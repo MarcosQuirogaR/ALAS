@@ -14,13 +14,13 @@ use crate::families::geometry::cabin_assets::asset_for_item;
 use crate::scene::{Color, Fill, Scene, SceneElement, Stroke, TextAlign, TextBaseline};
 use crate::theme::get_palette;
 
-const WIDTH: f64 = 760.0;
-const HEIGHT: f64 = 720.0;
+pub(super) const WIDTH: f64 = 760.0;
+pub(super) const HEIGHT: f64 = 720.0;
 
 #[derive(Clone, Copy)]
-struct SectionMap {
+pub(super) struct SectionMap {
     center: [f64; 2],
-    scale: f64,
+    pub(super) scale: f64,
     z_center: f64,
 }
 
@@ -50,7 +50,13 @@ fn polygon(scene: &mut Scene, points: Vec<[f64; 2]>, fill: Color, stroke: Color)
     });
 }
 
-fn text(scene: &mut Scene, value: impl Into<String>, pos: [f64; 2], color: Color, size: f64) {
+pub(super) fn text(
+    scene: &mut Scene,
+    value: impl Into<String>,
+    pos: [f64; 2],
+    color: Color,
+    size: f64,
+) {
     scene.add(SceneElement::Text {
         text: value.into(),
         pos,
@@ -244,7 +250,7 @@ fn draw_bins(scene: &mut Scene, map: SectionMap, layout: &PayloadLayout, deck: &
     }
 }
 
-fn draw_deck(
+pub(super) fn draw_deck(
     scene: &mut Scene,
     map: SectionMap,
     cabin: &CabinGeometry,
@@ -342,7 +348,7 @@ fn draw_hold(
                 outline,
             );
         } else {
-            // Unknown legacy items still get a bounded, readable fallback.
+            // Unrecognised items still get a bounded, readable fallback.
             let half = item.width.min(half_width * 0.95) * 0.5;
             let height = item.height.min((ceiling - floor) * 0.82);
             rect_physical(

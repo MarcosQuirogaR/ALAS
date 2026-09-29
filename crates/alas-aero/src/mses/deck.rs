@@ -5,7 +5,6 @@
 // keystroke templates MSES.run writes), scoped to what
 // alas/physics/mses_analysis.py drives.
 // Upstream: native aerodynamic model 4.2.8, MIT.
-// Reference: alas @ rust-port-baseline.
 
 //! The text `mset`/`mses`/`mplot` read: the `mses.case` operating-point deck
 //! and the menu keystroke scripts.

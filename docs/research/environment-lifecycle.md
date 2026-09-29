@@ -18,9 +18,9 @@ Environmental performance is not one scalar property of an aircraft. It is a vec
 
 The implementable ALAS strategy is therefore a staged environmental evaluator. It starts with the existing mission and propulsion results, adds species and noise diagnostics at low order, adds parameterised LCA and energy-carrier accounting, and promotes only finalists to external tools or higher-fidelity climate and airport models. Every metric returns a value, unit, load case, model/fidelity, source, uncertainty, policy, and residual.
 
-## Resume and evidence status
+## Evidence status
 
-The requested directory did not exist in the resumed checkout. The relevant PDFs were present in the repository’s existing topic folders, especially propulsion-energy, operations-economics, performance-airport, and mission-sizing. To make this deliverable self-contained, 16 byte-identical local copies were staged in [bib/environment-lifecycle](../../bib/environment-lifecycle/). No external literature search or web download was restarted, no existing source file was edited, and nothing was deleted.
+The relevant PDFs live in the repository's existing topic folders, especially propulsion-energy, operations-economics, performance-airport and mission-sizing. To make this note self-contained, 16 byte-identical local copies are kept in [bib/environment-lifecycle](../../bib/environment-lifecycle/).
 
 The local PDFs are reference evidence, not automatically licensed project assets. Rights notes below are deliberately conservative:
 
@@ -33,7 +33,7 @@ The report also records important standards, projects, and papers that were iden
 
 ## ALAS starting point and boundary
 
-The primary traceability anchor is the repository’s [requirements-first aircraft design document](../REQUIREMENTS_FIRST_AIRCRAFT_DESIGN.md). It gives each technical requirement a value and unit, load case, policy, and evidence/status, and distinguishes hard minimum/maximum constraints, soft targets, objectives, and diagnostics. The pipeline boundary is [crates/alas-pipeline/src/pipeline.rs](../../crates/alas-pipeline/src/pipeline.rs); feasibility and ranking are implemented around [crates/alas-opt/src/feasibility.rs](../../crates/alas-opt/src/feasibility.rs) and [crates/alas-opt/src/objective_model.rs](../../crates/alas-opt/src/objective_model.rs).
+The primary traceability anchor is the requirements-first design contract (see [design constraints](../design-constraints.md)). It gives each technical requirement a value and unit, load case, policy, and evidence/status, and distinguishes hard minimum/maximum constraints, soft targets, objectives, and diagnostics. The pipeline boundary is [crates/alas-pipeline/src/pipeline.rs](../../crates/alas-pipeline/src/pipeline.rs); feasibility and ranking are implemented around [crates/alas-opt/src/feasibility.rs](../../crates/alas-opt/src/feasibility.rs) and [crates/alas-opt/src/objective_model.rs](../../crates/alas-opt/src/objective_model.rs).
 
 The existing flow already has the right broad order:
 

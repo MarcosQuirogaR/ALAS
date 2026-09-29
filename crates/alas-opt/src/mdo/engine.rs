@@ -4,7 +4,7 @@
 //! Installed static thrust read off the configured engine binding, for the
 //! airworthiness thrust-to-weight residuals.
 //!
-//! Mission fuel and off-design thrust no longer come from scalar terms: the
+//! Mission fuel and off-design thrust do not come from scalar terms: the
 //! sizing loop flies the selected engine's deck through
 //! [`super::propulsion::PropulsionDeck`]. What remains here is the
 //! sea-level-static rating the takeoff and one-engine-inoperative climb

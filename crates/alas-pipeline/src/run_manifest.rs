@@ -11,7 +11,7 @@
 //! under observation. This manifest persists them beside the design database.
 //!
 //! The executed search method is recorded separately from the configured one
-//! on purpose. A saved configuration may still carry a legacy method token
+//! on purpose. A saved configuration may carry an older method token
 //! (`sqp`, `nsga2`, `turbo_1`, `cma_es`), which is migrated to
 //! `differential_evolution` at load time
 //! (`alas_config::settings_load_notes`); `configured_method` here is the
@@ -129,6 +129,48 @@ pub struct SearchDiagnosticsManifest {
     /// evaluated; `0` once past the epsilon control fraction of the budget.
     #[serde(default)]
     pub epsilon_level: f64,
+    /// Bounded feasibility restoration, absent in older manifests.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub restoration: Option<RestorationDiagnosticsManifest>,
+}
+
+/// Separate restoration effort, retained without hiding it in DE generations.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RestorationDiagnosticsManifest {
+    /// Maximum requested candidate scores for this restoration stage.
+    pub evaluation_budget: usize,
+    /// Actual full analyses after exact-cache reuse.
+    pub analysis_evaluations: usize,
+    /// Scores supplied by the exact full-fidelity cache.
+    pub cache_hits: usize,
+    /// Completed local poll iterations.
+    pub iterations: usize,
+    /// Elapsed stage time, seconds.
+    pub wall_time_s: f64,
+    /// Initial aggregate normalized hard violation.
+    pub initial_violation: f64,
+    /// Final aggregate normalized hard violation.
+    pub final_violation: f64,
+    /// Last local radius as a fraction of original bound width.
+    pub final_radius_normalized: f64,
+    /// Whether the evaluated restored point satisfies all hard constraints.
+    pub feasible: bool,
+}
+
+impl From<&alas_opt::RestorationDiagnostics> for RestorationDiagnosticsManifest {
+    fn from(value: &alas_opt::RestorationDiagnostics) -> Self {
+        Self {
+            evaluation_budget: value.evaluation_budget,
+            analysis_evaluations: value.analysis_evaluations,
+            cache_hits: value.cache_hits,
+            iterations: value.iterations,
+            wall_time_s: value.wall_time_s,
+            initial_violation: value.initial_violation,
+            final_violation: value.final_violation,
+            final_radius_normalized: value.final_radius_normalized,
+            feasible: value.feasible,
+        }
+    }
 }
 
 impl From<&alas_opt::SearchDiagnostics> for SearchDiagnosticsManifest {
@@ -149,6 +191,7 @@ impl From<&alas_opt::SearchDiagnostics> for SearchDiagnosticsManifest {
             relative_improvement: diagnostics.relative_improvement,
             feasible_fraction: diagnostics.feasible_fraction,
             epsilon_level: diagnostics.epsilon_level,
+            restoration: diagnostics.restoration.as_ref().map(Into::into),
         }
     }
 }
@@ -276,9 +319,9 @@ impl RunManifest {
     }
 }
 
-// Tests build their own fixtures and assert on them, so a failed expect is
+// Tests build their own fixtures and assert on them, so a failed unwrap or expect is
 // the assertion failing rather than a library invariant breaking.
-#[allow(clippy::expect_used)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -347,6 +390,7 @@ mod tests {
             relative_improvement: Some(0.083),
             feasible_fraction: 0.92,
             epsilon_level: 0.0,
+            restoration: None,
         }
     }
 
@@ -375,6 +419,33 @@ mod tests {
         assert_eq!(manifest.relative_improvement, source.relative_improvement);
         assert_eq!(manifest.feasible_fraction, source.feasible_fraction);
         assert_eq!(manifest.epsilon_level, source.epsilon_level);
+    }
+
+    #[test]
+    fn restoration_budget_and_outcome_survive_manifest_serialization() {
+        let mut source = reported();
+        source.restoration = Some(alas_opt::RestorationDiagnostics {
+            evaluation_budget: 108,
+            analysis_evaluations: 25,
+            cache_hits: 2,
+            iterations: 1,
+            wall_time_s: 3.5,
+            initial_violation: 0.04,
+            final_violation: 0.0,
+            final_radius_normalized: 0.05,
+            feasible: true,
+        });
+        let manifest = serde_json::to_value(SearchDiagnosticsManifest::from(&source)).unwrap();
+        assert_eq!(
+            manifest["restoration"],
+            serde_json::to_value(&source.restoration).unwrap()
+        );
+        let mut old = manifest;
+        old.as_object_mut().unwrap().remove("restoration");
+        assert!(serde_json::from_value::<SearchDiagnosticsManifest>(old)
+            .unwrap()
+            .restoration
+            .is_none());
     }
 
     #[test]

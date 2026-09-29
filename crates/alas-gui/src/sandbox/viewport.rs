@@ -30,6 +30,7 @@ use alas_viz::SceneView;
 use egui::{pos2, vec2, Color32, Context, Id, Pos2, Rect, Response, RichText, Stroke, Ui};
 
 use crate::state::{AppState, PreviewCamera};
+use crate::theme::SELECTABLE_CONTROL_RADIUS;
 use crate::views::tr;
 
 use super::drag::Handle;
@@ -39,6 +40,8 @@ use super::scene::{SANDBOX_CAMERA_ID, SANDBOX_VIEW_KEY};
 
 const HANDLE_RADIUS: f32 = 6.0;
 const PICK_RADIUS: f32 = 11.0;
+/// Reveal just the closest handle before the pointer reaches its drag target.
+const REVEAL_RADIUS: f32 = 28.0;
 /// Opacity of a floating control nobody is pointing at.
 pub const REST_OPACITY: f32 = 0.6;
 /// Inset of the floating controls from the viewport edge, in points.
@@ -147,7 +150,12 @@ pub(super) fn floating_control(
     } else {
         REST_OPACITY
     });
-    let response = ui.add_enabled(enabled, button.selected(selected));
+    let response = ui.add_enabled(
+        enabled,
+        button
+            .selected(selected)
+            .rounding(egui::Rounding::same(SELECTABLE_CONTROL_RADIUS)),
+    );
     ui.set_opacity(previous);
     debug_assert_eq!(response.id, id, "floating control id is predictable");
     register_overlay_rect(ui.ctx(), tag, response.rect);
@@ -294,14 +302,16 @@ pub fn show_viewport(state: &mut AppState, ui: &mut Ui) {
     let pointer = response
         .hover_pos()
         .filter(|p| !pointer_over_overlay(&overlays, Some(*p)));
-    let hovered_handle = pointer.and_then(|p| {
+    let nearest_handle = pointer.and_then(|p| {
         handles
             .iter()
             .map(|h| (h, fit.to_screen(&framing, h.point).distance(p)))
-            .filter(|(_, d)| *d <= PICK_RADIUS)
+            .filter(|(_, d)| *d <= REVEAL_RADIUS)
             .min_by(|a, b| a.1.total_cmp(&b.1))
-            .map(|(h, _)| h.clone())
     });
+    let hovered_handle = nearest_handle
+        .filter(|(_, distance)| *distance <= PICK_RADIUS)
+        .map(|(handle, _)| (*handle).clone());
 
     // A handle under the pointer takes the drag; the camera is the
     // fallback interaction. A gesture that began on a floating control
@@ -343,22 +353,30 @@ pub fn show_viewport(state: &mut AppState, ui: &mut Ui) {
     let painter = ui.painter_at(rect);
     let accent = ui.visuals().hyperlink_color;
     for handle in &handles {
-        let center = fit.to_screen(&framing, handle.point);
         let active = state
             .sandbox
             .drag
             .as_ref()
             .is_some_and(|d| same_handle_identity(&d.handle, handle));
+        let near = nearest_handle
+            .as_ref()
+            .is_some_and(|(h, _)| same_handle_identity(h, handle));
+        if !active && !near {
+            continue;
+        }
+        let center = fit.to_screen(&framing, handle.point);
         let hovered = hovered_handle
             .as_ref()
             .is_some_and(|h| same_handle_identity(h, handle));
-        let (fill, radius) = if active || hovered {
-            (accent, HANDLE_RADIUS + 2.0)
+        let fill = if active || hovered {
+            accent
         } else {
-            (
-                Color32::from_rgba_unmultiplied(accent.r(), accent.g(), accent.b(), 150),
-                HANDLE_RADIUS,
-            )
+            Color32::from_rgba_unmultiplied(accent.r(), accent.g(), accent.b(), 150)
+        };
+        let radius = if active || hovered {
+            HANDLE_RADIUS + 2.0
+        } else {
+            HANDLE_RADIUS
         };
         painter.circle(
             center,

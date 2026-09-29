@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/reporting/visualization.py (_assign_label_rows)
-// Reference: alas @ rust-port-baseline.
 
 //! Greedy row assignment for x-sorted annotation labels, shared by the
 //! side-view marker stack ([`super::side_view`]) and the stability-metrics

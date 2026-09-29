@@ -602,6 +602,32 @@ mod tests {
         assert_eq!(classification.verdict, DeliveryVerdict::AcceptedFeasible);
     }
 
+    #[test]
+    fn independent_structural_mass_estimates_do_not_block_delivery() {
+        let config = config("A320-200");
+        let mut design = registered_design("A320-200");
+        design.span_m += 1.0;
+        let report = FeasibilityReport {
+            findings: vec![PhysicalFinding {
+                code: FindingCode::StructuralMassModelDifference,
+                severity: FindingSeverity::Warning,
+                message: "Independent structural and empirical mass estimates differ".to_owned(),
+                actual: Some(27_000.0),
+                limit: Some(23_000.0),
+                unit: "kg",
+            }],
+            ..FeasibilityReport::default()
+        };
+        let classification =
+            DeliveryClassification::classify(&config, &design, &report, &RunCompletion::Completed);
+        assert_eq!(classification.verdict, DeliveryVerdict::AcceptedFeasible);
+        assert!(classification.blockers.is_empty());
+        assert_eq!(
+            report.findings[0].code.as_str(),
+            "structural_mass_model_difference"
+        );
+    }
+
     /// The AVE case: the two mass-coordinate paths disagree by 6.6 % MAC, so
     /// the hard constraints and the delivered balance statement are not about
     /// the same centre of gravity. A warning-severity finding is enough to

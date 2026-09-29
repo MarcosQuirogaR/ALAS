@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/config/fidelity_presets.py
-// Reference: alas @ rust-port-baseline.
 
 //! Named resolutions for the aerodynamic analysis.
 //!
@@ -16,10 +15,10 @@
 //! [`AnalysisConfig`] also holds physical and empirical assumptions: tail
 //! efficiency, the lift-coefficient window the drag polar is fitted over, the
 //! probe angles the trim search starts from, and every preset leaves those
-//! at their defaults. Upstream states that the registry is scoped to the three
+//! at their defaults. The registry is scoped to the three
 //! resolution fields precisely so it cannot clobber an assumption the user has
-//! tuned, and then hands its consumer the whole configuration, which clobbers
-//! them. This port reproduces what the registry holds and does not decide the
+//! tuned, yet its consumer receives the whole configuration, which clobbers
+//! them. The registry holds only the resolution fields and does not decide the
 //! question; a `deviation-candidate` in docs/PORTING.md records it for
 //! whoever writes the consumer.
 //!

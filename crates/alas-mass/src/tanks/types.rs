@@ -116,6 +116,17 @@ pub struct FuelTank {
     pub unusable_kg: f64,
     /// Volume centroid, aircraft geometry axes (x aft, y starboard, z up), m.
     pub centroid_m: [f64; 3],
+    /// Where the tank's last fuel pools as it drains, aircraft geometry
+    /// axes, m. See [`super::distribute::fuel_prism_item`] for how this and
+    /// [`Self::centroid_m`] combine into a fill-dependent position.
+    ///
+    /// For a wing tank this is the lower of the two spanwise-boundary
+    /// cross-section midpoints ([`super::resolve::wing_tank_pair`]), because
+    /// gravity pools the residual fuel at the geometrically lowest point the
+    /// cell reaches, regardless of the dihedral sign; for every other tank
+    /// kind it equals [`Self::centroid_m`] (no spanwise low end is modelled),
+    /// so a partial fill there is not moved.
+    pub low_point_m: [f64; 3],
     /// Extent of the equivalent rectangular prism: length (x), width (y),
     /// height (z), m.
     pub extent_m: [f64; 3],
@@ -132,6 +143,23 @@ pub struct FuelCgPoint {
     pub fuel_kg: f64,
     /// Centre of gravity of that fuel alone, aircraft geometry axes, m.
     pub cg_m: [f64; 3],
+}
+
+/// One point of a fuel-burn centre-of-gravity vector: see
+/// [`super::distribute::fuel_vector`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FuelVectorPoint {
+    /// Fuel remaining on board at this point, kg.
+    pub fuel_kg: f64,
+    /// Longitudinal centre of gravity of the remaining fuel, aircraft
+    /// geometry axes (x aft from the nose), m. `f64::NAN`-free only while
+    /// `fuel_kg` is positive; the fuel-empty endpoint reports the
+    /// zero-mass convention [`crate::ledger::MassProperties::EMPTY`] uses
+    /// (`0.0`), not a physical fuel position.
+    pub x_m: f64,
+    /// Vertical centre of gravity of the remaining fuel, aircraft geometry
+    /// axes (z up), m. Same empty-endpoint convention as [`Self::x_m`].
+    pub z_m: f64,
 }
 
 /// The resolved fuel-tank arrangement of a built aircraft.

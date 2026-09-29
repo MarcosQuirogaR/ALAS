@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-// Ported from alas/geometry/wing_mesh_bdf.py
-// Reference: alas @ rust-port-baseline.
-
 //! The wingbox finite-element mesh: the NASTRAN deck a structural solve reads.
 //!
 //! [`build_wing_mesh_bdf`] turns a sized wingbox into grids, skin and rib
@@ -39,15 +36,19 @@
 mod build;
 mod cards;
 mod elements;
+mod fuel;
 mod health;
+mod mass;
 mod nodes;
+mod product_caps;
 mod rivets;
 mod write;
 
-pub use build::build_wing_mesh_bdf;
+pub use build::{build_wing_mesh_bdf, build_wing_mesh_bdf_product};
 pub use cards::{
     Cbar, Conm2, Deck, Grid, Mat1, Param, ParamValue, Pbarl, Pshell, Rbe3, Shell, Spc1,
 };
+pub use fuel::{add_distributed_fuel_mass, FuelMassError};
 
 /// The shell warping coefficient above which a panel is reported as badly
 /// non-planar: `WARPING_THRESHOLD`.
@@ -137,6 +138,14 @@ impl MeshHealthReport {
 /// A mesh defect severe enough that there is no deck to return.
 #[derive(Debug, Clone, Copy, PartialEq, thiserror::Error)]
 pub enum MeshError {
+    /// A product spar-cap section or its attachment geometry is invalid.
+    #[error("invalid product cap geometry at spar {spar}, segment {segment}")]
+    InvalidCapGeometry {
+        /// Zero-based spar index.
+        spar: usize,
+        /// Zero-based segment index.
+        segment: usize,
+    },
     /// The zipper bridging produced triangles with no area.
     #[error(
         "{count} CTRIA3 elements are degenerate (zero area or duplicate nodes): \

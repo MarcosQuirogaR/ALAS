@@ -210,7 +210,7 @@ fn diagram(
     scene
 }
 
-fn label(scene: &mut Scene, text: &str, pos: [f64; 2], color: &str, size: f64) {
+pub(super) fn label(scene: &mut Scene, text: &str, pos: [f64; 2], color: &str, size: f64) {
     scene.add(SceneElement::Text {
         text: text.into(),
         pos,

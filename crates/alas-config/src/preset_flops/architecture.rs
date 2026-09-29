@@ -226,8 +226,7 @@ pub(super) fn declared_architecture(name: &str) -> Option<DeclaredArchitecture> 
     // rounded up) for cases whose published cabin total does not match the
     // registered study cabin. This is not FLOPS: NASA/TM-2017-219627 eq.
     // 116 reads `NSTU = 1 + ceil(NPASS/40)` (NPASS >= 51), a different,
-    // heavier count for a transport this size; physics review v1.2, finding
-    // M3. `ceil(seats/50)` is used here because it is the number a real
+    // heavier count for a transport this size. `ceil(seats/50)` is used here because it is the number a real
     // airline schedule is bound to carry regardless of the FLOPS-fitted
     // furnishings/systems correlation, and because `cabin_synchronized`
     // (`alas-pipeline::full_analysis::cabin_sync`) re-derives it against
@@ -321,15 +320,14 @@ pub(super) fn declared_architecture(name: &str) -> Option<DeclaredArchitecture> 
 /// [`CargoHoldLoading::Mixed`] is not declared on a fraction this project
 /// would have had to invent.
 ///
-/// The accounting caveat that used to sit here **is now resolved in the
-/// evaluator, not here**: Boeing's own OEW definition (D6-58333 Rev Q section
+/// The accounting caveat is resolved in the evaluator, not here: Boeing's own OEW definition (D6-58333 Rev Q section
 /// 2.1) and the FAA basic operating weight of AC 120-27F exclude unit load
 /// devices, and AC 120-85B treats a ULD as tare tracked with the load.
 /// `alas_mass::flops_transport::FlopsOperatingItemsBreakdown` therefore
 /// computes the tare for every configuration from this declaration and reports
 /// it *outside* operating empty mass, with FLOPS' own `WOPIT` convention
 /// retained alongside it. The consequence for this function is that the
-/// declaration below no longer changes any operating empty mass at all: it
+/// declaration below changes no operating empty mass at all: it
 /// decides a separately reported quantity and the cargo-hold architecture, and
 /// it cannot be used to move an error.
 /// Which method prices each aircraft's cabin equipment and occupant-driven
@@ -366,8 +364,7 @@ pub(super) fn declared_architecture(name: &str) -> Option<DeclaredArchitecture> 
 /// | A320-200, 150 seats | 56.3 kg/seat | 55.7 | 54.2 |
 /// | A340-300, 290-295 seats | 98.0 kg/seat | 99.1 | 57.1 |
 ///
-/// Effect on the operating-empty-mass error against the published references,
-/// measured with `cargo run -p alas-mass --example cabin_equipment_methods`:
+/// Effect on the operating-empty-mass error against the published references:
 /// A340-300 -14.00 % -> -4.71 %, A380-800 -17.83 % -> -8.80 %, B787-9
 /// -10.31 % -> -1.11 %, DC-10-30 -11.01 % -> -2.44 %, A220-300 -4.60 % ->
 /// -2.77 %, A320-200 +0.04 % -> +1.15 %.

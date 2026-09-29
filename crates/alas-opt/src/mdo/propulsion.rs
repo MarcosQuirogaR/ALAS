@@ -512,7 +512,7 @@ impl PropulsionDeck {
             };
             // Keep the iterate strictly inside the bracket so a flat map
             // cannot pin it to an endpoint. The margin is the smallest that
-            // does that, not the 5 % that used to throttle the contraction.
+            // does that.
             let width = high_fraction - low_fraction;
             let fraction = secant
                 .max(low_fraction + 1.0e-6 * width)
@@ -630,7 +630,7 @@ fn jet_a_mass_flow(result: &PropulsionResult) -> Result<f64, DeckError> {
 /// `installation`.
 ///
 /// This is the single construction path for the product mission: the
-/// turbofan branch sizes the legacy cycle to the catalogue static rating for
+/// turbofan branch sizes the scalar cycle to the catalogue static rating for
 /// installation/mass bookkeeping and wraps it in the empirical off-design
 /// deck; the turboprop branch binds the PW127M/568F surrogate. The native
 /// mission stage calls this same function, so candidate ranking and the
@@ -655,10 +655,10 @@ pub fn product_orchestrator(
         .map_err(|error| format!("mission engine binding failed: {error}"))?;
     match active_model {
         ActiveEngineModel::Turbofan(payload) => {
-            // The legacy scalar evaluator has no per-unit moment model. Keep
+            // The scalar turbofan model has no per-unit moment model. Keep
             // its equivalent thrust line through the mission reference point;
             // the typed propulsion boundary is still what mission code sees.
-            let legacy_installation = PropulsionInstallation {
+            let scalar_installation = PropulsionInstallation {
                 unit_positions_m: engine
                     .spanwise_positions_m
                     .iter()
@@ -689,7 +689,7 @@ pub fn product_orchestrator(
                 ..VehicleBuilderParams::default()
             };
             let sized = size_turbofan_to_static_rating(&inputs, &params);
-            let legacy_model = LegacyTurbofanModel::new(
+            let scalar_model = LegacyTurbofanModel::new(
                 inputs,
                 params,
                 sized.compressor_nondimensional_massflow,
@@ -702,7 +702,7 @@ pub fn product_orchestrator(
                     sources: vec![payload.part_power_source.clone()],
                 },
                 Vec::new(),
-                legacy_installation,
+                scalar_installation,
             )
             .map_err(|error| format!("mission propulsion construction failed: {error}"))?;
             let model = EmpiricalTurbofanModel::new(
@@ -719,7 +719,7 @@ pub fn product_orchestrator(
                     max_climb_rate_ft_min,
                     flight_idle_fraction: 0.07,
                 },
-                legacy_model,
+                scalar_model,
                 ModelProvenance {
                     model: ModelIdentity {
                         family: "bartel-young-openap-turbofan".to_owned(),

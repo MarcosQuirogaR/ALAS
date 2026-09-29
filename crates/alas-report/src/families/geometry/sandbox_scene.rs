@@ -515,7 +515,7 @@ pub fn figure_sandbox_exterior(
     SandboxSceneModel::new(plane, options.max_section_points).render(camera, theme, options)
 }
 
-fn bounds(points: &[Point3D]) -> [f64; 6] {
+pub(super) fn bounds(points: &[Point3D]) -> [f64; 6] {
     let mut b = [
         f64::INFINITY,
         f64::NEG_INFINITY,

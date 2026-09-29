@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/physics/stability.py
-// Reference: alas @ rust-port-baseline.
 
 //! Longitudinal stability and balance: the static margin, the neutral point,
 //! the cruise-condition trim solve, the `autobalance` CG shift, and the
@@ -45,5 +44,25 @@
 //! read here. (`alas-payload`'s `CabinGeometry` reimplements them locally for
 //! the same reason its row records.)
 
-include!("trim_parts/part_01.rs");
-include!("trim_parts/part_02.rs");
+use alas_aero::operating_point::OperatingPoint;
+use alas_aero::vlm::{VlmError, VlmResult, VlmSystem};
+use alas_atmo::Atmosphere;
+use alas_config::analysis::AnalysisConfig;
+use alas_geom::aircraft::airplane::Airplane;
+use alas_geom::aircraft::wing::Wing;
+use alas_math::{interp, linalg};
+use std::f64::consts::PI;
+
+mod tail_volume;
+pub use tail_volume::{tail_volume_coefficients, tail_volume_coefficients_reference_compatibility};
+
+mod with_system;
+pub use with_system::{
+    neutral_point_reference_compatibility_with_system, neutral_point_with_system,
+    stability_and_trim_reference_compatibility_with_system, stability_and_trim_with_system,
+};
+
+mod longitudinal;
+pub use longitudinal::*;
+mod probes;
+pub(crate) use probes::*;

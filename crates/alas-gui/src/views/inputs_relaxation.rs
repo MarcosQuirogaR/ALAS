@@ -1,15 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! The Inputs page's constraint policy (clarified ledger D01-D03).
+//! The Inputs page's constraint policy.
 //!
-//! The ledger asks for "a simple Inputs policy for explicitly allowing
-//! limited violations when a user has overconstrained the problem", with the
-//! per-limit detail in Advanced Settings. This is that control, and the one
-//! thing it must not do is look like a switch that changes a run when it
+//! A simple Inputs policy for explicitly allowing limited violations when a
+//! user has overconstrained the problem, with the per-limit detail in
+//! Advanced Settings. The one thing this control must not do is look like a switch that changes a run when it
 //! does not.
 //!
-//! D02's engineering review, recorded in
+//! The engineering review, recorded in
 //! `alas_config::optimizer::policy_review`, currently admits no limit at
 //! all, so a policy switched on here still relaxes nothing. That is stated
 //! in the card rather than discovered afterwards: the switch and the group
@@ -69,7 +68,7 @@ pub(crate) fn show_constraint_policy(state: &mut AppState, ui: &mut Ui) {
         });
     });
 
-    ui.label(
+    let eligibility = ui.label(
         RichText::new(tr_fields(
             "{eligible} of {reviewed} limits are currently eligible for relaxation.",
             &[
@@ -81,15 +80,9 @@ pub(crate) fn show_constraint_policy(state: &mut AppState, ui: &mut Ui) {
         .small(),
     );
     if eligible_count() == 0 {
-        // The honest consequence, stated where the switch is rather than
-        // left for the user to infer from an unchanged result.
-        ui.label(
-            RichText::new(tr(
-                "No limit has a tolerance with a traceable primary source yet, so this run stays strict whatever this switch is set to. A relaxed design would always be reported as relaxed and always rank behind every fully feasible one.",
-            ))
-            .weak()
-            .small(),
-        );
+        eligibility.on_hover_text(tr(
+            "No limit has a tolerance with a traceable primary source yet, so this run stays strict whatever this switch is set to. A relaxed design would always be reported as relaxed and always rank behind every fully feasible one.",
+        ));
     }
 }
 
@@ -157,8 +150,8 @@ mod tests {
             .expect("the edited buffer stays a readable configuration");
         assert!(config.optimizer.relaxation.enabled);
         assert_eq!(config.optimizer.relaxation.allowed_violated_groups, 2);
-        // D02: switching it on still admits nothing, because the review
-        // lists nothing. This is the property the card states in words.
+        // Switching it on still admits nothing, because no limit is
+        // listed as eligible. This is the property the card states in words.
         assert!(!config.optimizer.relaxation.is_active());
         assert_eq!(eligible_count(), 0);
     }

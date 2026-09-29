@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/physics/cargo_loader.py
-// Reference: alas @ rust-port-baseline.
 
 //! Freight: which containers exist, where they physically go in this fuselage,
 //! and how the load is distributed so the aircraft trims.

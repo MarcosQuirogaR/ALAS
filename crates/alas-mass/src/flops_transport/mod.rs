@@ -9,7 +9,7 @@
 //! returns SI and brackets every equation with the exact legal conversions in
 //! `alas-units`.
 //!
-//! [`evaluate_product`] resolves outer geometry from the built airplane and
+//! [`evaluate_product_at_design_gross_mass`] resolves outer geometry from the built airplane and
 //! reads every architecture datum from [`alas_config::FlopsTransportConfig`].
 //! It returns [`FlopsTransportEvaluation::Unverified`] when any required datum
 //! is absent or inconsistent. The reference-compatible MTOW fractions remain
@@ -30,7 +30,7 @@ pub use airframe::{
     FlopsAirframeRequest, FlopsAirframeSelection, FlopsAirframeSources,
 };
 pub use equations::estimate_flops_transport;
-pub use product::{evaluate_product, evaluate_product_at_design_gross_mass};
+pub use product::evaluate_product_at_design_gross_mass;
 pub use propulsion::{estimate_flops_propulsion, FlopsPropulsionBreakdown, FlopsPropulsionInputs};
 pub use structure::{estimate_flops_structure, FlopsStructureBreakdown, FlopsStructureInputs};
 
@@ -210,7 +210,7 @@ pub struct FlopsOperatingItemsBreakdown {
     pub unusable_fuel_kg: f64,
     /// Engine oil, FLOPS `WOIL`.
     pub engine_oil_kg: f64,
-    /// Passenger service, FLOPS `WSRV`.
+    /// FLOPS `WSRV`; LTH includes seats after explicit crew/oil/unusable-fuel allocation.
     pub passenger_service_kg: f64,
     /// Cargo containers, FLOPS `WCON`: **reported outside operating empty
     /// mass**, and therefore outside [`Self::total_kg`].
@@ -431,7 +431,7 @@ impl FlopsTransportUnverifiedReason {
     /// The stable [`as_str`](Self::as_str) value is intentionally terse for
     /// JSON and report keys. This companion text carries the physical
     /// meaning to a caller that must decide whether to supply a missing input
-    /// or select the explicit legacy comparison path.
+    /// or select the explicit Torenbeek comparison architecture.
     pub const fn description(self) -> &'static str {
         match self {
             Self::MaximumMach => "maximum Mach number is missing or nonpositive",
@@ -505,35 +505,6 @@ pub enum FlopsTransportEvaluation {
         /// Components whose own inputs were independently available.
         partial: PartialFlopsTransportBreakdown,
     },
-}
-
-/// Verification status that accompanies a FLOPS transport evaluation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FlopsTransportVerificationStatus {
-    /// Required physical input or provenance remains missing or inconsistent.
-    UnverifiedArchitecture,
-    /// Every required input and its declared source family was evaluated.
-    VerifiedArchitecture,
-}
-
-impl FlopsTransportVerificationStatus {
-    /// Stable evidence label for an evaluated FLOPS selection.
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::UnverifiedArchitecture => "unverified_architecture",
-            Self::VerifiedArchitecture => "verified_architecture",
-        }
-    }
-}
-
-impl FlopsTransportEvaluation {
-    /// Machine-readable status for an evaluated FLOPS selection.
-    pub const fn verification_status(&self) -> FlopsTransportVerificationStatus {
-        match self {
-            Self::Verified { .. } => FlopsTransportVerificationStatus::VerifiedArchitecture,
-            Self::Unverified { .. } => FlopsTransportVerificationStatus::UnverifiedArchitecture,
-        }
-    }
 }
 
 /// Invalid fully resolved input supplied directly to the equation API.

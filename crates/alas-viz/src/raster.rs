@@ -112,7 +112,7 @@ pub fn render_scene_rgba_scaled(scene: &Scene, scale: f64) -> Result<(u32, u32, 
 /// texture, which has no vector equivalent, still passes through a pixel
 /// buffer. On the route globe the SVG round-trip of the vector overlay cost
 /// about 80 ms per camera frame at 1.5x density while the sphere itself
-/// cost about 4 ms (2026-09-11), so this split is what makes orbiting the
+/// cost about 4 ms (measured), so this split is what makes orbiting the
 /// globe interactive. `None` when the scene has no textured element, so the
 /// caller can skip the texture entirely.
 pub fn render_scene_textures_rgba_scaled(scene: &Scene, scale: f64) -> Option<RasterResult> {
@@ -452,16 +452,12 @@ mod tests {
         );
     }
 
-    /// Regression for the actual GUI figure-card bug: this function used to
-    /// clear `scene.background` before calling `render_svg` so the vector
-    /// layer stayed transparent over pre-painted texture content. That also
-    /// blinded `visual_title`'s contrast decision (it reads the same field),
-    /// so every automatic figure title rendered in its near-black
-    /// light-theme color on Grey and Dark, on top of a still-correctly-dark
-    /// background, reproducing the reported "black global titles on Grey
-    /// background despite white panel titles". Panel headings were
-    /// unaffected because they are colored explicitly from the palette, not
-    /// through `visual_title`.
+    /// The vector layer must not clear `scene.background` to stay transparent
+    /// over pre-painted texture content: `visual_title` reads the same field
+    /// for its contrast decision, and clearing it would render every automatic
+    /// figure title in its near-black light-theme color on Grey and Dark
+    /// backgrounds. Panel headings are colored explicitly from the palette and
+    /// are unaffected.
     #[test]
     fn automatic_title_stays_legible_against_dark_and_grey_backgrounds() {
         for (theme_name, bg_hex) in [("grey", "#3a3a3a"), ("dark", "#1e1e1e")] {

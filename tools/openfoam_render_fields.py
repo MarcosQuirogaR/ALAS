@@ -86,11 +86,19 @@ view = CreateView("RenderView")
 view.ViewSize = [1600, 950]
 view.ViewTime = time
 view.InteractionMode = "2D"
-view.CameraPosition = [0.5, 0.0, 10.0]
-view.CameraFocalPoint = [0.5, 0.0, 0.0]
+# Scale the camera to the case chord, not an assumed one-metre section.
+try:
+    study_config = json.loads((case / "study.json").read_text(encoding="utf-8")).get("config", {})
+    chord = float(study_config.get("chord_m", 1.0))
+except (OSError, ValueError, TypeError):
+    chord = 1.0
+if not math.isfinite(chord) or chord <= 0:
+    chord = 1.0
+view.CameraPosition = [0.65 * chord, 0.0, 10.0 * chord]
+view.CameraFocalPoint = [0.65 * chord, 0.0, 0.0]
 view.CameraViewUp = [0.0, 1.0, 0.0]
 view.CameraParallelProjection = 1
-view.CameraParallelScale = 2.4
+view.CameraParallelScale = 0.65 * chord
 rendered_ranges = {}
 
 
@@ -191,6 +199,8 @@ def _status_overlay(case_dir, render_time=None):
                 candidate = config.get("solver_name")
                 if isinstance(candidate, str) and candidate.strip():
                     solver = candidate.strip()
+    if solver == "not recorded":
+        solver = "rhoSimpleFoam" if compressible else "simpleFoam"
     status_detail = metadata.get("status_detail")
     if solver == "not recorded" and isinstance(status_detail, str):
         candidate = status_detail.split(":", 1)[0].strip()
@@ -247,7 +257,7 @@ status_display = Show(status_source_proxy, view)
 status_display.WindowLocation = "Upper Left Corner"
 status_display.Justification = "Left"
 status_display.VerticalJustification = "Top"
-status_display.FontSize = 18
+status_display.FontSize = 14
 status_display.Color = [1.0, 1.0, 1.0]
 status_display.BackgroundColor = [0.0, 0.0, 0.0, 0.7]
 status_display.Opacity = 1.0
@@ -295,7 +305,7 @@ def render_calculated(name, expression, label, file_name):
 
 render_calculated(
     "Mach",
-    f"mag(U)/{sound_speed:.16e}",
+    ("mag(U)/sqrt(1.4*287.05287*T)" if compressible else f"mag(U)/{sound_speed:.16e}"),
     "Mach [-]",
     "mach-contour.png",
 )
@@ -317,7 +327,7 @@ Delete(status_source_proxy)
             f"density_kg_m3={rho:.16e}",
             f"static_temperature_k={temperature_k:.16e}",
             f"speed_of_sound_m_s={sound_speed:.16e}",
-            "mach_definition=mag(U)/sqrt(1.4*287.05287*T)",
+            ("mach_definition=mag(U)/sqrt(1.4*287.05287*T_local)" if compressible else "mach_definition=mag(U)/sqrt(1.4*287.05287*T_freestream)"),
             (
                 f"pressure_definition=p_absolute-p_reference; pressure_reference_pa={pressure_reference_pa:.16e}"
                 if compressible

@@ -8,7 +8,7 @@
 //! fields are shown by another discipline instead (gear load limits under
 //! Structures, airfoil sections under Aerodynamics, propulsion mass factors
 //! under Advanced Settings > Propulsion, structural solver cases on Analyses)
-//! and which legacy fields stay loadable but hidden.
+//! and which fields stay loadable but hidden.
 
 use alas_config::{Entry, Field, Node};
 use egui::{RichText, Ui};
@@ -26,6 +26,7 @@ pub(super) fn advanced_paths(group: &str) -> &'static [&'static str] {
         "mass_model" => &[
             "flops_transport",
             "flops_structure",
+            "flops_turboprop",
             "suspended_mass_fraction",
             "max_airspeed_for_flaps_ms",
             "flap_deflection_angle_deg",
@@ -57,7 +58,7 @@ pub(super) fn advanced_paths(group: &str) -> &'static [&'static str] {
     }
 }
 
-/// Dotted field paths another page renders (or that stay hidden as legacy),
+/// Dotted field paths another page renders (or that stay hidden),
 /// so neither surface of the owning group shows them.
 pub(super) fn relocated_paths(group: &str) -> &'static [&'static str] {
     match group {
@@ -152,31 +153,20 @@ fn prune(
     (surface != Surface::Advanced || is_advanced).then_some(field)
 }
 
-/// Keep the optimizer page focused on the one product search contract.
-/// `method` and `strategy` remain loadable by the config and parity paths
-/// (`method` is a hidden single-choice field with no other value to select;
-/// `strategy`, `seed_near_initial_design` and `seed_perturbation_fraction`
-/// are read only by the frozen reference-compatibility replay), but exposing
-/// them here would suggest that the product still dispatches a menu of
-/// algorithms or that the DE population is seeded that way. The dedicated
-/// Design Space page owns `design_space`.
-const LEGACY_OPTIMIZER_FIELDS: &[&str] = &[
-    "weights",
+/// Keep profile-specific scoring and search controls visible on the optimizer
+/// page. The dedicated Design Space page owns `design_space`; the two retired
+/// gradient-driver settings have no active profile and stay hidden.
+const HIDDEN_OPTIMIZER_FIELDS: &[&str] = &[
     "design_space",
-    "method",
-    "strategy",
     "finite_difference_step",
     "constraint_tolerance",
-    "display_progress",
-    "seed_near_initial_design",
-    "seed_perturbation_fraction",
 ];
 
 pub(super) fn optimizer_ui_fields(fields: &[Field]) -> Vec<Field> {
     fields
         .iter()
         .filter_map(|field| {
-            if LEGACY_OPTIMIZER_FIELDS.contains(&field.name) {
+            if HIDDEN_OPTIMIZER_FIELDS.contains(&field.name) {
                 return None;
             }
             if field.name != "solver" {
@@ -190,20 +180,20 @@ pub(super) fn optimizer_ui_fields(fields: &[Field]) -> Vec<Field> {
             solver.fields = solver
                 .fields
                 .into_iter()
-                .filter(|child| !LEGACY_OPTIMIZER_FIELDS.contains(&child.name))
+                .filter(|child| !HIDDEN_OPTIMIZER_FIELDS.contains(&child.name))
                 .map(|mut child| {
                     match child.name {
                         "max_iterations" => {
                             child.label = "Max generations";
-                            child.help = "Maximum number of L-SHADE differential-evolution generations before the run reports iteration_limit; the search may stop earlier once it converges.";
+                            child.help = "Maximum generations before the run reports iteration_limit. scipy_legacy may stop earlier on SciPy's population-energy spread test; the product profile uses its own convergence test.";
                         }
                         "population_size" => {
                             child.label = "Population size multiplier";
-                            child.help = "Multiplier on the number of design variables giving the initial population size. L-SHADE shrinks the population toward a small floor as generations proceed, so this sets the starting breadth of the search, not a fixed per-generation cost.";
+                            child.help = "Initial population size is this multiplier times the number of free design variables. scipy_legacy keeps the population size fixed; the L-SHADE product profile shrinks it during the run.";
                         }
                         "seed" => {
                             child.label = "Random seed";
-                            child.help = "Optional integer seed for a reproducible differential-evolution search, replayed exactly regardless of the worker count.";
+                            child.help = "Optional integer seed for reproducible candidate generation. scipy_legacy uses deferred generation updates with multiple workers, which can change its trajectory.";
                         }
                         _ => {}
                     }
@@ -237,7 +227,6 @@ pub(super) fn render_extra_sections(
     error_fields: &std::collections::HashSet<String>,
     lang: Option<&str>,
 ) {
-    let show_help = state.help_verbose;
     for section in page.extra {
         let Some(fields) = node_fields_at(&state.schema, section.path) else {
             continue;
@@ -252,6 +241,7 @@ pub(super) fn render_extra_sections(
         let locked = section.path.starts_with("/geometry") && state.manual_geometry_locked();
         let mut edits = Vec::new();
         crate::theme::card_frame(ui).show(ui, |ui| {
+            ui.set_min_width(ui.available_width());
             egui::CollapsingHeader::new(RichText::new(tr(section.title)).strong())
                 .id_salt(format!("{}::{}", page.id, section.title))
                 .default_open(true)
@@ -261,8 +251,7 @@ pub(super) fn render_extra_sections(
                     }
                     ui.add_enabled_ui(!locked, |ui| {
                         if let Some(values) = state.config_values.pointer_mut(section.path) {
-                            edits =
-                                dynamic_form(ui, &fields, values, error_fields, lang, show_help);
+                            edits = dynamic_form(ui, &fields, values, error_fields, lang, false);
                         }
                     });
                 });
@@ -448,6 +437,7 @@ fn render_installation_card(
         .collect();
     let locked = state.manual_geometry_locked();
     crate::theme::card_frame(ui).show(ui, |ui| {
+        ui.set_min_width(ui.available_width());
         egui::CollapsingHeader::new(RichText::new(tr("Installation & nacelle")).strong())
             .id_salt("propulsion::installation")
             .default_open(true)
@@ -573,7 +563,7 @@ mod tests {
     }
 
     fn relocation_target_exists(group: &str, leaf: &str) -> bool {
-        let legacy = group == "structures" && leaf == "psd_base_g2_per_hz";
+        let hidden = group == "structures" && leaf == "psd_base_g2_per_hz";
         let case = group == "structures"
             && (leaf == "enabled" || STRUCTURES_CASES.iter().any(|(name, _)| *name == leaf));
         let extra = all_pages().any(|page| {
@@ -587,7 +577,7 @@ mod tests {
                     })
             })
         });
-        legacy || case || extra
+        hidden || case || extra
     }
 
     #[test]
@@ -596,6 +586,7 @@ mod tests {
         let fields = node_fields_at(&schema, "/mass_model").expect("mass_model");
         let modeling = visible_fields(page("mass_model").expect("page"), "mass_model", &fields);
         assert!(modeling.iter().all(|field| field.name != "flops_transport"));
+        assert!(modeling.iter().all(|field| field.name != "flops_turboprop"));
         assert!(modeling
             .iter()
             .any(|field| field.name == "fuel_density_kg_m3"));
@@ -604,6 +595,7 @@ mod tests {
             .all(|field| field.name != "pct_load_nlg_max"));
         let advanced = visible_fields(page("mass_advanced").expect("page"), "mass_model", &fields);
         assert!(advanced.iter().any(|field| field.name == "flops_transport"));
+        assert!(advanced.iter().any(|field| field.name == "flops_turboprop"));
         assert!(advanced
             .iter()
             .any(|field| field.name == "max_airspeed_for_flaps_ms"));
@@ -636,10 +628,16 @@ mod tests {
     }
 
     #[test]
-    fn the_advanced_window_offers_airfoil_screening_and_external_tools_tabs() {
+    fn the_advanced_window_offers_external_tools_but_not_airfoil_screening() {
         let ids: Vec<&str> = ADVANCED_SETTINGS_PAGES.iter().map(|page| page.id).collect();
         assert!(ids.contains(&"setup_tools"));
-        assert!(ids.contains(&"airfoil_screening"));
+        // Airfoil Screening opens only from the top bar's Analysis menu; the
+        // page stays resolvable for the guided tour.
+        assert!(!ids.contains(&"airfoil_screening"));
+        assert_eq!(
+            page("airfoil_screening").map(|p| p.kind),
+            Some(crate::nav::PageKind::AirfoilScreening)
+        );
         assert!(!NAV.iter().any(|group| group.title == "Advanced Settings"));
     }
 

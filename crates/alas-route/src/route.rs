@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/routing/route.py
-// Reference: alas @ rust-port-baseline.
 
 //! What a route is: an ordered list of lateral positions between two airports,
 //! and the distance flown along it.

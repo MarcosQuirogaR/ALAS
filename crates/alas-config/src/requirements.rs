@@ -2,24 +2,22 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/config/requirements.py
-// Reference: alas @ rust-port-baseline.
 
 //! The stable wire group for mission targets and aircraft-level limits.
 //!
 //! The original configuration grouped mission requirements, discipline inputs
 //! and a few study bounds here. The optimizer still reads this group as the
 //! compatibility authority, but new code should classify each field explicitly
-//! as a requirement, model input, preference or numerical setting. The audit
-//! and migration ledger lives in `docs/design-constraints.md`; moving fields
+//! as a requirement, model input, preference or numerical setting. The classification
+//! ledger lives in `docs/design-constraints.md`; moving fields
 //! requires a saved-file migration rather than silently changing their meaning.
 //!
-//! The defaults reproduce the long-range transport the reference
-//! implementation was tuned against, so the program produces a real aircraft
+//! The defaults describe a long-range transport, so the program produces a real aircraft
 //! before anything has been configured.
 //!
 //! Passenger capacity is always recomputed for each candidate shell. A saved
-//! `optimize_passenger_capacity` value is still accepted for compatibility,
-//! but no longer changes product behavior.
+//! `optimize_passenger_capacity` value is accepted for compatibility,
+//! but does not change product behavior.
 //!
 //! Passenger and cargo targets are editable while the cabin preset is set to
 //! `Custom`. A named preset computes its payload from geometry, and letting
@@ -205,12 +203,14 @@ pub struct DesignRequirements {
     )]
     pub max_cruise_cl: f64,
 
-    /// The stability margin the aft centre-of-gravity limit is set by.
+    /// A preferred static margin, used by the frozen legacy/reference CG
+    /// gate and by report figures; the product gate enforces
+    /// `min_physical_static_margin` instead.
     #[config(
         advanced,
         label = "Target static margin",
         unit = "fraction of MAC",
-        help = "Static margin at the Aft CG Limit: Aft CG Limit (%MAC) = Neutral Point (%MAC) - target_static_margin*100. A positive value ensures positive static stability when the CG is at the aft limit."
+        help = "Preferred static margin at the aerodynamic aft CG limit: Aft CG Limit (%MAC) = Neutral Point (%MAC) - target_static_margin*100. This is a design preference used by the scipy_legacy objective, frozen reference CG-envelope path and report figures; the product feasibility gate enforces the (typically smaller) min_physical_static_margin below, measured at the actual mass-model CG, not this aerodynamic-reference target. The two boundaries can differ by (target_static_margin - min_physical_static_margin)*100 %MAC."
     )]
     pub target_static_margin: f64,
 
@@ -223,12 +223,14 @@ pub struct DesignRequirements {
     )]
     pub cg_range_pct_mac: f64,
 
-    /// The stability floor a design is hard-rejected below.
+    /// The stability floor a design is hard-rejected below: the boundary
+    /// the product feasibility gate actually enforces (see
+    /// `target_static_margin` for the separate, larger design preference).
     #[config(
         advanced,
         label = "Minimum physical static margin",
         unit = "fraction of MAC",
-        help = "Minimum static margin measured using the actual mass-model (physical) CG, not the aerodynamic reference point. Designs below this are hard-rejected as inherently unstable. 0.0 = bare stability; 0.05 = 5% MAC buffer (recommended)."
+        help = "Minimum static margin measured using the actual mass-model (physical) CG, not the aerodynamic reference point. Designs below this are hard-rejected as inherently unstable. 0.0 = bare stability; 0.05 = 5% MAC buffer (recommended). This is the boundary the product feasibility gate enforces at every loading state; target_static_margin above is a separate, larger design preference used by the scipy_legacy objective, frozen reference path and report figures."
     )]
     pub min_physical_static_margin: f64,
 
@@ -279,8 +281,7 @@ impl Default for DesignRequirements {
             // `alas_units::STANDARD_GRAVITY` (the CODATA/exact definitional
             // value that already drives every lbf conversion and the ISA
             // elsewhere in the program), rather than the frozen two-decimal
-            // 9.81 this field previously carried. Physics review v1.2,
-            // finding F5; `alas-config` has no dependency on `alas-units`
+            // 9.81. `alas-config` has no dependency on `alas-units`
             // so the value is repeated here as a literal rather than
             // importing the constant across a new crate edge.
             gravity_m_s2: 9.806_65,

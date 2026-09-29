@@ -75,44 +75,11 @@ fn find_labeled_number(text: &str, label: &str) -> Option<f64> {
     })
 }
 
-/// Absolute tolerance of every inner linear solve in the generated
-/// `fvSolution`.
-///
-/// It is the floor below which OpenFOAM performs no solver iterations at all,
-/// so an outer initial residual under it means the equation was skipped, not
-/// converged.  It is deliberately three orders below the default outer
-/// `residual_tolerance` of `1e-5`, so a genuinely converged case never comes
-/// near it: the outer residuals of a live segregated solve settle in the
-/// `1e-6 ... 1e-5` band, not at `1e-16`.
+/// Absolute tolerance for generated inner linear solves. `minIter 1` ensures
+/// an equation is not skipped merely because its initial residual falls below
+/// this tolerance. Small residuals and stationary fields alone do not establish
+/// either equation failure or physical validity.
 pub const LINEAR_SOLVER_RESIDUAL_FLOOR: f64 = 1.0e-8;
-
-// `FROZEN_RESIDUAL_SPREAD`, `FROZEN_RESIDUAL_MIN_RUN`, `frozen_run_length` and
-// `other_equations_still_moving` stood here and are REMOVED.  They implemented a
-// residual-shaped fallback: look for a reproduced, no-work residual run and only
-// then consult the field.  With the field consulted unconditionally, that path
-// could only ever certify a case the field evidence had not cleared, which is
-// the silent-certification hole the gate review identified.  Nothing replaced
-// them and no threshold was moved.
-
-// A `FROZEN_RESIDUAL_DEPTH_FACTOR` briefly stood here, requiring an outer
-// residual to sit two decades BELOW `LINEAR_SOLVER_RESIDUAL_FLOOR` before a
-// frozen history counted as a dead equation.  **It was withdrawn, not retuned.**
-//
-// Its premise was that a converged equation parks *at* the inner solver's
-// tolerance while a runaway is driven far beneath it by an inflated
-// normalisation.  The premise was checked against the written fields and does
-// not hold: `G3-fine-p404`'s omega sits at `1.00x` the floor and
-// `T3-gradfree-wallsolve`'s `k` at `0.67x`, and BOTH fields are completely
-// frozen: `0` of 436 389 and `0` of 82 993 cells changed over the last written
-// interval, while pressure changed in essentially every cell.  The factor had
-// been drawn through exactly the cases it was derived from, and its only real
-// effect was to accept `G3`, which this evidence says should never have been
-// accepted.
-//
-// Residual depth is therefore used only to decide *when to look at the field*,
-// at the floor itself and with no extra factor.  The verdict comes from
-// [`super::field_update`], which measures the thing in question directly.
-
 /// Decide whether the available evidence supports a numerically converged
 /// coefficient result.
 pub fn classify_convergence(
@@ -173,7 +140,7 @@ pub fn classify_convergence(
         );
     }
     // A run that completes its process and its mesh gate can still return
-    // finite numbers no section could produce.  The dispatch relaxation probe
+    // finite numbers no section could produce.  A relaxation-sweep case
     // `P3` did exactly that (Cl -302.74, Cd -230.15, wall y+ to 101) and was
     // classified only `unconverged`, which understates it: `unconverged` says
     // the answer is incomplete, while this says the answer is broken.  Screen
@@ -260,67 +227,13 @@ pub fn classify_convergence(
                 .to_owned(),
         );
     }
-    // An equation whose outer residual sits far below the inner linear-solver
-    // tolerance is not converged. It is not being solved.  OpenFOAM stops the
-    // inner solve as soon as the normalised initial residual is under
-    // `tolerance`, reports `No Iterations 0`, and leaves the field untouched;
-    // the log then shows an initial residual identical to the final one.  On a
-    // segregated incompressible solver whose fields are still moving, the
-    // normalised residual reaches that floor only when the normalisation factor
-    // has been inflated by a field that ran away, and once it does the equation
-    // stays frozen while the rest of the solution keeps evolving.
-    //
-    // Measured on this host, internal CFD convergence study (2026-09-16), case
-    // `T2-gradfree-turblinup`: at outer iteration 102 the omega residual is
-    // 9.998e-1, at 103 it is 1.805e-17, and from 110 onward it is fixed at
-    // 1.99328871654e-16 with `No Iterations 0` for the rest of the run while
-    // the pressure residual is still 1.3e-2 and falling.  `k` froze the same
-    // way at 9.18e-9.  Had the pressure and momentum equations then reached the
-    // gate, all five residuals would have read "below tolerance" and the case
-    // would have been certified with a dead turbulence model.
-    //
-    // Zero solver work is NOT the discriminator, and measurement says so: in
-    // `V1-inletoutlet-coarse`, a case that converges genuinely, `omega` reports
-    // `No Iterations 0` in **19 of its last 20** outer iterations, exactly as
-    // the skipped equations do.  What separates them is whether the residual is
-    // a **new measurement or a reproduction**:
-    //
-    // * `V1` `omega` drifts upward about 5 % every outer iteration
-    //   (4.893e-9, 5.155e-9, 5.422e-9 ...) until it crosses the inner
-    //   `tolerance 1e-8`, takes one sweep, and restarts the ramp: a sawtooth.
-    //   The residual is recomputed from sources that are still moving, so its
-    //   contiguous reproduced-run length is 1.
-    // * `T3-gradfree-wallsolve` reproduces `omega = 9.79030652798e-14` and
-    //   `k = 6.66141045541e-09` bit-identically for hundreds of consecutive
-    //   iterations, because nothing updates either field.
-    //
-    // Hence: below the floor, no solver work at the last iteration, **and** a
-    // contiguous run of reproduced residuals, plus the clause that keeps this
-    // from refusing a genuinely stationary answer, that some other equation is
-    // still moving.  An exactly converged steady solution reproduces every
-    // equation's residual and must be accepted; a dead equation is recognised
-    // by the contrast against a solution that is still changing around it.
-    //
-    // The residual pattern above is the SUSPICION.  It is not the verdict, and
-    // it cannot be: a residual-depth cut-off drawn through the measured cases
-    // separates none of them reliably.  `G3-fine-p404`'s omega sits at `1.00x`
-    // the inner floor and `T3-gradfree-wallsolve`'s at `9.8e-6x`, and both
-    // fields turn out to be equally frozen; `T3`'s `k` at `0.67x` is frozen
-    // too.  Any constant drawn between those numbers is fitted to the cases it
-    // was drawn from.
-    //
-    // So the verdict is taken from the field itself: see [`field_update`].
-    // OpenFOAM writes `k`, `omega` and `p` every `writeInterval`, and comparing
-    // the last two writes answers "is the solver still updating this field"
-    // exactly, with no threshold.  Measured, the separation is total: frozen
-    // equations changed `0` cells of 436 389, live ones changed 99.9 %.
-    // Where field evidence exists, it decides on its own and the residual
-    // pattern is not consulted at all.  That matters: `L2-medium-le2` has `k`
-    // and `omega` fields frozen solid (`0` of 183 721 cells changed between
-    // its last two writes) while their residuals keep *varying*, because the
-    // residual is recomputed each outer iteration from a pressure field that is
-    // still moving.  Every residual-shaped trigger misses it.  The field does
-    // not.
+    // Compare persisted internal fields as a conservative evidence gate.
+    // Equality at the configured ASCII precision is an observation, not proof
+    // of an inactive equation: an update may be smaller than stored precision,
+    // or confined to boundary values. Preserve the fail-safe and describe its
+    // uncertainty explicitly. Generated cases request at least one inner
+    // iteration and 17-digit writes to avoid preventable skipped solves and
+    // round-trip information loss; legacy cases remain supported.
     let mut dead = Vec::new();
     for required in required_equations.iter().copied() {
         let Some(sample) = field_updates.and_then(|evidence| evidence.sample(required)) else {
@@ -364,10 +277,26 @@ pub fn classify_convergence(
         .map(|required| (*required).to_owned())
         .collect::<Vec<_>>();
     if !dead.is_empty() {
+        let residual_blockers = required_equations
+            .iter()
+            .filter_map(|field| {
+                let value = last_initial_residuals.get(*field)?;
+                (*value > config.solver.residual_tolerance).then(|| format!("{field} {value:.3e}"))
+            })
+            .collect::<Vec<_>>();
+        let residual_detail = if residual_blockers.is_empty() {
+            String::new()
+        } else {
+            format!(
+                " Independently, the following outer residuals exceed the {:.3e} acceptance tolerance: {}.",
+                config.solver.residual_tolerance,
+                residual_blockers.join(", ")
+            )
+        };
         return (
             CfdOutcome::Failed,
             format!(
-                "Outer SIMPLE iteration {latest_iteration}: {}, while at least one other solved field did change. OBSERVATION, not a proven equation failure: equal written values mean no update was persisted at the stored precision, which a sub-precision update or a boundary-only change would also produce. Numerical certification is refused as a fail-safe.",
+                "Outer SIMPLE iteration {latest_iteration}: {}, while at least one other solved field did change. OBSERVATION, not a proven equation failure: equal written values mean no update was persisted at the stored precision, which a sub-precision update or a boundary-only change would also produce. Numerical certification is refused as a fail-safe.{residual_detail}",
                 dead.join("; "),
             ),
         );

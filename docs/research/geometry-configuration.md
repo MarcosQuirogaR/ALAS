@@ -725,10 +725,11 @@ ConstraintResidual
   explanation
 ~~~
 
-## Traceability to REQUIREMENTS_FIRST_AIRCRAFT_DESIGN.md
+## Requirements mapping
 
-The following maps this memo into the existing requirements-first flow. It is a
-translation table, not a replacement for the requirements document.
+The following maps this memo into the requirements-first flow (see
+`docs/design-constraints.md` and `docs/OPTIMIZATION.md`). It is a translation
+table.
 
 | Requirements-first location | Geometry/configuration action | Output or residual |
 | --- | --- | --- |

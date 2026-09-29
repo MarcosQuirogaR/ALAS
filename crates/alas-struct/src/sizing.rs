@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-// Ported from alas/physics/structural_sizing.py
-// Reference: alas @ rust-port-baseline.
-
 //! Direct strength-based wingbox sizing.
 //!
 //! [`size_wingbox`] sizes the spar caps directly from strength: margin of
@@ -47,12 +44,16 @@ use alas_geom::wing_structure::WingStructureGeometry;
 use crate::loads::WingInertiaRelief;
 use crate::tanks;
 
+mod arc_mass;
 mod law;
 mod scoped;
 mod solve;
+mod stiffness;
+mod stiffness_distribution;
 mod types;
 
 pub use scoped::{size_wingbox_with_scope, SizedWingbox, WingFuelRelief};
+pub use stiffness::{size_for_linear_model, StiffnessSizingResult};
 pub use types::{
     margin_is_structurally_non_negative, CompositeProxyDeclaration, ControllingMargin,
     MassBreakdown, SparSizing, WingboxSizing, MARGIN_NUMERICAL_ZERO,
@@ -62,23 +63,13 @@ pub(crate) use law::{gradient_unit, trapezoid};
 use law::{linspace, SizingLaw};
 use solve::size_wingbox_with_law;
 
-/// How many relieved-load passes the product law takes.
+/// Maximum relieved-load passes; the solve exits early on verified closure.
 ///
-/// The box relieves its own bending, so its mass appears on both sides of the
-/// sizing equation. The iteration is a strong contraction - the structure is
-/// under a tenth of the relieved mass and the moment responds to it linearly -
-/// so the total settles to inside a milligramme within the budget on every
-/// registered aircraft.
-///
-/// **Two of them do not reach `RELIEF_TOLERANCE` inside it.** Measured at
-/// their own nominal designs, the A340-300 is still moving by `4.10e-9` of its
-/// box mass at the eighth pass and the A380-800 by `4.87e-9`, against a `1e-9`
-/// relative tolerance - `6.1e-5 kg` and `1.3e-4 kg` in absolute terms, which is
-/// structurally nothing and is why this was not visible before. Neither
-/// constant is tuned to cover it: [`size_wingbox_with_scope`] reports the
-/// verdict as [`crate::scope::ReliefConvergence`], so a box that did not settle
-/// is published as one that did not settle rather than assumed to have.
-pub const RELIEF_PASSES: usize = 8;
+/// The former fixed eight-pass budget truncated converging configurations.
+/// Sixty-four is a bounded numerical budget, not a changed physical margin:
+/// the existing relative convergence tolerance remains unchanged, and the
+/// final box must also carry loads relieved by its *own* final mass.
+pub const RELIEF_PASSES: usize = 64;
 
 /// Relative change in total box mass below which the relieved-load fixed point
 /// is taken as converged.

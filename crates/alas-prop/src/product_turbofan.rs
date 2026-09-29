@@ -9,9 +9,17 @@
 //! regular at zero flight speed. Fixed component pressure ratios are an
 //! on-design screening assumption, not an off-design engine deck.
 
-include!("product_turbofan_parts/part_01.rs");
-include!("product_turbofan_parts/part_02.rs");
-include!("product_turbofan_parts/part_03.rs");
+use super::turbofan_physics::{
+    adiabatic_inlet, combustor_fuel_air_ratio, convergent_nozzle, gas_properties, net_thrust,
+    GasComposition, NozzleResult, PhysicsError, StreamThrust, TotalState,
+};
+use std::fmt;
+
+mod types;
+pub use types::*;
+mod engine;
+mod thermo;
+use thermo::*;
 
 #[cfg(test)]
 // Test fixtures assert successful construction through unwrap.

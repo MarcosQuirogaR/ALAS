@@ -16,6 +16,7 @@ fn itemized_payload_must_close_to_the_component_payload() {
             landing_fuel_items: Vec::new(),
             unusable_fuel_items: Vec::new(),
             flops: None,
+            flops_gear_split_kg: None,
         })
     };
     let mut items = vec![PayloadItemSummary {

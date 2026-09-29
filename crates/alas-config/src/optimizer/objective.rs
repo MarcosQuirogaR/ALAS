@@ -13,10 +13,9 @@
 //! soft (it ranks behind feasibility but ahead of the objective), diagnostic
 //! (reported, never ranked) or off.
 //!
-//! The frozen weighted lift-to-drag objective of the Python reference is not
-//! a product objective: it survives only inside the parity replay
-//! (`DesignObjective::new_reference_compatibility`), where the fixtures need
-//! it, and cannot be selected here.
+//! This group belongs to the mission-sized product profile. The default
+//! `scipy_legacy` profile instead uses the original weighted lift-to-drag
+//! objective and the penalty table in [`super::ObjectiveWeights`].
 
 use serde::{Deserialize, Serialize};
 
@@ -135,7 +134,7 @@ pub struct ObjectiveConfig {
     #[config(
         options = ObjectiveKind,
         label = "Objective",
-        help = "Quantity the design search minimises. Every choice sizes each candidate by the design mission under the fuel policy and ranks it feasibility first: block fuel is the operating cost of the mission, takeoff mass the structural and airport cost, operating empty mass the manufacturing cost, and fuel per seat-kilometre the block fuel normalised by the design passengers and range."
+        help = "Used by the mission-sized differential_evolution profile. That profile sizes each candidate by the design mission and ranks it feasibility first. scipy_legacy ignores this selector and minimizes the original weighted L/D cost plus its penalty table."
     )]
     pub kind: ObjectiveKind,
 
@@ -315,8 +314,8 @@ mod tests {
                 Some(serde_json::json!(kind.as_str()))
             );
         }
-        // The frozen lift-to-drag objective is a parity-replay path, not a
-        // saved-configuration value.
+        // The Python weighted L/D cost is selected by the solver profile,
+        // not represented as one of the mission-objective enum values.
         assert!(
             serde_json::from_value::<ObjectiveKind>(serde_json::json!("legacy_lift_to_drag"))
                 .is_err()

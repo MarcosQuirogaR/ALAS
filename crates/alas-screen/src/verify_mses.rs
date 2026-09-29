@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-// Ported from alas/analysis/airfoil_screening.py
-// Reference: alas @ rust-port-baseline.
-
 //! Stage 3: MSES coupled viscous/inviscid Euler analysis for transonic verification.
 
 use std::path::Path;

@@ -5,9 +5,8 @@
 //!
 //! Kept out of [`crate::state`] so that module stays about the design
 //! configuration; this one is about running `alas-screen`'s multi-stage sweep
-//! and holding its result, the same separation the reference desktop app drew
-//! by lifting `AirfoilSweepScreen`'s run state up into `App.tsx` rather than
-//! leaving it component-local, so navigating away mid-sweep does not lose it.
+//! and holding its result. The run state lives on the application state rather
+//! than in the view, so navigating away mid-sweep does not lose it.
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -40,7 +39,7 @@ pub struct ScreeningState {
     /// renderer in a separate viewport.
     pub window_open: bool,
     /// Whether the detached custom-airfoil importer was requested from the
-    /// Advanced Settings > Airfoil Screening selector.
+    /// Airfoil Screening window selector.
     pub custom_airfoil_import_open: bool,
     pub(crate) mses_readiness: MsesReadiness,
     /// Inspection state only: never applied to the aircraft configuration.

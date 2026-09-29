@@ -115,7 +115,7 @@ DLR's open [The Bird Strike Challenge](https://elib.dlr.de/134450/) / [MDPI publ
 
 ### 3.1 Required envelope fields
 
-The existing requirements-first design in [`docs/REQUIREMENTS_FIRST_AIRCRAFT_DESIGN.md`](../REQUIREMENTS_FIRST_AIRCRAFT_DESIGN.md) already establishes value, unit, load case, policy, evidence and status as the core contract. Certification/safety adds the following required fields:
+The requirements-first design (see [`docs/design-constraints.md`](../design-constraints.md)) establishes value, unit, load case, policy, evidence and status as the core contract. Certification/safety adds the following required fields:
 
 | Field | Example values | Why it matters |
 |---|---|---|
@@ -592,13 +592,13 @@ This research deliberately does not choose a single aircraft category, seat coun
 
 Until those decisions are recorded, the safe default is to fail closed on high-severity architecture gaps, keep quantitative probability rows evidence-pending, and expose all missing applicability or translator decisions to the user.
 
-## 14. Verification of this research artifact
+## 14. Verification of this note
 
-Only the new research directory and this report were added for this task. Existing source, tests, fixtures, and dirty-worktree changes were not modified. Before delivery, re-run the following read-only checks when the repository environment is available:
+Re-run the following checks when the repository environment is available:
 
 ```powershell
 Get-FileHash -Algorithm SHA256 .\bib\certification-safety\*.pdf
 Get-ChildItem .\bib\certification-safety\*.pdf | Select-Object Name,Length
 ```
 
-The hashes and page counts in §12.1 are the values observed during this research run. This document should be reviewed against the live FAA/EASA/ICAO/SAE/RTCA sources before being used to define a certification programme or an actual compliance submission.
+The hashes and page counts in §12.1 are the values observed when the note was written. This document should be reviewed against the live FAA/EASA/ICAO/SAE/RTCA sources before being used to define a certification programme or an actual compliance submission.

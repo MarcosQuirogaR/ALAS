@@ -170,7 +170,7 @@ pub(super) fn add_manifest_artifact_if_exists(
 /// The dispatch-time preset barrier of clarified App Features 1.2: a run on
 /// a registered preset must name a registered aircraft, and in preset mode
 /// its locked geometry, initial design point and search bounds must match
-/// the registry's values and the D09 envelope anchored there. The guided
+/// the registry's values and the design-space envelope anchored there. The guided
 /// workspace restores these after every edit; this check is the second
 /// barrier for buffers that reached the pipeline by another route.
 pub(super) fn check_preset_policy(
@@ -196,4 +196,17 @@ pub(super) fn check_preset_policy(
         config.preset,
         alas_config::preset_policy::describe_violations(&violations)
     ))
+}
+
+/// `lo..hi` over the finite entries of `values` at `decimals` places, or
+/// `none` when there are none.
+pub(super) fn finite_range_text(values: &[f64], decimals: usize) -> String {
+    let mut finite = values.iter().copied().filter(|value| value.is_finite());
+    let Some(first) = finite.next() else {
+        return "none".to_owned();
+    };
+    let (lo, hi) = finite.fold((first, first), |(lo, hi), value| {
+        (lo.min(value), hi.max(value))
+    });
+    format!("{lo:.decimals$}..{hi:.decimals$}")
 }

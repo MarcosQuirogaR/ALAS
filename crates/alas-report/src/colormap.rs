@@ -24,7 +24,7 @@ pub enum Colormap {
     Inferno,
     /// Perceptually-uniform map (black -> pale pink), used for NeuralFoil sweeps.
     Magma,
-    /// Classic blue-cyan-yellow-red map, used for legacy-style contour fields.
+    /// Classic blue-cyan-yellow-red map, used for classic contour fields.
     Jet,
 }
 

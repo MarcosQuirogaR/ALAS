@@ -785,10 +785,9 @@ numerically balanced but operationally unusable point from passing.
 | Reserves | `ReserveFuelPolicy` exists in `design_brief.rs` with trip fraction, fixed mass, diversion, holding and landing floor | Active fuel assessment says trip fuel excludes unmodeled reserves; make reserve policy part of mission evaluation and expose landing-fuel residual |
 | Airport geometry | `span_limit_m` exists in the brief; geometry can provide wingspan | Add gear span, length, turning and stand/taxiway/de-icing/run-up cases |
 
-### 7.2 Mapping to the requirements-first brief and owners
+### 7.2 Requirements mapping and owners
 
-`docs/REQUIREMENTS_FIRST_AIRCRAFT_DESIGN.md` already places these requirements
-in the intended architecture:
+These requirements map onto the architecture as follows:
 
 - cruise Mach, MMO and VMO map to atmosphere/aero/envelope;
 - ICA and time-to-climb map to climb/performance;
@@ -822,7 +821,7 @@ Recommended ownership:
 | `alas-pipeline` | Instantiate case families, run evaluators, aggregate named residuals and expose inconclusive results |
 | `alas-opt` | Consume policy-tagged residuals after hard constraints are evaluated; never invent missing performance translations |
 | `alas-report`/`alas-viz` | Show controlling cases, raw ASD/AGO curves, margins, uncertainty and evidence status |
-| `docs/REQUIREMENTS_FIRST_AIRCRAFT_DESIGN.md` | Requirement intent, policy, source, load-case binding and acceptance semantics |
+| `docs/design-constraints.md` | Requirement intent, policy, source, load-case binding and acceptance semantics |
 
 ## 8. Recommended implementation sequence
 

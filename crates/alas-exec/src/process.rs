@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/proc.py
-// Reference: alas @ rust-port-baseline.
 
 //! Windowless subprocess configuration.
 //!
@@ -50,7 +49,7 @@ use std::time::{Duration, Instant};
 /// How often [`wait_with_timeout`] polls a supervised child: short against
 /// every external tool's run time, long enough not to spin a core while the
 /// tool works.
-const POLL_INTERVAL: Duration = Duration::from_millis(25);
+pub(crate) const POLL_INTERVAL: Duration = Duration::from_millis(25);
 
 /// A configured timeout that cannot be used as a deadline.
 ///
@@ -130,15 +129,6 @@ pub(crate) fn absolute_path(path: &Path) -> PathBuf {
 /// Windows, where the flag exists.
 #[cfg(windows)]
 pub const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-
-/// True on Windows, where the windowless-spawn flag exists and is wanted.
-///
-/// The console-window problem [`NoConsoleWindow::no_window`] addresses is
-/// Windows-only, so a caller uses this to decide whether the concern applies at
-/// all before, say, reporting that a tool ran windowless.
-pub fn is_windows() -> bool {
-    cfg!(windows)
-}
 
 /// Configures a [`Command`] to run without allocating a console window.
 pub trait NoConsoleWindow {
@@ -445,11 +435,6 @@ mod tests {
         let relative = absolute_path(Path::new("outputs/request.txt"));
         assert!(relative.is_absolute());
         assert!(relative.ends_with("outputs/request.txt"));
-    }
-
-    #[test]
-    fn is_windows_matches_the_build_target() {
-        assert_eq!(is_windows(), cfg!(windows));
     }
 
     #[cfg(windows)]

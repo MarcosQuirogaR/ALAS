@@ -5,9 +5,7 @@
 //!
 //! The computational crates read their numbers from here and hold none of
 //! their own, so there is one place to look for what a run was configured
-//! with and one place a value can be changed. Each module corresponds to one
-//! module of the reference implementation's `alas.config` package, keeping
-//! the file boundaries so the two can be read side by side.
+//! with and one place a value can be changed.
 //!
 //! # A struct describes itself
 //!
@@ -21,8 +19,6 @@
 //! The derive refuses a field that says nothing about itself. See
 //! CONTRIBUTING.md: an undocumented setting reaches the user as a blank row
 //! they have to guess at, and the cost of guessing wrong is a wrong aircraft.
-//! The reference implementation has fields in exactly that state, whose
-//! descriptions this port supplies; that adds prose and changes no number.
 
 // The derive expands to `impl ::alas_config::ConfigNode`, which has to resolve
 // inside this crate as well as outside it.
@@ -77,8 +73,8 @@ pub use alas_config_derive::ConfigNode;
 pub use leaf::Leaf;
 pub use overlay::{overlay, OverlayError};
 pub use schema::{
-    Entry, Field, Kind, LeafField, Node, Number, OptionSource, ReadonlyUnless, TranslatedEntry,
-    TranslatedField, TranslatedNode,
+    Entry, Field, Kind, LeafField, Node, Number, OptionSource, OptionalValueKind, ReadonlyUnless,
+    TranslatedEntry, TranslatedField, TranslatedNode,
 };
 
 pub use airport_dataset::{

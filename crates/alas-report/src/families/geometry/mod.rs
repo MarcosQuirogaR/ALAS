@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/reporting/visualization.py
-// Reference: alas @ rust-port-baseline.
 
 //! Aircraft geometry visualization: planform overlays, 3-view/wireframe
 //! projections, per-station airfoil cross-sections, and cabin/payload

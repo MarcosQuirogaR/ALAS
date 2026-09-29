@@ -142,8 +142,8 @@ full-harness regression test reproducing the ATR-OEW-shaped failure mode.
 Re-running the harness with the fixed code against the *same, unregenerated* `MODEL.json`
 (SHA-256 unchanged, `F40A20F265A4654C8D1EADC53A47CE101D8EB87F9442D6023D52F5501D6071B4`) and contract
 exposes three previously-hidden misses, written to an isolated local fixture (not the canonical
-harness output, which this audit intentionally leaves untouched so it is not silently changed for
-other in-flight work; the next ordinary reproduction run will pick up the fix automatically):
+harness output, which is left untouched so it is not silently changed;
+the next ordinary reproduction run picks up the fix automatically):
 
 | Status | Rows (pre-fix) | Rows (post-fix) |
 | --- | ---: | ---: |
@@ -167,56 +167,26 @@ The three newly-exposed misses:
 None of these were re-tuned, loosened, or removed to make them pass; they are reported as new
 `out_of_tolerance` findings for the geometry/mass owners to investigate.
 
-### 2026-09-22 reproduction and outstanding model-dump staleness
+### Source audit findings
 
-The AND-tolerance fix above is no longer a hypothetical rerun: it is the checked-out
-`tools/aircraft_parity.cjs` (unchanged since 2026-09-15) and it was reproduced today with
-`node --test tools/aircraft_parity.test.cjs` (17/17 pass, exit 0) and
-
-```text
-node tools/aircraft_parity.cjs --out out/parity-rerun-20260922 --report out/2026-09-22-aircraft-parity.html
-```
-
-against the *same, still-unregenerated* `MODEL.json` (SHA-256
-`F40A20F265A4654C8D1EADC53A47CE101D8EB87F9442D6023D52F5501D6071B4`, dated 2026-09-09) and the
-unchanged contract (SHA-256 `6CFA76B71D091BEDEE3F9FBE483EEA482EEFA77934A2EFD96DDCA2E84F7FF557`).
-Exit 0; result JSON SHA-256 `87E9255BB18E1FCC3DF52F57D7274AEB401AF2FE2E2BA089518F4845A5F4FAD1`. The
-summary is exactly the post-fix row from the table above (69 `within_tolerance`, 5
-`out_of_tolerance`, 70 `diagnostic`, 21 `unsupported`, 76 `evidence_gap`, 0 `source_conflict`),
-confirming the fix is now simply the harness's ordinary, unmodified behavior rather than a special
-case. A per-preset status figure generated directly from this run's JSON was saved to an internal
-report path (SHA-256 `7201405CABB26E47022188AC4406DCDDB4F4EC798C3425113E30C1436FB036C9`); it is a
-comparison-status count chart, not a certification pass/fail figure, and its own caption says so.
-
-This rerun deliberately used the isolated `--out`/`--report` paths rather than overwriting the
-tool's canonical default output locations (`AIRCRAFT_PARITY.json` and
-`2026-09-09-aircraft-parity.html`), for the same reason given above: those canonical outputs are
-left alone so other in-flight work is not silently changed underneath it.
-
-**The underlying `MODEL.json` was not regenerated and is now materially stale.** It is 13 days old
-relative to this rerun, and the working tree has an active, uncommitted A320 cabin/mass regression
-in flight (`crates/alas-pipeline/tests/fixed_aircraft_mass_basis.rs` currently fails because the
-cabin/mass path yields 138 seats where the pipeline expects 132) whose owner holds exclusive
-compiler access for the duration of that fix. `cargo run -p alas-pipeline --example
-model_reference_dump` was therefore not run this session; every A320-200 row in this rerun reflects
-the pre-regression-fix model state, not the current source tree. Once that lane's Cargo access is
-released and the regression is resolved, the correct sequence to refresh this section is: `cargo run
--p alas-pipeline --example model_reference_dump` then `node tools/aircraft_parity.cjs` (writing over
-the canonical default output once no other lane depends on the old copy), and updating
-the SHA-256 values and status table above from that fresh run, not from this one.
-
-A parallel, independent read-only research pass and a code-level circularity trace performed the
-same day are published in
-[real-aircraft-source-audit-2026-09-22.md](research/real-aircraft-source-audit-2026-09-22.md). Its
-most release-relevant finding: the A320-200 `mass.usable_fuel_kg` model value (19,334 kg) is, for
-the default preset, a hand-entered literal transcribed from a cited certification source
-(`crates/alas-config/src/presets/narrowbody.rs:107-109`, tagged
-`FuelCapacityEvidence::PublishedPreset` in `crates/alas-pipeline/src/feasibility/fuel.rs:341-349`),
-not an independent tank-geometry computation, a confirmed **source/model circularity risk**, not
-independent validation, for that row. It also confirms the ATR72-600 OEW and DC-10 fuselage-length
-misses above are genuine model gaps across every published document vintage, not source-selection
-artifacts, and records EASA TCDS issue-currency updates (A.064 Issue 62, IM.A.570 Issue 25, A.015
-republished 15 Jan 2026, IM.A.115 Issue 30) found during that pass.
+- **A320-200 `mass.usable_fuel_kg` is a source/model circularity, not independent
+  validation.** The default preset carries a hand-entered usable-fuel literal
+  (`crates/alas-config/src/presets/narrowbody.rs`, tagged
+  `FuelCapacityEvidence::PublishedPreset` in
+  `crates/alas-pipeline/src/feasibility/fuel.rs`). It reproduces EASA TCDS
+  EASA.A.064 Issue 62 (III.9 fluid capacities, CFM with MOD 37331 and MOD 160001:
+  24,167 L at 0.800 kg/L = 19,334 kg) digit for digit. The older Airbus anchor
+  (24,209 L at 0.785 kg/L = 19,004 kg) differs by +1.74%, outside the 0.5%
+  relative bound. Neither is a tank-geometry prediction.
+- **ATR72-600 OEW and DC-10 fuselage length** are genuine model gaps across every
+  published document vintage, not source-selection artifacts.
+- **Certification document currency** noted during the audit: EASA TCDS A.064
+  Issue 62, IM.A.570 Issue 25, A.015 (republished January 2026), IM.A.115 Issue 30.
+- The audit changes how rows are read only; it does not alter the contract,
+  `tools/aircraft_parity.cjs` or any tolerance.
+- Refresh sequence: `cargo run --release -p alas-pipeline --example
+  model_reference_dump`, then `node tools/aircraft_parity.cjs`; update the
+  hashes and status table above from that run.
 
 ### Model-declared circularity markers (2026-09-09)
 
@@ -249,7 +219,7 @@ The ATR 72-600 mission evidence has a material variant/condition boundary. The p
 
 The certified widebody MAC values cannot be converted to a model `%MAC` frame from the public TCDS pages alone. A340-300 TCDS A.015 Issue 28 gives datum station 0 at 6.382 m forward of the nose and MAC 7.270 m, while B787 TCDS IM.A.115 Issue 30 gives datum station 0 at 1.41732 m forward of the nose and MAC 6.27126 m; neither publishes LEMAC. The source WBM/AFM LEMAC and the reference-wing boundary are therefore still unavailable. As a scale check, the current reference-area/span pairs give A340 `S/b = 361.6/60.30 = 5.996683 m` and B787 `S/b = 360.464/60.12 = 5.995742 m`; the certified B787 MAC is `1.045952 × S/b`, so it must not be relabeled as `S/b`, while the ALAS geometric MAC is 7.547785 m. The model export computes its own frame from the integrated active planform (`x_LEMAC = root_datum_x + wing_x_shift + ∫x c dy / ∫c dy`) and the CG closeout keeps this model frame separate from a source `PlanningMacReference`. Only the A220 currently has a source-grounded LEMAC. Do not add a guessed A340/B787 planning frame or alter their geometry until a WBM/AFM value or coordinate-level reference boundary is available.
 
-A formula coverage register maps the current mission, fuel, mass/CG, aero, atmosphere and performance equations to their code paths, focused tests, independent evidence and remaining source gaps; it is retained internally and not published with this checkout. A companion NotebookLM query bundle was prepared for a future authenticated source audit; no NotebookLM result is represented in the current parity status.
+A formula coverage register maps the current mission, fuel, mass/CG, aero, atmosphere and performance equations to their code paths, focused tests, independent evidence and remaining source gaps; it is not published with this checkout.
 
 The model-only `AVE` preset appears in the model hash and is reported as intentionally excluded. Most L/D, CD0, Oswald efficiency, critical-Mach and lift-curve rows are diagnostics because public values come from analytical, fleet-derived or wing-only sources. They are useful formula checks and trend diagnostics, not matched flight-test validation.
 
@@ -281,7 +251,7 @@ The evidence bundle has primary or traceable anchors for many overall dimensions
 | Subsystem masses | Model now exports component masses, centroids and first moments; no exact public real-aircraft subsystem breakdown | Exact variant definition, component list, unusable fuel/fluids, weighing condition and independent first moments |
 | CG envelope/cruise CG | Model now exports loaded physical CG and its own geometry MAC frame; A220 planning vertices exist locally; others lack public numeric envelopes | Forward/aft limits by weight/configuration, datum/LEMAC/MAC, cabin/fuel case and a cruise CG point |
 | Gear count/position | Model exports sized topology, wheelbase/track, normalized nose-tip stations and wheel coordinates; A220/A320/A340/A380 group anchors are source-backed, while ATR/B787/DC-10 remain source-limited | NLG/MLG topology, wheels per strut/bogie, axle coordinates, frame, track definition and exact variant |
-| SOL101 deformation | `evidence_gap` for every preset (confirmed by a sourced 2026-09-09 negative search retained in an internal working note, not published with this checkout) | Matching load case, constraints, materials, mesh/element basis and an independent displacement/strain measurement or certified test result. Manufacturer press releases (e.g. Boeing 787 limit/ultimate wing-test deflections) state a number and whether it is limit or ultimate but no boundary conditions, load distribution, weight state or variant, so none is usable. The one open lead is Kirmse et al. (DLR ETTC 2021, elib 145368), an in-flight 2 g wing-deformation measurement on DLR's A320-232 "D-ATRA", the only candidate on an ALAS-preset airframe, not yet retrieved, and in any case a flight-load case rather than a limit/ultimate value. |
+| SOL101 deformation | `evidence_gap` for every preset (a sourced search for public displacement data found none) | Matching load case, constraints, materials, mesh/element basis and an independent displacement/strain measurement or certified test result. Manufacturer press releases (e.g. Boeing 787 limit/ultimate wing-test deflections) state a number and whether it is limit or ultimate but no boundary conditions, load distribution, weight state or variant, so none is usable. The one open lead is Kirmse et al. (DLR ETTC 2021, elib 145368), an in-flight 2 g wing-deformation measurement on DLR's A320-232 "D-ATRA", the only candidate on an ALAS-preset airframe, not yet retrieved, and in any case a flight-load case rather than a limit/ultimate value. |
 
 ## Formula and units audit
 
@@ -316,7 +286,6 @@ All longitudinal stations must use one declared datum and units; LEMAC and MAC m
 
 The current CG extraction path is explicit about this frame requirement: `model_reference_dump` exports the integrated geometry MAC and nose-relative LEMAC, and `all_preset_cg_closeout` computes model `%MAC` with those values. When a source planning frame exists, the closeout separately computes `%MAC = 100 (xCG − source_LEMAC) / source_MAC`; it does not substitute the geometry MAC. A datum station by itself only translates manufacturer stations and does not provide LEMAC, so the A340/B787 TCDS datum/MAC pair cannot support a numeric CG-envelope comparison.
 
-No NotebookLM result is included in this audit. The curated NotebookLM connector had expired authentication, browser login could not complete in the available connected surface, and token refresh returned stale credentials. The formulas and source claims above come from the local evidence bibliography and the linked primary/peer-reviewed sources; they are not represented as NotebookLM inference.
 
 The bounded MSES condition audit confirms the current first-order sweep-normal Mach and body/twist/downwash mapping, but retains the nominal r2 MSES run as `not_converged` (`0/7` points) and flags the unresolved `Re≈180e6` versus `12.875 m` root-chord provenance mismatch for lead-owned condition reconciliation.
 

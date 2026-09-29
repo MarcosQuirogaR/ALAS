@@ -137,10 +137,10 @@ the takeoff-mass limit and by the usable tanks less the taxi fuel; the
 shortfall beyond either bound is a reported finding, and the mission is
 flown at the admissible mass.
 
-Every product search minimises a mission quantity; the frozen weighted
-lift-to-drag objective of the Python reference is replayed only by the
-parity fixtures and is not selectable. The mission-sized objective
-(`optimizer.objective`) ranks candidates feasibility first: a candidate that violates a hard requirement family
+The `scipy_legacy` profile minimizes the original weighted lift-to-drag cost
+plus the configured scalar penalties. The `differential_evolution` profile
+minimises a mission quantity through `optimizer.objective` and ranks
+candidates feasibility first: a candidate that violates a hard requirement family
 costs more than any feasible one and infeasible candidates order by their
 normalised violation; soft families rank behind feasibility and ahead of the
 objective; diagnostic families are reported only. Tail-volume windows are
@@ -220,6 +220,27 @@ does not renormalise when the stations stop short of the tip. This is
 implementation verification against the published equations as FLOPS
 evaluates them, not physical validation against weighed aircraft.
 
+## Current optimizer profiles (2026-09-27)
+
+Fresh configurations use `optimizer.solver.method = scipy_legacy`. This
+profile restores the ALAS v1.1.0 scalar objective and search contract:
+weighted lift-to-drag with the original additive penalty table, reference
+mass/geometry coordinates, and SciPy-compatible differential evolution.
+Defaults are `best1bin`, `max_iterations = 15`, population multiplier 6,
+energy-spread tolerance 0.01, mutation dithering in `[0.5, 1.0)`, crossover
+probability 0.7, no polishing, and one worker for immediate updating. When an
+initial design is supplied, the initial population is perturbed within 5% of
+each bound range and its first member is the unperturbed design; otherwise the
+profile uses Latin-hypercube sampling. It does not run the product scan or
+feasibility restoration.
+
+Set `optimizer.solver.method = differential_evolution` to select the current
+mission-sized profile. Its evaluation chain and optimizer are described
+below: mission sizing, explicit requirement policies, broad scan, L-SHADE,
+epsilon constraints, and bounded feasibility restoration. The explicit
+`DesignOptimizer::new_reference_compatibility` constructor remains for frozen
+parity fixtures.
+
 # Multidisciplinary sizing loop and the L-SHADE epsilon-constrained driver
 
 `alas-opt::mdo::mda` closes each candidate as a converged multidisciplinary
@@ -254,10 +275,9 @@ chain; nothing downstream of `build` is skipped or approximated for a
 "cheap" evaluation inside the search (the reduced-fidelity Stage A screening
 described below is explicitly excluded from ever becoming the winner).
 
-`optimizer.solver.method = differential_evolution` is the only search this
-build runs, over the design vector, with every candidate a converged
-aircraft from the chain above: **L-SHADE differential evolution under the
-epsilon-constrained method** (`alas-opt::search_methods::lshade_de`).
+Under the mission-sized `differential_evolution` profile, every candidate is
+a converged aircraft from the chain above: **L-SHADE differential evolution
+under the epsilon-constrained method** (`alas-opt::search_methods::lshade_de`).
 
 - **L-SHADE**: R. Tanabe and A. S. Fukunaga, "Improving the Search
   Performance of SHADE Using Linear Population Size Reduction," IEEE
@@ -301,8 +321,6 @@ epsilon-constrained method** (`alas-opt::search_methods::lshade_de`).
 
 A low-resolution Stage A scan seeds the population's first individual (see
 `alas-opt::search::staged`); it never selects the winner, since the search
-still decides it from the seed by the rule above. The frozen weighted
-lift-to-drag objective of the Python reference, and the SciPy-parity DE loop
-that replays it, remain reachable only through
-`DesignOptimizer::new_reference_compatibility` for the parity fixtures; no
-product or GUI path constructs it.
+still decides it from the seed by the rule above. These scan, ranking and
+restoration rules apply only to `differential_evolution`; `scipy_legacy` uses
+the original scalar penalties and SciPy-style `best1bin` algorithm.

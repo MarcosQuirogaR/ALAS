@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/reporting/visualization.py
-// Reference: alas @ rust-port-baseline.
 
 //! Propulsion thermodynamic cycle summary, the engine designer's nacelle
 //! preview, and parametric trade-space sweeps (carpet plot, efficiency

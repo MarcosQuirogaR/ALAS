@@ -3,18 +3,15 @@
 
 // Ported from native aerodynamic model/atmosphere/_isa_atmo_functions.py
 // Upstream: native aerodynamic model 4.2.8, MIT.
-// Reference: alas @ rust-port-baseline.
 
 //! The closed-form International Standard Atmosphere: pressure and
 //! temperature, from a table of eight layers and the barometric formula.
 //!
 //! This is one of the two altitude models [`crate::Atmosphere`] selects
-//! between, and the one a caller gets only by asking for it. Upstream's
-//! default is the fitted [`crate::differentiable`] model, and the two
-//! disagree by about a per cent in temperature, so where a module in this
-//! port evaluates the ISA it is because its Python counterpart passed
-//! `method="isa"`, not because the closed form is the natural reading of
-//! "the standard atmosphere".
+//! between, and the one a caller gets only by asking for it. The default is the
+//! fitted [`crate::differentiable`] model, and the two disagree by about a per cent in temperature, so a module evaluates the ISA
+//! only where it asks for it, not because the closed form is the natural
+//! reading of "the standard atmosphere".
 //!
 //! [`BAROMETRIC_GRAVITY`] (9.81 m/s^2) is the constant this module's upstream
 //! defines locally and reads as `g`. It is deliberately not the 9.80665
@@ -133,7 +130,7 @@ fn barometric_formula(
 ) -> f64 {
     let temperature_k = base_temperature_k + lapse_rate_k_per_m * (altitude_m - base_altitude_m);
     // Keeps the layer temperature positive no matter what altitude is asked
-    // for; ported from `np.fmax(T, 1)`.
+    // for.
     let temperature_k = temperature_k.max(1.0);
 
     if lapse_rate_k_per_m != 0.0 {

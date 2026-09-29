@@ -9,6 +9,11 @@
 //! reference/frame declarations prevent an unlabelled time history from being
 //! drawn as an ALAS aircraft polar.
 
-include!("flowunsteady_parts/part_01.rs");
-include!("flowunsteady_parts/part_02.rs");
-include!("flowunsteady_parts/part_03.rs");
+use std::fmt::Write as FmtWrite;
+
+mod types;
+pub use types::*;
+mod wire;
+pub use wire::*;
+#[cfg(test)]
+mod tests;

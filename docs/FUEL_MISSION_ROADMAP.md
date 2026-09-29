@@ -180,7 +180,7 @@ Acceptance:
 - Every output states model version, policy, provenance, validity domain, and
   uncertainty.
 
-## Delivery status, 2026-09-06
+## Delivery status
 
 The typed mass and fuel contracts (P1), the coupled required-fuel closure
 (P2) and the tank-local part of P4 are in the normal product pipeline.

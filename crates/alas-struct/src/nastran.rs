@@ -1,13 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-// Ported from alas/integration/nastran_runner.py
-// Reference: alas @ rust-port-baseline.
-
 //! NASTRAN static, modal and vibration solves: the decks, the run, the results.
 //!
-//! This is P9's second external-solver row, and it means the same thing the
-//! first one did: the numbers a solve reports come out of a compiled solver,
+//! The numbers a solve reports come out of a compiled solver,
 //! not out of arithmetic this crate performs. What is this crate's own is the
 //! deck it hands over ([`build_sol101_bulk`] and its three siblings) and
 //! that is what the parity test holds to the reference.
@@ -30,9 +26,14 @@ mod decks;
 mod format;
 mod results;
 mod run;
+pub(crate) mod static_spanwise;
+mod static_stress;
+pub use static_stress::{
+    StaticShellStressCase, StaticShellStressResponse, StaticShellStressSample,
+};
 pub(crate) mod text;
 
-pub use analysis::run_nastran_analysis;
+pub use analysis::{is_solver_not_configured, run_nastran_analysis};
 pub use decks::{
     build_sol101_bulk, build_sol103_bulk, build_sol111_random_bulk, build_sol111_sine_bulk,
     build_sol111_sine_bulk_msc, elliptic_forces_by_y,
@@ -46,6 +47,9 @@ pub use results::{
 pub use run::{
     fatal_lines, msc_solver_arguments, run_nastran, run_nastran_with_solver, solver_arguments,
     tail, NastranRunOutcome,
+};
+pub use static_spanwise::{
+    read_static_product, StaticCaseIdentity, StaticSpanwiseCase, StaticSpanwiseResponse,
 };
 
 use crate::mesh::MeshNodeIndex;

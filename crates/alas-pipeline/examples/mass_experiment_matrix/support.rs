@@ -80,6 +80,7 @@ pub(crate) fn dispatch_text(status: &DispatchStatus) -> String {
             format!("not_converged last change {last_change_kg:.1} kg")
         }
         DispatchStatus::ModelFailed(reason) => format!("model_failed: {reason}"),
+        DispatchStatus::Cancelled => "cancelled".to_owned(),
     }
 }
 

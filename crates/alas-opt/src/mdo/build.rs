@@ -2,11 +2,11 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 //! The candidate's geometry, mass and trimmed aerodynamic operating point:
-//! the part of the legacy evaluation that does not depend on the takeoff
-//! mass, so it is built exactly once per candidate.
+//! the part of the evaluation that does not depend on the takeoff mass, so
+//! it is built exactly once per candidate.
 //!
-//! This reuses the same public crate calls, in the same order, as
-//! `crate::objective_evaluate`'s legacy path: geometry build, candidate
+//! This makes the same public crate calls, in the same order, as
+//! `crate::objective_evaluate`'s weighted-penalty path: geometry build, candidate
 //! payload load case, a two-pass mass analysis with the payload layout
 //! summary, the cruise stall guard, and `stability_and_trim` followed by
 //! `AeroAnalysis::trimmed_performance`. A design vector that fails any of
@@ -134,10 +134,15 @@ pub(crate) fn size_fuselage_from_cabin(
     let mut lower = spec.lower;
     let mut upper = spec.upper;
 
+    // `build` takes `&self` and reads only `config.geometry`, which this
+    // bisection never mutates, so one builder is reused across every trial
+    // length instead of rebuilding it (and re-cloning the geometry config)
+    // on each call.
+    let builder = AircraftBuilder::new(Some(config.geometry.clone()));
     let capacity_at = |length_m: f64| -> Result<i64, CandidateFailure> {
         let mut trial = *design;
         trial.fuselage_length_m = length_m;
-        let plane = AircraftBuilder::new(Some(config.geometry.clone()))
+        let plane = builder
             .build(Some(&trial), false)
             .map_err(|_| geometry_build_failure())?;
         let layout =
@@ -160,7 +165,12 @@ pub(crate) fn size_fuselage_from_cabin(
         design.fuselage_length_m = lower;
         return Ok(());
     }
-    if capacity_at(upper)? < target {
+    // `upper` has not changed since the check above, and `capacity_at` is a
+    // pure function of its argument and the (unmutated) `design`/`config`
+    // captures, so its result is reused instead of rebuilding the same
+    // geometry and payload layout a second time.
+    let upper_capacity = capacity_at(upper)?;
+    if upper_capacity < target {
         return Err(geometry_build_failure());
     }
     // The detailed row packer is discrete: a small body-length change can
@@ -169,7 +179,7 @@ pub(crate) fn size_fuselage_from_cabin(
     // the fast bracketed solve for the usual case, but remember the capacity
     // of its selected endpoint so we never publish a vector that rebuilds one
     // seat short of the requested clean-sheet load case.
-    let mut selected_capacity = capacity_at(upper)?;
+    let mut selected_capacity = upper_capacity;
     for _ in 0..36 {
         let middle = 0.5 * (lower + upper);
         let capacity = capacity_at(middle)?;
@@ -268,16 +278,8 @@ type FirstMassPassOutput = (
     StructuralReference,
 );
 
-type StructuralMassAnalysis = (
-    MassBreakdown,
-    MassCoordinates,
-    [f64; 3],
-    WingboxFeedback,
-    Option<ReferenceWingMass>,
-    StructuralInventory,
-);
-
-include!("build_structural.rs");
+mod structural;
+pub(crate) use structural::mass_analysis_with_structural_feedback;
 
 #[cfg(test)]
 mod tests {

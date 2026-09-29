@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/config/presets.py (the single-aisle entries)
-// Reference: alas @ rust-port-baseline.
 
 //! Two published single-aisle types, which is where the global assumptions
 //! stop fitting.
@@ -24,64 +23,15 @@
 //! which sizes them out of runways they operate from every day.
 
 use crate::{
-    AircraftPreset, AircraftReferenceData, AircraftVariantIdentity, CertifiedExitLayout,
-    CertifiedExitPair, CgEnvelopeEvidence, DesignRequirements, DesignVector, EmpennageConfig,
-    EngineConfig, FuselageConfig, GeometryConfig, LandingGearConfig, MassModelConfig,
-    MissingDesignMissionDatum, MissionEvidenceApplicability, PartialDesignMissionEvidence,
-    PartialMissionEvidenceKind, PublishedMissionLoadCase, PublishedRange, WingConfig,
+    AircraftPreset, AircraftReferenceData, AircraftVariantIdentity, CgEnvelopeEvidence,
+    DesignRequirements, DesignVector, EmpennageConfig, EngineConfig, FuselageConfig,
+    GeometryConfig, LandingGearConfig, MassModelConfig, MissingDesignMissionDatum,
+    MissionEvidenceApplicability, PartialDesignMissionEvidence, PartialMissionEvidenceKind,
+    PublishedMissionLoadCase, PublishedRange, WingConfig,
 };
 
-/// EASA's baseline A220-300 cabin arrangement for the legacy registered
-/// variant.  Each number is the rating of the complete exit pair; the
-/// physical layout has two Type-C pairs and one Type-III pair, for 145 seats
-/// in the source table.  The 149-seat C-III*-C option requires a different
-/// exit installation and is intentionally absent here.
-const A220_300_CERTIFIED_EXIT_LAYOUT: CertifiedExitLayout = CertifiedExitLayout {
-    label: "C-III-C",
-    pairs: &[
-        CertifiedExitPair {
-            exit_type: "C",
-            capacity_per_pair: 55,
-        },
-        CertifiedExitPair {
-            exit_type: "III",
-            capacity_per_pair: 35,
-        },
-        CertifiedExitPair {
-            exit_type: "C",
-            capacity_per_pair: 55,
-        },
-    ],
-    source: "EASA.IM.A.570 BD-500 TCDS Issue 24, 2026-02-20, Section 2 BD-500-1A11 III.19 p.23 (baseline C-III-C MPSC 145; Option C25631002 is required for C-III*-C 149)",
-};
-
-/// EASA's A320-200 maximum-seating arrangement.  The four stations on each
-/// side are two Type-C door pairs and two Type-III overwing pairs; their
-/// complete-pair ratings sum to the 180-seat certified maximum.  The source
-/// permits a lower maximum when an overwing exit is deactivated, so this
-/// metadata is tied to the fully active WV017 arrangement used by the preset.
-const A320_200_CERTIFIED_EXIT_LAYOUT: CertifiedExitLayout = CertifiedExitLayout {
-    label: "C-III-III-C",
-    pairs: &[
-        CertifiedExitPair {
-            exit_type: "C",
-            capacity_per_pair: 55,
-        },
-        CertifiedExitPair {
-            exit_type: "III",
-            capacity_per_pair: 35,
-        },
-        CertifiedExitPair {
-            exit_type: "III",
-            capacity_per_pair: 35,
-        },
-        CertifiedExitPair {
-            exit_type: "C",
-            capacity_per_pair: 55,
-        },
-    ],
-    source: "EASA.A.064 A318/A319/A320/A321 TCDS Issue 12, 2013-09-12, Section 1 III.19 (maximum certified seating 180 with all four Type III overwing exits active)",
-};
+mod exit_layouts;
+use exit_layouts::{A220_300_CERTIFIED_EXIT_LAYOUT, A320_200_CERTIFIED_EXIT_LAYOUT};
 
 /// Short and medium-range twin, the reference single-aisle.
 pub fn a320_200() -> AircraftPreset {
@@ -133,7 +83,8 @@ pub fn a320_200() -> AircraftPreset {
             reference_wing_area_m2: Some(122.6),
             sources: vec![
                 "Airbus A320 Aircraft Characteristics Rev 46, 2026-07-01, section 2-1-1 p.2",
-                "Airbus A320 Aircraft Characteristics, section 2-2-0 Figure 2-2-0-991-004-A01 (sharklet general aircraft dimensions: 35.80 m span, 37.57 m length, 3.95 m body width, 12.45 m tailplane span, 5.87 m fin height, 6.07 m side-of-body wing chord, 16.29 m nose to leading edge of MAC)",
+                "Airbus A320 Aircraft Characteristics, section 2-2-0 Figure 2-2-0-991-004-A01 (sharklet general aircraft dimensions: 35.80 m span, 37.57 m length, 3.95 m body width, 12.45 m tailplane span, 5.87 m fin height, 6.07 m side-of-body wing chord; its 16.29 m dimension is spanwise, from the centreline, not a nose-to-MAC station)",
+                "Airbus A320 Aircraft Characteristics, Jun 01/24, section 7-3-0 Figure 7-3-0-991-010-A01 (static nose-gear loads at 17% MAC and main-gear loads at 38.7-43% MAC per weight variant; two-point statics with NLG 5.07 m and wheelbase 12.64 m place the leading edge of MAC 15.24-15.33 m aft of the nose)",
                 "Airbus A320 Aircraft Characteristics, section 2-3-0 ground-clearance figures (45,000 kg empty weight for maintenance; 17% / 36.8% MAC CG conditions; no OEW)",
                 "EASA.A.064 Issue 62, pp.37-48",
                 "EASA.A.064 Issue 12, section 1 items 15-16 (datum 2.540 m forward of nose; MAC 4.1935 m)",
@@ -159,6 +110,10 @@ pub fn a320_200() -> AircraftPreset {
             reference_station_fuselage_length_m: Some(37.57),
             reference_nlg_x_fraction: Some(5.07 / 37.57),
             reference_mlg_x_fractions: Some(vec![17.71 / 37.57, 17.71 / 37.57]),
+            // Airbus A320 AC Jun 01/24, Figure 2-3-0-991-004-A01 sheet 2:
+            // fuselage "bottom aft" (F2) 1.792 m above ground at MRW 78.4 t,
+            // aft CG 36.8 %MAC (1.762-1.843 m across the tabulated states).
+            fuselage_ground_clearance_m: Some(1.79),
             ..LandingGearConfig::default()
         },
         // The four planform numbers below are not read off a specification
@@ -175,9 +130,8 @@ pub fn a320_200() -> AircraftPreset {
         // number nothing above was tuned to: interpolated to the side of the
         // 3.95 m body, this planform gives a 6.067 m root chord, against the
         // 6.07 m Airbus prints on the plan view. Its mean aerodynamic chord
-        // also lands 3.377 m aft of the root leading edge, which puts the
-        // leading edge of MAC 16.29 m aft of the nose for the `root_datum_x_m`
-        // below: the same 16.29 m the same drawing dimensions.
+        // lands 3.377 m aft of the root leading edge; `root_datum_x_m` below
+        // places that leading edge at the Airbus weight-and-balance station.
         design_vector: DesignVector {
             span_m: 35.80,
             root_chord_m: 7.333,
@@ -195,9 +149,15 @@ pub fn a320_200() -> AircraftPreset {
         },
         geometry: GeometryConfig {
             wing: WingConfig {
-                // Places the leading edge of MAC 16.29 m aft of the nose, the
-                // value dimensioned on the Airbus plan view.
-                root_datum_x_m: 12.913,
+                // Places the leading edge of MAC 15.26 m aft of the nose, inside
+                // the 15.24-15.33 m that two-point statics give on the Airbus
+                // section 7-3-0 gear loads, and equal to the commonly quoted
+                // load-sheet H-arm 17.8015 m less the EASA.A.064 datum 2.540 m
+                // forward of the nose (that H-arm is not from a primary
+                // document). (The earlier 16.29 m anchor was a spanwise plan-view
+                // dimension, which had put the main gear at 34 %MAC, ahead of
+                // the 36.8 %MAC ground condition; it now sits at 58 %MAC.)
+                root_datum_x_m: 11.887,
                 root_z_m: -1.2,
                 break_z_m: -0.2,
                 tip_z_m: 1.5,
@@ -422,7 +382,11 @@ pub fn a220_300() -> AircraftPreset {
         },
         geometry: GeometryConfig {
             wing: WingConfig {
-                root_datum_x_m: 13.30,
+                // Puts the model's quarter-MAC point on the published one
+                // (LEMAC 16.535 m + 0.25 x 3.781 m reference chord, the
+                // planning MAC reference below); the model MAC is 0.8 %
+                // shorter, so its own LEMAC sits 0.09 m aft of 16.535 m.
+                root_datum_x_m: 13.424,
                 root_z_m: -1.0,
                 break_z_m: -0.2,
                 tip_z_m: 1.5,

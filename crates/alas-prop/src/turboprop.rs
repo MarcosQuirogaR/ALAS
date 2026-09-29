@@ -8,10 +8,24 @@
 //! jet thrust, and fuel flow.  The PW127M ratings are certified installation data;
 //! the fuel and propeller models are explicitly labelled family-level surrogates.
 
-include!("turboprop_parts/part_01.rs");
-include!("turboprop_parts/part_02.rs");
-include!("turboprop_parts/part_03.rs");
-include!("turboprop_parts/part_04.rs");
+use crate::system::{
+    ActiveLimit, DiagnosticItem, DiagnosticsQuery, FailureState, FlightCondition, ModelIdentity,
+    ModelProvenance, OperatingMode, PropulsionCapability, PropulsionDemand, PropulsionDiagnostics,
+    PropulsionError, PropulsionInstallation, PropulsionMassItem, PropulsionRating,
+    PropulsionRequest, PropulsionResult, PropulsionSystemModel, Residual, ResourceFlow,
+    ResourceKind, StateDerivative, ValidityStatus,
+};
+use std::f64::consts::PI;
+
+mod types;
+pub use types::*;
+mod model;
+#[cfg(test)]
+use model::*;
+mod evidence;
+mod system;
+pub use evidence::*;
+pub use system::*;
 
 #[cfg(test)]
 // Test fixtures assert successful construction through unwrap and expect.
@@ -196,11 +210,10 @@ mod tests {
     }
 
     /// A propeller that reaches the ideal actuator-disk bound has no profile
-    /// loss at all, and this model used to report exactly that: eta_p = 0.98
-    /// at the ATR's FL170 / 275 kt cruise. The blade-efficiency factor puts
-    /// the cruise point inside the band three independent sources agree on,
-    /// and leaves the static thrust, which was never on the ideal bound,
-    /// exactly where it was.
+    /// loss at all (eta_p = 0.98 at the ATR's FL170 / 275 kt cruise). The
+    /// blade-efficiency factor puts the cruise point inside the band three
+    /// independent sources agree on, and leaves the static thrust, which is
+    /// not on the ideal bound, where the static figure of merit puts it.
     #[test]
     fn cruise_efficiency_is_a_real_propeller_rather_than_the_loss_free_bound() {
         let model = Pw127m568fModel::default();
@@ -221,8 +234,8 @@ mod tests {
             )
             .unwrap();
 
-        // The loss-free bound at this condition, which is what the model must
-        // no longer sit on.
+        // The loss-free bound at this condition, which the model must stay
+        // clear of.
         let disk_area_m2 = PI * model.propeller_diameter_m.powi(2) / 4.0;
         let ideal_thrust_n = actuator_disk_thrust_bound_n(
             output.propeller_power_w,

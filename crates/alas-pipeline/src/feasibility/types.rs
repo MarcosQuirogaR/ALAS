@@ -46,6 +46,16 @@ pub enum FindingCode {
     InsufficientStaticMargin,
     /// The built wing reference area exceeds its configured maximum.
     WingAreaLimit,
+    /// The mandatory structural response could not be evaluated.
+    StructuralResponseUnavailable,
+    /// Structural strength or rib spacing does not meet the sized loads.
+    StructuralStrengthViolation,
+    /// The wing response leaves the configured linear model's validity domain.
+    StructuralLinearModelDomain,
+    /// A solved finite-element displacement proves excessive linear-model rotation.
+    StructuralFemModelDomain,
+    /// An attempted structural solver failed or returned incomplete static data.
+    StructuralSolverFailed,
     /// The reported cruise attitude left the window the optimizer selected
     /// the candidate inside, because the two are measured on different
     /// panel meshes.
@@ -95,6 +105,9 @@ pub enum FindingCode {
     /// The item ledger and the lumped model disagree about the takeoff
     /// centre of gravity by more than the reporting band.
     MassModelDisagreement,
+    /// Independent structural and empirical wing mass estimates differ;
+    /// this is a diagnostic comparison, not a physical mass limit.
+    StructuralMassModelDifference,
 }
 
 impl FindingCode {
@@ -121,6 +134,11 @@ impl FindingCode {
             Self::TrimUnavailable => "trim_unavailable",
             Self::InsufficientStaticMargin => "insufficient_static_margin",
             Self::WingAreaLimit => "wing_area_limit",
+            Self::StructuralResponseUnavailable => "structural_response_unavailable",
+            Self::StructuralStrengthViolation => "structural_strength_violation",
+            Self::StructuralLinearModelDomain => "structural_linear_model_domain",
+            Self::StructuralFemModelDomain => "structural_fem_model_domain",
+            Self::StructuralSolverFailed => "structural_solver_failed",
             Self::ReportedCruiseAttitudeOutsideWindow => "reported_cruise_attitude_outside_window",
             Self::MissionUnavailable => "mission_unavailable",
             Self::MissionNotConverged => "mission_not_converged",
@@ -143,6 +161,7 @@ impl FindingCode {
             Self::MassLedgerUnavailable => "mass_ledger_unavailable",
             Self::FuelTankLayoutUnavailable => "fuel_tank_layout_unavailable",
             Self::MassModelDisagreement => "mass_model_disagreement",
+            Self::StructuralMassModelDifference => "structural_mass_model_difference",
         }
     }
 }
@@ -237,6 +256,47 @@ pub struct CgEnvelopeAssessment {
     /// The published planning mean aerodynamic chord the percentages above are
     /// referred to, in metres, when one is registered.
     pub published_mac_chord_m: Option<f64>,
+    /// Every named loading state, potato extreme and
+    /// fuel-vector extreme this run evaluated, compared against the
+    /// published planning envelope's in-flight curve, reporting the
+    /// smallest margin and which point produced it. `None` when no
+    /// planning envelope is registered for this preset, or the loading
+    /// states/potato/fuel-vector evidence needed to sweep it was
+    /// unavailable.
+    pub flight_curve_comparison: Option<PlanningCurveComparison>,
+    /// Same sweep as [`Self::flight_curve_comparison`], against the
+    /// published envelope's on-ground curve.
+    pub ground_curve_comparison: Option<PlanningCurveComparison>,
+}
+
+/// The worst (smallest) margin one curve of a published
+/// planning envelope reported across every point swept -- every named
+/// loading state ([`alas_opt::ModelCgLoadingState`]), every potato extreme
+/// ([`crate::feasibility::OperationalEnvelopeAssessment::potato_pct_mac`])
+/// and every fuel-vector extreme
+/// ([`crate::feasibility::OperationalEnvelopeAssessment::fuel_vector_checks`]) --
+/// plus the label of whichever point produced it.
+///
+/// Margin is positive inside the published band and negative outside it:
+/// `min(cg_pct_mac - forward_pct_mac, aft_pct_mac - cg_pct_mac)` when an aft
+/// limit is published at that point's mass, else just the forward margin.
+/// This is preliminary design evidence, not the actual aircraft WBM (see
+/// [`CgEnvelopeAssessment`]'s own module doc).
+#[derive(Debug, Clone, PartialEq)]
+pub struct PlanningCurveComparison {
+    /// Smallest margin found across every swept point, percent MAC.
+    pub worst_margin_pct_mac: f64,
+    /// Stable label of the point that produced [`Self::worst_margin_pct_mac`]
+    /// (a loading-state label, `"potato extreme"` or `"fuel-vector extreme"`).
+    pub worst_point_label: String,
+    /// That point's own analyzed mass, kilograms.
+    pub worst_point_mass_kg: f64,
+    /// That point's own analyzed centre of gravity, percent MAC (this
+    /// envelope's own manufacturer frame).
+    pub worst_point_cg_pct_mac: f64,
+    /// Number of points actually swept (loading states plus potato and
+    /// fuel-vector extremes whose mass fell inside the published table).
+    pub points_swept: usize,
 }
 
 /// Datum offset, as a fraction of the published chord, beyond which the model
@@ -305,6 +365,8 @@ impl Default for CgEnvelopeAssessment {
             model_mac_leading_edge_offset_m: None,
             model_mac_length_difference_m: None,
             published_mac_chord_m: None,
+            flight_curve_comparison: None,
+            ground_curve_comparison: None,
         }
     }
 }
@@ -325,6 +387,24 @@ pub struct FeasibilityReport {
     /// The item-level mass statement: tanks, stations, and the mass, centre
     /// of gravity and inertia of each named loading state.
     pub mass_balance: Option<MassBalanceAssessment>,
+    /// True when this design carries nonzero propulsion mass but no
+    /// measured nacelle station exists on the built geometry, so the
+    /// product mass model placed the propulsion group at the no-nacelle
+    /// fallback (the wing centroid, offset by a fixed drop) instead of a
+    /// real engine station
+    /// ([`alas_mass::stations::ComponentStations::propulsion_station_fallback`]).
+    /// When true, [`Self::model_cg`] and every %MAC/CG figure this run
+    /// publishes are not physical evidence for this design: they describe
+    /// an aircraft with its engines placed at the wing, not this one. This
+    /// is a modelling-fidelity property of *this run's geometry* (no
+    /// nacelle built), not a physical infeasibility of the aircraft, so it
+    /// is reported alongside the verdict rather than folded into
+    /// [`Self::is_feasible`].
+    pub propulsion_station_fallback: bool,
+    /// Loading potato, fuel vector and ZFW operational limits (items 6/8),
+    /// `None` when the payload layout or fuel-tank arrangement could not be
+    /// resolved (already reported by [`Self::mass_balance`]'s own findings).
+    pub operational_envelope: Option<super::operational_envelope::OperationalEnvelopeAssessment>,
 }
 
 impl FeasibilityReport {

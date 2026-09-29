@@ -4,7 +4,6 @@
 // Ported from mission analysis model/Methods/Aerodynamics/Common/Fidelity_Zero/Lift/VLM.py
 // and the four modules it drives.
 // Upstream: mission analysis model 2.5.2, LGPL-2.1.
-// Reference: alas @ rust-port-baseline.
 
 //! mission analysis model's VORLAX-derived vortex lattice method: the lift the mission flies
 //! on.
@@ -73,6 +72,8 @@ mod rhs;
 mod types;
 mod wings;
 
+use rayon::prelude::*;
+
 pub use types::{
     PanelCoordinates, VlmCaseResult, VlmCondition, VlmError, VlmGeometry, VlmResults, VlmSettings,
     VlmWing, VortexDistribution,
@@ -129,63 +130,103 @@ pub fn run(
     let mut cases: Vec<Option<VlmCaseResult>> = (0..conditions.len()).map(|_| None).collect();
     let mut solve_diagnostics = Vec::with_capacity(groups.len());
 
-    for (mach, members) in groups {
-        let (influence, bound) = induced::compute(&vd, mach);
+    // Every group's influence matrix, elimination and force integration
+    // reads only `vd`, `angles`, `geometry`, `settings` and its own slice of
+    // `conditions`, and writes nothing any other group reads, so the groups
+    // are independent work items. faer's own kernel is pinned to
+    // `Par::Seq` (see `alas_math::linalg`'s module doc), so nesting this
+    // rayon region around each group's factorization is exactly the
+    // "outer parallel, inner sequential" split that pinning exists for. A
+    // mission training grid groups its eighty conditions into at most eight
+    // Mach numbers, so this is an eight-way (or fewer) split, not a
+    // fine-grained one; `into_par_iter` still preserves `groups`' own order
+    // in the collected `Vec`, which is what keeps `solve_diagnostics` in the
+    // order this function has always reported it.
+    // Collected as individual results and then walked in order, rather than
+    // straight into a `Result<Vec<_>, _>`: rayon returns whichever failing
+    // group it meets first, and the serial loop always reported the lowest
+    // Mach group's error.
+    let group_outputs: Vec<Result<GroupOutput, VlmError>> = groups
+        .into_par_iter()
+        .map(|(mach, members)| -> Result<GroupOutput, VlmError> {
+            let (influence, bound) = induced::compute(&vd, mach);
 
-        // The influence matrix contracted with the panel normals' direction
-        // cosines. Katz and Plotkin's equation 7.42, and validated against it
-        // in upstream's own comment.
-        let matrix: Vec<Vec<f64>> = (0..n)
-            .map(|m| {
-                (0..n)
-                    .map(|k| {
-                        let c = influence.at(n, m, k);
-                        let (sin_delta, cos_delta) = angles.delta[m].sin_cos();
-                        let (sin_phi, cos_phi) = angles.phi[m].sin_cos();
-                        f64::from(c[0]) * (sin_delta * cos_phi)
-                            + f64::from(c[1]) * (cos_delta * sin_phi)
-                            - f64::from(c[2]) * (cos_phi * cos_delta)
-                    })
-                    .collect()
+            // The influence matrix contracted with the panel normals'
+            // direction cosines. Katz and Plotkin's equation 7.42, and
+            // validated against it in upstream's own comment. `delta[m]` and
+            // `phi[m]` depend on the row `m` alone, not on the column `k`
+            // this closure iterates next, so each is one `sin_cos` per row
+            // rather than one per matrix entry.
+            let matrix: Vec<Vec<f64>> = (0..n)
+                .map(|m| {
+                    let (sin_delta, cos_delta) = angles.delta[m].sin_cos();
+                    let (sin_phi, cos_phi) = angles.phi[m].sin_cos();
+                    (0..n)
+                        .map(|k| {
+                            let c = influence.at(n, m, k);
+                            f64::from(c[0]) * (sin_delta * cos_phi)
+                                + f64::from(c[1]) * (cos_delta * sin_phi)
+                                - f64::from(c[2]) * (cos_phi * cos_delta)
+                        })
+                        .collect()
+                })
+                .collect();
+
+            let terms: Vec<rhs::RhsTerms> = members
+                .iter()
+                .map(|&index| {
+                    let condition = substitute_zero_velocity(conditions[index]);
+                    rhs::build(&vd, &angles, &condition, geometry.moment_reference_m)
+                })
+                .collect();
+
+            let right: Vec<Vec<f64>> = (0..n)
+                .map(|row| terms.iter().map(|t| t.rhs[row]).collect())
+                .collect();
+            let (solved, diagnostics) = alas_math::linalg::solve_with_diagnostics(&matrix, &right)
+                .map_err(|step| VlmError::SingularInfluenceMatrix { step })?;
+            if !diagnostics.residual_norm.is_finite()
+                || !diagnostics.normalized_residual.is_finite()
+                || !diagnostics.pivot_ratio.is_finite()
+                || !diagnostics.minimum_pivot.is_finite()
+            {
+                return Err(VlmError::NonFiniteNumericalDiagnostics);
+            }
+
+            let results = members
+                .iter()
+                .zip(&terms)
+                .enumerate()
+                .map(|(column, (&index, term))| {
+                    let gamma: Vec<f64> = (0..n).map(|row| solved[row][column]).collect();
+                    let condition = substitute_zero_velocity(conditions[index]);
+                    let case = forces::integrate(&forces::LoadCase {
+                        vd: &vd,
+                        geometry,
+                        condition: &condition,
+                        phi: &angles.phi,
+                        gamma: &gamma,
+                        induced: &influence,
+                        semispan: &bound.semispan,
+                        rhs: term,
+                        leading_edge_suction_multiplier: settings.leading_edge_suction_multiplier,
+                    });
+                    (index, case)
+                })
+                .collect();
+
+            Ok(GroupOutput {
+                diagnostics,
+                results,
             })
-            .collect();
+        })
+        .collect();
 
-        let terms: Vec<rhs::RhsTerms> = members
-            .iter()
-            .map(|&index| {
-                let condition = substitute_zero_velocity(conditions[index]);
-                rhs::build(&vd, &angles, &condition, geometry.moment_reference_m)
-            })
-            .collect();
-
-        let right: Vec<Vec<f64>> = (0..n)
-            .map(|row| terms.iter().map(|t| t.rhs[row]).collect())
-            .collect();
-        let (solved, diagnostics) = alas_math::linalg::solve_with_diagnostics(&matrix, &right)
-            .map_err(|step| VlmError::SingularInfluenceMatrix { step })?;
-        if !diagnostics.residual_norm.is_finite()
-            || !diagnostics.normalized_residual.is_finite()
-            || !diagnostics.pivot_ratio.is_finite()
-            || !diagnostics.minimum_pivot.is_finite()
-        {
-            return Err(VlmError::NonFiniteNumericalDiagnostics);
-        }
-        solve_diagnostics.push(diagnostics);
-
-        for (column, (&index, term)) in members.iter().zip(&terms).enumerate() {
-            let gamma: Vec<f64> = (0..n).map(|row| solved[row][column]).collect();
-            let condition = substitute_zero_velocity(conditions[index]);
-            cases[index] = Some(forces::integrate(&forces::LoadCase {
-                vd: &vd,
-                geometry,
-                condition: &condition,
-                phi: &angles.phi,
-                gamma: &gamma,
-                induced: &influence,
-                semispan: &bound.semispan,
-                rhs: term,
-                leading_edge_suction_multiplier: settings.leading_edge_suction_multiplier,
-            }));
+    for output in group_outputs {
+        let output = output?;
+        solve_diagnostics.push(output.diagnostics);
+        for (index, case) in output.results {
+            cases[index] = Some(case);
         }
     }
 
@@ -194,6 +235,16 @@ pub fn run(
         cases: cases.into_iter().flatten().collect(),
         solve_diagnostics,
     })
+}
+
+/// One Mach group's solve, as [`run`]'s rayon region produces it: the
+/// group-level diagnostics, and each member condition's result tagged with
+/// its index into the caller's own `conditions` slice, so the sequential
+/// merge afterward can write it into `cases` in that order regardless of
+/// which order the pool finished the groups in.
+struct GroupOutput {
+    diagnostics: alas_math::linalg::SolveDiagnostics,
+    results: Vec<(usize, VlmCaseResult)>,
 }
 
 /// Apply the zero-speed substitution one condition at a time.

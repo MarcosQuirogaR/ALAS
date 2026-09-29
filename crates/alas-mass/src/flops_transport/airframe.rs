@@ -134,7 +134,7 @@ fn sort_reasons(mut reasons: Vec<Reason>) -> FlopsAirframeEvaluation {
 /// averaged only to retain that existing per-engine interface. If a caller
 /// intentionally omits engine bodies, rebuild the same configured profile in
 /// memory; this keeps `include_engines` from changing a mass input. A
-/// cylindrical proxy remains only for a legacy configuration with no profile.
+/// cylindrical proxy remains only for a configuration with no profile.
 fn turboprop_nacelle_wetted_area_m2(
     plane: &Airplane,
     geometry: &GeometryConfig,

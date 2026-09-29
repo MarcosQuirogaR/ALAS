@@ -34,7 +34,6 @@
 //! rather than merely constructed.
 
 pub mod numerics;
-pub mod operating;
 pub mod profile;
 pub mod segments;
 pub mod solve;
@@ -42,8 +41,9 @@ pub mod vehicle;
 
 pub use numerics::Numerics;
 pub use profile::{
-    build_mission_request, check_profile_for_route, propose_profile_for_route,
-    route_cruise_altitude_m, MissionProfileProposal, MissionProfileRouteCheck, MissionRequest,
+    build_mission_request, check_profile_for_route, configure_cruise_legs,
+    propose_profile_for_route, route_cruise_altitude_m, MissionProfileProposal,
+    MissionProfileRouteCheck, MissionRequest,
 };
 pub use segments::{
     Conditions, Initials, MissionAnalyses, Segment, SegmentError, SegmentKind, SegmentSpec,

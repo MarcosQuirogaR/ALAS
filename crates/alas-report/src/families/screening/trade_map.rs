@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/reporting/airfoil_sweep_figures.py (`fig_trade_map`)
-// Reference: alas @ rust-port-baseline.
 
 //! Trade map: cruise L/D vs resulting wing fuel-tank capacity, coloured by
 //! section thickness: the two design levers the ranking blends, plotted
@@ -187,7 +186,7 @@ mod tests {
 
     #[test]
     fn axis_range_tracks_the_real_candidate_extent_not_a_fixed_window() {
-        // A candidate set far outside the old hardcoded (0.08,0.16) x
+        // A candidate set far outside a fixed (0.08,0.16) x
         // (0.006,0.018) window must still land inside the computed axes.
         let result = AirfoilScreeningResult {
             candidates: vec![

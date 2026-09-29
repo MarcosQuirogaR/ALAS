@@ -36,8 +36,13 @@ fn parity_optimizer() {
     let fixture: Fixture = alas_testkit::load("opt", "optimizer");
 
     let mut config = AlasConfig::default();
-    // The frozen Python optimizer fixture used g = 9.81 m/s^2.
+    // The reference optimizer fixture used g = 9.81 m/s^2.
     config.requirements.gravity_m_s2 = 9.81;
+    // The fixture was generated with the reference 2 % minimum nose-gear
+    // load; the product default is 6 % (Raymer/Torenbeek steering guidance),
+    // so the reference run pins the reference value explicitly (same precedent as
+    // `alas-pipeline/tests/parity_full_analysis.rs`).
+    config.mass_model.pct_load_nlg_min = 0.02;
     config.optimizer.solver.max_iterations = fixture.solver_settings.max_iterations;
     config.optimizer.solver.population_size = fixture.solver_settings.population_size;
     config.optimizer.solver.seed = fixture.solver_settings.seed;
@@ -50,7 +55,7 @@ fn parity_optimizer() {
     let mut initial_obj = DesignObjective::new_reference_compatibility(config.clone());
     let initial_cost = initial_obj.evaluate(&dv_init.to_array());
 
-    let mut opt = DesignOptimizer::new_reference_compatibility(config);
+    let mut opt = DesignOptimizer::new(config);
     let mut progress_messages = Vec::new();
     let result = opt
         .run(
@@ -89,19 +94,17 @@ fn parity_optimizer() {
 fn zero_max_iterations_records_the_initial_population_and_its_feasibility() {
     let mut config = AlasConfig::default();
     config.requirements.gravity_m_s2 = 9.81;
+    // Frozen reference basis; see the comment in `parity_optimizer` above.
+    config.mass_model.pct_load_nlg_min = 0.02;
     config.optimizer.solver.max_iterations = 0;
     config.optimizer.solver.population_size = 1;
     config.optimizer.solver.seed = Some(42);
     config.optimizer.solver.seed_near_initial_design = true;
 
     let initial = DesignVector::default();
-    // The product path is the L-SHADE epsilon-constrained search, whose
-    // initial population is not the frozen SciPy-parity one; the historical
-    // DE initial population contract belongs to the explicit compatibility
-    // constructor. Keep this parity check on that constructor so a
-    // zero-iteration request still audits the frozen 16-member reference
-    // population.
-    let mut optimizer = DesignOptimizer::new_reference_compatibility(config);
+    // A zero-iteration default-profile request still scores the original
+    // seeded 16-member population before returning its best scalar-cost row.
+    let mut optimizer = DesignOptimizer::new(config);
     let result = optimizer
         .run(None, Some(&initial), None)
         .expect("the default design is feasible");
@@ -120,16 +123,18 @@ fn zero_max_iterations_records_the_initial_population_and_its_feasibility() {
 }
 
 #[test]
-fn seeded_example_replays_the_python_winner() {
+fn seeded_example_replays_the_reference_winner() {
     let mut config = AlasConfig::default();
     config.requirements.gravity_m_s2 = 9.81;
+    // Frozen reference basis; see the comment in `parity_optimizer` above.
+    config.mass_model.pct_load_nlg_min = 0.02;
     config.optimizer.solver.max_iterations = 15;
     config.optimizer.solver.population_size = 6;
     config.optimizer.solver.tolerance = 0.05;
     config.optimizer.solver.seed = Some(42);
 
     let initial = DesignVector::default();
-    let mut optimizer = DesignOptimizer::new_reference_compatibility(config);
+    let mut optimizer = DesignOptimizer::new(config);
     let result = optimizer
         .run(None, Some(&initial), None)
         .expect("the frozen reference population contains feasible candidates");

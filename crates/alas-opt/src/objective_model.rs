@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-// Ported from alas/optimization/objective.py
-// Reference: alas @ rust-port-baseline.
-
 //! Scalar objective function for aircraft design space optimization.
 //!
 //! Evaluates aerodynamic performance (L/D) alongside physical constraints
@@ -28,7 +25,7 @@ use crate::history::OptimizationHistory;
 /// Reproduce the frozen parasite-drag buildup used by the parity fixture.
 ///
 /// Product aero now accounts for each surface's own thickness, sweep, and
-/// reference convention. The historical objective fixture instead applied the
+/// reference convention. The reference objective instead applies the
 /// main-wing section and design sweep to every wing and summed each wing's
 /// unfolded area. Keep that numerical seam local to the explicit objective
 /// compatibility path; product evaluations continue to use
@@ -98,7 +95,7 @@ pub fn wing_fuel_volume_m3(wing: &Wing, usable_fraction: f64) -> f64 {
 
 /// Frozen translation/parity form of [`wing_fuel_volume_m3`].
 ///
-/// The historical Python correlation consumed the wing's unfolded YZ area
+/// The reference correlation consumes the wing's unfolded YZ area
 /// and span.  Keep that choice behind an explicitly named seam so parity
 /// fixtures cannot silently change the product tank-volume calculation.
 pub fn wing_fuel_volume_m3_reference_compatibility(wing: &Wing, usable_fraction: f64) -> f64 {
@@ -166,7 +163,7 @@ pub(crate) fn apply_candidate_payload_load_case(
     let target_cargo_kg = config.requirements.cargo_payload_kg;
     let passenger_mass_kg = config.requirements.passenger_mass_kg;
     if config.requirements.aircraft_type == "passenger" {
-        // Resolve the legacy Premium slot before deciding whether this is a
+        // Resolve the Premium slot before deciding whether this is a
         // nonempty installed cabin; otherwise a Premium-only declaration
         // could be mistaken for an empty count cabin and rematerialized.
         config.cabin.passenger = config.cabin.passenger.canonicalized_for_product();
@@ -179,7 +176,7 @@ pub(crate) fn apply_candidate_payload_load_case(
     }
     if config.requirements.aircraft_type == "passenger" {
         // Resolve one canonical three-class cabin for both payload and FLOPS.
-        // A legacy Premium slot is folded into Economy before the row packer
+        // A Premium slot is folded into Economy before the row packer
         // sees it; percent-mode stale count seeds are ignored unless they
         // already agree with the requirements total.
         let counts = config
@@ -212,11 +209,11 @@ pub(crate) fn apply_candidate_payload_load_case(
     Ok(())
 }
 
-/// Apply the candidate cabin load case using the frozen Python semantics.
+/// Apply the candidate cabin load case using the reference-compatible semantics.
 ///
-/// The reference objective predates the product requirements-first cabin
-/// contract.  It must therefore materialise the historical class counts and
-/// payload geometry through the explicitly frozen preset helper; routing it
+/// The reference objective does not use the product requirements-first cabin
+/// contract.  It must therefore materialise the reference class counts and
+/// payload geometry through the explicit preset helper; routing it
 /// through [`apply_candidate_payload_load_case`] would silently replace those
 /// counts with the product load case before parity mass coordinates are
 /// evaluated.
@@ -236,6 +233,7 @@ pub(crate) fn apply_candidate_payload_load_case_reference_compatibility(
 /// Callable cost function for aircraft design space optimization.
 #[derive(Debug, Clone)]
 pub struct DesignObjective {
+    pub(crate) cancellation: Option<crate::cancellation::EvaluationCancellation>,
     /// Active aircraft configuration.
     pub config: AlasConfig,
     /// Trajectory of evaluated candidates.
@@ -253,8 +251,7 @@ pub struct DesignObjective {
     ///
     /// [`alas_config::DesignRequirements::cargo_target_kg`]: the user's
     /// entered cargo objective when there is one, otherwise the configured
-    /// cargo payload capacity. It is a target to match (clarified ledger App
-    /// Features 2, decision D10), not a floor: `mdo::residuals_geometry`
+    /// cargo payload capacity. It is a target to match, not a floor: `mdo::residuals_geometry`
     /// turns the two-sided deviation from it into the soft
     /// `cargo_target_shortfall`/`cargo_target_excess` pair, and what rejects
     /// an overloaded aircraft stays in the mass, balance and volume
@@ -303,7 +300,7 @@ impl DesignObjective {
         )
     }
 
-    /// Construct an objective that reproduces the frozen Python mass point.
+    /// Construct an objective that reproduces the reference mass point.
     ///
     /// This is only for reference-parity replay. Product optimization uses
     /// [`Self::new`], which evaluates the configured structural-wingbox
@@ -312,7 +309,7 @@ impl DesignObjective {
         // The comparison constructor is the explicit opt-in to the frozen
         // mass model.  Pin the authoritative architecture here so a caller
         // starting from the pure product default cannot accidentally run the
-        // legacy coordinate/aerodynamic replay with a FLOPS mass buildup.
+        // reference coordinate/aerodynamic replay with a FLOPS mass buildup.
         config.mass_model.mass_architecture =
             alas_config::MassArchitecture::LegacyReferenceCompatibleComparison;
         config.mass_model.apply_architecture();
@@ -358,10 +355,11 @@ impl DesignObjective {
         Self {
             config,
             history: OptimizationHistory::new(),
+            cancellation: None,
             target_num_passengers,
             target_cargo_payload_kg,
-            // Direct evaluator callers historically pass the configured
-            // preset/default vector. Product optimizer callers use
+            // Direct evaluator callers pass the configured preset/default
+            // vector. Product optimizer callers use
             // `new_with_nominal` after the driver has materialized any
             // cabin-derived variables, so this field is always the nominal
             // vector for the boundary being evaluated.

@@ -139,7 +139,7 @@ impl ProvenancedAirport {
             && finite_longitude(self.longitude_deg.value)
     }
 
-    /// Convert the record to the legacy airport value only when its required
+    /// Convert the record to the built-in airport value only when its required
     /// fields are complete. Physical-runway records intentionally return
     /// `None`; callers may opt into a planning approximation explicitly.
     pub fn declared_airport(&self) -> Option<Airport> {

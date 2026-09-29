@@ -135,6 +135,7 @@ fn every_registered_preset_nominal_candidate_is_evaluable() {
 #[test]
 fn the_a380_default_search_reports_a_typed_ground_reaction_cause() {
     let (mut config, _) = default_preset_route("A380-800");
+    config.optimizer.solver.method = alas_config::optimizer::PRODUCT_DE_METHOD.to_owned();
     // A reduced but honest budget (mirrors `staged_search.rs`'s convention):
     // small enough to run in a unit test, large enough that a differential-
     // evolution generation actually completes and the population's rejection

@@ -24,7 +24,7 @@ use super::types::{
 };
 
 /// Split the violated hard residuals into those the relaxation policy admits
-/// and those that still reject the candidate (clarified ledger D01-D02).
+/// and those that still reject the candidate.
 ///
 /// A violation is admitted only when the policy lists its limit, the miss is
 /// inside that limit's own declared tolerance, and the number of distinct
@@ -101,7 +101,7 @@ fn objective_value(
 pub(crate) fn assemble(
     outcome: SizingOutcome,
     config: &AlasConfig,
-    residuals: Vec<ConstraintResidual>,
+    mut residuals: Vec<ConstraintResidual>,
 ) -> CandidateAssessment {
     let objective_config = &config.optimizer.objective;
     let mtow_ceiling = outcome.mtow_ceiling;
@@ -111,6 +111,41 @@ pub(crate) fn assemble(
     // case. A shell that cannot seat the requested brief must not look better
     // merely because the denominator still uses the requested count.
     let passengers = outcome.sized.carried_passengers;
+
+    let objective_value = objective_value(kind, &outcome.sized, range_km, passengers);
+    // NaN comparisons are false and f64::max suppresses NaN. An unavailable
+    // physical measurement must therefore have an explicit hard rejection,
+    // including when its ordinary discipline was configured as a preference.
+    if !objective_value.is_finite()
+        || objective_value < 0.0
+        || !mtow_ceiling.is_finite()
+        || mtow_ceiling <= 0.0
+        || !objective_config.soft_penalty_weight.is_finite()
+        || objective_config.soft_penalty_weight < 0.0
+        || residuals.iter().any(|residual| {
+            residual.policy != ConstraintPolicy::Off
+                && (![
+                    residual.actual,
+                    residual.limit,
+                    residual.raw_residual,
+                    residual.normalized_violation,
+                ]
+                .iter()
+                .all(|value| value.is_finite())
+                    || residual.normalized_violation < 0.0)
+        })
+    {
+        residuals.push(ConstraintResidual::direct(
+            "candidate_state_unavailable",
+            super::types::ConstraintFamily::Mass,
+            1.0,
+            0.0,
+            "bool",
+            1.0,
+            1.0,
+            ConstraintPolicy::Hard,
+        ));
+    }
 
     let hard_violation_sum: f64 = residuals
         .iter()
@@ -123,7 +158,8 @@ pub(crate) fn assemble(
         .map(|residual| residual.normalized_violation)
         .sum();
     let strictly_feasible = residuals.iter().all(|residual| {
-        !(residual.policy == ConstraintPolicy::Hard && residual.normalized_violation > 0.0)
+        residual.policy != ConstraintPolicy::Hard
+            || (residual.normalized_violation.is_finite() && residual.normalized_violation <= 0.0)
     });
     // A candidate the relaxation policy admits is *admissible*, not feasible:
     // it is ranked, reported and exported as relaxed, and `relaxation`
@@ -136,7 +172,6 @@ pub(crate) fn assemble(
     };
     let hard_feasible = strictly_feasible || !relaxation.rejected;
 
-    let objective_value = objective_value(kind, &outcome.sized, range_km, passengers);
     let normalization_scale = match kind {
         ObjectiveKind::BlockFuel => BLOCK_FUEL_NORMALIZATION_FRACTION * mtow_ceiling,
         ObjectiveKind::TakeoffMass | ObjectiveKind::OperatingEmptyMass => mtow_ceiling,
@@ -146,7 +181,7 @@ pub(crate) fn assemble(
 
     let mut cost = normalized_objective + objective_config.soft_penalty_weight * soft_violation_sum;
     if hard_feasible && !relaxation.relaxed_ids.is_empty() {
-        // D03: a fully feasible design ranks ahead of a relaxed one whatever
+        // A fully feasible design ranks ahead of a relaxed one whatever
         // their objectives. The ranking key the search uses is
         // (admissible, aggregate hard violation, cost), and a strictly
         // feasible candidate's aggregate violation is zero while a relaxed
@@ -156,10 +191,11 @@ pub(crate) fn assemble(
         cost += objective_config.soft_penalty_weight * hard_violation_sum;
     }
     if !hard_feasible {
-        // An infeasible candidate always costs more than a feasible one, and
-        // infeasible candidates order by how badly they violate their worst
-        // hard constraint (differential_evolution_parts::part_01::scored_point
-        // ranks feasibility first).
+        // This finite cost surcharge is not the feasibility guarantee:
+        // scored-point selection ranks feasible candidates first. Infeasible
+        // candidates carry the SUM of normalized hard violations, not their
+        // worst individual constraint; the early epsilon comparison can also
+        // use cost when comparing two infeasible candidates.
         cost += 1.0 + hard_violation_sum;
     }
 
@@ -275,8 +311,8 @@ mod tests {
 
     #[test]
     fn several_eligible_misses_inside_one_discipline_count_as_one_group() {
-        // D01 in its own words: several eligible exceeded limits within Mass
-        // count as one violated group.
+        // Several eligible exceeded limits within Mass count as one violated
+        // group.
         let config = config_with(ConstraintRelaxation {
             enabled: true,
             allowed_violated_groups: 1,

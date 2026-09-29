@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-// Ported from alas/physics/structural_loads.py
-// Reference: alas @ rust-port-baseline.
-
 //! Shared spanwise load model for the wingbox.
 //!
 //! One elliptic-lift (+ inertial-relief) distributed load, integrated to shear

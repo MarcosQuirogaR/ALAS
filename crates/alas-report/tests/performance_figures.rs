@@ -87,6 +87,7 @@ fn sample_report(payload_kg: f64) -> AnalysisReport {
         geometry_summary: HashMap::new(),
         payload_layout: None,
         cg_envelope_ok: None,
+        neutral_point_conditions: None,
     }
 }
 
@@ -192,7 +193,7 @@ fn payload_range_status_names_the_missing_physical_input() {
 }
 
 #[test]
-fn performance_renderers_keep_the_w34_contract_details_visible() {
+fn performance_renderers_keep_the_contract_details_visible() {
     let config = AlasConfig::default();
     let report = sample_report(20_000.0);
 

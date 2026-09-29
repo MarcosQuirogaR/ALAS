@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/reporting/visualization.py
-// Reference: alas @ rust-port-baseline.
 
 //! Flown mission trajectory, altitude/mass/speed timelines, aerodynamic
 //! coefficient and force timelines, and drag-component breakdowns.
@@ -410,11 +409,11 @@ mod tests {
     }
 
     #[test]
-    fn w33_reference_contracts_cover_every_mission_scene_in_both_themes() {
+    fn reference_contracts_cover_every_mission_scene_in_both_themes() {
         let fixture: serde_json::Value = serde_json::from_str(include_str!(
             "../../../../../golden/report/reference_render_w33.json"
         ))
-        .expect("W3.3 reference fixture is valid JSON");
+        .expect("reference fixture is valid JSON");
         let mission = sample_mission();
         for theme in ["light", "dark"] {
             let figures = [
@@ -452,7 +451,7 @@ mod tests {
                     "mission_velocities" | "mission_flight_path" => 2,
                     "mission_aero_coefficients" | "mission_aero_forces" => 4,
                     "mission_drag_components" => 1,
-                    _ => unreachable!("all W3.3 mission ids are listed above"),
+                    _ => unreachable!("all mission ids are listed above"),
                 };
                 assert_eq!(contract["panel_count"].as_u64(), Some(expected_panels));
                 let svg = crate::svg::render_svg(&scene);

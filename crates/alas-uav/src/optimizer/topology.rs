@@ -9,7 +9,6 @@
 //! elevon/reflex model by changing a label, so those cases stop here with a
 //! typed reason.
 
-
 use crate::topology::{
     TopologyAvailability, TopologyUnavailableReason, UavAnalysisPath, UavTopology,
 };
@@ -32,11 +31,6 @@ impl TopologyOptimizedUav {
     /// Borrow the underlying preliminary result.
     pub const fn preliminary(&self) -> &OptimizedUav {
         &self.optimized
-    }
-
-    /// Consume the wrapper and return the historical preliminary result.
-    pub fn into_preliminary(self) -> OptimizedUav {
-        self.optimized
     }
 }
 

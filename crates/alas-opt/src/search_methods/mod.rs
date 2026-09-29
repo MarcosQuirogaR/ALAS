@@ -8,6 +8,7 @@
 
 mod lshade_de;
 pub(crate) mod product_de;
+pub(crate) mod restoration;
 
 /// Objective and feasibility data attached to one evaluated design.
 #[derive(Debug, Clone, PartialEq)]

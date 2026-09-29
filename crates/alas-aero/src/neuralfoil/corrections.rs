@@ -7,7 +7,6 @@
 // (airfoil_coefficients_post_stall), with Cf_flat_plate from
 // native aerodynamic model/library/aerodynamics/viscous.py.
 // Upstream: native aerodynamic model 4.2.8, MIT.
-// Reference: alas @ rust-port-baseline.
 
 //! What the network cannot see: the flow separating, and the flow going
 //! transonic.

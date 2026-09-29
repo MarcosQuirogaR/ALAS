@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/physics/aerodynamics.py
-// Reference: alas @ rust-port-baseline.
 
 //! The three entry points that run the vortex lattice and correct what it
 //! returns: `AeroAnalysis`' "performance estimates" section.
@@ -307,6 +306,29 @@ impl AeroAnalysis<'_> {
     ///
     /// See [`VlmError`].
     pub fn run_sweep(&self, mach: f64, altitude_m: f64) -> Result<PolarSweep, VlmError> {
+        let system = self.system()?;
+        self.run_sweep_with_system(&system, mach, altitude_m)
+    }
+
+    /// [`Self::run_sweep`], reusing an already-assembled VLM system instead
+    /// of assembling a fresh one.
+    ///
+    /// `system` must be [`vlm::VlmSystem::assemble`]d from `self.plane` at
+    /// `self.analysis`'s spanwise/chordwise resolution; the influence matrix
+    /// depends on the geometry and mesh alone, so a caller that already paid
+    /// for that factorization for the same aircraft (e.g. the neutral-point
+    /// or trim probes run at the same fine mesh) reuses it here instead of
+    /// refactoring an identical matrix.
+    ///
+    /// # Errors
+    ///
+    /// See [`VlmError`].
+    pub fn run_sweep_with_system(
+        &self,
+        system: &vlm::VlmSystem<'_>,
+        mach: f64,
+        altitude_m: f64,
+    ) -> Result<PolarSweep, VlmError> {
         let atmosphere = Atmosphere::new(altitude_m);
         let velocity = mach * atmosphere.speed_of_sound();
         let alphas = linspace(
@@ -331,7 +353,6 @@ impl AeroAnalysis<'_> {
         // schedule shares one assembly and one factorization; each angle is
         // a new right-hand side.
         if !alphas.is_empty() {
-            let system = self.system()?;
             for alpha in &alphas {
                 let solved = system.solve(&Self::level_op_point(atmosphere, velocity, *alpha))?;
                 let components = self.drag_components(

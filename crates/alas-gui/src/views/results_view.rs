@@ -3,8 +3,7 @@
 
 //! The Results page: summary stat tiles, then a tab per discipline, each a
 //! grid of figures. A figure with no builder or no data for this run shows
-//! "Not available for this run", the same graceful degradation the reference
-//! desktop app's `ResultsScreen` shows.
+//! "Not available for this run".
 
 use crate::state::AppState;
 use crate::theme::selectable_button;
@@ -29,7 +28,7 @@ pub use solver::SolverResultView;
 mod results_progress;
 use results_progress::show_progressive_results;
 
-/// One discipline tab in the Python desktop ResultsScreen.
+/// One discipline tab on the results page.
 struct Tab {
     id: &'static str,
     title: &'static str,
@@ -275,10 +274,7 @@ fn figure_tile(
         ui.set_min_width(content_width);
         ui.set_max_width(content_width);
         ui.vertical(|ui| {
-            // The figure explanation belongs to the title's hover text only.
-            // Learn-more help used to repeat it as a subtitle under the
-            // heading, which was redundant with the hover and crowded the
-            // result cards, so no inline subtitle is drawn here.
+            // Keep the figure explanation on its title hover.
             ui.label(RichText::new(tr(title)).strong())
                 .on_hover_text(tr(description));
             match scene.as_ref() {
@@ -329,6 +325,12 @@ fn figure_tile(
                             ui.ctx().request_repaint();
                         }
                     } else {
+                        // A static card's Arc<Scene> is only replaced when
+                        // its cache entry is rebuilt (new run, theme, or
+                        // language, all already folded into `view_key`), so
+                        // the entry's own revision is a cheap, exact stand-in
+                        // for hashing the whole scene graph every frame.
+                        let revision = state.result_figure_revision(&view_key);
                         let response = ui.add(
                             alas_viz::SceneView::new(scene, state.view_state_mut(view_key.clone()))
                                 .static_view()
@@ -338,6 +340,8 @@ fn figure_tile(
                                 // move through the report; the fullscreen
                                 // viewer is the deliberate zoom surface.
                                 .wheel_zoom(false)
+                                .cache_key(&view_key)
+                                .cache_revision(revision)
                                 .desired_size(vec2(canvas_width, canvas_height)),
                         );
                         if response.double_clicked() {
@@ -374,12 +378,14 @@ fn figure_tile(
     #[cfg(not(debug_assertions))]
     let _ = card;
     if fullscreen_open(ui.ctx(), &view_key) {
+        let revision = state.result_figure_revision(&view_key);
         if let Some(scene) = scene.as_ref() {
             show_fullscreen_result(
                 state,
                 ui.ctx(),
                 FullscreenFigure {
                     scene,
+                    revision,
                     config,
                     theme: &theme,
                     camera_key: &camera_key,
@@ -456,6 +462,10 @@ fn open_fullscreen_result(
 
 struct FullscreenFigure<'a> {
     scene: &'a Scene,
+    /// The gallery card's cache revision for this figure identity, reused
+    /// here so the maximized (non-orbiting) view also skips hashing the
+    /// whole scene graph every frame.
+    revision: u64,
     config: &'a alas_config::AlasConfig,
     theme: &'a str,
     camera_key: &'a str,

@@ -1,6 +1,6 @@
 # Mission analysis and preliminary sizing research for ALAS
 
-Status: completed research deliverable
+Status: research note
 
 Date: 2026-08-26
 
@@ -8,7 +8,7 @@ Scope: requirements-first conceptual aircraft design, mission definition and res
 
 This report turns the evidence in the locally curated PDFs into an implementable contract for ALAS. It is deliberately a conceptual-design specification, not a certification method. Internal equations should use SI units and explicit load cases; the user-facing units in the existing requirements document can remain NM, ft, KCAS, kg, and similar aviation units.
 
-No existing source file was modified for this deliverable. The PDFs listed in the source ledger were downloaded before this report was written and remain under `bib/mission-sizing/`.
+The PDFs listed in the source ledger are kept under `bib/mission-sizing/`.
 
 ## Executive findings
 
@@ -711,9 +711,9 @@ Use the existing hard-first policy:
 
 Retain the best near-feasible candidate for every major rejection group. This lets ALAS tell the user whether the issue is payload, range/reserves, wing area, thrust, tank volume, cabin capacity, airport performance, stability, or structure. OpenMDAO's documented handling of failed analyses supports this approach: failed or non-converged cases need explicit treatment instead of being fed into a surrogate as arbitrary high objective values [S07, pp. 5-9].
 
-## 9. Mapping to `REQUIREMENTS_FIRST_AIRCRAFT_DESIGN.md`
+## 9. Requirements mapping
 
-The mapping below is intentionally to the existing document's concepts, not to a new parallel architecture.
+The mapping below uses the existing requirements-first concepts (see `docs/design-constraints.md`), not a new parallel architecture.
 
 | Existing requirements-first concept | Mission-sizing implementation |
 | --- | --- |

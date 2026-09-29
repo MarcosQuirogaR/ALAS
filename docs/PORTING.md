@@ -62,7 +62,7 @@ A phase opens only when every row of the phases it depends on is `green`,
 
 | Phase | Contents | Opens after |
 |---|---|---|
-| P0 | Scaffolding, process docs, gate tooling, fixture framework | n/a |
+| P0 | Scaffolding, documentation, gate tooling, fixture framework | n/a |
 | P1 | `alas-units`, `alas-math`, `alas-atmo`, `alas-i18n` | P0 |
 | P2 | `alas-config` and the derive macro | P0 |
 | P3 | `alas-geom` | P1, P2 |
@@ -427,7 +427,6 @@ P14 study, not a translation decision.
 | `alas/physics/cabin_layout.py` | 693 | `alas-payload::cabin` | n/a | `exact` | green: `golden/payload/layout.json` (item sequence and counts at `exact`, positions and masses at `closed`; the compatibility interior replays the frozen premium-economy slot) |
 | `alas/physics/cargo_loader.py` | 381 | `alas-payload::cargo` | n/a | `exact` | green: `golden/payload/layout.json` (frozen hold grid keeps its loose bulk position; the product envelope path fit-checks it) |
 | n/a | n/a | `alas-mass::torenbeek` | AeroSandbox, MIT | `closed` | green: `golden/mass/torenbeek.json` |
-| n/a | n/a | `alas-mass::suave_transport` | SUAVE, LGPL-2.1 | `closed` | todo |
 | n/a | n/a | `alas-stab::modes` | AeroSandbox, MIT | `closed` | todo |
 | n/a | n/a | `alas-stab::suave_static` | SUAVE, LGPL-2.1 | `closed` | todo |
 | n/a | n/a | `alas-prop::suave_turbofan` | SUAVE, LGPL-2.1 | `closed` | todo |
@@ -604,8 +603,7 @@ vibration is not, and reports itself unavailable.
 
 `visualization.py` is 5,596 lines and does not survive as one module. It is
 split by figure family, none over the file-size limit. The families are
-enumerated in `docs/FIGURE_REVIEW.md`, which also carries the per-figure review
-sign-off.
+enumerated by the `alas-report::families` modules.
 
 | Python module | Lines | Rust target | Provenance | Tier | Status |
 |---|---:|---|---|---|---|
@@ -651,7 +649,6 @@ figure registry survive as library concerns, listed above.
 
 | Rust target | Provenance | Tier | Status |
 |---|---|---|---|
-| `alas-types` | n/a | `exact` | green |
 | `alas-units` | SUAVE, LGPL-2.1 | `closed` | green: `golden/units/factors.json` |
 | `alas-math::spline` | n/a | `linalg` | green: `golden/math/spline.json` |
 | `alas-math::chebyshev` | SUAVE, LGPL-2.1 | `linalg` | green: `golden/math/chebyshev.json` |

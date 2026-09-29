@@ -125,12 +125,6 @@ impl FlopsInputEvidence {
             Self::UncertainEngineeringEstimate => "uncertain_engineering_estimate",
         }
     }
-
-    /// Whether this family may be described as aircraft data rather than as
-    /// a choice made for the run.
-    pub const fn is_aircraft_data(self) -> bool {
-        matches!(self, Self::SourceBacked)
-    }
 }
 
 impl Leaf for FlopsInputEvidence {
@@ -210,11 +204,6 @@ impl FlopsInputProvenance {
             && !self.location.trim().is_empty()
             && !self.applicability.trim().is_empty()
     }
-
-    /// Whether this family states how uncertain it is.
-    pub fn states_uncertainty(&self) -> bool {
-        !self.uncertainty.trim().is_empty()
-    }
 }
 
 /// Evidence carried with a completed FLOPS transport evaluation.
@@ -248,35 +237,6 @@ impl FlopsTransportProvenance {
     /// Whether every non-geometric FLOPS input family carries its evidence.
     pub fn is_complete(&self) -> bool {
         self.mission.is_declared() && self.cabin.is_declared() && self.architecture.is_declared()
-    }
-
-    /// The three families, named, in the order the coverage report lists them.
-    pub fn families(&self) -> [(&'static str, &FlopsInputProvenance); 3] {
-        [
-            ("mission", &self.mission),
-            ("cabin", &self.cabin),
-            ("architecture", &self.architecture),
-        ]
-    }
-
-    /// Whether every family is read from a document for this variant.
-    ///
-    /// This is the only condition under which a run's non-geometric inputs
-    /// may be described as aircraft data. Anything else is a scenario, and
-    /// calling it otherwise is the mistake this method exists to prevent.
-    pub fn is_entirely_source_backed(&self) -> bool {
-        self.families()
-            .iter()
-            .all(|(_, family)| family.evidence.is_aircraft_data())
-    }
-
-    /// Names of the families that state no uncertainty.
-    pub fn families_without_uncertainty(&self) -> Vec<&'static str> {
-        self.families()
-            .iter()
-            .filter(|(_, family)| !family.states_uncertainty())
-            .map(|(name, _)| *name)
-            .collect()
     }
 }
 
@@ -677,11 +637,11 @@ impl FlopsTransportConfig {
             cargo_loading: Some(CargoHoldLoading::Containerized),
             containerized_baggage_fraction: None,
             // The same domain rule a registered preset gets. A configuration
-            // built without a preset used to default to the published FLOPS
-            // equations while every preset above 40 t took the LTH relations,
-            // so the identical aircraft was 16,515 kg (+10.0 %) heavier as a
-            // preset than as a clean sheet and any objective comparing the two
-            // was comparing two accounting systems. 350 seats admits this
+            // built without a preset must not default to the published FLOPS
+            // equations while every preset above 40 t takes the LTH relations: the
+            // identical aircraft would be 16,515 kg (+10.0 %) heavier as a preset
+            // than as a clean sheet, and any objective comparing the two would be
+            // comparing two accounting systems. 350 seats admits this
             // scenario through the seat clause.
             cabin_equipment_method: CabinEquipmentMethod::for_civil_transport_size(
                 None,

@@ -14,10 +14,9 @@
 //! same shape is kept here, as [`Method`], because the choice is not an
 //! implementation detail a caller can ignore: the two disagree by up to 1.1%
 //! in temperature, so which one a discipline uses is part of what that
-//! discipline computes. A translated module picks the method its Python
-//! counterpart picked, and [`Method::default`] is [`Method::Differentiable`]
-//! for the same reason upstream's default is, so that a call site that
-//! names no method reproduces one that named no method.
+//! discipline computes. A caller picks the method that matches the model it feeds, and
+//! [`Method::default`] is [`Method::Differentiable`], so that a call site that
+//! names no method gets the fitted model the aerodynamic solvers use.
 //!
 //! Two gravitational accelerations appear in this crate, deliberately not
 //! unified: [`crate::BAROMETRIC_GRAVITY`] (9.81 m/s^2) is what the barometric
@@ -107,7 +106,7 @@ pub enum AtmosphereError {
         temperature_deviation_k: f64,
     },
     /// The requested altitude lies outside the checked physical atmosphere
-    /// band. The legacy differentiable fan extends farther for optimizer
+    /// band. The differentiable fit extends farther for optimizer
     /// robustness, but those values are not admitted at product boundaries.
     #[error(
         "altitude {altitude_m} m lies outside the checked physical atmosphere band [{min_m}, {max_m}] m"

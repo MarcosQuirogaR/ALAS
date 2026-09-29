@@ -30,8 +30,8 @@ pub enum DispatchOutcome {
     /// The native refinement did not settle within its budget.
     NotConverged,
     /// The frozen maximum-available-fuel case was flown by choice.
-    LegacyMaximumFuel,
-    /// The policy could not be priced, so the legacy case was flown.
+    MaximumAvailableFuel,
+    /// The policy could not be priced, so the maximum-available-fuel case was flown.
     Unavailable,
 }
 
@@ -43,7 +43,7 @@ impl DispatchOutcome {
             Self::MtowLimited => "mtow_limited",
             Self::TankLimited => "tank_limited",
             Self::NotConverged => "not_converged",
-            Self::LegacyMaximumFuel => "legacy_maximum_fuel",
+            Self::MaximumAvailableFuel => "maximum_available_fuel",
             Self::Unavailable => "unavailable",
         }
     }
@@ -84,7 +84,7 @@ pub(super) fn apply_load_case(
                     // could not be built or failed to solve (see
                     // `select_load_case` in `mission_stage::dispatch`), never
                     // for a deliberate maximum-available-fuel policy choice
-                    // (that is `reason: None`, `DispatchOutcome::LegacyMaximumFuel`,
+                    // (that is `reason: None`, `DispatchOutcome::MaximumAvailableFuel`,
                     // left un-findinged below) and never for a load the
                     // limits reject (that is `PolicyClosure` with
                     // `shortfall_kg > 0`, reported as `ReserveFuelShortfall`
@@ -103,7 +103,7 @@ pub(super) fn apply_load_case(
                     ));
                     DispatchOutcome::Unavailable
                 }
-                None => DispatchOutcome::LegacyMaximumFuel,
+                None => DispatchOutcome::MaximumAvailableFuel,
             };
             fuel_loading.dispatch = Some(DispatchAssessment {
                 outcome,
@@ -313,7 +313,7 @@ mod tests {
         assert!(findings.is_empty());
         assert_eq!(
             fuel_loading.dispatch.unwrap().outcome,
-            DispatchOutcome::LegacyMaximumFuel
+            DispatchOutcome::MaximumAvailableFuel
         );
         assert!(is_feasible(findings));
     }

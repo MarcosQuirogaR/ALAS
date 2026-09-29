@@ -4,7 +4,6 @@
 // Ported from neuralfoil/main.py (get_aero_from_kulfan_parameters and the
 // _sigmoid / _squared_mahalanobis_distance helpers it calls).
 // Upstream: NeuralFoil 0.3.x, MIT.
-// Reference: alas @ rust-port-baseline.
 
 //! The network itself: eighteen shape numbers and a flight condition in,
 //! a lift curve and a boundary layer out.

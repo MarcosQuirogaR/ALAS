@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-// Ported from alas/analysis/airfoil_screening.py
-// Reference: alas @ rust-port-baseline.
-
 //! Stage 1: Fast 2-D NeuralFoil surrogate scoring across the airfoil database.
 
 use alas_aero::neuralfoil::{Conditions, ModelSize, PreparedAirfoil};
@@ -18,7 +15,7 @@ use crate::types::{AirfoilCandidateResult, MIN_NEURALFOIL_ANALYSIS_CONFIDENCE};
 
 /// Geometry contract used by a screening evaluation.
 ///
-/// Frozen screening fixtures replay the historical root/break/tip planform;
+/// Frozen screening fixtures replay the root/break/tip planform;
 /// product callers retain the explicit transport-planform builder. Keeping the
 /// choice at the builder boundary prevents a parity fixture from silently
 /// changing the aircraft used by the product path.
@@ -79,7 +76,7 @@ pub fn cruise_condition(
     cruise_condition_with_geometry(config, dv, ScreeningGeometry::Product)
 }
 
-/// Compute the frozen-reference screening condition for translated fixtures.
+/// Compute the screening condition for the frozen reference fixture.
 pub fn cruise_condition_reference_compatibility(
     config: &AlasConfig,
     dv: &DesignVector,
@@ -102,7 +99,7 @@ pub(crate) fn cruise_condition_with_geometry(
     let mac = wing.mean_aerodynamic_chord();
     let s = match geometry {
         ScreeningGeometry::Product => wing.reference_area(),
-        // The compatibility scorer intentionally replays the historical
+        // The compatibility scorer intentionally replays the
         // unfolded planform used by the frozen screening fixture.
         ScreeningGeometry::ReferenceCompatibility => wing.unfolded_area(),
     };

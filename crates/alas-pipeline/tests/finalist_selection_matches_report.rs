@@ -19,12 +19,12 @@
 //! `model_cg` finding surfaced in the printed report and JSON export) is a
 //! *third*, independently invoked assessment of the same design.
 //!
-//! Those two used to balance different aircraft. The search placed the lumped
-//! mass groups with the frozen reference-compatibility fractions and built its
-//! candidate without nacelle bodies; the report placed them on the geometric
-//! stations of an aircraft built with engines. For the r5 nominal run's own
-//! finalist that was worth 0.56 m of centre of gravity: 7.2 percent of the
-//! mean aerodynamic chord, which is how a candidate the search accepted as
+//! Those two must balance the same aircraft. If the search placed the lumped
+//! mass groups with the frozen reference-compatibility fractions on a
+//! candidate built without nacelle bodies while the report placed them on the
+//! geometric stations of an aircraft built with engines, the r5 nominal
+//! run's own finalist would differ by 0.56 m of centre of gravity (7.2 percent
+//! of the mean aerodynamic chord), and a candidate the search accepted as
 //! hard-feasible could print as physically INFEASIBLE in its own final report.
 //!
 //! Both paths are required to resolve their stations through
@@ -36,7 +36,7 @@ use alas_config::AlasConfig;
 use alas_pipeline::{export::report_to_database, FullAnalysis};
 
 /// Exact `design_vector` block from the r5 nominal run's own
-/// `design_database.json` (an internal benchmark run, 2026-09-09), not a
+/// `design_database.json` (an internal benchmark run), not a
 /// hand-picked or simplified fixture.
 fn r5_finalist_design() -> DesignVector {
     DesignVector {
@@ -296,12 +296,13 @@ fn the_neutral_point_resolution_difference_is_pinned_and_purely_aerodynamic() {
         report.x_neutral_point,
     );
 
-    // The forward CG limit is `neutral_point - min_static_margin -
-    // cg_range`, so the neutral-point difference passes through to the limit
-    // one-for-one and nothing else does. Asserting that equality is what
-    // makes this a *resolution* difference rather than an unexplained one:
-    // if some other term crept into either limit, this fails even though the
-    // bound above still passed.
+    // The physical forward CG limit is the
+    // more aft of the maximum-nose-load-handling and scissor-plot estimates:
+    // neither depends on the neutral point, so this limit does not inherit
+    // the NP resolution difference asserted above.
+    // Search and report evaluate it from the same gear/config geometry for
+    // the same design, so it should agree closely regardless of which
+    // neutral point (clean or critical) each happened to pass through.
     let feasibility = alas_pipeline::assess_physical_feasibility(&config, &design, &report, None);
     let model_cg = feasibility
         .model_cg
@@ -316,10 +317,9 @@ fn the_neutral_point_resolution_difference_is_pinned_and_purely_aerodynamic() {
     let limit_difference_pct_mac =
         (model_cg.configured_forward_limit_pct_mac - search_forward_limit).abs();
     assert!(
-        (limit_difference_pct_mac - np_difference_pct_mac).abs() < 1.0e-6,
-        "the forward CG limits differ by {limit_difference_pct_mac}% MAC but the neutral points \
-         differ by {np_difference_pct_mac}% MAC; the limit difference is no longer explained by \
-         the neutral-point resolution alone",
+        limit_difference_pct_mac < 1.0e-6,
+        "the forward CG limits differ by {limit_difference_pct_mac}% MAC even though neither \
+         depends on the neutral point any more",
     );
 }
 
@@ -359,7 +359,7 @@ fn a_hard_feasible_finalist_is_never_reported_physically_infeasible() {
         .expect("the balance family evaluates the forward CG range");
     let report_forward_violated = model_cg.loading_states.iter().any(|state| {
         state.constraints.iter().any(|constraint| {
-            constraint.constraint == alas_opt::ModelCgConstraint::ConfiguredForwardCgRange
+            constraint.constraint == alas_opt::ModelCgConstraint::PhysicalForwardCgLimit
                 && constraint.violated
         })
     });

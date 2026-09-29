@@ -8,12 +8,11 @@
 //! native aerodynamic model's `Atmosphere` class has two altitude models and defaults to
 //! the one that is *not* the closed-form ISA: `"differentiable"`, a cubic
 //! B-spline fitted through the ISA at thirty-eight altitudes, built so that a
-//! gradient-based optimizer sees a smooth function. Every module in the
-//! reference implementation that writes `Atmosphere(altitude=...)`
-//! without naming a method: the turbofan cycle, the performance envelope,
+//! gradient-based optimizer sees a smooth function. Every module that builds an
+//! `Atmosphere` without naming a method: the turbofan cycle, the performance envelope,
 //! the aerodynamic analysis, stability: flies against that fit and not
-//! against the ISA. The two disagree by up to 1% in temperature, so a port
-//! that substituted the closed form would be wrong by four thousand times the
+//! against the ISA. The two disagree by up to 1% in temperature, so
+//! substituting the closed form would be wrong by four thousand times the
 //! `closed` tier before any physics had happened. This module is what makes
 //! reproducing the fit possible; `alas-atmo::differentiable` is the fit
 //! itself.

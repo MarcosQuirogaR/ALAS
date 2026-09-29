@@ -17,7 +17,7 @@ use alas_config::{DesignRequirements, StructuresConfig};
 
 use super::deck::build_modes_deck_for_nodes;
 use super::{
-    build_static_deck, displacement_of, read_displacement_tables, read_eigenvalues,
+    build_static_deck_product, displacement_of, read_displacement_tables, read_eigenvalues,
     read_eigenvector_tables, run_nastran95, Dialect, Nastran95Solver, RunOutcome,
 };
 use crate::loads;
@@ -46,9 +46,37 @@ pub fn run_nastran95_analysis(
 ) -> NastranResults {
     let mut results = NastranResults::default();
     if config.run_sol_static {
-        let text = build_static_deck(deck, node_index, requirements, config, Dialect::Nastran95);
+        let text =
+            build_static_deck_product(deck, node_index, requirements, config, Dialect::Nastran95);
         results.static_solve = match solve_and_retain(solver, work_dir, SOL101, &text, config) {
-            Ok(print) => read_static_print(&print, node_index, requirements, config),
+            Ok(print) => {
+                let mut result = read_static_print(&print, node_index, requirements, config);
+                let cases = loads::load_cases(requirements, config.additional_safety_factor);
+                let response = super::read_static_spanwise_print(&print, deck, node_index, &cases);
+                crate::nastran::static_spanwise::attach(&mut result, response);
+                let stress = super::read_static_shell_stress_print(&print, deck, &cases);
+                if let Some(error) = &stress.error {
+                    result.status = ResultStatus::Error;
+                    result.error = Some(format!(
+                        "{}shell stress output: {error}",
+                        result
+                            .error
+                            .as_ref()
+                            .map_or(String::new(), |e| format!("{e}; "))
+                    ));
+                } else {
+                    for case in &stress.cases {
+                        let peak = case
+                            .samples
+                            .iter()
+                            .map(|s| s.von_mises_pa)
+                            .fold(0.0_f64, f64::max);
+                        result.root_von_mises_max_pa.push(case.name, peak);
+                    }
+                }
+                result.shell_stress = Some(stress);
+                result
+            }
             Err(detail) => StaticResult {
                 status: ResultStatus::Error,
                 error: Some(detail),

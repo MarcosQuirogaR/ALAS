@@ -1,10 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-// Ported from alas/integration/nastran_runner.py (_tail, _kill_process_tree,
-// _run_nastran and NastranRunOutcome).
-// Reference: alas @ rust-port-baseline.
-
 //! Running one solve, and saying precisely why it did not work.
 //!
 //! [`run_nastran`] never fails: a solve that times out, exits non-zero, writes
@@ -55,6 +51,9 @@ use alas_exec::process::{
 use alas_exec::SupervisedSpawn;
 
 use super::text;
+
+#[path = "run_diagnostics.rs"]
+mod diagnostics;
 
 /// How many lines of a captured stream a failure report quotes.
 const TAIL_LINES: usize = 15;
@@ -177,7 +176,37 @@ pub fn run_nastran_with_solver(
     solver_path: Option<&Path>,
     timeout_seconds: f64,
 ) -> NastranRunOutcome {
-    let (program, arguments) = match solver_path {
+    run_with_memory(bdf_path, exe_path, solver_path, timeout_seconds, None)
+}
+
+/// Product solve with an explicit per-process MSC memory ceiling in MB.
+pub fn run_nastran_with_memory(
+    bdf_path: &Path,
+    exe_path: &Path,
+    solver_path: Option<&Path>,
+    timeout_seconds: f64,
+    memory_mb: i64,
+) -> NastranRunOutcome {
+    if memory_mb <= 0 {
+        return NastranRunOutcome::failed("MSC Nastran memory ceiling must be positive (MB)");
+    }
+    run_with_memory(
+        bdf_path,
+        exe_path,
+        solver_path,
+        timeout_seconds,
+        Some(memory_mb),
+    )
+}
+
+fn run_with_memory(
+    bdf_path: &Path,
+    exe_path: &Path,
+    solver_path: Option<&Path>,
+    timeout_seconds: f64,
+    memory_mb: Option<i64>,
+) -> NastranRunOutcome {
+    let (program, mut arguments) = match solver_path {
         Some(solver) => {
             let program = match msc_command_token(exe_path) {
                 Ok(token) => token,
@@ -199,6 +228,13 @@ pub fn run_nastran_with_solver(
         }
         None => (exe_path.display().to_string(), solver_arguments(bdf_path)),
     };
+    if let Some(memory_mb) = memory_mb {
+        // MSC IOG: default `memory=max` reserves half host RAM on Windows.
+        // An estimate plus explicit cap permits concurrent independent solves.
+        arguments.push("memory=estimate".to_owned());
+        arguments.push(format!("memorymaximum={memory_mb}mb"));
+        arguments.push(format!("memorydefault={memory_mb}mb"));
+    }
     let work_dir = bdf_path.parent().unwrap_or(Path::new(".")).to_path_buf();
     let mut command = Command::new(&program);
     command.args(&arguments).current_dir(&work_dir);
@@ -340,6 +376,9 @@ fn supervise(mut command: Command, solve: &Solve) -> NastranRunOutcome {
         ));
     }
 
+    if let Some(detail) = diagnostics::runtime_failure(&solve.bdf_path) {
+        return NastranRunOutcome::failed(detail);
+    }
     let f06_path = solve.bdf_path.with_extension("f06");
     if !f06_path.exists() {
         return NastranRunOutcome::failed(format!(
@@ -406,6 +445,34 @@ fn file_name(path: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn invalid_memory_budget_is_rejected_before_launch() {
+        for memory_mb in [0, -1] {
+            let result = run_nastran_with_memory(
+                Path::new("missing.bdf"),
+                Path::new("missing.exe"),
+                None,
+                1.0,
+                memory_mb,
+            );
+            assert!(!result.ok);
+            assert!(result.detail.contains("memory ceiling must be positive"));
+        }
+    }
+
+    #[test]
+    fn zero_exit_with_empty_f06_and_memory_failure_is_rejected() {
+        let work = TempDir::new("nastran_memory_failure");
+        std::fs::write(
+            work.path().join("wing_sol101.log"),
+            "MAINAL: *** OPEN CORE MEMORY ALLOCATION FAILED *** ERROR = 1\nAnalysis complete 8",
+        )
+        .unwrap();
+        let result = stand_in(&work, successful_command(), 20.0, Some(""));
+        assert!(!result.ok);
+        assert!(result.detail.contains("MEMORY ALLOCATION FAILED"));
+    }
 
     #[test]
     fn an_empty_stream_reports_itself_as_empty_rather_than_as_nothing() {

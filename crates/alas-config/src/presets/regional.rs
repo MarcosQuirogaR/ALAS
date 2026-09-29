@@ -35,8 +35,6 @@ pub fn atr72_600() -> AircraftPreset {
     engine.radius_scale_m = 0.65;
     // ATR 72-600 factsheet 2020 p.22 states an 8.10 m propeller-axis
     // separation; half of that is the single-engine spanwise station.
-    // Physics review v1.2, section 4.3: the previous 4.25 m was 0.20 m
-    // off-source.
     engine.spanwise_positions_m = vec![4.05, -4.05];
     engine.z_m = -0.70;
     engine.inlet_x_offset_m = 1.2;
@@ -55,9 +53,8 @@ pub fn atr72_600() -> AircraftPreset {
             // weight variant. The 23,000 kg MTOW / 22,350 kg MLW /
             // 21,000 kg MZFW variant this preset declares is Mod 6219 (TCDS
             // A.084 section III.13.b, "ATR 72-212A models" table), a
-            // separate, independently applicable modification. Physics
-            // review v1.2, section 4.3: the prior text named only Mod 5948
-            // and could be read as the weight-variant citation.
+            // separate, independently applicable modification; Mod 5948 alone is not
+            // the weight-variant citation.
             modification_state: "ATR 72-600 commercial standard (Mod 5948, NAS/glass cockpit); 23,000 kg MTOW weight variant (Mod 6219)",
             tank_configuration: "standard integral wing tanks",
         },
@@ -66,8 +63,7 @@ pub fn atr72_600() -> AircraftPreset {
             // "ATR 72-212A models", Mod 6219 column: MRW 23,170 kg, MTOW
             // 23,000 kg, MLW 22,350 kg, MZFW 21,000 kg. The MTOW/MLW/MZFW
             // already matched this preset exactly; only MRW needed
-            // correcting from an uncited 23,150 kg (physics review v1.2,
-            // section 4.3, decoded from the downloaded TCDS PDF with pypdf).
+            // taken from the TCDS in place of an uncited 23,150 kg.
             mrw_kg: Some(23_170.0),
             mtow_kg: Some(23_000.0),
             mlw_kg: Some(22_350.0),
@@ -156,12 +152,10 @@ pub fn atr72_600() -> AircraftPreset {
             // balance needs; the ATR main gear is a trailing-arm unit, so its
             // axle and its contact station are not the same point and only the
             // contact station is dimensioned. Declaring the three fields is
-            // what retires the `StationError::MainGearStationNotMeasured`
-            // refusal this block previously carried: the refusal was correct
-            // while no ATR station in a stated frame was held, and the
-            // wing-mounted fallback (`x_mlg = mac_le + mlg_x_fraction_mac x
-            // mac`) remains outside its domain for this sponson gear - it is
-            // now simply not reached.
+            // what avoids the `StationError::MainGearStationNotMeasured`
+            // refusal; the wing-mounted fallback (`x_mlg = mac_le + mlg_x_fraction_mac x
+            // mac`) remains outside its domain for this sponson gear and is
+            // not reached.
             reference_wheelbase_m: Some(10.772),
             reference_track_m: Some(4.10),
             reference_station_frame: Some("nose_tip_drawing_reference".to_owned()),
@@ -203,7 +197,7 @@ pub fn atr72_600() -> AircraftPreset {
                 // the previous 10.2 m datum -- 0.754 m forward of the WBM
                 // reference chord -- which is what drove the model's
                 // static margin to roughly -46% and the ZFW nose-gear
-                // reaction negative (physics review v1.2, section 4.3).
+                // reaction negative.
                 // Moving the datum aft by that same 0.754 m places the
                 // built LEMAC on the WBM station; it does not change the
                 // built wing's own MAC length (2.498 m against the WBM's
@@ -232,7 +226,7 @@ pub fn atr72_600() -> AircraftPreset {
                 // `transport_planform` but never meshed into the production
                 // wing, only an explicit ratio drives `build_main_wing`'s
                 // side-of-body xsec (see
-                // `crates/alas-geom/src/builder_parts/part_01.rs`). Leaving
+                // `crates/alas-geom/src/builder.rs`). Leaving
                 // it unset (as this preset originally did) skips the clip
                 // that the chords above were fit to close: the built wing
                 // came out at 63.926 m^2 against the published 61 m^2
@@ -252,18 +246,23 @@ pub fn atr72_600() -> AircraftPreset {
             },
             empennage: EmpennageConfig {
                 tail_airfoil: "naca0012".to_owned(),
-                hstab_offset_from_tail_m: 4.6,
-                hstab_z_m: 1.0,
-                hstab_root_chord_m: 2.8,
-                hstab_tip_chord_m: 1.0,
+                // Approximate reconstruction of ATR's 2020 factsheet p.22,
+                // not certified surface stations: +/-0.3 m digitization/model
+                // uncertainty. Nose x=0, barrel centre z=0, z positive up.
+                // The T-tail root and fin tip share (x,z)=(24.8,4.7) m.
+                // See docs/research/atr72-tail-geometry-provenance.md.
+                hstab_offset_from_tail_m: 27.166 - 24.8,
+                hstab_z_m: 4.7,
+                hstab_root_chord_m: 1.8,
+                hstab_tip_chord_m: 1.2,
                 hstab_root_twist_deg: -1.0,
                 hstab_tip_twist_deg: -1.0,
-                hstab_tip_le_m: (2.8, 3.6, 0.3),
-                vstab_offset_from_tail_m: 4.2,
+                hstab_tip_le_m: (0.6, 3.6, 0.0),
+                vstab_offset_from_tail_m: 27.166 - 22.3,
                 vstab_z_m: 1.0,
-                vstab_root_chord_m: 4.0,
-                vstab_tip_chord_m: 1.4,
-                vstab_tip_le_m: (3.4, 0.0, 4.6),
+                vstab_root_chord_m: 3.8,
+                vstab_tip_chord_m: 1.8,
+                vstab_tip_le_m: (2.5, 0.0, 3.7),
                 ..EmpennageConfig::default()
             },
             fuselage: FuselageConfig {
@@ -308,6 +307,30 @@ pub fn atr72_600() -> AircraftPreset {
 #[allow(clippy::expect_used)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn atr_conceptual_t_tail_attaches_and_stays_inside_drawing_envelope() {
+        let atr = atr72_600();
+        let e = &atr.geometry.empennage;
+        let length = 27.166;
+        let h_x = length - e.hstab_offset_from_tail_m;
+        let v_x = length - e.vstab_offset_from_tail_m;
+        // Builder's nominal tail_scale=1, tail_x_shift=0 coordinates.
+        assert!((h_x - (v_x + e.vstab_tip_le_m.0)).abs() < 1e-10);
+        assert!((e.hstab_z_m - (e.vstab_z_m + e.vstab_tip_le_m.2)).abs() < 1e-10);
+        assert_eq!(e.hstab_root_chord_m, e.vstab_tip_chord_m);
+        assert!((e.hstab_z_m - 4.7).abs() < 0.3);
+        for trailing_edge in [
+            h_x + e.hstab_root_chord_m,
+            h_x + e.hstab_tip_le_m.0 + e.hstab_tip_chord_m,
+            v_x + e.vstab_root_chord_m,
+            v_x + e.vstab_tip_le_m.0 + e.vstab_tip_chord_m,
+        ] {
+            assert!(trailing_edge.is_finite() && trailing_edge < length);
+        }
+        assert!(e.hstab_tip_le_m.1 > 0.0);
+        assert_eq!(e.hstab_tip_le_m.2, 0.0);
+    }
 
     #[test]
     fn atr_identity_and_certified_mass_limits_are_not_mixed() {

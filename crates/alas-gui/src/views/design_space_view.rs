@@ -3,8 +3,6 @@
 
 //! The Setup > Design Space page: the optimizer's search variables, each with
 //! an editable initial value and lower/upper bound.
-//!
-//! A port of the reference desktop app's `DesignSpaceTable`.
 
 use alas_config::{DesignMode, VariableEnvelope, DESIGN_VARIABLE_SPECS};
 use egui::{DragValue, RichText, ScrollArea, Ui};
@@ -42,13 +40,9 @@ fn display_name(spec: &alas_config::DesignVariableSpec) -> String {
 
 /// Render the Design Space page.
 pub fn show_design_space_view(state: &mut AppState, ui: &mut Ui) {
-    ui.heading(tr("Design Space"));
-    ui.label(
-        RichText::new(
-            tr("The starting design and the optimization choice on Inputs set the study. Each row shows the starting design and the limits handed to the optimizer."),
-        )
-        .weak(),
-    );
+    ui.heading(tr("Design Space")).on_hover_text(tr(
+        "The starting design and the optimization choice on Inputs set the study. Each row shows the starting design and the limits handed to the optimizer.",
+    ));
     ui.add_space(6.0);
     let mode = state.design_mode();
     crate::theme::card_frame(ui).show(ui, |ui| {
@@ -134,28 +128,22 @@ fn show_design_mode_settings(state: &mut AppState, ui: &mut Ui, mode: DesignMode
         })
         .unwrap_or_default();
 
-    if fields.is_empty() {
-        if mode == DesignMode::BaselineSandbox {
-            ui.label(
-                RichText::new(tr(
-                    "All design variables are fixed at the selected reference values for this run.",
-                ))
-                .weak()
-                .small(),
-            );
-        }
-        return;
-    }
-
-    ui.add_space(6.0);
     let title = match mode {
         DesignMode::CleanSheet => "Clean-sheet options",
         DesignMode::ReferenceAdaptation => "Reference envelope controls",
         DesignMode::BaselineSandbox => "Baseline options",
     };
-    ui.label(RichText::new(tr(title)).strong());
+    let heading = ui.label(RichText::new(tr(title)).strong());
+    if mode == DesignMode::BaselineSandbox {
+        heading.on_hover_text(tr(
+            "All design variables are fixed at the selected reference values for this run.",
+        ));
+    }
+    if fields.is_empty() {
+        return;
+    }
+    ui.add_space(6.0);
     let lang = Some(state.language.code());
-    let show_help = state.help_verbose;
     let error_fields: std::collections::HashSet<String> = state
         .validation_findings
         .iter()
@@ -172,7 +160,7 @@ fn show_design_mode_settings(state: &mut AppState, ui: &mut Ui, mode: DesignMode
     let values = object
         .entry("design_space".to_owned())
         .or_insert_with(|| serde_json::json!({}));
-    let edits = dynamic_form(ui, &fields, values, &error_fields, lang, show_help);
+    let edits = dynamic_form(ui, &fields, values, &error_fields, lang, false);
     if !edits.is_empty() {
         // Changing a window or the clean-sheet cabin-sizing policy changes the
         // declared envelope. Rebuild run bounds from that same source.
@@ -221,7 +209,6 @@ fn show_design_constraints(state: &mut AppState, ui: &mut Ui) {
         .map(str::to_owned)
         .collect();
     let lang = Some(state.language.code());
-    let show_help = state.help_verbose;
     let mut edits = Vec::new();
     crate::theme::card_frame(ui).show(ui, |ui| {
         ui.set_min_width(ui.available_width());
@@ -229,13 +216,6 @@ fn show_design_constraints(state: &mut AppState, ui: &mut Ui) {
             .id_salt("design_space::constraints")
             .default_open(true)
             .show(ui, |ui| {
-                ui.label(
-                    RichText::new(tr(
-                        "Limits and stability targets used to score candidates. Their values are kept in the Input configuration and are not optimizer variables.",
-                    ))
-                    .weak()
-                    .small(),
-                );
                 if let Some(values) = state.group_mut("requirements") {
                     edits.extend(dynamic_form(
                         ui,
@@ -243,10 +223,14 @@ fn show_design_constraints(state: &mut AppState, ui: &mut Ui) {
                         values,
                         &error_fields,
                         lang,
-                        show_help,
+                        false,
                     ));
                 }
-            });
+            })
+            .header_response
+            .on_hover_text(tr(
+                "Limits and stability targets used to score candidates. Their values are kept in the Input configuration and are not optimizer variables.",
+            ));
     });
     if !edits.is_empty() {
         state.on_config_modified();

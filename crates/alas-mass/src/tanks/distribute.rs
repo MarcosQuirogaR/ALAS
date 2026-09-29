@@ -11,8 +11,8 @@
 //! # The fill order is an assumption, not a source
 //!
 //! Only the *burn* order is sourced for every registered aircraft. Exact
-//! refuelling sequences were not retrieved in the internal fuel-tank study
-//! (2026-09-05, sections 9.4 and 10). The general reverse-burn fill and
+//! refuelling sequences were not retrieved in the fuel-tank study
+//! (sections 9.4 and 10). The general reverse-burn fill and
 //! trim-last exception are therefore modelling assumptions. The A380
 //! exception uses inner and mid model cells that each contain feed and
 //! nonfeed tank volume (EASA.A.110 Issue 17, section 3.3) and the outer-cell half-capacity preference (Airbus Training
@@ -32,24 +32,25 @@
 //! [`crate::product_stations::analyzed_fuel_centroid`], the feasibility
 //! mass-balance states, and [`FuelTankLayout::fuel_cg_curve`].
 //!
-//! Why a burn-priority-only fill is not used: on the A380-800, whose burn
-//! order puts the tailplane trim tank third of four, it fills the trim tank
-//! and the outer wing to capacity at a partial load and leaves the inner feed
-//! tanks empty. The fuel centroid then sits 12.75 m further aft than an
-//! inner-first fill of the same mass, aft of the main-gear station, which is
-//! the whole of that aircraft's `static_margin_floor` and
-//! `min_nose_gear_load` exceedance. That inner cell lumps in Feed 2 and Feed 3
-//! (EASA.A.110 Issue 17, section 3.3), two of the four tanks the engines are
-//! fed from, so that state cannot be dispatched. Deferring trim alone removes
-//! the aft-CG failure but still leaves the inner feed-containing cells empty;
-//! the A380 approximation gives them positive fuel at partial loads.
+//! A fill that simply follows burn priority is not acceptable on the A380-800,
+//! whose burn order puts the tailplane trim tank third of four: a partial
+//! load would fill the trim tank and the outer wing to capacity and leave the
+//! inner feed tanks empty, putting the fuel centroid 12.75 m further aft than
+//! an inner-first fill of the same mass, aft of the main-gear station. That
+//! inner cell lumps in Feed 2 and Feed 3 (EASA.A.110 Issue 17, section 3.3),
+//! two of the four tanks the engines are fed from, so such a state is one the
+//! aircraft cannot dispatch in. Deferring trim alone removes the aft-CG
+//! failure but still leaves the inner feed-containing cells empty, so the
+//! A380 approximation gives them positive fuel at partial loads.
 
 use alas_geom::aircraft::spacing::linspace;
 
 use crate::inertia::rectangular_prism;
 use crate::ledger::{MassGroup, MassItem, MassMethod, MassProperties, MassRole};
 
-use super::types::{FuelCgPoint, FuelTank, FuelTankLayout, TankKind, TankLayoutError, TankSide};
+use super::types::{
+    FuelCgPoint, FuelTank, FuelTankLayout, FuelVectorPoint, TankKind, TankLayoutError, TankSide,
+};
 
 /// Match the registered A380 tank arrangement. Resolved layouts carry no
 /// preset name, and candidate tank capacities may scale with wing geometry.
@@ -159,6 +160,22 @@ fn distribute_a380(tanks: &[FuelTank], usable_fuel_kg: f64) -> FuelState {
 /// its usable capacity): a half-full tank is modelled as a shorter prism at
 /// the same footprint, not a full-height prism at half density, which is
 /// what keeps the vertical inertia term honest as a tank empties.
+///
+/// # Partial-fill centroid
+///
+/// The item's position is linearly interpolated between
+/// [`FuelTank::low_point_m`] (fill fraction 0, the physical limit: as the
+/// tank drains toward empty, gravity pools the last fuel at the
+/// geometrically lowest point the cell reaches) and [`FuelTank::centroid_m`]
+/// (fill fraction 1, the full-tank centroid the tank's own geometry
+/// resolves to). This is the minimum model the physics supports without a
+/// free-surface/ullage calculation: it is exact at both ends by
+/// construction and linear, not physical, in between, so it should not be
+/// read as a fuel-surface height at partial fill, only as a bound on how far
+/// the true centroid can be from the full-tank one. For every tank kind
+/// besides an integral wing cell, `low_point_m == centroid_m`
+/// ([`super::resolve`]), so the interpolation is the identity and this
+/// reduces to a fixed-centroid model exactly.
 fn fuel_prism_item(tank: &FuelTank, mass_kg: f64, role: MassRole, id: String) -> MassItem {
     let fill_fraction = if tank.usable_capacity_kg > 0.0 {
         (mass_kg / tank.usable_capacity_kg).clamp(0.0, 1.0)
@@ -166,12 +183,19 @@ fn fuel_prism_item(tank: &FuelTank, mass_kg: f64, role: MassRole, id: String) ->
         0.0
     };
     let [length_x_m, width_y_m, height_z_m] = tank.extent_m;
+    let mut position_m = [0.0; 3];
+    for (coordinate, (&low, &full)) in position_m
+        .iter_mut()
+        .zip(tank.low_point_m.iter().zip(tank.centroid_m.iter()))
+    {
+        *coordinate = low + fill_fraction * (full - low);
+    }
     MassItem {
         id,
         group: MassGroup::Fuel,
         role,
         mass_kg,
-        position_m: tank.centroid_m,
+        position_m,
         local_inertia: rectangular_prism(
             mass_kg,
             length_x_m,
@@ -370,4 +394,54 @@ impl FuelState {
         }
         Ok(Self { fills_kg })
     }
+}
+
+/// The centre-of-gravity path fuel actually follows as it is burned from
+/// `takeoff` down to empty, at `n_points` evenly spaced burned-fuel levels.
+///
+/// Every point comes from [`FuelState::burned`] applied to `takeoff`, so it
+/// follows the layout's actual burn order (centre tank first, trim last,
+/// etc.) rather than mixing the takeoff and a lumped-zero-fuel centroid on
+/// a straight line: the two agree only when the tank burned down is the
+/// same one the takeoff load itself sits in, which is not the general case
+/// for a multi-cell swept wing. The first point is
+/// exactly `takeoff`'s own centroid (nothing burned) and the last is empty
+/// (everything burned); both endpoints are exact, not interpolated,
+/// because [`FuelState::burned`] is evaluated at `burned_kg = 0.0` and
+/// `burned_kg = takeoff.total_kg()` rather than approached by a step.
+///
+/// Returns an empty vector for `n_points == 0`. `fuel_kg` is monotonically
+/// non-increasing along the returned points; `x_m`/`z_m` at the empty
+/// endpoint are the zero-mass convention
+/// [`crate::ledger::MassProperties::EMPTY`] uses (`0.0`), not a physical
+/// fuel position -- a caller plotting this vector should stop at the last
+/// positive-`fuel_kg` point if it wants only physical fuel positions.
+pub fn fuel_vector(
+    layout: &FuelTankLayout,
+    takeoff: &FuelState,
+    n_points: usize,
+) -> Vec<FuelVectorPoint> {
+    if n_points == 0 {
+        return Vec::new();
+    }
+    let total_kg = takeoff.total_kg();
+    let burned_levels_kg = if n_points == 1 {
+        vec![total_kg]
+    } else {
+        linspace(0.0, total_kg, n_points)
+    };
+    burned_levels_kg
+        .into_iter()
+        .filter_map(|burned_kg| {
+            // Clamp rather than let float rounding at the exact total push
+            // the last level fractionally over it into `InsufficientFuel`.
+            let state = takeoff.burned(layout, burned_kg.min(total_kg)).ok()?;
+            let properties = state.properties(layout);
+            Some(FuelVectorPoint {
+                fuel_kg: state.total_kg(),
+                x_m: properties.cg_m[0],
+                z_m: properties.cg_m[2],
+            })
+        })
+        .collect()
 }

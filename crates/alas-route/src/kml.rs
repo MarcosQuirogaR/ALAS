@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/routing/kml_import.py
-// Reference: alas @ rust-port-baseline.
 
 //! Importing a dispatch route exported by hand as KML.
 //!

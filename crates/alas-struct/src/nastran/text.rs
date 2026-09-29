@@ -1,10 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-// Ported from the str.splitlines()/str.strip() calls in
-// alas/integration/nastran_runner.py (_tail and _run_nastran's .f06 scan).
-// Reference: alas @ rust-port-baseline.
-
 //! Python's line splitting and whitespace stripping, as the run report needs
 //! them.
 //!

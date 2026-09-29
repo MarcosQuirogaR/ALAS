@@ -78,6 +78,7 @@ fn sample_report() -> AnalysisReport {
         payload_layout: None,
         trimmed_design_point: None,
         cg_envelope_ok: None,
+        neutral_point_conditions: None,
     }
 }
 
@@ -288,6 +289,90 @@ fn an_aircraft_with_no_measured_main_gear_station_gets_no_cg_envelope() {
         !texts.iter().any(|text| text.contains("MLG")),
         "no gear limit may be drawn without a station: {texts:?}"
     );
+}
+
+/// The governing aft/forward limit and the loading-state markers this
+/// figure draws map back, through the exact [`Axes2D`] the figure built
+/// ([`super::render::axes_view`]), to the values
+/// [`crate::families::model_cg_gate_assessment`] itself reports -- not a
+/// separately re-derived approximation.
+#[test]
+fn plotted_limits_and_state_markers_map_back_to_the_gate_values() {
+    use crate::scene::Axes2D;
+
+    let report = sample_report();
+    let config = AlasConfig::default();
+    let data = super::figure::prepare(&report, &config).expect("a real report resolves");
+    let axes: Axes2D = super::render::axes_view(&data);
+
+    // The heaviest and lightest evaluated states anchor `poly_aft`/`poly_fwd`
+    // (`w_ops` starts and ends there): the mapped pixel for the governing
+    // limit at that mass must equal the mapped pixel for that state's own
+    // `physical_limits.aft_limit_pct_mac`/`fwd_limit_pct_mac`.
+    let assessment =
+        crate::families::model_cg_gate_assessment(&report, &config).expect("gate resolves");
+    let mut states: Vec<_> = assessment.loading_states.iter().collect();
+    states.sort_by(|a, b| a.mass_kg.total_cmp(&b.mass_kg));
+    let lightest = states.first().expect("at least one state");
+    let heaviest = states.last().expect("at least one state");
+
+    let expected_aft_light = axes.map_point(
+        lightest.physical_limits.aft_limit_pct_mac,
+        lightest.mass_kg / 1000.0,
+    );
+    let actual_aft_light = axes.map_point(data.poly_aft[0], data.w_ops[0] / 1000.0);
+    assert!(
+        (expected_aft_light[0] - actual_aft_light[0]).abs() < 1e-6,
+        "lightest-state aft limit pixel: expected {expected_aft_light:?}, got {actual_aft_light:?}"
+    );
+
+    let last = data.w_ops.len() - 1;
+    let expected_fwd_heavy = axes.map_point(
+        heaviest.physical_limits.fwd_limit_pct_mac,
+        heaviest.mass_kg / 1000.0,
+    );
+    let actual_fwd_heavy = axes.map_point(data.poly_fwd[last], data.w_ops[last] / 1000.0);
+    assert!(
+        (expected_fwd_heavy[0] - actual_fwd_heavy[0]).abs() < 1e-6,
+        "heaviest-state fwd limit pixel: expected {expected_fwd_heavy:?}, got {actual_fwd_heavy:?}"
+    );
+
+    // Every drawn loading-state marker equals its gate state's own mass/CG,
+    // not a resampled or composited value.
+    assert_eq!(data.state_points.len(), states.len());
+    for (drawn, gate_state) in data.state_points.iter().zip(states.iter()) {
+        assert!((drawn.mass_kg - gate_state.mass_kg).abs() < 1e-9);
+        assert!((drawn.cg_pct_mac - gate_state.cg_pct_mac).abs() < 1e-9);
+    }
+}
+
+/// Every one-percent-MAC fan-line definition this report's balance
+/// index/limits rely on is linear in mass at fixed `%MAC`, matching the
+/// stated `index = W * (x - x_ref) / C + K` convention -- checked directly
+/// on [`alas_pipeline::feasibility::balance_index`] rather than only on this
+/// figure's own output.
+#[test]
+fn balance_index_is_linear_in_mass_at_fixed_position() {
+    use alas_pipeline::feasibility::balance_index;
+
+    let x_ref_m = 12.0;
+    let c = 1000.0;
+    let k = 50.0;
+    let x_m = 12.8; // A fixed CG station, off the reference.
+    let index_at = |mass_kg: f64| balance_index(mass_kg, x_m, x_ref_m, c, k);
+
+    let low = index_at(20_000.0);
+    let mid = index_at(40_000.0);
+    let high = index_at(60_000.0);
+    // Linear in mass: the second difference is zero.
+    assert!(
+        ((high - mid) - (mid - low)).abs() < 1e-9,
+        "index must be affine in mass at fixed %MAC: {low}, {mid}, {high}"
+    );
+    // At the reference station the index is the constant offset `k`,
+    // independent of mass.
+    assert!((balance_index(20_000.0, x_ref_m, x_ref_m, c, k) - k).abs() < 1e-9);
+    assert!((balance_index(90_000.0, x_ref_m, x_ref_m, c, k) - k).abs() < 1e-9);
 }
 
 #[test]

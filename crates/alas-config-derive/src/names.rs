@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/sidecar/schema.py (`_humanize`, `_UNIT_SUFFIXES`).
-// Reference: alas @ rust-port-baseline.
 
 //! The label and unit a field gets when it does not state its own.
 //!

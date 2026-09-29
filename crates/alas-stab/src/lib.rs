@@ -39,5 +39,6 @@
 
 pub mod dynamics;
 pub mod modes;
+pub mod neutral_point;
 pub mod static_stability;
 pub mod trim;

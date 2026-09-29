@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/sidecar/schema.py (`_field_kind`).
-// Reference: alas @ rust-port-baseline.
 
 //! Which editor a value's type asks for.
 //!
@@ -20,7 +19,7 @@
 
 use serde::Serialize;
 
-use crate::Kind;
+use crate::{Kind, OptionalValueKind};
 
 /// Field-name endings that mark a real number as a relative weight.
 ///
@@ -34,6 +33,19 @@ pub trait Leaf: Serialize {
     /// Which editor this value asks for. `name` is the field's identifier,
     /// which the weight-slider rule reads.
     fn kind(&self, name: &str) -> Kind;
+
+    /// The declared type used when this leaf appears as an unset `Option<T>`.
+    /// Custom leaf types retain the historical text fallback unless they
+    /// choose a more specific representation.
+    fn kind_when_unset() -> OptionalValueKind {
+        OptionalValueKind::Other
+    }
+
+    /// The inner type for an optional field, including when it is currently
+    /// `None`. Ordinary leaves carry no optional metadata.
+    fn optional_value_kind(&self) -> Option<OptionalValueKind> {
+        None
+    }
 
     /// The value, as the interface receives it.
     ///
@@ -49,11 +61,19 @@ impl Leaf for bool {
     fn kind(&self, _name: &str) -> Kind {
         Kind::Bool
     }
+
+    fn kind_when_unset() -> OptionalValueKind {
+        OptionalValueKind::Bool
+    }
 }
 
 impl Leaf for i64 {
     fn kind(&self, _name: &str) -> Kind {
         Kind::Int
+    }
+
+    fn kind_when_unset() -> OptionalValueKind {
+        OptionalValueKind::I64
     }
 }
 
@@ -61,11 +81,19 @@ impl Leaf for u32 {
     fn kind(&self, _name: &str) -> Kind {
         Kind::Int
     }
+
+    fn kind_when_unset() -> OptionalValueKind {
+        OptionalValueKind::U32
+    }
 }
 
 impl Leaf for usize {
     fn kind(&self, _name: &str) -> Kind {
         Kind::Int
+    }
+
+    fn kind_when_unset() -> OptionalValueKind {
+        OptionalValueKind::Usize
     }
 }
 
@@ -78,11 +106,19 @@ impl Leaf for f64 {
             Kind::Float
         }
     }
+
+    fn kind_when_unset() -> OptionalValueKind {
+        OptionalValueKind::Float
+    }
 }
 
 impl Leaf for String {
     fn kind(&self, _name: &str) -> Kind {
         Kind::Str
+    }
+
+    fn kind_when_unset() -> OptionalValueKind {
+        OptionalValueKind::String
     }
 }
 
@@ -96,6 +132,10 @@ impl<T: Leaf> Leaf for Option<T> {
             None => Kind::Optional,
             Some(value) => value.kind(name),
         }
+    }
+
+    fn optional_value_kind(&self) -> Option<OptionalValueKind> {
+        Some(T::kind_when_unset())
     }
 }
 
@@ -179,8 +219,25 @@ mod tests {
     fn an_unset_optional_reports_itself_unset_and_a_set_one_reports_its_value() {
         let unset: Option<f64> = None;
         assert_eq!(unset.kind("cruise_altitude_m"), Kind::Optional);
+        assert_eq!(unset.optional_value_kind(), Some(OptionalValueKind::Float));
         assert_eq!(Some(2.0_f64).kind("cruise_altitude_m"), Kind::Float);
+        assert_eq!(
+            Some(2.0_f64).optional_value_kind(),
+            Some(OptionalValueKind::Float)
+        );
         assert_eq!(Some(2.0_f64).kind("range_weight"), Kind::WeightSlider);
+        assert_eq!(
+            None::<i64>.optional_value_kind(),
+            Some(OptionalValueKind::I64)
+        );
+        assert_eq!(
+            None::<String>.optional_value_kind(),
+            Some(OptionalValueKind::String)
+        );
+        assert_eq!(
+            None::<bool>.optional_value_kind(),
+            Some(OptionalValueKind::Bool)
+        );
     }
 
     #[test]

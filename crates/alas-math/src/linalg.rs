@@ -2,15 +2,13 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 //! Dense linear algebra with no upstream counterpart: a general square solve
-//! and the LU factorization behind it, factored out once it gained a second
-//! caller.
+//! and the LU factorization behind it, shared by every crate that solves a
+//! dense system.
 //!
-//! [`solve`] began inside `bspline.rs`, written against that module's own
-//! collocation systems: a few tens of rows, and banded, since a B-spline's
-//! basis functions are locally supported. [`crate::BicubicSpline`] took it as
-//! a second, in-crate caller without moving it, since both lived in the same
-//! crate already. `alas-aero::vlm`'s AIC matrix is a third caller, and not
-//! in this crate: dense rather than banded (an aircraft's induced-velocity
+//! [`solve`] serves the B-spline collocation systems (a few tens of rows,
+//! and banded, since a B-spline's basis functions are locally supported),
+//! [`crate::BicubicSpline`], and `alas-aero::vlm`'s AIC matrix, which lives
+//! in another crate: dense rather than banded (an aircraft's induced-velocity
 //! field couples every panel to every other one, so there is no locality to
 //! exploit), and it runs to several hundred rows at the fine product mesh.
 //! `alas-payload::numeric`'s module doc states the rule this follows: private
@@ -19,14 +17,13 @@
 //!
 //! # Why the kernel is `faer`
 //!
-//! The first implementation here was a textbook partial-pivot elimination
-//! over a vector of row vectors: correct, and adequate for the collocation
-//! systems it was written for. The vortex-lattice AIC at the fine product
-//! mesh is 800 by 800, and there that scalar loop measured 164 ms per solve at
-//! about 2 Gflop/s on one core (2026-09-11), 90 % of every VLM call. NumPy's
-//! `numpy.linalg.solve` hands the same matrix to LAPACK `dgesv`, which is
-//! blocked and vectorized, so the port lost to the reference on the one stage
-//! that dominates the full analysis. `faer` is a kernel of that class in pure
+//! A textbook partial-pivot elimination over a vector of row vectors is
+//! adequate for the collocation systems but not for the vortex-lattice AIC at
+//! the fine product mesh, which is 800 by 800: that scalar loop measured
+//! 164 ms per solve at about 2 Gflop/s on one core, 90 % of every VLM call.
+//! NumPy's `numpy.linalg.solve` hands the same matrix to LAPACK `dgesv`, which
+//! is blocked and vectorized, so the frozen reference would win on the one
+//! stage that dominates the full analysis. `faer` is a kernel of that class in pure
 //! Rust: blocked LU with partial pivoting, SIMD inner kernels, and a rayon
 //! pool for the trailing update. It picks the same pivots partial pivoting
 //! always picks (the largest magnitude in the column) so results agree
@@ -54,7 +51,7 @@
 //! faer's default is to spread the trailing update over a rayon pool. On a
 //! 16-thread desktop that was measured slower than the sequential kernel at
 //! every size this program factors (n = 200: 3.3 ms against 0.42 ms;
-//! n = 800: 25 ms against 12 ms; 2026-09-11): the matrices are too small
+//! n = 800: 25 ms against 12 ms): the matrices are too small
 //! for the fork/join to pay for itself, and callers already parallelize
 //! above this level (the screening's candidates, the optimizers' batches).
 //! The kernel is therefore pinned to [`faer::Par::Seq`] once, before the
@@ -143,7 +140,7 @@ impl DenseMatrix {
     ///
     /// The error is the first diagonal position of `U` that is exactly zero:
     /// the elimination step that found no usable pivot, in the same terms
-    /// the elimination this replaced reported.
+    /// a textbook elimination reports.
     pub fn factor(self) -> Result<LuFactorization, usize> {
         let n = self.inner.nrows();
         if n == 0 {

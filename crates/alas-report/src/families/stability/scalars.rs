@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/reporting/visualization.py (_stability_scalars)
-// Reference: alas @ rust-port-baseline.
 
 //! Shared side-view/metrics scalar quantities, computed once from the
 //! [`AnalysisReport`] (no new VLM runs) so [`super::side_view`] and
@@ -203,6 +202,7 @@ mod tests {
             payload_layout: None,
             trimmed_design_point: None,
             cg_envelope_ok: None,
+            neutral_point_conditions: None,
         }
     }
 

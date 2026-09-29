@@ -6,7 +6,7 @@
 //! Measures execution latency and throughput of the numerical core across
 //! aerodynamics, mission integration, structural sizing, airfoil database
 //! screening, and end-to-end pipeline execution, comparing throughput against
-//! the legacy Python baseline.
+//! the Python reference baseline.
 
 use std::time::Instant;
 
@@ -36,7 +36,7 @@ pub struct BenchmarkResult {
     pub min_ms: f64,
     /// Maximum iteration duration in milliseconds.
     pub max_ms: f64,
-    /// Approximate legacy Python execution time in milliseconds.
+    /// Approximate Python reference execution time in milliseconds.
     pub legacy_python_ms: f64,
     /// Measured speedup factor relative to Python.
     pub speedup_factor: f64,

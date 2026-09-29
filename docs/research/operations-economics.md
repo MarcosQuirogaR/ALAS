@@ -529,7 +529,7 @@ These sources are relevant, but the detailed document was not copied because it 
 
 The following existing files were inspected as integration anchors; they were not modified for this research note.
 
-- [Requirements-first aircraft design](../REQUIREMENTS_FIRST_AIRCRAFT_DESIGN.md): hard/soft/objective/diagnostic policies, DesignBrief, stage mapping, residual evidence, and reporting boundaries.
+- [Design constraints](../design-constraints.md): boundary between requirements, model inputs, numerical settings, preferences, and validity limits.
 - [Mission profile request](../../crates/alas-mission/src/profile.rs): route, elevations, ISA deviation, distance, profile configuration, and physical mission boundary.
 - [Airport configuration](../../crates/alas-config/src/airports.rs): ICAO, elevation, TODA/LDA, ISA deviation, coordinates, and current airport data coverage.
 - [Payload layout](../../crates/alas-payload/src/layout.rs): passenger/cargo summaries, ULDs, doors, hold capacity, CG, aisle/deck data, and utilization.

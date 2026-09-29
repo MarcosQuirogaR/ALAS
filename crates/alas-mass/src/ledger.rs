@@ -204,16 +204,6 @@ impl MassProperties {
         }
     }
 
-    /// The tensor about an arbitrary reference point.
-    pub fn inertia_about(&self, reference_m: [f64; 3]) -> InertiaTensor {
-        let d = [
-            self.cg_m[0] - reference_m[0],
-            self.cg_m[1] - reference_m[1],
-            self.cg_m[2] - reference_m[2],
-        ];
-        self.inertia_cg.translated(self.mass_kg, d)
-    }
-
     /// Radii of gyration `(r_x, r_y, r_z)` about the centre of gravity, m.
     pub fn radii_of_gyration(&self) -> [f64; 3] {
         if self.mass_kg <= 0.0 {
@@ -306,17 +296,12 @@ pub enum MassMethod {
     Correlation(&'static str),
     /// A configured fraction of the takeoff mass.
     TakeoffMassFraction,
-    /// Integrated from geometry and material densities.
-    Geometric,
     /// A manufacturer-published or declared value.
     Declared,
     /// Placed by the payload layout engine.
     LayoutPlacement,
     /// Volume and density of a tank.
     TankFill,
-    /// The takeoff-mass closure remainder, which is an allowance and not a
-    /// physical estimate.
-    ClosureRemainder,
 }
 
 impl MassMethod {
@@ -326,11 +311,9 @@ impl MassMethod {
         match self {
             Self::Correlation(source) => source,
             Self::TakeoffMassFraction => "takeoff mass fraction",
-            Self::Geometric => "geometry and density",
             Self::Declared => "declared mass",
             Self::LayoutPlacement => "payload layout",
             Self::TankFill => "tank volume and density",
-            Self::ClosureRemainder => "mass closure remainder",
         }
     }
 }
@@ -387,11 +370,6 @@ impl MassLedger {
         &self.items
     }
 
-    /// Mutable access to every item, for state substitution.
-    pub fn items_mut(&mut self) -> &mut [MassItem] {
-        &mut self.items
-    }
-
     /// Reject a ledger that cannot describe a physical aircraft.
     ///
     /// A negative or non-finite mass is refused rather than clamped: an
@@ -434,32 +412,6 @@ impl MassLedger {
             .map(MassItem::properties)
             .collect();
         MassProperties::combine(parts.iter())
-    }
-
-    /// Combined properties of every item with one of `roles`.
-    pub fn properties_of(&self, roles: &[MassRole]) -> MassProperties {
-        self.properties_where(|item| roles.contains(&item.role))
-    }
-
-    /// Total mass of the items `include` selects, kg.
-    pub fn mass_where(&self, include: impl Fn(&MassItem) -> bool) -> f64 {
-        self.items
-            .iter()
-            .filter(|item| include(item))
-            .map(|item| item.mass_kg)
-            .sum()
-    }
-
-    /// Mass of each group present, in first-appearance order.
-    pub fn group_totals(&self) -> Vec<(MassGroup, f64)> {
-        let mut totals: Vec<(MassGroup, f64)> = Vec::new();
-        for item in &self.items {
-            match totals.iter_mut().find(|(group, _)| *group == item.group) {
-                Some((_, total)) => *total += item.mass_kg,
-                None => totals.push((item.group, item.mass_kg)),
-            }
-        }
-        totals
     }
 
     /// The operating empty mass: fixed items, operating items and unusable fuel.

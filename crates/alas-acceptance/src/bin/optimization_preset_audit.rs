@@ -64,6 +64,11 @@ use serde_json::{json, Value};
 #[path = "optimization_preset_audit/comparison.rs"]
 mod comparison;
 use comparison::{baseline_comparison, design_gross_mass_kg};
+#[path = "optimization_preset_audit/diagnostics.rs"]
+mod diagnostics;
+use diagnostics::dependency_gaps;
+#[path = "optimization_preset_audit/preparation.rs"]
+mod preparation;
 
 /// Fixed recorded seed for every optimization run in this harness. A fixed
 /// constant, not a "representative" or hidden default: recorded verbatim in
@@ -102,7 +107,7 @@ fn main() -> io::Result<()> {
         Some("matrix") => run_matrix(&args[1..]),
         _ => {
             eprintln!(
-                "usage:\n  optimization_preset_audit measure --preset <NAME> --output-dir <DIR> [--seed N] [--solver-preset NAME] [--timeout-s N] [--experiment LABEL --max-iterations N --population-size N]\n  optimization_preset_audit matrix --output-dir <DIR> [--seed N] [--solver-preset NAME] [--timeout-s N]\n\n  --experiment LABEL marks a measurement/engineering-budget run. It is required before\n  --max-iterations or --population-size may change the registered solver preset's search\n  effort, and the label is recorded in every row and artefact the run writes. It changes\n  numerical search effort only: no requirement, constraint, mission, design space or\n  acceptance clause is reachable from it."
+                "usage:\n  optimization_preset_audit measure --preset <NAME> --output-dir <DIR> [--seed N] [--solver-preset NAME] [--timeout-s N] [--native-only] [--experiment LABEL --max-iterations N --population-size N]\n  optimization_preset_audit matrix --output-dir <DIR> [--seed N] [--solver-preset NAME] [--timeout-s N] [--native-only]\n\n  --experiment LABEL marks a measurement/engineering-budget run. It is required before\n  --max-iterations or --population-size may change the registered solver preset's search\n  effort, and the label is recorded in every row and artefact the run writes. It changes\n  numerical search effort only: no requirement, constraint, mission, design space or\n  acceptance clause is reachable from it."
             );
             std::process::exit(2);
         }
@@ -118,6 +123,7 @@ struct Args {
     experiment: Option<String>,
     max_iterations: Option<i64>,
     population_size: Option<i64>,
+    native_only: bool,
 }
 
 /// How a run's solver settings were arrived at.
@@ -249,9 +255,11 @@ fn parse_args(values: &[String]) -> io::Result<Args> {
     let mut experiment = None;
     let mut max_iterations = None;
     let mut population_size = None;
+    let mut native_only = false;
     let mut index = 0;
     while index < values.len() {
         match values[index].as_str() {
+            "--native-only" => native_only = true,
             "--output-dir" => {
                 index += 1;
                 output_dir = values.get(index).map(PathBuf::from);
@@ -338,6 +346,7 @@ fn parse_args(values: &[String]) -> io::Result<Args> {
         experiment,
         max_iterations,
         population_size,
+        native_only,
     })
 }
 
@@ -377,6 +386,7 @@ fn run_measure(values: &[String]) -> io::Result<()> {
         &configuration,
         &settings,
         args.timeout_s.map(Duration::from_secs),
+        args.native_only,
     );
 
     fs::write(
@@ -416,6 +426,7 @@ fn run_matrix(values: &[String]) -> io::Result<()> {
             &configuration,
             &settings,
             args.timeout_s.map(Duration::from_secs),
+            args.native_only,
         );
         let is_timeout = row["status"] == Value::String("timeout".to_owned());
         rows.push(row);
@@ -438,6 +449,7 @@ fn run_matrix(values: &[String]) -> io::Result<()> {
         .all(|row| row["status"] == Value::String("success".to_owned()));
     let document = json!({
         "mode": "optimization",
+        "execution_scope": preparation::execution_scope(args.native_only),
         "seed": args.seed,
         "solver_preset": configuration.reported_name(),
         "configuration": configuration.provenance(),
@@ -541,7 +553,33 @@ fn run_with_timeout(
     let handle = thread::spawn(move || {
         let start = Instant::now();
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            DesignPipeline::new(config).run_cancellable(&options, &environment, worker_watch.flag())
+            let on_event = |event: alas_pipeline::runs::RunEvent| {
+                eprintln!(
+                    "[stage] {}",
+                    serde_json::to_string(&event).unwrap_or_default()
+                );
+            };
+            let preset = presets::get(&config.preset).map_err(|e| e.to_string())?;
+            let design = preset.design_vector;
+            let envelope = config.optimizer.design_space.envelope(&design);
+            let bounds = alas_config::DESIGN_VARIABLE_SPECS
+                .iter()
+                .map(|spec| {
+                    envelope
+                        .iter()
+                        .find(|v| v.name == spec.name)
+                        .map(|variable| (variable.lower, variable.upper))
+                        .ok_or_else(|| format!("design variable {} has no envelope", spec.name))
+                })
+                .collect::<Result<Vec<_>, String>>()?;
+            DesignPipeline::new(config).run_with_design_space_events(
+                &options,
+                &environment,
+                &design,
+                &bounds,
+                &on_event,
+                worker_watch.flag(),
+            )
         }));
         let elapsed = start.elapsed();
         let _ = tx.send((result, elapsed));
@@ -574,6 +612,7 @@ fn run_with_timeout(
         };
     };
 
+    let guarded_start = Instant::now();
     match rx.recv_timeout(limit) {
         Ok((result, elapsed)) => {
             let telemetry = Box::new(watch.snapshot());
@@ -596,7 +635,7 @@ fn run_with_timeout(
     // Records the phase and evaluation in flight, then sets the flag.
     watch.request_cancellation();
     let signalled = Instant::now();
-    let (result, observed) = loop {
+    let (result, _worker_elapsed) = loop {
         match rx.recv_timeout(JOIN_NOTICE_INTERVAL) {
             Ok(value) => break value,
             Err(mpsc::RecvTimeoutError::Timeout) => {
@@ -656,7 +695,7 @@ fn run_with_timeout(
     );
     RunOutcome::Cancelled {
         limit,
-        observed,
+        observed: guarded_start.elapsed(),
         detail,
         panicked,
         telemetry: Box::new(watch.snapshot()),
@@ -675,6 +714,36 @@ fn evaluate_preset_optimization(
     configuration: &Configuration,
     settings: &SolverSettings,
     timeout: Option<Duration>,
+    native_only: bool,
+) -> Value {
+    let mut row = evaluate_preset_optimization_inner(
+        name,
+        output_root,
+        locator,
+        preferences,
+        seed,
+        configuration,
+        settings,
+        timeout,
+        native_only,
+    );
+    preparation::record_scope(&mut row, native_only);
+    row
+}
+
+// Keep the inner measurement inputs explicit, matching the scope-recording wrapper.
+// Each argument records an independent audit input; keep their provenance explicit.
+#[allow(clippy::too_many_arguments)]
+fn evaluate_preset_optimization_inner(
+    name: &str,
+    output_root: &Path,
+    locator: &ToolLocator,
+    preferences: &ToolPreferences,
+    seed: u64,
+    configuration: &Configuration,
+    settings: &SolverSettings,
+    timeout: Option<Duration>,
+    native_only: bool,
 ) -> Value {
     let result_dir = output_root.join(name).join("optimize");
     let Ok(preset) = presets::get(name) else {
@@ -699,13 +768,25 @@ fn evaluate_preset_optimization(
     // Selected through the same JSON-preset boundary the CLI and GUI use, not
     // reassembled field-by-field: a hand-built config silently drops the
     // cabin seed and the engine binding (see `evaluate_preset` in
-    // `matrix_parts/part_01.rs`, which this mirrors for the optimization case
+    // `matrix/evaluate.rs`, which this mirrors for the optimization case
     // it does not cover).
     let mut config = match AlasConfig::from_value(&json!({ "preset": preset.name })) {
         Ok(config) => config,
         Err(error) => return error_row(name, &result_dir, seed, configuration, &error.to_string()),
     };
     config.optimizer.solver = settings.clone();
+    preparation::apply_machine_preferences(&mut config, preferences);
+    preparation::initialize_route_profile(&mut config);
+    preparation::apply_execution_scope(&mut config, native_only);
+    let scope = preparation::execution_scope(native_only);
+    eprintln!("[scope] preset={name} execution_scope={scope}; native-only does not certify external-solver completion");
+    let _ = fs::write(
+        result_dir.join("input_config.audit.json"),
+        serde_json::to_vec_pretty(&json!({"execution_scope": scope,
+            "config_file": "input_config.json",
+            "optional_external_execution_requested": !native_only}))
+        .unwrap_or_default(),
+    );
 
     if let Err(error) = fs::write(
         result_dir.join("input_config.json"),
@@ -760,12 +841,9 @@ fn evaluate_preset_optimization(
                 "output_dir": result_dir.display().to_string(),
                 "timeout_s": limit.as_secs(),
                 "wall_time_s": observed.as_secs_f64(),
-                // How long the run took to reach a cancellation boundary after
-                // the flag was set. Cooperative cancellation is bounded, not
-                // immediate, and this is the size of that bound as measured.
-                // Kept for continuity with the pre-change row; the telemetry
-                // below splits it into acknowledgement and drain.
-                "cancellation_latency_s": observed.as_secs_f64() - limit.as_secs_f64(),
+                // Use the watch's request-to-join interval; worker start and
+                // coordinator guard have different origins under contention.
+                "cancellation_latency_s": telemetry.join_latency_s,
                 "cancellation": cancellation_json(&telemetry),
                 "acknowledgement_contract_s": ACKNOWLEDGEMENT_CONTRACT_S,
                 "acknowledgement_contract_met": acknowledged,
@@ -775,6 +853,7 @@ fn evaluate_preset_optimization(
                 // the search was stopped from outside before it decided
                 // anything.
                 "execution_passed": false,
+                "full_analysis_completed": false,
                 "physical_passed": false,
                 "optimizer_converged": false,
                 "optimizer_feasible": false,
@@ -923,6 +1002,9 @@ fn error_row(
     json!({
         "preset": name,
         "status": "error",
+        "execution_passed": false,
+        "full_analysis_completed": false,
+        "physical_passed": false,
         "status_detail": detail,
         "seed": seed,
         "solver_preset": configuration.reported_name(),
@@ -1100,7 +1182,7 @@ fn build_success_row(
         "optimizer": {
             // The kernel that actually executed, as the optimizer reports it,
             // not the method token the configuration requested: the two differ
-            // for the legacy population names, which have no kernel behind
+            // for the older population names, which have no kernel behind
             // them and run mesh adaptive direct search.
             "method": optimization.map(|o| o.method.clone()),
             "requested_method": settings.method.clone(),
@@ -1119,6 +1201,8 @@ fn build_success_row(
         "cancellation": cancellation_json(telemetry),
         "baseline_vs_optimized": baseline_comparison(result),
         "execution_passed": execution_passed,
+        "full_analysis_completed": diagnostics::full_analysis_completed(result),
+        "analysis_evidence": diagnostics::evidence(result),
         "physical_passed": physical_passed,
         "feasibility_blockers": feasibility_blockers,
         "design_mission_status": design_mission_status,
@@ -1213,51 +1297,15 @@ fn format_finding(finding: &PhysicalFinding) -> String {
     }
 }
 
-/// Downstream external-tool stages this preset's config reached but for which
-/// no executable was discovered on this host, distinct from a stage that ran
-/// and failed. Only the "not discovered" variants are gaps; a launch failure
-/// or solver failure is a real error surfaced elsewhere in the row.
-fn dependency_gaps(result: &PipelineResult) -> Vec<String> {
-    let mut gaps = Vec::new();
-    if let Some(openvsp) = &result.openvsp_export {
-        if openvsp.status == OpenVspExportStatus::ScriptWrittenRuntimeUnverified {
-            gaps.push("openvsp: script written, no installed runtime discovered".to_owned());
-        }
-    }
-    if let Some(vspaero) = &result.vspaero_result {
-        if vspaero.status == VspaeroAnalysisStatus::NotConfigured {
-            gaps.push("vspaero: no native executable configured or discovered".to_owned());
-        }
-    }
-    if let Some(avl) = &result.avl_result {
-        if avl.status == AvlAnalysisStatus::NotConfigured {
-            gaps.push("avl: no solver executable available".to_owned());
-        }
-    }
-    if let Some(mses) = &result.mses_result {
-        use alas_aero::mses::MsesStatus;
-        match mses.status {
-            MsesStatus::Absent => gaps.push("mses: no MSES directory found".to_owned()),
-            MsesStatus::Incomplete => {
-                gaps.push("mses: directory present but missing one or more programs".to_owned())
-            }
-            _ => {}
-        }
-    }
-    if let Some(flowunsteady) = &result.flowunsteady_result {
-        if flowunsteady.status == FlowUnsteadyAnalysisStatus::NotConfigured {
-            gaps.push("flowunsteady: no adapter executable configured".to_owned());
-        }
-    }
-    gaps
-}
-
 fn format_matrix_report(document: &Value) -> String {
     let mut text = String::new();
     text.push_str("ALAS OPTIMIZATION-MODE PRESET ACCEPTANCE MATRIX\n");
     text.push_str(&format!(
-        "seed={} solver_preset={} timeout_s={:?}\n\n",
-        document["seed"], document["solver_preset"], document["timeout_s"]
+        "seed={} solver_preset={} timeout_s={:?} execution_scope={}\n\n",
+        document["seed"],
+        document["solver_preset"],
+        document["timeout_s"],
+        document["execution_scope"]
     ));
     text.push_str(
         "Preset       | Status               | Wall(s) | Kernel               | Term                 | Exec | Conv | Feas | Phys | Mission\n",
@@ -1337,120 +1385,6 @@ fn format_matrix_report(document: &Value) -> String {
     text
 }
 
-// Tests assert on values they construct here, so a failed expect is the
-// assertion failing, not a library invariant being broken.
-#[allow(clippy::unwrap_used, clippy::expect_used)]
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn args() -> Args {
-        Args {
-            output_dir: PathBuf::from("."),
-            seed: DEFAULT_SEED,
-            solver_preset: "quick_draft".to_owned(),
-            timeout_s: None,
-            preset: Some("A320-200".to_owned()),
-            experiment: None,
-            max_iterations: None,
-            population_size: None,
-        }
-    }
-
-    #[test]
-    fn an_unmodified_run_reports_the_registered_preset_and_its_settings_verbatim() {
-        let (configuration, settings) =
-            Configuration::resolve(&args()).expect("quick_draft is registered");
-        assert_eq!(configuration.reported_name(), "quick_draft");
-        assert_eq!(
-            configuration.provenance()["kind"],
-            "registered_solver_preset"
-        );
-        let registered = resolve_settings("quick_draft").expect("quick_draft is registered");
-        assert_eq!(settings.max_iterations, registered.max_iterations);
-        assert_eq!(settings.population_size, registered.population_size);
-        assert_eq!(settings.tolerance, registered.tolerance);
-    }
-
-    /// The rule the whole mechanism exists for: search effort cannot be
-    /// reduced without a label, so a reduced-budget run can never be read as
-    /// the preset it was derived from.
-    #[test]
-    fn an_unlabelled_search_effort_override_is_refused() {
-        let mut generations_only = args();
-        generations_only.max_iterations = Some(2);
-        let error = Configuration::resolve(&generations_only)
-            .expect_err("an unlabelled override must not resolve");
-        assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
-        assert!(
-            error.to_string().contains("--experiment"),
-            "the refusal must name the flag that would make the run honest: {error}"
-        );
-
-        let mut population_only = args();
-        population_only.population_size = Some(1);
-        assert!(Configuration::resolve(&population_only).is_err());
-    }
-
-    #[test]
-    fn an_experiment_label_may_not_impersonate_a_registered_preset() {
-        let mut request = args();
-        request.max_iterations = Some(2);
-        request.experiment = Some("balanced".to_owned());
-        let error =
-            Configuration::resolve(&request).expect_err("a registered name is not a valid label");
-        assert!(error.to_string().contains("registered solver preset"));
-    }
-
-    #[test]
-    fn a_labelled_experiment_reports_its_label_its_origin_and_every_override() {
-        let mut request = args();
-        request.max_iterations = Some(2);
-        request.population_size = Some(1);
-        request.experiment = Some("a320-finite-measurement-2026-09-22".to_owned());
-        let (configuration, settings) =
-            Configuration::resolve(&request).expect("a labelled override resolves");
-
-        assert_eq!(settings.max_iterations, 2);
-        assert_eq!(settings.population_size, 1);
-        // Everything the flags do not reach is still the registered preset's.
-        let registered = resolve_settings("quick_draft").expect("quick_draft is registered");
-        assert_eq!(settings.tolerance, registered.tolerance);
-        assert_eq!(settings.strategy, registered.strategy);
-        assert_eq!(settings.method, registered.method);
-
-        assert_eq!(
-            configuration.reported_name(),
-            "a320-finite-measurement-2026-09-22",
-            "the row must never report this run as the preset it was derived from"
-        );
-        let provenance = configuration.provenance();
-        assert_eq!(provenance["kind"], "experiment");
-        assert_eq!(provenance["derived_from_solver_preset"], "quick_draft");
-        let overrides = provenance["search_effort_overrides"]
-            .as_array()
-            .expect("the overrides are a list");
-        assert_eq!(overrides.len(), 2);
-        assert_eq!(overrides[0]["setting"], "max_iterations");
-        assert_eq!(overrides[0]["registered_value"], registered.max_iterations);
-        assert_eq!(overrides[0]["experiment_value"], 2);
-    }
-
-    #[test]
-    fn the_acknowledgement_bound_is_the_largest_uninterruptible_unit() {
-        let watch = CancelWatch::new();
-        let scope = alas_opt::CancelScope::attach(Some(watch.flag()));
-        assert!(acknowledgement_bound(&watch.snapshot()).is_none());
-        scope.evaluation(|| std::thread::sleep(Duration::from_millis(2)));
-        scope.block(8, || std::thread::sleep(Duration::from_millis(20)));
-        let snapshot = watch.snapshot();
-        let bound = acknowledgement_bound(&snapshot).expect("both units were timed");
-        assert_eq!(
-            bound,
-            snapshot
-                .longest_block_s
-                .expect("the block was the longer unit")
-        );
-        assert!(bound > snapshot.longest_evaluation_s.unwrap_or(0.0));
-    }
-}
+#[path = "optimization_preset_audit/tests.rs"]
+mod tests;

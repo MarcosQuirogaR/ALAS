@@ -18,7 +18,7 @@
 
 use std::collections::BTreeMap;
 
-use alas_config::{presets, ConfigNode, EngineConfig, Entry, Kind, Node, DESIGN_VARIABLE_SPECS};
+use alas_config::{presets, ConfigNode, EngineConfig, Entry, Node, DESIGN_VARIABLE_SPECS};
 use serde_json::Value;
 
 /// The name of the reference aircraft every sandbox starts from.
@@ -1061,11 +1061,6 @@ pub fn grouped(
         }
     }
     groups
-}
-
-/// Whether the schema kind of a leaf is one the sandbox editors accept.
-pub fn schema_kind_is_supported(kind: Kind) -> bool {
-    !matches!(kind, Kind::Nested | Kind::Unsupported)
 }
 
 // Tests assert on values they construct here, so a failed expect is the

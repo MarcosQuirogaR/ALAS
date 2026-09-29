@@ -3,7 +3,6 @@
 
 // Ported from alas/reporting/visualization.py, figure_mission_aero_coefficients
 // (L4523-4568) and figure_mission_aero_forces (L4569-4616).
-// Reference: alas @ rust-port-baseline.
 
 //! Two 2x2-panel mission timelines: angle of attack/CL/CD/L-over-D, and
 //! throttle/lift/thrust/drag.

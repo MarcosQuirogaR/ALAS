@@ -63,3 +63,7 @@
 
 # Timestamp file OpenVSP writes into its working directory.
 /.vsptime
+
+# Local working state and internal reports. Never part of the project.
+/.agent/
+/.claude/

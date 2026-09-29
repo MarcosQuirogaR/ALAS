@@ -2,13 +2,11 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/config/mission_config.py (`MissionProfileConfig`)
-// Reference: alas @ rust-port-baseline.
 
 //! The speed, rate and altitude profile the mission flies.
 //!
 //! Takeoff, an initial climb, two step climbs, three cruise legs, a
-//! four-rung descent ladder and a landing. The defaults reproduce the
-//! reference implementation's original worked example, which is a long-range
+//! four-rung descent ladder and a landing. The defaults describe a long-range
 //! widebody profile; a different aircraft usually wants different numbers,
 //! which is why they are here and not in the mission builder.
 //!
@@ -21,9 +19,6 @@
 //!
 //! A descent rung whose altitude is below the arrival field's elevation is
 //! skipped rather than flown into the ground.
-//!
-//! The fields declare no explanations upstream; the ones here are this
-//! port's, as CONTRIBUTING.md requires, and they change no value.
 
 use serde::{Deserialize, Serialize};
 

@@ -64,8 +64,7 @@ fn every_registered_preset_reference_geometry_passes_the_layout_residuals() {
         let assessment = match assess_reference(preset) {
             Ok(assessment) => assessment,
             // A preset that cannot be sized at all under its default route is
-            // a separate finding (mass/mission model territory), not a
-            // layout-residual one.
+            // a mass/mission model matter, not a layout-residual one.
             Err(_) => continue,
         };
         for id in LAYOUT_IDS {

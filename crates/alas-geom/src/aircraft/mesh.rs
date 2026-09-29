@@ -4,23 +4,18 @@
 // Ported from reference geometry/geometry/wing.py, `Wing.mesh_thin_surface` and
 // `Wing.mesh_line`.
 // Upstream: reference geometry 4.2.8, MIT.
-// Reference: alas @ rust-port-baseline.
 
 //! [`Wing::mesh_thin_surface`] and [`Wing::mesh_line`]: meshing the mean
 //! camber surface of a wing into the `(points, faces)` format a vortex
 //! lattice solve reads its panels from.
 //!
-//! # Why this is in scope at all
+//! # Why this is in scope
 //!
-//! Nothing in `alas/`'s own source calls either method before P11 (Figures).
-//! But reference geometry's own `VortexLatticeMethod.run()` calls
+//! The upstream `VortexLatticeMethod.run()` calls
 //! `wing.mesh_thin_surface(method="quad", chordwise_resolution=...,
-//! chordwise_spacing_function=..., add_camber=True)` on every wing, every
-//! time it runs, and `alas/physics/aerodynamics.py`'s `_run_vlm` constructs
-//! and runs exactly that solver. That makes this row a P5 prerequisite (of
-//! `alas-aero::vlm`, which will call [`Wing::mesh_thin_surface`] the same
-//! way), not a P11-only row, see `docs/PORTING.md`'s corrected paragraph
-//! for this crate's Geometry section.
+//! chordwise_spacing_function=..., add_camber=True)` on every wing every
+//! time it runs, so `alas-aero::vlm` calls [`Wing::mesh_thin_surface`] the
+//! same way.
 //!
 //! # Scoped to `method="quad"`
 //!

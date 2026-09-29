@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/reporting/visualization.py (`figure_vn_diagram`)
-// Reference: alas @ rust-port-baseline.
 
 //! The CS-25 V-n (flight envelope) diagram: filled colour bands between the
 //! stall boundary and the limit/ultimate load factors, the hatched
