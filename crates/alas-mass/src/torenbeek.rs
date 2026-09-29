@@ -1,43 +1,19 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-// Ported from native aerodynamic model/library/weights/torenbeek_weights.py
-// Upstream: native aerodynamic model 4.2.8, MIT.
-// Reference: alas @ rust-port-baseline.
-
 //! Torenbeek's empirical wing and fuselage weight methods, from "Synthesis
 //! of Subsonic Airplane Design" (1976, Delft University Press), Chapter 8
-//! and Appendix C: reached through native aerodynamic model's translation of them,
-//! since `alas-mass::breakdown` (`alas/physics/mass.py`, a separate,
-//! not-yet-ported module) calls exactly two of its functions: [`mass_wing`]
-//! and [`mass_fuselage_simple`].
+//! and Appendix C. [`crate::breakdown`] calls exactly two of them:
+//! [`mass_wing`] and [`mass_fuselage_simple`].
 //!
 //! # Scope
 //!
-//! Upstream's `torenbeek_weights.py` has seven public functions; this module
-//! has two, plus [`mass_wing`]'s three private helpers. Left untranslated,
-//! because a grep of the whole `alas/` package (not only `mass.py`) finds no
-//! caller:
-//!
-//! - `mass_wing_simple`: a cruder wing weight model (Eq. 8-12), superseded
-//!   at its only prospective call site by the Appendix C method this module
-//!   implements.
-//! - `mass_fuselage`: dead code upstream; it raises `NotImplementedError`
-//!   partway through, after referencing `S_g`, `W_str` and `W_fr`, none of
-//!   which the function ever assigns. Not a `deviation-candidate`; there is
-//!   no behaviour here to reproduce, faithfully or otherwise, since the
-//!   function cannot run to completion.
-//! - `mass_propeller`: unused by the translated wing/fuselage path. Turboprop
-//!   propulsion mass is owned by [`crate::propulsion_mass`], where engine,
-//!   propeller and installation evidence remain explicit.
-//!
-//! `mass_wing`'s and `mass_wing_basic_structure`'s `return_dict: bool` is
-//! narrowed to the `float`-returning path: `mass.py` never passes
-//! `return_dict=True` at either of its call sites (checked directly against
-//! the reference), and `Union[float, Dict[str, float]]` has no natural Rust
-//! type. Every intermediate value `return_dict=True` would have exposed is
-//! still a named local in the functions below, not folded into one
-//! expression.
+//! The module implements the Appendix C wing method (basic structure, flaps,
+//! spoilers and speedbrakes) and the simple fuselage relation (Eq. 8-16).
+//! Turboprop propulsion mass is owned by [`crate::propulsion_mass`], where
+//! engine, propeller and installation evidence remain explicit. Every
+//! intermediate value of the wing method is a named local rather than being
+//! folded into one expression.
 
 use alas_geom::aircraft::fuselage::Fuselage;
 use alas_geom::aircraft::wing::Wing;
@@ -45,16 +21,12 @@ use alas_geom::aircraft::wing::Wing;
 /// `mass_wing_basic_structure`'s `k_e` default: Torenbeek's weight
 /// knockdown for a wing with no wing-mounted engines forward of the elastic
 /// axis (see that function's doc). [`mass_wing`] never overrides it, since
-/// it does not expose `k_e` as a parameter of its own, matching upstream,
-/// whose `mass_wing` never passes `k_e` through either.
+/// it does not expose `k_e` as a parameter of its own.
 pub const DEFAULT_K_E: f64 = 0.95;
 
-/// Evenly spaced points from `start` to `stop`, inclusive: NumPy's
-/// `linspace(start, stop, num, endpoint=True)`. Duplicated from
-/// `alas_geom::aircraft::spacing::linspace`, which is private to that crate's
-/// aircraft module and not reachable from here (see that module's other
-/// callers, `alas-geom::airfoil_library` and `alas-geom::wing_structure`,
-/// which duplicate it for the same reason).
+/// Evenly spaced points from `start` to `stop`, inclusive, with the last
+/// point set to `stop` exactly. The equivalent in `alas_geom` is private to
+/// that crate.
 fn linspace(start: f64, stop: f64, num: usize) -> Vec<f64> {
     if num == 0 {
         return Vec::new();
@@ -69,54 +41,32 @@ fn linspace(start: f64, stop: f64, num: usize) -> Vec<f64> {
     values
 }
 
-/// The root cross-section's thickness-to-chord ratio, every helper below
-/// reads `wing.xsecs[0].airfoil.max_thickness()` at upstream's default
-/// sample, `np.linspace(0, 1, 101)`.
+/// The root cross-section's thickness-to-chord ratio, sampled at 101 evenly
+/// spaced chord stations; every helper below reads it through this function.
 fn root_thickness_to_chord(wing: &Wing) -> f64 {
     let sample = linspace(0.0, 1.0, 101);
     wing.xsecs[0].airfoil.max_thickness(&sample)
 }
 
-/// The cosine of an angle given in degrees: `native aerodynamic model.numpy.cosd`.
+/// The cosine of an angle given in degrees.
 fn cosd(degrees: f64) -> f64 {
     degrees.to_radians().cos()
 }
 
-/// The sine of an angle given in degrees: `native aerodynamic model.numpy.sind`.
+/// The sine of an angle given in degrees.
 fn sind(degrees: f64) -> f64 {
     degrees.to_radians().sin()
 }
 
-/// The mass of a wing's high-lift devices (flaps only; leading-edge devices
-/// are stubbed to zero upstream): `mass_wing_high_lift_devices`, Torenbeek
-/// Eq. C-10.
-///
-/// `k_f1` and `k_f2` (upstream's flap-configuration factors) are hardcoded
-/// to `1.0`, their upstream defaults: [`mass_wing`] never overrides them.
-///
-/// Production callers pass the configured flap area through
-/// [`mass_wing_high_lift_devices_with_area`]; this upstream-shaped entry point
-/// exists for the parity fixture, which reads the area off the wing.
-#[cfg(test)]
-fn mass_wing_high_lift_devices(
-    wing: &Wing,
-    max_airspeed_for_flaps: f64,
-    flap_deflection_angle: f64,
-) -> f64 {
-    mass_wing_high_lift_devices_with_area(
-        wing,
-        max_airspeed_for_flaps,
-        flap_deflection_angle,
-        wing.control_surface_area(),
-    )
-}
-
 /// High-lift-device mass with the configured flap planform area.
 ///
+/// Leading-edge devices carry no mass in this model. `k_f1` and `k_f2`, the
+/// flap-configuration factors, are fixed at 1.0.
+///
 /// `Wing` deliberately has no drawing/control-surface subgeometry, so its
-/// legacy `control_surface_area()` method is always zero. Product mass
-/// analysis supplies the area derived from `ControlSurfacesConfig` through
-/// this seam instead of silently assigning zero high-lift mass.
+/// `control_surface_area()` method is always zero. Product mass analysis
+/// supplies the area derived from `ControlSurfacesConfig` through this seam
+/// instead of silently assigning zero high-lift mass.
 fn mass_wing_high_lift_devices_with_area(
     wing: &Wing,
     max_airspeed_for_flaps: f64,
@@ -155,11 +105,10 @@ fn mass_wing_high_lift_devices_with_area(
 /// and ribs, without any movable surfaces) `mass_wing_basic_structure`,
 /// Torenbeek Appendix C.
 ///
-/// `return_dict` is narrowed away; see the module doc. `strut_y_location` is
-/// `None` at every call site `mass.py` reaches today, but stays a real
+/// `strut_y_location` is `None` at every current call site, but stays a real
 /// `Option<f64>` because Torenbeek Eq. C-5's branch on it is physically
 /// meaningful for a strut-braced wing, not merely an unused parameter.
-#[allow(clippy::too_many_arguments)] // mirrors upstream's own nine-parameter signature
+#[allow(clippy::too_many_arguments)] // one argument per Appendix C input
 fn mass_wing_basic_structure(
     wing: &Wing,
     design_mass_togw: f64,
@@ -170,8 +119,8 @@ fn mass_wing_basic_structure(
     strut_y_location: Option<f64>,
     k_e: f64,
 ) -> f64 {
-    // Preserve the translated Torenbeek structural-span convention here;
-    // `reference_span()` belongs to aircraft-level aerodynamic references.
+    // Torenbeek's structural-span convention: the developed span, not the
+    // aircraft-level aerodynamic `reference_span()`.
     let span = wing.unfolded_span();
     let sweep_half_chord = wing.mean_sweep_angle(0.5);
     let cos_sweep_half_chord = cosd(sweep_half_chord);
@@ -216,12 +165,9 @@ fn mass_wing_basic_structure(
 /// The mass of the wing's spoilers and speedbrakes:
 /// `mass_wing_spoilers_and_speedbrakes`.
 ///
-/// Upstream's signature takes a `wing` parameter that its body never reads:
-/// the commented-out alternative, `np.softmax(12.2 * wing.area(), 0.015 *
-/// mass_basic_wing)`, was replaced with a flat `0.015 * mass_basic_wing`
-/// (upstream's own comment: the wetted-area figure "comes out too high"),
-/// leaving the parameter dead. Reproduced faithfully, including the ignored
-/// argument.
+/// The mass is a flat 1.5 percent of the basic wing structure; the wing
+/// argument is not read. A wetted-area-based alternative was rejected because
+/// it comes out too high.
 fn mass_wing_spoilers_and_speedbrakes(_wing: &Wing, mass_basic_wing: f64) -> f64 {
     0.015 * mass_basic_wing
 }
@@ -302,82 +248,12 @@ pub fn wing_secondary_mass_breakdown_with_control_surface_area(
     }
 }
 
-/// Return only the modeled Torenbeek secondary wing mass, kg, using the
-/// reference-compatible cantilever/no-strut options.
-///
-/// This eight-argument convenience wrapper matches the mass arguments used by
-/// the legacy component buildup. It excludes the empirical basic
-/// spar/skin/rib structure and does not assert that the returned two-term sum
-/// exhausts the physical non-box wing inventory. Call
-/// [`wing_secondary_mass_with_structure_options`] when the product gear or
-/// strut architecture must be reflected in the spoiler term.
-#[allow(clippy::too_many_arguments)] // one argument per Torenbeek correlation input
-pub fn wing_secondary_mass_with_control_surface_area(
-    wing: &Wing,
-    design_mass_togw: f64,
-    ultimate_load_factor: f64,
-    suspended_mass: f64,
-    never_exceed_airspeed: f64,
-    max_airspeed_for_flaps: f64,
-    flap_deflection_angle: f64,
-    control_surface_area_m2: f64,
-) -> f64 {
-    wing_secondary_mass_breakdown_with_control_surface_area(
-        wing,
-        design_mass_togw,
-        ultimate_load_factor,
-        suspended_mass,
-        never_exceed_airspeed,
-        max_airspeed_for_flaps,
-        false,
-        flap_deflection_angle,
-        None,
-        control_surface_area_m2,
-    )
-    .total_kg
-}
-
-/// Return only the modeled Torenbeek secondary wing mass, kg, with explicit
-/// gear and strut options.
-///
-/// This is the option-complete counterpart to
-/// [`wing_secondary_mass_with_control_surface_area`].
-#[allow(clippy::too_many_arguments)] // one argument per Torenbeek correlation input
-pub fn wing_secondary_mass_with_structure_options(
-    wing: &Wing,
-    design_mass_togw: f64,
-    ultimate_load_factor: f64,
-    suspended_mass: f64,
-    never_exceed_airspeed: f64,
-    max_airspeed_for_flaps: f64,
-    main_gear_mounted_to_wing: bool,
-    flap_deflection_angle: f64,
-    strut_y_location: Option<f64>,
-    control_surface_area_m2: f64,
-) -> f64 {
-    wing_secondary_mass_breakdown_with_control_surface_area(
-        wing,
-        design_mass_togw,
-        ultimate_load_factor,
-        suspended_mass,
-        never_exceed_airspeed,
-        max_airspeed_for_flaps,
-        main_gear_mounted_to_wing,
-        flap_deflection_angle,
-        strut_y_location,
-        control_surface_area_m2,
-    )
-    .total_kg
-}
-
 /// The mass of a wing, according to Torenbeek's "Synthesis of Subsonic
 /// Airplane Design", 1976, Appendix C: "Prediction of Wing Structural
 /// Weight", `mass_wing`.
 ///
-/// `return_dict` is narrowed away; see the module doc. `k_e`
-/// (`mass_wing_basic_structure`'s engine-mounting knockdown) is fixed at
-/// [`DEFAULT_K_E`], since `mass_wing` itself never exposes it as a
-/// parameter, matching upstream.
+/// `k_e` (`mass_wing_basic_structure`'s engine-mounting knockdown) is fixed at
+/// [`DEFAULT_K_E`], since `mass_wing` does not expose it as a parameter.
 ///
 /// # Arguments
 ///
@@ -387,7 +263,7 @@ pub fn wing_secondary_mass_with_structure_options(
 /// - `never_exceed_airspeed`: `m/s`, used for the flutter stiffness penalty.
 /// - `max_airspeed_for_flaps`: `m/s`, the flap placard speed.
 /// - `flap_deflection_angle`: the maximum flap deflection, degrees.
-#[allow(clippy::too_many_arguments)] // mirrors upstream's own signature
+#[allow(clippy::too_many_arguments)] // one argument per Appendix C input
 pub fn mass_wing(
     wing: &Wing,
     design_mass_togw: f64,
@@ -415,10 +291,10 @@ pub fn mass_wing(
 
 /// Mass of a wing using an explicitly configured trailing-edge flap area.
 ///
-/// The ordinary [`mass_wing`] entry point remains reference-compatible. This
-/// product seam is used by the checked mass path, where control-surface
-/// configuration is available and must contribute to the high-lift mass.
-#[allow(clippy::too_many_arguments)] // one argument per Torenbeek correlation input
+/// [`mass_wing`] uses the wing's own (zero) control-surface area. This seam is
+/// used by the checked mass path, where control-surface configuration is
+/// available and must contribute to the high-lift mass.
+#[allow(clippy::too_many_arguments)]
 pub fn mass_wing_with_control_surface_area(
     wing: &Wing,
     design_mass_togw: f64,
@@ -458,11 +334,8 @@ fn mean(values: &[f64]) -> f64 {
     values.iter().sum::<f64>() / values.len() as f64
 }
 
-/// native aerodynamic model's `numpy.softmax`, restricted to the `softness`-parameterized
-/// path with two or more arguments: the only way [`mass_fuselage_simple`],
-/// this module's one caller, ever invokes it (`hardness` is never supplied
-/// upstream, and its `n_specified_arguments` validation and the empty/
-/// single-argument `ValueError` are accordingly not reproduced).
+/// Smooth maximum of two or more values with the given `softness`, the only
+/// form [`mass_fuselage_simple`], this module's one caller, needs.
 fn softmax(values: &[f64], softness: f64) -> f64 {
     let scaled: Vec<f64> = values.iter().map(|&v| v / softness).collect();
     let max = scaled.iter().copied().fold(f64::NEG_INFINITY, f64::max);
@@ -488,6 +361,21 @@ pub fn mass_fuselage_simple(
 
     0.23 * (never_exceed_airspeed * wing_to_tail_distance / (max_width + max_height)).sqrt()
         * fuselage.area_wetted().powf(1.2)
+}
+
+/// High-lift-device mass at the wing's own control-surface area.
+#[cfg(test)]
+fn mass_wing_high_lift_devices(
+    wing: &Wing,
+    max_airspeed_for_flaps: f64,
+    flap_deflection_angle: f64,
+) -> f64 {
+    mass_wing_high_lift_devices_with_area(
+        wing,
+        max_airspeed_for_flaps,
+        flap_deflection_angle,
+        wing.control_surface_area(),
+    )
 }
 
 #[cfg(test)]
@@ -609,13 +497,13 @@ mod tests {
     #[test]
     fn configured_flap_area_adds_high_lift_mass_to_the_product_wing() {
         let wing = rectangular_wing();
-        let legacy = mass_wing(
+        let plain = mass_wing(
             &wing, 60_000.0, 3.75, 20_000.0, 180.0, 90.0, false, 30.0, None,
         );
         let product = mass_wing_with_control_surface_area(
             &wing, 60_000.0, 3.75, 20_000.0, 180.0, 90.0, false, 30.0, None, 10.0,
         );
-        assert!(product > legacy, "product={product}, legacy={legacy}");
+        assert!(product > plain, "product={product}, plain={plain}");
     }
 
     #[test]
@@ -666,34 +554,6 @@ mod tests {
             breakdown.high_lift_devices_kg + breakdown.spoilers_and_speedbrakes_kg
         );
         assert!((total - (basic + breakdown.total_kg)).abs() < 1.0e-9);
-        assert_eq!(
-            wing_secondary_mass_with_structure_options(
-                arguments.0,
-                arguments.1,
-                arguments.2,
-                arguments.3,
-                arguments.4,
-                arguments.5,
-                arguments.6,
-                arguments.7,
-                arguments.8,
-                arguments.9,
-            ),
-            breakdown.total_kg
-        );
-        assert_eq!(
-            wing_secondary_mass_with_control_surface_area(
-                arguments.0,
-                arguments.1,
-                arguments.2,
-                arguments.3,
-                arguments.4,
-                arguments.5,
-                arguments.7,
-                arguments.9,
-            ),
-            breakdown.total_kg
-        );
     }
 
     #[test]
@@ -774,10 +634,9 @@ mod parity_helpers {
     use alas_testkit::{Comparison, Tier};
     use serde::Deserialize;
 
-    /// The same three wings `golden/generators/gen_mass_torenbeek.py` builds,
-    /// rebuilt from its docstring's literal values: duplicated from
-    /// `tests/parity_torenbeek.rs` because that file is a separate
-    /// compilation unit with no path back into this one.
+    /// The three wings the `torenbeek` mass fixture is generated from,
+    /// duplicated from `tests/parity_torenbeek.rs` because that file is a
+    /// separate compilation unit with no path back into this one.
     fn build_main_wing() -> Wing {
         let root_z_m = -2.1;
         let break_z_m = -0.3;
@@ -899,7 +758,7 @@ mod parity_helpers {
     }
 
     #[test]
-    fn mass_wing_high_lift_devices_matches_native_aerodynamic_model() {
+    fn mass_wing_high_lift_devices_matches_the_fixture() {
         let fixture: Fixture = alas_testkit::load("mass", "torenbeek");
 
         let mut comparison = Comparison::new(

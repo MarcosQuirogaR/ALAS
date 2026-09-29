@@ -5,7 +5,6 @@
 // (get_kulfan_parameters) and native aerodynamic model/geometry/airfoil/kulfan_airfoil.py
 // (KulfanAirfoil.upper_coordinates / lower_coordinates / to_airfoil).
 // Upstream: native aerodynamic model 4.2.8, MIT.
-// Reference: alas @ rust-port-baseline.
 
 //! The Kulfan (CST with LEM) airfoil parameterization: eighteen numbers that
 //! stand for a whole airfoil, and the least-squares fit that finds them.

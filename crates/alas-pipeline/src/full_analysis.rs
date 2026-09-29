@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-// Ported from alas/analysis/full_analysis.py
-// Reference: alas @ rust-port-baseline.
-
 //! High-fidelity aerodynamic, mass and stability analysis of a candidate design.
 //!
 //! [`FullAnalysis::run`] builds the 3-D aircraft geometry, calculates the
@@ -18,20 +15,22 @@ use std::collections::HashMap;
 use std::f64::consts::PI;
 
 use alas_aero::analysis::{AeroAnalysis, PolarSweep, TrimPoint};
+use alas_aero::vlm::VlmSystem;
 use alas_atmo::Atmosphere;
 use alas_config::design_variables::DesignVector;
 use alas_config::{presets, AlasConfig};
 use alas_geom::aircraft::airplane::Airplane;
 use alas_geom::builder::AircraftBuilder;
-use alas_mass::breakdown::{FlopsMassBuildup, MassBreakdown, MassCoordinateModel, MassCoordinates};
+use alas_mass::breakdown::{FlopsMassBuildup, MassCoordinateModel};
 use alas_math::lstsq::least_squares;
 use alas_opt::envelope::{assess_model_cg_envelope, check_cg_envelope};
 use alas_payload::build::{build_payload_layout, build_payload_layout_reference_compatibility};
 use alas_payload::layout::PayloadLayout;
 use alas_payload::oew::oew_and_cg;
+use alas_stab::neutral_point::NeutralPointConditions;
 use alas_stab::trim::{
-    neutral_point, neutral_point_reference_compatibility, stability_and_trim,
-    stability_and_trim_reference_compatibility,
+    neutral_point_reference_compatibility_with_system, neutral_point_with_system,
+    stability_and_trim_reference_compatibility_with_system, stability_and_trim_with_system,
 };
 use serde::{Deserialize, Serialize};
 
@@ -160,18 +159,35 @@ pub struct AnalysisReport {
     /// Reference-compatibility analyses preserve the frozen Python Boolean;
     /// product analyses use the hard physical floor and typed gear checks.
     pub cg_envelope_ok: Option<bool>,
+    /// Neutral-point conditions set beside `x_neutral_point` (`ac.md`).
+    pub neutral_point_conditions: Option<NeutralPointConditions>,
 }
 
 impl AnalysisReport {
-    /// Extract the view required by mission vehicle generation.
-    pub fn mission_view(&self) -> alas_mission::ReportView {
-        alas_mission::ReportView {
-            trimmed_l_over_d: self.trimmed_design_point.as_ref().map(|p| p.l_over_d),
-            plain_l_over_d: Some(self.design_point.l_over_d),
-            design_vector: serde_json::to_value(self.design).unwrap_or_default(),
-            geometry_summary: serde_json::to_value(&self.geometry_summary).unwrap_or_default(),
-            component_masses: serde_json::to_value(&self.component_masses).unwrap_or_default(),
+    /// The mission-sized takeoff mass this report was bound to, in kg, when it
+    /// came from a sized run (`FullAnalysis::run_at_sized_takeoff_mass`);
+    /// `None` for an unsized report, whose only mass basis is the declared
+    /// `requirements.mtow_kg`. Every downstream consumer reads its takeoff
+    /// mass here so the declared limit is never mistaken for the flown mass.
+    pub fn sized_takeoff_mass_kg(&self) -> Option<f64> {
+        let is_sized = self
+            .geometry_summary
+            .get("analysis_mass_basis_is_sized")
+            .is_some_and(|value| value.is_finite() && *value > 0.5);
+        if !is_sized {
+            return None;
         }
+        self.geometry_summary
+            .get("analysis_mass_basis_kg")
+            .copied()
+            .filter(|value| value.is_finite() && *value > 0.0)
+    }
+
+    /// The takeoff mass a downstream figure or export analyses, in kg: the
+    /// sized mass when the report carries one, else the declared
+    /// `fallback_mtow_kg` (the unsized, pre-optimization basis).
+    pub fn analysis_takeoff_mass_kg(&self, fallback_mtow_kg: f64) -> f64 {
+        self.sized_takeoff_mass_kg().unwrap_or(fallback_mtow_kg)
     }
 }
 
@@ -183,12 +199,15 @@ pub struct FullAnalysis {
     reference_compatibility: bool,
 }
 
+mod maps;
+mod np_conditions;
 mod station_coordinates;
+use maps::{breakdown_to_map, coordinates_to_map};
 pub(crate) use station_coordinates::station_coordinates_for;
 pub use station_coordinates::StationPlacementFailure;
 
-mod design_point;
-use design_point::design_point_nearest;
+mod polar_point;
+use polar_point::design_point_nearest;
 
 /// The one-cabin-per-case rule, shared rather than mirrored.
 ///
@@ -203,171 +222,11 @@ use design_point::design_point_nearest;
 /// on `alas-mass`, so that direction is a cycle.
 pub mod cabin_sync;
 
-include!("full_analysis_parts/part_01.rs");
-include!("full_analysis_parts/part_02.rs");
-
-fn breakdown_to_map(mb: &MassBreakdown) -> HashMap<String, f64> {
-    mb.as_pairs()
-        .into_iter()
-        .map(|(k, v)| (k.to_owned(), v))
-        .collect()
-}
-
-fn coordinates_to_map(mc: &MassCoordinates) -> HashMap<String, [f64; 3]> {
-    mc.as_pairs()
-        .into_iter()
-        .map(|(k, v)| (k.to_owned(), v))
-        .collect()
-}
-
+mod design_point;
+mod run;
 #[cfg(test)]
 // Failed expectations and unwraps here are failed test assertions.
 #[allow(clippy::unwrap_used, clippy::expect_used)]
-mod tests {
-    use super::{FullAnalysis, PolarFitStatus};
-    use alas_aero::analysis::PolarSweep;
-    use alas_config::design_variables::DesignVector;
-    use alas_config::{AlasConfig, AnalysisConfig};
-    use alas_geom::builder::AircraftBuilder;
+mod tests;
 
-    fn sweep(cl: Vec<f64>, cd: Vec<f64>) -> PolarSweep {
-        let n = cl.len();
-        PolarSweep {
-            alpha_deg: vec![0.0; n],
-            geometric_alpha_deg: vec![0.0; n],
-            cl,
-            cd,
-            cd_induced: vec![0.0; n],
-            cd_wave: vec![0.0; n],
-            cd_parasite: vec![0.0; n],
-            cm: vec![0.0; n],
-            l_over_d: vec![0.0; n],
-        }
-    }
-
-    #[test]
-    fn product_full_analysis_preserves_the_live_engine_configuration() {
-        let mut config = AlasConfig::default();
-        config.geometry.engine.engine_name = "Trent 900".to_owned();
-        config.geometry.engine.nacelle_profile = vec![(0.0, 0.33), (2.5, 1.0), (6.2, 0.41)];
-        config.geometry.engine.radius_scale_m = 1.91;
-        config
-            .geometry
-            .engine
-            .turbofan
-            .as_mut()
-            .unwrap()
-            .rated_thrust_kn = 399.0;
-        config.geometry.engine.bypass_ratio = 9.2;
-        config.geometry.engine.overall_pressure_ratio = 43.0;
-        config.geometry.engine.fan_pressure_ratio = 1.59;
-        config.geometry.engine.turbine_inlet_temp_k = 1712.0;
-        config.geometry.engine.cruise_tsfc_kg_kgf_hr = 0.481;
-        config.geometry.engine.fan_diameter_m = 3.11;
-        let expected = config.geometry.engine.clone();
-
-        let analysis = FullAnalysis::new(config);
-
-        assert_eq!(analysis.config.geometry.engine, expected);
-        let builder = AircraftBuilder::new(Some(analysis.config.geometry.clone()));
-        assert_eq!(builder.geometry.engine, expected);
-    }
-
-    #[test]
-    fn degenerate_polar_fit_preserves_constants_with_explicit_status() {
-        let fit = FullAnalysis::fit_polar_values(
-            &sweep(vec![0.0], vec![0.03]),
-            10.0,
-            &AnalysisConfig::default(),
-        );
-
-        assert_eq!(fit.status, PolarFitStatus::FallbackInsufficientPoints);
-        assert_eq!(fit.status.as_str(), "fallback_insufficient_points");
-        assert_eq!(fit.cd0, 0.02);
-        assert_eq!(fit.k, 0.04);
-    }
-
-    #[test]
-    fn rank_deficient_polar_fit_preserves_constants_with_explicit_status() {
-        let fit = FullAnalysis::fit_polar_values(
-            &sweep(vec![0.4, 0.4, 0.4], vec![0.03, 0.04, 0.05]),
-            10.0,
-            &AnalysisConfig::default(),
-        );
-
-        assert_eq!(fit.status, PolarFitStatus::FallbackLeastSquaresFailure);
-        assert_eq!(fit.status.as_str(), "fallback_least_squares_failure");
-        assert_eq!(fit.cd0, 0.02);
-        assert_eq!(fit.k, 0.04);
-    }
-
-    #[test]
-    fn nonfinite_selected_polar_values_use_the_least_squares_fallback() {
-        for invalid_cd in [f64::NAN, f64::INFINITY] {
-            let fit = FullAnalysis::fit_polar_values(
-                &sweep(vec![0.35, 0.45, 0.55], vec![0.0249, invalid_cd, 0.0321]),
-                10.0,
-                &AnalysisConfig::default(),
-            );
-
-            assert_eq!(fit.status, PolarFitStatus::FallbackLeastSquaresFailure);
-            assert_eq!(fit.cd0, 0.02);
-            assert_eq!(fit.k, 0.04);
-        }
-    }
-
-    #[test]
-    fn nonfinite_least_squares_solution_uses_the_least_squares_fallback() {
-        let config = AnalysisConfig {
-            polar_fit_cl_min: 0.0,
-            polar_fit_cl_max: f64::MAX,
-            ..AnalysisConfig::default()
-        };
-
-        // These source values are finite, but CL squared overflows while building the
-        // fit matrix. The non-finite QR result must not acquire fitted status.
-        let fit = FullAnalysis::fit_polar_values(
-            &sweep(vec![1.0e200, 2.0e200, 3.0e200], vec![0.02, 0.03, 0.04]),
-            10.0,
-            &config,
-        );
-
-        assert_eq!(fit.status, PolarFitStatus::FallbackLeastSquaresFailure);
-        assert_eq!(fit.cd0, 0.02);
-        assert_eq!(fit.k, 0.04);
-    }
-
-    #[test]
-    fn successful_fits_identify_their_window_provenance() {
-        let primary = FullAnalysis::fit_polar_values(
-            &sweep(vec![0.35, 0.45, 0.55], vec![0.0249, 0.0281, 0.0321]),
-            10.0,
-            &AnalysisConfig::default(),
-        );
-        assert_eq!(primary.status, PolarFitStatus::Fitted);
-
-        let fallback_window = FullAnalysis::fit_polar_values(
-            &sweep(vec![0.2, 0.4], vec![0.0216, 0.0264]),
-            10.0,
-            &AnalysisConfig::default(),
-        );
-        assert_eq!(fallback_window.status, PolarFitStatus::FittedFallbackWindow);
-    }
-
-    #[test]
-    fn successful_full_analysis_retains_the_detailed_payload_layout() {
-        let report = FullAnalysis::new(AlasConfig::default())
-            .run(&DesignVector::default(), false)
-            .unwrap_or_else(|error| {
-                panic!("default full analysis should resolve payload: {error}")
-            });
-
-        let layout = match report.payload_layout.as_ref() {
-            Some(layout) => layout,
-            None => panic!("a successful full analysis must carry its detailed layout"),
-        };
-        assert!(layout.total_mass.is_finite());
-        assert!(layout.cg_x.is_finite());
-        assert!(layout.cg_y.is_finite());
-    }
-}
+pub(crate) use run::effective_structural_payload_limit_kg;

@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/config/solver_presets.py
-// Reference: alas @ rust-port-baseline.
 
 //! Named speed-against-thoroughness settings for the design search.
 //!

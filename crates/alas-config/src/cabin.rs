@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/config/cabin_config.py
-// Reference: alas @ rust-port-baseline.
 
 //! What the aircraft carries, and where in the fuselage it sits.
 //!

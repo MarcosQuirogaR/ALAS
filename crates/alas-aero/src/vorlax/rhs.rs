@@ -4,7 +4,6 @@
 // Ported from mission analysis model/Methods/Aerodynamics/Common/Fidelity_Zero/Lift/
 // compute_RHS_matrix.py.
 // Upstream: mission analysis model 2.5.2, LGPL-2.1.
-// Reference: alas @ rust-port-baseline.
 
 //! The boundary condition: what the flow does at each control point before
 //! any vortex is switched on.

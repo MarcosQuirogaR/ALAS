@@ -5,7 +5,6 @@
 //   induced_drag_aircraft.py, compressibility_drag_wing.py,
 //   compressibility_drag_wing_total.py and miscellaneous_drag_aircraft_ESDU.py
 // Upstream: mission analysis model 2.5.2, LGPL-2.1.
-// Reference: alas @ rust-port-baseline.
 
 //! The three contributions parasite drag does not cover: induced,
 //! compressibility and excrescence drag.

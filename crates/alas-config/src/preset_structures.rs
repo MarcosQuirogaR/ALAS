@@ -67,13 +67,11 @@ pub fn config_for(preset_name: &str) -> Option<StructuresConfig> {
         // document on file states it.
         // Assigned as an effective isotropic proxy, not a verified material.
         // ACAP D6-58333 Rev Q contains ZERO occurrences of composite/carbon fibre/CFRP/laminate.
-        // The previously cited boeing-787-acap-p18.png is section 2.1.1 General Characteristics for the
-        // 787-8: weights and seating, no material content, wrong variant.
         // Note on the composite caps: CFRP QI (450 MPa), NOT CFRP UD (900 MPa). The 900 MPa single
         // allowable is a tension figure; real laminate caps in compression are limited far below it by
         // fibre micro-buckling and compression-after-impact. Using CFRP UD there would buy a 4.2x cap
         // mass reduction from a number that does not hold in compression, which is exactly the
-        // residual-fitting the audit rejects. QI is the conservative in-database proxy.
+        // residual fitting. QI is the conservative in-database proxy.
         "B787-9" => Some(StructuresConfig {
             skin_material: "CFRP QI".to_owned(),
             spar_web_material: "CFRP QI".to_owned(),
@@ -90,7 +88,7 @@ pub fn config_for(preset_name: &str) -> Option<StructuresConfig> {
         // allowable is a tension figure; real laminate caps in compression are limited far below it by
         // fibre micro-buckling and compression-after-impact. Using CFRP UD there would buy a 4.2x cap
         // mass reduction from a number that does not hold in compression, which is exactly the
-        // residual-fitting the audit rejects. QI is the conservative in-database proxy.
+        // residual fitting. QI is the conservative in-database proxy.
         "A220-300" => Some(StructuresConfig {
             skin_material: "CFRP QI".to_owned(),
             spar_web_material: "CFRP QI".to_owned(),

@@ -5,10 +5,10 @@
 //! [`lshade_de::Settings`] and runs the one kernel.
 //!
 //! `optimizer.solver.method` is validated at the configuration boundary
-//! (`alas_config::SolverSettings::is_supported_method`) and any saved legacy
-//! token (`sqp`, `nsga2`, `turbo_1`, `cma_es`, `feasibility_first_de`) is
-//! migrated to `differential_evolution` when a configuration document loads
-//! (`alas_config::settings_load_notes`), with a note the caller can surface.
+//! (`alas_config::SolverSettings::is_supported_method`); saved tokens for
+//! other algorithms are migrated to `differential_evolution` when a
+//! configuration document loads (`alas_config::settings_load_notes`), with a
+//! note the caller can surface.
 //! By the time a method string reaches this module it names the one kernel
 //! this build runs, so there is nothing left to dispatch here.
 //!
@@ -20,6 +20,7 @@ use alas_config::SolverSettings;
 
 use crate::cancellation::CancelScope;
 
+pub(crate) use super::lshade_de::Outcome;
 use super::{lshade_de, EvaluateBatch, ScoredPoint};
 
 /// The smallest population L-SHADE ever runs at (see
@@ -50,6 +51,9 @@ pub(crate) struct Settings {
     /// Candidates per cancellation check: the resolved worker count, so the
     /// stopping bound is the one parallel block in flight.
     pub(crate) block_size: usize,
+    /// Local initialization radius as a fraction of each free bound width.
+    /// `None` requests a wholly global Latin-hypercube initialization.
+    pub(crate) seed_radius: Option<f64>,
 }
 
 impl Settings {
@@ -57,9 +61,8 @@ impl Settings {
     /// variables against an already-resolved `seed`.
     ///
     /// `solver.population_size` is a multiplier on the number of design
-    /// variables, matching the setting's own label and the frozen SciPy
-    /// semantics the legacy driver was ported from, so the sixteen-variable
-    /// product space at the default multiplier of six starts at ninety-six
+    /// free variables. Locked dimensions require no search population, so a sixteen-variable
+    /// fully free space at the default multiplier of six starts at ninety-six
     /// candidates and shrinks from there. `solver.max_iterations` is the
     /// generation count; zero is legitimate and records the initial
     /// population only.
@@ -68,7 +71,11 @@ impl Settings {
         let population = multiplier
             .saturating_mul(dimension.max(1))
             .max(MINIMUM_POPULATION);
-        let generations = usize::try_from(solver.max_iterations.max(0)).unwrap_or(0);
+        let generations = if dimension == 0 {
+            0
+        } else {
+            usize::try_from(solver.max_iterations.max(0)).unwrap_or(0)
+        };
         let stagnation_generations =
             usize::try_from(solver.convergence_stagnation_generations.max(1)).unwrap_or(1);
         Self {
@@ -78,6 +85,9 @@ impl Settings {
             spread_tolerance: solver.tolerance.max(0.0),
             stagnation_generations,
             block_size: solver.resolved_workers().max(1),
+            seed_radius: solver
+                .seed_near_initial_design
+                .then_some(solver.seed_perturbation_fraction.clamp(0.0, 1.0)),
         }
     }
 
@@ -97,6 +107,7 @@ impl Settings {
             spread_tolerance: self.spread_tolerance,
             stagnation_generations: self.stagnation_generations,
             block_size: self.block_size,
+            seed_radius: self.seed_radius,
         }
     }
 }
@@ -173,6 +184,7 @@ mod tests {
             spread_tolerance: 0.01,
             stagnation_generations: 5,
             block_size: usize::MAX,
+            seed_radius: Some(0.05),
         }
     }
 
@@ -188,6 +200,7 @@ mod tests {
         assert_eq!(resolved.generations, 15);
         assert_eq!(resolved.seed, 7);
         assert_eq!(resolved.evaluation_budget(), 96 + 96 * 15);
+        assert_eq!(Settings::from_solver(&solver, 0, 7).generations, 0);
 
         solver.population_size = 0;
         solver.max_iterations = -3;

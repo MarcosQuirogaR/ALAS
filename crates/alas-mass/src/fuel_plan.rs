@@ -170,6 +170,8 @@ pub struct LegEstimate {
 /// Why a burn model could not price a quantity.
 #[derive(Debug, Clone, PartialEq)]
 pub enum FuelModelError {
+    /// Work stopped by the caller; no physical feasibility conclusion exists.
+    Cancelled,
     /// The mass asked for lies outside the model's validity.
     MassOutOfRange {
         /// The mass, kg.
@@ -199,6 +201,7 @@ pub enum FuelModelError {
 impl fmt::Display for FuelModelError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::Cancelled => write!(formatter, "fuel evaluation cancelled"),
             Self::MassOutOfRange { mass_kg } => {
                 write!(
                     formatter,
@@ -231,6 +234,16 @@ impl std::error::Error for FuelModelError {}
 /// Every method takes the mass at the start of what it prices, because fuel
 /// flow at a given speed depends on the lift the aircraft has to make.
 pub trait FuelBurnModel {
+    /// Opt in only when identical inputs give identical answers for this fixed
+    /// model throughout a dispatch solve. Mutable/stochastic models keep false.
+    fn deterministic_for_dispatch(&self) -> bool {
+        false
+    }
+    /// Checked before dispatch evaluations, including exact memoized hits.
+    fn check_cancellation(&self) -> Result<(), FuelModelError> {
+        Ok(())
+    }
+
     /// Fuel and time from takeoff to landing over `range_m`, starting at
     /// `takeoff_mass_kg`.
     fn trip(&self, takeoff_mass_kg: f64, range_m: f64) -> Result<LegEstimate, FuelModelError>;

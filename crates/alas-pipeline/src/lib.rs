@@ -66,12 +66,12 @@ pub use cabin_scene::{
     export_cabin_scene, CabinScene, CabinSceneInputs, CABIN_SCENE_SCHEMA_VERSION,
 };
 pub use cpacs::{
-    export_cpacs, export_cpacs_with_analysis, read_cpacs, read_cpacs_file, render_cpacs_v35,
-    write_cpacs_run_manifest, CpacsAircraft, CpacsAircraftError, CpacsDocument, CpacsEngine,
-    CpacsEnginePosition, CpacsExportError, CpacsExportResult, CpacsFuselage, CpacsFuselageElement,
-    CpacsFuselageProfile, CpacsFuselageSection, CpacsHeader, CpacsReadError, CpacsRunManifest,
-    CpacsSegment, CpacsTransformation, CpacsVersionInfo, CpacsWing, CpacsWingAirfoil,
-    CpacsWingElement, CpacsWingSection, CPACS_35_VERSION, CPACS_V35_SCHEMA_URL,
+    export_cpacs, export_cpacs_document, export_cpacs_with_analysis, read_cpacs, read_cpacs_file,
+    render_cpacs_v35, write_cpacs_run_manifest, CpacsAircraft, CpacsAircraftError, CpacsDocument,
+    CpacsEngine, CpacsEnginePosition, CpacsExportError, CpacsExportResult, CpacsFuselage,
+    CpacsFuselageElement, CpacsFuselageProfile, CpacsFuselageSection, CpacsHeader, CpacsReadError,
+    CpacsRunManifest, CpacsSegment, CpacsTransformation, CpacsVersionInfo, CpacsWing,
+    CpacsWingAirfoil, CpacsWingElement, CpacsWingSection, CPACS_35_VERSION, CPACS_V35_SCHEMA_URL,
 };
 pub use cpacs_adapters::{
     CpacsAdapterContract, CpacsAdapterManifest, CpacsAdapterRequest, CpacsAdapterTool,
@@ -87,10 +87,11 @@ pub use export::{
     export_json_with_feasibility_and_cpacs, format_summary, CpacsReference, DesignDatabase,
 };
 pub use feasibility::{
-    assess_physical_feasibility, assess_physical_feasibility_with_load_case, format_feasibility,
-    CarriedFuelBasis, CgEnvelopeAssessment, CruiseEquilibriumAssessment, DeliveryBlocker,
-    DeliveryClassification, DeliveryVerdict, DesignProvenance, DispatchAssessment, DispatchOutcome,
-    FeasibilityReport, FindingCode, FindingSeverity, FuelCapacityAssessment, FuelCapacityEvidence,
+    assess_physical_feasibility, assess_physical_feasibility_with_load_case, design_mass_config,
+    design_vn_diagram, design_vn_mass_kg, format_feasibility, CarriedFuelBasis,
+    CgEnvelopeAssessment, CruiseEquilibriumAssessment, DeliveryBlocker, DeliveryClassification,
+    DeliveryVerdict, DesignProvenance, DispatchAssessment, DispatchOutcome, FeasibilityReport,
+    FindingCode, FindingSeverity, FuelCapacityAssessment, FuelCapacityEvidence,
     FuelLoadingAssessment, LedgerItemSummary, MassBalanceAssessment, MassStateSummary,
     MissionFuelAssessment, MissionFuelStatus, PhysicalFinding, PlanningCgStatus, RunCompletion,
     TankSummary,

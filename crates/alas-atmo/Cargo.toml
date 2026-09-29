@@ -10,8 +10,8 @@ rust-version.workspace = true
 [dependencies]
 # native aerodynamic model's default atmosphere is a cubic B-spline fitted through the ISA,
 # not the closed form, so this crate needs the interpolating spline that
-# `alas-math` owns. Both are P1 leaves and `alas-math` depends on nothing in
-# the workspace, so the edge introduces no layering.
+# `alas-math` owns. `alas-math` depends on nothing in the workspace, so the edge
+# introduces no layering.
 alas-math = { path = "../alas-math" }
 # The checked-construction and airspeed error enums derive their `Display`
 # through it, as every other error type in the workspace does.

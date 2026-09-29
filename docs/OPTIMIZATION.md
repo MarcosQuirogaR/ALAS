@@ -2,8 +2,7 @@
 
 This is the operational answer to "what happens when I press Run with
 optimization enabled, and which inputs decide the result". The methods are
-in `docs/methods.md` ("Multidisciplinary sizing loop and gradient-based
-driver"); this page is the wiring and the input list.
+in `docs/methods.md`; this page is the wiring and the input list.
 
 ## The driving path
 
@@ -17,29 +16,33 @@ driver"); this page is the wiring and the input list.
    `run(bounds, Some(preset design vector))`. The bounds are the sixteen
    design-variable bounds of `alas_config::design_variables::SPECS`, recentred
    on the preset when one is loaded.
-3. **The one driver.** `optimizer.solver.method` is `differential_evolution`,
-   the only optimizer this build runs: L-SHADE differential evolution under
-   the epsilon-constrained method (`search_methods::lshade_de`; see
-   `docs/methods.md`). A saved configuration naming a retired token (`sqp`,
-   `nsga2`, `turbo_1`, `cma_es`, `feasibility_first_de`) is migrated to
-   `differential_evolution` when it loads, with a note the caller can
-   surface. Every candidate scores through the same `DesignObjective`.
-4. **One evaluation.** Geometry build from the design vector; the candidate
-   payload load case; a two-pass mass analysis with the payload layout;
-   cruise trim and drag polar by the vortex-lattice method; then the sizing
-   loop (`mdo::mda`): mass and CG at the current takeoff mass, re-trim when
-   the CG has moved, mission fuel from the Breguet model under the fuel
-   policy, new takeoff mass, until the takeoff mass settles. The residual
-   table (mass and fuel, balance, performance, geometry) and the objective
-   are assembled into the scalar cost the method ranks by.
+3. **The optimization profile.** Fresh configurations select
+   `optimizer.solver.method = scipy_legacy`, which restores ALAS v1.1.0's
+   weighted lift-to-drag objective, penalty table, legacy mass coordinates,
+   SciPy-style `best1bin` search, and seeded local population or
+   Latin-hypercube fallback. It runs without the product profile's broad scan
+   or feasibility-restoration stage. Select `differential_evolution` for the
+   mission-sized objective and L-SHADE epsilon-constrained product search.
+   Retired method tokens (`sqp`, `nsga2`, `turbo_1`, `cma_es`,
+   `feasibility_first_de`) still migrate to the product profile when loaded.
+4. **One evaluation.** `scipy_legacy` builds the reference-compatible
+   geometry and mass model, solves cruise trim and drag polar, then evaluates
+   the weighted L/D plus original scalar penalties. The product profile builds
+   geometry and payload load case, runs the mass analysis, cruise trim and
+   drag polar, then closes mission fuel and takeoff mass through `mdo::mda`;
+   its residual table and selected mission objective form the search cost.
 5. **Result.** The best design is re-analysed at full fidelity
    (`FullAnalysis`) and becomes the optimized report; the history feeds the
    convergence figure and the run manifest. The AVL branch scores the same
-   objective around AVL's induced drag (`assess_candidate_with_polar`).
+   objective around AVL's induced drag (`assess_candidate_with_polar_cancellable`). The
+   legacy profile does not apply the mission-sized finalist replay or revoke
+   its scalar-cost winner from product-only feasibility checks; those physical
+   findings remain visible in the final feasibility report.
 
-The frozen weighted lift-to-drag objective of the Python reference is not
-selectable. It exists only behind `DesignObjective::new_reference_compatibility`
-for the parity fixtures.
+`scipy_legacy` is the application default. The
+`DesignOptimizer::new_reference_compatibility` constructor remains available
+for deterministic parity fixtures even when a caller explicitly selects the
+product profile.
 
 ## Inputs the mission-sized search reads
 
@@ -61,17 +64,18 @@ holds; presets override the physical inputs.
 
 ### `optimizer.solver`: how the search is run
 
-`method` (always `differential_evolution`), `max_iterations` (generation
-budget), `population_size` (multiplier on the sixteen variables, before
-L-SHADE's linear population-size reduction), `tolerance` (population
-design-space spread and best-feasible-cost relative-improvement threshold),
-`convergence_stagnation_generations` (the stagnation window that tolerance
-applies over), `seed` and `workers` (worker count changes only wall time; a
-seeded run replays bit-identically at any count). `strategy`,
-`seed_near_initial_design`, `seed_perturbation_fraction`,
-`finite_difference_step` and `constraint_tolerance` remain loadable for the
-frozen reference-compatibility replay and for saved-file compatibility with
-the retired SQP driver; the product search does not read them.
+`method` chooses `scipy_legacy` (default) or `differential_evolution`.
+`max_iterations` sets the generation budget. `population_size` multiplies the
+number of free variables for the initial population; the product L-SHADE
+profile reduces population size while `scipy_legacy` keeps it fixed.
+`tolerance` controls SciPy's population-energy spread test in the legacy
+profile and the product profile's convergence test. The product-only
+`convergence_stagnation_generations` sets its stagnation window. `strategy`,
+`seed_near_initial_design` and `seed_perturbation_fraction` configure
+`scipy_legacy`; the product profile ignores them. A fixed seed reproduces
+serial runs; multiple legacy workers use deferred generation updates and can
+change the trajectory. `finite_difference_step` and `constraint_tolerance`
+remain only for saved-file compatibility with the retired SQP driver.
 
 ### `optimizer.plausibility`: the model's validity domain
 
@@ -103,7 +107,7 @@ declared tolerance (D02), and a relaxed design never ranks ahead of, or is
 labelled as, a fully feasible one (D03).
 
 **No limit is currently eligible.** `alas_config::optimizer::policy_review`
-records the D02 review as one determination per residual identifier, with
+records the relaxation review as one determination per residual identifier, with
 the reason: a limit is `NeverRelaxable` (a failed or incomplete evaluation,
 or a boolean availability flag), or `Ineligible` because no traceable
 primary engineering or regulatory source states a fraction of it that may be
@@ -113,12 +117,13 @@ no entries. A configuration that lists an ineligible or unknown identifier
 is a blocking validation error quoting the recorded reason, so the shipped
 run is strict and stays strict.
 
-### `optimizer.weights`: replay table
+### `optimizer.weights`: penalty table
 
-Only `failure_cost` (the cost of a candidate that cannot be built, trimmed
-or sized) and the tail-volume window (`min/max_hstab_volume_coef`,
-`min/max_vstab_volume_coef`, a soft plausibility band) are read. Every
-other weight belongs to the frozen reference objective.
+`scipy_legacy` uses the full weighted L/D penalty table from ALAS v1.1.0,
+including `failure_cost` for a candidate that cannot be built, trimmed or
+analysed. The mission-sized product profile reads `failure_cost` and the
+tail-volume plausibility window; its objective and requirement policies live
+under `optimizer.objective` and `requirements`.
 
 ### `requirements`: the brief
 

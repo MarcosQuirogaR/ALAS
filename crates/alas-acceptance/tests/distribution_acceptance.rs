@@ -4,7 +4,7 @@
 //! Opt-in acceptance tests for the packaged `alas` executable.
 //!
 //! These tests deliberately run only when `ALAS_W55_PACKAGE_DIR` names a
-//! previously assembled distribution. Keeping the package input explicit
+//! pre-assembled distribution. Keeping the package input explicit
 //! prevents a normal workspace test from silently using a developer checkout,
 //! a real user profile, or an installed external solver.
 

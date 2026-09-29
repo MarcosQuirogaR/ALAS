@@ -15,6 +15,12 @@ use crate::views::tr;
 
 pub(super) fn finding_title(code: FindingCode) -> String {
     tr(match code {
+        FindingCode::StructuralMassModelDifference => "Structural mass estimates differ",
+        FindingCode::StructuralResponseUnavailable => "Structural assessment unavailable",
+        FindingCode::StructuralStrengthViolation => "Structural sizing constraint exceeded",
+        FindingCode::StructuralLinearModelDomain => "Linear beam model validity exceeded",
+        FindingCode::StructuralFemModelDomain => "Finite-element linear model validity exceeded",
+        FindingCode::StructuralSolverFailed => "Structural verification failed",
         FindingCode::InvalidCruiseAerodynamics => "Cruise aerodynamics unavailable",
         FindingCode::NonPositiveFuel => "No usable fuel mass in the MTOW budget",
         FindingCode::TankLimitedTakeoffMass => "Takeoff mass is tank-limited",
@@ -63,6 +69,12 @@ pub(super) fn finding_title(code: FindingCode) -> String {
 
 pub(super) fn finding_meaning(code: FindingCode) -> String {
     tr(match code {
+        FindingCode::StructuralMassModelDifference => "The primary structural material inventory and empirical complete-wing estimate represent different model scopes. Their difference is diagnostic and does not reject a candidate or penalize its objective.",
+        FindingCode::StructuralResponseUnavailable => "The required structural response could not be evaluated from valid model inputs and results.",
+        FindingCode::StructuralStrengthViolation => "The sized structure exceeds a strength, rib-spacing or cap-packaging constraint. The finding specifies which constraint governs.",
+        FindingCode::StructuralLinearModelDomain => "The modeled deformation exceeds the configured linear beam curvature error budget. Linear analysis cannot establish this design's structural response.",
+        FindingCode::StructuralFemModelDomain => "The finite-element displacement establishes that the linear model exceeds its configured curvature error budget. A nonlinear assessment or a revised structure is needed.",
+        FindingCode::StructuralSolverFailed => "A requested structural verification failed or returned incomplete or invalid load-case results.",
         FindingCode::InvalidCruiseAerodynamics => "The cruise aerodynamic result did not contain a positive finite lift-to-drag ratio, so performance derived from it is not trustworthy.",
         FindingCode::NonPositiveFuel => "Operating empty mass plus payload consumed the configured MTOW budget, leaving no positive finite fuel allocation.",
         FindingCode::TankLimitedTakeoffMass => "The MTOW mass budget could accept more fuel than the established usable tank capacity. The analyzed aircraft therefore departs below MTOW.",
@@ -105,6 +117,12 @@ pub(super) fn finding_meaning(code: FindingCode) -> String {
 
 pub(super) fn finding_next_step(code: FindingCode) -> String {
     tr(match code {
+        FindingCode::StructuralMassModelDifference => "Structures: compare the inventory scope and assumptions of the two mass estimates",
+        FindingCode::StructuralResponseUnavailable
+        | FindingCode::StructuralStrengthViolation
+        | FindingCode::StructuralLinearModelDomain
+        | FindingCode::StructuralFemModelDomain
+        | FindingCode::StructuralSolverFailed => "Structures: inspect the governing load case, sizing, mass budget and solver diagnostics",
         FindingCode::InvalidCruiseAerodynamics | FindingCode::InvalidCruiseForceBalance => {
             "Aerodynamics, then Mission & Route"
         }
@@ -153,6 +171,12 @@ pub(super) fn finding_next_step(code: FindingCode) -> String {
 
 pub(super) fn affected_disciplines(code: FindingCode) -> String {
     tr(match code {
+        FindingCode::StructuralMassModelDifference => "Structures | Mass properties",
+        FindingCode::StructuralResponseUnavailable
+        | FindingCode::StructuralStrengthViolation
+        | FindingCode::StructuralLinearModelDomain
+        | FindingCode::StructuralFemModelDomain
+        | FindingCode::StructuralSolverFailed => "Structures | Mass properties | Optimization",
         FindingCode::InvalidCruiseAerodynamics | FindingCode::InvalidEnvelopeSpeedOrder => {
             "Aerodynamics | Performance"
         }
@@ -215,6 +239,7 @@ pub(super) fn actual_label(code: FindingCode) -> String {
         FindingCode::MaximumZeroFuelWeightViolation => "Calculated zero-fuel mass",
         FindingCode::ReserveFuelShortfall => "Required takeoff fuel",
         FindingCode::MassModelDisagreement => "Ledger takeoff CG",
+        FindingCode::StructuralMassModelDifference => "Primary structural material mass",
         FindingCode::StructuralPayloadLimitViolation => "Modeled payload",
         _ => "Calculated",
     })
@@ -232,6 +257,7 @@ pub(super) fn limit_label(code: FindingCode) -> String {
         FindingCode::MaximumZeroFuelWeightViolation => "Published MZFW",
         FindingCode::ReserveFuelShortfall => "Admissible takeoff fuel",
         FindingCode::MassModelDisagreement => "Lumped takeoff CG",
+        FindingCode::StructuralMassModelDifference => "Empirical complete-wing estimate",
         FindingCode::StructuralPayloadLimitViolation => "Structural payload limit",
         _ => "Limit",
     })

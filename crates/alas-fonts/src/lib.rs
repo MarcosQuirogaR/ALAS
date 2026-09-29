@@ -40,6 +40,3 @@ pub const MONOSPACE_FONT_BYTES: &[u8] = include_bytes!("../assets/NotoSansMono-V
 
 /// Noto Sans Math font used after the primary text face for engineering glyphs.
 pub const MATH_FONT_BYTES: &[u8] = include_bytes!("../assets/NotoSansMath-Regular.ttf");
-
-/// Immutable Google Fonts source revision used for the bundled font files.
-pub const GOOGLE_FONTS_SOURCE_REVISION: &str = "e44c4b011a820c2cbe2fd2cfa8052037d7edb571";

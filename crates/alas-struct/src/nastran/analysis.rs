@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-// Ported from alas/integration/nastran_runner.py (run_nastran_analysis).
-// Reference: alas @ rust-port-baseline.
-
 //! Writing the decks, running each enabled solve, and reading what came back.
 //!
 //! [`run_nastran_analysis`] is the whole row in one call, and its contract is
@@ -44,10 +41,10 @@ use crate::mesh::{Deck, MeshNodeIndex};
 use crate::op2::{read_op2, Op2};
 
 use super::results::{
-    read_force_psd_rms, read_harmonic_response, read_modes, read_static, ModesResult,
-    NastranResults, ResultStatus, StaticResult, VibrationResult,
+    read_force_psd_rms, read_harmonic_response, read_modes, ModesResult, NastranResults,
+    ResultStatus, StaticResult, VibrationResult,
 };
-use super::run::{run_nastran_with_solver, NastranRunOutcome};
+use super::run::{run_nastran_with_memory, NastranRunOutcome};
 use super::{build_sol101_bulk, build_sol103_bulk, build_sol111_sine_bulk_msc, monitor_set};
 
 /// The mesh every solution includes, written once at the top of the work tree.
@@ -91,12 +88,21 @@ fn sol111_config(config: &StructuresConfig) -> StructuresConfig {
     config.clone()
 }
 
+const NOT_CONFIGURED_MESSAGE: &str = "NASTRAN executable not configured (Setup > External Tools); \
+     reporting analytical estimates only";
+
+/// Whether `message` is the "no solver configured" outcome: an optional tool
+/// that is simply absent, so the solve never ran and analytical estimates are
+/// all the report has. It is distinct from a configured solver that is missing
+/// or fails, which is a broken installation or a failed solve.
+pub fn is_solver_not_configured(message: &str) -> bool {
+    message == NOT_CONFIGURED_MESSAGE
+}
+
 /// Why a solve produced nothing, when the reason is not a run outcome.
 fn missing_executable_message(configured: &str) -> String {
     if configured.trim().is_empty() {
-        "NASTRAN executable not configured (Setup > External Tools); \
-         reporting analytical estimates only"
-            .to_owned()
+        NOT_CONFIGURED_MESSAGE.to_owned()
     } else if Path::new(configured).is_dir() {
         format!("NASTRAN installation incomplete at {configured}: executable launcher is missing")
     } else {
@@ -196,14 +202,20 @@ pub fn run_nastran_analysis(
         .map(|(&solution, path)| {
             (
                 solution,
-                run_nastran_with_solver(path, exe, solver_override, config.timeout_s),
+                run_nastran_with_memory(
+                    path,
+                    exe,
+                    solver_override,
+                    config.timeout_s,
+                    config.nastran_memory_mb,
+                ),
             )
         })
         .collect();
 
     if let Some(path) = written.get(&Solution::Sol101) {
         results.static_solve = match solved(path, outcomes.get(&Solution::Sol101)) {
-            Solved::Result(op2) => read_static(&op2, node_index, &cases),
+            Solved::Result(op2) => super::read_static_product(&op2, deck, node_index, &cases),
             Solved::Failed(detail) => StaticResult {
                 status: ResultStatus::Error,
                 error: Some(detail),

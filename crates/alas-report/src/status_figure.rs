@@ -11,10 +11,7 @@
 //! with the conservative character budget; the retained failure text is
 //! never truncated, only reflowed.
 
-use crate::scene::{
-    text_block_height, Color, Scene, SceneElement, TextAlign, TextBaseline, CSS_PIXELS_PER_POINT,
-    TEXT_LINE_HEIGHT_EM,
-};
+use crate::scene::{text_block_height, Color, Scene, SceneElement, TextAlign, TextBaseline};
 use crate::theme::{get_palette, Palette};
 
 /// Default canvas width of a status figure in scene pixels.
@@ -94,15 +91,10 @@ pub fn sized_status_scene(
     scene
 }
 
-/// Line advance of the body text in scene pixels.
-pub fn body_line_height() -> f64 {
-    STATUS_BODY_FONT_SIZE * CSS_PIXELS_PER_POINT * TEXT_LINE_HEIGHT_EM
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::scene::conservative_char_budget;
+    use crate::scene::{conservative_char_budget, CSS_PIXELS_PER_POINT, TEXT_LINE_HEIGHT_EM};
     use crate::svg::render_svg;
 
     fn title_elements(scene: &Scene, title: &str) -> Vec<(Color, bool)> {
@@ -200,7 +192,9 @@ mod tests {
                 .lines()
                 .count();
         assert!(rows > 10);
-        let expected = 82.0 + rows as f64 * body_line_height() + 24.0;
+        let expected = 82.0
+            + rows as f64 * STATUS_BODY_FONT_SIZE * CSS_PIXELS_PER_POINT * TEXT_LINE_HEIGHT_EM
+            + 24.0;
         assert!((scene.height - expected).abs() < 1e-9);
     }
 

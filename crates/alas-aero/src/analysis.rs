@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/physics/aerodynamics.py
-// Reference: alas @ rust-port-baseline.
 
 //! The hybrid aerodynamics engine: an inviscid vortex-lattice solve for what
 //! potential flow can answer, plus semi-empirical estimates for what it
@@ -46,10 +45,12 @@
 //! the phase order to name the type.
 
 mod performance;
+mod thickness;
 mod wave;
 mod wetted;
 
 use std::f64::consts::PI;
+use std::sync::OnceLock;
 
 use alas_atmo::Atmosphere;
 use alas_config::analysis::AnalysisConfig;
@@ -57,8 +58,7 @@ use alas_config::geometry::GeometryConfig;
 use alas_config::physics::DragModelConfig;
 use alas_geom::aircraft::airplane::Airplane;
 use alas_geom::aircraft::fuselage::Fuselage;
-use alas_geom::aircraft::spacing::linspace;
-use alas_geom::aircraft::wing::{Wing, WingXSec};
+use alas_geom::aircraft::wing::Wing;
 
 pub use performance::{PolarSweep, QuickPerformance, TrimPoint, TrimmedPerformance};
 
@@ -140,7 +140,7 @@ pub fn compressible_report_alpha(
 /// upstream builds one aircraft and analyses it from several angles; a
 /// solve that needs a modified copy (only [`AeroAnalysis::trimmed_performance`]
 /// does) makes one for the duration of that solve.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct AeroAnalysis<'a> {
     /// The aircraft being analysed.
     pub plane: &'a Airplane,
@@ -162,6 +162,46 @@ pub struct AeroAnalysis<'a> {
     /// Replay the frozen Python quartic starting at M_dd, for objective
     /// parity fixtures generated before the Lock/Korn correction.
     frozen_wave_drag: bool,
+    /// Cached [`Self::section_thickness`]. Geometry-only (`plane` and
+    /// `reference_compatibility` are both fixed for this analysis's
+    /// lifetime), so every call after the first returns the same bits
+    /// without repeating `Airfoil::max_thickness`'s 101-sample interpolation.
+    /// `run_sweep` calls `drag_components`, and therefore this, once per
+    /// angle in the schedule; `quick_performance` and `trimmed_performance`
+    /// call it once per solve. `OnceLock` rather than a field computed in
+    /// `new`, so the cost is paid only by analyses that actually read a
+    /// thickness (several call sites, such as `parasite_and_wave_drag_remain_finite_through_the_regime_boundary`'s
+    /// probe, never do).
+    section_thickness_cache: OnceLock<f64>,
+    /// Cached per-wing thickness [`Self::parasite_drag`]'s own buildup
+    /// reads, one entry per `plane.wings`: index 0 is
+    /// [`Self::area_weighted_thickness`] of the main wing, every other index
+    /// is that wing's [`Self::wing_section_thickness`]. Geometry-only for
+    /// the same reason as the cache above. [`crate::analysis::wave`]'s
+    /// `korn_thickness` reads entry 0 back out of this cache rather than
+    /// running its own `area_weighted_thickness` pass, since the two would
+    /// otherwise compute the identical value from the identical wing.
+    wing_thickness_cache: OnceLock<Vec<f64>>,
+}
+
+impl Clone for AeroAnalysis<'_> {
+    /// A clone starts with empty caches rather than copying the populated
+    /// ones: `OnceLock` itself has no `Clone`, and a clone that has not yet
+    /// been read from is indistinguishable from one that has, since both
+    /// recompute to the same geometry-only value on first read.
+    fn clone(&self) -> Self {
+        Self {
+            plane: self.plane,
+            sweep_deg: self.sweep_deg,
+            geometry: self.geometry.clone(),
+            drag: self.drag.clone(),
+            analysis: self.analysis.clone(),
+            reference_compatibility: self.reference_compatibility,
+            frozen_wave_drag: self.frozen_wave_drag,
+            section_thickness_cache: OnceLock::new(),
+            wing_thickness_cache: OnceLock::new(),
+        }
+    }
 }
 
 impl<'a> AeroAnalysis<'a> {
@@ -182,6 +222,8 @@ impl<'a> AeroAnalysis<'a> {
             analysis: analysis.unwrap_or_default(),
             reference_compatibility: false,
             frozen_wave_drag: false,
+            section_thickness_cache: OnceLock::new(),
+            wing_thickness_cache: OnceLock::new(),
         }
     }
 
@@ -220,74 +262,6 @@ impl<'a> AeroAnalysis<'a> {
     /// Compressible turbulent flat-plate skin friction, Prandtl-Schlichting.
     fn turbulent_cf(reynolds: f64, mach: f64) -> f64 {
         0.455 / (reynolds.log10().powf(2.58) * (1.0 + 0.144 * mach * mach).powf(0.65))
-    }
-
-    /// The real maximum thickness-to-chord of the morphed root section, or
-    /// [`SECTION_THICKNESS_FALLBACK`] where there is no section to read.
-    pub fn section_thickness(&self) -> f64 {
-        self.plane
-            .wings
-            .first()
-            .map_or(SECTION_THICKNESS_FALLBACK, Self::wing_section_thickness)
-    }
-
-    /// The maximum thickness-to-chord of a surface's root section.
-    ///
-    /// Parasite drag is accumulated surface by surface. A tail can therefore
-    /// not inherit the main wing's section thickness merely because the
-    /// latter is the first surface in the airplane. Empty surfaces retain the
-    /// same observable fallback as [`Self::section_thickness`].
-    fn wing_section_thickness(wing: &Wing) -> f64 {
-        wing.xsecs
-            .first()
-            .map_or(SECTION_THICKNESS_FALLBACK, |xsec| {
-                xsec.airfoil
-                    .max_thickness(&linspace(0.0, 1.0, MAX_THICKNESS_SAMPLES))
-            })
-    }
-
-    /// The exposed-area-weighted thickness-to-chord across every panel of
-    /// `wing`, Raymer eq. 12.30's own convention for the form-factor `t/c`.
-    ///
-    /// The root section's maximum thickness (what [`Self::wing_section_thickness`]
-    /// returns) is the thickest station on a tapered wing, so using it for
-    /// the whole surface's form factor biases the factor high
-    /// (root t/c 0.15 against an area-weighted
-    /// ~0.12 costs about +8% wing profile drag on a reviewed preset). Each
-    /// panel between consecutive cross-sections contributes the mean of its
-    /// two end thicknesses, weighted by that panel's own trapezoidal
-    /// planform area (span in the YZ plane, so dihedral is respected, times
-    /// the mean chord) -- the same panel decomposition
-    /// [`Wing::mean_aerodynamic_chord`] and [`Wing::aerodynamic_center`] use
-    /// internally, reproduced here from public cross-section fields since
-    /// that panel area is not itself exposed across the crate boundary.
-    /// Falls back to [`Self::wing_section_thickness`] for a wing with fewer
-    /// than two cross-sections, where no panel exists to weight.
-    fn area_weighted_thickness(wing: &Wing) -> f64 {
-        // Each section's thickness is sampled once; interior sections bound
-        // two panels and would otherwise be sampled twice.
-        let samples = linspace(0.0, 1.0, MAX_THICKNESS_SAMPLES);
-        let thicknesses: Vec<f64> = wing
-            .xsecs
-            .iter()
-            .map(|xsec: &WingXSec| xsec.airfoil.max_thickness(&samples))
-            .collect();
-        let mut area_sum = 0.0;
-        let mut weighted_sum = 0.0;
-        for (pair, t) in wing.xsecs.windows(2).zip(thicknesses.windows(2)) {
-            let dy = pair[1].xyz_le[1] - pair[0].xyz_le[1];
-            let dz = pair[1].xyz_le[2] - pair[0].xyz_le[2];
-            let span_m = (dy * dy + dz * dz).sqrt();
-            let panel_area = span_m * (pair[0].chord + pair[1].chord) / 2.0;
-            let panel_thickness = (t[0] + t[1]) / 2.0;
-            area_sum += panel_area;
-            weighted_sum += panel_area * panel_thickness;
-        }
-        if area_sum > 0.0 {
-            weighted_sum / area_sum
-        } else {
-            Self::wing_section_thickness(wing)
-        }
     }
 
     /// Sweep used by the surface parasite form factor.
@@ -345,10 +319,8 @@ impl<'a> AeroAnalysis<'a> {
             let cf = Self::turbulent_cf(reynolds, mach);
             let thickness = if self.reference_compatibility {
                 main_thickness
-            } else if index == 0 {
-                Self::area_weighted_thickness(wing)
             } else {
-                Self::wing_section_thickness(wing)
+                self.wing_thicknesses()[index]
             };
             let sweep_deg = if self.reference_compatibility {
                 self.sweep_deg

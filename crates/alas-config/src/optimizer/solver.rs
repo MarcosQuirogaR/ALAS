@@ -2,29 +2,22 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/config/optimizer_config.py (`SolverSettings`)
-// Reference: alas @ rust-port-baseline.
 
-//! How the aircraft-design search is run: which algorithm, how long, how wide,
-//! and from where.
+//! How the aircraft-design search is run: which optimization profile, how
+//! long, how wide, and from where.
 //!
 //! These settings decide how many aircraft get built and analysed, and each
 //! evaluation is a full geometry build, mass breakdown and vortex-lattice
-//! solve. Generations times population size times the number of design
-//! variables is the run's cost, so this is the one group where a value chosen
-//! carelessly is felt as hours rather than as a wrong number.
+//! solve. The default `scipy_legacy` profile restores the v1.1.0 weighted L/D
+//! objective and SciPy-style `best1bin`; `differential_evolution` selects the
+//! mission-sized product objective and L-SHADE kernel.
 //!
-//! # Why the population starts clustered rather than spread
+//! # Initial population
 //!
-//! The upstream default seeds generation zero as a tight cluster of small
-//! perturbations around the initial design, plus that design unperturbed,
-//! instead of the uniform latin-hypercube coverage the solver would otherwise
-//! use. A design that trims, balances and closes its weight budget is a narrow
-//! region of the sixteen-dimensional box the bounds describe; a uniform sample
-//! of that box is almost entirely made of aircraft that do not balance, and
-//! the search spends its budget rediscovering feasibility rather than
-//! improving on it. Seeding near a known-good design starts inside the region
-//! and refines. [`SolverSettings::seed_near_initial_design`] turns it off for
-//! a deliberately broad search.
+//! The Python profile seeds generation zero with small perturbations around
+//! the initial design, plus that design unperturbed. The product profile mixes
+//! local and global samples after its broad scan. Both fall back to
+//! Latin-hypercube coverage when local seeding is disabled or unavailable.
 
 use serde::{Deserialize, Serialize};
 
@@ -34,18 +27,17 @@ use crate::ConfigNode;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ConfigNode)]
 #[serde(deny_unknown_fields)]
 pub struct SolverSettings {
-    /// Top-level optimizer selected for product searches.
+    /// Complete optimization profile selected for this run.
     ///
-    /// This is the only value a saved file may carry going forward. A legacy
-    /// token from an earlier build (`sqp`, `nsga2`, `turbo_1`, `cma_es`,
-    /// `feasibility_first_de`) is migrated to this one at load time, with a
-    /// note the caller can surface (`alas_config::settings_load_notes`); it
-    /// is never silently accepted as a distinct algorithm.
+    /// `scipy_legacy` restores the Python v1.1.0 scalar weighted L/D objective,
+    /// penalty table and SciPy-style Differential Evolution. The
+    /// `differential_evolution` profile keeps the mission-sized objective,
+    /// staged scan, feasibility ranking and L-SHADE product kernel.
     #[serde(default = "default_optimizer_method")]
     #[config(
         options = OptimizerMethod,
-        label = "Optimization method",
-        help = "The one search algorithm this build runs: L-SHADE differential evolution under the epsilon-constrained method (success-history parameter adaptation, current-to-pbest/1 mutation with an archive, linear population size reduction, and a constraint boundary that decays to strict feasibility as the search proceeds)."
+        label = "Optimization profile",
+        help = "scipy_legacy restores ALAS v1.1.0: weighted lift-to-drag plus scalar penalties, SciPy-style differential_evolution (best1bin by default), a seeded local population or Latin-hypercube fallback, and no separate scan/restoration. differential_evolution selects the mission-sized objective and current L-SHADE product search."
     )]
     pub method: String,
 
@@ -80,14 +72,12 @@ pub struct SolverSettings {
 
     /// How new candidates are generated from the population.
     ///
-    /// Read only by the frozen SciPy-parity replay
-    /// (`DesignOptimizer::new_reference_compatibility`), which no product
-    /// pipeline or GUI path constructs. The product L-SHADE search always
-    /// uses current-to-pbest/1/bin and does not read this field.
+    /// Used by the `scipy_legacy` profile. The product L-SHADE profile uses
+    /// current-to-pbest/1/bin independently of this field.
     #[config(
         options = Strategy,
-        label = "DE mutation/crossover strategy (parity replay only)",
-        help = "SciPy differential_evolution strategy name (e.g. 'best1bin', 'rand1bin', 'best2bin'), read only by the frozen reference-compatibility replay used for regression comparison against the Python baseline. The product search always uses current-to-pbest/1/bin and ignores this field."
+        label = "SciPy DE mutation/crossover strategy",
+        help = "Used by scipy_legacy. SciPy differential_evolution strategy name (e.g. best1bin, rand1bin, best2bin). The product L-SHADE profile always uses current-to-pbest/1/bin."
     )]
     pub strategy: String,
 
@@ -98,29 +88,28 @@ pub struct SolverSettings {
     )]
     pub max_iterations: i64,
 
-    /// Population size, as a multiple of the number of design variables.
+    /// Population size, as a multiple of the number of free design variables.
     #[config(
         label = "Population size multiplier",
-        help = "Population size as a multiplier on the number of design variables: more candidates per generation explores more broadly but costs more evaluations."
+        help = "Population size as a multiplier on the number of free design variables. Locked coordinates do not consume search population. More candidates explore more broadly but cost more evaluations."
     )]
     pub population_size: i64,
 
     /// How converged the population has to be before stopping early.
     #[config(
         label = "Convergence tolerance",
-        help = "The search stops early once two things both hold: the population's normalized design-space spread has fallen below this fraction of the bounds, and the best feasible cost's relative improvement has stayed below this fraction for the stagnation window below."
+        help = "For scipy_legacy, stops when the population energy standard deviation is at most tolerance times abs(mean energy), matching SciPy's default test. The product profile uses normalized design-space spread and its stagnation window."
     )]
     pub tolerance: f64,
 
-    /// Generations the best feasible cost may fail to improve by more than
-    /// `tolerance` before a converged spread is honoured.
+    /// Product-profile-only stagnation window retained for saved configs.
     #[serde(
         default = "default_convergence_stagnation_generations",
         skip_serializing_if = "is_default_convergence_stagnation_generations"
     )]
     #[config(
-        label = "Convergence stagnation window",
-        help = "Consecutive generations the best feasible cost may fail to improve by more than the convergence tolerance before the search may report convergence, once the population's design-space spread has also fallen below that tolerance."
+        label = "Product-profile convergence stagnation window",
+        help = "Used only by the mission-sized differential_evolution profile. The scipy_legacy profile uses SciPy's population-energy spread test and ignores this field."
     )]
     pub convergence_stagnation_generations: i64,
 
@@ -131,7 +120,7 @@ pub struct SolverSettings {
     )]
     pub seed: Option<i64>,
 
-    /// How many native-objective workers evaluate a candidate batch at once.
+    /// Total native compute threads shared by candidates and nested analyses.
     ///
     /// `0` means "decide from the machine". The worker count changes only how
     /// a batch is distributed, never which designs are evaluated or what they
@@ -140,8 +129,8 @@ pub struct SolverSettings {
     /// A positive value is used exactly as given, so a configuration that
     /// states `1` keeps one worker.
     #[config(
-        label = "Parallel worker processes",
-        help = "Number of native worker threads for candidate batches. 0 (the default) picks a count from the machine's available parallelism; a positive value is used exactly as written; negative values are treated as 1. The product L-SHADE search always evaluates one whole generation as a single deterministic batch, in the order it built the generation from its seed, so this setting changes only how long a batch takes, never which points are evaluated or the winner: a seeded run replays bit-identically at any worker count. The frozen reference-compatibility replay is the one exception: its legacy driver defers a whole generation only when more than one worker is requested, which changes the trial interleaving and is preserved that way for exact regression comparison against the Python baseline. External evaluator adapters remain serial because they own mutable process/session state."
+        label = "Native compute worker threads",
+        help = "Total native compute worker threads shared by candidate batches and nested VLM analyses. The scipy_legacy profile defaults to one worker, matching Python's immediate-update mode; multiple workers use deferred generations and can change the trajectory, as in SciPy. The product profile evaluates deterministic whole-generation batches, so worker count changes runtime only. External evaluator adapters remain serial because they own mutable process/session state."
     )]
     pub workers: i64,
 
@@ -154,23 +143,21 @@ pub struct SolverSettings {
 
     /// Whether generation zero clusters around the initial design.
     ///
-    /// Read only by the frozen SciPy-parity replay, like [`Self::strategy`];
-    /// the product L-SHADE search always seeds its population's first
-    /// individual directly from the supplied design and draws the rest from
-    /// a Latin hypercube over the bounds.
+    /// The legacy profile seeds around the supplied design. If disabled or
+    /// unavailable, it uses Latin-hypercube sampling. The product profile
+    /// combines local perturbations, global samples and its scan seed.
     #[config(
-        label = "Seed search near the initial design (parity replay only)",
-        help = "Initialize the population as a tight cluster of small perturbations around the initial/preset design (plus the design itself, unperturbed) instead of SciPy's default uniform latin-hypercube coverage of the whole bounds space. Read only by the frozen reference-compatibility replay; the product L-SHADE search seeds its population's first individual directly from the supplied design instead and does not read this field."
+        label = "Seed search near the initial design",
+        help = "For scipy_legacy, keep the supplied initial design and seed the population with nearby perturbations; if disabled or unavailable, use Latin-hypercube sampling. The product profile also mixes global samples with its scan seed."
     )]
     pub seed_near_initial_design: bool,
 
     /// How tight that cluster is.
     ///
-    /// Read only by the frozen SciPy-parity replay; see
-    /// [`Self::seed_near_initial_design`].
+    /// Used when [`Self::seed_near_initial_design`] is enabled.
     #[config(
-        label = "Seed cluster perturbation size (parity replay only)",
-        help = "Size of the initial random perturbation around the initial design, as a fraction of each design variable's (upper - lower) bound range. Read only by the frozen reference-compatibility replay when seed_near_initial_design is enabled; the product L-SHADE search does not read this field."
+        label = "Seed cluster perturbation size",
+        help = "Size of local initial perturbations as a fraction of each free variable's bound range. Applies when seed_near_initial_design is enabled; fixed coordinates remain unchanged."
     )]
     pub seed_perturbation_fraction: f64,
 }
@@ -187,7 +174,7 @@ impl Default for SolverSettings {
             tolerance: 0.01,
             convergence_stagnation_generations: default_convergence_stagnation_generations(),
             seed: None,
-            workers: 0,
+            workers: 1,
             display_progress: true,
             seed_near_initial_design: true,
             seed_perturbation_fraction: 0.05,
@@ -206,13 +193,15 @@ impl Default for SolverSettings {
 /// cores. A configuration that states more than eight is still honoured.
 pub const MAXIMUM_AUTOMATIC_WORKERS: usize = 8;
 
+/// The default full v1.1.0-compatible optimization profile.
+pub const SCIPY_LEGACY_METHOD: &str = "scipy_legacy";
+/// The mission-sized product profile retained as an explicit alternative.
+pub const PRODUCT_DE_METHOD: &str = "differential_evolution";
+
 /// Method tokens an earlier build accepted and this one no longer implements
-/// as a distinct kernel. A saved configuration document that carries one of
-/// these is migrated to `"differential_evolution"` at load time, with a note
-/// the caller can surface (see `crate::settings_load_notes`); a
-/// [`SolverSettings`] built directly with one of them, bypassing that
-/// boundary, is rejected by [`SolverSettings::is_supported_method`] rather
-/// than silently running an algorithm this build does not have.
+/// as distinct kernels. A saved configuration carrying one of these is
+/// migrated to [`PRODUCT_DE_METHOD`] at load time, with a note the caller can
+/// surface (see `crate::settings_load_notes`).
 pub const LEGACY_METHOD_TOKENS: &[&str] =
     &["feasibility_first_de", "nsga2", "turbo_1", "cma_es", "sqp"];
 
@@ -260,13 +249,12 @@ impl SolverSettings {
             .map_or(1, |count| count.get().min(MAXIMUM_AUTOMATIC_WORKERS))
     }
 
-    /// Whether `method` names an optimizer implemented by the product.
+    /// Whether `method` names a supported optimization profile.
     ///
-    /// `"differential_evolution"` is the only supported value; see
-    /// [`LEGACY_METHOD_TOKENS`] for the names a saved file may still carry
-    /// and where they are migrated.
+    /// The default restores the original SciPy/L/D strategy; the product DE
+    /// remains selectable for the mission-sized formulation.
     pub fn is_supported_method(method: &str) -> bool {
-        method == "differential_evolution"
+        matches!(method, SCIPY_LEGACY_METHOD | PRODUCT_DE_METHOD)
     }
 
     /// Whether `strategy` is one of the DE mutation/crossover strategies.
@@ -290,7 +278,7 @@ impl SolverSettings {
 }
 
 fn default_optimizer_method() -> String {
-    "differential_evolution".to_owned()
+    SCIPY_LEGACY_METHOD.to_owned()
 }
 
 fn default_finite_difference_step() -> f64 {

@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/config/optimizer_config.py (`ObjectiveWeights`)
-// Reference: alas @ rust-port-baseline.
 
 //! The weights and thresholds shaping the cost the optimizer minimises.
 //!
@@ -29,9 +28,13 @@
 //!
 //! Fields whose names end in a weight suffix are offered as sliders rather
 //! than as numbers, because only their ratio to each other means anything.
-//! That rule is upstream's and catches a few thresholds that are not weights
+//! That rule catches a few thresholds that are not weights
 //! at all (a thickness floor, a fuselage length floor, the failure costs)
 //! which is reproduced rather than corrected.
 
-include!("weights_parts/part_01.rs");
-include!("weights_parts/part_02.rs");
+mod defaults;
+mod fields;
+#[cfg(test)]
+mod tests;
+
+pub use fields::ObjectiveWeights;

@@ -26,14 +26,13 @@
 //!   policy, but without the five-minute contingency floor unless the
 //!   policy states a positive one. This carries no regulatory standing; it
 //!   is the FAST-OAD/CeRAS-style convention conceptual-design tools use.
-//! - **Trip fuel only**: taxi and trip fuel, nothing else. The frozen
-//!   behaviour of the earlier maximum-available-fuel mission, kept for
-//!   comparison rather than for design use.
+//! - **Trip fuel only**: taxi and trip fuel, nothing else. It is a
+//!   comparison baseline, not a rule for design use.
 //!
 //! # The nested fixed point
 //!
 //! The final reserve is evaluated at a mass that includes fuel carried
-//! upstream of it (contingency and the alternate), which in turn depend on
+//! ahead of it (contingency and the alternate), which in turn depend on
 //! trip fuel, which depends on the takeoff mass this same plan's fuel adds
 //! up to. [`plan_fuel`] does not iterate that: it evaluates every landing
 //! mass once, in the order the rule names them (destination, then

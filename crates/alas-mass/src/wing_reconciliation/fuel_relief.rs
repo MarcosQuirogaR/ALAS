@@ -279,7 +279,7 @@ mod tests {
         )
         .unwrap_or_else(|error| panic!("{error}"));
         let stations = alas_struct::sizing::sizing_stations(&wsg, &config.structures);
-        let requirements = super::super::design_requirements(&config);
+        let requirements = crate::wing_reconciliation::support::design_requirements(&config);
         (config, design, requirements, wsg, stations)
     }
 

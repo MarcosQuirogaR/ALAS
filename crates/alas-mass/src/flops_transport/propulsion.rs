@@ -63,7 +63,7 @@ pub fn scaled_engine_count(count: usize) -> f64 {
 /// This is the form NASA Aviary evaluates in
 /// `aviary/subsystems/mass/flops_based/distributed_prop.py`
 /// (`distributed_nacelle_diam_factor`: `0.5 * diam_avg * total_num_eng**0.5`),
-/// the reference implementation of the same FLOPS source. The two-engine
+/// NASA's implementation of the same FLOPS source. The two-engine
 /// validation cases do not exercise this branch, so it is verified against
 /// that source rather than against a FLOPS run.
 pub fn scaled_nacelle_diameter_m(nacelle_diameter_m: f64, engine_count: usize) -> f64 {

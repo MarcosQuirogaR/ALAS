@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/config/cabin_config.py (`CargoDeckConfig`)
-// Reference: alas @ rust-port-baseline.
 
 //! Which decks carry freight, in what containers, and how it is distributed.
 //!
@@ -14,12 +13,9 @@
 //!
 //! Zero means "work it out" for every position field: a door position of zero
 //! is not a door at the nose, it is a door the layout places. That convention
-//! is upstream's and is reproduced, including its one sharp edge: a target
+//! has one sharp edge: a target
 //! centre of gravity at or below zero means the centre of the envelope, so
 //! there is no way to ask for a trim point at the datum itself.
-//!
-//! None of these fields declares an explanation upstream; the ones here are
-//! this port's, as CONTRIBUTING.md requires, and they change no value.
 
 use serde::{Deserialize, Serialize};
 

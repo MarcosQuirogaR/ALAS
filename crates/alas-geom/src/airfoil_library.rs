@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-// Ported from alas/geometry/airfoils.py.
-// Reference: alas @ rust-port-baseline.
-
 //! Airfoil name resolution and parametric shaping.
 //!
 //! [`AirfoilLibrary::get`] is `AirfoilLibrary.get`: resolve a name through

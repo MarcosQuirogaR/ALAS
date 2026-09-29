@@ -8,24 +8,21 @@
 //! native aerodynamic model's differentiable atmosphere: a cubic B-spline fitted through
 //! the ISA at thirty-eight altitudes.
 //!
-//! This is the model `Atmosphere(altitude=...)` uses when no `method` is
-//! named, which is how every module in the reference implementation but one
-//! constructs it: the turbofan cycle, the performance envelope, the
+//! This is the model [`crate::Atmosphere`] uses when no method is named:
+//! the turbofan cycle, the performance envelope, the
 //! aerodynamic analysis, stability, the full analysis. It exists so that a
 //! gradient-based optimizer sees a smooth function rather than the ISA's
 //! piecewise-linear temperature, and it is not a small correction to the
 //! closed form: it disagrees with the ISA by up to 1.1% in temperature and
-//! 0.4% in density over the altitudes this program flies at. A port that
-//! reached for [`crate::pressure_isa`] wherever upstream wrote
-//! `Atmosphere(...)` would be wrong by four thousand times the `closed`
-//! tier before evaluating any physics, so the fit is reproduced rather than
-//! approximated.
+//! 0.4% in density over the altitudes this program flies at. Using
+//! [`crate::pressure_isa`] in its place would be wrong by four thousand times
+//! the `closed` tier before evaluating any physics, so the fit is reproduced
+//! rather than approximated.
 //!
 //! The fit is built in two pieces, both interpolating rather than smoothing:
 //! temperature directly, and pressure through its logarithm, since pressure
 //! falls by five orders of magnitude across the fitted band and a spline
-//! through the raw values would ring badly between knots. Upstream's comment
-//! records the resulting mean absolute pressure error against the ISA as
+//! through the raw values would ring badly between knots. The resulting mean absolute pressure error against the ISA is
 //! 0.02% over 0-100 km.
 //!
 //! # The altitude grid

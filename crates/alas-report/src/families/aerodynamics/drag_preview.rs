@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/sidecar/figures.py: _preview_drag.
-// Reference: alas @ rust-port-baseline.
 
 //! Solver-free drag preview for the live design editor.
 //!

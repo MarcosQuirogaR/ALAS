@@ -3,7 +3,6 @@
 
 // Ported from the reference mission turbofan component network and sizing
 // routine. The implementation is retained as an independent analysis path.
-// Reference: alas @ rust-port-baseline.
 
 //! The mission turbofan cycle at the single flight condition
 //! `turbofan_sizing`: a second, structurally different turbofan model from

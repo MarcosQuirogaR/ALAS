@@ -13,7 +13,7 @@
 //! ranges.
 //!
 //! The maximum payload is an *estimated achievable* capacity of the fixed
-//! aircraft (D07): the declared structural cap bounded by the preset's
+//! aircraft: the declared structural cap bounded by the preset's
 //! MZFW-derived limit when the full analysis recorded one and by the mass
 //! budget `MTOW - OEW`. Every corner therefore respects the declared MTOW,
 //! and an aircraft whose empty mass reaches its MTOW gets no corners at all

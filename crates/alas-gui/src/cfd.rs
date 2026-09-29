@@ -17,8 +17,11 @@ use std::sync::Arc;
 use alas_cfd::{CfdOutcome, CfdResults, CfdRunEvent, CfdStage, CfdStudyConfig, OperatingInput};
 use alas_exec::openfoam::{OpenFoamCapabilities, OpenFoamPreferences};
 
-#[path = "cfd_parts/mod.rs"]
-mod cfd_parts;
+mod lifecycle;
+mod persistence;
+mod selection;
+#[cfg(test)]
+mod tests;
 
 /// Process-local suffix for case directories.  The timestamp and process id
 /// make directories unique across application launches; the counter closes

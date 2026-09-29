@@ -3,7 +3,6 @@
 
 //! The Advanced Walkthrough's chapter content.
 //!
-//! A direct port of the reference desktop app's `AdvancedWalkthrough.tsx`
 //! `CHAPTERS`: what each discipline computes, what model sits behind it, and
 //! where it can mislead. A reading document, not a spotlight tour.
 
@@ -17,8 +16,6 @@ pub struct Section {
 
 /// One chapter of the guide.
 pub struct Chapter {
-    /// Its stable id.
-    pub id: &'static str,
     /// Its title, shown in the contents rail and as the chapter heading.
     pub title: &'static str,
     /// A one-line summary shown under the title in the contents rail.
@@ -30,7 +27,6 @@ pub struct Chapter {
 /// The whole guide, in reading order.
 pub const CHAPTERS: &[Chapter] = &[
     Chapter {
-        id: "overview",
         title: "What ALAS does",
         blurb: "The pipeline, and what 'conceptual design' means here.",
         sections: &[
@@ -57,7 +53,6 @@ pub const CHAPTERS: &[Chapter] = &[
         ],
     },
     Chapter {
-        id: "inputs",
         title: "Requirements & design space",
         blurb: "What you specify, what the optimizer is allowed to change.",
         sections: &[
@@ -85,15 +80,14 @@ pub const CHAPTERS: &[Chapter] = &[
         ],
     },
     Chapter {
-        id: "optimizer",
         title: "The optimizer",
         blurb: "How candidates are scored, and why penalties are shaped the way they are.",
         sections: &[
             Section {
                 heading: "The objective",
                 body: &[
-                    "The search minimises a mission quantity: block fuel by default, or takeoff mass, operating empty mass or fuel per seat-kilometre. Each candidate is closed by the design mission under the fuel policy, so the objective is what a converged, trimmed aircraft actually burns or weighs, not a proxy such as lift-to-drag. Whether a run optimises at all is the Optimize design space choice on Inputs; the search settings live under Advanced Settings > Optimizer.",
-                    "The requirements are constraints, not prices. Mass and fuel capacity, the CG envelope and gear reactions, the CS-25 climb and field requirements, and the planform limits each form a family whose policy you set: hard, soft, diagnostic or off. The frozen weight table from the Python reference only serves the parity fixtures.",
+                    "The optimizer profile sets the candidate score. scipy_legacy is the default: it restores ALAS v1.1.0's weighted lift-to-drag objective and scalar penalty table. differential_evolution selects the mission-sized score: block fuel by default, or takeoff mass, operating empty mass or fuel per seat-kilometre, evaluated after mission closure. Whether a run optimises at all is the Optimize design space choice on Inputs; the search settings live under Advanced Settings > Optimizer.",
+                    "The mission-sized profile treats mass and fuel capacity, the CG envelope and gear reactions, the CS-25 climb and field requirements, and the planform limits as requirement families whose policy you set: hard, soft, diagnostic or off. The scipy_legacy profile instead uses the original scalar penalties, configured under the Optimizer weights group.",
                 ],
             },
             Section {
@@ -112,7 +106,6 @@ pub const CHAPTERS: &[Chapter] = &[
         ],
     },
     Chapter {
-        id: "aero",
         title: "Aerodynamics & stability",
         blurb: "VLM, drag build-up, trim, and the dynamic modes.",
         sections: &[
@@ -139,7 +132,6 @@ pub const CHAPTERS: &[Chapter] = &[
         ],
     },
     Chapter {
-        id: "screening",
         title: "Airfoil screening",
         blurb: "Three fidelity stages over ~1,600 sections, and how to read the ranking.",
         sections: &[
@@ -167,7 +159,6 @@ pub const CHAPTERS: &[Chapter] = &[
         ],
     },
     Chapter {
-        id: "weights",
         title: "Weight, balance & structures",
         blurb: "Where mass comes from, and what the wingbox solve does.",
         sections: &[
@@ -194,7 +185,6 @@ pub const CHAPTERS: &[Chapter] = &[
         ],
     },
     Chapter {
-        id: "mission",
         title: "Mission, routing & propulsion",
         blurb: "Native mission, the four routing tiers, and the engine cycle.",
         sections: &[
@@ -220,7 +210,6 @@ pub const CHAPTERS: &[Chapter] = &[
         ],
     },
     Chapter {
-        id: "practice",
         title: "Working effectively",
         blurb: "Habits that make the tool tell you the truth.",
         sections: &[

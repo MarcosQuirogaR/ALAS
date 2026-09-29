@@ -2,25 +2,210 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/reporting/visualization.py:figure_cg_envelope (L2354-2835)
-// Reference: alas @ rust-port-baseline.
 
 use super::super::no_data_scene;
-use super::helpers::linspace;
-use super::render::{render, CgEnvelopeRenderData};
+use super::helpers::{interp, linspace};
+use super::render::{render, CgEnvelopeRenderData, StatePoint};
 use crate::chart_kit::draw_title;
-use crate::families::MAIN_GEAR_STATION_NOT_MEASURED;
+use crate::families::{model_cg_gate_assessment, MAIN_GEAR_STATION_NOT_MEASURED};
 use crate::scene::{Color, Scene};
 use crate::theme::get_palette;
 use alas_config::AlasConfig;
 use alas_mass::breakdown::{FUEL, OEW_KEYS, PAYLOAD};
-use alas_perf::landing_gear::size_landing_gear_with_group_stations;
+use alas_opt::envelope::{AftLimitGovernance, ForwardLimitGovernance};
+use alas_opt::ModelCgEnvelopeError;
 use alas_pipeline::full_analysis::AnalysisReport;
+
+/// Interpolate one physical-limit component across the loading states'
+/// masses (ascending), clamped outside the bracket: the gate reports each
+/// component only at its named states, and this is the same "cheap mode"
+/// linear-in-mass approximation
+/// `crate::feasibility::operational_envelope::interpolated_aft_limit_pct_mac`
+/// already uses for the aft governing value alone, applied here to every
+/// diagnostic component so the drawn curves and the gate never disagree
+/// between the states that anchor them.
+fn series_over(w_ops: &[f64], masses_kg: &[f64], values_pct_mac: &[f64]) -> Vec<f64> {
+    w_ops
+        .iter()
+        .map(|&w| interp(w, masses_kg, values_pct_mac))
+        .collect()
+}
+
+/// Declared structural reference weights for the active preset, when the
+/// registry names one: used only to choose between a "design" and a
+/// certified/structural weight-line label, never as a value substitution.
+fn declared_reference_weights(config: &AlasConfig) -> (bool, bool) {
+    let reference = alas_config::presets::get(&config.preset)
+        .ok()
+        .map(|preset| preset.reference.clone());
+    let has_mtow = reference
+        .as_ref()
+        .and_then(|r| r.mtow_kg)
+        .is_some_and(|v| v.is_finite() && v > 0.0);
+    let has_mzfw = reference
+        .as_ref()
+        .and_then(|r| r.mzfw_kg)
+        .is_some_and(|v| v.is_finite() && v > 0.0);
+    (has_mtow, has_mzfw)
+}
+
+/// Build every series [`render::render`] draws, or the placeholder message
+/// to show instead. Split out of [`figure_cg_envelope`] so a test can
+/// recompute the exact same [`CgEnvelopeRenderData`] a rendered figure used,
+/// map a gate value through [`super::render::axes_view`] itself, and check
+/// the two agree -- without re-deriving this construction a second time.
+pub(super) fn prepare(
+    report: &AnalysisReport,
+    config: &AlasConfig,
+) -> Result<CgEnvelopeRenderData, &'static str> {
+    if report.component_masses.is_empty() || report.mass_coordinates.is_empty() {
+        return Err("No mass / coordinate data available");
+    }
+
+    let assessment = match model_cg_gate_assessment(report, config) {
+        Ok(assessment) => assessment,
+        Err(ModelCgEnvelopeError::MainGearStationNotMeasured(_)) => {
+            return Err(MAIN_GEAR_STATION_NOT_MEASURED);
+        }
+        Err(_) => {
+            return Err("No mass / coordinate data available");
+        }
+    };
+
+    let mut states: Vec<_> = assessment
+        .loading_states
+        .iter()
+        .filter(|state| state.mass_kg.is_finite() && state.cg_pct_mac.is_finite())
+        .collect();
+    states.sort_by(|a, b| a.mass_kg.total_cmp(&b.mass_kg));
+    if states.is_empty() {
+        return Err("No mass / coordinate data available");
+    }
+
+    let masses_kg: Vec<f64> = states.iter().map(|s| s.mass_kg).collect();
+    let aft_gov: Vec<f64> = states
+        .iter()
+        .map(|s| s.physical_limits.aft_limit_pct_mac)
+        .collect();
+    let aero_aft: Vec<f64> = states
+        .iter()
+        .map(|s| s.physical_limits.aerodynamic_aft_pct_mac)
+        .collect();
+    let ground_aft: Vec<f64> = states
+        .iter()
+        .map(|s| s.physical_limits.ground_aft_pct_mac)
+        .collect();
+    let tip_aft: Vec<f64> = states
+        .iter()
+        .map(|s| s.physical_limits.tip_back_aft_pct_mac)
+        .collect();
+    let fwd_gov: Vec<f64> = states
+        .iter()
+        .map(|s| s.physical_limits.fwd_limit_pct_mac)
+        .collect();
+    let max_nose_fwd: Vec<f64> = states
+        .iter()
+        .map(|s| s.physical_limits.max_nose_load_fwd_pct_mac)
+        .collect();
+    let scissor_fwd: Vec<f64> = states
+        .iter()
+        .map(|s| s.physical_limits.scissor_plot_fwd_pct_mac)
+        .collect();
+
+    let aero_active = states
+        .iter()
+        .any(|s| s.physical_limits.aft_limit_governance == AftLimitGovernance::Aerodynamic);
+    let ground_active = states.iter().any(|s| {
+        s.physical_limits.aft_limit_governance == AftLimitGovernance::GroundMinimumNoseLoad
+    });
+    let tip_active = states
+        .iter()
+        .any(|s| s.physical_limits.aft_limit_governance == AftLimitGovernance::TipBack);
+    let max_nose_active = states.iter().any(|s| {
+        s.physical_limits.fwd_limit_governance == ForwardLimitGovernance::MaxNoseLoadHandling
+    });
+    let scissor_active = states.iter().any(|s| {
+        s.physical_limits.fwd_limit_governance == ForwardLimitGovernance::ScissorPlotEstimate
+    });
+
+    let w_lo = masses_kg[0];
+    let w_hi = masses_kg[masses_kg.len() - 1].max(w_lo * 1.001);
+    let w_ops = linspace(w_lo, w_hi, 150);
+    let poly_aft = series_over(&w_ops, &masses_kg, &aft_gov);
+    let poly_fwd = series_over(&w_ops, &masses_kg, &fwd_gov);
+    let aero_aft = series_over(&w_ops, &masses_kg, &aero_aft);
+    let ground_aft = series_over(&w_ops, &masses_kg, &ground_aft);
+    let tip_aft = series_over(&w_ops, &masses_kg, &tip_aft);
+    let max_nose_fwd = series_over(&w_ops, &masses_kg, &max_nose_fwd);
+    let scissor_fwd = series_over(&w_ops, &masses_kg, &scissor_fwd);
+
+    let get_mass = |k: &str| report.component_masses.get(k).copied().unwrap_or(0.0);
+    let oew_mass: f64 = OEW_KEYS.iter().map(|&k| get_mass(k)).sum();
+    let payload = get_mass(PAYLOAD);
+    let fuel = get_mass(FUEL);
+    let mtow_mass = oew_mass + payload + fuel.max(0.0);
+    let mlw_mass = config.landing_mass_limit_kg(mtow_mass);
+    let mzfw_mass = oew_mass + payload;
+    let (has_structural_mtow, has_structural_mzfw) = declared_reference_weights(config);
+
+    let state_points: Vec<StatePoint> = states
+        .iter()
+        .map(|s| StatePoint {
+            mass_kg: s.mass_kg,
+            cg_pct_mac: s.cg_pct_mac,
+            label: s.state.label().to_owned(),
+        })
+        .collect();
+
+    Ok(CgEnvelopeRenderData {
+        mtow_mass,
+        mlw_mass,
+        mzfw_mass,
+        mtow_label: if report.sized_takeoff_mass_kg().is_some() {
+            // The line is the run's mission-sized takeoff mass, not a
+            // certified maximum.
+            "sized TOW"
+        } else if has_structural_mtow {
+            "MTOW"
+        } else {
+            "design TOW"
+        },
+        mzfw_label: if has_structural_mzfw {
+            "MZFW"
+        } else {
+            "design ZFW"
+        },
+        clean_np_pct_mac: assessment.clean_np_pct_mac,
+        w_ops,
+        poly_fwd,
+        poly_aft,
+        aero_aft,
+        ground_aft,
+        tip_aft,
+        aero_active,
+        ground_active,
+        tip_active,
+        max_nose_fwd,
+        scissor_fwd,
+        max_nose_active,
+        scissor_active,
+        state_points,
+    })
+}
 
 /// Generate a model-derived CG loading-state check figure.
 ///
-/// The figure uses aggregate OEW, payload, and fuel centroids plus modeled
-/// aerodynamic and gear limits. It is not an AFM/WBM operational envelope or
-/// evidence of certified loading-order, fuel-sequence, or mission coverage.
+/// Every aft/forward physical boundary drawn here is read from
+/// [`crate::families::model_cg_gate_assessment`] -- the same gate the
+/// feasibility pipeline evaluates a design against -- rather than re-derived
+/// from a simplified aerodynamic/gear formula local to this figure.
+/// The gate reports each boundary only at five named
+/// loading states; the curves drawn between them are this figure's own
+/// linear-in-mass interpolation (documented on [`series_over`]), not
+/// additional gate evaluations.
+///
+/// The figure is not an AFM/WBM operational envelope or evidence of
+/// certified loading-order, fuel-sequence, or mission coverage.
 pub fn figure_cg_envelope(
     report: &AnalysisReport,
     config: &AlasConfig,
@@ -32,273 +217,12 @@ pub fn figure_cg_envelope(
     scene.title = Some(title.to_owned());
     draw_title(&mut scene, title, pal);
     scene.suppress_derived_title();
-    let masses = &report.component_masses;
-    let coords = &report.mass_coordinates;
-    let plane = &report.airplane;
 
-    if masses.is_empty() || coords.is_empty() {
-        return no_data_scene(scene, pal, "No mass / coordinate data available");
-    }
-    let Some(wing) = plane
-        .wings
-        .iter()
-        .find(|w| w.name == "Main Wing")
-        .or_else(|| plane.wings.first())
-    else {
-        return no_data_scene(scene, pal, "No mass / coordinate data available");
-    };
-    let Some(fus) = plane.fuselages.first() else {
-        return no_data_scene(scene, pal, "No mass / coordinate data available");
-    };
-    if wing.xsecs.len() < 2 || fus.xsecs.is_empty() {
-        return no_data_scene(scene, pal, "No mass / coordinate data available");
-    }
-
-    let mac = plane.c_ref;
-    let x_wing_ac = wing.aerodynamic_center(0.25)[0];
-    let x_mac_le = x_wing_ac - 0.25 * mac; // Leading edge of the MAC.
-    let to_pct = |x_m: f64| ((x_m - x_mac_le) / mac.max(0.001)) * 100.0;
-    // --- Advanced gear/limit settings from config --------------------------
-    let mm = &config.mass_model;
-    let nlg_x_frac = mm.nlg_x_fraction;
-    let mlg_x_frac_mac = mm.mlg_x_fraction_mac;
-    let pct_nlg_min = mm.pct_load_nlg_min;
-
-    // --- Fuselage for NLG/MLG wheel positioning ----------------------------
-    let fus_start_x = fus.xsecs[0].xyz_c[0];
-    let fus_end_x = fus.xsecs[fus.xsecs.len() - 1].xyz_c[0];
-    let fus_len = fus_end_x - fus_start_x;
-
-    let fallback_x_nlg = fus_start_x + fus_len * nlg_x_frac;
-    let fallback_x_mlg = x_mac_le + mlg_x_frac_mac * mac;
-    // Resolved through the shared gate rather than from a fallback rebuilt
-    // here. The gear-strength boundaries of this envelope are moments about
-    // the main-gear station, so drawing them for an aircraft whose station
-    // the mass model refuses would put a limit line where nothing was
-    // measured. The figure says so instead.
-    let Ok(gear_stations) = alas_pipeline::gear_stations::resolved_gear_stations(
-        config,
-        plane,
-        fallback_x_nlg,
-        fallback_x_mlg,
-        fus_start_x,
-        fus_len,
-    ) else {
-        return no_data_scene(scene, pal, MAIN_GEAR_STATION_NOT_MEASURED);
-    };
-    let x_nlg = gear_stations.x_nlg_m;
-    let x_mlg = gear_stations.x_mlg_m;
-    let wheelbase = x_mlg - x_nlg;
-
-    // --- Component groups ----------------------------------------------------
-    let get_mass = |k: &str| masses.get(k).copied().unwrap_or(0.0);
-    let oew_mass: f64 = OEW_KEYS.iter().map(|&k| get_mass(k)).sum();
-    let payload = get_mass(PAYLOAD);
-    let fuel = get_mass(FUEL);
-    let mtow_mass = oew_mass + payload + fuel.max(0.0);
-    // The same resolved limit the `LandingMassLimitViolation` feasibility
-    // check uses (declared reference MLW in BaselineSandbox/
-    // ReferenceAdaptation; the mass-model fraction in CleanSheet), so the plot
-    // and the feasibility finding never disagree on which line is the limit.
-    let mlw_mass = config.landing_mass_limit_kg(mtow_mass);
-    let mzfw_mass = oew_mass + payload;
-
-    let cg_of_subset = |keys: &[&str]| -> f64 {
-        let m_tot: f64 = keys.iter().map(|&k| get_mass(k).max(0.0)).sum();
-        if m_tot <= 0.0 {
-            return to_pct(plane.xyz_ref[0]);
+    match prepare(report, config) {
+        Ok(data) => {
+            render(&mut scene, pal, data);
+            scene
         }
-        let x_mom: f64 = keys
-            .iter()
-            .map(|&k| {
-                let m = get_mass(k).max(0.0);
-                let x = coords.get(k).map(|c| c[0]).unwrap_or(plane.xyz_ref[0]);
-                m * x
-            })
-            .sum();
-        to_pct(x_mom / m_tot)
-    };
-    let oew_cg_mac = cg_of_subset(&OEW_KEYS);
-    let payload_cg_x = coords
-        .get(PAYLOAD)
-        .map(|c| c[0])
-        .unwrap_or(plane.xyz_ref[0]);
-    let fuel_cg_x = coords.get(FUEL).map(|c| c[0]).unwrap_or(plane.xyz_ref[0]);
-    let oew_cg_x = x_mac_le + oew_cg_mac / 100.0 * mac;
-
-    let composite_cg = |m_oew: f64,
-                        x_oew: f64,
-                        m_payload: f64,
-                        x_payload: f64,
-                        m_fuel: f64,
-                        x_fuel: f64|
-     -> (f64, f64) {
-        let m_tot = (m_oew + m_payload + m_fuel).max(1.0);
-        let x_cg = (m_oew * x_oew + m_payload * x_payload + m_fuel * x_fuel) / m_tot;
-        (m_tot, to_pct(x_cg))
-    };
-
-    // Sequence: load payload progressively (0 -> 100%), then fuel (0 -> 100%).
-    let fracs = linspace(0.0, 1.0, 15);
-    let mut pts_weight_a = Vec::with_capacity(30);
-    let mut pts_cg_a = Vec::with_capacity(30);
-    for &frac in &fracs {
-        let (w, cg) = composite_cg(
-            oew_mass,
-            oew_cg_x,
-            frac * payload,
-            payload_cg_x,
-            0.0,
-            fuel_cg_x,
-        );
-        pts_weight_a.push(w);
-        pts_cg_a.push(cg);
+        Err(message) => no_data_scene(scene, pal, message),
     }
-    for &frac in &fracs {
-        let (w, cg) = composite_cg(
-            oew_mass,
-            oew_cg_x,
-            payload,
-            payload_cg_x,
-            frac * fuel.max(0.0),
-            fuel_cg_x,
-        );
-        pts_weight_a.push(w);
-        pts_cg_a.push(cg);
-    }
-
-    // --- Aerodynamic limits --------------------------------------------------
-    let sm_val = if report.static_margin.is_nan() {
-        0.10
-    } else {
-        report.static_margin
-    };
-    let x_np = plane.xyz_ref[0] + sm_val * mac;
-    let np_pct = to_pct(x_np);
-
-    let target_sm = config.requirements.target_static_margin;
-    let cg_range = config.requirements.cg_range_pct_mac;
-    let aft_limit_mac = np_pct - target_sm * 100.0;
-    let fwd_limit_mac = aft_limit_mac - cg_range;
-    let tip_over_pct = to_pct(x_mlg);
-
-    // Gear strength limits: the same wheel/tire-derived values the optimizer's
-    // CG check enforces, computed from the aerodynamic limits above, so this
-    // plot shows exactly the boundary a design is actually held to. Python
-    // wraps this in a `try/except`, falling back to `MassModelConfig`'s fixed
-    // fractions on any failure; `size_landing_gear` here is infallible given
-    // valid geometry, so the fallback branch is unreached and not translated.
-    let fus_diam_raw = config.geometry.fuselage.diameter_m;
-    let fus_diam = if fus_diam_raw > 0.0 {
-        fus_diam_raw
-    } else {
-        4.0
-    };
-    let aero_fwd_lim_x = x_mac_le + fwd_limit_mac / 100.0 * mac;
-    let aero_aft_lim_x = x_mac_le + aft_limit_mac / 100.0 * mac;
-    let gear = size_landing_gear_with_group_stations(
-        mtow_mass,
-        x_nlg,
-        x_mlg,
-        aero_fwd_lim_x,
-        aero_aft_lim_x,
-        fus_diam,
-        fus_diam * 1.1,
-        &gear_stations.main_gear_x_m,
-        &config.landing_gear,
-    );
-    let pct_nlg_max = gear.pct_load_nlg_max;
-    let pct_mlg_max = gear.pct_load_mlg_max;
-
-    // --- Curves over the weight range -----------------------------------------
-    let w_calc = linspace(oew_mass * 0.5, mtow_mass * 1.3, 200);
-    let load_nlg_max = mtow_mass * pct_nlg_max;
-    let load_mlg_max = mtow_mass * pct_mlg_max;
-    let load_nlg_min = mtow_mass * pct_nlg_min;
-
-    let c_nlg_str: Vec<f64> = w_calc
-        .iter()
-        .map(|&w| to_pct(x_mlg - (load_nlg_max * wheelbase / w)))
-        .collect();
-    let c_mlg_str: Vec<f64> = w_calc
-        .iter()
-        .map(|&w| to_pct(x_nlg + (load_mlg_max * wheelbase / w)))
-        .collect();
-    let c_nlg_min: Vec<f64> = w_calc
-        .iter()
-        .map(|&w| to_pct(x_mlg - (load_nlg_min * wheelbase / w)))
-        .collect();
-
-    // --- Model loading-state bounds ---------------------------------------------
-    let w_ops = linspace(oew_mass, mtow_mass, 150);
-    let op_nlg_str: Vec<f64> = w_ops
-        .iter()
-        .map(|&w| to_pct(x_mlg - (load_nlg_max * wheelbase / w)))
-        .collect();
-    let op_mlg_str: Vec<f64> = w_ops
-        .iter()
-        .map(|&w| to_pct(x_nlg + (load_mlg_max * wheelbase / w)))
-        .collect();
-    let op_nlg_min: Vec<f64> = w_ops
-        .iter()
-        .map(|&w| to_pct(x_mlg - (load_nlg_min * wheelbase / w)))
-        .collect();
-
-    let poly_fwd: Vec<f64> = op_nlg_str.iter().map(|&v| fwd_limit_mac.max(v)).collect();
-    let poly_aft: Vec<f64> = (0..w_ops.len())
-        .map(|i| aft_limit_mac.min(op_mlg_str[i].min(op_nlg_min[i])))
-        .collect();
-
-    // A strength boundary is useful only while it actually closes the
-    // model loading-state check. Omitting inactive curves keeps their labels from
-    // floating outside the plot and makes the visible constraints truthful.
-    let nlg_strength_limits = op_nlg_str
-        .iter()
-        .zip(&poly_fwd)
-        .any(|(&curve, &bound)| curve > fwd_limit_mac + 1e-9 && (curve - bound).abs() < 1e-9);
-    let mlg_strength_limits = op_mlg_str
-        .iter()
-        .zip(&op_nlg_min)
-        .any(|(&curve, &nose)| curve <= aft_limit_mac + 1e-9 && curve <= nose + 1e-9);
-    let nose_load_limits = op_nlg_min
-        .iter()
-        .zip(&op_mlg_str)
-        .any(|(&curve, &main)| curve <= aft_limit_mac + 1e-9 && curve <= main + 1e-9);
-
-    render(
-        &mut scene,
-        pal,
-        CgEnvelopeRenderData {
-            mac,
-            x_mac_le,
-            oew_mass,
-            payload,
-            fuel,
-            mtow_mass,
-            mlw_mass,
-            mzfw_mass,
-            oew_cg_mac,
-            oew_cg_x,
-            payload_cg_x,
-            fuel_cg_x,
-            target_sm,
-            fwd_limit_mac,
-            aft_limit_mac,
-            tip_over_pct,
-            np_pct,
-            w_calc,
-            c_nlg_str,
-            c_mlg_str,
-            c_nlg_min,
-            pts_cg_a,
-            pts_weight_a,
-            w_ops,
-            poly_fwd,
-            poly_aft,
-            nlg_strength_limits,
-            mlg_strength_limits,
-            nose_load_limits,
-        },
-    );
-    scene
 }

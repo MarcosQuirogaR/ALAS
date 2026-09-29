@@ -146,7 +146,20 @@ pub(super) fn select_load_case(
     // is flown at the admissible mass and the shortfall is reported.
     let ceiling_kg =
         admissible_takeoff_mass_ceiling(config, zero_fuel_mass_kg, &limits, &analytic)?;
-    let mut takeoff_mass_kg = analytic_solution.takeoff_mass_kg.min(ceiling_kg);
+    // A report bound to a mission-sized takeoff mass (`AnalysisReport::
+    // sized_takeoff_mass_kg`) already carries a closed mass/fuel fixed point:
+    // its geometry, trim and component masses were evaluated at that mass. The
+    // native refinement starts there, and when its first flight re-prices the
+    // fuel within the settling tolerance the sized mass is kept as the flown
+    // mass, so the report and the feasibility load case publish one takeoff
+    // mass. A larger disagreement is a real change and is iterated to the
+    // refined mass as for any other report.
+    let sized_seed_kg = report
+        .sized_takeoff_mass_kg()
+        .map(|mass_kg| mass_kg.min(ceiling_kg))
+        .filter(|mass_kg| *mass_kg > zero_fuel_mass_kg);
+    let mut takeoff_mass_kg =
+        sized_seed_kg.unwrap_or_else(|| analytic_solution.takeoff_mass_kg.min(ceiling_kg));
     let mut plan = analytic_solution.plan;
     let mut converged = false;
     let mut native_flights = 0;
@@ -203,10 +216,14 @@ pub(super) fn select_load_case(
         required_kg = zero_fuel_mass_kg + plan.takeoff_fuel_kg();
         let next_kg = required_kg.min(ceiling_kg);
         let change_kg = next_kg - takeoff_mass_kg;
+        let flown_kg = takeoff_mass_kg;
         takeoff_mass_kg = next_kg;
         let tolerance_kg = NATIVE_TOLERANCE_KG.max(NATIVE_TOLERANCE_FRACTION * next_kg);
         if change_kg.abs() < tolerance_kg {
             converged = true;
+            if sized_seed_kg.is_some() && native_flights == 1 {
+                takeoff_mass_kg = flown_kg;
+            }
             break;
         }
     }

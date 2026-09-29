@@ -234,22 +234,14 @@ pub struct OpenFoamAdapter {
     backend: OpenFoamBackend,
 }
 
-#[path = "openfoam_parts/adapter.rs"]
 mod adapter;
-#[path = "openfoam_parts/process.rs"]
 mod process_runner;
-#[path = "openfoam_parts/version.rs"]
 mod version;
 
 pub use version::{
     version_from_directory, OpenFoamDistribution, OpenFoamSupportLevel, OpenFoamVersion,
     OpenFoamVersionAssessment, FOUNDATION_LAST_RELEASE_WITH_SIMPLEFOAM, TEMPLATE_BASELINE_RELEASE,
 };
-
-/// Probe from preferences in one call for setup cards and tests.
-pub fn probe_openfoam(preferences: OpenFoamPreferences) -> OpenFoamCapabilities {
-    OpenFoamAdapter::resolve(preferences).probe()
-}
 
 fn valid_tool_name(tool: &str) -> bool {
     !tool.is_empty()

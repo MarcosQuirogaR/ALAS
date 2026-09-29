@@ -196,6 +196,41 @@ pub(super) fn integrate_wing_box(
     Some(integral)
 }
 
+/// The spar-box cross-section of `wing` at one spanwise station `y_m`,
+/// linearly blended between the two built cross-sections that bracket it.
+///
+/// Blending the two panels' already-computed [`SectionBox`]es (rather than
+/// interpolating the underlying [`WingXSec`] and re-running [`section_box`])
+/// keeps this consistent with [`integrate_wing_box`]'s own per-panel
+/// treatment, and avoids needing to interpolate an airfoil identity between
+/// two sections that may not share one.
+///
+/// Returns `None` when `y_m` falls outside every panel the wing's own
+/// stations bracket, or a bracketing panel's section box is degenerate.
+pub(super) fn section_box_at_y(wing: &Wing, front: f64, rear: f64, y_m: f64) -> Option<SectionBox> {
+    for pair in wing.xsecs.windows(2) {
+        let y_a = pair[0].xyz_le[1];
+        let y_b = pair[1].xyz_le[1];
+        let lo = y_a.min(y_b);
+        let hi = y_a.max(y_b);
+        let span = hi - lo;
+        if span <= 0.0 || y_m < lo - 1.0e-9 * span.max(1.0) || y_m > hi + 1.0e-9 * span.max(1.0) {
+            continue;
+        }
+        let a = section_box(&pair[0], front, rear)?;
+        let b = section_box(&pair[1], front, rear)?;
+        let blend = ((y_m - y_a) / (y_b - y_a)).clamp(0.0, 1.0);
+        return Some(SectionBox {
+            area_m2: a.area_m2 + (b.area_m2 - a.area_m2) * blend,
+            x_mid_m: a.x_mid_m + (b.x_mid_m - a.x_mid_m) * blend,
+            z_mid_m: a.z_mid_m + (b.z_mid_m - a.z_mid_m) * blend,
+            width_m: a.width_m + (b.width_m - a.width_m) * blend,
+            depth_m: a.depth_m + (b.depth_m - a.depth_m) * blend,
+        });
+    }
+    None
+}
+
 /// The root and tip y coordinates and semispan of the one side `wing`'s own
 /// cross-sections describe.
 pub(super) fn semispan_bounds(wing: &Wing) -> Option<(f64, f64, f64)> {

@@ -159,10 +159,9 @@ fn or_nan(value: Option<f64>) -> f64 {
 
 /// The mesh `golden/stab/trim.json` was generated at.
 ///
-/// The reference implementation meshed at one panel in each direction; the
-/// product default has since moved to eight chordwise panels (see
-/// `alas_config::analysis`), so this restores the frozen mesh explicitly
-/// rather than inheriting a default that is no longer it. Mirrors
+/// The fixture was generated with one panel in each direction; the product
+/// default is eight chordwise panels (see `alas_config::analysis`), so this
+/// restores the fixture mesh explicitly. Mirrors
 /// `alas-aero`'s `tests/support::reference_mesh`, which every other VLM-fed
 /// parity fixture in this workspace already calls.
 fn reference_mesh() -> AnalysisConfig {

@@ -3,7 +3,6 @@
 
 // Ported from reference geometry/geometry/fuselage.py
 // Upstream: reference geometry 4.2.8, MIT.
-// Reference: alas @ rust-port-baseline.
 
 //! reference geometry's `Fuselage` and `FuselageXSec`, scoped to the surface
 //! `alas-geom::builder` and `alas-mass::torenbeek` (both later modules)

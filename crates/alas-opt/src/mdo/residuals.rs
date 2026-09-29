@@ -13,7 +13,7 @@
 use alas_config::{AlasConfig, ConstraintPolicy, MtowSizing, ObjectiveConfig, ObjectiveWeights};
 
 use crate::envelope::{
-    assess_model_cg_envelope, ModelCgConstraint, ModelCgConstraintAssessment,
+    assess_model_cg_envelope_with_ledger, ModelCgConstraint, ModelCgConstraintAssessment,
     ModelCgLoadingAssessment,
 };
 
@@ -23,6 +23,10 @@ use super::residuals_performance::performance_residuals;
 use super::sizing::SizingOutcome;
 use super::types::ConstraintFamily::{Balance, Mass};
 use super::types::ConstraintResidual;
+
+mod balance_ledger;
+#[cfg(test)]
+mod critical_tests;
 
 /// Every requirement family's residuals for one sized candidate.
 pub(crate) fn build(
@@ -34,6 +38,17 @@ pub(crate) fn build(
 ) -> Vec<ConstraintResidual> {
     let objective = &config.optimizer.objective;
     let mut residuals = Vec::new();
+    // Loads use the sized closure mass in every mode, the same binding the
+    // pipeline gives the final report and its structural stage; a registered
+    // aircraft keeps its declared design gross mass through the overrides
+    // `at_closure_mass` writes.
+    let structural_config = config.at_closure_mass(outcome.sized.takeoff_mass_kg);
+    residuals.extend(super::structural_feasibility::residuals(
+        &structural_config,
+        &outcome.history.dv,
+        &outcome.plane,
+        outcome.masses.wing,
+    ));
     residuals.extend(mass_residuals(outcome, objective));
     residuals.extend(balance_residuals(
         outcome,
@@ -153,6 +168,9 @@ fn mass_residuals(outcome: &SizingOutcome, objective: &ObjectiveConfig) -> Vec<C
     ));
 
     match &sized.dispatch.status {
+        // MDA returns CandidateFailure("cancelled") before constructing a
+        // SizedCandidate; cancellation is never a physical residual.
+        alas_mass::dispatch::DispatchStatus::Cancelled => return residuals,
         alas_mass::dispatch::DispatchStatus::Converged => {}
         alas_mass::dispatch::DispatchStatus::MtowLimited { shortfall_kg } => {
             residuals.push(ConstraintResidual::scaled(
@@ -235,7 +253,7 @@ fn mass_residuals(outcome: &SizingOutcome, objective: &ObjectiveConfig) -> Vec<C
 /// (`static_stability_floor` and `configured_forward_cg_range` are lower
 /// bounds; the gear-strength pair is an upper bound; the minimum nose-gear
 /// load is a lower bound).
-const BALANCE_CONSTRAINTS: [(&str, ModelCgConstraint, bool); 5] = [
+const BALANCE_CONSTRAINTS: [(&str, ModelCgConstraint, bool); 9] = [
     (
         "static_margin_floor",
         ModelCgConstraint::StaticStabilityFloor,
@@ -243,7 +261,7 @@ const BALANCE_CONSTRAINTS: [(&str, ModelCgConstraint, bool); 5] = [
     ),
     (
         "forward_cg_range",
-        ModelCgConstraint::ConfiguredForwardCgRange,
+        ModelCgConstraint::PhysicalForwardCgLimit,
         true,
     ),
     (
@@ -261,6 +279,18 @@ const BALANCE_CONSTRAINTS: [(&str, ModelCgConstraint, bool); 5] = [
         ModelCgConstraint::MinimumNoseGearLoad,
         true,
     ),
+    (
+        "max_nose_gear_load",
+        ModelCgConstraint::MaximumNoseGearLoadFraction,
+        false,
+    ),
+    ("tip_back", ModelCgConstraint::TipBack, true),
+    ("tail_scrape", ModelCgConstraint::TailScrape, true),
+    (
+        "minimum_usable_cg_range",
+        ModelCgConstraint::MinimumUsableCgRange,
+        true,
+    ),
 ];
 
 /// The centre-of-gravity envelope and landing-gear reaction residuals.
@@ -272,16 +302,40 @@ fn balance_residuals(
     if policy == ConstraintPolicy::Off {
         return Vec::new();
     }
-    let assessment = assess_model_cg_envelope(
-        &outcome.plane,
-        &outcome.masses,
-        &outcome.coords,
-        outcome.cg_x,
-        outcome.x_np,
-        outcome.mac,
-        config,
-    );
+    let assessment = balance_ledger::loading_basis(outcome, config).and_then(|ledger| {
+        if !config.requirements.cruise_mach.is_finite()
+            || !(0.0..1.0).contains(&config.requirements.cruise_mach)
+            || !config.requirements.cruise_altitude_m.is_finite()
+        {
+            return Err(
+                "critical neutral-point condition is outside the finite subsonic domain".to_owned(),
+            );
+        }
+        // Match the reporting condition set at this stage's mesh fidelity.
+        // A clean cruise probe cannot stand in for the critical aft-CG limit.
+        let conditions = alas_stab::neutral_point::neutral_point_conditions(
+            &outcome.plane,
+            &config.analysis,
+            &alas_stab::neutral_point::NpConditionsInput {
+                low_speed_altitude_m: 0.0,
+                cruise_mach: config.requirements.cruise_mach,
+                cruise_altitude_m: config.requirements.cruise_altitude_m,
+                ..Default::default()
+            },
+        )
+        .map_err(|error| format!("critical neutral-point conditions: {error:?}"))?;
+        assess_model_cg_envelope_with_ledger(
+            &outcome.plane,
+            ledger,
+            outcome.x_np,
+            conditions.critical,
+            outcome.mac,
+            config,
+        )
+        .map_err(|error| format!("{error}"))
+    });
     let Ok(assessment) = assessment else {
+        tracing::debug!(error = ?assessment.err(), "candidate item-level CG assessment unavailable");
         return vec![ConstraintResidual::direct(
             "cg_model_error",
             Balance,
@@ -302,6 +356,17 @@ fn balance_residuals(
                 } else {
                     worst.actual - worst.limit
                 };
+                // Diagnostic constraints (`ModelCgConstraint::is_diagnostic`:
+                // the configured CG range, and tail scrape until the aft
+                // fuselage contour is validated) are reported and visible to
+                // the relaxation review but never reject a candidate, whatever the
+                // Balance family policy -- unless the family is `Off`, which
+                // already short-circuits above.
+                let residual_policy = if constraint.is_diagnostic() {
+                    ConstraintPolicy::Diagnostic
+                } else {
+                    policy
+                };
                 ConstraintResidual::direct(
                     id,
                     Balance,
@@ -310,7 +375,7 @@ fn balance_residuals(
                     constraint.unit(),
                     raw_residual,
                     worst.normalized_exceedance,
-                    policy,
+                    residual_policy,
                 )
             })
         })

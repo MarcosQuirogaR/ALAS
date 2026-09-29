@@ -9,13 +9,21 @@
 //! appear successful.
 
 use std::fmt::Write as FmtWrite;
-use std::fs::{self, File, OpenOptions};
+use std::fs::{self, File};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::thread;
+use std::time::Instant;
 
 use crate::process::{
-    absolute_path, parent_directory, timeout_from_seconds, wait_with_timeout, DeadlineWait,
-    NewProcessGroup, NoConsoleWindow,
+    absolute_path, parent_directory, stop_process_tree, timeout_from_seconds, NewProcessGroup,
+    NoConsoleWindow, POLL_INTERVAL,
+};
+
+mod artifacts;
+use artifacts::{
+    create_fresh_file, is_fresh_output, output_filename, remove_stale_artifact, render_output_paths,
 };
 
 /// Process-level outcome before aerodynamic parsing.
@@ -30,6 +38,8 @@ pub enum AvlProcessStatus {
     LaunchFailed,
     /// The deadline expired and the complete process tree was killed.
     TimedOut,
+    /// Cancellation requested; the owned process tree was killed.
+    Cancelled,
     /// AVL returned a non-zero status.
     SolverFailed,
     /// AVL returned success without every requested fresh force file.
@@ -106,6 +116,7 @@ impl AvlProcessStatus {
             Self::InvalidTimeout => "invalid_timeout",
             Self::LaunchFailed => "launch_failed",
             Self::TimedOut => "timed_out",
+            Self::Cancelled => "cancelled",
             Self::SolverFailed => "solver_failed",
             Self::OutputMissing => "output_missing",
             Self::Completed => "completed",
@@ -185,6 +196,25 @@ pub fn run_avl_with_options(
     timeout_seconds: f64,
     options: &AvlRunOptions,
 ) -> AvlProcessResult {
+    run_avl_with_options_cancellable(
+        executable,
+        geometry_path,
+        alpha_deg,
+        timeout_seconds,
+        options,
+        None,
+    )
+}
+
+/// Execute a sweep while polling cancellation and killing its owned process tree.
+pub fn run_avl_with_options_cancellable(
+    executable: &Path,
+    geometry_path: &Path,
+    alpha_deg: &[f64],
+    timeout_seconds: f64,
+    options: &AvlRunOptions,
+    cancel: Option<&AtomicBool>,
+) -> AvlProcessResult {
     let paths = render_output_paths(
         geometry_path,
         alpha_deg.len(),
@@ -205,6 +235,11 @@ pub fn run_avl_with_options(
         stderr_path: stderr_path.clone(),
         error: None,
     };
+    if cancel.is_some_and(|flag| flag.load(Ordering::Relaxed)) {
+        result.status = AvlProcessStatus::Cancelled;
+        result.error = Some("AVL cancelled before launch".to_owned());
+        return result;
+    }
     if !geometry_path.is_file() {
         result.error = Some(format!(
             "AVL geometry is missing: {}",
@@ -329,19 +364,35 @@ pub fn run_avl_with_options(
         }
     };
 
-    let process_status = match wait_with_timeout(&mut child, timeout) {
-        DeadlineWait::Exited(status) => status,
-        DeadlineWait::TimedOut => {
-            result.status = AvlProcessStatus::TimedOut;
-            result.error = Some(format!(
-                "AVL exceeded the {timeout_seconds:.1} s deadline; process tree force-killed"
-            ));
+    // A deadline beyond the platform clock's range never arrives, where
+    // `Instant + Duration` would panic.
+    let deadline = Instant::now().checked_add(timeout);
+    let process_status = loop {
+        if cancel.is_some_and(|flag| flag.load(Ordering::Relaxed)) {
+            stop_process_tree(&mut child);
+            result.status = AvlProcessStatus::Cancelled;
+            result.error = Some("AVL cancelled; process tree force-killed".to_owned());
             return result;
         }
-        DeadlineWait::PollFailed(error) => {
-            result.status = AvlProcessStatus::SolverFailed;
-            result.error = Some(format!("cannot poll AVL: {error}"));
-            return result;
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) if deadline.is_none_or(|deadline| Instant::now() < deadline) => {
+                thread::sleep(POLL_INTERVAL);
+            }
+            Ok(None) => {
+                stop_process_tree(&mut child);
+                result.status = AvlProcessStatus::TimedOut;
+                result.error = Some(format!(
+                    "AVL exceeded the {timeout_seconds:.1} s deadline; process tree force-killed"
+                ));
+                return result;
+            }
+            Err(error) => {
+                stop_process_tree(&mut child);
+                result.status = AvlProcessStatus::SolverFailed;
+                result.error = Some(format!("cannot poll AVL: {error}"));
+                return result;
+            }
         }
     };
     if !process_status.success() {
@@ -429,117 +480,6 @@ fn render_session_with_outputs(
     }
     session.push_str("\nQUIT\n");
     session
-}
-
-#[derive(Debug, Clone)]
-struct AvlRunPaths {
-    session_path: PathBuf,
-    force_paths: Vec<PathBuf>,
-    stdout_path: PathBuf,
-    stderr_path: PathBuf,
-    output_paths: AvlOutputPaths,
-}
-
-impl AvlRunPaths {
-    fn all_artifacts(&self) -> impl Iterator<Item = &Path> {
-        self.force_paths
-            .iter()
-            .map(PathBuf::as_path)
-            .chain(self.output_paths.strip_forces.iter().map(PathBuf::as_path))
-            .chain(self.output_paths.derivatives.iter().map(PathBuf::as_path))
-            .chain(self.output_paths.trim.iter().map(PathBuf::as_path))
-            .chain([
-                self.session_path.as_path(),
-                self.stdout_path.as_path(),
-                self.stderr_path.as_path(),
-            ])
-    }
-
-    fn required_outputs(&self) -> impl Iterator<Item = &Path> {
-        self.force_paths
-            .iter()
-            .map(PathBuf::as_path)
-            .chain(self.output_paths.strip_forces.iter().map(PathBuf::as_path))
-            .chain(self.output_paths.derivatives.iter().map(PathBuf::as_path))
-            .chain(self.output_paths.trim.iter().map(PathBuf::as_path))
-    }
-}
-
-fn render_output_paths(
-    geometry_path: &Path,
-    alpha_count: usize,
-    namespace: Option<&Path>,
-    channels: &AvlOutputChannels,
-) -> AvlRunPaths {
-    let source_base = geometry_path.with_extension("");
-    let base = match namespace {
-        Some(namespace) => namespace.join(
-            source_base
-                .file_name()
-                .map(PathBuf::from)
-                .unwrap_or_else(|| PathBuf::from("avl_case")),
-        ),
-        None => source_base,
-    };
-    let force_paths = (0..alpha_count)
-        .map(|index| base.with_extension(format!("avl.{index:03}.ft")))
-        .collect::<Vec<_>>();
-    let output_paths = AvlOutputPaths {
-        strip_forces: if channels.strip_forces {
-            (0..alpha_count)
-                .map(|index| base.with_extension(format!("avl.{index:03}.fs")))
-                .collect()
-        } else {
-            Vec::new()
-        },
-        derivatives: channels
-            .stability_derivatives
-            .then(|| base.with_extension("avl.derivatives.txt")),
-        trim: channels
-            .trim_commands
-            .as_ref()
-            .map(|_| base.with_extension("avl.trim.ft")),
-    };
-    AvlRunPaths {
-        session_path: base.with_extension("avl.session.txt"),
-        force_paths,
-        stdout_path: base.with_extension("avl.stdout.txt"),
-        stderr_path: base.with_extension("avl.stderr.txt"),
-        output_paths,
-    }
-}
-
-fn output_filename(path: &Path) -> String {
-    path.file_name()
-        .map(|name| name.to_string_lossy().into_owned())
-        .unwrap_or_else(|| path.as_os_str().to_string_lossy().into_owned())
-}
-
-fn create_fresh_file(path: &Path) -> std::io::Result<File> {
-    OpenOptions::new()
-        .create_new(true)
-        .write(true)
-        .truncate(false)
-        .open(path)
-}
-
-fn remove_stale_artifact(path: &Path) -> std::io::Result<()> {
-    match fs::symlink_metadata(path) {
-        Ok(metadata) if metadata.file_type().is_file() || metadata.file_type().is_symlink() => {
-            fs::remove_file(path)
-        }
-        Ok(_) => Err(std::io::Error::new(
-            std::io::ErrorKind::AlreadyExists,
-            "expected an output file, found another filesystem object",
-        )),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(error),
-    }
-}
-
-fn is_fresh_output(path: &Path) -> bool {
-    fs::symlink_metadata(path)
-        .is_ok_and(|metadata| metadata.file_type().is_file() && metadata.len() > 100)
 }
 
 #[cfg(test)]

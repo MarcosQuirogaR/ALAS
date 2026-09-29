@@ -7,7 +7,6 @@
 // mission analysis model.Analyses.Atmospheric.US_Standard_1976 and mission analysis model.Analyses.Planets.Planet.
 // Upstream: mission analysis model 2.5.2, LGPL-2.1 (relicensed under GPL-2.0-or-later per
 // LGPL-2.1 section 3; compatible with this program's AGPL-3.0-or-later).
-// Reference: alas @ rust-port-baseline.
 
 //! The analysis stack a mission segment evaluates against.
 //!
@@ -27,8 +26,7 @@
 //! runner rather than a module of the program under translation, and
 //! reproducing it would put an untranslated, unchecked geometry assembly
 //! underneath every mission number. This is the arrangement
-//! `alas-mass::transport_weight`, `alas-aero::drag_buildup` and
-//! `alas-aero::vorlax` already use, for the reason `drag_buildup`'s row
+//! `alas-aero::drag_buildup` and `alas-aero::vorlax` already use, for the reason `drag_buildup`'s row
 //! records at length: a parity test must be handed the inputs the reference
 //! used rather than re-derive them through a second model.
 //!
@@ -43,20 +41,17 @@ use alas_aero::drag_buildup::{
     NacelleParams, WingParams,
 };
 use alas_aero::lift_surrogate::{
-    aircraft_lift_coefficient, LiftSolution, LiftSurrogate, SurrogateDomainError,
-    SurrogateDomainStatus,
+    aircraft_lift_coefficient, LiftSolution, LiftSurrogate, SurrogateDomainStatus,
 };
-use alas_atmo::{us1976_compute_values, us1976_try_compute_values, Us1976Error, Us1976Values};
+use alas_atmo::{us1976_compute_values, Us1976Values};
 use alas_prop::mission_turbofan::{
     evaluate_thrust, freestream_from_atmosphere, ThrustOutput, TurbofanInputs, VehicleBuilderParams,
 };
 use alas_prop::system::{
     FailureState, OperatingMode, PropulsionDemand, PropulsionError, PropulsionLoads,
-    PropulsionOrchestrator, PropulsionRating, PropulsionRequest, PropulsionResult, PropulsionState,
-    ResourceKind, TechnologyTrace,
+    PropulsionOrchestrator, PropulsionRequest, PropulsionResult, PropulsionState, ResourceKind,
+    TechnologyTrace,
 };
-
-use crate::operating::ThrustRating;
 
 /// The name every propulsion technology gives the active limit it raises when
 /// a normalized-force command would deliver less than flight-idle thrust.
@@ -160,24 +155,9 @@ pub struct MissionAnalyses {
 }
 
 impl MissionAnalyses {
-    /// Whether named ratings still need the historical scalar schedule.
-    pub(crate) fn uses_legacy_propulsion_schedule(&self) -> bool {
-        self.legacy_turbofan.is_some()
-    }
-
     /// `US_Standard_1976.compute_values` at one altitude.
     pub fn atmosphere(&self, altitude_m: f64, temperature_deviation_k: f64) -> Us1976Values {
         us1976_compute_values(altitude_m, temperature_deviation_k)
-    }
-
-    /// Checked US1976 atmosphere for callers that cannot accept the legacy
-    /// edge-clamping behavior of [`Self::atmosphere`].
-    pub fn atmosphere_checked(
-        &self,
-        altitude_m: f64,
-        temperature_deviation_k: f64,
-    ) -> Result<Us1976Values, Us1976Error> {
-        us1976_try_compute_values(altitude_m, temperature_deviation_k)
     }
 
     /// `Fidelity_Zero`'s whole `compute` chain at one flight condition.
@@ -195,19 +175,6 @@ impl MissionAnalyses {
     ) -> AeroSolution {
         let lift = self.surrogate.evaluate(angle_of_attack_rad, mach);
         self.aerodynamics_from_lift(lift, mach, temperature_k, reynolds_number_per_m)
-    }
-
-    /// Checked variant of [`Self::aerodynamics`] that refuses to use the
-    /// surrogate's edge-clamped value outside its trained rectangle.
-    pub fn aerodynamics_checked(
-        &self,
-        angle_of_attack_rad: f64,
-        mach: f64,
-        temperature_k: f64,
-        reynolds_number_per_m: f64,
-    ) -> Result<AeroSolution, SurrogateDomainError> {
-        let lift = self.surrogate.evaluate_checked(angle_of_attack_rad, mach)?;
-        Ok(self.aerodynamics_from_lift(lift, mach, temperature_k, reynolds_number_per_m))
     }
 
     fn aerodynamics_from_lift(
@@ -375,51 +342,6 @@ impl MissionAnalyses {
                 rejected_thrust_output()
             });
         (output, idle_floor_limited)
-    }
-
-    /// Evaluate a phase rating through the technology-neutral model.
-    ///
-    /// Legacy turbofans have no named schedules, so their established rating
-    /// fraction is supplied explicitly by the mission configuration. Typed
-    /// technologies receive the named rating without reinterpretation.
-    // Mirrors the mission thrust boundary (`thrust`) plus the rating pair.
-    #[allow(clippy::too_many_arguments)]
-    pub fn thrust_for_rating(
-        &self,
-        atmosphere: &Us1976Values,
-        altitude_m: f64,
-        velocity_m_s: f64,
-        mach: f64,
-        gravity_m_s2: f64,
-        rating: ThrustRating,
-        legacy_rating_fraction: f64,
-    ) -> Result<ThrustOutput, PropulsionError> {
-        let freestream =
-            freestream_from_atmosphere(atmosphere, altitude_m, velocity_m_s, mach, gravity_m_s2);
-        let demand = if self.uses_legacy_propulsion_schedule() {
-            PropulsionDemand::NormalizedForce(legacy_rating_fraction)
-        } else {
-            PropulsionDemand::RatedFraction {
-                rating: match rating {
-                    ThrustRating::TakeoffGoAround => PropulsionRating::TakeoffGoAround,
-                    ThrustRating::MaximumClimb => PropulsionRating::MaximumClimb,
-                    ThrustRating::MaximumContinuous => PropulsionRating::MaximumContinuous,
-                    ThrustRating::FlightIdle => PropulsionRating::FlightIdle,
-                    ThrustRating::Cruise => PropulsionRating::Cruise,
-                },
-                fraction: legacy_rating_fraction,
-            }
-        };
-        let result = self.propulsion.evaluate(&PropulsionRequest {
-            flight: (&freestream).into(),
-            demand,
-            mode: OperatingMode::Normal,
-            failure: FailureState::None,
-            loads: PropulsionLoads::default(),
-            state: PropulsionState::default(),
-            time_step_s: None,
-        })?;
-        self.project_propulsion_result(result, velocity_m_s, gravity_m_s2)
     }
 
     fn project_propulsion_result(

@@ -96,6 +96,11 @@ impl WingAnalysisState {
                 figure_exterior_3d(model.airplane(), Some(self.camera.into()), Some(theme)),
             ))
         });
+        // Every call redraws the scene (a new geometry snapshot, an orbit
+        // drag, a camera preset button, or a theme switch), so the cached
+        // preview texture must be treated as new content every time, not
+        // only when the analysed geometry itself changes.
+        self.preview_revision = self.preview_revision.wrapping_add(1);
     }
 
     /// Reset the moment reference to the snapshot's quarter mean-aerodynamic
@@ -251,4 +256,41 @@ fn geometry_signature(config: &AlasConfig, design: &DesignVector, empennage: boo
         .hash(&mut hasher);
     empennage.hash(&mut hasher);
     hasher.finish()
+}
+
+#[cfg(test)]
+mod preview_revision_tests {
+    use super::WingAnalysisState;
+
+    #[test]
+    fn every_rebuild_advances_the_preview_revision_even_without_a_geometry_change() {
+        let mut window = WingAnalysisState::default();
+        let geometry_revision = window.geometry_revision;
+
+        // A camera drag or preset button calls `rebuild_preview` without
+        // touching the analysed geometry (no `invalidate_geometry` call), so
+        // `geometry_revision` alone is not a safe `SceneView::cache_revision`:
+        // it would leave a stale cached texture from before the redraw.
+        window.rebuild_preview("Dark");
+        let after_first = window.preview_revision;
+        assert_ne!(after_first, 0);
+        assert_eq!(
+            window.geometry_revision, geometry_revision,
+            "rebuild_preview alone must not touch geometry_revision"
+        );
+
+        window.camera.apply_orbit_motion(egui::vec2(10.0, 0.0));
+        window.rebuild_preview("Dark");
+        let after_camera_change = window.preview_revision;
+        assert_ne!(
+            after_camera_change, after_first,
+            "a second redraw (a camera-only change here) must get a new revision"
+        );
+
+        window.rebuild_preview("Light");
+        assert_ne!(
+            window.preview_revision, after_camera_change,
+            "a theme-only redraw must also get a new revision"
+        );
+    }
 }

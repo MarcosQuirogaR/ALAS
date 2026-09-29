@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/config/engines.py
-// Reference: alas @ rust-port-baseline.
 
 //! Turbofans the presets select from, with the data to draw and size them.
 //!

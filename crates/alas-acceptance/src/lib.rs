@@ -5,8 +5,8 @@
 //!
 //! This crate exercises the complete ALAS pipeline end-to-end against all
 //! published aircraft presets, verifies disciplinary consistency across widebodies
-//! and narrowbodies, and measures computational performance against legacy
-//! Python references.
+//! and narrowbodies, and measures computational performance against
+//! Python reference timings.
 
 pub mod benchmarks;
 pub mod matrix;

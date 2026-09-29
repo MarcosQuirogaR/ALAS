@@ -298,5 +298,6 @@ fn test_report(config: &AlasConfig) -> AnalysisReport {
         payload_layout: None,
         trimmed_design_point: None,
         cg_envelope_ok: Some(true),
+        neutral_point_conditions: None,
     }
 }

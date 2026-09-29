@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/reporting/visualization.py (figure_dynamic_modes, L1497-1663)
-// Reference: alas @ rust-port-baseline.
 
 //! Longitudinal/lateral-directional dynamic-mode analysis at trimmed cruise:
 //! an s-plane pole plot next to a compact numeric readout.
@@ -13,10 +12,7 @@
 //! `config.requirements.cruise_altitude_m`/`cruise_mach`, so unlike the
 //! sibling stability figures this one genuinely needs the `AlasConfig`, not
 //! just the `AnalysisReport`: the report alone does not carry the cruise
-//! flight condition its own polar sweep was evaluated at. The stub this
-//! replaces took only `(report, theme)`; this row's provenance note in
-//! `docs/PORTING.md` and `docs/PHYSICS_SOLVER_FLOW.md` describe the *content* being
-//! fabricated, not the signature, and every real call site already has a
+//! flight condition its own polar sweep was evaluated at. Every real call site already has a
 //! `config` in scope (the sibling `figure_control_surfaces` already takes
 //! one), so the signature grows to match what the computation needs.
 
@@ -90,7 +86,7 @@ fn prepare_trimmed_dynamic_state(
         return None;
     }
     // The report plane is normally anchored to this point by FullAnalysis,
-    // but hand-built reports and legacy callers can still carry a stale seed.
+    // but hand-built reports can still carry a stale seed.
     // Dynamic rate derivatives must use the same physical reference as trim.
     plane.xyz_ref = report.physical_cg;
     for wing in plane

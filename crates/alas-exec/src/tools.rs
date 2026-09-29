@@ -3,11 +3,22 @@
 
 //! External-tool discovery and the typed environment passed to a run.
 //!
-//! The executable, GUI and pipeline used to each make a different decision
-//! about where an optional solver lived. Keeping discovery here means a
+//! The executable, GUI and pipeline must make the same decision
+//! about where an optional solver lives. Keeping discovery here means a
 //! packaged executable and a development checkout resolve the same way, and a
 //! run receives one named value rather than a list of unrelated `Option`s.
 
-include!("tools_parts/part_01.rs");
-include!("tools_parts/part_02.rs");
-include!("tools_parts/part_03.rs");
+use serde::{Deserialize, Serialize};
+use std::env;
+use std::fs;
+use std::path::{Path, PathBuf};
+
+mod types;
+pub use types::*;
+mod locator;
+mod nastran;
+mod platform;
+use nastran::*;
+use platform::*;
+#[cfg(test)]
+mod external_tests;

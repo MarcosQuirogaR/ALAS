@@ -4,7 +4,6 @@
 // Ported from MINPACK-1's qrfac.f, qform.f, r1updt.f and r1mpyq.f.
 // Upstream: MINPACK-1 (Argonne National Laboratory, 1980), public domain,
 // as vendored in SciPy 1.11.4 and reached through scipy.optimize.fsolve.
-// Reference: alas @ rust-port-baseline.
 
 //! The QR factorization `hybrd` carries between iterations, and the rank-one
 //! update that lets it skip rebuilding one.

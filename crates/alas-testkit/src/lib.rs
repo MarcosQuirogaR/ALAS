@@ -68,7 +68,7 @@ pub enum Tier {
 /// to different last bits; the port calls the same functions in the same
 /// order, so the difference is still rounding, but it is amplified through
 /// fits and eigen-solves beyond the reference-runtime bounds. Measured on
-/// ubuntu-22.04 on 2026-09-23: at most 1.1e-10 relative for closed-tier
+/// ubuntu-22.04: at most 1.1e-10 relative for closed-tier
 /// results (modal eigenvector entries) and 1.6e-7 for least-squares fits.
 /// Off the reference runtime the two tiers therefore widen once, here, to
 /// 1e-9 and 1e-6, bounds still far below anything that matters physically;

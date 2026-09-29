@@ -10,7 +10,7 @@
 //!
 //! [`envelope::assess_model_cg_envelope`] evaluates the hard stability floor
 //! and each gear-reaction constraint across OEW, MZFW, and MTOW. The separate
-//! [`envelope::check_cg_envelope`] path preserves the frozen Python fixture.
+//! [`envelope::check_cg_envelope`] path preserves the reference fixture.
 //!
 //! [`sampling::sample_design`] generates random valid design vectors.
 //!
@@ -40,23 +40,24 @@ pub use cancellation::{
     StopReason,
 };
 pub use differential_evolution::{
-    DeliveredAcceptance, DesignOptimizer, NoFeasibleDesign, OptimizationError, OptimizationResult,
-    ParetoCandidate, SearchDiagnostics, CANCELLED, REPORTING_FIDELITY_FALLBACK,
-    REPORTING_FIDELITY_REJECTED,
+    DeliveredAcceptance, DesignOptimizer, DiagnosticSearchOutcome, NoFeasibleDesign,
+    OptimizationError, OptimizationResult, ParetoCandidate, RestorationDiagnostics,
+    SearchDiagnostics, CANCELLED, REPORTING_FIDELITY_FALLBACK, REPORTING_FIDELITY_REJECTED,
 };
 pub use envelope::{
-    assess_model_cg_envelope, check_cg_envelope, AftCgLimitGovernance, CgEnvelopeResult,
-    ModelCgConstraint, ModelCgConstraintAssessment, ModelCgEnvelopeAssessment,
-    ModelCgEnvelopeError, ModelCgLoadingAssessment, ModelCgLoadingState,
-    StaticMarginPreferenceAssessment,
+    assess_model_cg_envelope, assess_model_cg_envelope_with_ledger, check_cg_envelope,
+    AftCgLimitGovernance, CgEnvelopeResult, LedgerLoadingBasis, ModelCgConstraint,
+    ModelCgConstraintAssessment, ModelCgEnvelopeAssessment, ModelCgEnvelopeError,
+    ModelCgLoadingAssessment, ModelCgLoadingState, StaticMarginPreferenceAssessment,
 };
 pub use evaluator::{ObjectiveEvaluation, ObjectiveEvaluator};
 pub use history::OptimizationHistory;
 pub use mdo::{
-    assess_candidate, assess_candidate_with_polar, assess_product_candidate, canonicalize_design,
-    evaluate_mission_sized, evaluate_mission_sized_with_assessment, CandidateAssessment,
-    ConstraintFamily, ConstraintResidual, ExternalPolar, PolarConditionTolerance,
-    ProductStateProvenance, ResolvedProductState, SegmentMissionModel, SizedCandidate,
+    assess_candidate, assess_candidate_with_polar_cancellable, assess_product_candidate,
+    assess_product_candidate_cancellable, canonicalize_design, evaluate_mission_sized,
+    evaluate_mission_sized_with_assessment, CandidateAssessment, ConstraintFamily,
+    ConstraintResidual, ExternalPolar, PolarConditionTolerance, ProductStateProvenance,
+    ResolvedProductState, SegmentMissionModel, SizedCandidate,
 };
 pub use objective::{
     wing_fuel_volume_m3, wing_fuel_volume_m3_reference_compatibility, DesignObjective,

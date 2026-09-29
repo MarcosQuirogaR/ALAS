@@ -11,6 +11,14 @@ use serde_json::{json, Value};
 /// Geometry corrections pinned by the Airbus dimension references alongside
 /// the preset definitions, and the continuous-leading-edge sweep convention.
 pub fn dimensions(path: &str) -> Option<(Value, Value)> {
+    // This default differs for every preset, so it is matched by suffix
+    // rather than one entry per preset name. Raymer ch.11 / Torenbeek
+    // recommend ~6-8% minimum nose-gear load for steering/braking authority;
+    // the frozen 2% floor left the "Min Nose Load" CG-envelope boundary well
+    // inside the aerodynamic aft limit for most configured presets.
+    if path.ends_with(".mass_model.pct_load_nlg_min") {
+        return Some((json!(0.02), json!(0.06)));
+    }
     let (old, new) = match path {
         "A340-300.geometry.empennage.hstab_tip_le_m[1]" => (9.0, 9.7),
         // Airbus A380 AC Rev 20 Dec 01/25, Subject 2-2-0,
@@ -36,13 +44,20 @@ pub fn dimensions(path: &str) -> Option<(Value, Value)> {
         "A320-200.geometry.empennage.vstab_tip_le_m[2]" => (5.8, 5.87),
         "A320-200.geometry.fuselage.height_m" => return Some((Value::Null, json!(4.14))),
         "A320-200.geometry.wing.break_span_fraction" => (0.37, 0.34),
-        "A320-200.geometry.wing.root_datum_x_m" => (12.9, 12.913),
+        "A320-200.geometry.wing.root_datum_x_m" => (12.9, 11.887),
+        // Wing roots re-anchored so the model quarter-MAC point sits on the
+        // manufacturer weight-and-balance one, derived by two-point statics
+        // from each airport-planning document's section 7 gear loads.
+        "A220-300.geometry.wing.root_datum_x_m" => (13.3, 13.424),
+        "A340-300.geometry.wing.root_datum_x_m" => (22.0, 23.111),
+        "A380-800.geometry.wing.root_datum_x_m" => (26.7, 25.31),
+        "B787-9.geometry.wing.root_datum_x_m" => (21.0, 22.227),
+        "DC-10.geometry.wing.root_datum_x_m" => (21.4, 22.995),
         "A320-200.requirements.max_structural_payload_kg" => (19_900.0, 21_256.0),
         // Standard gravity: the frozen two-decimal 9.81 corrected to
         // `alas_units::STANDARD_GRAVITY` (9.80665), the CODATA/exact
         // definitional value that already drives every lbf conversion and
-        // the ISA elsewhere in the program. Physics review v1.2, finding
-        // F5. Every registered preset shares this default.
+        // the ISA elsewhere in the program. Every registered preset shares this default.
         "AVE.requirements.gravity_m_s2"
         | "A340-300.requirements.gravity_m_s2"
         | "A380-800.requirements.gravity_m_s2"
@@ -108,6 +123,20 @@ pub fn native_field(path: &str, key: &str) -> bool {
                     | "reference_body_wheelbase_m"
                     | "reference_track_m"
                     | "mlg_strut_bogie_wheels"
+                    // Dynamic nose-braking, tip-back and
+                    // ground-clearance additions the frozen configuration
+                    // has no equivalent field for at all.
+                    | "nlg_dynamic_braking_decel_g"
+                    | "tire_dynamic_rating_factor"
+                    | "min_tip_back_deg"
+                    | "required_rotation_angle_deg"
+                    | "fuselage_ground_clearance_m"
+                    // The rotation and landing-trim forward-CG
+                    // criteria's own conceptual-design inputs. The frozen
+                    // configuration has no field for them at all.
+                    | "rotation_pitch_acceleration_deg_s2"
+                    | "pitch_radius_of_gyration_frac_mac"
+                    | "cl_ground_attitude_frac_of_cl_max_to"
             ))
         || (path.ends_with(".optimizer") && matches!(key, "objective" | "design_space"))
         || (path.ends_with(".mass_model")
@@ -120,6 +149,10 @@ pub fn native_field(path: &str, key: &str) -> bool {
                     | "structural_mass_method"
                     | "propulsion_mass_method"
                     | "flops_structure"
+                    // The separate handling/steering nose-load
+                    // ceiling, distinct from tire-capacity strength. The
+                    // frozen configuration has no field for it at all.
+                    | "pct_load_nlg_max_handling"
             ))
         || (path.ends_with(".geometry.engine")
             && matches!(key, "turbofan" | "turboprop" | "propulsion_technology"))
@@ -151,8 +184,7 @@ pub fn native_field(path: &str, key: &str) -> bool {
                     | "convergence_stagnation_generations"
             ))
         || (path.ends_with(".drag_model") && key == "exclude_buried_main_wing_area")
-        // The cargo capacity objective (clarified ledger App Features 2,
-        // decision D10) is a requested target the frozen configuration has no
+        // The cargo capacity objective is a requested target the frozen configuration has no
         // field for: a native addition rather than a disagreement about a
         // value. Every registered preset leaves it at its disabled default,
         // so no preset's resolved cargo target moves; `alas-opt`'s

@@ -183,6 +183,7 @@ fn leaf_entry(
     quote! {
         ::alas_config::Entry::Leaf(::alas_config::LeafField {
             kind: ::alas_config::Leaf::kind(&self.#ident, #name),
+            optional_value_kind: ::alas_config::Leaf::optional_value_kind(&self.#ident),
             value: ::alas_config::Leaf::value(&self.#ident),
             min: #min,
             max: #max,

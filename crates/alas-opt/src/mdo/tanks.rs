@@ -4,66 +4,31 @@
 //! Usable fuel-tank capacity for a mission-sized candidate.
 
 use alas_config::design_variables::DesignVector;
-use alas_config::{presets, AlasConfig};
+use alas_config::AlasConfig;
 use alas_geom::aircraft::airplane::Airplane;
-use alas_geom::builder::AircraftBuilder;
-use alas_mass::tanks::FuelTankLayout;
 
 /// Usable fuel-tank capacity on `plane`, in kilograms, or `None` when the
 /// configured tank arrangement cannot be resolved on the built geometry.
 ///
-/// A registered preset's published volumes are honoured as they stand only
-/// when `design` still equals the preset's own design vector: the same
-/// rule `alas_pipeline::feasibility::assess_fuel_capacity` applies to the
-/// finalist report; `alas-opt` cannot depend on `alas-pipeline`, so the
-/// small preset lookup is reproduced here. For any other design the
-/// published cells are carried onto the candidate as per-cell factors
-/// against the preset's own geometry
-/// ([`FuelTankLayout::resolve_scaled`]), so a wider or thicker wing gains
-/// the tank volume its spar box actually offers instead of keeping a typed
-/// litre count.
+/// The shared product resolver preserves registered cell-volume calibration
+/// on redesigned geometry and honors custom declarations without restoring
+/// a deleted tank. Dispatch and item-level balance use the same resolver.
 pub(crate) fn tank_capacity_kg(
     config: &AlasConfig,
     plane: &Airplane,
     design: &DesignVector,
 ) -> Option<f64> {
-    let preset = presets::get(&config.preset).ok();
-    let published_l = preset.and_then(|preset| preset.reference.usable_fuel_volume_l);
-    let reference = preset
-        .filter(|preset| preset.design_vector != *design)
-        .and_then(|preset| {
-            AircraftBuilder::new(Some(config.geometry.clone()))
-                .build(Some(&preset.design_vector), false)
-                .ok()
-        });
-    let layout = match reference {
-        Some(reference) => FuelTankLayout::resolve_scaled(
-            plane,
-            &reference,
-            &config.geometry,
-            &config.structures,
-            &config.fuel_tanks,
-            &config.fuel_policy,
-            config.mass_model.fuel_density_kg_m3,
-            published_l,
-        ),
-        None => FuelTankLayout::resolve(
-            plane,
-            &config.geometry,
-            &config.structures,
-            &config.fuel_tanks,
-            &config.fuel_policy,
-            config.mass_model.fuel_density_kg_m3,
-            published_l,
-        ),
-    };
-    layout.ok().map(|layout| layout.usable_capacity_kg())
+    alas_mass::tanks::resolve_product_layout(config, design, plane)
+        .ok()
+        .map(|layout| layout.usable_capacity_kg())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alas_config::presets;
     use alas_config::DesignVector;
+    use alas_geom::builder::AircraftBuilder;
 
     /// A candidate whose span exceeds the preset's grows tank capacity with
     /// its spar box, and the preset's own design keeps its published total.

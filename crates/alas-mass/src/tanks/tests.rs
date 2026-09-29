@@ -17,7 +17,7 @@ use alas_geom::aircraft::spacing::linspace;
 use alas_geom::aircraft::wing::{Wing, WingXSec};
 use alas_geom::builder::AircraftBuilder;
 
-use super::{CapacitySource, FuelState, FuelTank, FuelTankLayout, TankKind, TankSide};
+use super::{fuel_vector, CapacitySource, FuelState, FuelTank, FuelTankLayout, TankKind, TankSide};
 
 const DENSITY_KG_M3: f64 = 800.0;
 
@@ -57,6 +57,7 @@ fn synthetic_tank(id: &str, usable_capacity_kg: f64, burn_priority: i64, x_m: f6
         usable_capacity_kg,
         unusable_kg: 0.0,
         centroid_m: [x_m, 0.0, 0.0],
+        low_point_m: [x_m, 0.0, 0.0],
         extent_m: [1.0, 1.0, 1.0],
         burn_priority,
         capacity_source: CapacitySource::Geometric,
@@ -497,6 +498,102 @@ fn the_fuel_loading_curve_is_monotone_in_fuel_and_ends_at_the_full_centroid() {
     }
 }
 
+/// A single tank whose `low_point_m` is forward of and below its full-tank
+/// `centroid_m`, the partial-fill geometry (a swept, dihedral wing
+/// cell's inboard boundary sits forward and below the cell's own centroid).
+fn tank_with_low_point() -> FuelTankLayout {
+    let mut tank = synthetic_tank("wing", 1_000.0, 1, 20.0);
+    tank.low_point_m = [15.0, 0.0, -1.0];
+    FuelTankLayout {
+        tanks: vec![tank],
+        geometric_calibration_factor: 1.0,
+        density_kg_m3: DENSITY_KG_M3,
+    }
+}
+
+#[test]
+fn a_full_tank_sits_at_its_full_centroid_not_its_low_point() {
+    let layout = tank_with_low_point();
+    let full = layout
+        .distribute(layout.usable_capacity_kg())
+        .expect("full load fits its own capacity");
+    let position = full.mass_items(&layout)[0].position_m;
+    assert!((position[0] - 20.0).abs() < 1.0e-9);
+    assert!((position[2] - 0.0).abs() < 1.0e-9);
+}
+
+#[test]
+fn a_nearly_empty_tank_sits_at_its_low_point() {
+    let layout = tank_with_low_point();
+    // `mass_items` filters zero-fill tanks out entirely (there is no fuel
+    // to place), so the fill-fraction-0 limit is approached, not reached
+    // exactly, with a vanishing load.
+    let nearly_empty = layout
+        .distribute(1.0e-6)
+        .expect("a trace load fits the tank");
+    let position = nearly_empty.mass_items(&layout)[0].position_m;
+    assert!((position[0] - 15.0).abs() < 1.0e-6);
+    assert!((position[2] - (-1.0)).abs() < 1.0e-6);
+}
+
+#[test]
+fn the_partial_fill_centroid_moves_monotonically_from_the_low_point_to_the_full_centroid() {
+    let layout = tank_with_low_point();
+    let levels_kg = [0.0, 100.0, 250.0, 500.0, 750.0, 1_000.0];
+    let mut previous_x = f64::NEG_INFINITY;
+    for &fuel_kg in &levels_kg {
+        let state = layout.distribute(fuel_kg).expect("every level fits");
+        let x = if fuel_kg > 0.0 {
+            state.mass_items(&layout)[0].position_m[0]
+        } else {
+            // The empty state carries no item; its limit is the low point.
+            15.0
+        };
+        assert!(
+            x >= previous_x - 1.0e-9,
+            "x did not increase monotonically with fill: {x} after {previous_x}"
+        );
+        assert!((15.0..=20.0).contains(&x));
+        previous_x = x;
+    }
+    assert!((previous_x - 20.0).abs() < 1.0e-9);
+}
+
+#[test]
+fn the_fuel_vector_ends_at_the_takeoff_centroid_and_at_empty_with_monotonic_mass() {
+    let layout = three_tank_layout();
+    let takeoff = layout
+        .distribute(1_800.0)
+        .expect("1800 kg fits the 3000 kg layout");
+    let vector = fuel_vector(&layout, &takeoff, 7);
+    assert_eq!(vector.len(), 7);
+
+    let first = vector.first().expect("seven points produce a first one");
+    let takeoff_cg = takeoff.properties(&layout).cg_m;
+    assert!((first.fuel_kg - 1_800.0).abs() < 1.0e-9);
+    assert!((first.x_m - takeoff_cg[0]).abs() < 1.0e-9);
+    assert!((first.z_m - takeoff_cg[2]).abs() < 1.0e-9);
+
+    let last = vector.last().expect("seven points produce a last one");
+    assert!((last.fuel_kg - 0.0).abs() < 1.0e-9);
+
+    for pair in vector.windows(2) {
+        assert!(pair[1].fuel_kg <= pair[0].fuel_kg + 1.0e-9);
+    }
+}
+
+#[test]
+fn the_fuel_vector_is_empty_for_zero_points_and_a_single_point_is_the_empty_state() {
+    let layout = three_tank_layout();
+    let takeoff = layout
+        .distribute(1_800.0)
+        .expect("1800 kg fits the 3000 kg layout");
+    assert!(fuel_vector(&layout, &takeoff, 0).is_empty());
+    let single = fuel_vector(&layout, &takeoff, 1);
+    assert_eq!(single.len(), 1);
+    assert!((single[0].fuel_kg - 0.0).abs() < 1.0e-9);
+}
+
 #[test]
 fn the_default_aircraft_resolves_a_finite_layout_with_positive_capacity() {
     let config = AlasConfig::default();
@@ -564,7 +661,7 @@ fn a_partial_a380_load_supplies_feed_containing_groups_and_balances_pairs() {
     // geometric cell to absorb anything and is the identity: the resolved
     // layout holds the certified *tank* total of 323,546 L, not the 324,339 L
     // aeroplane total the preset declares (EASA TCDS EASA.A.110 Issue 17,
-    // 2026-08-05, section 3.3, p.14 of 20). The 793 L difference is that
+    // section 3.3, p.14 of 20). The 793 L difference is that
     // table's "Systems" row - usable fuel in lines and engines, which has no
     // tank station and is not modelled here.
     let certified_tank_kg = 323_546.0 * 1.0e-3 * density_kg_m3;

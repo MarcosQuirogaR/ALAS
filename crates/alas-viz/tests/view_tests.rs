@@ -37,6 +37,23 @@ fn coordinate_round_trip_mapping_is_consistent() {
 }
 
 #[test]
+fn the_background_is_painted_from_the_scene_origin_not_the_screen_origin() {
+    let scene = Scene::new(100.0, 50.0, Some(Color::rgb(10, 20, 30)));
+    let target = Rect::from_min_size(pos2(300.0, 200.0), vec2(200.0, 100.0));
+    let transform = ViewportTransform::fit(100.0, 50.0, target);
+    let shapes = render_scene_to_shapes(&scene, &transform);
+
+    let background = shapes.iter().find_map(|shape| match shape {
+        egui::Shape::Rect(rect) => Some(rect.rect),
+        _ => None,
+    });
+    let background =
+        background.unwrap_or_else(|| panic!("a scene with a background paints a rectangle"));
+    assert_eq!(background.min, pos2(300.0, 200.0));
+    assert_eq!(background.max, pos2(500.0, 300.0));
+}
+
+#[test]
 fn color_conversion_premultiplies_straight_alpha() {
     let opaque = to_egui_color(&Color::rgb(25, 100, 200));
     assert_eq!(opaque, Color32::from_rgb(25, 100, 200));

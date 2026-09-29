@@ -5,7 +5,6 @@
 // and the `expand_rows` machinery in Conditions.py/State.py.
 // Upstream: mission analysis model 2.5.2, LGPL-2.1 (relicensed under GPL-2.0-or-later per
 // LGPL-2.1 section 3; compatible with this program's AGPL-3.0-or-later).
-// Reference: alas @ rust-port-baseline.
 
 //! Everything a mission segment knows about itself at each control point.
 //!

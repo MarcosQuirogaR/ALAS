@@ -118,7 +118,7 @@ counter += 1;
 
 Specifically, **do not** write:
 
-- **Dates, version numbers, or session references.** `git log` and the commit
+- **Dates, version numbers, or references to tasks or working sessions.** `git log` and the commit
   message already record when something changed and why. A comment saying
   "previously this did X" becomes unreadable the moment someone reads the file
   without that history in front of them.
@@ -156,7 +156,6 @@ lines:
 ```rust
 // Ported from aerosandbox/atmosphere/_isa_atmo_functions.py
 // Upstream: AeroSandbox 4.2.8, MIT.
-// Reference: alas @ rust-port-baseline.
 ```
 
 This is what makes `THIRD-PARTY-NOTICES.md` auditable rather than aspirational.
@@ -180,8 +179,8 @@ provenance block is honest.
   is the policy, not a suggestion.
 - **No panics in library code.** `unwrap` and `expect` are denied outside
   tests. An analysis that cannot produce a number reports that through the
-  stage status contract in `alas-types`; a genuine invariant violation returns
-  an error and lets the caller decide.
+  typed status of that analysis (for example `NotRun` or `Error`); a genuine
+  invariant violation returns an error and lets the caller decide.
 - **Every `#[allow]` carries a comment saying why**, on the line above. An
   unexplained allow is an unreviewed decision.
 - **No module over 500 assembled production lines**, tests excluded. This is
@@ -265,13 +264,7 @@ caught it.
 
 ---
 
-## On tooling assistance
-
-Parts of this codebase are written with the help of AI coding tools. This is
-disclosed here and in any academic work that reports on this program.
-Contributors remain responsible for reviewing and validating what they
-submit, regardless of how it was drafted, and the conventions above apply
-equally to hand-written and generated code.
+## Numerical evidence
 
 What is not negotiable is the numerical evidence. No module is trusted because
 it looks right. It is trusted because it agrees with a reference to a stated

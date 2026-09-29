@@ -52,9 +52,6 @@ pub const TRANSONIC_UPPER_MACH: f64 = 1.2;
 /// a different validation envelope and are refused explicitly.
 pub const MAX_SUPPORTED_MACH: f64 = 2.0;
 
-/// Freestream Mach number from which compressibility is flagged as a caution.
-pub const COMPRESSIBILITY_CAUTION_MACH: f64 = 0.2;
-
 /// Chord Reynolds number below which a fully turbulent SST solution is
 /// transition-sensitive and flagged as a caution.
 pub const TRANSITION_SENSITIVE_REYNOLDS: f64 = 5.0e5;
@@ -254,14 +251,12 @@ pub fn boundary_table(boundaries: &BoundarySettings) -> Vec<PatchCondition> {
 
 /// Boundary-condition table for the automatic perfect-gas path.
 ///
-/// `rhoSimpleFoam` needs thermodynamic pressure and temperature at every
-/// possible outer-flow direction.  The OpenCFD v2606 aerofoil tutorial uses
-/// the same `freestreamVelocity`/`freestreamPressure` contract, with
-/// `inletOutlet` temperature and turbulence fields; applying it to the
-/// generated inlet, outlet and far-field patches lets shocks leave the domain
-/// without imposing an incompressible zero-gradient pressure on a supersonic
-/// characteristic.
-pub fn compressible_boundary_table(boundaries: &BoundarySettings) -> Vec<PatchCondition> {
+/// At supersonic freestream normal to the remote inlet/outlet planes, prescribe
+/// the inlet state and extrapolate the outlet. The lateral mixed conditions
+/// remain unchanged. This assumes supersonic remote streamwise boundaries;
+/// it does not track local shocks or switch characteristics dynamically.
+pub fn compressible_boundary_table(config: &CfdStudyConfig) -> Vec<PatchCondition> {
+    let boundaries = &config.boundaries;
     let outer = |patch_name: &str, role: &str| {
         patch(
             patch_name,
@@ -273,7 +268,7 @@ pub fn compressible_boundary_table(boundaries: &BoundarySettings) -> Vec<PatchCo
             "calculated",
         )
     };
-    vec![
+    let mut table = vec![
         outer(&boundaries.inlet_patch, "inlet"),
         outer(&boundaries.outlet_patch, "outlet"),
         outer("farField", "far field"),
@@ -295,7 +290,14 @@ pub fn compressible_boundary_table(boundaries: &BoundarySettings) -> Vec<PatchCo
             "empty",
             "empty",
         ),
-    ]
+    ];
+    if config.has_supersonic_streamwise_boundaries() {
+        table[0].velocity = "fixedValue".to_owned();
+        table[0].pressure = "fixedValue".to_owned();
+        table[1].velocity = "zeroGradient".to_owned();
+        table[1].pressure = "zeroGradient".to_owned();
+    }
+    table
 }
 
 /// Whether a regime flag stops a launch or only qualifies the result.
@@ -551,7 +553,7 @@ impl CfdStudyConfig {
             turbulence_model: self.turbulence_model.clone(),
             turbulence: self.effective_turbulence(),
             boundaries: if simulation.compressible {
-                compressible_boundary_table(&self.boundaries)
+                compressible_boundary_table(self)
             } else {
                 boundary_table(&self.boundaries)
             },

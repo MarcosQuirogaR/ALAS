@@ -12,8 +12,14 @@
 //! [`crate::mission_turbofan`] so consumers can migrate before its physics is
 //! replaced.
 
-include!("system_parts/part_01.rs");
-include!("system_parts/part_02.rs");
+use crate::mission_turbofan::{
+    evaluate_thrust, Freestream, ThrustOutput, TurbofanInputs, VehicleBuilderParams,
+};
+
+mod types;
+pub use types::*;
+mod models;
+pub use models::*;
 
 #[cfg(test)]
 mod tests {

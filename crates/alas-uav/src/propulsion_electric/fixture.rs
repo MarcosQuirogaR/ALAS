@@ -398,10 +398,10 @@ fn sample_at_speed(curve: &RpmCurve, speed_m_s: f64) -> Option<PropellerSample> 
     })
 }
 
-fn interpolate(lower: f64, upper: f64, fraction: f64) -> f64 {
+pub(super) fn interpolate(lower: f64, upper: f64, fraction: f64) -> f64 {
     lower + fraction * (upper - lower)
 }
 
-fn positive(value: f64) -> bool {
+pub(super) fn positive(value: f64) -> bool {
     value.is_finite() && value > 0.0
 }

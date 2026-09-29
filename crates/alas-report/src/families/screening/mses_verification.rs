@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/reporting/airfoil_sweep_figures.py (`fig_mses_verification`)
-// Reference: alas @ rust-port-baseline.
 
 //! Stage-3 MSES verification: VLM+Korn (Stage 2) vs MSES (Stage 3) cruise
 //! L/D per verified candidate, with wave drag annotated next to each MSES

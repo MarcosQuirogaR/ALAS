@@ -35,7 +35,7 @@
 // assertion failing.
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
-use alas_config::{fidelity_presets, performance_presets, solver_presets};
+use alas_config::{fidelity_presets, performance_presets, solver_presets, AnalysisConfig};
 use alas_testkit::{Comparison, Tier};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -77,24 +77,6 @@ fn every_solver_preset_matches_the_reference() {
                 // Solver presets preserve the selected method while changing
                 // only the historical effort/budget settings.
                 settings.remove("method");
-                // Only the balanced preset's worker count diverges, and it
-                // diverges the way the configuration default does: the frozen
-                // literal `1` became `0`, meaning "resolve against this
-                // machine", which the product L-SHADE search uses to
-                // evaluate each generation's batch in parallel without
-                // changing which points it evaluates or which one it
-                // returns. The other three presets
-                // ask for four workers explicitly and are unchanged. The
-                // product value is asserted here so it is pinned on both
-                // sides, and the frozen literal is then compared as it stands.
-                if preset.name == "balanced" {
-                    assert_eq!(
-                        settings.get("workers").and_then(Value::as_i64),
-                        Some(0),
-                        "the balanced preset resolves its worker count against the machine"
-                    );
-                    settings.insert("workers".to_owned(), serde_json::json!(1));
-                }
                 (
                     preset.name,
                     preset.display_name,
@@ -256,6 +238,17 @@ fn compare_settings(
         comparison.exact(&format!("{path}.{key}"), actual_value, expected_value);
     }
     for key in actual.keys() {
+        // A native addition has no upstream value to compare with, but a
+        // preset must still leave it alone: it has to stay at the default.
+        if NATIVE_ANALYSIS_ADDITIONS.contains(&key.as_str()) {
+            let default = to_value(&AnalysisConfig::default());
+            comparison.exact(
+                &format!("{path}.{key}: left at the default"),
+                &actual[key],
+                &default[key],
+            );
+            continue;
+        }
         if !expected.contains_key(key) {
             comparison.exact(
                 &format!("{path}.{key}"),
@@ -265,6 +258,10 @@ fn compare_settings(
         }
     }
 }
+
+/// `AnalysisConfig` fields the Rust application added after the frozen
+/// registry was recorded. The fidelity presets do not set them.
+const NATIVE_ANALYSIS_ADDITIONS: &[&str] = &["avl_timeout_s"];
 
 /// The frozen fidelity-registry value for a vortex-lattice mesh field this
 /// port deliberately moved, or `None` for every other field.

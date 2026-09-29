@@ -131,6 +131,7 @@ fn show_menu_bar(state: &mut AppState, ctx: &Context, ui: &mut Ui) {
             "Standalone analyses open from the guided workspace; leave the sandbox to use them.",
         ));
         show_menu_action(state, ui);
+        crate::views::tool_intro::show_menu_action(state, ui);
         ui.menu_button(tr("Help"), |ui| {
             if ui.button(tr("About ALAS")).clicked() {
                 state.show_about = true;
@@ -143,7 +144,12 @@ fn show_menu_bar(state: &mut AppState, ctx: &Context, ui: &mut Ui) {
 /// Render the whole sandbox workspace for this frame.
 pub fn show_sandbox_workspace(state: &mut AppState, ctx: &Context) {
     if state.sandbox.estimates.poll() || state.sandbox.estimates.running() {
-        ctx.request_repaint();
+        // Quick Analysis reports progress through an mpsc channel with no
+        // egui::Context of its own, so a 10 Hz poll (the cadence already
+        // used elsewhere for channel-backed background jobs) picks up
+        // completion promptly without spinning the UI at display refresh
+        // rate while the estimate is running.
+        ctx.request_repaint_after(std::time::Duration::from_millis(100));
     }
     handle_shortcuts(state, ctx);
 

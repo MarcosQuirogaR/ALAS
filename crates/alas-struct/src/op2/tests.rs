@@ -116,6 +116,7 @@ fn msc_table4_chunks_are_joined_and_force_vectors_are_reported_not_displacements
     );
 
     let parsed = read_op2(&op2_stream(records)).unwrap();
+    assert!(parsed.duplicate_static_subcases.is_empty());
     let table = parsed.displacements.get(&1).unwrap();
     assert_eq!(table.node_ids, [10, 20]);
     assert_eq!(table.data[0][2], 0.25);
@@ -127,6 +128,24 @@ fn msc_table4_chunks_are_joined_and_force_vectors_are_reported_not_displacements
             subcase: 1,
             num_wide: 8,
         }]
+    );
+}
+
+#[test]
+fn duplicate_complete_static_tables_are_retained_as_product_error_metadata() {
+    let mut records = vec![fortran_record(b"OUG1    ")];
+    append_table(
+        &mut records,
+        &ident(1, 1, 0, 8),
+        &[vector_row(10, 0.25)],
+        -4,
+    );
+    append_table(&mut records, &ident(1, 1, 0, 8), &[vector_row(10, 0.5)], -8);
+    let parsed = read_op2(&op2_stream(records)).unwrap();
+    assert_eq!(parsed.duplicate_static_subcases, [1]);
+    assert_eq!(
+        parsed.displacements[&1].data[0][2], 0.5,
+        "legacy last-table behavior is preserved"
     );
 }
 

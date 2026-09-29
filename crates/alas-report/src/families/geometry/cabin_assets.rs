@@ -58,7 +58,7 @@ impl CabinAsset {
     }
 }
 
-fn rectangle(item: &DeckItem) -> Vec<[f64; 2]> {
+pub(super) fn rectangle(item: &DeckItem) -> Vec<[f64; 2]> {
     let half_width = item.width * 0.5;
     let half_height = item.height * 0.5;
     vec![

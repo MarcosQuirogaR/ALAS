@@ -5,7 +5,6 @@
 // process chain and the methods it names in
 // mission analysis model/Methods/Aerodynamics/Common/Fidelity_Zero/Drag/.
 // Upstream: mission analysis model 2.5.2, LGPL-2.1.
-// Reference: alas @ rust-port-baseline.
 
 //! mission analysis model's `Fidelity_Zero` drag buildup: the drag polar the mission flies on.
 //!
@@ -45,9 +44,8 @@
 //! `drag_breakdown.induced.inviscid_wings[tag]`, which
 //! `mission analysis model.Analyses.Aerodynamics.Vortex_Lattice` writes; there is no
 //! closed-form fallback on the path this program takes. So the lift solution
-//! arrives as data, the same arrangement `alas-mass::transport_weight` uses for
-//! `sealevel_static_thrust`. `alas-aero::lift_surrogate` is what will supply
-//! it; until then the fixture does.
+//! arrives as data. `alas-aero::lift_surrogate` supplies it in the product path;
+//! the parity fixture supplies it otherwise.
 //!
 //! # Scope
 //!

@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/config/optimizer_config.py
-// Reference: alas @ rust-port-baseline.
 
 //! What the design search is looking for, and how hard it looks.
 //!
@@ -15,10 +14,10 @@
 //! solver settings are answering the same question; two that differ in the
 //! objective are not, and a comparison between them means nothing.
 //!
-//! [`ObjectiveWeights`] is the penalty table of the frozen Python objective.
-//! The product search reads only its failure cost and tail-volume window;
-//! the rest is replayed by the parity fixtures and kept so a saved
-//! configuration still round-trips.
+//! [`ObjectiveWeights`] is the penalty table of the original Python objective.
+//! The default `scipy_legacy` profile reads that full table; the
+//! mission-sized product profile reads only its failure cost and tail-volume
+//! window.
 
 pub mod design_space;
 mod objective;
@@ -33,7 +32,9 @@ pub use objective::{ConstraintPolicy, MtowSizing, ObjectiveConfig, ObjectiveKind
 pub use plausibility::PlausibilityLimits;
 pub use policy_review::{review_for, reviewed_limits, RelaxationReview, ReviewedLimit};
 pub use relaxation::{ConstraintRelaxation, RelaxableLimit, NON_RELAXABLE_RESIDUAL_IDS};
-pub use solver::{SeedOutOfRange, SolverSettings, LEGACY_METHOD_TOKENS};
+pub use solver::{
+    SeedOutOfRange, SolverSettings, LEGACY_METHOD_TOKENS, PRODUCT_DE_METHOD, SCIPY_LEGACY_METHOD,
+};
 pub use weights::ObjectiveWeights;
 
 use serde::{Deserialize, Serialize};
@@ -47,22 +48,22 @@ pub struct OptimizerConfig {
     /// What the search rewards and what it penalizes.
     #[config(
         nested,
-        help = "Penalty table of the frozen reference objective, replayed by the parity fixtures. The mission-sized search reads only the failure cost and the tail-volume window from this group; every other weight is inert for product runs."
+        help = "Penalty table used by scipy_legacy for the original weighted lift-to-drag objective. The mission-sized differential_evolution profile reads only the failure cost and tail-volume window from this group."
     )]
     pub weights: ObjectiveWeights,
 
     /// How the search is run.
     #[config(
         nested,
-        help = "Which optimization method runs, how long and wide its population is, and where in the design space it starts."
+        help = "Which complete optimization profile runs, how long and wide its population is, and where in the design space it starts."
     )]
     pub solver: SolverSettings,
 
-    /// What the mission-sized search minimises, and which requirements bound it.
+    /// What the mission-sized product search minimises, and which requirements bound it.
     #[serde(default, skip_serializing_if = "ObjectiveConfig::is_default")]
     #[config(
         nested,
-        help = "The mission-sized objective (block fuel, takeoff mass, empty mass or fuel per seat-kilometre over the design range under the fuel policy) the takeoff-mass closure, and the hard, soft or diagnostic policy of every requirement family that bounds it."
+        help = "Used by the mission-sized differential_evolution profile: select block fuel, takeoff mass, empty mass or fuel per seat-kilometre over the design range, plus the takeoff-mass closure and each requirement family's hard, soft or diagnostic policy. scipy_legacy uses weighted L/D and the penalty table instead."
     )]
     pub objective: ObjectiveConfig,
 
@@ -89,7 +90,7 @@ pub struct OptimizerConfig {
     /// Whether, and how far, an overconstrained problem may miss a limit.
     ///
     /// Strict as shipped; see [`relaxation::ConstraintRelaxation`] for the
-    /// D01-D03 rules and [`policy_review`] for the review that decides which
+    /// counting, eligibility and ranking rules and [`policy_review`] for the review that decides which
     /// limits may ever be listed.
     #[serde(default, skip_serializing_if = "ConstraintRelaxation::is_default")]
     #[config(

@@ -5,7 +5,6 @@
 // sample_training, build_surrogate and evaluate_surrogate, and the
 // fuselage_correction/aircraft_total tail of Fidelity_Zero's lift chain.
 // Upstream: mission analysis model 2.5.2, LGPL-2.1.
-// Reference: alas @ rust-port-baseline.
 
 //! The lift and induced-drag surrogate the mission actually flies on.
 //!
@@ -51,6 +50,16 @@
 //! `Fidelity_Zero.__defaults__` sets `use_surrogate = True` and the mission
 //! runner overrides nothing, so `initialize` never binds it.
 
-include!("lift_surrogate_parts/part_01.rs");
-include!("lift_surrogate_parts/part_02.rs");
-include!("lift_surrogate_parts/part_03.rs");
+use crate::vorlax::{self, VlmError, VlmGeometry, VlmSettings};
+use alas_math::{BicubicSpline, BicubicSplineError};
+use std::collections::BTreeMap;
+
+mod types;
+pub use types::*;
+mod surrogate;
+pub use surrogate::*;
+// A test asserts on values it constructed here directly, so a failed unwrap
+// or expect is the assertion failing, not a library invariant being broken.
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+#[cfg(test)]
+mod tests;

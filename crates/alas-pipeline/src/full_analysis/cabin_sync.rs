@@ -228,7 +228,7 @@ mod tests {
     }
 
     #[test]
-    fn count_mode_preserves_the_installed_cabin_and_folds_legacy_premium() {
+    fn count_mode_preserves_the_installed_cabin_and_folds_premium_seats() {
         let requirements = DesignRequirements {
             num_passengers: 999,
             ..Default::default()

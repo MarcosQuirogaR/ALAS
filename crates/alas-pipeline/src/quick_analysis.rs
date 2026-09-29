@@ -436,6 +436,7 @@ pub fn run_quick_analysis(
 
 fn dispatch_status_text(status: &DispatchStatus) -> String {
     match status {
+        DispatchStatus::Cancelled => "cancelled; no feasibility conclusion".to_owned(),
         DispatchStatus::Converged => "converged".to_owned(),
         DispatchStatus::MtowLimited { shortfall_kg } => {
             format!("MTOW-limited by {shortfall_kg:.0} kg")

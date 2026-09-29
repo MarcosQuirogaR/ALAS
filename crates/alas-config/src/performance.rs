@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/config/performance_config.py
-// Reference: alas @ rust-port-baseline.
 
 //! High-lift capability, field performance and the certified speed schedule.
 //!

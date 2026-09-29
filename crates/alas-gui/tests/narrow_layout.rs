@@ -4,12 +4,11 @@
 //! The landing form stays readable on a window narrower than the shell's
 //! declared minimum.
 //!
-//! `21-narrow-viewport.png` of the 2026-09-17 native screenshot batch caught
-//! a 466 x 893 window in which the live-preview dock kept its 300-point
-//! minimum and the form column was hard-clipped at 144 points: headings and
-//! labels were cut mid-glyph with no ellipsis, and all three TLAR values
-//! (Mach 0.84, 11887 m, 358670 kg) were entirely off-screen with no
-//! horizontal scroll bar.
+//! On a 466 x 893 window the live-preview dock must not keep its 300-point
+//! minimum and hard-clip the form column at 144 points: headings and labels
+//! would be cut mid-glyph with no ellipsis, and the TLAR values (Mach 0.84,
+//! 11887 m, 358670 kg) would be entirely off-screen with no horizontal scroll
+//! bar.
 //!
 //! These tests render the real Inputs page headlessly and inspect the text
 //! shapes egui emits against the clip rectangle each was painted under, which
@@ -67,7 +66,7 @@ fn horizontally_clipped_text(output: &FullOutput) -> Vec<String> {
 /// The right edge of the widest box the page painted.
 ///
 /// A combo box cannot be wrapped by the layout, so one that does not fit
-/// used to widen the whole page: every card then matched that width and its
+/// would widen the whole page: every card then matched that width and its
 /// right border, and the engine selector with it, was cut off by the window.
 fn widest_painted_edge(output: &FullOutput) -> f32 {
     fn walk(shape: &Shape, widest: &mut f32) {
@@ -212,7 +211,7 @@ fn the_tlar_values_are_painted_inside_the_clip_rectangle_on_a_narrow_window() {
 
 #[test]
 fn no_card_is_painted_wider_than_the_window_at_any_supported_width() {
-    // The page settles: an overflowing row used to grow the content width
+    // The page settles: an overflowing row would grow the content width
     // frame after frame, so the check is made on a settled render.
     for (width, height) in [NARROW, (640.0, 800.0), (880.0, 560.0), (1_600.0, 900.0)] {
         let output = render_inputs((width, height), None);

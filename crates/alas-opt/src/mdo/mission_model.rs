@@ -15,11 +15,11 @@
 //! same propulsion deck, polar and profile definitions, so the two paths
 //! price the same aircraft.
 
+mod climb_bands;
 mod integrate;
 mod profile;
-pub use profile::envelope_limit_m_s;
-
 pub use integrate::{EnergyLedger, FlownLeg};
+pub use profile::envelope_limit_m_s;
 
 use alas_atmo::Atmosphere;
 use alas_config::mission::MissionProfileConfig;
@@ -45,6 +45,7 @@ const FLOWN_ALTITUDE_RESOLUTION_M: f64 = 1.0;
 /// The common segment-integrated burn model.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SegmentMissionModel {
+    pub(crate) cancellation: Option<crate::cancellation::EvaluationCancellation>,
     /// Cruise Mach used for the wave-drag reference point.
     pub cruise_mach: f64,
     /// Configured cruise altitude, m above mean sea level.
@@ -180,6 +181,18 @@ pub struct MissionPlan {
 }
 
 impl SegmentMissionModel {
+    pub(crate) fn check_cancelled(&self) -> Result<(), FuelModelError> {
+        if self
+            .cancellation
+            .as_ref()
+            .is_some_and(|token| token.requested())
+        {
+            Err(FuelModelError::Cancelled)
+        } else {
+            Ok(())
+        }
+    }
+
     /// Build a model from the trimmed polar, the configured mission profile
     /// and the engine deck. Distances and altitudes are metres.
     ///
@@ -205,6 +218,7 @@ impl SegmentMissionModel {
         let cruise_atmosphere = Atmosphere::try_new(cruise_altitude_m)
             .map_err(|error| format!("cruise atmosphere is invalid: {error}"))?;
         let model = Self {
+            cancellation: None,
             phase_limits,
             steps_per_segment: integrate::DEFAULT_STEPS_PER_SEGMENT,
             cas_subdivisions: alas_config::mission::CAS_SPEED_SUBDIVISIONS,
@@ -501,6 +515,7 @@ impl SegmentMissionModel {
         mass_kg: f64,
         range_m: f64,
     ) -> Result<FlownLeg, FuelModelError> {
+        self.check_cancelled()?;
         self.validate().map_err(FuelModelError::InvalidModel)?;
         let fly_at = |scale: f64| -> Result<FlownLeg, FuelModelError> {
             let profile = climb_rate_revision(&self.profile, scale);
@@ -541,6 +556,7 @@ impl SegmentMissionModel {
         let mut previous_failed_scale = 1.0;
         let mut scale = 1.0;
         for _ in 0..CLIMB_RATE_BRACKET_STEPS {
+            self.check_cancelled()?;
             scale = (scale * CLIMB_RATE_BRACKET_FACTOR).max(floor_scale);
             match fly_at(scale) {
                 Ok(_) => {
@@ -585,6 +601,7 @@ impl SegmentMissionModel {
         };
         let mut best: Option<FlownLeg> = None;
         for _ in 0..CLIMB_RATE_BISECTION_ITERATIONS {
+            self.check_cancelled()?;
             if high - low <= CLIMB_RATE_BISECTION_RESOLUTION {
                 break;
             }
@@ -671,6 +688,7 @@ impl SegmentMissionModel {
             Err(error) => return Err(fly_error_into_model_error(error, range_m)),
         };
         for _ in 0..FLOWN_ALTITUDE_BISECTION_ITERATIONS {
+            self.check_cancelled()?;
             if high - low <= FLOWN_ALTITUDE_RESOLUTION_M {
                 break;
             }
@@ -855,65 +873,7 @@ fn fly_error_into_model_error(error: FlyError, range_m: f64) -> FuelModelError {
     }
 }
 
-impl FuelBurnModel for SegmentMissionModel {
-    fn trip(&self, takeoff_mass_kg: f64, range_m: f64) -> Result<LegEstimate, FuelModelError> {
-        self.fly_trip(takeoff_mass_kg, range_m)
-            .map(|flown| flown.leg)
-    }
-
-    fn diversion(
-        &self,
-        start_mass_kg: f64,
-        distance_m: f64,
-    ) -> Result<LegEstimate, FuelModelError> {
-        self.fly_diversion(start_mass_kg, distance_m)
-            .map(|flown| flown.leg)
-    }
-
-    fn holding_fuel_flow_kg_s(&self, mass_kg: f64, altitude_m: f64) -> Result<f64, FuelModelError> {
-        self.validate().map_err(FuelModelError::InvalidModel)?;
-        if !altitude_m.is_finite() {
-            return Err(FuelModelError::InvalidDistance {
-                distance_m: altitude_m,
-            });
-        }
-        if !mass_kg.is_finite() || mass_kg <= 0.0 {
-            return Err(FuelModelError::MassOutOfRange { mass_kg });
-        }
-        let atmosphere = alas_atmo::us1976_try_compute_values(altitude_m, self.isa_deviation_c)
-            .map_err(|error| {
-                FuelModelError::InvalidModel(format!("holding atmosphere: {error}"))
-            })?;
-        // Hold at the minimum-drag lift coefficient of the low-speed polar.
-        let cl_best = (self.cd0 / self.induced_factor_k).sqrt();
-        let dynamic_pressure_pa = mass_kg * self.gravity_m_s2 / (self.wing_area_m2 * cl_best);
-        let speed_m_s = (2.0 * dynamic_pressure_pa / atmosphere.density_kg_m3).sqrt();
-        self.level_fuel_flow_kg_s(mass_kg, altitude_m, speed_m_s)
-    }
-
-    fn cruise_fuel_flow_kg_s(&self, mass_kg: f64) -> Result<f64, FuelModelError> {
-        self.validate().map_err(FuelModelError::InvalidModel)?;
-        self.level_fuel_flow_kg_s(mass_kg, self.cruise_altitude_m, self.cruise_tas_m_s)
-    }
-
-    fn taxi_fuel_flow_kg_s(&self) -> Result<f64, FuelModelError> {
-        self.validate().map_err(FuelModelError::InvalidModel)?;
-        let flight = self
-            .propulsion
-            .flight_condition(
-                self.departure_elevation_m.max(0.0),
-                TAXI_SPEED_M_S,
-                self.gravity_m_s2,
-                self.isa_deviation_c,
-            )
-            .map_err(deck_error)?;
-        Ok(self
-            .propulsion
-            .idle_point(flight)
-            .map_err(deck_error)?
-            .fuel_flow_kg_s)
-    }
-}
+mod fuel_burn;
 
 #[cfg(test)]
 mod tests {
@@ -955,6 +915,48 @@ mod tests {
 
     fn model() -> (SegmentMissionModel, f64) {
         model_for(&AlasConfig::default(), &DesignVector::default())
+    }
+
+    #[test]
+    fn uncancelled_token_preserves_valid_mission_exactly() {
+        let (mut model, mass) = model();
+        let original = model.fly_trip(mass, 3.0e6).unwrap();
+        model.cancellation = Some(crate::cancellation::EvaluationCancellation::new());
+        assert_eq!(model.fly_trip(mass, 3.0e6).unwrap(), original);
+    }
+
+    #[test]
+    fn atr_pre_cancel_and_mid_integration_cancel_are_not_physical_failures() {
+        let config = AlasConfig::from_value(&serde_json::json!({"preset": "ATR72-600"})).unwrap();
+        let design = alas_config::presets::get("ATR72-600")
+            .unwrap()
+            .design_vector;
+        let (mut model, mass) = model_for(&config, &design);
+        let token = crate::cancellation::EvaluationCancellation::new();
+        model.cancellation = Some(token.clone());
+        token.request();
+        assert_eq!(
+            model.fly_trip(mass, 627000.0),
+            Err(FuelModelError::Cancelled)
+        );
+        let token = crate::cancellation::EvaluationCancellation::new();
+        model.cancellation = Some(token.clone());
+        // Refine the ordinary ATR integrator to guarantee work remains in
+        // flight when cancellation is requested; no artificial sleeps inside physics.
+        model.steps_per_segment = 1_000_000;
+        let (started_tx, started_rx) = std::sync::mpsc::channel();
+        std::thread::scope(|scope| {
+            let worker = scope.spawn(move || {
+                started_tx.send(()).unwrap();
+                model.fly_trip(mass, 627000.0)
+            });
+            started_rx.recv().unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(30));
+            let requested = std::time::Instant::now();
+            token.request();
+            assert_eq!(worker.join().unwrap(), Err(FuelModelError::Cancelled));
+            assert!(requested.elapsed() < std::time::Duration::from_secs(1));
+        });
     }
 
     fn assert_ledger_closes(flown: &FlownLeg) {
@@ -1075,9 +1077,8 @@ mod tests {
     /// An adapted plan keeps the configured schedule's *shape* and its
     /// declared equivalent airspeeds, not its literal true airspeeds.
     ///
-    /// This test previously asserted literal true airspeeds. That contract was
-    /// deliberately replaced, for a measured physical reason: a true airspeed
-    /// is not invariant with altitude, so holding the number while the cruise
+    /// The plan does not hold literal true airspeeds, for a physical reason: a
+    /// true airspeed is not invariant with altitude, so holding the number while the cruise
     /// level is lowered raises dynamic pressure and drag, and the step-down
     /// then makes a rating shortfall *worse* rather than better. On the ATR
     /// 72-600 the declared 140.7 m/s is its FL170 cruise and at 1 067 m it is
@@ -1193,12 +1194,9 @@ mod tests {
     /// every count (no kinetic energy hidden by the sub-rung boundaries, where
     /// each speed change opens a budget).
     ///
-    /// **The order this pins is one, not two, and that is a measurement, not
-    /// a relaxation.** This test previously asserted that doubling twice cut
-    /// the error by at least half (`fine <= 0.5 * coarse`) over counts 4, 8
-    /// and 16 against a 64-sub-rung reference. Refining the same fixture
-    /// across 1 ... 64 shows why that never followed from the scheme, on this
-    /// fixture's own numbers (trip fuel, kg):
+    /// **The order this pins is one, not two.** A halving of the error per
+    /// doubling (`fine <= 0.5 * coarse`) does not follow from the scheme.
+    /// Refining the fixture across 1 ... 64 gives (trip fuel, kg):
     ///
     /// | sub-rungs | 4 | 8 | 16 | 32 | 64 |
     /// |---|---|---|---|---|---|
@@ -1206,27 +1204,25 @@ mod tests {
     ///
     /// The successive-difference ratio over 16/32/64 is **1.95**, an observed
     /// order of **0.96**: clean first order, with the 64-sub-rung value still
-    /// 0.08 % short of the Richardson limit, so the old reference was not
-    /// converged and counts 4-8 are pre-asymptotic, which is the only reason
-    /// the halving assertion ever held. First order is what the discretization
+    /// 0.08 % short of the Richardson limit, so counts 4-8 are
+    /// pre-asymptotic. First order is what the discretization
     /// is built to deliver: the schedule is *piecewise constant* in speed,
     /// with each rung-to-rung change taken instantaneously at a boundary and
     /// its kinetic budget amortized inside the following sub-rung. That is an
     /// `O(dh)` treatment however finely the true airspeed itself is sampled.
     ///
-    /// **Open integrator finding, this lane, not fixed here.** The *planned*
+    /// **Known integrator limitation.** The *planned*
     /// footprint does converge at second order (the descent ladder moves
     /// 561 m, 172 m, 27 m, 15 m, 1.6 m, 0.4 m over the same doublings), but
     /// the *flown* descent footprint runs away from it: 5.6 km longer than
     /// planned at 1 sub-rung and 38.1 km longer at 64, and at 128 the leg
     /// stops converging altogether (`speed schedule not attained ... 0.1 m/s`
-    /// transition, 867 MJ unpaid). Measured negative controls: the climb-rate
-    /// revision of `fly_leg` never fires on this fixture (the unrevised and
-    /// revised legs agree bit for bit at every count), and `integrate.rs` is
-    /// unmodified by this lane, so the cause is the rating/idle-bounded
-    /// combined energy balance being newly exercised by the
-    /// equivalent-airspeed cruise resolution, not the rate revision or the
-    /// envelope scale. The shipped count is
+    /// transition, 867 MJ unpaid). The climb-rate revision of `fly_leg`
+    /// never fires on this fixture (the unrevised and revised legs agree bit
+    /// for bit at every count), so the cause is the rating/idle-bounded
+    /// combined energy balance exercised by the equivalent-airspeed cruise
+    /// resolution, not the rate revision or the envelope scale. The shipped
+    /// count is
     /// `alas_config::mission::CAS_SPEED_SUBDIVISIONS` = 8, whose trip fuel is
     /// within 0.47 % of the Richardson limit; that bound is asserted below so
     /// a regression in the shipped configuration is caught, rather than only
@@ -1683,11 +1679,23 @@ mod tests {
                 // it takes is a measurement that moves with the deck and the
                 // polar. Measured today: 0.90 of MTOW reaches 5 180 m
                 // unadapted, 0.95 does not.
+                // `light.cruise_altitude_m` is the climb ladder's own top
+                // (`ProfileGeometry::ladder_top_m`), not the raw configured
+                // number: the ATR profile disables its step-climb legs (zero
+                // distance share) below the declared cruise altitude, so an
+                // unadapted, unloaded flight tops out at
+                // `initial_climb_altitude_fraction` (0.999) of the declared
+                // level by design, never exactly at it. A weight-limited
+                // step-down (the failure this test guards against) lands far
+                // below that, at the measured ~5 180 m against a ~6 096 m
+                // (FL200) configured level, so a 99.5 % tolerance separates
+                // the two without masking either.
                 let recovered = [0.95_f64, 0.90, 0.85, 0.80].into_iter().find(|fraction| {
                     model
                         .fly_trip(fraction * mtow, 700_000.0)
                         .is_ok_and(|light| {
-                            !light.adapted && light.cruise_altitude_m == model.cruise_altitude_m
+                            !light.adapted
+                                && light.cruise_altitude_m >= 0.995 * model.cruise_altitude_m
                         })
                 });
                 assert!(
@@ -1796,8 +1804,7 @@ mod tests {
     /// that closure rule separate from the genuine idle-domain rejection
     /// covered by the integration test in `integrate.rs`.
     ///
-    /// **Open physics gap, measured here and owned by propulsion, not by this
-    /// lane.** With the report-derived polar the sector no longer closes *at*
+    /// **Known propulsion-deck limitation.** With the report-derived polar the sector does not close *at*
     /// the configured 5 180 m: level flight there at 136.8 m/s needs 13 288 N
     /// against 12 629 N of deck rating, 5.0 % short, and the shortfall does
     /// not clear with mass: 19 000 kg still levels at 4 697 m. Inverting the
@@ -1806,11 +1813,10 @@ mod tests {
     /// rating there, so the binding term is the turboprop deck's altitude
     /// lapse (and secondarily an L/D of 15.4 where the aircraft's is nearer
     /// 16-17), not the mission schedule. The real ATR 72-600 does cruise at
-    /// FL170, so this is a modelling deficiency and is recorded as one; it is
-    /// **not** made to pass by widening the altitude assertion. What this test
-    /// now pins is the contract it was written for (the same-target rung
-    /// closure) plus the measured shortfall itself, so that correcting the
-    /// deck fails this test loudly instead of silently.
+    /// FL170, so this is a modelling deficiency and is recorded as one; the
+    /// altitude assertion is not widened to hide it. The test pins the
+    /// same-target rung closure plus the measured shortfall itself, so that
+    /// correcting the deck fails this test loudly instead of silently.
     #[test]
     fn atr_dispatch_bracket_flies_report_derived_sector_at_configured_altitude() {
         let config = AlasConfig::from_value(&serde_json::json!({"preset": "ATR72-600"}))

@@ -3,5 +3,19 @@
 
 //! Mission, hardware, and propulsion controls for the fixed-wing UAV workflow.
 
-include!("sections_parts/part_01.rs");
-include!("sections_parts/part_02.rs");
+mod hardware;
+mod mission;
+mod propulsion;
+
+pub(super) use hardware::component_inputs;
+pub(super) use mission::mission_inputs;
+pub(super) use propulsion::propulsion_inputs;
+
+use egui::{Grid, Ui};
+
+fn form_grid(ui: &mut Ui, id: impl std::hash::Hash, contents: impl FnOnce(&mut Ui)) {
+    Grid::new(id)
+        .num_columns(2)
+        .spacing([20.0, 8.0])
+        .show(ui, contents);
+}

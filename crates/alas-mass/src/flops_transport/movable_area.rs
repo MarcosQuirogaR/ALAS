@@ -104,13 +104,13 @@ pub(super) fn chord_band_fraction(wing: &Wing, start: f64, end: f64) -> Option<f
 /// movables, and this implementation does not.
 ///
 /// The wing-only convention is adopted deliberately, for compatibility with
-/// NASA Aviary, the agency's own reference implementation of these
+/// NASA Aviary, the agency's own implementation of these
 /// equations: `flops_based/surface_controls.py` computes
 /// `surface_flap_area = flap_ratio * wing_area` and adds no tail term, and
 /// its `LargeSingleAisle1FLOPS` case carries `CONTROL_SURFACE_AREA = 137
 /// ft^2` against a `1370 ft^2` wing, exactly the declared 0.1 ratio. Matching
-/// Aviary keeps this port checkable against the only published numeric
-/// reference available.
+/// Aviary keeps this implementation checkable against the only published
+/// numeric reference available.
 ///
 /// Two further observations are consistent with the choice but do **not**
 /// establish it as physically correct:
@@ -146,7 +146,7 @@ pub(super) fn movable_surface_area(
     let wing = main_wing(plane)?;
     // FLOPS receives planform areas on the aircraft reference plane. Keep
     // control-surface fractions tied to the wing's projected reference area;
-    // the legacy unfolded area would add a dihedral-dependent bias.
+    // the unfolded area would add a dihedral-dependent bias.
     let area = wing.reference_area();
     if !area.is_finite() || area <= 0.0 {
         return None;
@@ -189,8 +189,8 @@ mod tests {
     use alas_geom::builder::AircraftBuilder;
 
     /// A 30 m semispan wing tapering 6 m to 1.5 m through one break, so the
-    /// chord distribution is far from the constant one the old span-fraction
-    /// rule assumed.
+    /// chord distribution is far from the constant one a span-fraction rule
+    /// assumes.
     fn tapered_wing() -> alas_geom::aircraft::wing::Wing {
         use alas_geom::aircraft::airfoil::Airfoil;
         use alas_geom::aircraft::wing::{Wing, WingXSec};
@@ -327,7 +327,7 @@ mod tests {
             exact_band / exact_total
         );
         // The band carries about eleven percent more area than its span
-        // fraction, which is the bias the previous SFLAP resolution had.
+        // fraction, which is the bias a span-fraction area would carry.
         let span_fraction = 0.62 - 0.10;
         assert!(
             fraction > span_fraction * 1.05,

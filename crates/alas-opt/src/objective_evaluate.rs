@@ -4,9 +4,9 @@
 //! Candidate scalar-cost evaluation for the aircraft design objective.
 //!
 //! Product evaluation is the mission-sized objective in [`crate::mdo`]. The
-//! weighted lift-to-drag cost below is the frozen Python objective and is
-//! reachable only through `DesignObjective::new_reference_compatibility`,
-//! which the parity fixtures replay; it is not a selectable objective.
+//! weighted lift-to-drag cost below is the reference-compatible objective and
+//! is selected by the `scipy_legacy` profile as well as the explicit parity
+//! constructor.
 
 use super::{
     apply_candidate_payload_load_case, apply_candidate_payload_load_case_reference_compatibility,
@@ -35,9 +35,8 @@ impl DesignObjective {
     /// Evaluate the scalar cost for candidate design vector `x`.
     pub fn evaluate(&mut self, x: &[f64]) -> f64 {
         // Every product evaluation sizes the candidate by the design mission
-        // and ranks it feasibility first; only the frozen reference replay
-        // keeps the legacy weighted penalty, so its parity fixture stays
-        // attributable to the translated Python model.
+        // and ranks it feasibility first. The `scipy_legacy` profile uses
+        // the weighted penalty evaluation and its reference mass coordinates.
         if !self.reference_mass_coordinates {
             return crate::mdo::evaluate_mission_sized(self, x);
         }
@@ -84,7 +83,7 @@ impl DesignObjective {
             return cost;
         }
 
-        // This is the frozen replay path, and the two builders no longer mesh
+        // This is the reference replay path, and the two builders do not mesh
         // alike: the product one reads `n_subdivisions` as an absolute panel
         // count across the surface, the reference one as the per-section
         // multiplier the fixtures were generated with.
@@ -104,9 +103,10 @@ impl DesignObjective {
         };
 
         if self.reference_mass_coordinates {
-            // The frozen objective predates the projected XY reference
-            // contract. Keep its historical scales at this explicit parity
-            // seam while native optimization consumes builder references.
+            // The reference objective uses the unfolded wing area and span
+            // rather than the projected XY reference contract. Keep those
+            // scales at this explicit parity seam while native optimization
+            // consumes builder references.
             if let Some(wing) = plane.wings.first() {
                 let s_ref = wing.unfolded_area();
                 // The reference builder stored the design-vector span rather
@@ -131,9 +131,9 @@ impl DesignObjective {
             && !self.reference_mass_coordinates;
         let analysis_config = self.config.analysis.clone();
         // These bounds describe a preferred transport-aircraft shape rather
-        // than a feasibility condition. Keep them for frozen reference replay,
-        // but do not silently steer the native product search unless the user
-        // explicitly enables the shape-prior model.
+        // than a feasibility condition. Keep them for scipy_legacy and
+        // reference replay, but do not silently steer the native product
+        // search unless the user explicitly enables the shape-prior model.
         let transport_planform = if transport_constraints_active {
             match assess_product_transport_planform(&plane, &dv, &self.config) {
                 Some(assessment) => Some(assessment),
@@ -337,6 +337,10 @@ impl DesignObjective {
                             &masses,
                             &coords,
                             cg_x,
+                            t.x_np,
+                            // No multi-condition NP sweep on this hot path
+                            // (see `mdo::residuals`'s same seam); the clean
+                            // probe stands in for the critical station.
                             t.x_np,
                             plane.c_ref,
                             &self.config,

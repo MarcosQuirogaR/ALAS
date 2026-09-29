@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/physics/payload.py (`apply_cabin_preset`)
-// Reference: alas @ rust-port-baseline.
 
 //! Named cabin layouts, and what selecting one writes into the configuration.
 //!

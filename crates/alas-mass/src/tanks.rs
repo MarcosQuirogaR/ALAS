@@ -26,6 +26,7 @@
 
 mod distribute;
 mod geometry;
+mod product;
 mod resolve;
 mod scaled;
 mod types;
@@ -33,7 +34,9 @@ mod types;
 #[cfg(test)]
 mod tests;
 
-pub use distribute::FuelState;
+pub use distribute::{fuel_vector, FuelState};
+pub use product::{resolve_product_layout, uses_registered_tank_layout};
 pub use types::{
-    CapacitySource, FuelCgPoint, FuelTank, FuelTankLayout, TankKind, TankLayoutError, TankSide,
+    CapacitySource, FuelCgPoint, FuelTank, FuelTankLayout, FuelVectorPoint, TankKind,
+    TankLayoutError, TankSide,
 };

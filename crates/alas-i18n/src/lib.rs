@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/i18n.py
-// Reference: alas @ rust-port-baseline.
 
 //! Runtime language selection and the boundary where English source text
 //! becomes a translation.
@@ -60,7 +59,9 @@
 use std::borrow::Cow;
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::sync::{Mutex, OnceLock};
+#[cfg(test)]
+use std::sync::Mutex;
+use std::sync::{OnceLock, RwLock};
 
 pub mod es;
 
@@ -112,9 +113,15 @@ pub fn get_language() -> String {
     CURRENT_LANGUAGE.with(|cell| cell.borrow().clone())
 }
 
-fn registry() -> &'static Mutex<HashMap<String, HashMap<String, String>>> {
-    static REGISTRY: OnceLock<Mutex<HashMap<String, HashMap<String, String>>>> = OnceLock::new();
-    REGISTRY.get_or_init(|| Mutex::new(HashMap::new()))
+// Registration happens a handful of times at startup (`es::install` and its
+// extension); every `t()` call is a read. A `Mutex` here serialized lookups
+// against each other for no reason on this GUI's hot text-layout paths
+// (translating hundreds of labels a frame); `RwLock` lets those reads run
+// uncontended against one another and only excludes them during the rare
+// write.
+fn registry() -> &'static RwLock<HashMap<String, HashMap<String, String>>> {
+    static REGISTRY: OnceLock<RwLock<HashMap<String, HashMap<String, String>>>> = OnceLock::new();
+    REGISTRY.get_or_init(|| RwLock::new(HashMap::new()))
 }
 
 #[cfg(test)]
@@ -128,7 +135,7 @@ pub(crate) fn registry_test_guard() -> std::sync::MutexGuard<'static, ()> {
 
 #[cfg(test)]
 pub(crate) fn reset_registry_for_test() {
-    match registry().lock() {
+    match registry().write() {
         Ok(mut catalogs) => catalogs.clear(),
         Err(poisoned) => poisoned.into_inner().clear(),
     }
@@ -148,7 +155,7 @@ where
     // A poisoned lock means an earlier registration panicked mid-insert; the
     // table it was writing is best treated as never having arrived rather
     // than propagating that panic into an unrelated caller.
-    if let Ok(mut catalogs) = registry().lock() {
+    if let Ok(mut catalogs) = registry().write() {
         catalogs.insert(lang.to_string(), table);
     }
 }
@@ -163,7 +170,7 @@ pub fn extend_catalog<I>(lang: &str, entries: I)
 where
     I: IntoIterator<Item = (String, String)>,
 {
-    if let Ok(mut catalogs) = registry().lock() {
+    if let Ok(mut catalogs) = registry().write() {
         catalogs
             .entry(lang.to_string())
             .or_default()
@@ -175,7 +182,7 @@ where
 // or no entry) is a plain `None` rather than something `t` has to unpack
 // twice.
 fn translated(lang: &str, text: &str) -> Option<String> {
-    registry().lock().ok()?.get(lang)?.get(text).cloned()
+    registry().read().ok()?.get(lang)?.get(text).cloned()
 }
 
 /// Translate `text` into the active (or given) language.
@@ -198,17 +205,34 @@ pub fn t<'a>(text: Option<&'a str>, lang: Option<&str>) -> Cow<'a, str> {
         Some(value) if !value.is_empty() => value,
         _ => return Cow::Borrowed(""),
     };
-    let language = if lang.is_some() {
-        normalize_language(lang)
-    } else {
-        get_language()
-    };
-    if language == DEFAULT_LANGUAGE {
-        return Cow::Borrowed(text);
-    }
-    match translated(&language, text) {
-        Some(value) => Cow::Owned(value),
-        None => Cow::Borrowed(text),
+    match lang {
+        Some(lang) => {
+            let language = normalize_language(Some(lang));
+            if language == DEFAULT_LANGUAGE {
+                return Cow::Borrowed(text);
+            }
+            match translated(&language, text) {
+                Some(value) => Cow::Owned(value),
+                None => Cow::Borrowed(text),
+            }
+        }
+        // The overwhelming majority of calls pass `lang: None` and read the
+        // calling thread's language (see `tr()` throughout the GUI, called
+        // hundreds of times a frame). `get_language()` clones the thread's
+        // `String` for callers that need an owned copy; borrowing the cell
+        // here instead avoids that allocation on every lookup, English or
+        // not, without changing what any caller observes.
+        None => CURRENT_LANGUAGE.with(|cell| {
+            let language = cell.borrow();
+            if *language == DEFAULT_LANGUAGE {
+                Cow::Borrowed(text)
+            } else {
+                match translated(&language, text) {
+                    Some(value) => Cow::Owned(value),
+                    None => Cow::Borrowed(text),
+                }
+            }
+        }),
     }
 }
 

@@ -214,7 +214,7 @@ mod registry;
 
 pub use dat::{export_file, import_file, parse_dat, parse_dat_with_source};
 pub use json::{export_json, parse_json, parse_json_with_source, parse_value};
-pub(crate) use registry::legacy_by_name_or_icao;
+pub(crate) use registry::airport_by_name_or_icao;
 pub use registry::{
     find_custom, register_custom_airport, registered_custom_airports, replace_custom_airports,
 };
@@ -292,12 +292,12 @@ mod tests {
     }
 
     #[test]
-    fn physical_lengths_supply_conservative_legacy_distances() {
+    fn physical_lengths_supply_conservative_declared_distances() {
         let airport = sample("ZZ03");
         replace_custom_airports(vec![airport]).expect("registry accepts sample");
-        let legacy = legacy_by_name_or_icao("ZZ03").expect("legacy lookup");
-        assert_eq!(legacy.toda_m, 2400.0);
-        assert_eq!(legacy.lda_m, 2400.0);
+        let resolved = airport_by_name_or_icao("ZZ03").expect("airport lookup");
+        assert_eq!(resolved.toda_m, 2400.0);
+        assert_eq!(resolved.lda_m, 2400.0);
         replace_custom_airports(Vec::new()).expect("registry clears");
     }
 

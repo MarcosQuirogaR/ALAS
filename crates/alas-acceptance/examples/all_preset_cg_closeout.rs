@@ -141,28 +141,28 @@ fn main() -> Result<(), Box<dyn Error>> {
         // The frozen reference path is retained as an explicit comparison
         // control. It must not inherit the product architecture merely
         // because this example also evaluates the pure production path.
-        let mut legacy_config = config.clone();
-        legacy_config.mass_model.mass_architecture =
+        let mut reference_config = config.clone();
+        reference_config.mass_model.mass_architecture =
             MassArchitecture::LegacyReferenceCompatibleComparison;
-        legacy_config.mass_model.apply_architecture();
+        reference_config.mass_model.apply_architecture();
         let (reference_initial_masses, reference_initial_coordinates, _) = run_mass_analysis(
             &airplane,
-            &legacy_config.requirements,
-            &legacy_config.geometry,
-            Some(&legacy_config.mass_model),
+            &reference_config.requirements,
+            &reference_config.geometry,
+            Some(&reference_config.mass_model),
             None,
         );
         let reference_payload = payload_summary(
             &airplane,
-            &legacy_config,
+            &reference_config,
             &reference_initial_masses,
             &reference_initial_coordinates,
         )?;
         let (reference_masses, reference_coordinates, reference_cg) = run_mass_analysis(
             &airplane,
-            &legacy_config.requirements,
-            &legacy_config.geometry,
-            Some(&legacy_config.mass_model),
+            &reference_config.requirements,
+            &reference_config.geometry,
+            Some(&reference_config.mass_model),
             Some(&reference_payload),
         );
 
@@ -291,7 +291,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let output = json!({
         "status": "preliminary_model_evidence_not_afm_wbm_limits",
         "generated_by": "cargo run -p alas-acceptance --example all_preset_cg_closeout",
-            "comparison": "Both paths run the real two-pass cabin/cargo builder. The reference path is an explicit legacy comparison control; the product path evaluates the pure FLOPS component buildup and uses the structural wingbox only for an independent coordinate diagnostic.",
+            "comparison": "Both paths run the real two-pass cabin/cargo builder. The reference path is an explicit reference-compatible comparison control; the product path evaluates the pure FLOPS component buildup and uses the structural wingbox only for an independent coordinate diagnostic.",
         "tank_semantics": "For an unchanged registered aircraft, the published usable-fuel mass is authoritative. MTOW-residual fuel is separately reported and capped only in the tank-limited loading case; edited designs use the product's separately labeled geometry estimate.",
         "limitations": [
             "The four states are planning OEW/MZFW/MTOW/full-fuel cases, not an operational loading envelope.",

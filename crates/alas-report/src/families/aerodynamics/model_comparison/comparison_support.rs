@@ -386,7 +386,7 @@ pub(super) fn draw_avl_condition_panels(
     }
 }
 
-fn panel_title(scene: &mut Scene, axes: &Axes2D, text: &str, pal: &Palette) {
+pub(super) fn panel_title(scene: &mut Scene, axes: &Axes2D, text: &str, pal: &Palette) {
     scene.add(SceneElement::Text {
         text: text.to_owned(),
         pos: [axes.left, axes.top - 8.0],

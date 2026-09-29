@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/reporting/visualization.py (figure_structures_sizing, L5706-5818).
-// Reference: alas @ rust-port-baseline.
 
 //! Wingbox planform (spar lines + faint rib-station lines), the semi-wing
 //! mass breakdown as a pie chart, and a FEM-vs-Torenbeek wing mass

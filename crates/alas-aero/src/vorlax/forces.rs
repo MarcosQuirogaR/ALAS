@@ -4,7 +4,6 @@
 // Ported from mission analysis model/Methods/Aerodynamics/Common/Fidelity_Zero/Lift/VLM.py,
 // steps 11 through 13 (VORLAX subroutines PRESS and AERO).
 // Upstream: mission analysis model 2.5.2, LGPL-2.1.
-// Reference: alas @ rust-port-baseline.
 
 //! Turning solved circulations into forces: VORLAX's `PRESS` and `AERO`.
 //!

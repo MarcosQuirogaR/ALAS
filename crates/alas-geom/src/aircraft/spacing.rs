@@ -3,7 +3,6 @@
 
 // Ported from reference geometry/numpy/spacing.py
 // Upstream: reference geometry 4.2.8, MIT.
-// Reference: alas @ rust-port-baseline.
 
 //! Point spacing along an interval: evenly spaced and cosine-spaced.
 //!

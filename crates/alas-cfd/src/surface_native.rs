@@ -13,8 +13,6 @@ mod geometry;
 pub(crate) use geometry::integrate;
 #[path = "surface_native_mesh.rs"]
 mod mesh;
-#[path = "surface_native_raw.rs"]
-mod raw;
 
 pub(crate) fn io(path: &Path, error: std::io::Error) -> SurfaceError {
     SurfaceError::Io {
@@ -126,29 +124,6 @@ pub(crate) fn parse_case(
         samples,
         forces,
     })
-}
-
-pub(crate) fn raw_rows(
-    text: &str,
-    components: usize,
-) -> Result<(raw::FaceRows, Option<usize>), SurfaceError> {
-    raw::raw_rows(text, components)
-}
-
-pub(crate) fn count_check(
-    actual: usize,
-    declared: Option<usize>,
-    source: &str,
-) -> Result<(), SurfaceError> {
-    raw::count_check(actual, declared, source)
-}
-
-pub(crate) fn parse_sampled(
-    pressure_text: &str,
-    shear_text: &str,
-    reference: &SurfaceReference,
-) -> Result<super::SampledSurfaceDistribution, SurfaceError> {
-    raw::parse_sampled(pressure_text, shear_text, reference)
 }
 
 #[cfg(test)]

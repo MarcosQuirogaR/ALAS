@@ -5,7 +5,6 @@
 // and its aircraft `Airplane.draw_three_view` routine,
 // `style="wireframe"` branch)
 // Upstream: native aerodynamic model 4.2.8, MIT.
-// Reference: alas @ rust-port-baseline.
 
 //! The four-panel top/front/side/isometric wireframe three-view.
 //!

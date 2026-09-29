@@ -125,6 +125,21 @@ pub(crate) fn run_candidate_with_polar_and_fuselage_policy(
     external: Option<&ExternalPolar>,
     preserve_explicit_fuselage_length: bool,
 ) -> Result<SizingOutcome, CandidateFailure> {
+    run_candidate_cancellable(config, x, external, preserve_explicit_fuselage_length, None)
+}
+
+pub(crate) fn run_candidate_cancellable(
+    config: &AlasConfig,
+    x: &[f64],
+    external: Option<&ExternalPolar>,
+    preserve_explicit_fuselage_length: bool,
+    cancellation: Option<crate::cancellation::EvaluationCancellation>,
+) -> Result<SizingOutcome, CandidateFailure> {
+    if cancellation.as_ref().is_some_and(|token| token.requested()) {
+        return Err(CandidateFailure {
+            reason: "cancelled",
+        });
+    }
     let (candidate_config, dv, mut plane) = super::build::build_geometry_with_fuselage_policy(
         config,
         x,
@@ -232,7 +247,7 @@ pub(crate) fn run_candidate_with_polar_and_fuselage_policy(
         }
         _ => req.cruise_altitude_m,
     };
-    let model = SegmentMissionModel::new(
+    let mut model = SegmentMissionModel::new(
         candidate_config.mission.profile.clone(),
         req.cruise_mach,
         flown_cruise_altitude_m,
@@ -272,6 +287,7 @@ pub(crate) fn run_candidate_with_polar_and_fuselage_policy(
 
     let tank_capacity = tank_capacity_kg(&candidate_config, &plane, &dv);
 
+    model.cancellation = cancellation;
     let context = MdaContext {
         config: &candidate_config,
         dv: &dv,
@@ -488,5 +504,27 @@ mod tests {
         let config = AlasConfig::default();
         let x = DesignVector::default().to_array();
         assert!(run_candidate(&config, &x).is_ok());
+    }
+}
+
+#[cfg(test)]
+mod cancellation_tests {
+    #[test]
+    fn pre_cancelled_candidate_is_not_a_numerical_or_physical_rejection() {
+        let token = crate::cancellation::EvaluationCancellation::new();
+        token.request();
+        let result = super::run_candidate_cancellable(
+            &alas_config::AlasConfig::default(),
+            &[],
+            None,
+            false,
+            Some(token),
+        );
+        assert!(matches!(
+            result,
+            Err(super::CandidateFailure {
+                reason: "cancelled"
+            })
+        ));
     }
 }

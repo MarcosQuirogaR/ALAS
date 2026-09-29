@@ -25,7 +25,6 @@ alas-report = { path = "../alas-report" }
 alas-route = { path = "../alas-route" }
 alas-screen = { path = "../alas-screen" }
 alas-struct = { path = "../alas-struct" }
-alas-types = { path = "../alas-types" }
 # The desktop UAV page owns only interaction state; selection, optimization,
 # geometry conversion, and shared-core verification remain in `alas-uav`.
 alas-uav = { path = "../alas-uav" }
@@ -35,7 +34,6 @@ egui = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 serde_yaml = { workspace = true }
-tracing = { workspace = true }
 
 [dev-dependencies]
 alas-testkit = { path = "../alas-testkit" }

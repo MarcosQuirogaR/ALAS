@@ -60,7 +60,7 @@ pub struct Pbarl {
     pub pid: i64,
     /// Material identifier.
     pub mid: i64,
-    /// Cross-section name, `"I"` for every spar cap this mesh builds.
+    /// Cross-section name: product caps use `"BAR"`, reference decks `"I"`.
     pub section: &'static str,
     /// The section's dimensions, in the order the named section expects them.
     pub dim: Vec<f64>,
@@ -95,6 +95,10 @@ pub struct Cbar {
     pub x: [f64; 3],
     /// Offset interpretation flag.
     pub offt: &'static str,
+    /// Grid-to-section-centroid offset at end A, metres in the OFFT frame.
+    pub offset_a: [f64; 3],
+    /// Grid-to-section-centroid offset at end B, metres in the OFFT frame.
+    pub offset_b: [f64; 3],
 }
 
 /// A `CONM2` concentrated mass hung off one grid.

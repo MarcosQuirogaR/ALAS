@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! W3.9 screening figure contracts: every panel keeps the reference labels,
+//! Screening figure contracts: every panel keeps the reference labels,
 //! data stage, and honest unavailable behavior visible to SVG and GUI callers.
 
 // Checked-in fixture data and deliberately complete sample results make a
@@ -119,11 +119,11 @@ fn screening_scenes_are_unavailable_without_their_required_stage_data() {
 }
 
 #[test]
-fn reference_fixture_covers_every_w39_figure_in_both_parity_themes() {
+fn reference_fixture_covers_every_figure_in_both_parity_themes() {
     let fixture: Value = serde_json::from_str(include_str!(
         "../../../golden/report/reference_render_w39.json"
     ))
-    .expect("W3.9 fixture is valid JSON");
+    .expect("fixture is valid JSON");
     assert_eq!(fixture["schema"], "reference-render-w39/v1");
     let figures = fixture["figures"].as_object().expect("figure map");
     for id in [

@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/physics/payload.py (`oew_and_cg`)
-// Reference: alas @ rust-port-baseline.
 
 //! The operating-empty mass and where it balances.
 //!

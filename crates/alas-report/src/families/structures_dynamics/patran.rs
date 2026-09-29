@@ -3,7 +3,6 @@
 
 // Ported from alas/reporting/visualization.py: figure_structures_patran
 // (L6180-6229).
-// Reference: alas @ rust-port-baseline.
 
 //! Display externally rendered Patran deformation plots.
 //!

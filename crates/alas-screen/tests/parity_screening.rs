@@ -314,6 +314,12 @@ fn parity_screening() {
     assert_eq!(sweep_result.n_total, fixture.full_sweep.n_total);
     assert_eq!(sweep_result.n_ok, fixture.full_sweep.n_ok);
     assert_eq!(sweep_result.n_refined, fixture.full_sweep.n_refined);
+    // Nothing cancelled this sweep: the parallel refinement stage once
+    // reported every completed run as cancelled, which skipped Stage 3.
+    assert!(
+        !sweep_result.cancelled,
+        "an uncancelled sweep reported cancelled"
+    );
 
     let mut comp_sweep = Comparison::new("full_screening_sweep", Tier::Closed);
     for (actual, expected) in sweep_result

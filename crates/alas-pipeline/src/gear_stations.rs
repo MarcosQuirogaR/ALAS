@@ -4,12 +4,14 @@
 //! The one seam every export, figure and diagnostic resolves landing-gear
 //! stations through.
 //!
-//! The model-derived fallback (`mac_le + mlg_x_fraction_mac * MAC`, a
-//! fraction of fuselage length for the nose) is a *wing-mounted gear* rule
-//! with a stated domain. A consumer that rebuilt it and handed it straight to
-//! [`alas_config::LandingGearConfig::resolved_station_positions`] could draw,
-//! plot or export an aircraft with no wing-root gear bay with gear at a
-//! station the mass model refuses to supply.
+//! Each of those consumers would otherwise rebuild the model-derived fallback itself
+//! (`mac_le + mlg_x_fraction_mac * MAC`, a fraction of fuselage length for the
+//! nose) and hand it straight to
+//! [`alas_config::LandingGearConfig::resolved_station_positions`]. That rule
+//! is a *wing-mounted gear* rule with a stated domain, so every independent
+//! copy of it was a place where an aircraft with no wing-root gear bay could
+//! still be drawn, plotted or exported with gear at a station the mass model
+//! refuses to supply.
 //!
 //! The applicability gate lives in
 //! [`alas_config::LandingGearConfig::resolved_station_positions_checked`]; the
@@ -120,15 +122,13 @@ mod tests {
     }
 
     /// The fallback stations each consumer builds, in the convention they all
-    /// share, so the test compares the seam against the unchecked rule.
+    /// share, so the test compares the seam against what they would build independently.
     fn fallbacks(config: &AlasConfig, plane: &Airplane) -> (f64, f64, f64, f64) {
-        let wing = plane
-            .wings
-            .iter()
-            .find(|wing| wing.name == "Main Wing")
-            .unwrap_or(&plane.wings[0]);
         let mac = plane.c_ref;
-        let x_mac_le = wing.aerodynamic_center(0.25)[0] - 0.25 * mac;
+        // Canonical MAC frame: mirrors `landing_gear_for_report`'s `x_mac_le`,
+        // which comes from `Airplane::mac_frame()` rather than an
+        // `aerodynamic_center(0.25) - 0.25 * c_ref` reconstruction.
+        let x_mac_le = plane.mac_frame().map_or(0.0, |frame| frame.x_lemac_m);
         let fuselage = &plane.fuselages[0];
         let start_x = fuselage.xsecs[0].xyz_c[0];
         let end_x = fuselage.xsecs[fuselage.xsecs.len() - 1].xyz_c[0];
@@ -157,9 +157,13 @@ mod tests {
 
     #[test]
     fn low_wing_fallback_aircraft_resolve_the_station_they_already_had() {
-        // B787-9 and DC-10 register no anchor and keep the wing-mounted
+        // DC-10 and AVE register no anchor and keep the wing-mounted
         // fallback. The seam must return it unchanged, bit for bit.
-        for name in ["B787-9", "DC-10", "AVE"] {
+        // B787-9 moved to `source_scaled_aircraft_are_unaffected_by_the_gate`
+        // below: it registers `reference_nlg_x_fraction`/
+        // `reference_mlg_x_fractions`, so it is source-scaled rather than a
+        // wing-mounted fallback case.
+        for name in ["DC-10", "AVE"] {
             let (config, plane) = preset_case(name);
             let (x_nlg, x_mlg, start_x, length) = fallbacks(&config, &plane);
             let resolved = resolved_gear_stations(&config, &plane, x_nlg, x_mlg, start_x, length)
@@ -179,7 +183,7 @@ mod tests {
 
     #[test]
     fn source_scaled_aircraft_are_unaffected_by_the_gate() {
-        for name in ["A320-200", "A220-300", "A340-300", "A380-800"] {
+        for name in ["A320-200", "A220-300", "A340-300", "A380-800", "B787-9"] {
             let (config, plane) = preset_case(name);
             let (x_nlg, x_mlg, start_x, length) = fallbacks(&config, &plane);
             let resolved = resolved_gear_stations(&config, &plane, x_nlg, x_mlg, start_x, length)

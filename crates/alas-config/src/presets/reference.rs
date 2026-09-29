@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/config/presets.py (the `AVE` entry)
-// Reference: alas @ rust-port-baseline.
 
 //! AVE: the notional long-range twin this program was built around.
 //!
@@ -38,7 +37,7 @@ pub fn ave() -> AircraftPreset {
         },
         reference: AircraftReferenceData {
             cg_evidence: CgEnvelopeEvidence::DesignRequirement,
-            sources: vec!["docs/PRESET_PHYSICAL_AUDIT.md#variant-identity"],
+            sources: vec!["notional design requirement; no published aircraft data"],
             ..AircraftReferenceData::default()
         },
         engine_name: "GE9X",

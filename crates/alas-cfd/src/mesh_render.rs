@@ -77,7 +77,7 @@ pub(super) fn render_geo(
     // Pin the meshing RNG so the only remaining source of run-to-run variation
     // is named rather than anonymous.  Measured on this host with Gmsh 4.15.2,
     // single-threaded, on a byte-identical `.geo` (internal CFD convergence
-    // study, 2026-09-16, case q16): three runs gave 89 794 /
+    // study case q16): three runs gave 89 794 /
     // 89 732 / 89 902 nodes.  Pinning the seed does NOT remove that, and
     // neither does `Mesh.Optimize = 0`, `Mesh.OptimizeNetgen = 0`,
     // `Mesh.RandomFactor`, nor `Mesh.Algorithm = 6`.  Deleting
@@ -240,7 +240,7 @@ pub(super) fn render_geo(
             ratio = sizing.expansion_ratio,
             n_layers = sizing.n_layers,
         ));
-        // Both trailing-edge corners are convex corners of the fluid domain, and
+        // Both trailing-edge corners are convex corners of the solid section, and
         // the prism stack has to turn through them.  Told to fan, Gmsh sweeps
         // the layers around the corner; left alone, it stitches the upper and
         // lower stacks together behind the section with whatever elements close
@@ -265,7 +265,7 @@ pub(super) fn render_geo(
         // within 0.3 %, and `checkMesh` reports `Mesh OK` in every case.  No
         // size field, layer count, layer thickness, first-layer height or
         // coordinate changed: this is a local topology correction only.
-        let fan_points: Vec<i32> = match topology.trailing_edge {
+        let mut fan_points: Vec<i32> = match topology.trailing_edge {
             // The closing point of a sharp edge is the single rearmost point.
             EdgeKind::Sharp => points
                 .iter()
@@ -283,8 +283,20 @@ pub(super) fn render_geo(
                 }
             }
         };
+        // Sharp leading edges and other acute convex solid corners also need
+        // the layer normals to fan into the surrounding fluid. Restricting
+        // fans to the trailing edge leaves a diamond's sharp nose stitched
+        // across the layer stack. Detect these from the exact local polygon,
+        // independent of orientation, without moving or resampling vertices.
+        let acute_corners = acute_convex_vertices(points, signed_area_unit);
+        for index in &acute_corners {
+            let id = point_offset + *index as i32;
+            if !fan_points.contains(&id) {
+                fan_points.push(id);
+            }
+        }
         if !fan_points.is_empty() {
-            if topology.trailing_edge == EdgeKind::Sharp {
+            if topology.trailing_edge == EdgeKind::Sharp || !acute_corners.is_empty() {
                 out.push_str("Mesh.BoundaryLayerFanElements = 7;\n");
             }
             out.push_str(&format!(
@@ -320,6 +332,25 @@ pub(super) fn render_geo(
     out
 }
 
+/// Vertices with a convex solid interior angle strictly below 90 degrees.
+/// Dot and cross products avoid acos conditioning and work for either winding.
+fn acute_convex_vertices(points: &[(f64, f64)], signed_area: f64) -> Vec<usize> {
+    if points.len() < 3 || signed_area == 0.0 {
+        return Vec::new();
+    }
+    (0..points.len())
+        .filter(|&i| {
+            let p = points[i];
+            let prev = points[(i + points.len() - 1) % points.len()];
+            let next = points[(i + 1) % points.len()];
+            let a = (prev.0 - p.0, prev.1 - p.1);
+            let b = (next.0 - p.0, next.1 - p.1);
+            let acute = a.0 * b.0 + a.1 * b.1 > 0.0;
+            let convex = (b.0 * a.1 - b.1 * a.0) * signed_area > 0.0;
+            acute && convex
+        })
+        .collect()
+}
 pub(in crate::mesh) fn characteristic_lengths(
     config: &CfdStudyConfig,
     chord: f64,
@@ -376,4 +407,26 @@ pub(in crate::mesh) fn leading_edge_size(config: &CfdStudyConfig, surface_size_m
 pub(in crate::mesh) fn wake_box(config: &CfdStudyConfig) -> (f64, f64, f64, f64) {
     let (_, max_x, _, _) = domain_bounds(config);
     (0.0, max_x, -2.0 * config.chord_m, 2.0 * config.chord_m)
+}
+
+#[cfg(test)]
+mod acute_corner_tests {
+    use super::acute_convex_vertices;
+
+    #[test]
+    fn diamond_has_two_acute_tips_in_either_winding() {
+        let diamond = [(1.0, 0.0), (0.5, 0.03), (0.0, 0.0), (0.5, -0.03)];
+        assert_eq!(acute_convex_vertices(&diamond, 0.03), vec![0, 2]);
+        let reversed: Vec<_> = diamond.into_iter().rev().collect();
+        assert_eq!(acute_convex_vertices(&reversed, -0.03), vec![1, 3]);
+    }
+
+    #[test]
+    fn straight_right_angle_and_concave_vertices_are_not_fanned() {
+        let square = [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)];
+        assert!(acute_convex_vertices(&square, 1.0).is_empty());
+        let notch = [(0.0, 0.0), (2.0, 0.0), (2.0, 2.0), (1.0, 0.1), (0.0, 2.0)];
+        assert!(!acute_convex_vertices(&notch, 2.1).contains(&3));
+        assert!(acute_convex_vertices(&[(0.0, 0.0), (1.0, 0.0)], 0.0).is_empty());
+    }
 }

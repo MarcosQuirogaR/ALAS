@@ -236,57 +236,6 @@ pub struct SurfaceDistribution {
     pub forces: SurfaceForceSummary,
 }
 
-/// One row from a `surfaceFormat raw` export.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct RawSurfaceScalar {
-    /// Sample location in m.
-    pub point_m: [f64; 3],
-    /// Scalar value in the field's native units.
-    pub value: f64,
-}
-/// One vector row from a `surfaceFormat raw` export.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct RawSurfaceVector {
-    /// Sample location in m.
-    pub point_m: [f64; 3],
-    /// Vector value in the field's native units.
-    pub value: [f64; 3],
-}
-/// Paired pressure and wall-shear values at one ordered raw-surface point.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct SampledSurfaceSample {
-    /// Sample location in m.
-    pub point_m: [f64; 3],
-    /// Ordered arc length in m.
-    pub arc_length_m: f64,
-    /// Unit tangent toward increasing chordwise x.
-    pub tangent_plus_chord: [f64; 3],
-    /// Kinematic pressure in m^2/s^2.
-    pub p_kinematic_m2_s2: f64,
-    /// Pressure after density conversion in Pa.
-    pub pressure_pa: f64,
-    /// Kinematic wall shear in m^2/s^2.
-    pub wall_shear_kinematic_m2_s2: [f64; 3],
-    /// Wall shear stress in Pa.
-    pub wall_shear_stress_pa: [f64; 3],
-    /// Magnitude of wall shear stress in Pa.
-    pub wall_shear_magnitude_pa: f64,
-    /// Signed skin-friction coefficient toward increasing x.
-    pub cf: f64,
-    /// Non-negative skin-friction magnitude.
-    pub cf_magnitude: f64,
-    /// Pressure coefficient.
-    pub cp: f64,
-}
-/// Ordered samples reconstructed from paired raw surface exports.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct SampledSurfaceDistribution {
-    /// Ordering strategy used for the samples.
-    pub order: SurfaceOrder,
-    /// Ordered paired surface values.
-    pub samples: Vec<SampledSurfaceSample>,
-}
-
 /// Return the greatest numeric case-time directory, preserving its spelling.
 pub fn latest_numeric_time(case_dir: &Path) -> Result<String, SurfaceError> {
     let mut selected = None;
@@ -342,42 +291,4 @@ pub fn parse_surface_case(
         ));
     }
     surface_native::parse_case(case_dir, &time_name, reference)
-}
-
-/// Parse a scalar raw surface export (`x y z value`).
-pub fn parse_raw_scalar_surface(text: &str) -> Result<Vec<RawSurfaceScalar>, SurfaceError> {
-    let (rows, declared) = surface_native::raw_rows(text, 1)?;
-    let values = rows
-        .into_iter()
-        .map(|(point, value)| RawSurfaceScalar {
-            point_m: point,
-            value: value[0],
-        })
-        .collect::<Vec<_>>();
-    surface_native::count_check(values.len(), declared, "scalar raw surface")?;
-    Ok(values)
-}
-
-/// Parse a vector raw surface export (`x y z vx vy vz`).
-pub fn parse_raw_vector_surface(text: &str) -> Result<Vec<RawSurfaceVector>, SurfaceError> {
-    let (rows, declared) = surface_native::raw_rows(text, 3)?;
-    let values = rows
-        .into_iter()
-        .map(|(point, value)| RawSurfaceVector {
-            point_m: point,
-            value: [value[0], value[1], value[2]],
-        })
-        .collect::<Vec<_>>();
-    surface_native::count_check(values.len(), declared, "vector raw surface")?;
-    Ok(values)
-}
-
-/// Build Cp/Cf samples from paired native `surfaceFormat raw` files.
-pub fn parse_sampled_surface_fields(
-    pressure_text: &str,
-    wall_shear_text: &str,
-    reference: &SurfaceReference,
-) -> Result<SampledSurfaceDistribution, SurfaceError> {
-    reference.validate()?;
-    surface_native::parse_sampled(pressure_text, wall_shear_text, reference)
 }

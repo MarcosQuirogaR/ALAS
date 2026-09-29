@@ -18,7 +18,8 @@ use crate::state::AppState;
 use crate::views::{form_page, tr};
 
 /// The pages the window offers, in tab order: every Advanced Settings tab
-/// (discipline forms, Airfoil Screening, and External Tools) plus Run options.
+/// (discipline forms and External Tools) plus Run options. Airfoil Screening
+/// is not a tab; it opens from the top bar's Analysis menu.
 pub fn pages() -> Vec<&'static nav::Page> {
     nav::ADVANCED_SETTINGS_PAGES.iter().collect()
 }
@@ -29,6 +30,15 @@ pub fn show_advanced_settings_window(state: &mut AppState, ctx: &Context) {
         return;
     }
     let pages = pages();
+    // A session saved while a since-removed tab (Airfoil Screening) was
+    // active falls back to the first tab instead of an empty page.
+    if state.sandbox.advanced_tab != "run_options"
+        && !pages
+            .iter()
+            .any(|page| page.id == state.sandbox.advanced_tab)
+    {
+        state.sandbox.advanced_tab.clear();
+    }
     if state.sandbox.advanced_tab.is_empty() {
         if let Some(first) = pages.first() {
             state.sandbox.advanced_tab = first.id.to_owned();
@@ -78,20 +88,9 @@ pub fn show_advanced_settings_window(state: &mut AppState, ctx: &Context) {
                     let Some(page) = pages.iter().find(|p| p.id == active).cloned() else {
                         return;
                     };
-                    match page.kind {
-                        PageKind::Setup => {
-                            crate::views::show_tools_view(state, ui);
-                            return;
-                        }
-                        PageKind::AirfoilScreening => {
-                            if state.screening.window_open {
-                                ui.label(tr("Airfoil Screening is open in its own window."));
-                            } else {
-                                crate::views::show_screening_view_advanced(state, ui);
-                            }
-                            return;
-                        }
-                        _ => {}
+                    if page.kind == PageKind::Setup {
+                        crate::views::show_tools_view(state, ui);
+                        return;
                     }
                     let locked = state.manual_geometry_locked()
                         && matches!(page.group, Some("geometry") | Some("control_surfaces"));

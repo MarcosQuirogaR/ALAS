@@ -3,7 +3,6 @@
 
 // Ported from alas/reporting/visualization.py (`figure_payload_range`) and
 // alas/physics/performance.py (`payload_range_diagram`).
-// Reference: alas @ rust-port-baseline.
 
 //! The conceptual A-B-C-D payload-range curve from the analyzed aircraft.
 //!
@@ -14,6 +13,7 @@
 
 use alas_atmo::Atmosphere;
 use alas_config::{presets, ActiveEngineModel, AlasConfig};
+use alas_mass::breakdown::OEW_KEYS;
 use alas_perf::performance::breguet_range_m;
 use alas_pipeline::feasibility::{assess_fuel_capacity, FuelCapacityEvidence};
 use alas_pipeline::full_analysis::AnalysisReport;
@@ -27,16 +27,6 @@ use crate::theme::get_palette;
 const G: f64 = 9.81;
 const M_TO_NM: f64 = 1852.0;
 const BLUE: &str = "tab:blue";
-const OEW_KEYS: &[&str] = &[
-    "Wing",
-    "H-Stab",
-    "V-Stab",
-    "Fuselage",
-    "Gear",
-    "Propulsion",
-    "Systems",
-    "Furnishings",
-];
 
 /// One labelled corner of the conceptual payload-range curve.
 #[derive(Debug, Clone, Copy)]
@@ -66,8 +56,12 @@ pub struct PayloadRangeData {
     pub payload_basis: &'static str,
     /// Modelled operating empty weight, kilograms.
     pub oew_kg: f64,
-    /// Maximum takeoff weight the curve was built on, kilograms.
+    /// Takeoff mass the curve was built on, kilograms: the mission-sized mass
+    /// when `mass_is_sized`, else the declared MTOW.
     pub mtow_kg: f64,
+    /// True when `mtow_kg` is the pipeline's sized takeoff mass rather than
+    /// the declared MTOW.
+    pub mass_is_sized: bool,
     /// Range method and its provenance.
     pub method_note: String,
 }
@@ -202,8 +196,13 @@ pub fn figure_payload_range(
     });
     scene.add(SceneElement::Text {
         text: format!(
-            "OEW: {} kg   |   MTOW: {} kg",
+            "OEW: {} kg   |   {}: {} kg",
             format_thousands(data.oew_kg),
+            if data.mass_is_sized {
+                "Sized TOW"
+            } else {
+                "MTOW"
+            },
             format_thousands(data.mtow_kg)
         ),
         pos: [axes.left + axes.width * 0.5, axes.top + axes.height + 56.0],
@@ -233,7 +232,9 @@ pub fn payload_range_data(
         .map(|key| masses.get(*key).copied().unwrap_or(0.0))
         .sum();
     let analyzed_payload_kg = masses.get("Payload").copied().unwrap_or(0.0);
-    let mtow_kg = config.requirements.mtow_kg;
+    // The mission-sized takeoff mass when the report carries one; the
+    // declared MTOW is only the fallback for an unsized report.
+    let mtow_kg = report.analysis_takeoff_mass_kg(config.requirements.mtow_kg);
 
     // A payload-range chart is an aircraft-capability curve, not a second
     // drawing of the currently selected cabin load. The old implementation
@@ -354,6 +355,7 @@ pub fn payload_range_data(
         fuel_capacity_limit,
         payload_basis,
         oew_kg,
+        mass_is_sized: report.sized_takeoff_mass_kg().is_some(),
         mtow_kg,
         method_note,
     })

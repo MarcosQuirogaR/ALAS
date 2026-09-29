@@ -3,10 +3,10 @@
 
 //! Headless command line entry point and path resolution for ALAS.
 //!
-//! [`paths`] ports `alas/paths.py`: cross-platform path resolution for application
+//! [`paths`] resolves paths across platforms for application
 //! installation roots, user data directories, and external tools.
 //!
-//! [`cli`] ports `alas/cli.py`: command-line argument parsing and headless workflow dispatch.
+//! [`cli`] parses command-line arguments and dispatches the headless workflow.
 
 pub mod cli;
 pub mod config_load;
