@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/reporting/visualization.py (`figure_stability_side_view`)
-// Reference: alas @ rust-port-baseline.
 
 //! Longitudinal stability markers over the built fuselage profile.
 

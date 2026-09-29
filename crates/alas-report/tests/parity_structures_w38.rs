@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! W3.8 data-contract checks for structural and external-result scenes.
+//! Data-contract checks for structural and external-result scenes.
 //!
 //! These assertions inspect scene semantics: axis labels, unavailable-state
 //! text, and whether optional external series are absent. A non-empty SVG is
@@ -22,7 +22,7 @@ fn fixture() -> Value {
     serde_json::from_str(include_str!(
         "../../../golden/report/reference_render_w38.json"
     ))
-    .expect("W3.8 contract fixture is valid JSON")
+    .expect("contract fixture is valid JSON")
 }
 
 fn text_nodes(scene: &alas_report::scene::Scene) -> Vec<&str> {
@@ -113,7 +113,7 @@ fn sample_structural_result() -> StructuralAnalysisResult {
 }
 
 #[test]
-fn w38_fixture_names_every_required_axis_and_external_contract() {
+fn fixture_names_every_required_axis_and_external_contract() {
     let fixture = fixture();
     let sizing = &fixture["figures"]["structures_sizing"]["axis_labels"];
     assert_eq!(sizing[0], "Spanwise position Y [m]");

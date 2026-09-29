@@ -206,7 +206,21 @@ pub(super) fn solve_relieved(
         );
         relative_change =
             (next.total_mass_kg - result.total_mass_kg).abs() / result.total_mass_kg.abs().max(1.0);
-        let settled = relative_change <= RELIEF_TOLERANCE;
+        let settled = relative_change <= RELIEF_TOLERANCE
+            && (!next.strength_margins_pass()
+                || final_strength_is_consistent(
+                    wsg,
+                    cfg,
+                    req,
+                    &next,
+                    skin_mat,
+                    web_mat,
+                    cap_mat,
+                    fuel_kg_m,
+                    wing_mounted_point_masses,
+                    front,
+                    rear,
+                ));
         result = next;
         passes += 1;
         if settled {
@@ -230,6 +244,60 @@ pub(super) fn solve_relieved(
         }
     };
     (result, convergence)
+}
+
+/// A fully stressed fixed point must be checked against its final relief,
+/// not only against the preceding iterate's mass. Exit on the conservative
+/// side of the contraction; do not manufacture a wider strength tolerance.
+#[allow(clippy::too_many_arguments)]
+fn final_strength_is_consistent(
+    wsg: &WingStructureGeometry,
+    cfg: &StructuresConfig,
+    req: &DesignRequirements,
+    sizing: &WingboxSizing,
+    skin: &MaterialSpec,
+    web: &MaterialSpec,
+    cap: &MaterialSpec,
+    fuel: &[f64],
+    point_masses: &[(f64, f64)],
+    front: f64,
+    rear: f64,
+) -> bool {
+    let y = &sizing.y_stations;
+    let mut running = box_running_mass_kg_m(sizing, skin, web, cap, front, rear);
+    for (mass, fuel_mass) in running.iter_mut().zip(fuel) {
+        *mass += fuel_mass;
+    }
+    crate::loads::load_cases(req, cfg.additional_safety_factor)
+        .iter()
+        .all(|case| {
+            let aero =
+                crate::loads::elliptic_distributed_load(y, wsg.semi_span, case.total_force_n);
+            let net = crate::loads::net_distributed_load(
+                &aero,
+                case.load_factor,
+                req.gravity_m_s2,
+                &running,
+            );
+            let (_, mut moment) = crate::loads::cantilever_shear_moment(y, &net);
+            crate::loads::apply_point_mass_relief(
+                y,
+                &mut moment,
+                case.load_factor,
+                req.gravity_m_s2,
+                point_masses,
+            );
+            sizing.spars.iter().all(|spar| {
+                moment.iter().enumerate().all(|(j, moment)| {
+                    let demand = (spar.frac_moment[j] * moment).abs();
+                    let stress = demand / (spar.a_cap[j] * (0.85 * spar.h[j])).max(1.0e-12);
+                    demand <= 1.0
+                        || super::margin_is_structurally_non_negative(
+                            cap.f_allow_pa / stress.max(1.0e-9) - 1.0,
+                        )
+                })
+            })
+        })
 }
 
 #[cfg(test)]
@@ -318,38 +386,23 @@ mod tests {
     ];
 
     #[test]
-    fn two_registered_aircraft_do_not_reach_the_declared_relief_tolerance_in_the_pass_budget() {
-        // Measured, not asserted away. The A340-300 and the A380-800 are still
-        // moving at the eighth pass, by 4.10e-9 and 4.87e-9 of their own box
-        // mass, where the declared tolerance is 1e-9. In absolute terms that is
-        // 6.1e-5 kg and 1.3e-4 kg, far inside the gramme the module claims, so
-        // it is a contract the constants do not meet rather than a box that is
-        // wrong. Neither constant was moved to make this pass: the verdict is
-        // reported instead, which is what the previous loop could not do
-        // because it broke out of the budget without recording why.
+    fn registered_aircraft_converge_without_relaxing_the_declared_tolerance() {
+        // A bounded iteration budget permits a converging model to finish;
+        // it does not turn an unconverged last iterate into an accepted box.
         for name in REGISTERED {
             let scoped = size(&probe(name), &WingFuelRelief::EnclosedBoxVolume);
-            let settles = !matches!(name, "A340-300" | "A380-800");
-            assert_eq!(
+            assert!(
                 scoped.scope.relief_convergence.is_settled(),
-                settles,
                 "{name}: {:?}",
                 scoped.scope.relief_convergence
             );
-            if let ReliefConvergence::NotSettled {
+            if let ReliefConvergence::Settled {
                 passes,
                 relative_change,
-                tolerance,
             } = scoped.scope.relief_convergence
             {
-                assert_eq!(passes, RELIEF_PASSES, "{name} spends its whole budget");
-                assert!(relative_change > tolerance);
-                // The drift the budget leaves is still structurally nothing.
-                assert!(
-                    relative_change * scoped.sizing.total_mass_kg < 1.0e-3,
-                    "{name} drifts {relative_change} of {} kg",
-                    scoped.sizing.total_mass_kg
-                );
+                assert!(passes <= RELIEF_PASSES);
+                assert!(relative_change <= RELIEF_TOLERANCE);
             }
         }
     }

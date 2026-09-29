@@ -112,6 +112,7 @@ fn test_report(masses: HashMap<String, f64>) -> AnalysisReport {
         geometry_summary: HashMap::new(),
         payload_layout: None,
         cg_envelope_ok: Some(true),
+        neutral_point_conditions: None,
     }
 }
 
@@ -409,7 +410,7 @@ fn product_fuel_volume_check_uses_typed_carried_fuel_and_capacity() {
 }
 
 #[test]
-fn w35_reference_contract_covers_every_mass_balance_figure_in_both_themes() {
+fn reference_contract_covers_every_mass_balance_figure_in_both_themes() {
     let corpus: serde_json::Value = serde_json::from_str(include_str!(
         "../../../../../golden/report/reference_render_corpus.json"
     ))

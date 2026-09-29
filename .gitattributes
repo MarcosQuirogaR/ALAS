@@ -4,3 +4,7 @@
 # those bytes and break the digest that proves this file against the zip
 # archive it was extracted from -- see docs/PORTING.md, Geometry.
 crates/alas-geom/data/selig.txt -text
+
+# The perf_aero bit-identity baselines are compared against LF text emitted by
+# the generator; keep their bytes verbatim regardless of core.autocrlf.
+crates/alas-aero/tests/fixtures/perf_aero/*.txt -text

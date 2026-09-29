@@ -12,6 +12,11 @@ use super::sizing::SizingOutcome;
 use super::types::ConstraintFamily::Geometry;
 use super::types::ConstraintResidual;
 
+mod measure;
+#[path = "residuals_planform.rs"]
+mod planform;
+use measure::tip_washout_deg;
+
 /// The span limit, wing-area cap, wing-loading floor, transport body-attitude
 /// window, tail-volume window and passenger/cargo-capacity shortfall.
 pub(super) fn geometry_residuals(
@@ -30,6 +35,7 @@ pub(super) fn geometry_residuals(
     let dv: DesignVector = outcome.history.dv;
     let plane: &Airplane = &outcome.plane;
     let mut residuals = Vec::new();
+    residuals.extend(planform::residuals(plane, &dv, config, policy));
 
     if objective.max_span_m > 0.0 {
         residuals.push(ConstraintResidual::scaled(
@@ -74,7 +80,7 @@ pub(super) fn geometry_residuals(
     // three-dimensional trimmed aircraft, not a guessed local MSES alpha
     // limit: the pipeline still maps this solved body angle through the
     // section twist and downwash explicitly.  Registered aircraft retain
-    // their measured body attitude for parity/audit reporting; applying a
+    // their measured body attitude for parity reporting; applying a
     // generic 2 to 4 degree design target to them would rewrite the reference
     // aircraft rather than test it.
     if config.optimizer.design_space.mode == alas_config::DesignMode::CleanSheet
@@ -90,9 +96,8 @@ pub(super) fn geometry_residuals(
     }
 
     // A tail-volume window is a plausibility band, not a requirement: the
-    // surveyed tools rank it as a preference (internal research note,
-    // 2026-09-05, tier S), and the legacy objective scores it as a
-    // quadratic add-on. Under a hard family
+    // surveyed tools rank it as a preference, and the weighted-penalty
+    // objective scores it as a quadratic add-on. Under a hard family
     // it is therefore ranked soft; diagnostic and off follow the family.
     let preference = match policy {
         ConstraintPolicy::Hard => ConstraintPolicy::Soft,
@@ -121,8 +126,7 @@ pub(super) fn geometry_residuals(
     residuals.extend(plausibility_residuals(outcome, config, policy));
 
     if req.aircraft_type == "cargo" {
-        // Clarified ledger App Features 2, decision D10: the entered cargo
-        // mass is a *target to match*, not a floor to clear and not a licence
+        // The entered cargo mass is a *target to match*, not a floor to clear and not a licence
         // to load without limit. It is therefore reported as a two-sided
         // deviation from the target under the Soft policy, which is a cost
         // contribution rather than a rejection: a candidate that cannot reach
@@ -372,21 +376,6 @@ fn cargo_target_residuals(
             policy,
         ),
     ]
-}
-
-/// Geometric twist of the main wing's tip section relative to its root,
-/// degrees, negative for washout.
-///
-/// Read from the built sections. `WingXSec::twist` is mutated in place by the
-/// trim phase, which applies one incidence to the whole surface, so the
-/// difference taken here is the geometric twist distribution and not the
-/// trimmed attitude.
-fn tip_washout_deg(plane: &Airplane) -> Option<f64> {
-    let wing = plane.wings.first()?;
-    let root = wing.xsecs.first()?;
-    let tip = wing.xsecs.last()?;
-    let washout = tip.twist - root.twist;
-    washout.is_finite().then_some(washout)
 }
 
 /// Degrees of twist that count as one unit of violation.

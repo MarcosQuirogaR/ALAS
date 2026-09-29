@@ -41,9 +41,9 @@
 //!   frozen reference text are both compared exactly below; no tolerance is
 //!   widened and no schema/value contract is relaxed.
 //! * `strategy`, `seed_near_initial_design` and `seed_perturbation_fraction`
-//!   also changed *label*, not only help, to say they are read only by the
-//!   frozen reference-compatibility replay now that L-SHADE is the one
-//!   product search kernel; see [`solver_agnostic_label_correction`].
+//!   also changed *label*, not only help, to say which profile reads them now
+//!   that both SciPy-compatible and L-SHADE search kernels are available; see
+//!   [`solver_agnostic_label_correction`].
 //! * The active transport planform adds four explicit side-of-body/kink
 //!   fields to `WingConfig`. The frozen Python schema has none of them, so the
 //!   absent upstream fields and the source-corrected Rust values/schema are
@@ -436,28 +436,18 @@ fn product_default_correction(path: &str) -> Option<(Value, Value)> {
     else if path.ends_with(".wing.n_subdivisions") || path == "WingConfig.n_subdivisions" {
         Some((serde_json::json!(8), serde_json::json!(24)))
     }
-    // The native worker count. The frozen value is a literal one; the product
-    // default is `0`, meaning "resolve against this machine", which the
-    // product L-SHADE search uses to evaluate each generation's batch in
-    // parallel (measured 2.24x on the B787-9 and 2.76x on AVE at eight
-    // workers, with the evaluation count and the winner unchanged, on the
-    // predecessor staged search this replaced). The frozen
-    // reference-compatibility replay is deliberately *not* covered by that:
-    // its generation loop batches only when a configuration explicitly asks
-    // for more than one worker, because a batched generation defers the
-    // population update and is a different algorithm from the serial one.
-    // See `SolverSettings::resolved_workers` and the guard in
-    // `alas_opt::DesignOptimizer::run_search`.
+    // The SciPy-compatible profile preserves its upstream serial default.
+    // Parallel workers remain selectable, with SciPy's deferred generation
+    // update semantics.
     else if path.ends_with(".optimizer.solver.workers")
         || path == "OptimizerConfig.solver.workers"
     {
-        Some((serde_json::json!(1), serde_json::json!(0)))
+        Some((serde_json::json!(1), serde_json::json!(1)))
     }
     // Standard gravity. The frozen value is a two-decimal figure; the
     // product default is `alas_units::STANDARD_GRAVITY`, the CODATA/exact
     // definitional value (9.80665 m/s^2) that already drives every lbf
-    // conversion and the ISA elsewhere in the program. Physics review v1.2,
-    // finding F5: this field is the one place mission weights read a
+    // conversion and the ISA elsewhere in the program. This field is the one place mission weights read a
     // slightly different constant than the rest of the program: a 0.035 %
     // difference, numerically negligible on its own, but a mixed constant at
     // the mass -> mission interface. `alas_mission::vehicle::
@@ -468,6 +458,13 @@ fn product_default_correction(path: &str) -> Option<(Value, Value)> {
     // of scope here.
     else if path.ends_with(".gravity_m_s2") {
         Some((serde_json::json!(9.81), serde_json::json!(9.806_65)))
+    }
+    // Raymer ch.11 / Torenbeek recommend ~6-8% minimum nose-gear load for
+    // steering/braking authority; the frozen 2% floor left the "Min Nose
+    // Load" CG-envelope boundary well inside the aerodynamic aft limit for
+    // most configured presets, where it rarely governed anything.
+    else if path.ends_with(".pct_load_nlg_min") || path == "MassModelConfig.pct_load_nlg_min" {
+        Some((serde_json::json!(0.02), serde_json::json!(0.06)))
     } else {
         None
     }
@@ -509,6 +506,10 @@ fn compare_node(
                             | "flops_structure"
                             | "flops_turboprop"
                             | "geometric_component_stations"
+                            // Separate handling/steering nose-load
+                            // ceiling, distinct from tire-capacity strength.
+                            // The frozen schema has no field for it at all.
+                            | "pct_load_nlg_max_handling"
                     ))
         })
         .collect();
@@ -744,6 +745,21 @@ fn is_native_config_field(path: &str, key: &str) -> bool {
                 | "reference_body_wheelbase_m"
                 | "reference_track_m"
                 | "mlg_strut_bogie_wheels"
+                // Dynamic nose-braking, tip-back and ground-clearance
+                // additions are native product additions; the frozen Python schema predates them. Their
+                // values and defaults are checked by the landing-gear unit
+                // and config tests.
+                | "nlg_dynamic_braking_decel_g"
+                | "tire_dynamic_rating_factor"
+                | "min_tip_back_deg"
+                | "required_rotation_angle_deg"
+                | "fuselage_ground_clearance_m"
+                // The rotation (nose-wheel liftoff) and landing-trim
+                // forward-CG criteria's own conceptual-design inputs; the
+                // frozen Python schema predates them.
+                | "rotation_pitch_acceleration_deg_s2"
+                | "pitch_radius_of_gyration_frac_mac"
+                | "cl_ground_attitude_frac_of_cl_max_to"
         ) && (path.ends_with("LandingGearConfig") || path.ends_with(".landing_gear")))
         // Condition-specific OEI evidence fields are native additions; the
         // frozen Python schema predates them. Their optional/default
@@ -755,7 +771,7 @@ fn is_native_config_field(path: &str, key: &str) -> bool {
                 | "oei_windmilling_cd"
         ) && (path.ends_with("PerformanceConfig") || path.ends_with(".performance")))
         // The mission-sized objective, the design-space boundary, the
-        // correlation validity domain and the D01-D03 relaxation policy are
+        // correlation validity domain and the relaxation policy are
         // native product additions; the frozen Python optimizer schema
         // predates all four. Their values, bounds and review are checked by
         // the optimizer config tests and by `optimizer::policy_review`.
@@ -788,7 +804,14 @@ fn is_native_config_field(path: &str, key: &str) -> bool {
         // preset-FLOPS tests rather than the frozen Python fixture.
         || (matches!(
             key,
-            "schema_version" | "mass_architecture" | "flops_transport" | "flops_turboprop"
+            "schema_version"
+                | "mass_architecture"
+                | "flops_transport"
+                | "flops_turboprop"
+                // Separate handling/steering nose-load ceiling,
+                // distinct from tire-capacity strength. The frozen schema
+                // has no field for it at all.
+                | "pct_load_nlg_max_handling"
         )
             && (path.ends_with("MassModelConfig") || path.ends_with(".mass_model")))
         // The conceptual free-turbine design cycle. The frozen Python
@@ -808,10 +831,18 @@ fn is_native_config_field(path: &str, key: &str) -> bool {
                 | "constraint_tolerance"
                 | "convergence_stagnation_generations"
         ) && (path.ends_with("SolverSettings") || path.ends_with(".solver")))
+        // The external-solver resource limits are native product additions;
+        // the frozen Python schema predates them. Their defaults, bounds and
+        // round trip are checked by the `analysis` and `structures` unit tests.
+        // `max_linear_curvature_relative_error` is the native linear-model
+        // validity limit for the structural sizing loop.
+        || (key == "avl_timeout_s"
+            && (path.ends_with("AnalysisConfig") || path.ends_with(".analysis")))
+        || (matches!(key, "nastran_memory_mb" | "max_linear_curvature_relative_error")
+            && (path.ends_with("StructuresConfig") || path.ends_with(".structures")))
         || (key == "random_force_psd_n2_per_hz"
             && (path.ends_with("StructuresConfig") || path.ends_with(".structures")))
-        // The cargo capacity objective (clarified ledger App Features 2,
-        // decision D10) is a native product addition; the frozen Python
+        // The cargo capacity objective is a native product addition; the frozen Python
         // requirements schema predates it. Its default, valid domain,
         // round-trip and schema entry are checked by the
         // `DesignRequirements` unit tests.
@@ -1022,6 +1053,19 @@ fn compare_field(
             &frozen_python,
         );
     } else if let Some((source_corrected, frozen_python)) =
+        static_margin_gate_help_correction(label)
+    {
+        comparison.exact(
+            &format!("{label}.help: source-corrected Rust value"),
+            &field.help,
+            &source_corrected,
+        );
+        comparison.exact(
+            &format!("{label}.help: frozen Python value"),
+            &expected.get("help").and_then(Value::as_str).unwrap_or(""),
+            &frozen_python,
+        );
+    } else if let Some((source_corrected, frozen_python)) =
         passenger_mass_authority_help_correction(label)
     {
         comparison.exact(
@@ -1152,6 +1196,13 @@ fn mass_legacy_help_correction(label: &str) -> Option<(&'static str, &'static st
             "Legacy comparison only: passenger seats, galleys, lavatories, insulation, crew, paint, and operational empty items as a fraction of MTOW. Typically 10-14% for passenger transports.",
             "Passenger seats, galleys, lavatories, insulation, crew, paint, and operational empty items as a fraction of MTOW. Typically 10-14% for passenger transports.",
         )),
+        // Documents the source and the raised default alongside
+        // the reworded help text; see `product_default_correction`'s
+        // `.pct_load_nlg_min` arm for the value itself.
+        label if label.ends_with(".pct_load_nlg_min") => Some((
+            "Minimum fraction of weight that must be on the nose gear for adequate steering authority: sets the 'Min Nose Load' CG-envelope boundary (the aft-most safe CG at each weight). Raymer ch.11 / Torenbeek recommend roughly 6-8% minimum for steering/braking authority (8-15% preferred, <=20% max, see pct_load_nlg_max_handling); the shipped default was previously 2%, which left the boundary well inside the aerodynamic aft limit for most configured presets and so rarely governed anything.",
+            "Minimum fraction of weight that must be on the nose gear for adequate steering authority: sets the 'Min Nose Load' CG-envelope boundary (the aft-most safe CG at each weight).",
+        )),
         _ => None,
     }
 }
@@ -1206,23 +1257,25 @@ fn wing_centroid_help_correction(label: &str) -> Option<(&'static str, &'static 
     }
 }
 
-/// Labels that changed to say a field is now read only by the frozen
-/// reference-compatibility replay, alongside [`solver_agnostic_help_correction`]
-/// for the same fields.
+/// Labels that changed to say which full optimization profile reads a field,
+/// alongside [`solver_agnostic_help_correction`] for that field.
 fn solver_agnostic_label_correction(label: &str) -> Option<(&'static str, &'static str)> {
     match label {
         "OptimizerConfig.solver.strategy" | "ALASConfig.optimizer.solver.strategy" => Some((
-            "DE mutation/crossover strategy (parity replay only)",
+            "SciPy DE mutation/crossover strategy",
             "DE mutation/crossover strategy",
         )),
+        "OptimizerConfig.solver.workers" | "ALASConfig.optimizer.solver.workers" => {
+            Some(("Native compute worker threads", "Parallel worker processes"))
+        }
         "OptimizerConfig.solver.seed_near_initial_design"
         | "ALASConfig.optimizer.solver.seed_near_initial_design" => Some((
-            "Seed search near the initial design (parity replay only)",
+            "Seed search near the initial design",
             "Seed search near the initial design",
         )),
         "OptimizerConfig.solver.seed_perturbation_fraction"
         | "ALASConfig.optimizer.solver.seed_perturbation_fraction" => Some((
-            "Seed cluster perturbation size (parity replay only)",
+            "Seed cluster perturbation size",
             "Seed cluster perturbation size",
         )),
         _ => None,
@@ -1232,25 +1285,29 @@ fn solver_agnostic_label_correction(label: &str) -> Option<(&'static str, &'stat
 fn solver_agnostic_help_correction(label: &str) -> Option<(&'static str, &'static str)> {
     match label {
         // `strategy`, `tolerance`, `seed_near_initial_design` and
-        // `seed_perturbation_fraction` all changed prose to say which driver
-        // actually reads them now that L-SHADE is the one product kernel
-        // (see `search_methods::lshade_de`); the frozen text is unchanged.
+        // `seed_perturbation_fraction` changed prose to identify the profile
+        // that reads them; the frozen Python text remains unchanged.
         "OptimizerConfig.solver.strategy" | "ALASConfig.optimizer.solver.strategy" => Some((
-            "SciPy differential_evolution strategy name (e.g. 'best1bin', 'rand1bin', 'best2bin'), read only by the frozen reference-compatibility replay used for regression comparison against the Python baseline. The product search always uses current-to-pbest/1/bin and ignores this field.",
+            "Used by scipy_legacy. SciPy differential_evolution strategy name (e.g. best1bin, rand1bin, best2bin). The product L-SHADE profile always uses current-to-pbest/1/bin.",
             "SciPy differential_evolution strategy name (e.g. 'best1bin', 'rand1bin', 'best2bin'): controls how new candidate designs are generated from the population each generation.",
         )),
+        "OptimizerConfig.solver.population_size"
+        | "ALASConfig.optimizer.solver.population_size" => Some((
+            "Population size as a multiplier on the number of free design variables. Locked coordinates do not consume search population. More candidates explore more broadly but cost more evaluations.",
+            "Population size as a multiplier on the number of design variables: more candidates per generation explores more broadly but costs more evaluations.",
+        )),
         "OptimizerConfig.solver.tolerance" | "ALASConfig.optimizer.solver.tolerance" => Some((
-            "The search stops early once two things both hold: the population's normalized design-space spread has fallen below this fraction of the bounds, and the best feasible cost's relative improvement has stayed below this fraction for the stagnation window below.",
+            "For scipy_legacy, stops when the population energy standard deviation is at most tolerance times abs(mean energy), matching SciPy's default test. The product profile uses normalized design-space spread and its stagnation window.",
             "Relative tolerance for convergence; the solver stops early once the population's cost spread falls below this.",
         )),
         "OptimizerConfig.solver.seed_near_initial_design"
         | "ALASConfig.optimizer.solver.seed_near_initial_design" => Some((
-            "Initialize the population as a tight cluster of small perturbations around the initial/preset design (plus the design itself, unperturbed) instead of SciPy's default uniform latin-hypercube coverage of the whole bounds space. Read only by the frozen reference-compatibility replay; the product L-SHADE search seeds its population's first individual directly from the supplied design instead and does not read this field.",
+            "For scipy_legacy, keep the supplied initial design and seed the population with nearby perturbations; if disabled or unavailable, use Latin-hypercube sampling. The product profile also mixes global samples with its scan seed.",
             "Initialize the population as a tight cluster of small perturbations around the initial/preset design (plus the design itself, unperturbed) instead of SciPy's default uniform latin-hypercube coverage of the whole bounds space. Guarantees at least one known-valid, physically-balanced design is in generation 0, and lets the solver refine from there instead of having to rediscover CG/stability balance from scratch across the full 16-D space. Disable to fall back to the old full-space exploration (e.g. if you specifically want to explore far from the initial design).",
         )),
         "OptimizerConfig.solver.seed_perturbation_fraction"
         | "ALASConfig.optimizer.solver.seed_perturbation_fraction" => Some((
-            "Size of the initial random perturbation around the initial design, as a fraction of each design variable's (upper - lower) bound range. Read only by the frozen reference-compatibility replay when seed_near_initial_design is enabled; the product L-SHADE search does not read this field.",
+            "Size of local initial perturbations as a fraction of each free variable's bound range. Applies when seed_near_initial_design is enabled; fixed coordinates remain unchanged.",
             "Size of the initial random perturbation around the initial design, as a fraction of each design variable's (upper - lower) bound range. Only used when seed_near_initial_design is enabled. Small values (e.g. 0.05) start with a tight, mostly-valid cluster; larger values explore more broadly from the start at the cost of more of the population starting off invalid.",
         )),
         "MSESConfig.alpha_sweep_n_points" | "ALASConfig.mses.alpha_sweep_n_points" => Some((
@@ -1311,19 +1368,10 @@ fn solver_agnostic_help_correction(label: &str) -> Option<(&'static str, &'stati
             "Total pressure ratio through the core compressors (LPC x HPC combined, NOT including the fan). Feeds mission compressor sizing (split into a fixed LPC ratio + a solved HPC ratio) and the Propulsion Analysis cycle's compressor_pressure_ratio.",
             "Total pressure ratio through the core compressors (LPC x HPC combined, NOT including the fan). Feeds SUAVE's compressor sizing (split into a fixed LPC ratio + a solved HPC ratio) and the Propulsion Analysis cycle's compressor_pressure_ratio.",
         )),
-        // The corrected prose no longer says parallel evaluation is free,
-        // because it is not, for the one driver where it still is not: the
-        // frozen reference-compatibility replay defers a whole generation
-        // only when more than one worker is requested, which changes the
-        // trial interleaving and is preserved that way for exact regression
-        // comparison against the Python baseline
-        // (`seeded_example_replays_the_python_winner`). The product
-        // L-SHADE search is the case where the count really does change only
-        // the wall time: it always evaluates one generation as a single
-        // deterministic batch, so a seeded run replays bit-identically at
-        // any worker count, and the text now says so.
+        // Worker counts above one select SciPy's deferred generation-update
+        // semantics for the legacy profile and therefore change the path.
         "OptimizerConfig.solver.workers" | "ALASConfig.optimizer.solver.workers" => Some((
-            "Number of native worker threads for candidate batches. 0 (the default) picks a count from the machine's available parallelism; a positive value is used exactly as written; negative values are treated as 1. The product L-SHADE search always evaluates one whole generation as a single deterministic batch, in the order it built the generation from its seed, so this setting changes only how long a batch takes, never which points are evaluated or the winner: a seeded run replays bit-identically at any worker count. The frozen reference-compatibility replay is the one exception: its legacy driver defers a whole generation only when more than one worker is requested, which changes the trial interleaving and is preserved that way for exact regression comparison against the Python baseline. External evaluator adapters remain serial because they own mutable process/session state.",
+            "Total native compute worker threads shared by candidate batches and nested VLM analyses. The scipy_legacy profile defaults to one worker, matching Python's immediate-update mode; multiple workers use deferred generations and can change the trajectory, as in SciPy. The product profile evaluates deterministic whole-generation batches, so worker count changes runtime only. External evaluator adapters remain serial because they own mutable process/session state.",
             "Number of worker processes for parallel evaluation (>1 uses multiprocessing). Requires a picklable objective, already the case for ALAS's optimizer.",
         )),
         _ => None,
@@ -1333,12 +1381,33 @@ fn solver_agnostic_help_correction(label: &str) -> Option<(&'static str, &'stati
 /// `passenger_mass_kg` documents the product passenger-mass authority
 /// decision: every seated passenger, of any class, is priced at this
 /// combined (occupant + checked bag) mass, and the per-class occupant slot
-/// is the derived remainder. The prose also no longer presents the shipped
+/// is the derived remainder. The prose does not present the shipped
 /// 100 kg as a standard: AC 120-27F is operator weight-and-balance guidance,
 /// so the text names the number as a project load-case default and says what
 /// must be recorded before another value is used operationally. Only the
 /// prose changed; the value and every other field are unchanged, and both
 /// texts stay pinned here.
+///
+/// The aft-limit help text described `target_static_margin`
+/// as if it were the enforced boundary; the product feasibility gate actually
+/// enforces `min_physical_static_margin`, at the physical (mass-model) CG.
+fn static_margin_gate_help_correction(label: &str) -> Option<(&'static str, &'static str)> {
+    match label {
+        "DesignRequirements.target_static_margin" | "ALASConfig.requirements.target_static_margin" => {
+            Some((
+            "Preferred static margin at the aerodynamic aft CG limit: Aft CG Limit (%MAC) = Neutral Point (%MAC) - target_static_margin*100. This is a design preference used by the scipy_legacy objective, frozen reference CG-envelope path and report figures; the product feasibility gate enforces the (typically smaller) min_physical_static_margin below, measured at the actual mass-model CG, not this aerodynamic-reference target. The two boundaries can differ by (target_static_margin - min_physical_static_margin)*100 %MAC.",
+                "Static margin at the Aft CG Limit: Aft CG Limit (%MAC) = Neutral Point (%MAC) - target_static_margin*100. A positive value ensures positive static stability when the CG is at the aft limit.",
+            ))
+        }
+        "DesignRequirements.min_physical_static_margin"
+        | "ALASConfig.requirements.min_physical_static_margin" => Some((
+            "Minimum static margin measured using the actual mass-model (physical) CG, not the aerodynamic reference point. Designs below this are hard-rejected as inherently unstable. 0.0 = bare stability; 0.05 = 5% MAC buffer (recommended). This is the boundary the product feasibility gate enforces at every loading state; target_static_margin above is a separate, larger design preference used by the scipy_legacy objective, frozen reference path and report figures.",
+            "Minimum static margin measured using the actual mass-model (physical) CG, not the aerodynamic reference point. Designs below this are hard-rejected as inherently unstable. 0.0 = bare stability; 0.05 = 5% MAC buffer (recommended).",
+        )),
+        _ => None,
+    }
+}
+
 fn passenger_mass_authority_help_correction(label: &str) -> Option<(&'static str, &'static str)> {
     match label {
         "DesignRequirements.passenger_mass_kg" | "ALASConfig.requirements.passenger_mass_kg" => {

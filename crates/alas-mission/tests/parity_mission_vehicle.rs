@@ -321,7 +321,9 @@ fn request_corrections() -> BTreeMap<&'static str, RequestCorrection> {
             0.37,
             0.34,
         ),
-        correction("A320-200.geometry_config.wing.root_datum_x_m", 12.9, 12.913),
+        correction("A320-200.geometry_config.wing.root_datum_x_m", 12.9, 11.887),
+        // Wing root anchored to the Airbus quarter-MAC point (gear-load statics).
+        correction("A340-300.geometry_config.wing.root_datum_x_m", 22.0, 23.111),
         correction(
             "A340-300.geometry_config.empennage.hstab_tip_le_m[1]",
             9.0,

@@ -183,7 +183,7 @@ fn literal_arguments(source: &str, function: &str) -> Vec<String> {
     found
 }
 
-/// The two optimizer policy groups Q11 and D02 surface in Advanced Settings.
+/// The two optimizer policy groups that surface in Advanced Settings.
 ///
 /// The whole-schema test above is the standing contract, but it fails on
 /// unrelated groups whose catalogue entries other work still owes, and a
@@ -235,8 +235,8 @@ fn the_optimizer_policy_groups_have_spanish_catalog_provenance() {
     assert_eq!(checked, 2 * (2 + 14 + 2));
 }
 
-/// The two surfaces this work added: Q12's search-diagnostics block and
-/// D01-D03's Inputs constraint-policy card.
+/// The two surfaces covered: the search-diagnostics block and the Inputs
+/// constraint-policy card.
 ///
 /// Scoped for the same reason as the test above: the whole-source contract
 /// stops at the first uncatalogued literal anywhere in the crate, so a
@@ -272,8 +272,7 @@ fn the_search_diagnostics_and_constraint_policy_views_have_spanish_provenance() 
     );
 }
 
-/// The surfaces the 2026-09-17 High GUI corrections added: the responsive
-/// landing layout's notice, the reason a run is blocked, the schema form's
+/// The surfaces covered: the responsive landing layout's notice, the reason a run is blocked, the schema form's
 /// modification marker and the sandbox component context.
 ///
 /// Scoped for the same reason as the two tests above: the whole-source
@@ -286,11 +285,12 @@ fn the_narrow_layout_run_gate_and_sandbox_context_views_have_spanish_provenance(
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     let mut total = 0;
     for relative in [
-        "src/app_parts/part_01.rs",
+        "src/app.rs",
+        "src/app/nav_panel.rs",
         "src/views/notices.rs",
-        "src/views/form_feedback.rs",
-        "src/views/form_parts/part_01.rs",
-        "src/views/form_parts/part_02.rs",
+        "src/views/form/feedback.rs",
+        "src/views/form/field.rs",
+        "src/views/form/editors.rs",
         "src/views/control_bar.rs",
         "src/sandbox/panel.rs",
         "src/sandbox/viewport.rs",

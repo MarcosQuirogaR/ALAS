@@ -7,9 +7,24 @@
 //! failure or evidence gap. Component data therefore cannot become an
 //! optimizer default. Propeller performance is supplied as thrust-at-speed
 //! operating points; a retail static-thrust value is never used in flight.
-//! Geometry follows the preliminary sizing relations documented in
-//! `docs/PHYSICS_SOLVER_FLOW.md`, with every empirical or applicability quantity
+//! Geometry follows preliminary sizing relations, with every empirical or applicability quantity
 //! supplied explicitly in [`PreliminaryModel`].
 
-include!("optimizer_parts/part_01.rs");
-include!("optimizer_parts/part_02.rs");
+mod generation;
+mod topology;
+mod validation;
+use crate::catalog::{Catalog, Dimensions};
+use crate::{Finding, FindingKind, UavDesign, UavReport};
+pub use generation::{
+    EmpennageGeometry, FuselageGeometry, GeneratedGeometry, LandingGearGeometry, WingGeometry,
+};
+pub use topology::{
+    optimize_for_topology, optimize_for_topology_with_control, TopologyOptimizationError,
+    TopologyOptimizedUav,
+};
+use validation::validate_problem;
+
+mod problem;
+pub use problem::*;
+mod search;
+pub use search::*;

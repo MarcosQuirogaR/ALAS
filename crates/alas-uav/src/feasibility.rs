@@ -11,5 +11,11 @@
 //! never treated as thrust available in flight. Every flight point therefore
 //! carries thrust from an independently evaluated propeller operating point.
 
-include!("feasibility_parts/part_01.rs");
-include!("feasibility_parts/part_02.rs");
+use crate::catalog::{EscSpec, MotorSpec};
+pub use crate::model::*;
+use crate::packaging::{check_packaging, collect_mass_terms, total_mass};
+
+mod checks;
+pub use checks::*;
+mod flight;
+pub(crate) use flight::*;

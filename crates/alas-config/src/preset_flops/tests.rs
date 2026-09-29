@@ -104,11 +104,10 @@ mod tests {
     }
 
     /// The hold architecture is one physical fact and must have one
-    /// declaration. It used to have two: the FLOPS container tare read
-    /// `declared_cargo_loading`, the cabin layout engine read
-    /// `cabin.cargo.lower_deck_uld`, and they disagreed on the ATR 72-600 and
-    /// the A320-200 - the ATR, which has no lower hold at all, was still being
-    /// offered LD3 positions in one.
+    /// declaration. The FLOPS container tare reads
+    /// `declared_cargo_loading` and the cabin layout engine reads
+    /// `cabin.cargo.lower_deck_uld`; the two must agree on the ATR 72-600 (which
+    /// has no lower hold at all, so no LD3 positions) and on the A320-200.
     #[test]
     fn the_hold_architecture_has_one_declaration_that_both_consumers_agree_on() {
         use crate::CargoHoldLoading;

@@ -17,7 +17,7 @@ use alas_mass::dispatch::DispatchSolution;
 /// Which requirement family a [`ConstraintResidual`] belongs to.
 ///
 /// Ordered so that the relaxation policy can count *distinct* violated
-/// discipline groups deterministically (clarified ledger D01). The order is
+/// discipline groups deterministically. The order is
 /// the declaration order and carries no severity meaning.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ConstraintFamily {
@@ -29,6 +29,8 @@ pub enum ConstraintFamily {
     Performance,
     /// Planform, wing-loading and accommodation requirements.
     Geometry,
+    /// Strength, stiffness and the validity of the structural response model.
+    Structure,
 }
 
 /// One requirement, evaluated as a typed residual rather than folded into a
@@ -67,88 +69,7 @@ pub struct ConstraintResidual {
 /// order of magnitude below any model's fidelity.
 const NUMERICAL_SLACK: f64 = 1.0e-5;
 
-impl ConstraintResidual {
-    /// Build a residual whose normalized violation is `raw_residual` scaled
-    /// by the magnitude of `limit`: the convention every scaled residual in
-    /// `mdo::residuals` uses, so a limit near zero cannot divide the
-    /// violation toward infinity. Violations below [`NUMERICAL_SLACK`] of
-    /// the limit are reported in `raw_residual` but not counted.
-    pub(crate) fn scaled(
-        id: &'static str,
-        family: ConstraintFamily,
-        actual: f64,
-        limit: f64,
-        unit: &'static str,
-        raw_residual: f64,
-        policy: ConstraintPolicy,
-    ) -> Self {
-        let scale = limit.abs().max(1e-9);
-        let normalized_violation = (raw_residual / scale - NUMERICAL_SLACK).max(0.0);
-        Self {
-            id,
-            family,
-            actual,
-            limit,
-            unit,
-            raw_residual,
-            normalized_violation,
-            policy,
-        }
-    }
-
-    /// Build a residual whose normalized violation is supplied directly, for
-    /// a source (the CG envelope, an evaluation failure) that already
-    /// carries its own normalization.
-    #[allow(clippy::too_many_arguments)] // one named field per physical quantity of the residual; a struct would only rename them once
-    pub(crate) fn direct(
-        id: &'static str,
-        family: ConstraintFamily,
-        actual: f64,
-        limit: f64,
-        unit: &'static str,
-        raw_residual: f64,
-        normalized_violation: f64,
-        policy: ConstraintPolicy,
-    ) -> Self {
-        Self {
-            id,
-            family,
-            actual,
-            limit,
-            unit,
-            raw_residual,
-            normalized_violation,
-            policy,
-        }
-    }
-
-    /// Whether this residual is on the infeasible side of its limit.
-    fn violated(&self) -> bool {
-        self.normalized_violation > 0.0
-    }
-
-    /// The signed, dimensionless constraint value a gradient-based driver
-    /// works with: the counted violation when the requirement is missed,
-    /// and the negative margin over the limit's magnitude when it is met,
-    /// so the value crosses zero exactly at the limit.
-    pub fn signed_normalized(&self) -> f64 {
-        if self.normalized_violation > 0.0 {
-            self.normalized_violation
-        } else if self.limit == 0.0 {
-            // A limit of exactly zero has no magnitude to take a relative
-            // margin from, and dividing by the `1e-9` floor below would hand
-            // a gradient driver a margin nine orders of magnitude out of
-            // scale with every other constraint. A residual built against a
-            // zero bound already reports `raw_residual` in the unit its
-            // violation is counted in (the boolean sentinels, and the
-            // washout window in `mdo::residuals_geometry`), so that value is
-            // the signed one.
-            self.raw_residual.min(0.0)
-        } else {
-            (self.raw_residual / self.limit.abs().max(1e-9)).min(0.0)
-        }
-    }
-}
+mod residual;
 
 /// How closely an [`ExternalPolar`] must have been evaluated at a
 /// candidate's own cruise condition to be flown by it.
@@ -406,9 +327,8 @@ impl ProductStateProvenance {
 /// The converged physical state a candidate's feasibility was actually
 /// decided on.
 ///
-/// [`CandidateAssessment`] previously carried only scalars, so a downstream
-/// report had no way to reuse the balance state the search accepted and had
-/// to rebuild its own. Two independent rebuilds of "the same" aircraft can
+/// A downstream report reuses the balance state the search accepted rather
+/// than rebuilding its own. Two independent rebuilds of "the same" aircraft can
 /// disagree about where it balances while agreeing on its takeoff mass, which
 /// is exactly how a hard-feasible finalist could be printed as physically
 /// infeasible. Carrying the state itself makes the two comparable, and the
@@ -450,7 +370,7 @@ pub struct ResolvedProductState {
 }
 
 /// What the controlled-relaxation policy made of one candidate's violated
-/// hard residuals (clarified ledger D01-D03).
+/// hard residuals.
 ///
 /// Empty and `rejected: false` for a strictly feasible candidate, which is
 /// every candidate under the shipped strict policy. A candidate with a
@@ -460,7 +380,7 @@ pub struct ResolvedProductState {
 pub struct RelaxationOutcome {
     /// Limits that were missed inside their own declared tolerance.
     pub relaxed_ids: Vec<&'static str>,
-    /// Distinct discipline groups carrying a relaxed miss (D01 counts
+    /// Distinct discipline groups carrying a relaxed miss (the policy counts
     /// groups, not limits).
     pub violated_groups: usize,
     /// Whether the candidate is rejected despite the policy: a miss outside
@@ -563,12 +483,12 @@ pub(crate) struct PayloadCapacity {
 /// has `x` at hand to rebuild the vector only in the failure path that
 /// actually needs it for a history entry.
 ///
-/// The reason is one of the legacy objective's own evaluation-failure labels
+/// The reason is one of the weighted-penalty objective's own evaluation-failure labels
 /// (`geometry_build`, `mass_coordinates`, `payload_layout`, `trim_solve`;
 /// see `crate::objective_evaluate`), which is what lets
 /// `OptimizationHistory::reject_reason_counts` and the differential-evolution
 /// reject-reason grouping read a mission-sized failure the same way as a
-/// legacy one.
+/// weighted-penalty one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct CandidateFailure {
     pub reason: &'static str,
@@ -580,6 +500,49 @@ pub(crate) struct CandidateFailure {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unavailable_constraint_measurements_never_become_satisfied() {
+        for invalid in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            for (actual, limit, raw) in [
+                (invalid, 1.0, 0.0),
+                (1.0, invalid, 0.0),
+                (1.0, 1.0, invalid),
+            ] {
+                let residual = ConstraintResidual::scaled(
+                    "test",
+                    ConstraintFamily::Structure,
+                    actual,
+                    limit,
+                    "m",
+                    raw,
+                    ConstraintPolicy::Hard,
+                );
+                assert!(residual.violated());
+            }
+            let residual = ConstraintResidual::direct(
+                "test",
+                ConstraintFamily::Structure,
+                1.0,
+                1.0,
+                "m",
+                0.0,
+                invalid,
+                ConstraintPolicy::Hard,
+            );
+            assert!(residual.violated());
+        }
+        let satisfied = ConstraintResidual::scaled(
+            "test",
+            ConstraintFamily::Structure,
+            0.5,
+            1.0,
+            "m",
+            -0.5,
+            ConstraintPolicy::Hard,
+        );
+        assert!(!satisfied.violated());
+    }
 
     /// A transport-like cruise polar at M 0.78 / 11 000 m over 120 m^2, with
     /// every validity gate satisfied, for the rejection tests to perturb one

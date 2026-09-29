@@ -4,7 +4,6 @@
 // Ported from reference geometry/geometry/airfoil/airfoil.py,
 // reference geometry/geometry/airfoil/airfoil_families.py
 // Upstream: reference geometry 4.2.8, MIT.
-// Reference: alas @ rust-port-baseline.
 
 //! reference geometry's `Airfoil`, scoped to the surface this program's Python
 //! package actually calls: construction from explicit coordinates or from a

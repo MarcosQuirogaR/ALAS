@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/reporting/visualization.py:figure_landing_gear_planform (L2836-3017)
-// Reference: alas @ rust-port-baseline.
 
 use super::common::missing_datum_scene;
 use super::mass_breakdown::AC_CHORD_FRACTION;
@@ -117,19 +116,46 @@ pub fn figure_landing_gear_planform(
         fus.xsecs.iter().map(|s| s.width).fold(f64::MIN, f64::max)
     };
 
-    // Aerodynamic (gear-independent) CG limits: the same worst-case loads
-    // the optimizer's CG check sizes the gear against.
-    let sm_val = if report.static_margin.is_nan() {
-        0.10
-    } else {
-        report.static_margin
-    };
-    let x_np = plane.xyz_ref[0] + sm_val * mac;
-    let target_sm = config.requirements.target_static_margin;
-    let cg_range = config.requirements.cg_range_pct_mac;
-    let np_pct = (x_np - x_mac_le) / mac.max(0.001) * 100.0;
-    let aft_limit_mac = np_pct - target_sm * 100.0;
-    let fwd_limit_mac = aft_limit_mac - cg_range;
+    // Governing physical CG limits at the heaviest evaluated loading state
+    // (analyzed takeoff, or the heaviest state available), read from the
+    // same gate the feasibility pipeline evaluates a design against:
+    // the aerodynamic, ground-minimum-nose-load and
+    // tip-back aft mechanisms and the max-nose-load/scissor-plot forward
+    // ones, not this figure's own simplified `NP - target_sm` reconstruction
+    // (that formula used the optimizer's *preferred* static margin, never a
+    // hard physical floor, and ignored the ground/tip-back mechanisms
+    // entirely). Falls back to that formula only when the gate itself
+    // cannot be assessed (e.g. no neutral point yet), so a design still
+    // being edited keeps a usable, clearly approximate estimate rather than
+    // no gear at all.
+    let gate_limits = crate::families::model_cg_gate_assessment(report, config)
+        .ok()
+        .and_then(|assessment| {
+            assessment
+                .loading_states
+                .iter()
+                .max_by(|a, b| a.mass_kg.total_cmp(&b.mass_kg))
+                .map(|state| {
+                    (
+                        state.physical_limits.fwd_limit_pct_mac,
+                        state.physical_limits.aft_limit_pct_mac,
+                    )
+                })
+        })
+        .filter(|(fwd, aft)| fwd.is_finite() && aft.is_finite());
+    let (fwd_limit_mac, aft_limit_mac) = gate_limits.unwrap_or_else(|| {
+        let sm_val = if report.static_margin.is_nan() {
+            0.10
+        } else {
+            report.static_margin
+        };
+        let x_np = plane.xyz_ref[0] + sm_val * mac;
+        let target_sm = config.requirements.target_static_margin;
+        let cg_range = config.requirements.cg_range_pct_mac;
+        let np_pct = (x_np - x_mac_le) / mac.max(0.001) * 100.0;
+        let aft = np_pct - target_sm * 100.0;
+        (aft - cg_range, aft)
+    });
     let aero_fwd_lim_x = x_mac_le + fwd_limit_mac / 100.0 * mac;
     let aero_aft_lim_x = x_mac_le + aft_limit_mac / 100.0 * mac;
 
@@ -141,6 +167,26 @@ pub fn figure_landing_gear_planform(
         + masses.get(PAYLOAD).copied().unwrap_or(0.0)
         + masses.get(FUEL).copied().unwrap_or(0.0).max(0.0);
 
+    // Loaded CG height above the ground plane: the mass model's own
+    // global CG `z` (`report.physical_cg[2]`, positive up) above the
+    // fuselage's lowest skin point, rather than a bare `1.1 * diameter`
+    // guess unrelated to this design's actual mass distribution. The strut
+    // and tire that carry the fuselage the rest of the way to the ground
+    // are not sized yet at this call site (that is what this function
+    // computes), so a fuselage-radius floor keeps the estimate from
+    // collapsing to an implausibly small height for a design whose CG sits
+    // near the belly; it remains an estimate, not a measured ground height.
+    let z_ground_body = fus
+        .xsecs
+        .iter()
+        .map(|section| section.xyz_c[2] - section.width / 2.0)
+        .fold(f64::INFINITY, f64::min);
+    let h_cg_estimate_m = if z_ground_body.is_finite() && report.physical_cg[2].is_finite() {
+        (report.physical_cg[2] - z_ground_body).max(fus_diam * 0.5)
+    } else {
+        fus_diam * 1.1
+    };
+
     let gear = size_landing_gear_with_group_stations(
         mtow_mass,
         x_nlg,
@@ -148,7 +194,7 @@ pub fn figure_landing_gear_planform(
         aero_fwd_lim_x,
         aero_aft_lim_x,
         fus_diam,
-        fus_diam * 1.1,
+        h_cg_estimate_m,
         &gear_stations.main_gear_x_m,
         gear_cfg,
     );

@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/physics/mses_analysis.py
-// Reference: alas @ rust-port-baseline.
 
 //! MSES two-dimensional airfoil analysis: a viscous/inviscid coupled solve run
 //! on the optimized design's root section for the model-comparison view.
@@ -36,5 +35,20 @@
 //! airplane. And upstream's `repo_root` argument, retained there only for
 //! signature compatibility, is dropped.
 
-include!("mses_parts/part_01.rs");
-include!("mses_parts/part_02.rs");
+mod deck;
+mod driver;
+mod exec;
+mod parse;
+use alas_config::MsesConfig;
+use alas_geom::aircraft::airfoil::Airfoil;
+use alas_geom::aircraft::spacing::linspace;
+pub use driver::Mses;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::AtomicBool;
+
+mod polar;
+pub use polar::*;
+mod pressure;
+pub use pressure::*;
+mod runs;
+pub use runs::*;

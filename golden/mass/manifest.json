@@ -26,23 +26,6 @@
         "python": "3.13.13"
       }
     },
-    "suave_transport": {
-      "description": "SUAVE.Analyses.Weights.Weights_Transport.evaluate() (method_type='New SUAVE', the only value ever reached) on the default AVE design's sized base config: the full weight_breakdown, every intermediate correlation term, and vehicle.mass_properties.operating_empty after evaluate()",
-      "generator": "gen_mass_suave_transport.py",
-      "runtime": "suave",
-      "alas_commit": "7d1555c1f4db5110cf6cd187c156718e1a033b50",
-      "environment": {
-        "suave": {
-          "version": "2.5.2",
-          "tree": "external tools/SUAVE-2.5.2/trunk"
-        },
-        "scipy": "1.11.4",
-        "platform": "Windows-10-10.0.26200-SP0",
-        "aerosandbox": "absent",
-        "python": "3.10.20",
-        "numpy": "1.26.4"
-      }
-    },
     "torenbeek": {
       "description": "aerosandbox.library.weights.torenbeek_weights: mass_wing (and its three private helpers) and mass_fuselage_simple, on wings/fuselages shaped like aircraft_builder.py's main wing, hstab, vstab and fuselage, across a spread of load factor, TOGW, airspeeds, flap angle, strut location and main-gear-mounting parameters",
       "generator": "gen_mass_torenbeek.py",

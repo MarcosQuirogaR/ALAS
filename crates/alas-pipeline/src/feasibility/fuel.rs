@@ -24,9 +24,8 @@
 //! mass model that leaves unusable fuel out of OEW has it reserved here.
 
 use alas_config::{presets, AlasConfig, DesignVector};
-use alas_mass::tanks::FuelTankLayout;
+use alas_mass::tanks::{resolve_product_layout, uses_registered_tank_layout};
 use alas_mission::MissionResult;
-use alas_opt::wing_fuel_volume_m3;
 
 use crate::full_analysis::AnalysisReport;
 
@@ -141,7 +140,7 @@ pub struct FuelLoadingAssessment {
     /// `mtow_closure_fuel_kg`, in kilograms. `Some(0.0)` from
     /// [`plan_from_values`] means "nothing left to reserve, by construction"
     /// (a tank-agnostic caller). `None`, produced only by
-    /// [`plan_fuel_loading`]'s real [`FuelTankLayout::resolve`] attempt
+    /// [`plan_fuel_loading`]'s real [`alas_mass::tanks::FuelTankLayout::resolve`] attempt
     /// failing, means the reservation could not be verified at all, in
     /// that case [`findings`] raises [`FindingCode::FuelTankLayoutUnavailable`]
     /// rather than silently treating the unresolved mass as a verified zero.
@@ -172,7 +171,7 @@ pub(crate) fn plan_fuel_loading(
     design: &DesignVector,
     report: &AnalysisReport,
 ) -> FuelLoadingAssessment {
-    let analysis_mass_basis_kg = report_mass_basis_kg(config, report);
+    let analysis_mass_basis_kg = report.analysis_takeoff_mass_kg(config.requirements.mtow_kg);
     let gross_mtow_closure_fuel_kg = report
         .component_masses
         .get("Fuel")
@@ -195,34 +194,10 @@ pub(crate) fn plan_fuel_loading(
     }
 }
 
-/// Return the takeoff-mass basis used to build a report.
-///
-/// A mission-sized finalist carries its closed mass in the report provenance,
-/// while `config.requirements.mtow_kg` remains the design or regulatory upper
-/// limit. Downstream mission and feasibility code must use the former for
-/// mass closure and retain the latter only as a limit; otherwise it silently
-/// recreates fuel and zero-fuel mass at the heavier ceiling.
-pub(crate) fn report_mass_basis_kg(config: &AlasConfig, report: &AnalysisReport) -> f64 {
-    let sized = report
-        .geometry_summary
-        .get("analysis_mass_basis_kg")
-        .copied();
-    let is_sized = report
-        .geometry_summary
-        .get("analysis_mass_basis_is_sized")
-        .is_some_and(|value| value.is_finite() && *value > 0.5);
-    if is_sized {
-        if let Some(value) = sized.filter(|value| value.is_finite() && *value > 0.0) {
-            return value;
-        }
-    }
-    config.requirements.mtow_kg
-}
-
 /// The tank-physical mass permanently unusable to the engines, from the same
-/// [`FuelTankLayout`] inventory [`super::mass_balance::assess_mass_balance`]
+/// [`alas_mass::tanks::FuelTankLayout`] inventory [`super::mass_balance::assess_mass_balance`]
 /// resolves for the CG ledger (same geometry, same
-/// [`super::mass_balance::tank_reference`] density/published-volume pair),
+/// shared product tank resolver),
 /// not a separate wing-volume approximation. `None` when the layout cannot
 /// be resolved; the caller must not treat that the same as a verified zero
 /// (see [`findings`]'s [`FindingCode::FuelTankLayoutUnavailable`] check).
@@ -248,17 +223,7 @@ fn resolved_unusable_fuel_kg(
     design: &DesignVector,
     report: &AnalysisReport,
 ) -> Option<f64> {
-    let (density_kg_m3, published_total_l) = super::mass_balance::tank_reference(config, design);
-    let tanks = FuelTankLayout::resolve(
-        &report.airplane,
-        &config.geometry,
-        &config.structures,
-        &config.fuel_tanks,
-        &config.fuel_policy,
-        density_kg_m3,
-        published_total_l,
-    )
-    .ok()?;
+    let tanks = resolve_product_layout(config, design, &report.airplane).ok()?;
     if config.mass_model.mass_architecture.is_pure_flops() {
         let total_kg = report
             .flops_mass_buildup
@@ -278,7 +243,7 @@ fn resolved_unusable_fuel_kg(
 /// Build a load-case fuel contract from already-resolved values.
 ///
 /// This is the tank-agnostic core: it does not itself attempt to resolve a
-/// [`FuelTankLayout`], so it reports `unusable_fuel_kg: Some(0.0)`: callers
+/// [`alas_mass::tanks::FuelTankLayout`], so it reports `unusable_fuel_kg: Some(0.0)`: callers
 /// that bypass tank resolution (direct unit tests, or any caller that has
 /// already netted out unusable fuel from `mtow_closure_fuel_kg` itself) are
 /// asserting there is nothing left to reserve, which is different from
@@ -364,8 +329,21 @@ pub fn assess_fuel_capacity(
     design: &DesignVector,
     report: &AnalysisReport,
 ) -> FuelCapacityAssessment {
+    // Resolve first even for a reference: invalid installation evidence must
+    // not be hidden by its aircraft-name lookup.
+    let capacity_kg = resolve_product_layout(config, design, &report.airplane)
+        .ok()
+        .and_then(|layout| valid_positive_capacity(layout.usable_capacity_kg()));
     if let Ok(preset) = presets::get(&config.preset) {
-        if *design == preset.design_vector {
+        let reference_density = preset.mass_model.as_ref().map_or_else(
+            || alas_config::MassModelConfig::default().fuel_density_kg_m3,
+            |mass| mass.fuel_density_kg_m3,
+        );
+        if *design == preset.design_vector
+            && uses_registered_tank_layout(config)
+            && config.mass_model.fuel_density_kg_m3 == reference_density
+            && capacity_kg.is_some()
+        {
             if let Some(capacity_kg) = preset.reference.usable_fuel_mass_kg {
                 return FuelCapacityAssessment {
                     capacity_kg: Some(capacity_kg),
@@ -375,12 +353,9 @@ pub fn assess_fuel_capacity(
         }
     }
 
-    let capacity_kg = report.airplane.wings.first().and_then(|wing| {
-        valid_positive_capacity(
-            wing_fuel_volume_m3(wing, config.mass_model.fuel_tank_usable_fraction)
-                * config.mass_model.fuel_density_kg_m3,
-        )
-    });
+    // The same inventory drives search, dispatch, fuel centroids and the
+    // item ledger. A wing-only approximation loses centre/auxiliary tanks.
+    // Resolution failure is missing evidence, not permission to invent fuel.
     FuelCapacityAssessment {
         capacity_kg,
         evidence: if capacity_kg.is_some() {

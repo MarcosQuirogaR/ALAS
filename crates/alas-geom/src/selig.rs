@@ -1,11 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-// Ported from the zip-reading branch of AirfoilLibrary._init_zip / .get in
-// alas/geometry/airfoils.py.
 // Upstream coordinate data: UIUC Airfoil Coordinates Database, see
 // THIRD-PARTY-NOTICES.md.
-// Reference: alas @ rust-port-baseline.
 
 //! Lookup into the embedded Selig airfoil coordinate corpus.
 //!

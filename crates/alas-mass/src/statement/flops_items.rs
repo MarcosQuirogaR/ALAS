@@ -172,7 +172,11 @@ fn push_flops_operating_items(
             if flops.cabin_equipment_method
                 == alas_config::CabinEquipmentMethod::LthCivilTransportV1
             {
-                MassMethod::Correlation("LTH civil transport cabin")
+                if id == "operating-passenger_service" {
+                    MassMethod::Correlation("LTH civil transport cabin")
+                } else {
+                    MassMethod::Correlation("FLOPS crew allocation within LTH total")
+                }
             } else {
                 MassMethod::Correlation("FLOPS")
             },

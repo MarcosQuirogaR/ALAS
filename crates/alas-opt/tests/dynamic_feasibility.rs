@@ -15,6 +15,7 @@ use alas_opt::{DesignOptimizer, ObjectiveEvaluation, OptimizationError};
 fn public_de_returns_a_valid_candidate_when_an_invalid_one_is_cheaper() {
     for seed in [0, 1, 42, 99] {
         let mut config = AlasConfig::default();
+        config.optimizer.solver.method = alas_config::optimizer::PRODUCT_DE_METHOD.to_owned();
         // A zero-iteration product search only evaluates the midpoint, so it
         // cannot exercise feasibility-first ordering. One search iteration
         // supplies the initial population and a competing trial set.
@@ -72,6 +73,7 @@ fn public_de_returns_a_valid_candidate_when_an_invalid_one_is_cheaper() {
 #[test]
 fn public_de_returns_typed_failure_for_an_all_invalid_population() {
     let mut config = AlasConfig::default();
+    config.optimizer.solver.method = alas_config::optimizer::PRODUCT_DE_METHOD.to_owned();
     config.optimizer.solver.max_iterations = 0;
     config.optimizer.solver.population_size = 1;
     config.optimizer.solver.seed = Some(7);

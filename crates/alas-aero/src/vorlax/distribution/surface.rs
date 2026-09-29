@@ -5,7 +5,6 @@
 // generate_vortex_distribution.py, the body of
 // generate_wing_vortex_distribution's strip loop.
 // Upstream: mission analysis model 2.5.2, LGPL-2.1.
-// Reference: alas @ rust-port-baseline.
 
 //! One side of one wing, while it is being laid out.
 //!

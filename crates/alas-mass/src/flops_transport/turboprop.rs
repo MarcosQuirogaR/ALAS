@@ -334,19 +334,6 @@ pub enum TurbopropMassUnverifiedReason {
     NacelleArchitecture,
 }
 
-impl TurbopropMassUnverifiedReason {
-    /// A stable identifier for reports and exports.
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::InvalidConfiguration => "turboprop_mass_configuration",
-            Self::InvalidOperatingPoint => "turboprop_operating_point",
-            Self::ShaftPowerRating => "turboprop_shaft_power_rating",
-            Self::PropellerGeometry => "turboprop_propeller_geometry",
-            Self::NacelleArchitecture => "turboprop_nacelle_architecture",
-        }
-    }
-}
-
 /// Evaluate the shaft-power propulsion group.
 ///
 /// # Errors

@@ -10,5 +10,12 @@
 //! alongside its CPACS document, then this module injects a namespace-bound
 //! payload into an existing CPACS 3.5 document.
 
-include!("cpacs35_parts/part_01.rs");
-include!("cpacs35_parts/part_02.rs");
+use super::{
+    CataloguePowertrainSelection, ElectricMissionResult, ElectricPropulsionResult, ElectricalCheck,
+};
+use crate::procurement::{ProcurementEstimate, ProcurementLine};
+
+mod render;
+pub use render::*;
+mod xml;
+use xml::*;

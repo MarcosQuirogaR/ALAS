@@ -382,7 +382,7 @@ fn validate_request(request: &VspaeroSweepRequest) -> Result<(), VspaeroError> {
     Ok(())
 }
 
-fn parse_reference(
+pub(super) fn parse_reference(
     setup_text: &str,
     length_unit: ReferenceLengthUnit,
 ) -> Result<VspaeroReference, VspaeroError> {

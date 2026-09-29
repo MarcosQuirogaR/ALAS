@@ -72,7 +72,7 @@ fn placed_passenger_counts(
         match name {
             "First" => counts[0] += count,
             "Business" => counts[1] += count,
-            // Product payload folds any legacy Premium slot into tourist.
+            // Product payload folds any Premium slot into tourist.
             "Economy" | "Premium" => counts[2] += count,
             _ => {}
         }

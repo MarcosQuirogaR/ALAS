@@ -31,6 +31,7 @@ pub mod cabin;
 pub mod cargo;
 pub mod geometry;
 pub mod layout;
+pub mod loading_sequence;
 pub mod oew;
 
 // Reproduces CPython's and NumPy's own numerics, which decide whole seats and
@@ -50,4 +51,8 @@ pub use cargo::{
 };
 pub use geometry::{CabinGeometry, CabinGeometryError, DeckSpec};
 pub use layout::{DeckItem, ItemKind, ItemMeta, LayoutSummary, Mode, PayloadLayout};
+pub use loading_sequence::{
+    cargo_loading_sequences, concat_sequences, passenger_loading_sequences, potato_boundary,
+    LoadingPoint, LoadingSequence, PotatoPoint,
+};
 pub use oew::oew_and_cg;

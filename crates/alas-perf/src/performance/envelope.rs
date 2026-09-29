@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-// Ported from alas/physics/performance.py
-// Reference: alas @ rust-port-baseline.
-
 //! The Breguet range equation and the CS-25 V-n flight envelope.
 
 use alas_atmo::Atmosphere;
@@ -168,9 +165,9 @@ impl VnDiagramData {
 
 /// Build the CS-25-style V-n diagram: `build_vn_diagram`.
 ///
-/// Scoped to `s_ref` rather than a whole `Airplane`: upstream reads only
-/// `plane.s_ref` off its airplane argument, so this crate takes the reference
-/// area directly instead of a dependency on the geometry crate for one field.
+/// Scoped to `s_ref` rather than a whole `Airplane`: only the reference area
+/// is read, so this crate takes it directly instead of depending on the
+/// geometry crate for one field.
 /// `n_lim_pos = ultimate_load_factor / 1.5` (CS-25.303 factor of safety),
 /// `VC = VD / 1.25` (CS-25.335(b) minimum margin); the stall boundaries use
 /// the clean-configuration lift limits, distinct from the flaps-down maxima.

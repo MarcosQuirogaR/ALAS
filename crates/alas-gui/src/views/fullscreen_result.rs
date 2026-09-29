@@ -32,6 +32,7 @@ pub(super) fn show_fullscreen_result(
 ) {
     let FullscreenFigure {
         scene,
+        revision,
         config,
         theme,
         camera_key,
@@ -137,6 +138,8 @@ pub(super) fn show_fullscreen_result(
                             )
                             .wheel_zoom(true)
                             .show_toolbar(false)
+                            .cache_key(&fullscreen_view)
+                            .cache_revision(revision)
                             .desired_size(available),
                         );
                         restore |= response.double_clicked();

@@ -314,6 +314,9 @@ pub(crate) fn converge(
     let mut structural_feedback = context.structural_feedback;
 
     for pass in 0..max_passes {
+        model.check_cancelled().map_err(|_| CandidateFailure {
+            reason: "cancelled",
+        })?;
         sizing_iterations = pass + 1;
         if pass > 0 {
             evaluate_state_at_tow(
@@ -351,6 +354,11 @@ pub(crate) fn converge(
             max_passes.max(objective.sizing_max_iterations.max(1) as usize),
             tolerance_kg,
         );
+        if matches!(solution.status, DispatchStatus::Cancelled) {
+            return Err(CandidateFailure {
+                reason: "cancelled",
+            });
+        }
         let dispatch_converged = matches!(solution.status, DispatchStatus::Converged);
         if !sizing_iterates {
             outcome = Some((solution, dispatch_converged));

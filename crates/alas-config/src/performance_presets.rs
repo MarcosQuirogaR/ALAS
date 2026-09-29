@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/config/performance_presets.py
-// Reference: alas @ rust-port-baseline.
 
 //! Named high-lift and propulsion technology levels for the field-performance
 //! model.

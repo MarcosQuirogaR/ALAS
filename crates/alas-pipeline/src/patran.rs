@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-// Ported from alas/integration/patran_runner.py.
-// Reference: alas @ rust-port-baseline.
-
 //! Headless Patran deformation-image export after a successful SOL 101 run.
 //!
 //! Patran may exit successfully after an internal session failure, so the

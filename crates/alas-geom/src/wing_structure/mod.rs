@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-// Ported from alas/geometry/wing_structure.py.
-// Reference: alas @ rust-port-baseline.
-
 //! Generic rib/spar wingbox FEM geometry for the main wing.
 //!
 //! Generalizes the reference scripts' one-off wingbox (hardcoded to one
@@ -11,12 +8,24 @@
 //! wing this program's own `DesignVector`/`WingConfig` describe, and to an
 //! arbitrary number of spars at arbitrary chord fractions.
 //!
-//! * Planform (`x_le`) and dihedral (`z_le`) come from the *same*
-//!   root -> break(kink) -> tip piecewise-linear formulas
-//!   `AircraftBuilder._build_main_wing` uses upstream (`dx_break`/`dx_tip`
-//!   are copied verbatim, not reinvented), so the structural wingbox stays
-//!   geometrically consistent with the aerodynamic wing everything else
-//!   analyses.
+//! * Planform (`x_le`) and dihedral (`z_le`) follow the same root -> kink ->
+//!   tip piecewise-linear stations the aerodynamic wing is lofted from. The
+//!   kink span fraction, kink and tip leading-edge x, and inboard/outboard
+//!   sweep are read from [`alas_config::WingConfig::transport_planform`] for
+//!   the supplied [`DesignVector`] (the builder's own station algebra,
+//!   including an explicit `kink_span_fraction`, `outboard_le_sweep_deg` and
+//!   the transport-extension outboard-sweep rule), so the semi-span, chords
+//!   and kink station of the wingbox are those of the evaluated design and
+//!   not of the preset. The optional side-of-body station of that planform is
+//!   not a station of the box: chord is linear from the root to the kink.
+//! * Vertical placement is `WingConfig::{root,break,tip}_z_m`, exactly as the
+//!   aerodynamic builder places its sections: absolute leading-edge z offsets
+//!   in metres about the aircraft datum, *not* a dihedral angle that scales
+//!   with span. Changing the span therefore changes the implied dihedral in
+//!   both the aerodynamic and the structural model alike, and they stay
+//!   consistent with each other; the offsets only shift the box vertically
+//!   and tilt the ribs and spars, they do not enter the bending stiffness
+//!   model, which is planar.
 //! * Airfoil shape at each spanwise station is sampled directly from the
 //!   *actual built* root/tip [`Airfoil`] objects (their own
 //!   `upper_coordinates()`/`lower_coordinates()`) rather than a hardcoded
@@ -27,13 +36,31 @@
 //!   position happens to kink at the break because the planform itself
 //!   does. Generalizing it to every spar is what lets `spar_chord_fractions`
 //!   be an arbitrary-length list instead of a fixed front/rear pair.
+//!   The reference points of that line follow the frozen reference's
+//!   perpendicular rib-cut construction for the default reference planform
+//!   (no kink or side-of-body station configured, which the parity fixtures
+//!   pin). A transport planform places them at the same streamwise chord
+//!   fraction at the root, kink and tip, because the perpendicular cut runs to
+//!   the inboard trailing edge across a trailing-edge kink and drifts the
+//!   rear spar toward the trailing edge, collapsing its web depth.
 //!
 //! Coordinate convention matches native aerodynamic model's airplane frame: X = chordwise
 //! (aft-positive), Y = spanwise (outboard-positive, root = 0), Z = up
-//! (including dihedral). Twist (washout) is **not** applied to the FEM
-//! cross-sections: a documented simplification matching the reference
-//! scripts' own fidelity level (a few degrees of twist has a second-order
-//! effect on spanwise bending stiffness).
+//! (including dihedral); all lengths are metres and angles are radians
+//! internally (degrees only at the configuration boundary).
+//!
+//! Twist is **not** applied to the FEM cross-sections. The aerodynamic wing
+//! carries `root_twist_deg`/`break_twist_deg`/`tip_twist_deg` as jig rotations
+//! of each section about its own leading edge (nose-up positive), which the
+//! box does not reproduce: a rib section here is the untwisted airfoil in the
+//! plane of the leading-edge-normal cut. Rotating the ribs would move the spar
+//! nodes off the rib plane the rib-length and spar-intersection algebra
+//! assumes, so it cannot be added inside this builder without redefining
+//! that geometry. For a few degrees of washout the effect on the box is
+//! second order (depth changes by `1 - cos(twist)`, about 0.14 % at 3 degrees,
+//! and the elastic-axis shift is a torsion, not a bending, quantity), but
+//! the FE model does not carry aerodynamic-twist loads or torsional
+//! coupling.
 //!
 //! Ribs are cut perpendicular to the local leading edge (streamwise at the
 //! root: the root rib is the clamped wall and must be a clean streamwise
@@ -74,7 +101,8 @@ pub use types::{RibStation, WingStructureError};
 pub struct WingStructureGeometry {
     /// Half of `dv.span_m`.
     pub semi_span: f64,
-    /// `wing_cfg.break_span_fraction`, carried as its own field since every
+    /// Kink station as a fraction of the semi-span (from
+    /// `WingConfig::transport_planform`), carried as its own field since every
     /// planform method compares against it.
     pub break_eta: f64,
     /// `break_eta * semi_span`.
@@ -124,6 +152,11 @@ pub struct WingStructureGeometry {
     x_kink_te: f64,
 
     spar_ref_pts: Vec<SparReferenceLine>,
+
+    // Whether the spar reference lines follow a constant streamwise chord
+    // fraction (transport planform) or the frozen reference's perpendicular
+    // rib-cut construction; see [`WingStructureGeometry::new`].
+    streamwise_spar_lines: bool,
 }
 
 impl WingStructureGeometry {
@@ -151,15 +184,35 @@ impl WingStructureGeometry {
             return Err(WingStructureError::NoSpars);
         }
 
-        let semi_span = dv.span_m / 2.0;
-        let break_eta = wing_cfg.break_span_fraction;
-        let y_break = break_eta * semi_span;
+        // The aerodynamic wing is lofted from `WingConfig::transport_planform`
+        // (kink station, outboard sweep with its transport-extension rules),
+        // so the FE box reads the same station algebra instead of
+        // re-deriving it from the break-fraction/decrement fields.
+        let planform = wing_cfg
+            .transport_planform(dv)
+            .map_err(|_| WingStructureError::InvalidPlanform)?;
+        let semi_span = planform.tip.y_m;
+        let break_eta = planform.kink.span_fraction;
+        let y_break = planform.kink.y_m;
 
-        let sweep_in = dv.sweep_deg.to_radians();
-        let sweep_out = (dv.sweep_deg - wing_cfg.outboard_sweep_decrement_deg).to_radians();
+        let sweep_in = planform.inboard_le_sweep_deg.to_radians();
+        let sweep_out = planform.outboard_le_sweep_deg.to_radians();
 
-        let dx_break = y_break * sweep_in.tan();
-        let dx_tip = dx_break + (semi_span - y_break) * sweep_out.tan();
+        let dx_break = planform.kink.leading_edge_x_m;
+        let dx_tip = planform.tip.leading_edge_x_m;
+
+        // The frozen reference places each spar's break and tip reference point
+        // along the leading-edge-normal rib cut at that station. Across a
+        // trailing-edge kink that cut runs to the inboard trailing edge, so the
+        // straight break -> tip spar line drifts aft (to about 0.87 of the rib on
+        // the A320 preset, against 0.70 nominal) and its web collapses to a
+        // third of the nominal depth. A transport planform (explicit kink or
+        // side-of-body station) therefore places the reference points at the
+        // same *streamwise* chord fraction at the root, kink and tip. The
+        // default reference planform (neither station set) keeps the frozen
+        // construction the parity fixtures pin.
+        let streamwise_spar_lines =
+            wing_cfg.kink_span_fraction.is_some() || wing_cfg.side_of_body_span_fraction.is_some();
 
         let c_root = dv.root_chord_m;
         let c_break = dv.break_chord_m;
@@ -228,6 +281,7 @@ impl WingStructureGeometry {
             a_out,
             x_kink_te,
             spar_ref_pts: Vec::new(),
+            streamwise_spar_lines,
         };
         geometry.spar_ref_pts = geometry.compute_spar_reference_points();
         Ok(geometry)

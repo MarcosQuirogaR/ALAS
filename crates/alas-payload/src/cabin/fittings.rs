@@ -3,7 +3,6 @@
 
 // Ported from alas/physics/cabin_layout.py (`build_passenger_layout`, the
 // monument, exit and baggage passes)
-// Reference: alas @ rust-port-baseline.
 
 //! Everything the cabin carries that is not a seat: the galley and lavatory
 //! complexes, the emergency exits, and the checked baggage in the holds below.
@@ -15,5 +14,20 @@
 //! *seating* centre of gravity, which is what airlines do with bags, so the
 //! payload balance stays driven by where the passengers are.
 
-include!("fittings_parts/part_01.rs");
-include!("fittings_parts/part_02.rs");
+use super::seating::Seating;
+use super::{
+    cabin_deck_segments, ceil_div, effective_pair_capacity, min_exit_pairs, monument_fill_order,
+    select_exit_type, spread_bay_indices, stack_y, Bay, ExitSpec, MonumentSide, EXIT_TYPES,
+    MONUMENT_LEN, SEAT_BOX_H,
+};
+use crate::cargo::{CargoLoadManager, CargoMassSemantics};
+use crate::geometry::CabinGeometry;
+use crate::layout::{
+    ContainerMeta, DeckItem, ExitMeta, ItemKind, ItemMeta, OverheadBinMeta, OverheadBinType, LOWER,
+};
+use alas_config::{CargoDeckConfig, CertifiedExitLayout, DesignRequirements, PassengerCabinConfig};
+
+mod monuments;
+pub(super) use monuments::*;
+mod baggage;
+pub(super) use baggage::*;

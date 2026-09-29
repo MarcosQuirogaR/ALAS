@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/reporting/airfoil_sweep_figures.py (`fig_section_shapes`)
-// Reference: alas @ rust-port-baseline.
 
 //! Overlaid section geometries of the top few picks and the current
 //! section: is the ranking reaching for a thin low-Reynolds sliver, or a

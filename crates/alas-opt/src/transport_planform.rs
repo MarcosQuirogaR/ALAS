@@ -7,8 +7,7 @@
 //! the inboard box carries bending load and fuel, and the trailing edge must
 //! retain room for high-lift devices. These metrics are intentionally simple
 //! geometric guards, not substitutes for detailed structures, fuel-system, or
-//! landing-gear design. The physical rationale and source boundary are in
-//! `docs/PHYSICS_SOLVER_FLOW.md`.
+//! landing-gear design.
 
 use alas_config::{
     AlasConfig, ControlSurfacesConfig, DesignVector, MainWingStation, ObjectiveWeights,

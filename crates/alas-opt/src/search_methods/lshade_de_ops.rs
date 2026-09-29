@@ -21,22 +21,50 @@ pub(super) fn min_by_feasibility(left: ScoredPoint, right: ScoredPoint) -> Score
     }
 }
 
-/// The epsilon-level comparison key (Takahama & Sakai): a candidate within
-/// `epsilon` of feasible is ranked by objective alone; otherwise by
-/// violation, objective as the tie-break.
+/// Feasible elites precede all infeasible candidates. Between infeasible
+/// candidates, the epsilon-level comparison (Takahama & Sakai) ranks finite
+/// positive violations inside epsilon by objective, other misses by violation.
 pub(super) fn epsilon_key(point: &ScoredPoint, epsilon: f64) -> (u8, OrderedF64, OrderedF64) {
-    if point.constraint_violation <= epsilon {
+    if !point.cost.is_finite() || !point.constraint_violation.is_finite() {
+        return (3, OrderedF64(f64::INFINITY), OrderedF64(f64::INFINITY));
+    }
+    // A completed feasible design survives every restoration phase. Epsilon
+    // only helps order infeasible candidates; it cannot reward abandoning a
+    // feasible basin for an attractive objective outside the physical limits.
+    if point.valid {
+        return point.feasibility_key();
+    }
+    if point.constraint_violation > 0.0 && point.constraint_violation <= epsilon {
         (
-            0,
+            1,
             OrderedF64(point.cost),
             OrderedF64(point.constraint_violation),
         )
     } else {
         (
-            1,
+            2,
             OrderedF64(point.constraint_violation),
             OrderedF64(point.cost),
         )
+    }
+}
+
+/// SHADE weights successful feasibility restoration by residual reduction,
+/// rather than by an unrelated (often constant) failure cost. This keeps F/CR
+/// adaptation active when the entire initial population is infeasible.
+pub(super) fn selection_improvement(parent: &ScoredPoint, trial: &ScoredPoint) -> f64 {
+    let gain = if parent.valid != trial.valid {
+        1.0
+    } else if !trial.valid && trial.constraint_violation < parent.constraint_violation {
+        (parent.constraint_violation - trial.constraint_violation)
+            / parent.constraint_violation.abs().max(1.0e-12)
+    } else {
+        (parent.cost - trial.cost).abs() / parent.cost.abs().max(1.0e-12)
+    };
+    if gain.is_finite() {
+        gain.max(f64::EPSILON)
+    } else {
+        1.0
     }
 }
 
@@ -245,7 +273,12 @@ pub(super) fn normalized_spread(population: &[Vec<f64>], bounds: &[(f64, f64)]) 
         return 0.0;
     }
     let mut total = 0.0;
+    let mut active = 0usize;
     for (dimension, &(lower, upper)) in bounds.iter().enumerate() {
+        if lower == upper {
+            continue;
+        }
+        active += 1;
         let width = (upper - lower).max(f64::EPSILON);
         let mut min_value = f64::INFINITY;
         let mut max_value = f64::NEG_INFINITY;
@@ -256,7 +289,7 @@ pub(super) fn normalized_spread(population: &[Vec<f64>], bounds: &[(f64, f64)]) 
         }
         total += (max_value - min_value) / width;
     }
-    total / bounds.len() as f64
+    total / active.max(1) as f64
 }
 
 pub(super) fn relative_change(previous: f64, current: f64) -> f64 {
@@ -309,6 +342,43 @@ pub(super) fn latin_hypercube(
         crate::search_methods::clamp_to_bounds(candidate, bounds);
     }
     population
+}
+
+/// Mix a reference-conditioned neighborhood with independent full-envelope
+/// exploration. The 3:1 allocation is a search heuristic, not a geometry
+/// constraint: subsequent mutation can visit every configured bound. Radius
+/// is dimensionless; actual design vectors retain the interface's SI/degree
+/// units, and locked coordinates are left untouched.
+pub(super) fn conditioned_population(
+    bounds: &[(f64, f64)],
+    count: usize,
+    initial: Option<&[f64]>,
+    radius: Option<f64>,
+    rng: &mut RandomState,
+) -> Vec<Vec<f64>> {
+    let Some(initial) = initial.filter(|point| point.len() == bounds.len()) else {
+        return latin_hypercube(bounds, count, rng);
+    };
+    let mut center = initial.to_vec();
+    clamp_into_bounds(&mut center, bounds);
+    let Some(radius) = radius.filter(|value| value.is_finite() && *value >= 0.0) else {
+        let mut points = latin_hypercube(bounds, count, rng);
+        points[0] = center;
+        return points;
+    };
+    let global_count = count.div_ceil(4);
+    let local_bounds: Vec<(f64, f64)> = bounds
+        .iter()
+        .zip(&center)
+        .map(|(&(lower, upper), &value)| {
+            let delta = radius.min(1.0) * (upper - lower);
+            ((value - delta).max(lower), (value + delta).min(upper))
+        })
+        .collect();
+    let mut points = latin_hypercube(&local_bounds, count - global_count, rng);
+    points[0] = center;
+    points.extend(latin_hypercube(bounds, global_count, rng));
+    points
 }
 
 fn shuffle(values: &mut [usize], rng: &mut RandomState) {

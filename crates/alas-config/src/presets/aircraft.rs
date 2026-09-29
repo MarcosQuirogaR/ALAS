@@ -1,0 +1,347 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (C) 2026 Marcos Quiroga Rodriguez
+
+//! [`AircraftPreset`] and the reference data a registered aircraft carries.
+
+use super::speed_schedules::{apply_a320_200_speed_schedule, apply_atr72_600_speed_schedule};
+use super::{
+    CgEnvelopeEvidence, DesignMissionEvidence, PartialDesignMissionEvidence, PlanningCgEnvelope,
+};
+use crate::{
+    DesignRequirements, DesignVector, GeometryConfig, LandingGearConfig, MassModelConfig,
+    PerformanceConfig,
+};
+
+/// Exact certified/configuration identity represented by a real-aircraft preset.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AircraftVariantIdentity {
+    /// Certified aircraft model or versioned notional design.
+    pub model: &'static str,
+    /// Manufacturer weight-variant identifier.
+    pub weight_variant: &'static str,
+    /// Installed engine model, not merely its family.
+    pub engine_model: &'static str,
+    /// Modification state needed to make the weight and geometry data coherent.
+    pub modification_state: &'static str,
+    /// Fuel-tank configuration to which the usable capacity applies.
+    pub tank_configuration: &'static str,
+}
+
+/// One source-defined emergency-exit pair and its CS-25 evacuation rating.
+///
+/// The capacities in the regulation are ratings for the complete pair of
+/// exits.  Keeping that unit in the field name prevents a consumer from
+/// multiplying a pair rating by two when it emits the two physical door
+/// cut-outs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CertifiedExitPair {
+    /// Exit class printed in the source cabin configuration.
+    pub exit_type: &'static str,
+    /// Passengers assigned to this complete exit pair.
+    pub capacity_per_pair: i64,
+}
+
+/// A revision-locked exit arrangement for a registered aircraft variant.
+///
+/// This is source metadata used to keep a product preset's cabin topology
+/// separate from the generic diameter heuristic.  It is not a declaration
+/// that the layout engine has demonstrated the aircraft's certified
+/// evacuation performance.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CertifiedExitLayout {
+    /// Human-readable pair sequence, for example `C-III-C`.
+    pub label: &'static str,
+    /// Exit pairs in source order, including each pair's rating.
+    pub pairs: &'static [CertifiedExitPair],
+    /// Exact source, revision and location for the arrangement.
+    pub source: &'static str,
+}
+
+/// Primary-source values against which one preset is validated.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct AircraftReferenceData {
+    /// Maximum ramp weight.
+    pub mrw_kg: Option<f64>,
+    /// Maximum takeoff weight.
+    pub mtow_kg: Option<f64>,
+    /// Maximum landing weight.
+    pub mlw_kg: Option<f64>,
+    /// Maximum zero-fuel weight.
+    pub mzfw_kg: Option<f64>,
+    /// Same-aircraft OEW for conditional comparison, from [`crate::oew_reference`].
+    pub oew_kg: Option<f64>,
+    /// Usable fuel volume before applying the declared density.
+    pub usable_fuel_volume_l: Option<f64>,
+    /// Published usable fuel mass for the declared density.
+    pub usable_fuel_mass_kg: Option<f64>,
+    /// Density used by the source's volume-to-mass conversion.
+    pub fuel_density_kg_l: Option<f64>,
+    /// Manufacturer/reference-plane wing area.
+    pub reference_wing_area_m2: Option<f64>,
+    /// Manufacturer planning cabin, not a certification limit.
+    pub planning_seats: Option<i64>,
+    /// Certified evacuation maximum for the applicable exit arrangement.
+    pub certified_max_seats: Option<i64>,
+    /// Source-defined exit-pair arrangement for the registered variant.
+    pub certified_exit_layout: Option<CertifiedExitLayout>,
+    /// Whether a complete design-mission definition has source provenance.
+    pub design_mission_evidence: DesignMissionEvidence,
+    /// Relevant public range/mission material that is not a complete mission.
+    pub partial_design_mission_evidence: Vec<PartialDesignMissionEvidence>,
+    /// What kind of CG evidence is publicly available.
+    pub cg_evidence: CgEnvelopeEvidence,
+    /// Published planning curve, when the source provides one.
+    ///
+    /// This is deliberately absent for presets whose type-certificate source
+    /// delegates the limits to the AFM/WBM.
+    pub planning_cg_envelope: Option<PlanningCgEnvelope>,
+    /// Revision-locked primary documents supporting this record.
+    pub sources: Vec<&'static str>,
+}
+
+/// An aircraft preset that was asked for and is not registered.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("unknown preset '{name}'; available: {}", available.join(", "))]
+pub struct UnknownAircraftPreset {
+    /// What was asked for.
+    pub name: String,
+    /// What there is, sorted.
+    pub available: Vec<String>,
+}
+
+/// One complete aircraft configuration.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AircraftPreset {
+    /// The key the configuration selects it by.
+    pub name: &'static str,
+    /// What the interface calls it.
+    pub display_name: &'static str,
+    /// What kind of aircraft it is, in one sentence.
+    pub description: &'static str,
+    /// Exact model, weight variant, engine and modification identity.
+    pub identity: AircraftVariantIdentity,
+    /// Revision-locked primary-source validation values.
+    pub reference: AircraftReferenceData,
+    /// Its position in the design space the optimizer searches.
+    pub design_vector: DesignVector,
+    /// Everything about its shape the design vector does not own.
+    pub geometry: GeometryConfig,
+    /// The mission it is sized for.
+    pub requirements: DesignRequirements,
+    /// Which engine it is fitted with.
+    pub engine_name: &'static str,
+    /// How many of them.
+    pub n_engines: usize,
+    /// Existing-aircraft landing-gear topology and track.
+    pub landing_gear: LandingGearConfig,
+    /// Legacy comparison inputs calibrated for this type, where the global
+    /// compatibility model misses.
+    ///
+    /// These Torenbeek/fraction values are retained for the explicit
+    /// reference-compatible comparison path. Pure production runs use the
+    /// preset's source-backed FLOPS transport and structure inputs instead.
+    /// `None` means the global compatibility values already land close enough.
+    pub mass_model: Option<MassModelConfig>,
+    /// Field-performance assumptions calibrated for this type.
+    ///
+    /// The high-lift system is what decides the takeoff and landing speeds,
+    /// and the vortex-lattice analysis cannot see one. A widebody scored with
+    /// a regional jet's flaps comes out ten to twenty knots fast on every
+    /// V-speed. `None` means the global default fits.
+    pub performance: Option<PerformanceConfig>,
+}
+
+/// Representative operating defaults used when an aircraft is selected.
+///
+/// These are high-demand or historically representative city pairs, not
+/// source-backed aircraft design missions.  Keeping them outside
+/// [`AircraftReferenceData`] prevents an interactive example from being
+/// mistaken for payload/range validation evidence.
+#[derive(Debug, Clone, PartialEq)]
+pub struct OperationalMissionDefaults {
+    /// Departure airport display name, resolvable through the airport registry.
+    pub departure_airport: &'static str,
+    /// Arrival airport display name, resolvable through the airport registry.
+    pub arrival_airport: &'static str,
+    /// Route-appropriate requested final cruise altitude, in metres MSL.
+    pub cruise_altitude_m: f64,
+    /// Route-appropriate cruise Mach command.
+    pub cruise_mach: f64,
+    /// Representative gross route payload when the route requires a payload/fuel trade.
+    pub route_payload_kg: Option<f64>,
+    /// Aircraft-appropriate mission schedule for the representative route.
+    pub profile: crate::MissionProfileConfig,
+    /// Why this city pair is representative and where that claim came from.
+    pub provenance: &'static str,
+}
+
+impl AircraftPreset {
+    /// Cabin seed used for the registered aircraft's generic planning load
+    /// case.
+    ///
+    /// The registry does not claim an operator-specific LOPA: the real
+    /// aircraft may be delivered with several cabin mixes, and the AFM/WBM
+    /// remains the authority for an actual dispatch load sheet. These seeds
+    /// only make the published passenger target representable by the common
+    /// geometry engine. A single-class economy seed is deliberately used for
+    /// the narrowbody, regional, and A340 targets because the generic
+    /// widebody lie-flat business block is not a valid default for those
+    /// bodies. Users can still edit the target shares while the cabin preset
+    /// is `Custom`.
+    pub fn planning_cabin_config(&self) -> crate::CabinConfig {
+        let mut cabin = crate::CabinConfig::default();
+        // One declaration of the hold architecture, read here and by the FLOPS
+        // container tare alike. Writing the two out separately lets them
+        // disagree: only the A220-300 carried the bulk cabin declaration,
+        // while `declared_cargo_loading` also declares the ATR 72-600 and the
+        // A320-200 bulk. The ATR 72-600 has no lower hold at all (ATR 72-600
+        // factsheet p. 22) and was still being offered LD3 positions in one.
+        if crate::preset_flops::declared_cargo_loading(self.name) == crate::CargoHoldLoading::Bulk {
+            cabin.cargo.lower_deck_uld = "BLK".to_owned();
+        }
+        match self.name {
+            "A220-300" | "A320-200" | "A340-300" | "ATR72-600" => {
+                cabin.passenger.set_length_share_mix(&[("Economy", 1.0)]);
+            }
+            _ => {}
+        }
+        if self.name == "A320-200" {
+            // Airbus A320 ACAP Figure 2-4-1: 28/29 in pitch for the 180-seat
+            // single-class arrangement; the 28 in lower bound is used.
+            cabin.passenger.economy.pitch_m = 0.7112;
+        }
+        if self.name == "ATR72-600" {
+            // The official ATR 72-600 72-seat layout uses two Type-III exit
+            // pairs. The generic spacing proxy otherwise floors the 19.166 m
+            // passenger stretch to one pair (70 seats). 9.5 m is the smallest
+            // transparent spacing that represents two pairs in this
+            // preliminary geometry model; it is not a certification value.
+            cabin.passenger.min_exit_pair_spacing_m = 9.5;
+        }
+        cabin
+    }
+
+    /// Where each engine hangs along the span, in metres from the centerline.
+    pub fn engine_spanwise_positions(&self) -> &[f64] {
+        &self.geometry.engine.spanwise_positions_m
+    }
+
+    /// Representative route and speed schedule loaded by interactive clients.
+    pub fn operational_mission_defaults(&self) -> OperationalMissionDefaults {
+        let (departure_airport, arrival_airport, cruise_altitude_m, cruise_mach, provenance) = match self.name {
+            "A220-300" => (
+                "Riga (EVRA)",
+                "Stockholm Arlanda (ESSA)",
+                25_000.0 * 0.3048,
+                0.74,
+                "airBaltic 30-year route history: Stockholm is one of its most popular Riga routes; airBaltic operates an all-A220-300 fleet (accessed 2026-08-29)",
+            ),
+            "ATR72-600" => (
+                "Madrid Barajas (LEMD)",
+                "Palma de Mallorca (LEPA)",
+                // FL200, not the prior FL170: at FL170 the PW127M/568F deck
+                // sits at 99% rated power at this design Mach, above the
+                // factsheet's max-cruise fuel flow; FL200's thinner air
+                // lowers the required power. Internal ATR study, 2026-09-07.
+                20_000.0 * 0.3048,
+                // Internal-consistency correction: `requirements.cruise_mach`
+                // (design/sizing) is 0.44; the operational default used an
+                // unexplained 0.40. 0.44 removes that mismatch (close to the
+                // factsheet's 275 KTAS, but not itself validation evidence).
+                0.44,
+                "Representative European regional-sector default; operational example only, not an ATR design-mission claim",
+            ),
+            "A320-200" => (
+                "Madrid Barajas (LEMD)",
+                "Palma de Mallorca (LEPA)",
+                28_000.0 * 0.3048,
+                0.74,
+                "Aena 2025 traffic reporting identifies Madrid among Palma's principal connections; representative A320-family short-haul pairing (accessed 2026-08-29)",
+            ),
+            "A340-300" => (
+                "Frankfurt (EDDF)",
+                "Boston Logan (KBOS)",
+                39_000.0 * 0.3048,
+                0.82,
+                "Lufthansa 2026 timetable publishes ten weekly Frankfurt-Boston flights and 5,889 km route distance; representative remaining A340-300 operation (accessed 2026-08-29)",
+            ),
+            "A380-800" => (
+                "Dubai (OMDB)",
+                "London Heathrow (EGLL)",
+                39_000.0 * 0.3048,
+                0.83,
+                "Emirates identifies Dubai-London Heathrow as a high-frequency A380 market (accessed 2026-08-29)",
+            ),
+            "B787-9" => (
+                "Tokyo Haneda (RJTT)",
+                "Sydney (YSSY)",
+                41_000.0 * 0.3048,
+                0.85,
+                "ANA lists Sydney among the principal Haneda routes for its Boeing 787-9 (accessed 2026-08-29)",
+            ),
+            "DC-10" => (
+                "Osaka Kansai (RJBB)",
+                "Honolulu (PHNL)",
+                37_000.0 * 0.3048,
+                0.82,
+                "Northwest Airlines 1996-10-27 timetable explicitly assigns DC-10 equipment to Osaka-Honolulu; historical because scheduled passenger DC-10 service has ended",
+            ),
+            // AVE is a synthetic reference aircraft and has no real demand history.
+            _ => (
+                "London Heathrow (EGLL)",
+                "Dubai (OMDB)",
+                39_000.0 * 0.3048,
+                0.84,
+                "Synthetic AVE reference route; no real-world subtype demand claim",
+            ),
+        };
+
+        let mut profile = crate::MissionProfileConfig::default();
+        let atmosphere = alas_atmo::Atmosphere::new(cruise_altitude_m);
+        let cruise_tas_m_s = cruise_mach * atmosphere.speed_of_sound();
+        profile.cruise_1_air_speed_m_s = cruise_tas_m_s;
+        profile.cruise_2_air_speed_m_s = cruise_tas_m_s;
+        profile.cruise_3_air_speed_m_s = cruise_tas_m_s;
+
+        if self.name == "A320-200" {
+            apply_a320_200_speed_schedule(
+                &mut profile,
+                cruise_altitude_m,
+                self.requirements.mtow_kg,
+                self.reference
+                    .reference_wing_area_m2
+                    .unwrap_or(self.requirements.max_wing_area_m2),
+                self.performance.as_ref().map_or_else(
+                    || crate::PerformanceConfig::default().cl_max_to,
+                    |p| p.cl_max_to,
+                ),
+            );
+        }
+        if self.name == "ATR72-600" {
+            apply_atr72_600_speed_schedule(
+                &mut profile,
+                self.requirements.mtow_kg,
+                self.reference
+                    .reference_wing_area_m2
+                    .unwrap_or(self.requirements.max_wing_area_m2),
+                self.performance.as_ref().map_or_else(
+                    || crate::PerformanceConfig::default().cl_max_to,
+                    |p| p.cl_max_to,
+                ),
+            );
+        }
+
+        OperationalMissionDefaults {
+            departure_airport,
+            arrival_airport,
+            cruise_altitude_m,
+            cruise_mach,
+            // 250 occupied seats at a transparent preliminary 100 kg per
+            // passenger including baggage. This is a representative dispatch
+            // load, not a claim about the historical flight's actual load sheet.
+            route_payload_kg: (self.name == "DC-10").then_some(25_000.0),
+            profile,
+            provenance,
+        }
+    }
+}

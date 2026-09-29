@@ -84,6 +84,9 @@ impl WingStructureGeometry {
     /// center spar) gets no tip point at all; it physically ends at the
     /// break/kink station, so there's no break -> tip segment to define.
     pub(super) fn compute_spar_reference_points(&self) -> Vec<SparReferenceLine> {
+        if self.streamwise_spar_lines {
+            return self.streamwise_spar_reference_points();
+        }
         let x_le_root = 0.0;
         let aft_root = self.rib_vector(0.0);
         let (l_root, _) = self.get_rib_lengths(0.0, x_le_root, aft_root.0, aft_root.1);
@@ -117,6 +120,22 @@ impl WingStructureGeometry {
                     break_pt,
                     tip,
                 }
+            })
+            .collect()
+    }
+
+    /// Spar reference lines at a constant streamwise chord fraction: root,
+    /// kink and tip points at `x_le + frac * chord`, in the same frame as the
+    /// rib-cut construction. Partial-span spars carry no tip point.
+    fn streamwise_spar_reference_points(&self) -> Vec<SparReferenceLine> {
+        let point = |x_le: f64, y: f64, chord: f64, frac: f64| (x_le + frac * chord, y);
+        self.spar_fracs
+            .iter()
+            .zip(&self.spar_full_span)
+            .map(|(&frac, &full_span)| SparReferenceLine {
+                root: point(0.0, 0.0, self.c_root, frac),
+                break_pt: point(self.dx_break, self.y_break, self.c_break, frac),
+                tip: full_span.then(|| point(self.dx_tip, self.semi_span, self.c_tip, frac)),
             })
             .collect()
     }

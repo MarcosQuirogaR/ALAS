@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/config/settings.py (`_overlay_dataclass`).
-// Reference: alas @ rust-port-baseline.
 
 //! Laying a partial set of values over a complete one.
 //!

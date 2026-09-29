@@ -11,7 +11,7 @@
 //! ignored, an engine as a solid cylinder, a fuel tank as a rectangular
 //! prism, and anything without extent as a point. The same solids appear in
 //! NASA TM-78681's rigid-structure program and in RCAIDE's moment-of-inertia
-//! modules, and Raymer's radii-of-gyration table is retained as the
+//! modules, and Raymer's radii-of-gyration table is the
 //! aircraft-level check the ledger result is compared with.
 //!
 //! Every function returns a tensor about the solid's own centroid in axes
@@ -75,13 +75,6 @@ pub fn rectangular_prism(
     )
 }
 
-/// A uniform rod along y, which stands in for a slender item such as a
-/// landing-gear axle or a distributed system run across the span.
-pub fn thin_rod_y(mass_kg: f64, length_m: f64) -> InertiaTensor {
-    let transverse = mass_kg * length_m * length_m / 12.0;
-    InertiaTensor::diagonal(transverse, 0.0, transverse)
-}
-
 /// Non-dimensional radii of gyration of a whole aircraft.
 ///
 /// Raymer (*Aircraft Design: A Conceptual Approach*, table 16.1, after
@@ -94,11 +87,11 @@ pub fn thin_rod_y(mass_kg: f64, length_m: f64) -> InertiaTensor {
 /// I_zz = m (R_z e / 2)^2,   e = (b + L) / 2
 /// ```
 ///
-/// The frozen `alas-stab` estimate applies the same fractions to the full
-/// span and full length, which is 2.6 to 4.6 times the measured B747-100
-/// tensor (NASA CR-2144) and is retained there only for parity; here the
-/// published definition is used. The radii are a cross-check on the ledger
-/// result and a fallback when no ledger exists, never a replacement for it.
+/// Applying the same fractions to the full span and full length overstates
+/// the measured B747-100 tensor (NASA CR-2144) by a factor of 2.6 to 4.6, so
+/// the published half-dimension definition is used here. The radii are a
+/// cross-check on the ledger result and a fallback when no ledger exists,
+/// never a replacement for it.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RadiiOfGyration {
     /// Roll radius as a fraction of the half-span.
@@ -117,23 +110,6 @@ impl RadiiOfGyration {
         yaw_length_fraction: 0.39,
     };
 
-    /// Raymer's twin-turboprop row.
-    pub const TWIN_TURBOPROP: Self = Self {
-        roll_span_fraction: 0.22,
-        pitch_length_fraction: 0.34,
-        yaw_length_fraction: 0.38,
-    };
-
-    /// The measured B747-100 (NASA CR-2144, Heffley and Jewell 1972) reduced
-    /// to the same definition: `I_xx 2.468e7`, `I_yy 4.488e7`,
-    /// `I_zz 6.738e7` kg m^2 at 288,760 kg, 59.64 m span and 70.66 m length.
-    /// A validation anchor for a large four-engine transport.
-    pub const B747_100_MEASURED: Self = Self {
-        roll_span_fraction: 0.310,
-        pitch_length_fraction: 0.353,
-        yaw_length_fraction: 0.469,
-    };
-
     /// The dimensional radii `[r_x, r_y, r_z]` in metres for the given span
     /// and fuselage length.
     pub fn radii_m(&self, span_m: f64, fuselage_length_m: f64) -> [f64; 3] {
@@ -143,13 +119,6 @@ impl RadiiOfGyration {
             self.pitch_length_fraction * 0.5 * fuselage_length_m,
             self.yaw_length_fraction * 0.5 * e,
         ]
-    }
-
-    /// The diagonal tensor the fractions imply for `mass_kg` at the given
-    /// span and fuselage length.
-    pub fn tensor(&self, mass_kg: f64, span_m: f64, fuselage_length_m: f64) -> InertiaTensor {
-        let [rx, ry, rz] = self.radii_m(span_m, fuselage_length_m);
-        InertiaTensor::diagonal(mass_kg * rx * rx, mass_kg * ry * ry, mass_kg * rz * rz)
     }
 }
 
@@ -183,13 +152,10 @@ mod tests {
     }
 
     #[test]
-    fn a_long_cylinder_approaches_a_rod_transversely() {
+    fn a_long_cylinder_has_no_moment_about_its_own_axis() {
         let long = solid_cylinder_x(12.0, 0.0, 6.0);
         assert!(close(long.iyy, 36.0));
         assert!(close(long.ixx, 0.0));
-        let rod = thin_rod_y(12.0, 6.0);
-        assert!(close(rod.ixx, 36.0));
-        assert!(close(rod.iyy, 0.0));
     }
 
     #[test]
@@ -202,21 +168,9 @@ mod tests {
 
     #[test]
     fn the_radii_use_raymers_half_dimension_definition() {
-        let tensor = RadiiOfGyration::JET_TRANSPORT.tensor(1000.0, 10.0, 20.0);
-        assert!(close(tensor.ixx, 1000.0 * (0.25_f64 * 5.0).powi(2)));
-        assert!(close(tensor.iyy, 1000.0 * (0.38_f64 * 10.0).powi(2)));
-        assert!(close(tensor.izz, 1000.0 * (0.39_f64 * 7.5).powi(2)));
-    }
-
-    #[test]
-    fn the_b747_anchor_reproduces_the_measured_tensor() {
-        // NASA CR-2144 values in kg m^2, at the mass and dimensions the
-        // anchor row was reduced from; a 1 percent band covers the rounding
-        // of the published slug-ft^2 figures.
-        let tensor = RadiiOfGyration::B747_100_MEASURED.tensor(288_760.0, 59.64, 70.66);
-        let within = |value: f64, expected: f64| (value / expected - 1.0).abs() < 0.01;
-        assert!(within(tensor.ixx, 2.468e7), "ixx {}", tensor.ixx);
-        assert!(within(tensor.iyy, 4.488e7), "iyy {}", tensor.iyy);
-        assert!(within(tensor.izz, 6.738e7), "izz {}", tensor.izz);
+        let [rx, ry, rz] = RadiiOfGyration::JET_TRANSPORT.radii_m(10.0, 20.0);
+        assert!(close(rx, 0.25 * 5.0));
+        assert!(close(ry, 0.38 * 10.0));
+        assert!(close(rz, 0.39 * 7.5));
     }
 }

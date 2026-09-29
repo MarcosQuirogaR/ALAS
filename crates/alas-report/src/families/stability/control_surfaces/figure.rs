@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/reporting/visualization.py:figure_control_surfaces (L1735-1991)
-// Reference: alas @ rust-port-baseline.
 
 use super::geometry::{
     cs_surface_area, cs_surface_patch, draw_planform_fill, draw_top_patch, fmt_volume_coef,

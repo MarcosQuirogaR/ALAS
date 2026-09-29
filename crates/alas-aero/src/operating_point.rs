@@ -3,7 +3,6 @@
 
 // Ported from native aerodynamic model/performance/operating_point.py
 // Upstream: native aerodynamic model 4.2.8, MIT.
-// Reference: alas @ rust-port-baseline.
 
 //! native aerodynamic model's `OperatingPoint`, scoped to the surface this program's
 //! Python package and native aerodynamic model's own `VortexLatticeMethod` actually reach.

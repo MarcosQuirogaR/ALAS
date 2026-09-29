@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/physics/cargo_loader.py (`CargoLoadManager`)
-// Reference: alas @ rust-port-baseline.
 
 //! Where the containers can stand in this fuselage, and how the load is spread
 //! across them to trim the aircraft.
@@ -118,7 +117,8 @@ pub struct CargoLoadManager<'g> {
     pub lower_uld: &'static UldType,
 }
 
-include!("manager_parts/impl.rs");
+mod correction;
+mod slots;
 
 #[cfg(test)]
 // Failed expectations and unwraps here are failed test assertions.

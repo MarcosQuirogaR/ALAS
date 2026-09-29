@@ -3,7 +3,7 @@
 
 //! The lumped mass coordinates the product analysis balances on.
 //!
-//! The reference implementation places every group at a fraction of a
+//! The frozen reference placement puts every group at a fraction of a
 //! length that was chosen for one aircraft. The product analysis places
 //! them at the stations the built geometry gives: the integrated wingbox
 //! centroid, the tails on their own mean chords, the gear at its nose and
@@ -87,10 +87,10 @@ impl StationPlacementFailure {
 impl FullAnalysis {
     /// Replace the frozen group points with geometry-derived stations and
     /// recompute the centre of gravity, unless this analysis replays the
-    /// reference implementation or the configuration keeps the frozen
+    /// frozen reference placement or the configuration keeps the frozen
     /// placement.
     ///
-    /// The payload point is kept from `legacy`, where the detailed layout has
+    /// The payload point is kept from `lumped_coordinates`, where the detailed layout has
     /// already placed it. The fuel point is the centroid of the analyzed
     /// fuel in its tanks; when no tank can be resolved on this geometry the
     /// frozen wing point stands, because a missing tank arrangement is a
@@ -100,13 +100,13 @@ impl FullAnalysis {
         design: &DesignVector,
         plane: &Airplane,
         masses: &MassBreakdown,
-        legacy: MassCoordinates,
+        lumped_coordinates: MassCoordinates,
     ) -> Result<(MassCoordinates, [f64; 3]), String> {
         if self.reference_compatibility {
-            let cg = calculate_physical_cg(masses, &legacy);
-            return Ok((legacy, cg));
+            let cg = calculate_physical_cg(masses, &lumped_coordinates);
+            return Ok((lumped_coordinates, cg));
         }
-        station_coordinates_for(&self.config, design, plane, masses, legacy)
+        station_coordinates_for(&self.config, design, plane, masses, lumped_coordinates)
     }
 }
 
@@ -130,9 +130,9 @@ pub(crate) fn station_coordinates_for(
     design: &DesignVector,
     plane: &Airplane,
     masses: &MassBreakdown,
-    legacy: MassCoordinates,
+    lumped_coordinates: MassCoordinates,
 ) -> Result<(MassCoordinates, [f64; 3]), String> {
-    product_mass_coordinates(config, design, plane, masses, legacy).map_err(|message| {
+    product_mass_coordinates(config, design, plane, masses, lumped_coordinates).map_err(|message| {
         format!(
             "{}: {message}",
             StationPlacementFailure::classify(config, plane).as_str()
@@ -193,8 +193,8 @@ mod tests {
             StationPlacementFailure::MainGearStationNotMeasured
         );
 
-        let (masses, legacy) = lumped(&config, &plane);
-        let error = station_coordinates_for(&config, &design, &plane, &masses, legacy)
+        let (masses, lumped_coordinates) = lumped(&config, &plane);
+        let error = station_coordinates_for(&config, &design, &plane, &masses, lumped_coordinates)
             .expect_err("an ATR-like layout has no main-gear station to place");
         assert!(
             error.starts_with(StationPlacementFailure::MainGearStationNotMeasured.as_str()),
@@ -221,9 +221,10 @@ mod tests {
                 StationPlacementFailure::MassCoordinates,
                 "{name} has a main-gear station, so nothing is refused"
             );
-            let (masses, legacy) = lumped(&config, &plane);
+            let (masses, lumped_coordinates) = lumped(&config, &plane);
             assert!(
-                station_coordinates_for(&config, &design, &plane, &masses, legacy).is_ok(),
+                station_coordinates_for(&config, &design, &plane, &masses, lumped_coordinates)
+                    .is_ok(),
                 "{name} must still place its product stations"
             );
         }

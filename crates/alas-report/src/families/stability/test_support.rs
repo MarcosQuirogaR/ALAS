@@ -144,6 +144,7 @@ pub fn probe_report(airplane: Airplane) -> AnalysisReport {
             cm_residual: 0.0,
         }),
         cg_envelope_ok: None,
+        neutral_point_conditions: None,
         airplane,
     }
 }

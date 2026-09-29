@@ -64,14 +64,19 @@ struct Fixture {
 #[test]
 fn parity_objective() {
     let fixture: Fixture = alas_testkit::load("opt", "objective");
-    // The fixture was generated with the historical three-station wing.
+    // The fixture was generated with the three-station reference wing.
     // Obtain its configuration through the compatibility constructor so the
     // standalone fuel-volume and CG checks use the same geometry as the
     // objective replay below.
-    let mut historical_config = AlasConfig::default();
-    // The frozen Python objective fixture used g = 9.81 m/s^2.
-    historical_config.requirements.gravity_m_s2 = 9.81;
-    let config = DesignObjective::new_reference_compatibility(historical_config).config;
+    let mut reference_config = AlasConfig::default();
+    // The reference objective fixture used g = 9.81 m/s^2.
+    reference_config.requirements.gravity_m_s2 = 9.81;
+    // The fixture was generated with the reference 2 % minimum nose-gear
+    // load; the product default is 6 % (Raymer/Torenbeek steering guidance),
+    // so the reference run pins the reference value explicitly (same precedent as
+    // `alas-pipeline/tests/parity_full_analysis.rs`).
+    reference_config.mass_model.pct_load_nlg_min = 0.02;
+    let config = DesignObjective::new_reference_compatibility(reference_config).config;
     let dv_default = DesignVector::default();
     let builder = AircraftBuilder::new_reference_compatibility(Some(config.geometry.clone()));
     let plane = builder
@@ -179,7 +184,7 @@ fn parity_objective() {
 }
 
 #[test]
-fn seeded_python_winner_keeps_the_reference_objective_value() {
+fn seeded_reference_winner_keeps_the_reference_objective_value() {
     let vector = [
         77.26310883297792,
         16.033742604077958,
@@ -198,9 +203,12 @@ fn seeded_python_winner_keeps_the_reference_objective_value() {
         -0.000594121555662916,
         0.00010574272521884703,
     ];
-    let mut historical_config = AlasConfig::default();
-    historical_config.requirements.gravity_m_s2 = 9.81;
-    let mut objective = DesignObjective::new_reference_compatibility(historical_config);
+    let mut reference_config = AlasConfig::default();
+    reference_config.requirements.gravity_m_s2 = 9.81;
+    // Pin the reference 2 % minimum nose-gear load basis, same as
+    // `parity_objective` above (product default is 6 %).
+    reference_config.mass_model.pct_load_nlg_min = 0.02;
+    let mut objective = DesignObjective::new_reference_compatibility(reference_config);
     let cost = objective.evaluate(&vector);
     let last = objective.history.cost.len() - 1;
 

@@ -3,7 +3,6 @@
 
 // Ported from NumPy 2.5.1 `numpy.random.bit_generator` and `pcg64`.
 // Upstream: NumPy 2.5.1, BSD-3-Clause and MIT.
-// Reference: alas @ rust-port-baseline.
 
 //! The two NumPy random streams used by the reference optimizer.
 //!

@@ -1,98 +1,152 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! The first-start external-tool disclosure screen.
+//! The detached External Tools manager and first-start disclosure.
 //!
 //! Shown once per installation, gated on `EXTERNAL_TOOLS_INTRO_MARKER_FILE`
 //! independently of the general onboarding walkthrough's own marker: a user
 //! who skips or dismisses the walkthrough must still see, once, what
 //! external tools ALAS can use, their official source and licence, and
-//! whether ALAS can fetch any of them automatically before they reach
-//! Setup > External Tools on their own. Reopen it any time from
-//! Help > External Tools Overview.
+//! whether ALAS can fetch any of them automatically. Reopen the manager at
+//! any time from the application menu, including while the Sandbox is active.
 //!
-//! Every factual claim here is sourced from `THIRD-PARTY-NOTICES.md` and
-//! `docs/downloads.md`, not restated from memory or invented for this
-//! screen: this module must never assert a licence, source, or
-//! redistribution right beyond what those files already record. Where a
-//! licence has not yet been recorded there (OpenFOAM, Gmsh, ParaView), this
-//! screen says so plainly instead of guessing.
+//! Source and licence claims follow `THIRD-PARTY-NOTICES.md`,
+//! `docs/downloads.md`, and linked official publisher pages.
 //!
-//! The only two acquisition actions here reuse existing background/atomic/
-//! cancellable mechanisms ([`crate::state::AppState::start_navdata_download`]
-//! and [`crate::state::AppState::start_openvsp_runtime_setup`]) rather than
-//! opening a third download path. Every other tool is disclosed with a
-//! "Configure..." button that only navigates to Setup > External Tools.
+//! Automatic acquisitions reuse the existing background/atomic/cancellable
+//! mechanisms. Other tools have a publisher link and an in-window configuration
+//! card. No purchase or third-party installer runs inside ALAS.
 
-use egui::{Color32, Context, Frame, RichText, ScrollArea, Stroke, Ui, Window};
+use egui::{Context, RichText, ScrollArea, Ui, ViewportBuilder, ViewportCommand};
 
-use crate::state::AppState;
+use crate::native_viewport::{show_native_viewport, viewport_id};
+use crate::state::{AppState, LogKind};
+use crate::views::external_tool_catalog::{ExternalToolConfig, USER_SUPPLIED_TOOLS};
 use crate::views::{tr, tr_fields};
 
-const TOOL_INTRO_ORDER: egui::Order = egui::Order::Foreground;
+const TOOL_MANAGER_VIEWPORT: &str = "external_tools_manager";
 
-/// Render the first-start external-tool disclosure screen, if it is open.
+/// Open or raise the native manager from either desktop workspace.
+pub fn open_tool_manager(state: &mut AppState, ctx: &Context) {
+    if state.show_tool_intro {
+        ctx.send_viewport_cmd_to(viewport_id(TOOL_MANAGER_VIEWPORT), ViewportCommand::Focus);
+    } else {
+        state.tool_intro_selected_config = None;
+    }
+    state.show_tool_intro = true;
+}
+
+/// Top-bar entry point shared by the guided workspace and Sandbox.
+pub fn show_menu_action(state: &mut AppState, ui: &mut Ui) {
+    if ui.button(tr("External Tools")).clicked() {
+        open_tool_manager(state, ui.ctx());
+    }
+}
+
+/// Render the manager as its own OS window, if it is open.
 pub fn show_tool_intro(state: &mut AppState, ctx: &Context) {
     if !state.show_tool_intro {
         return;
     }
-    if ctx.input(|input| input.key_pressed(egui::Key::Escape)) {
-        state.show_tool_intro = false;
-        return;
-    }
-
-    let screen = ctx.screen_rect();
-    egui::Area::new("tool_intro_scrim".into())
-        .fixed_pos(screen.min)
-        .order(TOOL_INTRO_ORDER)
-        // Paint-only: an interactable scrim in the same foreground order as
-        // the window below it can swallow the window's own clicks on some
-        // egui backends (the walkthrough scrim uses the same precaution).
-        .interactable(false)
-        .show(ctx, |ui| {
-            ui.set_min_size(screen.size());
-            ui.painter()
-                .rect_filled(screen, 0.0, Color32::from_black_alpha(160));
-        });
-
-    let mut open = true;
-    Window::new(tr("External tools ALAS can use"))
-        .order(TOOL_INTRO_ORDER)
-        .open(&mut open)
-        .collapsible(false)
-        .resizable(true)
-        .default_size(egui::vec2(720.0, 560.0))
-        .frame(
-            Frame::window(&ctx.style())
-                .stroke(Stroke::new(2.0_f32, Color32::from_rgb(50, 180, 255)))
-                .rounding(10.0),
-        )
-        .show(ctx, |ui| {
-            ui.label(tr(
-                "ALAS drives several independently licensed external programs through a process boundary. This is a one-time overview of what each one is, its official source and licence, and whether ALAS can fetch it for you. Reopen it any time from Help > External Tools Overview.",
-            ));
-            ui.add_space(10.0);
-            ScrollArea::vertical()
-                .id_salt("tool_intro_scroll")
-                .show(ui, |ui| {
-                    ready_now_section(ui);
-                    ui.add_space(10.0);
-                    ui.separator();
-                    ui.add_space(10.0);
-                    optional_download_section(state, ui);
-                    ui.add_space(10.0);
-                    ui.separator();
-                    ui.add_space(10.0);
-                    user_supplied_section(state, ui);
-                });
-            ui.add_space(10.0);
-            if ui.button(tr("Close")).clicked() {
-                state.show_tool_intro = false;
+    // A file picker may finish after the user returns to the overview.
+    crate::views::tools_view::apply_completed_path_selection(state);
+    let mut close = false;
+    let response = show_native_viewport(
+        ctx,
+        TOOL_MANAGER_VIEWPORT,
+        tr("External Tools"),
+        ViewportBuilder::default()
+            .with_title(tr("External Tools"))
+            .with_inner_size(egui::vec2(900.0, 680.0))
+            .with_min_inner_size(egui::vec2(620.0, 420.0))
+            .with_resizable(true),
+        |child_ctx, ui, _class| {
+            if child_ctx.input(|input| input.key_pressed(egui::Key::Escape)) {
+                close = true;
             }
-        });
-    if !open {
+            ui.horizontal(|ui| {
+                if let Some(config) = state.tool_intro_selected_config {
+                    if ui.button(tr("All tools")).clicked() {
+                        state.tool_intro_selected_config = None;
+                    }
+                    if config == ExternalToolConfig::All {
+                        ui.heading(tr("All settings"));
+                    } else if let Some(tool) =
+                        USER_SUPPLIED_TOOLS.iter().find(|tool| tool.config == config)
+                    {
+                        ui.heading(tr(tool.name));
+                    }
+                } else {
+                    ui.heading(tr("External tools ALAS can use"))
+                        .on_hover_text(tr("Manage the external programs ALAS can use, their official acquisition pages, and your local configuration."));
+                    if ui.button(tr("All settings")).clicked() {
+                        select_configuration(state, ExternalToolConfig::All);
+                    }
+                }
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.button(tr("Close")).clicked() {
+                        close = true;
+                    }
+                });
+            });
+            ui.separator();
+            if state.tool_intro_selected_config == Some(ExternalToolConfig::All) {
+                crate::views::tools_view::show_tools_view(state, ui);
+            } else {
+                ScrollArea::vertical()
+                    .id_salt((
+                        "external_tools_manager_scroll",
+                        state.tool_intro_selected_config,
+                    ))
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        if let Some(config) = state.tool_intro_selected_config {
+                            configuration_section(state, ui, config);
+                        } else {
+                            ready_now_section(ui);
+                            ui.add_space(10.0);
+                            ui.separator();
+                            ui.add_space(10.0);
+                            optional_download_section(state, ui);
+                            ui.add_space(10.0);
+                            ui.separator();
+                            ui.add_space(10.0);
+                            user_supplied_section(state, ui);
+                        }
+                    });
+            }
+        },
+    );
+    if close || response.close_requested {
         state.show_tool_intro = false;
+        state.tool_intro_selected_config = None;
+        state.tool_intro_download_all_consent = false;
+        state.tool_intro_navdata_consent = false;
+        state.tool_intro_openvsp_preview_consent = false;
     }
+}
+
+fn configuration_section(state: &mut AppState, ui: &mut Ui, config: ExternalToolConfig) {
+    if let Some(tool) = USER_SUPPLIED_TOOLS
+        .iter()
+        .find(|tool| tool.config == config)
+    {
+        ui.horizontal_wrapped(|ui| {
+            ui.hyperlink_to(tr(tool.action), tool.url);
+            if config == ExternalToolConfig::FlowUnsteady {
+                ui.hyperlink_to(tr("Julia download"), "https://julialang.org/downloads/");
+            }
+            ui.label(
+                RichText::new(tr_fields(
+                    "Source: {source}. Licence: {licence}.",
+                    &[("source", tr(tool.source)), ("licence", tr(tool.licence))],
+                ))
+                .weak(),
+            );
+        });
+        ui.add_space(10.0);
+    }
+    crate::views::tools_view::show_tool_configuration(state, ui, config);
 }
 
 fn section_heading(ui: &mut Ui, text: &str) {
@@ -100,27 +154,26 @@ fn section_heading(ui: &mut Ui, text: &str) {
     ui.add_space(4.0);
 }
 
-/// Group 1: tools with nothing to configure, per
-/// `EXTERNAL_TOOL_FIRST_START_IMPLEMENTATION_TASK.md`'s FS1 group 1.
+/// Group 1: tools with nothing to configure.
 fn ready_now_section(ui: &mut Ui) {
     section_heading(ui, "Ready now: nothing to do");
-    ui.label(RichText::new(tr("Athena AVL 3.52 (Windows)")).strong());
-    ui.label(
-        RichText::new(tr(
-            "Source: the upstream MIT AVL distribution (web.mit.edu/drela/Public/web/avl). Licence: GPL-2.0. The unchanged executable, its source archive, and the GPL notice already ship inside the Windows package: nothing to install or configure.",
-        ))
-        .weak()
-        .small(),
-    );
-    ui.add_space(6.0);
-    ui.label(RichText::new(tr("XFOIL Orr-Sommerfeld transition data (used by MSES)")).strong());
-    ui.label(
-        RichText::new(tr(
-            "Source: Mark Drela's official XFOIL 6.99 page (web.mit.edu/drela/Public/web/xfoil). Licence: GPL-2.0-or-later. The unmodified map and archive already ship bundled with every release. MSES itself still requires your own installation: see \"You supply these\" below.",
-        ))
-        .weak()
-        .small(),
-    );
+    if cfg!(target_os = "windows") {
+        ui.horizontal_wrapped(|ui| {
+            ui.label(RichText::new(tr("Athena AVL 3.52 (Windows)")).strong())
+                .on_hover_text(tr(
+                    "Source: the upstream MIT AVL distribution (web.mit.edu/drela/Public/web/avl). Licence: GPL-2.0. The unchanged executable, its source archive, and the GPL notice already ship inside the Windows package: nothing to install or configure.",
+                ));
+            ui.hyperlink_to(tr("Official source"), "https://web.mit.edu/drela/Public/web/avl/");
+        });
+        ui.add_space(6.0);
+    }
+    ui.horizontal_wrapped(|ui| {
+        ui.label(RichText::new(tr("XFOIL Orr-Sommerfeld transition data (used by MSES)")).strong())
+            .on_hover_text(tr(
+                "Source: Mark Drela's official XFOIL 6.99 page (web.mit.edu/drela/Public/web/xfoil). Licence: GPL-2.0-or-later. The unmodified map and archive already ship bundled with every release. MSES itself still requires your own installation: see \"You supply these\" below.",
+            ));
+        ui.hyperlink_to(tr("Official source"), "https://web.mit.edu/drela/Public/web/xfoil/");
+    });
 }
 
 /// Group 2: the only two acquisitions this screen may offer, per this
@@ -145,10 +198,9 @@ enum Acquisition {
 
 /// Every acquisition this screen may offer on this host, in display order.
 ///
-/// This is the complete set: the tools under "You supply these" have no
-/// licence that lets ALAS fetch them (MSES and the MSC products are sold per
-/// seat; OpenVSP's main install and NASTRAN-95 need a reviewed release), so
-/// "download all" can never reach them.
+/// This is the complete set of audited in-app download paths. Other tools
+/// have publisher links and user-owned installations, so "download all"
+/// cannot reach them.
 fn offered_acquisitions() -> Vec<Acquisition> {
     let mut offered = vec![Acquisition::Navdata];
     if crate::openvsp_runtime_setup::install_supported() {
@@ -166,9 +218,25 @@ fn pending_acquisitions(state: &AppState, offered: &[Acquisition]) -> Vec<Acquis
         .copied()
         .filter(|item| match item {
             Acquisition::Navdata => !state.navdata_download_in_progress,
-            Acquisition::OpenVspPreview => !state.openvsp_runtime_setup.running,
+            Acquisition::OpenVspPreview => {
+                !state.openvsp_runtime_setup.running && !preview_runtime_installed(state)
+            }
         })
         .collect()
+}
+
+fn preview_runtime_status(state: &AppState) -> crate::openvsp_runtime_setup::PreviewRuntimeStatus {
+    let destination = crate::openvsp_runtime_setup::resolve_destination(
+        state.tool_preferences.openvsp_dir.as_deref(),
+    );
+    crate::openvsp_runtime_setup::runtime_status(destination.as_deref())
+}
+
+fn preview_runtime_installed(state: &AppState) -> bool {
+    matches!(
+        preview_runtime_status(state),
+        crate::openvsp_runtime_setup::PreviewRuntimeStatus::Installed { .. }
+    )
 }
 
 fn start_all_acquisitions(state: &mut AppState) {
@@ -191,25 +259,21 @@ fn start_all_acquisitions(state: &mut AppState) {
 }
 
 fn download_all_row(state: &mut AppState, ui: &mut Ui) {
-    ui.label(RichText::new(tr("Download everything ALAS may fetch for you")).strong());
-    ui.label(
-        RichText::new(tr(
-            "One consent for every item in this group, each under the licence stated in its own row below. The tools under \"You supply these\" are not included: their licences do not allow ALAS to download them for you.",
-        ))
-        .weak()
-        .small(),
-    );
-    // Kept in egui's per-window memory rather than `AppState`: it lives only
-    // as long as this screen and, like the per-item boxes, starts unticked.
-    let consent_id = ui.id().with("tool_intro_download_all_consent");
-    let mut consent = ui.data(|data| data.get_temp::<bool>(consent_id).unwrap_or(false));
+    ui.label(RichText::new(tr("Download everything ALAS may fetch for you")).strong())
+        .on_hover_text(tr(
+            "One consent for every automated download in this group. Other tools have official publisher links and require a separate user installation or licence.",
+        ));
     ui.horizontal(|ui| {
         ui.checkbox(
-            &mut consent,
+            &mut state.tool_intro_download_all_consent,
             tr("I consent to every download in this group"),
-        );
+        )
+        .on_hover_text(tr(
+            "One consent for every automated download in this group. Other tools have official publisher links and require a separate user installation or licence.",
+        ));
         let offered = offered_acquisitions();
-        let enabled = consent && !pending_acquisitions(state, &offered).is_empty();
+        let enabled = state.tool_intro_download_all_consent
+            && !pending_acquisitions(state, &offered).is_empty();
         if ui
             .add_enabled(enabled, egui::Button::new(tr("Download all")))
             .clicked()
@@ -217,7 +281,6 @@ fn download_all_row(state: &mut AppState, ui: &mut Ui) {
             start_all_acquisitions(state);
         }
     });
-    ui.data_mut(|data| data.insert_temp(consent_id, consent));
 }
 
 fn navdata_dir(state: &AppState) -> String {
@@ -231,19 +294,21 @@ fn navdata_dir(state: &AppState) -> String {
 }
 
 fn navdata_row(state: &mut AppState, ui: &mut Ui) {
-    ui.label(RichText::new(tr("X-Plane navigation data (community mirror)")).strong());
-    ui.label(
-        RichText::new(tr(
-            "Source: a third-party GitHub mirror of X-Plane-format airway/fix data (not X-Plane's own distribution), fetched from its master branch. Licence: GPL-3.0. Used only for airway routing; ALAS falls back to great-circle routing without it. Never bundled in a release; downloaded only at your request and never redistributed.",
-        ))
-        .weak()
-        .small(),
-    );
+    ui.horizontal_wrapped(|ui| {
+        ui.label(RichText::new(tr("X-Plane navigation data (community mirror)")).strong())
+            .on_hover_text(tr(
+                "Source: a third-party GitHub mirror of X-Plane-format airway/fix data (not X-Plane's own distribution), fetched from its master branch. Licence: GPL-3.0. Used only for airway routing; ALAS falls back to great-circle routing without it. Never bundled in a release; downloaded only at your request and never redistributed.",
+            ));
+        ui.hyperlink_to(tr("View source"), "https://github.com/mcantsin/x-plane-navdata");
+    });
     ui.horizontal(|ui| {
         ui.checkbox(
             &mut state.tool_intro_navdata_consent,
             tr("I consent to this download"),
-        );
+        )
+        .on_hover_text(tr(
+            "Source: a third-party GitHub mirror of X-Plane-format airway/fix data (not X-Plane's own distribution), fetched from its master branch. Licence: GPL-3.0. Used only for airway routing; ALAS falls back to great-circle routing without it. Never bundled in a release; downloaded only at your request and never redistributed.",
+        ));
         let in_progress = state.navdata_download_in_progress;
         let enabled = state.tool_intro_navdata_consent && !in_progress;
         let label = if in_progress {
@@ -259,26 +324,41 @@ fn navdata_row(state: &mut AppState, ui: &mut Ui) {
             state.cancel_navdata_download();
         }
     });
+    if let Some((message, kind)) = &state.navdata_download_feedback {
+        let text = match kind {
+            LogKind::Info => RichText::new(message),
+            LogKind::Warn => RichText::new(message).color(ui.visuals().warn_fg_color),
+            LogKind::Error => RichText::new(message).color(ui.visuals().error_fg_color),
+        };
+        ui.label(text.small());
+    }
 }
 
 fn openvsp_preview_row(state: &mut AppState, ui: &mut Ui) {
-    ui.label(RichText::new(tr("OpenVSP native-preview runtime (Windows only)")).strong());
-    ui.label(
-        RichText::new(tr(
+    ui.label(RichText::new(tr("OpenVSP native-preview runtime (Windows only)")).strong())
+        .on_hover_text(tr(
             "A separate, app-local Python runtime used only for native OpenVSP screenshots after export; it never affects vspscript or VSPAERO analysis. Setup downloads hash-pinned CPython 3.13.7, the OpenVSP 3.51.2 Python bindings, and NumPy 2.3.3 from their official sources and verifies each archive's pinned checksum before extracting it. See docs/openvsp-preview.md for the exact pinned versions and licences.",
-        ))
-        .weak()
-        .small(),
+        ));
+    let status = preview_runtime_status(state);
+    let installed = matches!(
+        status,
+        crate::openvsp_runtime_setup::PreviewRuntimeStatus::Installed { .. }
     );
+    ui.label(RichText::new(status.label()).weak().small());
     ui.horizontal(|ui| {
         ui.checkbox(
             &mut state.tool_intro_openvsp_preview_consent,
             tr("I consent to this download"),
-        );
+        )
+        .on_hover_text(tr(
+            "A separate, app-local Python runtime used only for native OpenVSP screenshots after export; it never affects vspscript or VSPAERO analysis. Setup downloads hash-pinned CPython 3.13.7, the OpenVSP 3.51.2 Python bindings, and NumPy 2.3.3 from their official sources and verifies each archive's pinned checksum before extracting it. See docs/openvsp-preview.md for the exact pinned versions and licences.",
+        ));
         let running = state.openvsp_runtime_setup.running;
         let enabled = state.tool_intro_openvsp_preview_consent && !running;
         let label = if running {
             tr("Setting up...")
+        } else if installed {
+            tr("Reinstall preview runtime")
         } else {
             tr("Download now")
         };
@@ -302,113 +382,57 @@ fn openvsp_preview_row(state: &mut AppState, ui: &mut Ui) {
                 .small(),
         );
     }
+    if state.openvsp_runtime_setup.running {
+        ui.label(RichText::new(state.openvsp_runtime_setup.stage.clone()).weak());
+    }
 }
-
-/// One row of group 3: a tool ALAS never downloads, disclosed with its
-/// source/licence and a way to jump straight to its configuration card.
-struct UserSuppliedTool {
-    name: &'static str,
-    source: &'static str,
-    licence: &'static str,
-}
-
-/// Sourced from `THIRD-PARTY-NOTICES.md`'s "Invoked executables" table and
-/// `EXTERNAL_TOOL_MATRIX.md`. OpenFOAM, Gmsh and ParaView have no licence
-/// entry in `THIRD-PARTY-NOTICES.md` yet (a documented, separate gap this
-/// task does not close: see `EXTERNAL_TOOL_MATRIX.md`'s cross-cutting
-/// gaps), so their rows say that plainly instead of asserting an
-/// unverified SPDX identifier.
-const USER_SUPPLIED_TOOLS: &[UserSuppliedTool] = &[
-    UserSuppliedTool {
-        name: "MSES (mset, mses, mplot)",
-        source: "MIT Technology Licensing Office (web.mit.edu/tlo)",
-        licence: "Proprietary, per-seat commercial licence",
-    },
-    UserSuppliedTool {
-        name: "MSC Nastran",
-        source: "Hexagon / MSC Software (hexagon.com)",
-        licence: "Proprietary",
-    },
-    UserSuppliedTool {
-        name: "MSC Patran",
-        source: "Hexagon / MSC Software (hexagon.com)",
-        licence: "Proprietary",
-    },
-    UserSuppliedTool {
-        name: "NASTRAN-95",
-        source: "a maintainer-reviewed local build; no public download this screen can offer",
-        licence: "NASA Open Source Agreement 1.3",
-    },
-    UserSuppliedTool {
-        name: "OpenVSP / VSPAERO (main install)",
-        source: "official OpenVSP project (openvsp.org)",
-        licence: "NASA Open Source Agreement, as supplied by the selected release",
-    },
-    UserSuppliedTool {
-        name: "OpenFOAM",
-        source: "official OpenFOAM distribution (openfoam.com)",
-        licence: "not yet recorded in THIRD-PARTY-NOTICES.md: verify on the official site",
-    },
-    UserSuppliedTool {
-        name: "Gmsh",
-        source: "not cited in ALAS's tracked files: see the official Gmsh project site",
-        licence: "not yet recorded in THIRD-PARTY-NOTICES.md: verify on the official site",
-    },
-    UserSuppliedTool {
-        name: "ParaView",
-        source: "not cited in ALAS's tracked files: see the official ParaView project site",
-        licence: "not yet recorded in THIRD-PARTY-NOTICES.md: verify on the official site",
-    },
-    UserSuppliedTool {
-        name: "FLOWUnsteady / Julia adapter",
-        source: "official FLOWUnsteady project (github.com/byuflowlab/FLOWUnsteady)",
-        licence: "user-supplied; follows your selected release, not assumed to be the upstream MIT notice",
-    },
-];
 
 fn user_supplied_section(state: &mut AppState, ui: &mut Ui) {
     section_heading(ui, "You supply these: ALAS never downloads them");
     for tool in USER_SUPPLIED_TOOLS {
-        ui.horizontal(|ui| {
-            ui.vertical(|ui| {
-                ui.label(RichText::new(tr(tool.name)).strong());
-                ui.label(
-                    RichText::new(tr_fields(
-                        "Source: {source}. Licence: {licence}.",
-                        &[("source", tr(tool.source)), ("licence", tr(tool.licence))],
-                    ))
-                    .weak()
-                    .small(),
-                );
-            });
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.button(tr("Configure...")).clicked() {
-                    state.active_page = "setup_tools".to_owned();
-                    state.show_tool_intro = false;
-                }
-            });
+        ui.horizontal_wrapped(|ui| {
+            ui.label(RichText::new(tr(tool.name)).strong())
+                .on_hover_text(tr_fields(
+                    "Source: {source}. Licence: {licence}.",
+                    &[("source", tr(tool.source)), ("licence", tr(tool.licence))],
+                ));
+            ui.hyperlink_to(tr(tool.action), tool.url);
+            if tool.config == ExternalToolConfig::FlowUnsteady {
+                ui.hyperlink_to(tr("Julia download"), "https://julialang.org/downloads/");
+            }
+            if ui.button(tr("Configure...")).clicked() {
+                select_configuration(state, tool.config);
+            }
         });
         ui.add_space(6.0);
     }
 }
 
+fn select_configuration(state: &mut AppState, config: ExternalToolConfig) {
+    state.tool_intro_selected_config = Some(config);
+    state.show_tool_intro = true;
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        navdata_dir, offered_acquisitions, pending_acquisitions, Acquisition, USER_SUPPLIED_TOOLS,
+        navdata_dir, offered_acquisitions, pending_acquisitions, select_configuration, Acquisition,
+        USER_SUPPLIED_TOOLS,
     };
     use crate::state::AppState;
+    use crate::views::external_tool_catalog::ExternalToolConfig;
 
     #[test]
     fn the_per_item_consent_checkboxes_default_unchecked() {
         // `AppState::default()`'s `show_tool_intro` itself depends on a real
         // per-user marker file on disk (see
-        // `state_parts::first_start_marker_tests` for that gate, tested in
+        // `state::tests::first_start_marker_tests` for that gate, tested in
         // isolation against a scoped temp path), so it is not asserted here.
         // The two consent checkboxes are plain `false` defaults independent
-        // of that marker, and this is the property FS1 actually requires:
+        // of that marker, and this is the property that matters:
         // no download starts without explicit, per-item consent.
         let state = AppState::default();
+        assert!(!state.tool_intro_download_all_consent);
         assert!(!state.tool_intro_navdata_consent);
         assert!(!state.tool_intro_openvsp_preview_consent);
     }
@@ -423,27 +447,135 @@ mod tests {
         );
 
         let mut state = AppState::default();
+        state.tool_preferences.openvsp_dir = Some(
+            std::env::current_exe()
+                .expect("test executable path")
+                .display()
+                .to_string(),
+        );
         assert_eq!(pending_acquisitions(&state, &offered), offered);
         state.navdata_download_in_progress = true;
         assert!(!pending_acquisitions(&state, &offered).contains(&Acquisition::Navdata));
     }
 
     #[test]
-    fn clicking_configure_on_a_user_supplied_row_navigates_and_closes() {
+    fn configure_stays_in_the_manager_instead_of_navigating_the_main_app() {
         let mut state = AppState {
             show_tool_intro: true,
             active_page: "inputs".to_owned(),
             ..Default::default()
         };
+        select_configuration(&mut state, ExternalToolConfig::Mses);
+        assert_eq!(state.active_page, "inputs");
+        assert!(state.show_tool_intro);
+        assert_eq!(
+            state.tool_intro_selected_config,
+            Some(ExternalToolConfig::Mses)
+        );
+    }
 
-        // Exercise the same state transition the "Configure..." button
-        // performs, without depending on an egui test harness for a single
-        // click.
-        state.active_page = "setup_tools".to_owned();
-        state.show_tool_intro = false;
+    #[test]
+    fn raising_an_open_manager_preserves_the_selected_tool() {
+        let mut state = AppState {
+            show_tool_intro: true,
+            tool_intro_selected_config: Some(ExternalToolConfig::Mses),
+            ..Default::default()
+        };
+        super::open_tool_manager(&mut state, &egui::Context::default());
+        assert_eq!(
+            state.tool_intro_selected_config,
+            Some(ExternalToolConfig::Mses)
+        );
+    }
 
-        assert_eq!(state.active_page, "setup_tools");
-        assert!(!state.show_tool_intro);
+    #[test]
+    fn clicking_configure_selects_a_card_without_closing_the_manager() {
+        let mut state = AppState {
+            show_tool_intro: true,
+            active_page: "inputs".to_owned(),
+            ..Default::default()
+        };
+        let context = egui::Context::default();
+        let mut button_center = egui::Pos2::ZERO;
+        for frame in 0..4 {
+            let events = match frame {
+                1 => vec![egui::Event::PointerMoved(button_center)],
+                2 | 3 => vec![
+                    egui::Event::PointerMoved(button_center),
+                    egui::Event::PointerButton {
+                        pos: button_center,
+                        button: egui::PointerButton::Primary,
+                        pressed: frame == 2,
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                ],
+                _ => Vec::new(),
+            };
+            let output = context.run(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(960.0, 720.0),
+                    )),
+                    events,
+                    time: Some(frame as f64 * 0.1),
+                    ..Default::default()
+                },
+                |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        super::user_supplied_section(&mut state, ui);
+                    });
+                },
+            );
+            if frame == 0 {
+                let label = super::tr("Configure...");
+                button_center = output
+                    .shapes
+                    .iter()
+                    .find_map(|shape| match &shape.shape {
+                        egui::Shape::Text(text) if text.galley.text() == label => {
+                            Some(text.pos + text.galley.size() * 0.5)
+                        }
+                        _ => None,
+                    })
+                    .expect("first Configure button painted");
+            }
+        }
+        assert_eq!(state.active_page, "inputs");
+        assert!(state.show_tool_intro);
+        assert_eq!(
+            state.tool_intro_selected_config,
+            Some(ExternalToolConfig::Mses)
+        );
+    }
+
+    #[test]
+    fn every_configuration_card_renders_in_the_detached_window_fallback() {
+        let mut state = AppState {
+            show_tool_intro: true,
+            ..Default::default()
+        };
+        let context = egui::Context::default();
+        for config in std::iter::once(None)
+            .chain(std::iter::once(Some(ExternalToolConfig::All)))
+            .chain(USER_SUPPLIED_TOOLS.iter().map(|tool| Some(tool.config)))
+        {
+            state.tool_intro_selected_config = config;
+            let _ = context.run(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1280.0, 800.0),
+                    )),
+                    ..Default::default()
+                },
+                |ctx| super::show_tool_intro(&mut state, ctx),
+            );
+            assert!(
+                state.show_tool_intro,
+                "window closed while showing {config:?}"
+            );
+        }
     }
 
     #[test]
@@ -474,6 +606,8 @@ mod tests {
         for tool in USER_SUPPLIED_TOOLS {
             assert!(!tool.source.is_empty());
             assert!(!tool.licence.is_empty());
+            assert!(tool.url.starts_with("https://"));
+            assert!(!tool.action.is_empty());
         }
     }
 

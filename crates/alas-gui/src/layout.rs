@@ -52,7 +52,7 @@ pub const CONTENT_MIN_WIDTH: f32 = 400.0;
 /// Width the Inputs page's preset and engine selectors need side by side.
 ///
 /// A combo box sizes itself to its longest entry and the wrapped layout
-/// cannot break before one, so below this the pair used to widen the whole
+/// cannot break before one, so below this the pair would widen the whole
 /// page and run under the window's right edge. Above it they share a row.
 pub const SELECTOR_PAIR_MIN_WIDTH: f32 = 460.0;
 
@@ -63,18 +63,6 @@ pub const SELECTOR_PAIR_MIN_WIDTH: f32 = 460.0;
 /// wider than the window itself.
 pub fn expanded_navigation_width(viewport_width: f32) -> f32 {
     viewport_width.clamp(NAV_RAIL_WIDTH, NAV_PANEL_WIDTH)
-}
-
-/// Where the live preview belongs.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PreviewPlacement {
-    /// Reserve a vertical column on the right of the editor.
-    Side,
-}
-
-/// Return the fixed right-side preview placement for every window size.
-pub fn preview_placement(_available_width: f32) -> PreviewPlacement {
-    PreviewPlacement::Side
 }
 
 /// Return the user-resizable width range for the right-side preview dock, or
@@ -123,16 +111,9 @@ pub fn run_log_height(viewport_height: f32, requested_height: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::{
-        preview_dock_fits, preview_placement, preview_width_range, PreviewPlacement,
-        CONTENT_MIN_WIDTH, PREVIEW_DOCK_MAX_WIDTH, PREVIEW_DOCK_MIN_WIDTH,
+        preview_dock_fits, preview_width_range, CONTENT_MIN_WIDTH, PREVIEW_DOCK_MAX_WIDTH,
+        PREVIEW_DOCK_MIN_WIDTH,
     };
-
-    #[test]
-    fn preview_stays_to_the_right_of_the_editor_at_every_window_width() {
-        for width in [360.0, 760.0, 1_280.0, 3_840.0] {
-            assert_eq!(preview_placement(width), PreviewPlacement::Side);
-        }
-    }
 
     #[test]
     fn preview_width_stays_user_resizable_without_responsive_bottom_promotion() {

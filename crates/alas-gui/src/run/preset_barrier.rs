@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! Dispatch-time preset barrier (App Features 1.2, decision D09).
+//! Dispatch-time preset barrier.
 //!
 //! In preset mode the run leaves the GUI with the registered preset's locked
 //! geometry and initial design point, and with optimizer bounds anchored to

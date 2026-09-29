@@ -4,7 +4,6 @@
 // Ported from alas/reporting/visualization.py:
 //   figure_mass_breakdown, figure_landing_gear_planform, and
 //   figure_fuel_volume_check.
-// Reference: alas @ rust-port-baseline.
 
 //! Mass-balance layout figures split by figure family so each source file
 //! stays within the repository's review-size limit.

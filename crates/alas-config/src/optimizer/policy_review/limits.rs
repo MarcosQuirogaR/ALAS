@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! The D02 determination table itself.
+//! The determination table itself.
 //!
 //! Split out of [`super`] so the review can grow an entry at a time without
 //! the reasoning around it competing for the same file. The shared rationale
@@ -65,7 +65,7 @@ tolerance.";
 
 /// Every residual identifier the optimizer can emit that is not part of
 /// `mdo::residuals_layout`'s wing-to-fuselage family
-/// ([`super::limits_layout::LAYOUT_LIMITS`]), with its D02 determination.
+/// ([`super::limits_layout::LAYOUT_LIMITS`]), with its determination.
 ///
 /// Split from that family into its own file so this table's own growth does
 /// not compete with the layout family's for the same budgeted file
@@ -155,9 +155,9 @@ measure a miss against.",
         id: "structural_inventory_unverified",
         family: "Mass",
         review: RelaxationReview::NeverRelaxable,
-        rationale: "The strength-sized wingbox exceeds the whole modelled wing, so the mass \
-statement is incomplete rather than outside a limit; admitting it would publish a partial \
-aircraft as a complete one.",
+        rationale: "The selected component-based mass model lacks a complete sourced wing \
+inventory; admitting it would publish a partial aircraft as a complete one. Disagreement \
+with an independent empirical mass estimate alone is not this failure.",
     },
     // --- Balance ---
     ReviewedLimit {
@@ -183,6 +183,15 @@ structural overload, and no primary source states a fraction of a gear rating th
 exceeded.",
     },
     ReviewedLimit {
+        id: "max_nose_gear_load",
+        family: "Balance",
+        review: RelaxationReview::Ineligible,
+        rationale: "The maximum nose-gear load fraction bounds nose-gear steering and braking \
+loads and rotation authority (Raymer/Torenbeek, ~20 % ceiling); no published aircraft accepts a \
+fraction of its weight on the nose gear beyond that bound in normal operation, so no tolerance \
+can be sourced.",
+    },
+    ReviewedLimit {
         id: "min_nose_gear_load",
         family: "Balance",
         review: RelaxationReview::Ineligible,
@@ -192,12 +201,39 @@ The validation ledger already records that the present bound admits a physically
 negative reaction, so widening it is the wrong direction.",
     },
     ReviewedLimit {
+        id: "minimum_usable_cg_range",
+        family: "Balance",
+        review: RelaxationReview::Ineligible,
+        rationale: "This residual reports the configured `cg_range_pct_mac` assumption, not a \
+physical limit: the physical forward/aft boundaries themselves are \
+unaffected by it, so there is nothing to size a tolerance against beyond the declared preference \
+itself.",
+    },
+    ReviewedLimit {
         id: "nose_gear_strength",
         family: "Balance",
         review: RelaxationReview::Ineligible,
         rationale: "A gear reaction ceiling is a component strength limit; exceeding it is a \
 structural overload, and no primary source states a fraction of a gear rating that may be \
 exceeded.",
+    },
+    ReviewedLimit {
+        id: "tail_scrape",
+        family: "Balance",
+        review: RelaxationReview::Ineligible,
+        rationale: "The tail-scrape angle is a rigid-body ground-clearance geometry limit: \
+below it the fuselage contacts the runway before the required \
+rotation attitude is reached, which is a collision, and no primary source states a fraction of \
+that clearance that may be given up.",
+    },
+    ReviewedLimit {
+        id: "tip_back",
+        family: "Balance",
+        review: RelaxationReview::Ineligible,
+        rationale: "The tip-back angle is a rigid-body ground-stability geometry limit: \
+below it the aircraft tips onto its tail at the aft-most loaded \
+centre of gravity, and no primary source states a fraction of that stability margin that may be \
+given up.",
     },
     ReviewedLimit {
         id: "static_margin_floor",

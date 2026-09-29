@@ -55,7 +55,10 @@ pub(crate) fn show_setup_tab(state: &mut AppState, ui: &mut Ui) {
 fn show_configuration_card(window: &mut WingAnalysisState, ui: &mut Ui) {
     crate::theme::card_frame(ui).show(ui, |ui| {
         ui.set_min_width(ui.available_width());
-        ui.label(RichText::new(tr("Analysed configuration")).strong().size(15.0));
+        ui.label(RichText::new(tr("Analysed configuration")).strong().size(15.0))
+            .on_hover_text(tr(
+                "The model is an incompressible, inviscid vortex lattice: its drag is induced drag only, and Mach number sets the speed without correcting any coefficient.",
+            ));
         let surfaces = window.surface_names();
         let names = if surfaces.is_empty() {
             tr("No surfaces are available.")
@@ -98,13 +101,6 @@ fn show_configuration_card(window: &mut WingAnalysisState, ui: &mut Ui) {
             .weak()
             .small(),
         );
-        ui.label(
-            RichText::new(tr(
-                "The model is an incompressible, inviscid vortex lattice: its drag is induced drag only, and Mach number sets the speed without correcting any coefficient.",
-            ))
-            .weak()
-            .small(),
-        );
     });
 }
 
@@ -113,12 +109,8 @@ fn show_preview_card(state: &mut AppState, ui: &mut Ui) {
     crate::theme::card_frame(ui).show(ui, |ui| {
         ui.set_min_width(ui.available_width());
         ui.horizontal_wrapped(|ui| {
-            ui.label(RichText::new(tr("Live preview")).strong().size(15.0));
-            ui.label(
-                RichText::new(tr("Updates with every geometry or empennage change."))
-                    .weak()
-                    .small(),
-            );
+            ui.label(RichText::new(tr("Live preview")).strong().size(15.0))
+                .on_hover_text(tr("Updates with every geometry or empennage change."));
         });
         let scene = with_window(|window| window.preview.clone());
         let Some(scene) = scene else {
@@ -127,7 +119,7 @@ fn show_preview_card(state: &mut AppState, ui: &mut Ui) {
         };
         let width = ui.available_width().max(200.0);
         let height = (width * 0.42).clamp(PREVIEW_MIN_HEIGHT, PREVIEW_MAX_HEIGHT);
-        let revision = with_window(|window| window.geometry_revision);
+        let revision = with_window(|window| window.preview_revision);
         let response = ui.add(
             SceneView::new(&scene, state.view_state_mut(WING_ANALYSIS_VIEW_KEY))
                 .desired_size(vec2(width, height))
@@ -315,7 +307,10 @@ fn show_reference_card(window: &mut WingAnalysisState, ui: &mut Ui) {
             RichText::new(tr("Reference quantities, axes and moment reference"))
                 .strong()
                 .size(15.0),
-        );
+        )
+        .on_hover_text(tr(
+            "Geometry axes: x aft from the aircraft datum, y to starboard, z up. Lift and drag are wind-axis; the pitching moment is positive nose-up about the point below.",
+        ));
         match window.reference() {
             Some(reference) => {
                 Grid::new("wing_analysis_reference")
@@ -338,13 +333,6 @@ fn show_reference_card(window: &mut WingAnalysisState, ui: &mut Ui) {
                 ui.label(tr("Reference quantities need an available wing."));
             }
         }
-        ui.label(
-            RichText::new(tr(
-                "Geometry axes: x aft from the aircraft datum, y to starboard, z up. Lift and drag are wind-axis; the pitching moment is positive nose-up about the point below.",
-            ))
-            .weak()
-            .small(),
-        );
         let mut changed = false;
         Grid::new("wing_analysis_moment_reference")
             .num_columns(2)

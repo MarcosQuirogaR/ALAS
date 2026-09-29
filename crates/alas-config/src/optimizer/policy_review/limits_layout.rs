@@ -1,19 +1,17 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! `mdo::residuals_layout`'s wing-to-fuselage layout family's D02
+//! `mdo::residuals_layout`'s wing-to-fuselage layout family's
 //! determinations.
 //!
-//! Split out of [`super::limits`] so that table's own growth does not
-//! compete with this family's for the same budgeted file
-//! (`docs/source-size-budgets.tsv`'s ratchet). [`super::reviewed_limits`]
+//! Split out of [`super::limits`] so each family keeps its own table. [`super::reviewed_limits`]
 //! is the one list a caller reads; this module's only export is consumed
 //! there.
 
 use super::limits::{WING_FUSELAGE_CONTAINMENT, WING_LAYOUT_VALIDITY_DOMAIN};
 use super::{RelaxationReview, ReviewedLimit};
 
-/// Every layout-family residual identifier, with its D02 determination.
+/// Every layout-family residual identifier, with its determination.
 ///
 /// Ordered by identifier, matching [`super::limits::CORE_LIMITS`]'s own
 /// convention.

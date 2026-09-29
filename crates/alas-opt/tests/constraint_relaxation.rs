@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! Controlled constraint relaxation (clarified ledger D01-D03).
+//! Controlled constraint relaxation.
 //!
-//! The rules under test are the ledger's own: violated *groups* are counted
+//! The rules under test: violated *groups* are counted
 //! rather than limits, only a reviewed limit may be missed and only inside
 //! its own tolerance, a limit that reports a failed evaluation can never be
 //! relaxed, and a relaxed design is never labelled fully feasible.
@@ -76,7 +76,7 @@ fn a_reviewed_limit_missed_inside_its_tolerance_is_recorded_as_relaxed() {
     assert_eq!(assessment.relaxation.violated_groups, 1);
     // The nominal reference aircraft also misses limits this policy does not
     // list, and one ineligible miss rejects the whole candidate however many
-    // eligible ones were admitted. That is the D02 rule observed on a real
+    // eligible ones were admitted. That rule is observed on a real
     // aircraft rather than on a fixture, and it is why this candidate is
     // still not admissible.
     assert!(assessment.relaxation.rejected);
@@ -111,7 +111,7 @@ fn a_limit_outside_the_eligibility_list_is_never_admitted() {
 
 #[test]
 fn a_relaxed_candidate_keeps_its_violation_in_the_ranking_key() {
-    // D03: a fully feasible design ranks first. The search's key is
+    // A fully feasible design ranks first. The search's key is
     // (admissible, aggregate hard violation, cost), so a candidate admitted
     // only by the policy has to keep a strictly positive aggregate violation
     // for that ordering to hold without a tuned penalty. A candidate that

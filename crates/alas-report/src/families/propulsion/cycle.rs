@@ -4,7 +4,6 @@
 // Ported from alas/reporting/visualization.py
 // (figure_propulsion_cycle_summary, figure_engine_designer_preview,
 // _propulsion_cycle_summary_lines)
-// Reference: alas @ rust-port-baseline.
 
 //! On-design cruise cycle station temperatures and the Engine Designer's
 //! thermodynamic preview. The editor preview uses the same cycle walk as the
@@ -371,7 +370,7 @@ fn draw_nacelle_silhouette(scene: &mut Scene, pal: &Palette, eng: &EngineConfig)
 /// scene primitive set has no per-`Axes2D` title, only the whole-figure
 /// `Scene::title`).
 #[allow(dead_code)]
-fn panel_title(scene: &mut Scene, pal: &Palette, text: &str, x: f64) {
+pub(super) fn panel_title(scene: &mut Scene, pal: &Palette, text: &str, x: f64) {
     scene.add(SceneElement::Text {
         text: text.to_owned(),
         pos: [x, 40.0],

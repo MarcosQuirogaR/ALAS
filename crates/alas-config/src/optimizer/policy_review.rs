@@ -1,12 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! The D02 engineering review: which limits may be missed, and on what basis.
+//! The engineering review: which limits may be missed, and on what basis.
 //!
-//! The clarified ledger's D02 asks for "an engineering-reviewed eligibility
-//! list and per-limit tolerances", and is explicit that these are engineering
-//! work rather than "arbitrary global percentages". This module is that
-//! review, recorded per limit so the result is auditable instead of asserted.
+//! Relaxation needs an engineering-reviewed eligibility list and per-limit
+//! tolerances, which are engineering work rather than arbitrary global
+//! percentages. This module is that review, recorded per limit so the result is auditable instead of asserted.
 //!
 //! **The review's present outcome is that no limit is eligible.** That is a
 //! finding, not an omission, and it is why [`ConstraintRelaxation::eligible`]
@@ -35,7 +34,7 @@
 //! aerodrome code letters, and a declared maximum weight is established under
 //! 14 CFR/CS 25.25 rather than estimated. The second is a measured error band
 //! on this program's own model of the quantity. The project's cross-domain
-//! physical-validation ledger (an internal audit record dated 2026-09-17)
+//! physical-validation ledger
 //! records that no such band exists for any constrained quantity: field
 //! lengths are `NotAvailable` because ALAS reports no matched take-off or
 //! landing field length at all, static margin and CG envelope are
@@ -49,12 +48,13 @@
 
 mod limits;
 mod limits_layout;
+mod limits_structure;
 
 use std::sync::OnceLock;
 
 use super::relaxation::ConstraintRelaxation;
 
-/// Every residual identifier the optimizer can emit, with its D02
+/// Every residual identifier the optimizer can emit, with its
 /// determination: [`limits::CORE_LIMITS`] followed by
 /// [`limits_layout::LAYOUT_LIMITS`] (`mdo::residuals_layout`'s
 /// wing-to-fuselage family, split into its own file so its growth does not
@@ -67,13 +67,14 @@ pub fn reviewed_limits() -> &'static [ReviewedLimit] {
             limits::CORE_LIMITS
                 .iter()
                 .chain(limits_layout::LAYOUT_LIMITS)
+                .chain(limits_structure::STRUCTURE_LIMITS)
                 .copied()
                 .collect()
         })
         .as_slice()
 }
 
-/// What the D02 review concluded about one limit.
+/// What the review concluded about one limit.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum RelaxationReview {
     /// Never listable, whatever a configuration asks for.
@@ -89,7 +90,7 @@ pub enum RelaxationReview {
     },
 }
 
-/// One limit's D02 determination.
+/// One limit's determination.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ReviewedLimit {
     /// Residual identifier, as `alas_opt::mdo` spells it.
@@ -132,19 +133,6 @@ pub fn eligible_count() -> usize {
         .iter()
         .filter(|limit| limit.is_listable())
         .count()
-}
-
-/// A one-line statement of the review's outcome, for a user-facing surface.
-///
-/// Deliberately says the count rather than "relaxation is unavailable": a
-/// reader has to be able to tell a reviewed-and-empty policy from a missing
-/// feature.
-pub fn review_summary() -> String {
-    format!(
-        "{} of {} limits reviewed under D02 are currently eligible for relaxation.",
-        eligible_count(),
-        reviewed_count()
-    )
 }
 
 /// Configuration issues in the optimizer's two policy groups.
@@ -197,7 +185,7 @@ mod tests {
             assert!(
                 matches!(
                     limit.family,
-                    "Evaluation" | "Mass" | "Balance" | "Performance" | "Geometry"
+                    "Evaluation" | "Mass" | "Balance" | "Performance" | "Geometry" | "Structure"
                 ),
                 "{} names family {}, which is not a requirement family",
                 limit.id,
@@ -208,13 +196,12 @@ mod tests {
 
     #[test]
     fn the_review_currently_admits_nothing_and_says_so() {
-        // This is the D02 finding, not a placeholder: see the module
+        // This is the review outcome, not a placeholder: see the module
         // documentation for the evidence behind each determination. A future
         // review that produces a sourced tolerance changes this assertion
         // deliberately, which is the point of asserting it.
         assert_eq!(eligible_count(), 0);
         assert!(reviewed_count() >= 50);
-        assert!(review_summary().starts_with("0 of "));
     }
 
     #[test]

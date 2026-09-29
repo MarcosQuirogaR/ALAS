@@ -3,7 +3,6 @@
 
 // Ported from native aerodynamic model/dynamics/flight_dynamics/airplane.py, `get_modes`.
 // Upstream: native aerodynamic model 4.2.8, MIT.
-// Reference: alas @ rust-port-baseline.
 
 //! native aerodynamic model's `flight_dynamics.airplane.get_modes`: the closed-form
 //! small-perturbation eigenmode approximations (phugoid, short-period, roll

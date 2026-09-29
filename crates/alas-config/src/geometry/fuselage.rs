@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/config/geometry_config.py (`FuselageConfig`)
-// Reference: alas @ rust-port-baseline.
 
 //! The fuselage, as the stations its surface is lofted through.
 //!

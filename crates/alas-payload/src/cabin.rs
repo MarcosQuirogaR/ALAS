@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/physics/cabin_layout.py
-// Reference: alas @ rust-port-baseline.
 
 //! The passenger cabin: what the regulation allows, and where the furniture
 //! goes.
@@ -311,19 +310,6 @@ impl DeckCapacities {
 /// demonstration.
 pub fn max_certifiable_capacity(g: &CabinGeometry, pax: &PassengerCabinConfig) -> DeckCapacities {
     max_certifiable_capacity_with_source_layout(g, pax, None, None)
-}
-
-/// The geometry-derived passenger ceiling further limited by an applicable
-/// source-certified maximum, if one is registered for the selected aircraft.
-///
-/// `None` preserves the geometry-only behaviour used by clean-sheet studies,
-/// the public low-level API, and the frozen Python compatibility path.
-pub fn max_certifiable_capacity_with_source_cap(
-    g: &CabinGeometry,
-    pax: &PassengerCabinConfig,
-    source_capacity_cap: Option<i64>,
-) -> DeckCapacities {
-    max_certifiable_capacity_with_source_layout(g, pax, None, source_capacity_cap)
 }
 
 /// The product capacity calculation with a source-defined exit arrangement.

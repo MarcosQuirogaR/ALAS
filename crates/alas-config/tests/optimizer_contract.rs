@@ -6,12 +6,12 @@
 use alas_config::{validate, AlasConfig, Severity};
 
 #[test]
-fn the_serialized_default_selects_differential_evolution_explicitly(
+fn the_serialized_default_selects_the_python_compatible_profile_explicitly(
 ) -> Result<(), serde_json::Error> {
     let value = serde_json::to_value(AlasConfig::default())?;
     assert_eq!(
         value["optimizer"]["solver"]["method"],
-        serde_json::json!("differential_evolution")
+        serde_json::json!("scipy_legacy")
     );
     assert_eq!(
         value["optimizer"]["solver"]["strategy"],

@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/physics/dynamics.py
-// Reference: alas @ rust-port-baseline.
 
 //! Longitudinal and lateral-directional dynamic-mode analysis: the two inputs
 //! `alas/physics/dynamics.py` supplies to native aerodynamic model's eigenmode solve: a

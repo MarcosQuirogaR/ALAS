@@ -234,8 +234,8 @@ pub(super) fn cargo_containers_kg(containerized_mass_kg: f64) -> f64 {
 /// circular A340-300 case, where every candidate coincides, reproduces
 /// exactly as well, which confirms the coefficients and the exponent
 /// independently of the convention. It is also the same `D_av` that FLOPS
-/// equation 56 already uses in this crate (`structure.rs`), so the two methods
-/// read the same quantity from the same geometry.
+/// equation 56 uses in this crate (`structure.rs`), so the two methods read
+/// the same quantity from the same geometry.
 ///
 /// Feeding the maximum width instead understates a non-circular fuselage:
 /// 1,723.8 kg on the A380-800 (7.14 m wide, 8.41 m deep) and 86.4 kg on the
@@ -251,10 +251,9 @@ pub(super) fn lth_furnishings_kg(fuselage_length_m: f64, average_fuselage_diamet
 /// `m_opp = 35.782 n_pax^1.1141` long-haul (Pape 2018 equations 2.15 and
 /// 2.16, p. 23). It replaces the occupant-driven FLOPS operating items (the
 /// cabin crew and their baggage, the flight crew and theirs, and the passenger
-/// service items) and **not** the unusable fuel or the engine oil, which are
-/// propulsion-side fluids this relation does not price, and **not** the
-/// container tare, which is decided by the hold architecture rather than by
-/// the cabin and is evaluated identically under both methods.
+/// service items), including unusable fuel and engine/APU oil: these fluids
+/// are listed in Pape section 2.11, pp. 22-23. Their explicit rows are allocated
+/// within this total. Cargo container tare remains separate.
 pub(super) fn lth_operating_items_kg(passengers: usize, long_haul: bool) -> f64 {
     let count = passengers as f64;
     if count <= 0.0 {
@@ -498,22 +497,10 @@ pub fn estimate_flops_transport(
     // Equations 119-126. Counts are declared inputs rather than equation
     // 116-118 defaults because the product contract represents an installed
     // cabin and crew, not an unspecified FLOPS study.
-    // The LTH operating-item relation is a single occupant-driven total, so
-    // the three FLOPS items it covers (cabin crew and baggage, flight crew
-    // and baggage, and passenger service) are reported as zero and the whole
-    // is carried on the passenger-service line rather than being split across
-    // them by a rule the source does not give. It does not cover the container
-    // tare, which is hold architecture.
-    let cabin_crew_and_baggage = if lth_cabin_equipment {
-        0.0
-    } else {
-        cabin_crew_and_baggage_kg(inputs.flight_attendant_count, inputs.galley_crew_count)
-    };
-    let flight_crew_and_baggage = if lth_cabin_equipment {
-        0.0
-    } else {
-        flight_crew_and_baggage_kg(inputs.flight_crew_count)
-    };
+    // Allocate known crew inside LTH's total so pilots retain cockpit stations.
+    let cabin_crew_and_baggage =
+        cabin_crew_and_baggage_kg(inputs.flight_attendant_count, inputs.galley_crew_count);
+    let flight_crew_and_baggage = flight_crew_and_baggage_kg(inputs.flight_crew_count);
     // Equations 121 and 122 are the only two operating items that read an
     // engine rating; a propeller installation substitutes for exactly those.
     let (unusable_fuel, engine_oil) = match inputs.propulsion_sizing {
@@ -533,10 +520,23 @@ pub fn estimate_flops_transport(
         ),
     };
     let passenger_service = if lth_cabin_equipment {
-        lth_operating_items_kg(
+        let operating_total = lth_operating_items_kg(
             passengers,
             inputs.haul_class == alas_config::OperatingHaulClass::LongHaul,
-        )
+        );
+        // Pape section 2.11 includes crew, fuel residue and engine/APU oil.
+        // Allocate their explicit rows within m_opp, refusing a negative remainder.
+        let remainder = operating_total
+            - unusable_fuel
+            - engine_oil
+            - cabin_crew_and_baggage
+            - flight_crew_and_baggage;
+        if remainder < 0.0 {
+            return Err(FlopsTransportInputError {
+                field: "lth_operating_items_allocation",
+            });
+        }
+        remainder
     } else {
         passenger_service_kg(
             inputs.first_class_passenger_count,
@@ -776,7 +776,8 @@ mod tests {
     /// The LTH alternative replaces the cabin equipment and the four
     /// occupant-driven operating items together, because the two methods put
     /// the passenger seats on opposite sides of that boundary, and it leaves
-    /// the propulsion-side fluids and every systems equation alone.
+    /// the separately placed fluids inside its total and every systems
+    /// equation alone.
     #[test]
     fn the_lth_cabin_method_replaces_one_whole_boundary_and_nothing_else() {
         // The registered A320-200 cabin case, so the comparison below is the
@@ -820,15 +821,18 @@ mod tests {
             "published A320-200 LTH furnishings are 2964.5 kg, got {}",
             lth_result.systems.furnishings_kg
         );
-        assert!(
-            (lth_result.operating_items.passenger_service_kg - expected_operating_items).abs()
-                < 1e-9
-        );
+        assert!((lth_result.operating_items.total_kg - expected_operating_items).abs() < 1e-9);
 
-        // The three occupant items the single LTH total covers are reported as
-        // zero rather than left double counted beside it.
-        assert_eq!(lth_result.operating_items.cabin_crew_and_baggage_kg, 0.0);
-        assert_eq!(lth_result.operating_items.flight_crew_and_baggage_kg, 0.0);
+        // Crew retain explicit rows for their physical stations. These are
+        // allocations within the LTH total, not additions to it.
+        assert_eq!(
+            lth_result.operating_items.cabin_crew_and_baggage_kg,
+            flops_result.operating_items.cabin_crew_and_baggage_kg
+        );
+        assert_eq!(
+            lth_result.operating_items.flight_crew_and_baggage_kg,
+            flops_result.operating_items.flight_crew_and_baggage_kg
+        );
         assert!(flops_result.operating_items.cabin_crew_and_baggage_kg > 0.0);
 
         // Negative control on the accounting decoupling: the container tare is
@@ -853,8 +857,9 @@ mod tests {
             );
         }
 
-        // The propulsion-side fluids and every systems equation but the
-        // furnishings are identical: this is one boundary, not a new method.
+        // Fluid rows retain their explicit masses and stations, while their
+        // sum is deducted from the LTH remainder. All systems equations but
+        // furnishings are unchanged.
         assert_eq!(
             lth_result.operating_items.unusable_fuel_kg,
             flops_result.operating_items.unusable_fuel_kg
@@ -875,9 +880,7 @@ mod tests {
         long_haul.haul_class = alas_config::OperatingHaulClass::LongHaul;
         let long_haul_result = estimate_flops_transport(&long_haul).expect("valid inputs");
         assert!(
-            (long_haul_result.operating_items.passenger_service_kg
-                - 35.782 * 150.0_f64.powf(1.114_1))
-            .abs()
+            (long_haul_result.operating_items.total_kg - 35.782 * 150.0_f64.powf(1.114_1)).abs()
                 < 1e-9
         );
         assert!(
@@ -897,6 +900,44 @@ mod tests {
         assert!(
             (lth_group - flops_group).abs() / flops_group < 0.10,
             "single-aisle cabin groups {lth_group} and {flops_group} must agree closely"
+        );
+    }
+
+    #[test]
+    fn lth_turboprop_operating_items_include_declared_fluids_once() {
+        let mut inputs = representative_inputs();
+        inputs.first_class_passenger_count = 0;
+        inputs.business_class_passenger_count = 0;
+        inputs.tourist_class_passenger_count = 72;
+        inputs.cabin_equipment_method = alas_config::CabinEquipmentMethod::LthCivilTransportV1;
+        inputs.haul_class = alas_config::OperatingHaulClass::ShortMediumHaul;
+        inputs.propulsion_sizing = PropulsionSizing::ShaftPower {
+            engine_oil_kg: 46.220,
+        };
+        inputs.maximum_fuel_capacity_kg = 5_000.0;
+        let result = estimate_flops_transport(&inputs).expect("valid ATR fluid allocation");
+        let items = result.operating_items;
+        assert!((items.unusable_fuel_kg - 42.0).abs() < 1e-12);
+        assert!((items.engine_oil_kg - 46.220).abs() < 1e-12);
+        // Independent source equation: the two fluid rows do not increase it.
+        assert!((items.total_kg - 32.907 * 72_f64.powf(1.021)).abs() < 1e-9);
+        assert!(
+            (items.passenger_service_kg
+                + 88.220
+                + items.flight_crew_and_baggage_kg
+                + items.cabin_crew_and_baggage_kg
+                - items.total_kg)
+                .abs()
+                < 1e-9
+        );
+        inputs.propulsion_sizing = PropulsionSizing::ShaftPower {
+            engine_oil_kg: 3_000.0,
+        };
+        assert_eq!(
+            estimate_flops_transport(&inputs)
+                .expect_err("fluids exceed total")
+                .field,
+            "lth_operating_items_allocation"
         );
     }
 

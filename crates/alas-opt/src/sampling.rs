@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-// Ported from alas/optimization/sampling.py
-// Reference: alas @ rust-port-baseline.
-
 //! Random sampling in the aircraft design variable space.
 
 use alas_config::design_variables::{DesignVector, SPECS};

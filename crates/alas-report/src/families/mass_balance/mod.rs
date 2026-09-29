@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/reporting/visualization.py
-// Reference: alas @ rust-port-baseline.
 
 //! Mass breakdown, longitudinal weight distribution, model CG check, and landing gear layout figures.
 //!
@@ -16,6 +15,7 @@
 //! re-exporting them keeps the mass-balance API organized by discipline.
 
 mod cg_envelope;
+pub mod load_trim;
 mod mass_distribution;
 
 use std::collections::HashMap;
@@ -53,6 +53,16 @@ pub use mass_distribution::figure_mass_distribution;
 /// those figures only read the airplane, mass coordinates, and static-margin
 /// fallback from the report shell.
 ///
+/// # Pre-run draft, not a result
+///
+/// This is the *draft* preview of the editable inputs: it exists before any
+/// run, so its mass analysis is priced at the declared `requirements.mtow_kg`
+/// design gross mass and carries no mission-sized takeoff mass. Once a
+/// pipeline run has completed for the same configuration, callers must read
+/// the run's `optimized_report` (bound to the sized takeoff mass, see
+/// `AnalysisReport::sized_takeoff_mass_kg`) instead of calling this; the
+/// desktop preview does so.
+///
 /// # The preview resolves the same cabin the analysis does
 ///
 /// `alas_mass::analysis::complete_mass_analysis` prices the payload on
@@ -63,15 +73,13 @@ pub use mass_distribution::figure_mass_distribution;
 /// `resolves_payload_from_candidate_geometry` is unconditionally true, so
 /// `num_passengers` is a seed, not a loading.
 ///
-/// This preview used to pass `None` while every residual, baseline and export
-/// path passes a layout, so the centre-of-gravity envelope, the landing-gear
-/// planform and the control-surface figure were drawn for a **different
-/// loading** than the feasibility verdict shown beside them: measured on the
-/// registered presets, up to 3 000 kg of payload and 21.7 points of %MAC apart
-/// (`alas-payload/examples/payload_placement_divergence.rs`). It now runs the
-/// same two passes `alas_pipeline::baseline` does: a lumped pass for the
-/// operating empty mass and its station, then the resolved cabin, so the
-/// previewed aircraft is the evaluated aircraft.
+/// Every residual, baseline and export path passes a layout, so the preview
+/// does too: otherwise the centre-of-gravity envelope, the landing-gear
+/// planform and the control-surface figure would be drawn for a **different
+/// loading** than the feasibility verdict shown beside them. It runs the same
+/// two passes `alas_pipeline::baseline` does: a lumped pass for the operating
+/// empty mass and its station, then the resolved cabin, so the previewed
+/// aircraft is the evaluated aircraft.
 ///
 /// # What this deliberately does not do
 ///
@@ -80,16 +88,12 @@ pub use mass_distribution::figure_mass_distribution;
 /// preview already made, plus one cabin layout.
 ///
 /// The FLOPS operating items are repriced on the seated count through
-/// `alas_pipeline::full_analysis::cabin_sync`, which is now shared rather than
-/// mirrored: duplicating cabin logic across crates is what produced this
-/// divergence in the first place, and there is still exactly one
-/// implementation. (It could not move to `alas-mass` instead:
-/// `cabin_synchronized` reads an `alas_payload::layout::PayloadLayout` and
-/// `alas-payload` already depends on `alas-mass`.) With both halves of the
-/// rule applied, this preview's operating empty mass matches the full
-/// analysis's to the milligram on every probed preset, against +1 226 kg on
-/// the A320-200 and +12 012 kg on the A380-800 before: see
-/// `examples/preview_cabin_parity.rs`.
+/// `alas_pipeline::full_analysis::cabin_sync`, which is shared rather than
+/// mirrored: there is exactly one implementation of the cabin rule. (It cannot
+/// live in `alas-mass`: `cabin_synchronized` reads an
+/// `alas_payload::layout::PayloadLayout` and `alas-payload` already depends on
+/// `alas-mass`.) With both halves of the rule applied, this preview's
+/// operating empty mass matches the full analysis's.
 pub fn quick_preview_report(
     airplane: Airplane,
     config: &AlasConfig,
@@ -214,6 +218,7 @@ pub fn quick_preview_report(
         payload_layout,
         trimmed_design_point: None,
         cg_envelope_ok: None,
+        neutral_point_conditions: None,
     })
 }
 

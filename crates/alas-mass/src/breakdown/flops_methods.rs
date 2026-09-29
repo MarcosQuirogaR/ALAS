@@ -6,7 +6,7 @@
 //! The eight operating-empty slots use FLOPS grouping, with explicitly
 //! selected LTH cabin/pylon relations and a shaft-power installation branch.
 //! The resolved buildup retains those equation sources. It is independent of
-//! the frozen Torenbeek/fraction compatibility buildup. The mapping into the
+//! the Torenbeek/fraction comparison buildup. The mapping into the
 //! ALAS slots is fixed here:
 //!
 //! | FLOPS | ALAS slot |
@@ -22,8 +22,7 @@
 //! them in the structural group statement, but they sit on the engines and the
 //! ALAS mass stations put them at the nacelle centroid. Because both groups
 //! are always evaluated together here there is no selection under which the
-//! nacelle group can be dropped or added twice, which is what the previous
-//! per-group selection allowed.
+//! nacelle group can be dropped or added twice.
 
 use alas_config::{
     CabinConfig, ControlSurfacesConfig, DesignRequirements, GeometryConfig, MassModelConfig,
@@ -65,6 +64,20 @@ impl FlopsMassBuildup {
         self.airframe
             .structure
             .map_or(0.0, |structure| structure.nacelle_kg)
+    }
+
+    /// The structural group's own `(main_gear_kg, nose_gear_kg)` split
+    /// (FLOPS equations 63/64), before it is summed into the single
+    /// [`MassBreakdown::gear`] slot.
+    ///
+    /// `None` when this buildup carries no structural group (should not
+    /// happen for a successfully built [`FlopsMassBuildup`], since building
+    /// one requires `airframe.structure`, but a buildup carrying only the
+    /// systems/operating-items groups is not ruled out by this type alone).
+    pub fn gear_split_kg(&self) -> Option<(f64, f64)> {
+        self.airframe
+            .structure
+            .map(|structure| (structure.main_gear_kg, structure.nose_gear_kg))
     }
 
     /// The installed engines, reversers, controls, starters and fuel system,
@@ -231,7 +244,7 @@ mod tests {
     };
     use alas_geom::builder::AircraftBuilder;
 
-    use crate::breakdown::calculate_component_masses_checked_product_with_gear;
+    use crate::breakdown::calculate_component_masses_checked_with_gear;
     use crate::flops_transport::FlopsOperatingItemsBreakdown;
 
     fn provenance() -> FlopsInputProvenance {
@@ -316,14 +329,14 @@ mod tests {
         geometry: &GeometryConfig,
         mass_model: &MassModelConfig,
     ) -> MassBreakdown {
-        calculate_component_masses_checked_product_with_gear(
+        calculate_component_masses_checked_with_gear(
             plane,
             requirements,
             geometry,
+            &CabinConfig::default(),
             &ControlSurfacesConfig::default(),
             Some(mass_model),
             &alas_config::LandingGearConfig::default(),
-            &CabinConfig::default(),
         )
         .unwrap_or_else(|error| panic!("the declared fixture must evaluate: {error}"))
     }

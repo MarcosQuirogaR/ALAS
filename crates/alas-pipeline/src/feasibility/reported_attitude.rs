@@ -12,7 +12,7 @@
 //! in panel count, so a supercritical wing reported at sixteen chordwise
 //! panels still sits about half a degree from the extrapolated limit, and the
 //! search mesh sits further still, per an internal VLM resolution-sensitivity
-//! study (2026-09-11).
+//! study.
 //!
 //! Before this check existed nothing closed that loop: `feasibility` tested
 //! the trimmed point for finiteness only, so a candidate selected because its

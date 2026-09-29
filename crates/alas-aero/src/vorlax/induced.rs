@@ -4,7 +4,6 @@
 // Ported from mission analysis model/Methods/Aerodynamics/Common/Fidelity_Zero/Lift/
 // compute_wing_induced_velocity.py.
 // Upstream: mission analysis model 2.5.2, LGPL-2.1.
-// Reference: alas @ rust-port-baseline.
 
 //! The influence of every horseshoe vortex on every control point.
 //!

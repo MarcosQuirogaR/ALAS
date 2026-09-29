@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! W3.2 geometry contracts: the fixture pins the reference figure inventory;
+//! Geometry figure contracts: the fixture pins the reference figure inventory;
 //! scene assertions pin the SVG-facing labels and physical-shape safeguards.
 
 // Fixture construction failures are test-authoring errors, not runtime paths.
@@ -21,7 +21,7 @@ use serde_json::Value;
 
 fn plane() -> Airplane {
     Airplane {
-        name: "W3.2 contract aircraft".to_owned(),
+        name: "contract aircraft".to_owned(),
         xyz_ref: [0.0, 0.0, 0.0],
         wings: vec![
             Wing::new(
@@ -69,11 +69,11 @@ fn plane() -> Airplane {
 }
 
 #[test]
-fn reference_fixture_covers_every_w32_figure_in_both_parity_themes() {
+fn reference_fixture_covers_every_figure_in_both_parity_themes() {
     let fixture: Value = serde_json::from_str(include_str!(
         "../../../golden/report/reference_render_w32.json"
     ))
-    .expect("W3.2 fixture is valid JSON");
+    .expect("fixture is valid JSON");
     let figures = fixture["figures"].as_object().expect("figure map");
     for id in [
         "airfoil_evolution",
@@ -106,7 +106,7 @@ fn reference_contracts_preserve_panel_axes_series_annotations_and_reasons() {
     let fixture: Value = serde_json::from_str(include_str!(
         "../../../golden/report/reference_render_w32.json"
     ))
-    .expect("W3.2 fixture is valid JSON");
+    .expect("fixture is valid JSON");
     let figures = fixture["figures"].as_object().expect("figure map");
 
     let evolution = &figures["design_evolution:light"];

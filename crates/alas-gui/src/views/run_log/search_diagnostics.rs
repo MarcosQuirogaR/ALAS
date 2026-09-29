@@ -42,17 +42,26 @@ pub(super) fn search_ran(state: &AppState) -> bool {
 
 /// Render the diagnostics block above the stage timings.
 pub(super) fn show(state: &AppState, ui: &mut Ui) {
-    ui.label(RichText::new(tr("Search diagnostics")).strong().small());
+    ui.label(RichText::new(tr("Search diagnostics")).strong().small())
+        .on_hover_text(tr(
+            "Scan evaluations use a coarser mesh and a looser sizing closure, so they are not comparable with the full-fidelity count.",
+        ));
     let Some(diagnostics) = current(state) else {
-        let message = if search_ran(state) {
-            // The frozen reference-compatibility replay is the one search
-            // path outside the product L-SHADE driver, and it returns no
-            // lifecycle record. Saying so is not the same as reporting zeros.
-            tr("This run's search method reports no diagnostics.")
+        let (status, help) = if search_ran(state) {
+            // The classic SciPy-compatible profile has no lifecycle record;
+            // saying so is not the same as reporting zero scan or poll work.
+            (
+                tr("No diagnostics reported"),
+                tr("This run's search method reports no diagnostics."),
+            )
         } else {
-            tr("This run included no design search.")
+            (
+                tr("No design search"),
+                tr("This run included no design search."),
+            )
         };
-        ui.label(RichText::new(message).weak().small());
+        ui.label(RichText::new(status).weak().small())
+            .on_hover_text(help);
         ui.add_space(6.0);
         return;
     };
@@ -145,13 +154,6 @@ pub(super) fn show(state: &AppState, ui: &mut Ui) {
                 },
             );
         });
-    ui.label(
-        RichText::new(tr(
-            "Scan evaluations use a coarser mesh and a looser sizing closure, so they are not comparable with the full-fidelity count.",
-        ))
-        .weak()
-        .small(),
-    );
     ui.add_space(6.0);
 }
 

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! The D02 review covers what the optimizer actually emits.
+//! The relaxation policy review covers what the optimizer actually emits.
 //!
 //! `alas_config::optimizer::policy_review` records one determination per
 //! residual identifier, and the value of that record depends entirely on it
@@ -43,13 +43,13 @@ fn every_residual_the_reference_twin_emits_carries_a_d02_determination() {
     }
     assert!(
         unreviewed.is_empty(),
-        "these residuals reach the search with no D02 determination: {unreviewed:?}"
+        "these residuals reach the search with no review determination: {unreviewed:?}"
     );
 }
 
 #[test]
 fn the_shipped_review_admits_no_limit_the_reference_twin_can_produce() {
-    // The D02 outcome, checked against the identifiers a real aircraft
+    // The review outcome, checked against the identifiers a real aircraft
     // actually generates rather than against the register in isolation.
     let assessment = assess_product_candidate(&AlasConfig::default(), &DesignVector::default())
         .expect("the reference twin is assessable");
@@ -84,7 +84,7 @@ fn the_review_gate_rejects_the_policy_the_mechanism_tests_construct() {
     assert_eq!(policy.tolerance_for("wing_area"), Some(0.02));
     let message = policy
         .validate()
-        .expect_err("but the D02 review refuses the configuration");
+        .expect_err("but the review refuses the configuration");
     assert!(message.contains("not eligible for relaxation"), "{message}");
 
     let mut config = AlasConfig::default();

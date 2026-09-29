@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from the legacy mission-request integration (`build_mission_request`).
-// Reference: alas @ rust-port-baseline.
 
 //! The mission half of the mission request.
 //!
@@ -25,12 +24,15 @@
 #[path = "profile/step_climb.rs"]
 mod step_climb;
 
-use alas_atmo::{pressure_isa, temperature_isa, Atmosphere};
+use alas_atmo::Atmosphere;
 use alas_config::airports::Airport;
-use alas_config::mission::{resolve_true_airspeed_m_s, MissionProfileConfig, SpeedReference};
+use alas_config::mission::MissionProfileConfig;
 use alas_config::AlasConfig;
 use serde::Serialize;
-use step_climb::{minimum_cruise_leg_duration_for_step_s, step_climb_levels_m};
+pub use step_climb::configure_cruise_legs;
+use step_climb::{
+    cruise_legs_have_enough_time_to_justify_the_ladder, estimate_non_cruise_distance,
+};
 
 /// A route-aware mission-profile proposal for the guided Inputs editor.
 ///
@@ -71,26 +73,16 @@ pub struct MissionProfileRouteCheck {
     pub fits_route: bool,
 }
 
-/// Propose a profile for a route using the configuration's declared cruise
-/// Mach, cruise altitude and existing climb/descent schedule.
-///
-/// The number of step climbs is selected from the profile's own vertical
-/// levels, rates and speeds. The candidate with the greatest number of active
-/// cruise legs is retained only when two things both hold: its estimated
-/// non-cruise footprint geometrically fits the supplied route, *and* every
-/// cruise leg that footprint leaves behind would fly for at least the
-/// physically derived minimum its own step climb needs to pay back
-/// (see [`cruise_legs_have_enough_time_to_justify_the_ladder`] and
-/// [`minimum_cruise_leg_duration_for_step_s`]). Geometric fit
-/// alone is not enough: a step climb's own horizontal footprint is a small
-/// altitude delta and fits inside almost any route, so a purely geometric
-/// test selects the longest ladder that does not overshoot the route even
-/// when the cruise segments it produces are minutes long, an operationally
-/// nonsensical profile no dispatcher would file. When neither condition
-/// holds for a candidate, the next simpler candidate is tried. No
-/// aircraft-class threshold is introduced here. A route that is shorter than
-/// even the one-cruise footprint returns a one-leg proposal plus a failed
-/// route check for the caller to display.
+/// Propose a profile for a route using its cruise Mach/altitude and configured
+/// climb/descent schedule. The highest candidate is selected when its climb
+/// and descent fit geometrically and its sequential cruise-leg durations allow
+/// the expected optimum-altitude drift to support each 2,000 ft step.
+/// The drift uses a representative fuel-burn fraction because the Inputs
+/// editor has no solved mass/fuel-flow state. ADS-B is an observational check
+/// on the route-scale recommendations, not a live data source or a claim to
+/// predict an individual clearance. A route too short for its initial climb
+/// and descent still returns a one-leg profile plus a failed route check for
+/// the caller to display.
 pub fn propose_profile_for_route(
     config: &AlasConfig,
     origin: &Airport,
@@ -129,16 +121,30 @@ pub fn propose_profile_for_route(
     let origin_elevation_m = origin.elevation_m;
     let arrival_elevation_m = dest.elevation_m;
     let mut selected_legs = 1;
+    let mut selected_profile = profile.clone();
+    configure_cruise_legs(
+        &mut selected_profile,
+        selected_legs,
+        cruise_altitude_m,
+        origin_elevation_m,
+    );
     let mut selected_distance_m = estimate_non_cruise_distance(
-        &profile,
+        &selected_profile,
         cruise_altitude_m,
         origin_elevation_m,
         arrival_elevation_m,
         selected_legs,
     )?;
     for active_cruise_legs in (1..=3).rev() {
+        let mut candidate_profile = profile.clone();
+        configure_cruise_legs(
+            &mut candidate_profile,
+            active_cruise_legs,
+            cruise_altitude_m,
+            origin_elevation_m,
+        );
         let candidate_distance_m = estimate_non_cruise_distance(
-            &profile,
+            &candidate_profile,
             cruise_altitude_m,
             origin_elevation_m,
             arrival_elevation_m,
@@ -146,7 +152,7 @@ pub fn propose_profile_for_route(
         )?;
         let geometrically_fits = candidate_distance_m <= route_distance_m;
         let ladder_is_operationally_worth_it = cruise_legs_have_enough_time_to_justify_the_ladder(
-            &profile,
+            &candidate_profile,
             route_distance_m,
             candidate_distance_m,
             active_cruise_legs,
@@ -156,6 +162,7 @@ pub fn propose_profile_for_route(
         if geometrically_fits && ladder_is_operationally_worth_it {
             selected_legs = active_cruise_legs;
             selected_distance_m = candidate_distance_m;
+            selected_profile = candidate_profile;
             break;
         }
         // Keep the one-leg candidate even when this route cannot accommodate
@@ -163,12 +170,12 @@ pub fn propose_profile_for_route(
         // scale that ladder or report the physical shortfall.
         if active_cruise_legs == 1 {
             selected_distance_m = candidate_distance_m;
+            selected_profile = candidate_profile;
         }
     }
 
-    set_active_cruise_legs(&mut profile, selected_legs);
     Ok(MissionProfileProposal {
-        profile,
+        profile: selected_profile,
         cruise_altitude_m,
         cruise_true_airspeed_m_s,
         active_cruise_legs: selected_legs,
@@ -214,259 +221,6 @@ fn active_cruise_legs(profile: &MissionProfileConfig) -> usize {
     .iter()
     .rposition(|fraction| fraction.is_finite() && *fraction > 1.0e-9)
     .map_or(1, |index| index + 1)
-}
-
-/// The relative share of the post-climb/descent cruise remainder each active
-/// cruise leg would fly, for a candidate with `count` active legs.
-///
-/// Shared by [`set_active_cruise_legs`], which applies this split to the
-/// profile once a candidate is selected, and
-/// [`cruise_legs_have_enough_time_to_justify_the_ladder`], which has to
-/// evaluate the same split for every candidate *before* one is selected: the
-/// two must agree, or the operational check would be gating a different
-/// schedule than the one actually applied.
-fn active_cruise_leg_fractions(profile: &MissionProfileConfig, count: usize) -> [f64; 3] {
-    let count = count.clamp(1, 3);
-    match count {
-        1 => [1.0, 0.0, 0.0],
-        2 => [0.5, 0.5, 0.0],
-        _ => {
-            let total = profile.cruise_1_distance_fraction.max(0.0)
-                + profile.cruise_2_distance_fraction.max(0.0)
-                + profile.cruise_3_distance_fraction.max(0.0);
-            if total > 0.0 {
-                [
-                    profile.cruise_1_distance_fraction.max(0.0) / total,
-                    profile.cruise_2_distance_fraction.max(0.0) / total,
-                    profile.cruise_3_distance_fraction.max(0.0) / total,
-                ]
-            } else {
-                [1.0 / 3.0; 3]
-            }
-        }
-    }
-}
-
-fn set_active_cruise_legs(profile: &mut MissionProfileConfig, count: usize) {
-    let fractions = active_cruise_leg_fractions(profile, count);
-    profile.cruise_1_distance_fraction = fractions[0];
-    profile.cruise_2_distance_fraction = fractions[1];
-    profile.cruise_3_distance_fraction = fractions[2];
-}
-
-/// Whether a candidate with `active_cruise_legs` active cruise legs leaves
-/// every one of them long enough to fly for at least the minimum duration
-/// the step that produced it is worth
-/// ([`minimum_cruise_leg_duration_for_step_s`]), given the route distance
-/// left over after `non_cruise_distance_m` of climb and descent.
-///
-/// A single cruise leg (`active_cruise_legs < 2`) is not a step, it is the
-/// direct cruise every route flies regardless of length, so it is never
-/// gated on a minimum duration; `propose_profile_for_route`'s pre-loop
-/// fallback relies on that to always have a one-leg candidate available.
-/// From two legs up, each additional leg exists only because a step climb
-/// was inserted to produce it, and that climb, sized from
-/// [`step_climb_levels_m`] at `cruise_altitude_m` and
-/// `departure_elevation_m`, is what this function is judging as worth its
-/// own cost.
-fn cruise_legs_have_enough_time_to_justify_the_ladder(
-    profile: &MissionProfileConfig,
-    route_distance_m: f64,
-    non_cruise_distance_m: f64,
-    active_cruise_legs: usize,
-    cruise_altitude_m: f64,
-    departure_elevation_m: f64,
-) -> bool {
-    if active_cruise_legs < 2 {
-        return true;
-    }
-    let cruise_remainder_m = route_distance_m - non_cruise_distance_m;
-    // Checked for finiteness explicitly rather than as a negated comparison:
-    // a NaN remainder means an unusable route or footprint, and it must fail
-    // the ladder rather than compare its way past the test.
-    if !cruise_remainder_m.is_finite() || cruise_remainder_m <= 0.0 {
-        return false;
-    }
-    let fractions = active_cruise_leg_fractions(profile, active_cruise_legs);
-    let cruise_air_speeds_m_s = [
-        profile.cruise_1_air_speed_m_s,
-        profile.cruise_2_air_speed_m_s,
-        profile.cruise_3_air_speed_m_s,
-    ];
-    let levels_m = step_climb_levels_m(profile, cruise_altitude_m, departure_elevation_m);
-    // Leg 1 is the initial climb-out level, not a step; leg 2 is produced by
-    // the step from `levels_m[0]` to `levels_m[1]`; leg 3 by the step from
-    // `levels_m[1]` to `levels_m[2]` (cruise altitude itself).
-    let step_for_leg_m = |leg_index: usize| match leg_index {
-        0 => 0.0,
-        1 => (levels_m[1] - levels_m[0]).max(0.0),
-        _ => (levels_m[2] - levels_m[1]).max(0.0),
-    };
-    fractions
-        .iter()
-        .zip(cruise_air_speeds_m_s.iter())
-        .enumerate()
-        .all(|(leg_index, (&fraction, &speed_m_s))| {
-            if fraction <= 0.0 {
-                // Not one of the active legs; imposes no timing requirement.
-                return true;
-            }
-            if !speed_m_s.is_finite() || speed_m_s <= 0.0 {
-                return false;
-            }
-            let leg_distance_m = cruise_remainder_m * fraction;
-            let leg_duration_s = leg_distance_m / speed_m_s;
-            leg_duration_s >= minimum_cruise_leg_duration_for_step_s(step_for_leg_m(leg_index))
-        })
-}
-
-fn estimate_non_cruise_distance(
-    profile: &MissionProfileConfig,
-    cruise_altitude_m: f64,
-    departure_elevation_m: f64,
-    arrival_elevation_m: f64,
-    active_cruise_legs: usize,
-) -> Result<f64, String> {
-    let mut current_m = departure_elevation_m;
-    let mut distance_m = 0.0;
-    let leg = |current_m: &mut f64,
-               distance_m: &mut f64,
-               target_m: f64,
-               speed_m_s: f64,
-               rate_m_s: f64,
-               midpoint_m: f64| {
-        let delta_m = (target_m - *current_m).abs();
-        if delta_m <= 1.0e-9 {
-            *current_m = target_m;
-            return Ok::<(), String>(());
-        }
-        let speed_m_s = resolved_profile_speed(profile, speed_m_s, midpoint_m)?;
-        if !speed_m_s.is_finite() || speed_m_s <= 0.0 || !rate_m_s.is_finite() || rate_m_s <= 0.0 {
-            return Err(format!(
-                "mission proposal needs positive finite speed/rate, got speed={speed_m_s}, rate={rate_m_s}"
-            ));
-        }
-        if speed_m_s <= rate_m_s {
-            return Err(format!(
-                "mission proposal vertical rate {rate_m_s} m/s is not below airspeed {speed_m_s} m/s"
-            ));
-        }
-        let horizontal_speed_m_s = (speed_m_s * speed_m_s - rate_m_s * rate_m_s).sqrt();
-        *distance_m += delta_m / rate_m_s * horizontal_speed_m_s;
-        *current_m = target_m;
-        Ok(())
-    };
-
-    leg(
-        &mut current_m,
-        &mut distance_m,
-        departure_elevation_m + profile.takeoff_altitude_gain_m,
-        profile.takeoff_air_speed_m_s,
-        profile.takeoff_climb_rate_m_s,
-        departure_elevation_m,
-    )?;
-    // The same levels the ladder-duration check judges, so the footprint and
-    // the check describe one schedule.
-    let [first_level_m, second_level_m, _] =
-        step_climb_levels_m(profile, cruise_altitude_m, departure_elevation_m);
-    let first_level_midpoint_m = 0.5 * (current_m + first_level_m);
-    leg(
-        &mut current_m,
-        &mut distance_m,
-        first_level_m,
-        profile.initial_climb_air_speed_m_s,
-        profile.initial_climb_rate_m_s,
-        first_level_midpoint_m,
-    )?;
-    if active_cruise_legs >= 2 {
-        let second_level_midpoint_m = 0.5 * (current_m + second_level_m);
-        leg(
-            &mut current_m,
-            &mut distance_m,
-            second_level_m,
-            profile.step_climb_1_air_speed_m_s,
-            profile.step_climb_1_rate_m_s,
-            second_level_midpoint_m,
-        )?;
-    }
-    if active_cruise_legs >= 3 {
-        let cruise_midpoint_m = 0.5 * (current_m + cruise_altitude_m);
-        leg(
-            &mut current_m,
-            &mut distance_m,
-            cruise_altitude_m,
-            profile.step_climb_2_air_speed_m_s,
-            profile.step_climb_2_rate_m_s,
-            cruise_midpoint_m,
-        )?;
-    }
-
-    for (altitude_ft, speed_m_s, rate_m_s) in [
-        (
-            profile.descent_1_altitude_ft,
-            profile.descent_1_air_speed_m_s,
-            profile.descent_1_rate_m_s,
-        ),
-        (
-            profile.descent_2_altitude_ft,
-            profile.descent_2_air_speed_m_s,
-            profile.descent_2_rate_m_s,
-        ),
-        (
-            profile.descent_3_altitude_ft,
-            profile.descent_3_air_speed_m_s,
-            profile.descent_3_rate_m_s,
-        ),
-        (
-            profile.descent_4_altitude_ft,
-            profile.descent_4_air_speed_m_s,
-            profile.descent_4_rate_m_s,
-        ),
-    ] {
-        let target_m = altitude_ft * 0.3048;
-        if target_m > arrival_elevation_m && target_m < current_m {
-            let descent_midpoint_m = 0.5 * (current_m + target_m);
-            leg(
-                &mut current_m,
-                &mut distance_m,
-                target_m,
-                speed_m_s,
-                rate_m_s,
-                descent_midpoint_m,
-            )?;
-        }
-    }
-    if arrival_elevation_m < current_m {
-        let landing_midpoint_m = 0.5 * (current_m + arrival_elevation_m);
-        leg(
-            &mut current_m,
-            &mut distance_m,
-            arrival_elevation_m,
-            profile.landing_air_speed_m_s,
-            profile.landing_descent_rate_m_s,
-            landing_midpoint_m,
-        )?;
-    }
-    Ok(distance_m)
-}
-
-fn resolved_profile_speed(
-    profile: &MissionProfileConfig,
-    configured_speed_m_s: f64,
-    altitude_m: f64,
-) -> Result<f64, String> {
-    match profile.climb_descent_speed_reference {
-        SpeedReference::TrueAirspeed => Ok(configured_speed_m_s),
-        SpeedReference::CalibratedAirspeed => resolve_true_airspeed_m_s(
-            SpeedReference::CalibratedAirspeed,
-            configured_speed_m_s,
-            pressure_isa(altitude_m),
-            temperature_isa(altitude_m),
-        )
-        .map_err(|error| {
-            format!("mission proposal could not resolve calibrated airspeed: {error}")
-        }),
-    }
 }
 
 /// The mission half of the request handed to the segment network.
@@ -705,17 +459,10 @@ mod tests {
 
     #[test]
     fn a_route_at_the_edge_of_the_earth_keeps_the_declared_three_leg_profile() {
-        // Under the corrected, physically derived minimum leg duration
-        // (item 6, physics review v1.2 section 2.3), the default profile's
-        // ~1,200 m step-climb levels each need on the order of six hours of
-        // cruise to be worth flying to (`minimum_cruise_leg_duration_for_step_s`),
-        // so the third leg is only reachable on a route far longer than any
-        // real nonstop sector (the longest scheduled routes run to roughly
-        // 15,000-17,000 km; Earth's antipodal great-circle distance caps out
-        // at about 20,015 km). This route is chosen only to exercise the
-        // three-leg code path, not to model a real one; see
-        // `a_long_route_keeps_the_two_leg_profile_under_the_corrected_minimum`
-        // for the behaviour at a realistic ultra-long-haul distance.
+        // A 2,000 ft interval takes about 4.45 cruise hours under the current
+        // altitude-drift prior and transition margin. This route is an
+        // implementation boundary that exercises two step climbs; it is not
+        // a validation case for a real aircraft route.
         let config = AlasConfig::default();
         let proposal = propose_profile_for_route(
             &config,
@@ -733,16 +480,9 @@ mod tests {
     }
 
     #[test]
-    fn a_long_route_keeps_the_two_leg_profile_under_the_corrected_minimum() {
-        // A 12,000 km sector (longer than all but a handful of real
-        // scheduled routes) geometrically fits the full three-leg ladder,
-        // but the third leg would be too short to recoup its step climb
-        // under the corrected minimum, so the proposal steps back to two
-        // legs instead. This is the intended behaviour change from item 6:
-        // the previous flat 30-minute threshold accepted the third leg here
-        // (see the removed `a_long_route_keeps_the_declared_three_leg_profile`
-        // at 12,000 km), which the physics review found permissive by
-        // roughly 5-8x against the actual optimum-altitude drift rate.
+    fn a_long_route_uses_two_step_climbs_when_total_cruise_time_supports_them() {
+        // A 12,000 km sector leaves enough time in each sequential cruise
+        // leg for two 2,000 ft increments under the first-order drift model.
         let config = AlasConfig::default();
         let proposal = propose_profile_for_route(
             &config,
@@ -752,10 +492,10 @@ mod tests {
         )
         .expect("the long route has a valid default profile");
 
-        assert_eq!(proposal.active_cruise_legs, 2);
+        assert_eq!(proposal.active_cruise_legs, 3);
         assert!(proposal.profile.cruise_1_distance_fraction > 0.0);
         assert!(proposal.profile.cruise_2_distance_fraction > 0.0);
-        assert_eq!(proposal.profile.cruise_3_distance_fraction, 0.0);
+        assert!(proposal.profile.cruise_3_distance_fraction > 0.0);
         assert!(proposal.non_cruise_distance_m <= proposal.route_distance_m);
     }
 

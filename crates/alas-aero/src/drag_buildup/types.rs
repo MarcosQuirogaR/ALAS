@@ -4,7 +4,6 @@
 // Ported from mission analysis model/Analyses/Aerodynamics/Fidelity_Zero.py and the
 // mission analysis model/Methods/Aerodynamics/Common/Fidelity_Zero/Drag/ family.
 // Upstream: mission analysis model 2.5.2, LGPL-2.1.
-// Reference: alas @ rust-port-baseline.
 
 //! The inputs the drag buildup reads and the breakdown it reports.
 
@@ -101,8 +100,7 @@ pub struct Freestream {
 /// `span_efficiency` at its `None` default the inviscid induced drag *is*
 /// `drag_breakdown.induced.inviscid_wings[tag]`, which
 /// `mission analysis model.Analyses.Aerodynamics.Vortex_Lattice` writes, so this row takes
-/// the lift solution as input, the same way `alas-mass::transport_weight`
-/// takes `sealevel_static_thrust` from `turbofan_sizing`.
+/// the lift solution as input.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct WingParams {
     /// Mean aerodynamic chord, in metres.

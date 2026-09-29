@@ -19,9 +19,8 @@ use alas_opt::{assess_product_candidate, CandidateAssessment};
 /// not whether the bounds happened to permit it.
 ///
 /// The mode is stated here rather than inherited. A bare `{"preset": name}`
-/// document used to load as a clean sheet, which is what these tests were
-/// written against; it now defaults to `ReferenceAdaptation`, whose envelope
-/// is the D09 window around the registered reference and which therefore
+/// document defaults to `ReferenceAdaptation`, whose envelope
+/// is the +/-10 % window around the registered reference and which therefore
 /// rejects a deliberately broken shape with `design_space` before any
 /// plausibility residual is reached. That default is correct for the product
 /// (adapting a registered aircraft is what a preset document asks for) and
@@ -68,7 +67,7 @@ const PLAUSIBILITY_IDS: &[&str] = &[
 /// The registered aircraft whose *sized* fuselage leaves the validity domain
 /// even though the aircraft itself does not.
 ///
-/// Measured with `examples/plausibility_survey`. As built from the preset
+/// As built from the preset
 /// geometry, every registered type has a transport fuselage: fineness 9.2 to
 /// 12.4 and a tail arm of 0.42 to 0.48 of body length. Evaluating the same
 /// aircraft in the **clean-sheet** design mode, which these tests use because
@@ -82,10 +81,9 @@ const PLAUSIBILITY_IDS: &[&str] = &[
 ///
 /// In `DesignMode::ReferenceAdaptation`, which is the mode a registered
 /// aircraft is actually optimized in, the fuselage is not re-derived and the
-/// distortion does not occur: an internal all-preset benchmark (2026-09-16)
-/// records no plausibility residual among any preset's rejection reasons.
-/// The defect is therefore in the cabin-derived fuselage sizing, which is not
-/// this worker's slice.
+/// distortion does not occur: no plausibility residual appears among any
+/// preset's rejection reasons. The defect is therefore in the cabin-derived
+/// fuselage sizing.
 ///
 /// This list is an expectation, not a permission: when the cabin/geometry
 /// owner fixes it, the assertion below fails and the entry is deleted.
@@ -103,9 +101,8 @@ fn only_the_recorded_cabin_defect_pushes_a_registered_aircraft_out_of_the_domain
         let assessment = match assess(preset, nominal(preset)) {
             Ok(assessment) => assessment,
             // A preset that cannot be sized at all under its default
-            // configuration is a separate finding, owned by the mass and
-            // mission models, and is reported by the benchmark rather than
-            // asserted on here.
+            // configuration is a matter for the mass and mission models,
+            // not asserted on here.
             Err(_) => continue,
         };
         let recorded = SIZED_FUSELAGE_LEAVES_THE_DOMAIN.contains(&preset);
@@ -226,7 +223,7 @@ fn the_washout_residual_measures_tip_incidence_less_root_incidence() {
     // washout, even though the variable is labelled "Geometric washout at
     // tip": the builder writes it straight onto the tip section while the
     // root takes `geometry.wing.root_twist_deg`, +4.0 deg on AVE. The AVE
-    // clean-sheet finalist of the 2026-09-16 benchmark sits at
+    // clean-sheet finalist of the all-preset benchmark sits at
     // `tip_twist_deg = +1.0`, which is 3.0 degrees of *washout*, not wash-in.
     // This is the check that keeps the two quantities from being confused
     // again.

@@ -18,6 +18,7 @@ fn settings(seed: u64, population: usize, generations: usize) -> Settings {
         spread_tolerance: 0.01,
         stagnation_generations: 5,
         block_size: usize::MAX,
+        seed_radius: Some(0.05),
     }
 }
 
@@ -39,6 +40,26 @@ fn scored_1d(values: &[f64]) -> ScoredPoint {
         constraint_violation: (0.4 - x).max(0.0),
         objectives: [x * x, x, x],
     }
+}
+
+#[test]
+fn cancellation_inside_the_final_evaluation_block_is_not_a_budget_completion() {
+    let watch = CancelWatch::new();
+    let mut evaluate = |points: &[Vec<f64>]| {
+        watch.request_cancellation();
+        points.iter().map(|values| scored_1d(values)).collect()
+    };
+    let outcome = run(
+        &[(0.0, 1.0)],
+        settings(7, 4, 0),
+        Some(&[0.7]),
+        &CancelScope::attach(Some(watch.flag())),
+        &mut evaluate,
+    );
+    assert!(outcome.cancelled);
+    assert!(!outcome.converged);
+    assert_eq!(outcome.evaluations, 4);
+    assert!(outcome.winner.valid);
 }
 
 #[test]
@@ -392,6 +413,7 @@ fn a_run_with_a_stable_feasible_population_reports_convergence() {
             spread_tolerance: 0.05,
             stagnation_generations: 4,
             block_size: usize::MAX,
+            seed_radius: Some(0.05),
         },
         None,
         &CancelScope::attach(None),
@@ -405,4 +427,111 @@ fn a_run_with_a_stable_feasible_population_reports_convergence() {
     );
     assert!(outcome.generations_completed < 200);
     assert_eq!(outcome.epsilon_final, 0.0);
+}
+
+#[test]
+fn conditioned_initialization_preserves_a_narrow_feasible_basin_and_explores_globally() {
+    // A synthetic 16-coordinate corridor: independent global samples almost
+    // never satisfy all coupled limits simultaneously. This is search
+    // verification, not calibration against an aircraft's physical response.
+    let bounds = vec![(0.0, 1.0); 16];
+    let initial = vec![0.5; 16];
+    let mut seen = Vec::new();
+    let mut evaluate = |points: &[Vec<f64>]| {
+        seen.extend(points.iter().cloned());
+        points
+            .iter()
+            .map(|values| {
+                let violation: f64 = values
+                    .iter()
+                    .map(|x| ((x - 0.5).abs() - 0.04).max(0.0))
+                    .sum();
+                let cost: f64 = values.iter().map(|x| (x - 0.52).powi(2)).sum();
+                ScoredPoint {
+                    values: values.clone(),
+                    cost,
+                    valid: violation == 0.0,
+                    constraint_violation: violation,
+                    objectives: [cost; 3],
+                }
+            })
+            .collect()
+    };
+    let outcome = run(
+        &bounds,
+        Settings {
+            seed_radius: Some(0.025),
+            ..settings(7, 64, 30)
+        },
+        Some(&initial),
+        &CancelScope::attach(None),
+        &mut evaluate,
+    );
+    let initial_population = &seen[..64];
+    assert!(initial_population[..48]
+        .iter()
+        .all(|point| point.iter().all(|x| (x - 0.5).abs() <= 0.025)));
+    assert!(initial_population[48..]
+        .iter()
+        .any(|point| point.iter().any(|x| (x - 0.5).abs() > 0.2)));
+    assert!(outcome.winner.valid);
+    assert!(
+        outcome.winner.cost < 0.7 * 16.0 * 0.02_f64.powi(2),
+        "{:?}",
+        outcome.winner
+    );
+}
+
+#[test]
+fn epsilon_never_evicts_a_feasible_parent_for_an_invalid_objective_exploit() {
+    let feasible = scored_1d(&[0.7]);
+    let mut exploit = scored_1d(&[0.1]);
+    exploit.cost = -1.0e9;
+    assert!(ops::epsilon_key(&feasible, 1.0) < ops::epsilon_key(&exploit, 1.0));
+    exploit.constraint_violation = 0.0;
+    assert!(ops::epsilon_key(&feasible, 0.0) < ops::epsilon_key(&exploit, 0.0));
+    exploit.constraint_violation = f64::INFINITY;
+    assert!(ops::epsilon_key(&feasible, f64::INFINITY) < ops::epsilon_key(&exploit, f64::INFINITY));
+}
+
+#[test]
+fn feasibility_restoration_updates_adaptation_even_when_failure_cost_is_constant() {
+    let mut parent = scored_1d(&[0.1]);
+    let mut trial = scored_1d(&[0.3]);
+    parent.cost = 1.0e6;
+    trial.cost = parent.cost;
+    let weight = ops::selection_improvement(&parent, &trial);
+    assert!(weight > 0.0 && weight.is_finite());
+    let mut f = [0.5; MEMORY_SIZE];
+    let mut cr = [0.5; MEMORY_SIZE];
+    let mut index = 0;
+    ops::update_memory(&mut f, &mut cr, &mut index, &[(0.8, 0.7, weight)]);
+    assert_eq!(index, 1);
+    assert!((f[0] - 0.8).abs() < 1.0e-12);
+}
+
+#[test]
+fn locked_coordinates_do_not_dilute_the_convergence_measure() {
+    let mut bounds = vec![(3.0, 3.0); 15];
+    bounds.push((0.0, 1.0));
+    let mut first = vec![3.0; 16];
+    let mut second = first.clone();
+    first[15] = 0.2;
+    second[15] = 0.8;
+    assert!((ops::normalized_spread(&[first, second], &bounds) - 0.6).abs() < 1.0e-12);
+}
+
+#[test]
+fn all_fixed_coordinates_do_not_launch_generations() {
+    let mut evaluate = batch_of(scored_1d);
+    let outcome = run(
+        &[(0.7, 0.7)],
+        settings(3, 4, 100),
+        None,
+        &CancelScope::attach(None),
+        &mut evaluate,
+    );
+    assert_eq!(outcome.generations_completed, 0);
+    assert!(outcome.winner.valid);
+    assert!(!outcome.converged);
 }

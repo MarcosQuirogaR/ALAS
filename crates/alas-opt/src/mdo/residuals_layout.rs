@@ -61,6 +61,7 @@ pub(super) fn layout_residuals(
     }
     let plane = &outcome.plane;
     let mut residuals = Vec::new();
+    residuals.extend(root_to_kink_te_angle_residual(outcome, config, policy));
     residuals.extend(wing_root_incidence_residuals(config, policy));
     if let (Some(fuselage_length), Some(root), Some(tip)) = (
         fuselage_length_m(plane),
@@ -74,6 +75,43 @@ pub(super) fn layout_residuals(
     }
     residuals.extend(wave_drag_ceiling_residual(outcome, config, policy));
     residuals
+}
+
+/// Keep the trailing-edge ray from the fuselage centreline to the kink at or
+/// below 90 degrees to the aft fuselage axis. A negative signed TE sweep is
+/// the same forward-running root-to-kink edge in the aircraft x-aft frame.
+fn root_to_kink_te_angle_residual(
+    outcome: &SizingOutcome,
+    config: &AlasConfig,
+    policy: ConstraintPolicy,
+) -> Vec<ConstraintResidual> {
+    const MAX_ANGLE_DEG: f64 = 90.0;
+    let Ok(planform) = config.geometry.wing.transport_planform(&outcome.history.dv) else {
+        return vec![ConstraintResidual::direct(
+            "root_to_kink_te_angle_unavailable",
+            Geometry,
+            1.0,
+            0.0,
+            "bool",
+            1.0,
+            1.0,
+            policy,
+        )];
+    };
+    let root_te_x_m = planform.root.leading_edge_x_m + planform.root.chord_m;
+    let kink_te_x_m = planform.kink.leading_edge_x_m + planform.kink.chord_m;
+    let angle_deg = (planform.kink.y_m - planform.root.y_m)
+        .atan2(kink_te_x_m - root_te_x_m)
+        .to_degrees();
+    vec![ConstraintResidual::scaled(
+        "root_to_kink_te_angle",
+        Geometry,
+        angle_deg,
+        MAX_ANGLE_DEG,
+        "deg",
+        angle_deg - MAX_ANGLE_DEG,
+        policy,
+    )]
 }
 
 /// Overall fuselage length in metres, from the primary body's sections.

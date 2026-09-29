@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/reporting/visualization.py (`figure_stability_metrics`)
-// Reference: alas @ rust-port-baseline.
 
 //! Stability number line and the report polar's Cm-versus-CL view.
 

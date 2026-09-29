@@ -3,7 +3,6 @@
 
 // Ported from alas/sidecar/figures_extra.py (`_draw_runway`, `_draw_bars`,
 // `_figure_lto`, `figure_lto_departure`, and `figure_lto_arrival`).
-// Reference: alas @ rust-port-baseline.
 
 //! Landing and take-off runway and required-versus-available distance figures.
 
@@ -63,7 +62,9 @@ pub fn figure_lto_for_airport(
     role: &str,
     theme: Option<&str>,
 ) -> Scene {
-    let takeoff_mass_kg = config.requirements.mtow_kg;
+    // The sized takeoff mass when the report carries one, never the declared
+    // MTOW ceiling.
+    let takeoff_mass_kg = report.analysis_takeoff_mass_kg(config.requirements.mtow_kg);
     let landing_mass_kg = config
         .design_landing_mass_for(takeoff_mass_kg)
         .clamp(0.0, takeoff_mass_kg);
@@ -82,7 +83,7 @@ pub fn figure_lto_for_airport(
 ///
 /// Pipeline and GUI callers should use this entry point so a tank-limited
 /// takeoff or mission-derived arrival is not silently redrawn at configured
-/// MTOW/MLW. The legacy wrapper remains for standalone report construction
+/// MTOW/MLW. The wrapper without masses remains for standalone report construction
 /// where no completed load state exists.
 pub fn figure_lto_for_airport_at_masses(
     report: &AnalysisReport,
@@ -131,7 +132,7 @@ pub fn figure_lto_for_airport_at_masses(
     let tw_sl = if takeoff_weight_n.is_finite() && takeoff_weight_n > 0.0 {
         rated_thrust_n / takeoff_weight_n
     } else {
-        static_thrust_to_weight(config, 0.30)
+        static_thrust_to_weight(config, takeoff_mass_kg, 0.30)
     };
     let performance = compute_field_performance_at_masses(
         takeoff_mass_kg,
@@ -547,9 +548,9 @@ mod tests {
     }
 
     /// The V1/VR/V2 dashed markers must sit within the drawn TODR distance,
-    /// scaled the same way as the golden `gen_w62_lto.py` sidecar (by
-    /// `todr_m`, not by the full declared TODA). A prior port regression
-    /// scaled by TODA instead, pushing the markers far past the TODR/BFL
+    /// scaled the same way as the LTO golden sidecar (by
+    /// `todr_m`, not by the full declared TODA). Scaling by TODA
+    /// would push the markers far past the TODR/BFL
     /// arrows whenever TODR is a small fraction of the available runway.
     #[test]
     fn v_speed_markers_are_scaled_by_todr_not_toda() {

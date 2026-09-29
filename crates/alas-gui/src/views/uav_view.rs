@@ -85,15 +85,15 @@ pub fn show_uav_view(state: &mut AppState, ui: &mut Ui) {
 fn outcome(state: &UavWorkflowState, ui: &mut Ui) {
     if let Some(topology) = state.last_completed_topology {
         card(ui, "Design convention", None, |ui| {
-            ui.label(tr_fields(
-                "Design convention used by this result: {topology}",
-                &[("topology", tr(topology.label()))],
-            ));
+            ui.label(tr(topology.label()));
             if topology != state.topology {
                 ui.colored_label(
                     ui.visuals().warn_fg_color,
-                    tr("The selected convention differs from this result; run again to update it."),
-                );
+                    tr("Convention changed; run again"),
+                )
+                .on_hover_text(tr(
+                    "The selected convention differs from this result; run again to update it.",
+                ));
             }
         });
         ui.add_space(8.0);
@@ -141,9 +141,8 @@ fn outcome(state: &UavWorkflowState, ui: &mut Ui) {
                     }
                 }
                 ui.add_space(4.0);
-                ui.weak(tr(
-                    "A missing-data rejection is an unverified constraint, not proof that the hardware is physically impossible.",
-                ));
+                ui.weak(tr("Missing data leaves constraints unverified"))
+                    .on_hover_text(tr("A missing-data rejection is an unverified constraint, not proof that the hardware is physically impossible."));
             });
             if let Some(rejected) = &summary.best_evaluated {
                 ui.add_space(8.0);
@@ -174,9 +173,8 @@ fn outcome(state: &UavWorkflowState, ui: &mut Ui) {
             } else {
                 ui.add_space(8.0);
                 card(ui, "Generated planform and installed layout", None, |ui| {
-                    ui.weak(tr(
-                        "No airframe figure is shown because every candidate stopped before a physically complete geometry could be generated; the electrical mission above remains the valid result artifact.",
-                    ));
+                    ui.weak(tr("No complete geometry generated"))
+                        .on_hover_text(tr("No airframe figure is shown because every candidate stopped before a physically complete geometry could be generated; the electrical mission above remains the valid result artifact."));
                 });
             }
         }
@@ -379,9 +377,10 @@ fn layout_plot_rejected(rejected: &RejectedUav, ui: &mut Ui) {
 fn rejected_metrics(rejected: &RejectedUav, ui: &mut Ui) {
     let Some(metrics) = rejected.metrics else {
         card(ui, "Preliminary design metrics", None, |ui| {
-            ui.weak(tr(
-                "Objective metrics were unavailable for this rejected candidate.",
-            ));
+            ui.weak(tr("Objective metrics unavailable"))
+                .on_hover_text(tr(
+                    "Objective metrics were unavailable for this rejected candidate.",
+                ));
         });
         return;
     };

@@ -169,8 +169,8 @@ pub(super) fn score_candidate(objective: &mut DesignObjective, inputs: Objective
 
     if subjective_shape_priors_active {
         // Wing position and fuselage proportions are configurable design
-        // priors, not universal laws. In particular, the historical
-        // absolute fuselage floor is not valid across aircraft classes.
+        // priors, not universal laws. In particular, an absolute fuselage
+        // floor is not valid across aircraft classes.
         let x_wing_le = if !plane.wings.is_empty() && !plane.wings[0].xsecs.is_empty() {
             plane.wings[0].xsecs[0].xyz_le[0]
         } else {
@@ -272,8 +272,8 @@ pub(super) fn score_candidate(objective: &mut DesignObjective, inputs: Objective
     }
 
     if !transport_constraints_active {
-        // Legacy product and reference replay retain the historical taper
-        // and root-corner proxies when transport constraints are disabled.
+        // Keep the taper and root-corner proxies when transport constraints
+        // are disabled.
         let taper_ratio_break = dv.break_chord_m / dv.root_chord_m.max(0.1);
         if taper_ratio_break > w.max_break_root_chord_ratio {
             let excess = taper_ratio_break - w.max_break_root_chord_ratio;
@@ -286,9 +286,27 @@ pub(super) fn score_candidate(objective: &mut DesignObjective, inputs: Objective
             let dx_break_root = y_break_root * dv.sweep_deg.to_radians().tan();
             let te_dx_root = dx_break_root + dv.break_chord_m - dv.root_chord_m;
             let te_angle_deg = y_break_root.atan2(te_dx_root).to_degrees();
-            if te_angle_deg > 90.0 {
+            if te_angle_deg > 90.0 && objective.reference_mass_coordinates {
+                // The reference objective scores this as a soft
+                // quadratic penalty; the parity replay keeps that.
                 let excess_deg = te_angle_deg - 90.0;
                 cost += excess_deg.powi(2) * w.te_root_angle_penalty_scale;
+            } else if te_angle_deg > 90.0 {
+                // This is the requested geometry limit, so a miss is
+                // infeasible rather than another L/D trade in the score.
+                let cost = w.failure_cost;
+                objective.history.record(
+                    dv,
+                    false,
+                    cost,
+                    ld,
+                    dv.span_m,
+                    alpha,
+                    plane.s_ref,
+                    trim_ih,
+                    "inboard_te_angle",
+                );
+                return cost;
             }
         }
     }

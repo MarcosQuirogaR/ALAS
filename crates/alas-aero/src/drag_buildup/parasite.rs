@@ -5,7 +5,6 @@
 //   parasite_drag_wing.py, parasite_drag_fuselage.py, parasite_drag_nacelle.py,
 //   parasite_drag_pylon.py and parasite_total.py
 // Upstream: mission analysis model 2.5.2, LGPL-2.1.
-// Reference: alas @ rust-port-baseline.
 
 //! Parasite drag, component by component.
 //!

@@ -184,14 +184,21 @@ mod load_notes_tests {
     }
 
     #[test]
-    fn a_document_that_already_names_the_one_supported_method_carries_no_note() {
-        for data in [
-            serde_json::json!({}),
-            serde_json::json!({ "optimizer": { "solver": { "method": "differential_evolution" } } }),
+    fn a_supported_profile_or_omitted_method_carries_no_note() {
+        for (data, expected_method) in [
+            (serde_json::json!({}), "scipy_legacy"),
+            (
+                serde_json::json!({ "optimizer": { "solver": { "method": "differential_evolution" } } }),
+                "differential_evolution",
+            ),
+            (
+                serde_json::json!({ "optimizer": { "solver": { "method": "scipy_legacy" } } }),
+                "scipy_legacy",
+            ),
         ] {
             assert_eq!(legacy_solver_method(&data), None);
             let (config, notes) = AlasConfig::from_value_with_notes(&data).unwrap();
-            assert_eq!(config.optimizer.solver.method, "differential_evolution");
+            assert_eq!(config.optimizer.solver.method, expected_method);
             assert!(notes.legacy_solver_method.is_none());
             assert!(notes.messages().is_empty(), "{data}");
         }

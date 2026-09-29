@@ -18,10 +18,8 @@ pub fn optimized_baseline() -> (Catalog, OptimizedUav) {
 }
 
 fn build_optimized_baseline() -> (Catalog, OptimizedUav) {
-    let catalog = Catalog::from_json(include_str!(
-        "../../examples/data/optimizer_audit_catalog.json"
-    ))
-    .expect("the reviewed synthetic catalogue must parse");
+    let catalog = Catalog::from_json(include_str!("../data/optimizer_catalog.json"))
+        .expect("the reviewed synthetic catalogue must parse");
     let maps = propulsion_maps();
     let optimized = optimize(&problem(&catalog, &maps, 256))
         .expect("the evidence-complete product test problem must optimize");

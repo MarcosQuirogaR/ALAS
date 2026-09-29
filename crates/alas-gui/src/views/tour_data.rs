@@ -3,9 +3,7 @@
 
 //! The first-run walkthrough's steps.
 //!
-//! A direct port of the reference desktop app's `Walkthrough.tsx` `TOUR_STEPS`.
-//! The reference spotlights a DOM element per step. This port names the same
-//! semantic shell targets; [`crate::app`] records their actual egui response
+//! Each step names a semantic shell target; [`crate::app`] records their actual egui response
 //! rectangles after layout rather than predicting their pixel geometry.
 
 /// A shell region measured from a real egui response for the spotlight.
@@ -81,7 +79,7 @@ pub const TOUR_STEPS: &[TourStep] = &[
     },
     TourStep {
         title: "Help on every option",
-        body: "Hover any field's label for an explanation. Prefer a leaner screen? Toggle in the top bar's \"Help\" > \"Learn-more help\" to hide these instantly.",
+        body: "Hover a field label or section title for a detailed explanation.",
         page: Some("aerodynamics"),
         target: Some(TourTarget::Content),
     },
@@ -190,9 +188,7 @@ mod tests {
         assert_eq!(TOUR_STEPS[3].title, "Sandbox mode");
         assert_eq!(TOUR_STEPS[3].page, Some("inputs"));
         assert!(TOUR_STEPS[4].body.contains("when in the standard mode"));
-        assert!(TOUR_STEPS[6]
-            .body
-            .contains("\"Help\" > \"Learn-more help\""));
+        assert!(TOUR_STEPS[6].body.contains("Hover a field label"));
         // Setup > Analyses (`analyses_view.rs`) locks exactly these four
         // disciplines as "always runs"; native mission is an optional
         // per-run toggle, not part of that always-run set.
@@ -219,7 +215,6 @@ mod tests {
                     "no run needed",
                     "no Run needed",
                     "Analyze reference",
-                    "MADS",
                     "View > ",
                     "View menu",
                     "barto",

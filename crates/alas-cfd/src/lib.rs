@@ -29,7 +29,13 @@ use serde::{Deserialize, Serialize};
 pub mod mesh;
 pub mod surface;
 
-/// Version of the generated topology and dictionary contract.  `v5` makes the
+/// Version of the generated topology and dictionary contract. `v7` provides
+/// sharp-leading-edge boundary-layer fans, the named compressible gradient
+/// limiter, and supersonic streamwise boundary/pressure-limit corrections.
+/// `v6` requests
+/// at least one inner iteration for each solved equation and preserves scalar
+/// values with 17-digit ASCII output. Residual acceptance is unchanged.
+/// `v5` makes the
 /// pressure-equation non-orthogonal treatment, the inner pressure relative
 /// tolerance, the gradient limiter, the turbulence convection scheme and the
 /// momentum linear solver explicit configuration instead of template literals;
@@ -37,14 +43,14 @@ pub mod surface;
 /// the difference is a control surface and a provenance label, not physics.
 /// `v4` pairs the
 /// SIMPLEC (`consistent yes`) loop with SIMPLEC relaxation factors instead of
-/// the SIMPLE pair it previously emitted, and sizes the boundary-layer stack
+/// the SIMPLE pair, and sizes the boundary-layer stack
 /// from the estimated turbulent boundary-layer thickness; a `v3` case reaches
 /// the same fixed point but takes markedly more outer iterations and leaves
 /// the outer boundary layer on isotropic cells.  `v3` fixed the `forceCoeffs`
 /// pitch axis to `(0 0 -1)` so the reported `Cm` is positive nose-up, matching
 /// the recorded frame convention and the native surface integration; `v2`
 /// cases report `Cm` with the opposite sign.
-pub const TEMPLATE_VERSION: &str = "alas-airfoil-2d-openfoam-gmsh-v5";
+pub const TEMPLATE_VERSION: &str = "alas-airfoil-2d-openfoam-gmsh-v7";
 /// Nominal span of the thin 2-D extrusion, relative to chord.
 pub const EXTRUSION_SPAN_TO_CHORD: f64 = 0.01;
 
@@ -711,7 +717,7 @@ mod tests {
 
     #[test]
     fn a_finite_but_impossible_coefficient_is_refused_as_a_failed_result() {
-        // Exactly the measured tail of an internal relaxation probe (2026-09-16),
+        // Exactly the measured tail of an internal relaxation probe,
         // case `P3-relax-07-08`: the process exited cleanly, checkMesh passed,
         // and the solver reported finite numbers no section can produce.
         // Before this screen it was labelled only
@@ -900,7 +906,7 @@ mod tests {
     fn the_solver_stage_budget_covers_the_work_actually_requested() {
         // The shipped 1800 s is a fine guard for gmsh and checkMesh and a bad
         // one for the solver.  Cell counts are the measured ones from an
-        // internal CFD convergence study (2026-09-16).
+        // internal CFD convergence study.
         let solver = SolverSettings::default();
         assert_eq!(solver.timeout_seconds, 1_800);
         assert_eq!(solver.max_iterations, 2_000);
@@ -940,7 +946,7 @@ mod tests {
     #[test]
     fn an_equation_that_stopped_being_solved_cannot_satisfy_the_residual_gate() {
         // Every residual series below is the measured tail of a real case in an
-        // internal CFD convergence study (2026-09-16), because the whole
+        // internal CFD convergence study, because the whole
         // question is which of two behaviours the artifacts actually show.
         let config = CfdStudyConfig::default();
         let stationary_forces = (0..config.solver.force_window)
@@ -1032,10 +1038,20 @@ mod tests {
         assert!(detail.contains("ASCII precision"), "{detail}");
         assert!(detail.contains("OBSERVATION, not a proven"), "{detail}");
         assert!(!detail.contains("stopped being updated"), "{detail}");
+        let mut pressure_limited = build(0, 30);
+        for sample in &mut pressure_limited {
+            if sample.field == "p" {
+                sample.initial = 6.0e-5;
+            }
+        }
+        let (limited_outcome, limited_detail) = judge(&pressure_limited);
+        assert_eq!(limited_outcome, CfdOutcome::Failed);
+        assert!(limited_detail.contains("Independently"), "{limited_detail}");
+        assert!(limited_detail.contains("p 6.000e-5"), "{limited_detail}");
         // `k` is named too.  It sits at `6.661e-9`, only 0.67x the inner
         // solver's own tolerance, so no residual-depth rule reaches it, but its
         // field is just as frozen as omega's, and that is what is measured.
-        // This is the negative control the guard previously failed.
+        // This is the negative control for the guard.
         assert!(detail.contains("k 6.661e-9"), "{detail}");
         assert!(
             detail.contains("unchanged in all 82993 internal cells"),

@@ -92,7 +92,7 @@ print_stdout = "deny"
 print_stderr = "deny"
 dbg_macro = "deny"
 # A panic in library code is a bug. Analyses that cannot produce a number report
-# it through the stage status contract instead (see alas-types).
+# it through its typed status or error value instead.
 unwrap_used = "deny"
 expect_used = "deny"
 todo = "warn"
@@ -110,4 +110,14 @@ strip = "symbols"
 # Parity tests replay full analyses; running them at opt-level 0 makes the suite
 # slow enough that it stops being run.
 [profile.test]
+opt-level = 2
+# Full debuginfo on 170-odd integration-test binaries makes linking (and the
+# PDBs it writes on MSVC) a large share of a workspace test run. Line tables
+# keep file:line in panic backtraces; codegen and float semantics are unchanged.
+debug = "line-tables-only"
+
+# Debug builds of the application otherwise run resvg, tiny-skia, faer and egui
+# unoptimized, which makes an interactive debug session unusably slow. Only
+# third-party packages are affected; workspace crates keep opt-level 0.
+[profile.dev.package."*"]
 opt-level = 2

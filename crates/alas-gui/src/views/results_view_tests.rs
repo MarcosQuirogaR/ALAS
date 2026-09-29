@@ -458,6 +458,7 @@ mod maximized_overlay {
                     ctx,
                     FullscreenFigure {
                         scene,
+                        revision: 1,
                         config,
                         theme: "Dark",
                         camera_key: CAMERA_KEY,
@@ -563,7 +564,6 @@ fn a_result_figure_card_shows_its_explanation_only_as_hover_text() {
         .expect("a registered result figure with an explanation");
     let context = Context::default();
     let mut state = AppState {
-        help_verbose: true,
         ..Default::default()
     };
     let config = state
@@ -597,6 +597,6 @@ fn a_result_figure_card_shows_its_explanation_only_as_hover_text() {
     );
     assert!(
         !painted.iter().any(|text| text == descriptor.description),
-        "Learn-more help must not repeat the hover explanation as a subtitle: {painted:?}"
+        "The hover explanation must not be painted as a subtitle: {painted:?}"
     );
 }

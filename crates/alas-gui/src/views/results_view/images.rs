@@ -127,6 +127,32 @@ pub(super) fn external_image(
         .sense(egui::Sense::click())
 }
 
+/// A load already attempted and refused: no `state.patran_textures` field
+/// exists for failures, so `None` was retried by reading and decoding the
+/// file again on every repaint. The memo lapses on a new run, and after
+/// [`FAILED_LOAD_RETRY`] within one, since an external solver can write the
+/// image after a snapshot has already named it.
+#[derive(Clone, Copy)]
+struct FailedExternalLoad {
+    run_identity: u64,
+    at: std::time::Instant,
+}
+
+const FAILED_LOAD_RETRY: std::time::Duration = std::time::Duration::from_secs(2);
+
+fn record_load_failure(
+    context: &egui::Context,
+    id: Id,
+    run_identity: u64,
+) -> Option<egui::TextureHandle> {
+    let failure = FailedExternalLoad {
+        run_identity,
+        at: std::time::Instant::now(),
+    };
+    context.data_mut(|data| data.insert_temp(id, failure));
+    None
+}
+
 fn load_external_texture(
     state: &mut AppState,
     context: &egui::Context,
@@ -135,8 +161,22 @@ fn load_external_texture(
     if let Some(texture) = state.patran_textures.get(source) {
         return Some(texture.clone());
     }
-    let bytes = std::fs::read(source).ok()?;
-    let icon = eframe::icon_data::from_png_bytes(&bytes).ok()?;
+    let failure_id = Id::new(("patran_missing_texture", source));
+    let run_identity = state.run_identity;
+    if context
+        .data(|data| data.get_temp::<FailedExternalLoad>(failure_id))
+        .is_some_and(|failed| {
+            failed.run_identity == run_identity && failed.at.elapsed() < FAILED_LOAD_RETRY
+        })
+    {
+        return None;
+    }
+    let Ok(bytes) = std::fs::read(source) else {
+        return record_load_failure(context, failure_id, run_identity);
+    };
+    let Ok(icon) = eframe::icon_data::from_png_bytes(&bytes) else {
+        return record_load_failure(context, failure_id, run_identity);
+    };
     let image = egui::ColorImage::from_rgba_unmultiplied(
         [icon.width as usize, icon.height as usize],
         &icon.rgba,
@@ -150,4 +190,42 @@ fn load_external_texture(
         .patran_textures
         .insert(source.to_owned(), texture.clone());
     Some(texture)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_missing_source_is_not_reopened_within_the_same_run() {
+        let ctx = egui::Context::default();
+        let mut state = AppState::default();
+        let missing = "does-not-exist.png";
+
+        assert!(load_external_texture(&mut state, &ctx, missing).is_none());
+        // The first call recorded the failure; a second call within the same
+        // run must not touch the filesystem again to reach the same answer.
+        assert!(load_external_texture(&mut state, &ctx, missing).is_none());
+    }
+
+    #[test]
+    fn a_new_run_retries_a_source_that_previously_failed() {
+        let ctx = egui::Context::default();
+        let mut state = AppState::default();
+        let missing = "still-does-not-exist.png";
+
+        assert!(load_external_texture(&mut state, &ctx, missing).is_none());
+        state.run_identity = state.run_identity.wrapping_add(1);
+        assert!(load_external_texture(&mut state, &ctx, missing).is_none());
+
+        // The memoized failure now carries the new run identity, which is
+        // only possible if the second call re-attempted the load instead of
+        // returning the cached answer from the previous run.
+        let failure_id = Id::new(("patran_missing_texture", missing));
+        let recorded = ctx.data(|data| data.get_temp::<FailedExternalLoad>(failure_id));
+        assert_eq!(
+            recorded.map(|failed| failed.run_identity),
+            Some(state.run_identity)
+        );
+    }
 }

@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/config/mission_config.py
-// Reference: alas @ rust-port-baseline.
 
 //! Whether a run flies its mission, and how its native mission is configured.
 //!

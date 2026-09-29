@@ -6,7 +6,7 @@
 //! Preset mode (a registered `preset` with the `ReferenceAdaptation` or
 //! `BaselineSandbox` design mode) protects the defining properties of the
 //! aircraft from manual edits and gives the optimizer only the bounded
-//! envelope of decision D09 around the originally loaded reference. Every
+//! envelope around the originally loaded reference. Every
 //! configuration field and design variable falls into one of five classes:
 //!
 //! | Class | Members | Manual edit | Optimizer |
@@ -24,7 +24,7 @@
 //! for review: landing-gear topology and control-surface geometry of a
 //! registered type.
 //!
-//! D09 anchoring: the envelope is always built around the registry's design
+//! Anchoring: the envelope is always built around the registry's design
 //! vector, never around the latest candidate, so repeated runs cannot
 //! compound the allowance. A zero reference stays zero for fractional
 //! windows; discrete or categorical inputs are not design variables here.
@@ -43,7 +43,7 @@ pub enum PresetFieldClass {
     /// Defining geometry of the registered aircraft; restored on every edit
     /// and rejected at dispatch when changed.
     LockedGeometry,
-    /// A design variable the optimizer may move inside the D09 envelope.
+    /// A design variable the optimizer may move inside the preset envelope.
     OptimizerEnvelope,
     /// Mission, payload and route inputs the user edits freely.
     Operational,
@@ -74,28 +74,6 @@ impl PresetFieldClass {
 /// Engine fields that describe the installation rather than the engine
 /// model, and are therefore locked with the rest of the geometry.
 pub const LOCKED_ENGINE_FIELDS: [&str; 3] = ["spanwise_positions_m", "z_m", "inlet_x_offset_m"];
-
-/// Derived quantities shown next to the inputs, with their definition.
-pub const DERIVED_QUANTITIES: [(&str, &str); 6] = [
-    (
-        "reference_area_m2",
-        "trapezoidal planform area of the wing from span and the root, break and tip chords",
-    ),
-    (
-        "mean_aerodynamic_chord_m",
-        "mean aerodynamic chord of the trapezoidal planform",
-    ),
-    ("aspect_ratio", "span squared over the reference area"),
-    ("taper_ratio", "tip chord over root chord"),
-    (
-        "operating_empty_mass_kg",
-        "mass-model output at the fixed design weights",
-    ),
-    (
-        "usable_fuel_capacity_kg",
-        "resolved tank layout or published preset capacity",
-    ),
-];
 
 /// Classify a configuration path such as `geometry/wing/span_m` or
 /// `/requirements/mtow_kg` (leading slash optional, `/`-separated keys).
@@ -296,7 +274,7 @@ pub fn design_violations(
         .collect()
 }
 
-/// Search bounds that reach outside the D09 envelope anchored at the
+/// Search bounds that reach outside the preset envelope anchored at the
 /// preset's own design vector. `bounds` follows the design-vector order; a
 /// wrong length is reported as one violation.
 pub fn bounds_violations(

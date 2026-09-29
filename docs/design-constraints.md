@@ -1,11 +1,10 @@
 # Design-constraint audit
 
-Audit date: 2026-09-19. The audit covers the configuration fields that are
+The audit covers the configuration fields that are
 presented as design constraints, their defaults and preset overrides, and the
 code that consumes them. It also records the boundary between an aircraft
 requirement, a physical-model input, a numerical setting, a preference, and a
-validity-domain limit. The source tree had unrelated uncommitted work while
-this audit was performed; references below identify the current consumers by
+validity-domain limit. References below identify the current consumers by
 path rather than by a commit hash.
 
 The current implementation has a useful policy split in
@@ -216,7 +215,7 @@ validation remain separate deliverables.
 
 The audit used repository search and source inspection. It did not run a full
 aircraft optimization or a certification substantiation. Figure-specific
-implementation and numerical checks are reported separately by the owning
-agent. The remaining human decision is the certification basis and the
+implementation and numerical checks are recorded with the tests that own them.
+The remaining human decision is the certification basis and the
 airport/route data contract: without those, moving the fields and assigning
 universal defaults would create false traceability.

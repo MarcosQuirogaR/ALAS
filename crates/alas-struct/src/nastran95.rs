@@ -4,8 +4,7 @@
 //! NASTRAN-95 statics and normal modes: the deck this program writes for an
 //! open-source solver that predates the modern one, and the run that solves it.
 //!
-//! This is the one row in the port with no Python original; there is nothing
-//! to translate and so nothing to agree with in the usual way. What it agrees
+//! This deck has no Python original to agree with. What it agrees
 //! with instead is a *second solver*. The same wingbox is solved twice: once as
 //! the modern [`crate::nastran`] deck through MSC Nastran, and once as the
 //! NASTRAN-95 deck [`deck`] writes through the built 1995 solver, and the two
@@ -61,14 +60,18 @@ mod deck;
 mod field;
 mod run;
 mod section;
+mod static_spanwise;
+mod static_stress;
 
 pub use analysis::{
     run_nastran95_analysis, run_nastran95_from_config_or_env, run_nastran95_from_env,
 };
-pub use deck::{build_modes_deck, build_static_deck, Dialect};
+pub use deck::{build_modes_deck, build_static_deck, build_static_deck_product, Dialect};
 pub use field::{real, Card, ContinuationTags, Field};
 pub use run::{
     displacement_of, read_displacement_tables, read_eigenvalues, read_eigenvector_tables,
     run_nastran95, Mode, Nastran95Solver, RunOutcome,
 };
-pub use section::{i_section, BarConstants};
+pub use section::{i_section, rectangle, BarConstants};
+pub use static_spanwise::read_static_spanwise_print;
+pub use static_stress::read_static_shell_stress_print;

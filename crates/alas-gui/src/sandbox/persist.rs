@@ -14,7 +14,7 @@
 
 use std::collections::BTreeMap;
 
-use alas_config::{AlasConfig, MissionProfileConfig, WORKSPACE_ENVELOPE_KEY};
+use alas_config::{AlasConfig, WORKSPACE_ENVELOPE_KEY};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -100,12 +100,12 @@ impl AppState {
         let config = AlasConfig::from_value(document).map_err(|error| error.to_string())?;
         let canonical = full_config_values(&config);
         // A loaded non-default profile may be a deliberate case-file or
-        // Advanced Settings edit. Mark it for preservation before the Inputs
-        // card first reconciles the route; the card will then ask before
-        // replacing it after a route change. A literal default profile stays
-        // eligible for automatic route-linked generation.
-        self.mission_profile_manual_edit =
-            config.mission.profile != MissionProfileConfig::default();
+        // Advanced Settings edit. Preset operational profiles are also
+        // non-default, though, and must still receive their route-aware
+        // cruise-leg count. Preserve profiles that differ from both generic
+        // and preset operational defaults.
+        let automatic_profile = crate::views::mission_profile_inputs::is_automatic_profile(&config);
+        self.mission_profile_manual_edit = !automatic_profile;
         self.mission_profile_route_signature.clear();
         self.mission_profile_regeneration_prompt = false;
         self.mission_profile_retained_validation = None;
@@ -140,6 +140,9 @@ impl AppState {
             self.design_values = design_values;
         }
         self.active_preset = config.preset.clone();
+        if automatic_profile {
+            crate::views::mission_profile_inputs::initialize_route_profile(self);
+        }
         if self.sandbox.active() {
             self.sandbox.undo.clear();
             self.sandbox.estimates.abandon();

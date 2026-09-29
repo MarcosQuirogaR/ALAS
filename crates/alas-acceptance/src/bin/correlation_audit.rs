@@ -77,7 +77,7 @@ fn main() -> io::Result<()> {
 
 /// Select `preset` exactly as the program does.
 ///
-/// Reassembling the configuration field-by-field here used to drop the cabin
+/// Reassembling the configuration field-by-field here would drop the cabin
 /// seed and the engine binding, so the audit measured a preset the product
 /// never evaluates. Going through the selection boundary is what keeps this
 /// bundle a correlation artifact rather than a description of the harness.

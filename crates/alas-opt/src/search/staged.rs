@@ -73,7 +73,11 @@ impl Settings {
             // Broad enough to cover the envelope without consuming the
             // coupled budget: two low-resolution samples per design variable,
             // bounded so a large space stays affordable.
-            scan_points: (2 * dimension).clamp(8, 64),
+            scan_points: if dimension == 0 {
+                0
+            } else {
+                (2 * dimension).clamp(8, 64)
+            },
             scan_finalists: 3,
             // Sixteen points per block keeps a cancellation check at a
             // bounded interval while staying a fixed, hardware-independent
@@ -83,6 +87,37 @@ impl Settings {
             seed: solver.seed.map_or(0, |value| value as u64),
         }
     }
+}
+
+/// Give half the reduced scan to the same normalized reference neighborhood
+/// used by the full search. The remainder retains broad stratified coverage;
+/// this changes sampling effort, never admissibility or the declared bounds.
+pub(crate) fn conditioned_scan_sample(
+    bounds: &[(f64, f64)],
+    count: usize,
+    seed: u64,
+    initial: Option<&[f64]>,
+    radius: Option<f64>,
+) -> Vec<Vec<f64>> {
+    let local = initial
+        .filter(|point| point.len() == bounds.len())
+        .zip(radius.filter(|value| value.is_finite() && *value >= 0.0));
+    let Some((initial, radius)) = local else {
+        return scan_sample(bounds, count, seed);
+    };
+    let local_bounds: Vec<(f64, f64)> = bounds
+        .iter()
+        .zip(initial)
+        .map(|(&(lo, hi), &value)| {
+            let center = value.clamp(lo, hi);
+            let delta = radius.min(1.0) * (hi - lo);
+            ((center - delta).max(lo), (center + delta).min(hi))
+        })
+        .collect();
+    let local_count = count / 2;
+    let mut points = scan_sample(&local_bounds, local_count, seed);
+    points.extend(scan_sample(bounds, count - local_count, mix_seed(seed, 97)));
+    points
 }
 
 /// Build the reduced configuration the scan ranks candidates on.

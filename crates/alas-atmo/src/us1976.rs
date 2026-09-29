@@ -6,7 +6,6 @@
 // and mission analysis model/Attributes/Planets/Earth.py
 // Upstream: mission analysis model 2.5.2, LGPL-2.1 (relicensed under GPL-2.0-or-later per
 // LGPL-2.1 section 3; compatible with this program's AGPL-3.0-or-later).
-// Reference: alas @ rust-port-baseline.
 
 //! The U.S. Standard Atmosphere (1976), as mission analysis model's mission stack evaluates it.
 //!
@@ -440,9 +439,8 @@ mod tests {
         // published pressure and temperature constants at each break; they
         // are not derived from each other, so evaluating the segment below a
         // boundary at its own top does not reproduce the segment above's
-        // stored base value to floating-point precision. Confirmed against
-        // the Python reference directly: at the geopotential altitude 0
-        // boundary, `compute_values` itself shows a ~2e-6 relative jump
+        // stored base value to floating-point precision. At the geopotential
+        // altitude 0 boundary, `compute_values` itself shows a ~2e-6 relative jump
         // between a point a millimetre below and a millimetre above. This
         // checks that the jump stays of that small, table-rounding size (a
         // wrong segment or a sign error would be wrong by orders of
@@ -471,7 +469,7 @@ mod tests {
     fn the_segment_above_a_boundary_wins_the_tie_and_matches_its_own_stored_base_value() {
         // `segment_for`'s documentation claims the higher-indexed segment
         // wins at an exact break, matching mission analysis model's mask-overwrite loop.
-        // Confirmed against the Python reference directly: querying exactly
+        // Querying exactly
         // 11000 m geopotential returns 22632.1 Pa: `BREAKS[2]`'s own
         // stored base pressure, not a value derived from segment 1's formula
         // extrapolated up to that point.

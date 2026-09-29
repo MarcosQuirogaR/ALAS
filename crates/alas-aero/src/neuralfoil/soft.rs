@@ -5,7 +5,6 @@
 // sigmoid, swish, blend) and native aerodynamic model/modeling/splines/hermite.py
 // (cosine_hermite_patch).
 // Upstream: native aerodynamic model 4.2.8, MIT.
-// Reference: alas @ rust-port-baseline.
 
 //! The smooth replacements for `max`, `min` and `if` that the airfoil
 //! surrogate is built out of.

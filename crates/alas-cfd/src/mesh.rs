@@ -42,7 +42,9 @@ use super::{AirfoilSnapshot, CfdStudyConfig};
 /// of every `v5` mesh.  A `v5` mesh of the same case is geometrically the same
 /// section at the same resolution; only the local topology behind the trailing
 /// edge differs.
-pub const GMSH_TEMPLATE_VERSION: &str = "alas-airfoil-gmsh-openfoam-v6";
+/// `v7` additionally fans every acute convex solid corner, including sharp
+/// leading edges, without altering the exact polygon or layer sizing.
+pub const GMSH_TEMPLATE_VERSION: &str = "alas-airfoil-gmsh-openfoam-v7";
 
 /// Expansion ratio used by the generated boundary-layer field.
 pub const BOUNDARY_LAYER_EXPANSION_RATIO: f64 = 1.2;
@@ -483,6 +485,32 @@ mod tests {
         assert_eq!(sizing.total_thickness_m, 0.0);
         assert_eq!(sizing.boundary_layer_coverage_ratio, 0.0);
         assert!(sizing.estimated_boundary_layer_thickness_m > 0.0);
+    }
+
+    #[test]
+    fn diamond_fans_both_sharp_tips_without_changing_geometry() {
+        let mut coordinates = Vec::new();
+        for i in 0..=100 {
+            let x = 1.0 - f64::from(i) / 100.0;
+            coordinates.push((x, 0.06 * x.min(1.0 - x)));
+        }
+        for i in 1..=100 {
+            let x = f64::from(i) / 100.0;
+            coordinates.push((x, -0.06 * x.min(1.0 - x)));
+        }
+        let name = "diamond".to_owned();
+        let airfoil = AirfoilSnapshot {
+            coordinate_hash: coordinate_hash(&name, &coordinates),
+            name,
+            coordinates,
+        };
+        let artifact = build_gmsh_geo(&CfdStudyConfig::default(), &airfoil)
+            .unwrap_or_else(|e| panic!("diamond mesh: {e}"));
+        assert!(artifact
+            .source
+            .contains("Field[1].FanPointsList = {5, 105};"));
+        assert!(artifact.report.exact_polygon_geometry);
+        assert_eq!(artifact.report.geometry_resampling_error_m, 0.0);
     }
 
     #[test]

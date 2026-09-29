@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/physics/cabin_layout.py (`build_passenger_layout`)
-// Reference: alas @ rust-port-baseline.
 
 //! The passenger layout engine: seats, monuments, exits and baggage assembled
 //! into one interior.

@@ -5,17 +5,22 @@
 
 use alas_config::{
     presets, AircraftReferenceData, AlasConfig, CgEnvelopeCondition, CgEnvelopeEvidence,
-    PlanningMacReference,
+    PlanningCgEnvelope, PlanningMacReference,
 };
+use alas_opt::ModelCgEnvelopeAssessment;
 
 use crate::full_analysis::AnalysisReport;
 
-use super::{CgEnvelopeAssessment, PlanningCgStatus};
+use super::{
+    CgEnvelopeAssessment, OperationalEnvelopeAssessment, PlanningCgStatus, PlanningCurveComparison,
+};
 
 pub(super) fn assess_public_cg_reference(
     config: &AlasConfig,
     report: &AnalysisReport,
     analyzed_carried_fuel_kg: f64,
+    model_cg: Option<&ModelCgEnvelopeAssessment>,
+    operational_envelope: Option<&OperationalEnvelopeAssessment>,
 ) -> CgEnvelopeAssessment {
     let Ok(preset) = presets::get(&config.preset) else {
         return CgEnvelopeAssessment::default();
@@ -26,8 +31,122 @@ pub(super) fn assess_public_cg_reference(
     let mut assessment = assess_reference_limits(&preset.reference, mass_and_cg);
     if let Some(envelope) = preset.reference.planning_cg_envelope {
         attach_mac_frame_comparison(&mut assessment, report, envelope.mac_reference);
+        // Sweep every named loading state plus every potato
+        // and fuel-vector extreme against both curves, not just the one
+        // analyzed point above.
+        assessment.flight_curve_comparison = sweep_curve(
+            &envelope,
+            CgEnvelopeCondition::Flight,
+            envelope.mac_reference,
+            model_cg,
+            operational_envelope,
+        );
+        assessment.ground_curve_comparison = sweep_curve(
+            &envelope,
+            CgEnvelopeCondition::Ground,
+            envelope.mac_reference,
+            model_cg,
+            operational_envelope,
+        );
     }
     assessment
+}
+
+/// One point swept against a planning curve: its own label, mass and CG in
+/// the manufacturer's planning frame (`x_m` in the primary aircraft body
+/// frame, aft of the nose).
+struct SweptPoint {
+    label: String,
+    mass_kg: f64,
+    x_m: f64,
+}
+
+/// Every named loading state plus every potato and fuel-vector extreme this
+/// run evaluated, converted to the manufacturer planning frame's stations
+/// . Loading states come from `model_cg` (ledger-or-lumped
+/// states); the potato and fuel-vector extremes come from
+/// `operational_envelope` (loading-sequence and fuel-vector sweep). Points from either input that this run did not produce are
+/// simply absent, not zero-filled.
+fn swept_points(
+    model_cg: Option<&ModelCgEnvelopeAssessment>,
+    operational_envelope: Option<&OperationalEnvelopeAssessment>,
+) -> Vec<SweptPoint> {
+    let mut points = Vec::new();
+    if let Some(model_cg) = model_cg {
+        for state in &model_cg.loading_states {
+            points.push(SweptPoint {
+                label: state.state.label().to_owned(),
+                mass_kg: state.mass_kg,
+                x_m: state.cg_x_m,
+            });
+        }
+    }
+    if let Some(envelope) = operational_envelope {
+        // `potato_checks` already carries the potato's own raw stations
+        // (two per sampled mass level, forward and aft), computed before
+        // the model's own percent-MAC conversion; reused here rather than
+        // recomputing from `potato_pct_mac`, which is already in the
+        // model's MAC frame, not the manufacturer's.
+        for check in &envelope.potato_checks {
+            points.push(SweptPoint {
+                label: "potato extreme".to_owned(),
+                mass_kg: check.mass_kg,
+                x_m: check.x_m,
+            });
+        }
+        for check in &envelope.fuel_vector_checks {
+            points.push(SweptPoint {
+                label: "fuel-vector extreme".to_owned(),
+                mass_kg: check.mass_kg,
+                x_m: check.x_m,
+            });
+        }
+    }
+    points
+}
+
+/// Sweep every point [`swept_points`] can build against one curve
+/// (`condition`) of `envelope`, returning the worst (smallest) margin found
+/// and which point produced it. `None` when no point's mass fell inside the
+/// published table.
+fn sweep_curve(
+    envelope: &PlanningCgEnvelope,
+    condition: CgEnvelopeCondition,
+    mac_reference: PlanningMacReference,
+    model_cg: Option<&ModelCgEnvelopeAssessment>,
+    operational_envelope: Option<&OperationalEnvelopeAssessment>,
+) -> Option<PlanningCurveComparison> {
+    let mut worst: Option<PlanningCurveComparison> = None;
+    let mut points_swept = 0usize;
+    for point in swept_points(model_cg, operational_envelope) {
+        let Some(limits) = envelope.limits_at(condition, point.mass_kg) else {
+            continue;
+        };
+        let Some(cg_pct_mac) = planning_cg_pct_mac(point.x_m, mac_reference) else {
+            continue;
+        };
+        points_swept += 1;
+        let forward_margin_pct_mac = cg_pct_mac - limits.forward_pct_mac;
+        let margin_pct_mac = limits.aft_pct_mac.map_or(forward_margin_pct_mac, |aft| {
+            forward_margin_pct_mac.min(aft - cg_pct_mac)
+        });
+        if worst
+            .as_ref()
+            .is_none_or(|current| margin_pct_mac < current.worst_margin_pct_mac)
+        {
+            worst = Some(PlanningCurveComparison {
+                worst_margin_pct_mac: margin_pct_mac,
+                worst_point_label: point.label,
+                worst_point_mass_kg: point.mass_kg,
+                worst_point_cg_pct_mac: cg_pct_mac,
+                points_swept: 0,
+            });
+        }
+    }
+    worst.map(|comparison| PlanningCurveComparison {
+        points_swept,
+        ..comparison
+    })
 }
 
 /// Record how far the built model's own MAC reference sits from the published
@@ -56,13 +175,10 @@ fn attach_mac_frame_comparison(
     assessment.published_mac_chord_m = Some(published_chord_m);
 
     let model_chord_m = report.airplane.c_ref;
-    let model_leading_edge_x_m = report
-        .airplane
-        .wings
-        .iter()
-        .find(|wing| wing.name == "Main Wing")
-        .or_else(|| report.airplane.wings.first())
-        .map(|wing| wing.aerodynamic_center(0.25)[0] - 0.25 * model_chord_m);
+    // Canonical MAC frame: the main wing (largest projected
+    // area) and its own `mac_station()` leading edge, never reconstructed
+    // from `aerodynamic_center(0.25) - 0.25 * c_ref`.
+    let model_leading_edge_x_m = report.airplane.mac_frame().map(|frame| frame.x_lemac_m);
     if !model_chord_m.is_finite() || model_chord_m <= 0.0 {
         return;
     }
@@ -257,5 +373,70 @@ mod tests {
         let assessment = CgEnvelopeAssessment::default();
         assert!(!assessment.mac_references_disagree());
         assert_eq!(assessment.mac_datum_shift_pct_mac(), None);
+    }
+
+    /// The A220-300 is the one registered preset with a
+    /// published planning envelope. Sweeping every named loading state plus
+    /// every potato/fuel-vector extreme against both curves must report a
+    /// point count on each curve of at least the five named loading states
+    /// (every one of them falls inside the table's mass range for this
+    /// preset), and the worst point/margin must be internally consistent
+    /// (the reported margin is recomputed from the reported point's own
+    /// mass/CG and the same curve, matching within floating-point noise).
+    #[test]
+    fn the_a220_300_sweep_covers_every_loading_state_on_both_curves() {
+        let config = AlasConfig::from_value(&serde_json::json!({ "preset": "A220-300" }))
+            .expect("A220-300 preset config");
+        let preset = presets::get("A220-300").expect("registered preset");
+        let report = crate::full_analysis::FullAnalysis::new(config.clone())
+            .run(&preset.design_vector, true)
+            .expect("A220-300 must analyze");
+        let feasibility = crate::feasibility::assess_physical_feasibility(
+            &config,
+            &preset.design_vector,
+            &report,
+            None,
+        );
+        let model_cg = feasibility
+            .model_cg
+            .as_ref()
+            .expect("A220-300 produces a model CG assessment");
+        let operational_envelope = feasibility.operational_envelope.as_ref();
+        let envelope = preset
+            .reference
+            .planning_cg_envelope
+            .expect("A220-300 registers a planning envelope");
+
+        for condition in [CgEnvelopeCondition::Flight, CgEnvelopeCondition::Ground] {
+            let comparison = sweep_curve(
+                &envelope,
+                condition,
+                envelope.mac_reference,
+                Some(model_cg),
+                operational_envelope,
+            )
+            .unwrap_or_else(|| panic!("{condition:?} curve must sweep at least one point"));
+            assert!(
+                comparison.points_swept >= model_cg.loading_states.len(),
+                "{condition:?}: swept {} points, expected at least the {} named loading states",
+                comparison.points_swept,
+                model_cg.loading_states.len()
+            );
+            let limits = envelope
+                .limits_at(condition, comparison.worst_point_mass_kg)
+                .expect("the worst point's own mass must lie inside the published table");
+            let forward_margin = comparison.worst_point_cg_pct_mac - limits.forward_pct_mac;
+            let expected_margin = limits.aft_pct_mac.map_or(forward_margin, |aft| {
+                forward_margin.min(aft - comparison.worst_point_cg_pct_mac)
+            });
+            assert!(
+                (comparison.worst_margin_pct_mac - expected_margin).abs() < 1.0e-9,
+                "{condition:?}: reported margin {} does not match recomputed margin {} for \
+                 point {:?}",
+                comparison.worst_margin_pct_mac,
+                expected_margin,
+                comparison.worst_point_label
+            );
+        }
     }
 }

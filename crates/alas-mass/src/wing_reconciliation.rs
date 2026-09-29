@@ -12,47 +12,24 @@
 //! wing mass and the wing centroid come from one calculation rather than two.
 //!
 //! This lives here, below both `alas-opt` and `alas-pipeline`, for the same
-//! reason [`crate::product_stations`] does: the optimizer's search and the
-//! final report must read one wing mass. Sizing candidates against the
-//! reconciled wing while reporting the empirical total puts two numbers on one
-//! wing (about 1.2 t apart on a nominal finalist), and the fuel closure
-//! silently absorbs the difference in the operating empty mass the run is
-//! judged on.
+//! reason [`crate::product_stations`] does: if the search sized every
+//! candidate against the reconciled wing while the final report published the
+//! empirical total for the same aircraft, the fuel closure would silently
+//! absorb the difference. Two numbers for one wing is not a reporting detail:
+//! it is the operating empty mass the run is ultimately judged on.
 
 use alas_config::design_variables::DesignVector;
-use alas_config::optimizer::DesignMode;
 use alas_config::AlasConfig;
 use alas_geom::aircraft::airplane::Airplane;
-use alas_geom::aircraft::wing::Wing;
-use alas_geom::builder::AircraftBuilder;
-use alas_struct::sizing::WingboxSizing;
 
-use crate::breakdown::{
-    run_mass_analysis_with_model_checked_product_with_gear, MassCoordinateModel,
-};
-use crate::torenbeek::{
-    mass_wing_with_control_surface_area, wing_secondary_mass_breakdown_with_control_surface_area,
-};
-use crate::wing_inventory::{
-    build_wing_inventory, MovableSurface, TorenbeekWingGroup, WingInventoryInputs,
-    WingMovableSurfaces, WingNonBoxInventory,
-};
-use crate::wingbox_feedback::{
-    reconcile_clean_sheet_wing, ReferenceWingMass, SizedWingboxMass, WingboxFeedback,
-};
+use crate::wingbox_feedback::{ReferenceWingMass, WingboxFeedback};
 
 mod fuel_relief;
 pub use fuel_relief::{
     declared_integral_wing_fuel_kg_m, declared_wing_fuel_case, DeclaredWingFuelCase,
 };
-mod geometry;
-use geometry::{
-    configured_surface_area, fixed_non_box_structure, flops_wing_inputs, surface_centroid,
-    validate_secondary_breakdown,
-};
 mod support;
 pub use support::{design_gross_mass_kg, StructuralInventory};
-use support::{design_requirements, reconcile_against_reference};
 
 /// Why a candidate's wing could not be reconciled.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
@@ -120,4 +97,7 @@ pub fn reconcile(
     })
 }
 
-include!("wing_reconciliation/reconcile.rs");
+mod geometry;
+mod reconcile;
+use reconcile::reconcile_structural_wing;
+pub use reconcile::{clean_sheet_secondary, main_wing, sized_primary_wing};

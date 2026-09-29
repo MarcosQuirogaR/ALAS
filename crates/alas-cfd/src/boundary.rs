@@ -7,6 +7,25 @@ use serde::{Deserialize, Serialize};
 
 use super::config::FarFieldCondition;
 
+impl super::CfdStudyConfig {
+    /// Whether the prescribed freestream is supersonic normal to the vertical
+    /// inlet/outlet planes. This assumes those remote patches retain that
+    /// state; it is not a local, dynamically switching characteristic boundary.
+    pub fn has_supersonic_streamwise_boundaries(&self) -> bool {
+        self.mach_number() * self.angle_of_attack_deg.to_radians().cos() > 1.0
+    }
+
+    /// Perfect-gas isentropic stagnation/static pressure ratio, with the
+    /// existing factor-two startup allowance retained at lower Mach. A fixed
+    /// factor two would clip physically admissible shocks at supersonic Mach.
+    pub fn compressible_pressure_upper_factor(&self) -> f64 {
+        let gamma = super::DRY_AIR_GAMMA;
+        (1.0 + 0.5 * (gamma - 1.0) * self.mach_number().powi(2))
+            .powf(gamma / (gamma - 1.0))
+            .max(2.0)
+    }
+}
+
 /// Routine boundary-condition choices exposed by the CFD window.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -28,7 +47,7 @@ pub struct BoundarySettings {
     /// `y = +/-10 c` the free-stream turbulence has decayed several orders below
     /// the imposed value, the clamp fights the decayed interior, and those
     /// cells limit-cycle for the whole run (an internal CFD convergence
-    /// study, 2026-09-16, `q17-field-change.py` on case
+    /// study, case
     /// `T1-gradfree-turbupwind`).  `inletOutlet` is `fixedValue` wherever the
     /// flow enters and `zeroGradient` wherever it leaves, so it imposes the
     /// same free-stream state on inflow and simply convects the interior value
@@ -52,7 +71,7 @@ pub struct BoundarySettings {
     /// This is kept separate from [`FarFieldCondition::Freestream`], which also
     /// switches the pressure to `freestreamPressure` on every outer patch and
     /// was measured to break the mass-balance criterion outright (internal
-    /// CFD study, 2026-09-16, case `E15`: continuity `3.87e-4`
+    /// CFD study case `E15`: continuity `3.87e-4`
     /// against a `1e-5` gate).  Here the pressure treatment is untouched, so
     /// the pressure level stays anchored by the outlet.
     #[serde(default)]

@@ -42,9 +42,8 @@ pub(super) fn electrical_mission(
                 );
             });
         ui.add_space(4.0);
-        ui.weak(tr(
-            "This is a source-bounded preliminary electrical calculation, not a flight-test, airworthiness, or certification result.",
-        ));
+        ui.weak(tr("Preliminary, source-bounded; not certified"))
+            .on_hover_text(tr("This is a source-bounded preliminary electrical calculation, not a flight-test, airworthiness, or certification result."));
     });
     ui.add_space(8.0);
     let columns = card_column_count(ui.available_width());
@@ -121,7 +120,7 @@ pub(super) fn aircraft_bom(optimized: &OptimizedUav, ui: &mut Ui) {
             ));
         }
         if !estimate.complete {
-            ui.weak(tr(
+            ui.weak(tr("Partial price estimate")).on_hover_text(tr(
                 "The displayed total is partial: shipping, tax, consumables, machining, and payload costs are not inferred.",
             ));
         }

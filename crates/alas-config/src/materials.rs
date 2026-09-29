@@ -2,16 +2,12 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/config/materials.py
-// Reference: alas @ rust-port-baseline.
 
 //! Structural materials the wingbox sizing selects from by name.
 //!
-//! The table itself is not Rust source. `alas/config/materials.py` is a
-//! sequence of constructor calls registering immutable records of published
-//! material properties: data written as code because a constructor is the
-//! shortest thing to hand in Python, not because anything about it is
-//! executable. It lives here as `data/materials.json`, embedded in the crate
-//! and parsed the first time it is asked for, which keeps a table reviewable
+//! The table itself is not Rust source: it is a sequence of immutable
+//! records of published material properties. It lives here as
+//! `data/materials.json`, embedded in the crate and parsed the first time it is asked for, which keeps a table reviewable
 //! as a table and makes a corrected figure a one-line data change.
 //!
 //! That embedded copy is deliberately distinct from

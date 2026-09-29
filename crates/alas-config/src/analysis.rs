@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/config/analysis_config.py
-// Reference: alas @ rust-port-baseline.
 
 //! How finely the aerodynamics are evaluated, and where.
 //!
@@ -57,6 +56,15 @@ use crate::ConfigNode;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ConfigNode)]
 #[serde(deny_unknown_fields)]
 pub struct AnalysisConfig {
+    /// Wall-clock deadline for final native AVL sweeps, in seconds.
+    #[serde(default = "default_avl_timeout_s")]
+    #[config(
+        label = "AVL reporting timeout",
+        unit = "s",
+        help = "Wall-clock deadline for final AVL sweeps; independent of the optimizer candidate budget and aerodynamic mesh."
+    )]
+    pub avl_timeout_s: f64,
+
     /// Lowest angle of attack in the final polar sweep.
     #[config(
         label = "Polar sweep: alpha minimum",
@@ -222,9 +230,14 @@ impl AnalysisConfig {
     }
 }
 
+fn default_avl_timeout_s() -> f64 {
+    600.0
+}
+
 impl Default for AnalysisConfig {
     fn default() -> Self {
         Self {
+            avl_timeout_s: default_avl_timeout_s(),
             sweep_alpha_min_deg: -4.0,
             sweep_alpha_max_deg: 10.0,
             sweep_n_points: 15,
@@ -255,6 +268,35 @@ impl Default for AnalysisConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn avl_timeout_roundtrips_defaults_and_is_exposed_in_schema() {
+        let config = AnalysisConfig {
+            avl_timeout_s: 1234.5,
+            ..AnalysisConfig::default()
+        };
+        let mut value = serde_json::to_value(&config).unwrap();
+        assert_eq!(
+            serde_json::from_value::<AnalysisConfig>(value.clone())
+                .unwrap()
+                .avl_timeout_s,
+            1234.5
+        );
+        value.as_object_mut().unwrap().remove("avl_timeout_s");
+        assert_eq!(
+            serde_json::from_value::<AnalysisConfig>(value)
+                .unwrap()
+                .avl_timeout_s,
+            600.0
+        );
+        assert!(config.schema().field("avl_timeout_s").is_some());
+        for invalid in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+            let mut full = crate::AlasConfig::default();
+            full.analysis.avl_timeout_s = invalid;
+            assert!(crate::validation::validate(&full)
+                .iter()
+                .any(|issue| issue.field_path == "analysis.avl_timeout_s"));
+        }
+    }
 
     #[test]
     fn the_reported_analysis_is_at_least_as_fine_as_the_in_loop_one() {

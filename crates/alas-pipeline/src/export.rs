@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-// Ported from alas/reporting/design_report.py
-// Reference: alas @ rust-port-baseline.
-
 //! Exporting design databases to JSON, Selig `.dat` files, and formatted summaries.
 
 use std::collections::HashMap;
@@ -41,7 +38,7 @@ pub struct DesignDatabase {
     pub cpacs: Option<CpacsReference>,
 }
 
-/// Link from the legacy JSON report to the authoritative CPACS aircraft file.
+/// Link from the JSON report to the authoritative CPACS aircraft file.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CpacsReference {
     /// CPACS file path, relative to the report output directory when possible.
@@ -800,6 +797,7 @@ mod tests {
             payload_layout: None,
             trimmed_design_point: None,
             cg_envelope_ok: None,
+            neutral_point_conditions: None,
         };
 
         let database = report_to_database(&report, &AlasConfig::default());

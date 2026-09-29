@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/validation.py
-// Reference: alas @ rust-port-baseline.
 
 //! The checks a configuration has to pass that no single field can make.
 //!
@@ -94,7 +93,7 @@ pub fn validate(config: &AlasConfig) -> Vec<ValidationIssue> {
     issues.extend(fuel_properties_are_physical(config));
     issues.extend(landing_gear_inputs_are_physical(config));
     issues.extend(empennage_tapers_toward_its_tips(config));
-    issues.extend(mses_timeouts_are_positive_and_finite(config));
+    issues.extend(solver_timeouts_are_positive_and_finite(config));
     issues.extend(optimizer_tokens_are_supported(config));
     issues.extend(crate::optimizer::policy_review::policy_group_issues(config));
     issues.extend(mass_model::active_issues(config));
@@ -102,6 +101,22 @@ pub fn validate(config: &AlasConfig) -> Vec<ValidationIssue> {
     issues.extend(passenger_and_mass_inputs_are_coherent(config));
     issues.extend(custom_geometry_is_physical(config));
     issues.extend(vlm_mesh_is_solvable(config));
+    if config.structures.nastran_memory_mb <= 0 {
+        issues.push(ValidationIssue {
+            severity: Severity::Error,
+            field_path: "structures.nastran_memory_mb".to_owned(),
+            message: "The MSC Nastran per-process memory ceiling must be positive (MB).".to_owned(),
+        });
+    }
+    let curvature_budget = config.structures.max_linear_curvature_relative_error;
+    if !curvature_budget.is_finite() || curvature_budget <= 0.0 {
+        issues.push(ValidationIssue {
+            severity: Severity::Error,
+            field_path: "structures.max_linear_curvature_relative_error".to_owned(),
+            message: "The linear beam curvature error budget must be finite and greater than zero."
+                .to_owned(),
+        });
+    }
     issues
 }
 
@@ -497,12 +512,17 @@ fn optimizer_tokens_are_supported(config: &AlasConfig) -> Vec<ValidationIssue> {
     issues
 }
 
-/// MSES uses these values to construct process deadlines. Rejecting invalid
+/// External solvers use these values to construct process deadlines. Rejecting invalid
 /// values here keeps a malformed configuration from reaching
 /// `Duration::try_from_secs_f64` (or a worker thread) and makes the error
-/// visible at every run boundary, including when MSES is currently optional.
-fn mses_timeouts_are_positive_and_finite(config: &AlasConfig) -> Vec<ValidationIssue> {
+/// visible at every run boundary, including when a solver is optional.
+fn solver_timeouts_are_positive_and_finite(config: &AlasConfig) -> Vec<ValidationIssue> {
     [
+        (
+            "analysis.avl_timeout_s",
+            config.analysis.avl_timeout_s,
+            "AVL",
+        ),
         ("mses.timeout_mset_s", config.mses.timeout_mset_s, "MSET"),
         ("mses.timeout_mses_s", config.mses.timeout_mses_s, "MSES"),
     ]

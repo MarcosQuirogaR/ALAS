@@ -345,18 +345,10 @@ impl ProfileGeometry<'_> {
         start.max(self.arrival_elevation_m) + MINIMUM_SEGMENT_ALTITUDE_M
     }
 
-    /// Climb-rung altitude bands `(takeoff top, initial top, step-one top)`
-    /// for a cruise at `cruise_m`.
-    fn climb_bands_from(&self, departure_m: f64, cruise_m: f64) -> (f64, f64, f64) {
-        let p = self.profile;
-        let takeoff_top = (departure_m + p.takeoff_altitude_gain_m).min(cruise_m);
-        let initial_top = (cruise_m * p.initial_climb_altitude_fraction)
-            .max(takeoff_top)
-            .min(cruise_m);
-        let step_one_top = (cruise_m * p.step_climb_1_altitude_fraction)
-            .max(initial_top)
-            .min(cruise_m);
-        (takeoff_top, initial_top, step_one_top)
+    /// Altitude the climb ladder actually tops out at (and where cruise then
+    /// flies) for a cruise at `cruise_m`; see [`super::climb_bands::bands`].
+    fn ladder_top_m(&self, departure_m: f64, cruise_m: f64) -> f64 {
+        super::climb_bands::top_m(self.profile, departure_m, cruise_m)
     }
 
     fn climb_ladder_from(
@@ -367,7 +359,8 @@ impl ProfileGeometry<'_> {
         let p = self.profile;
         let mut segments = Vec::with_capacity(4 * self.cas_subdivisions);
         let departure = departure_m;
-        let (takeoff_top, initial_top, step_one_top) = self.climb_bands_from(departure_m, cruise_m);
+        let (takeoff_top, initial_top, step_one_top, ladder_top) =
+            super::climb_bands::bands(self.profile, departure_m, cruise_m);
         for (kind, start, end, configured_speed, rate) in [
             (
                 SegmentKind::Takeoff,
@@ -393,7 +386,7 @@ impl ProfileGeometry<'_> {
             (
                 SegmentKind::Climb,
                 step_one_top,
-                cruise_m,
+                ladder_top,
                 p.step_climb_2_air_speed_m_s,
                 p.step_climb_2_rate_m_s,
             ),
@@ -522,7 +515,8 @@ impl ProfileGeometry<'_> {
         // latter is the trip arrival elevation until the model gains a
         // separate alternate-elevation input.
         let climb = self.climb_ladder_from(self.arrival_elevation_m, cruise_m)?;
-        let descent = self.descent_ladder_to(cruise_m, self.arrival_elevation_m)?;
+        let top_m = self.ladder_top_m(self.arrival_elevation_m, cruise_m);
+        let descent = self.descent_ladder_to(top_m, self.arrival_elevation_m)?;
         Ok((climb, descent))
     }
 
@@ -694,47 +688,53 @@ impl ProfileGeometry<'_> {
         cruise_m: f64,
     ) -> Result<ProfilePlan, FuelModelError> {
         // Cruise fields are true airspeeds declared for the configured cruise
-        // level. A plan that flies a different level resolves them there by
-        // preserving the declared equivalent airspeed; at the configured
-        // level they are returned bit-unchanged. See `cruise_tas_at`.
-        let (climb, descent, cruise_rungs) = match leg {
+        // level; a plan flying a different level resolves them there by
+        // preserving the declared equivalent airspeed (see `cruise_tas_at`).
+        // The level actually cruised at is the climb ladder's own top
+        // (`ladder_top_m`), matching where the native schedule stops
+        // climbing when a trailing step-climb leg is disabled.
+        let (climb, descent, cruise_rungs, top_m) = match leg {
             LegKind::Trip => {
                 let p = self.profile;
+                let top_m = self.ladder_top_m(self.departure_elevation_m, cruise_m);
                 (
                     self.climb_ladder(cruise_m)?,
-                    self.descent_ladder(cruise_m)?,
+                    self.descent_ladder_to(top_m, self.arrival_elevation_m)?,
                     vec![
                         (
-                            self.cruise_tas_at(cruise_m, p.cruise_1_air_speed_m_s)?,
+                            self.cruise_tas_at(top_m, p.cruise_1_air_speed_m_s)?,
                             p.cruise_1_distance_fraction,
                         ),
                         (
-                            self.cruise_tas_at(cruise_m, p.cruise_2_air_speed_m_s)?,
+                            self.cruise_tas_at(top_m, p.cruise_2_air_speed_m_s)?,
                             p.cruise_2_distance_fraction,
                         ),
                         (
-                            self.cruise_tas_at(cruise_m, p.cruise_3_air_speed_m_s)?,
+                            self.cruise_tas_at(top_m, p.cruise_3_air_speed_m_s)?,
                             p.cruise_3_distance_fraction,
                         ),
                     ],
+                    top_m,
                 )
             }
             LegKind::Diversion => {
                 let (climb, descent) = self.diversion_ladders(cruise_m)?;
+                let top_m = self.ladder_top_m(self.arrival_elevation_m, cruise_m);
                 (
                     climb,
                     descent,
                     vec![(
-                        self.cruise_tas_at(cruise_m, self.profile.cruise_1_air_speed_m_s)?,
+                        self.cruise_tas_at(top_m, self.profile.cruise_1_air_speed_m_s)?,
                         1.0,
                     )],
+                    top_m,
                 )
             }
         };
         // One factor for the whole leg, so the configured schedule's shape -
         // every relative speed and every transition between rungs - is
         // preserved and only its overall pace changes. See `envelope_scale`.
-        let scale = self.envelope_scale(&climb, &descent, &cruise_rungs, cruise_m)?;
+        let scale = self.envelope_scale(&climb, &descent, &cruise_rungs, top_m)?;
         let (climb, descent, cruise_rungs) = if scale < 1.0 {
             (
                 Self::scaled_segments(&climb, scale)?,
@@ -748,14 +748,14 @@ impl ProfileGeometry<'_> {
             (climb, descent, cruise_rungs)
         };
         let plan = ProfilePlan {
-            cruise_altitude_m: cruise_m,
-            // `adapted` means one thing and keeps meaning it: the cruise
-            // *altitude* was lowered below the configured one. The envelope
-            // scale is a property of the aircraft and its declared limits,
-            // not an adaptation of the route, and it is reported separately
-            // rather than folded in here - overloading this flag made a
-            // design-range trip at its own configured altitude report itself
-            // as adapted.
+            // The altitude actually reached and cruised at (`top_m`), equal
+            // to `cruise_m` unless a step-climb leg is disabled below it.
+            cruise_altitude_m: top_m,
+            // True only when the cruise *altitude* was lowered because a
+            // short route could not fit the full ladder, so it compares
+            // against `cruise_m`, not `top_m`: a schedule that structurally
+            // never climbs its last fraction must not flip this on its own.
+            // The envelope scale is a separate, aircraft-declared property.
             adapted: cruise_m < self.configured_cruise_m_for(leg),
             envelope_scale: scale,
             climb,

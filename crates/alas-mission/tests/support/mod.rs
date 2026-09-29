@@ -233,8 +233,8 @@ pub fn analyses(vehicle: &Vehicle, training: &SurrogateTraining) -> MissionAnaly
                     family: "legacy-mission-turbofan".to_owned(),
                     version: "frozen-fixture-v1".to_owned(),
                 },
-                dataset: Some("SUAVE W6.4 frozen fixture".to_owned()),
-                sources: vec!["alas @ rust-port-baseline".to_owned()],
+                dataset: Some("SUAVE frozen fixture".to_owned()),
+                sources: vec!["frozen fixture".to_owned()],
             },
             Vec::new(),
             PropulsionInstallation {

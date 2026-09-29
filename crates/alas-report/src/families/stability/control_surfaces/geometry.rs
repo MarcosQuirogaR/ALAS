@@ -3,7 +3,6 @@
 
 // Ported from alas/reporting/visualization.py (_le_chord_at_span,
 // _span_stations, _cs_surface_patch, _cs_surface_area; L1664-1732)
-// Reference: alas @ rust-port-baseline.
 
 use crate::scene::{Axes2D, Color, Fill, Point2D, Scene, SceneElement, Stroke};
 use alas_geom::aircraft::airplane::Airplane;

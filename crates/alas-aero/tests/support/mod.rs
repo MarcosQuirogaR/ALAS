@@ -233,12 +233,12 @@ pub fn analysis_config(spanwise: i64, chordwise: i64) -> AnalysisConfig {
 
 /// The mesh every `golden/aero` fixture was generated at.
 ///
-/// The reference implementation meshed at one panel in each direction, and a
-/// parity fixture is only evidence about the *port* if this side meshes the
-/// same way. The product default has since moved to eight chordwise panels
-/// because one samples the mean camber line only where it is zero (see
-/// `alas_config::analysis`), so these tests state the reference mesh
-/// explicitly rather than inheriting a default that is no longer it.
+/// The fixtures were generated with one panel in each direction, and a parity
+/// fixture is only evidence if this side meshes the same way. The product
+/// default is eight chordwise panels because one panel samples the mean camber
+/// line only where it is zero (see `alas_config::analysis`), so these tests
+/// state the fixture mesh explicitly rather than inheriting the product
+/// default.
 pub fn reference_mesh() -> AnalysisConfig {
     analysis_config(1, 1)
 }

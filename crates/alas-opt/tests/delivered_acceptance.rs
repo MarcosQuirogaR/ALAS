@@ -5,10 +5,8 @@
 //!
 //! The search's `converged` and the application's feasibility verdict are two
 //! different statements, evaluated on two different meshes and two different
-//! mission models. Three of four converged application runs measured before
-//! this contract existed reported the delivered aircraft INFEASIBLE while
-//! still labelling the search converged
-//! (an internal optimizer independent-verification handoff record, section 2.3).
+//! mission models. Without this contract a converged search can deliver an
+//! aircraft the application reports INFEASIBLE.
 //!
 //! These tests hold the contract that closes that gap: a design the
 //! application rejects is never returned as a converged result, a verified
@@ -54,6 +52,7 @@ fn converged_result() -> OptimizationResult {
         termination: "converged".to_owned(),
         pareto_front: Vec::new(),
         search_diagnostics: Some(SearchDiagnostics {
+            restoration: None,
             converged: true,
             analysis_evaluations: 225,
             cache_hits: 0,

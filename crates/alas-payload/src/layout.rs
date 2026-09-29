@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/physics/payload.py (`DeckItem`, `PayloadLayout`)
-// Reference: alas @ rust-port-baseline.
 
 //! What a laid-out interior is: an ordered list of physical things, each with
 //! a size, a place and a mass, and the mass properties that fall out of them.
@@ -348,7 +347,7 @@ pub struct PayloadLayout {
 }
 
 /// Total mass and the two centre-of-gravity coordinates of a set of items:
-/// `PayloadLayout.recompute_cg`, as a function so a builder can compute them
+/// computed as a function so a builder can obtain them
 /// before it has a summary to construct the layout with.
 ///
 /// Only items with positive mass contribute, so the monuments and exits place
@@ -377,11 +376,6 @@ impl PayloadLayout {
         self.items.iter().filter(|it| it.deck == deck).collect()
     }
 
-    /// Every item of one kind, in placement order.
-    pub fn by_kind(&self, kind: ItemKind) -> Vec<&DeckItem> {
-        self.items.iter().filter(|it| it.kind == kind).collect()
-    }
-
     /// The decks this layout uses, in the order items first appear on them.
     pub fn decks(&self) -> Vec<&'static str> {
         let mut seen: Vec<&'static str> = Vec::new();
@@ -391,17 +385,6 @@ impl PayloadLayout {
             }
         }
         seen
-    }
-
-    /// Recompute the mass and centre of gravity from the items.
-    ///
-    /// The engines have already done this for the layouts they return; this is
-    /// for a consumer that has added or removed an item of its own.
-    pub fn recompute_cg(&mut self) {
-        let (mass, cg_x, cg_y) = mass_properties(&self.items);
-        self.total_mass = mass;
-        self.cg_x = cg_x;
-        self.cg_y = cg_y;
     }
 }
 
@@ -481,6 +464,5 @@ mod tests {
         };
         assert_eq!(layout.decks(), vec![MAIN, LOWER, UPPER]);
         assert_eq!(layout.by_deck(MAIN).len(), 2);
-        assert_eq!(layout.by_kind(ItemKind::Bag).len(), 1);
     }
 }

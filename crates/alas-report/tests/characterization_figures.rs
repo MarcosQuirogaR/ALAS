@@ -70,6 +70,7 @@ fn sample_report() -> AnalysisReport {
         geometry_summary: HashMap::new(),
         payload_layout: None,
         cg_envelope_ok: Some(true),
+        neutral_point_conditions: None,
     };
     report.component_masses.insert("Wing".to_owned(), 8500.0);
     report

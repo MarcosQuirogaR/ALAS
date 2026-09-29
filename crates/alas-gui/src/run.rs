@@ -75,6 +75,7 @@ impl AppState {
         self.status_message = "Running...".to_owned();
         self.stage.clear();
         self.pipeline_result = None;
+        self.pipeline_result_design_values = Some(self.design_values.clone());
         self.pipeline_result_complete = false;
         self.result_figure_cache.clear();
         self.patran_textures.clear();

@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/routing/route.py (`Route.for_airports`)
-// Reference: alas @ rust-port-baseline.
 
 //! Choosing the best route available between two airports.
 //!

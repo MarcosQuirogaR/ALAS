@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-// Ported from alas/physics/performance.py
-// Reference: alas @ rust-port-baseline.
-
 //! The FAR-25 V-speed schedule and the estimated field-performance distances.
 
 use alas_config::airports::Airport;
@@ -111,8 +108,7 @@ pub fn compute_v_speeds_at_masses(
 /// `FieldPerformance`.
 ///
 /// Holds the aerodrome so the distances-available and the margins against them
-/// are read from the same source the sizing used, exactly as upstream's
-/// dataclass carries the `Airport` and exposes the margins as properties.
+/// are read from the same source the sizing used.
 #[derive(Debug, Clone, PartialEq)]
 pub struct FieldPerformance {
     /// The aerodrome these distances were estimated at.
@@ -170,7 +166,7 @@ impl FieldPerformance {
 /// static `T/W` at MTOW; `bfl_factor` turns take-off distance into balanced
 /// field length (Raymer Table 17.1). The take-off constant `37.7` and the
 /// landing factor are the reverse of the matching-chart constraints.
-#[allow(clippy::too_many_arguments)] // mirrors upstream's own signature
+#[allow(clippy::too_many_arguments)] // one argument per physical input
 pub fn compute_field_performance(
     mtow_kg: f64,
     wing_area_m2: f64,

@@ -45,7 +45,6 @@ use super::profile::{ProfilePlan, Segment, SegmentKind};
 use super::SegmentMissionModel;
 use crate::mdo::propulsion::{DeckError, DeckKind, OperatingPoint, ThrustLimit};
 
-/// Default midpoint steps per planned segment; the model can refine it.
 pub(crate) const DEFAULT_STEPS_PER_SEGMENT: usize = 4;
 /// Service-ceiling criterion, 100 ft/min, m/s: a rating-limited climb step
 /// slower than this is a thrust deficit, not a slow climb.
@@ -350,9 +349,9 @@ impl Integrator<'_> {
         .into())
     }
 
-    /// Fly one step with a midpoint mass predictor; returns its horizontal
-    /// distance.
+    /// Fly one midpoint-predicted step and return its horizontal distance.
     fn fly_step(&mut self, step: StepPlan) -> Result<f64, FlyError> {
+        self.model.check_cancelled()?;
         let flight = self.model.propulsion.flight_condition(
             step.altitude_m,
             step.tas_m_s,
@@ -670,6 +669,7 @@ impl SegmentMissionModel {
         let mut descent_estimate_m = plan.descent_footprint_m();
         let mut flown: Option<(Integrator<'_>, f64)> = None;
         for _ in 0..DESCENT_FOOTPRINT_PASSES {
+            self.check_cancelled()?;
             let cruise_distance_m = plan.range_m - climb_footprint_m - descent_estimate_m;
             if cruise_distance_m < -CRUISE_DISTANCE_TOLERANCE_M {
                 return Err(FlyError::TooShort {

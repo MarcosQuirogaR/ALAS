@@ -29,9 +29,13 @@ impl AeroAnalysis<'_> {
     /// exposed-area-weighted t/c, the same basis as the form factor. The root
     /// section is the thickest station on a tapered wing and overstates wave
     /// drag; reference-compatibility analyses keep it for the frozen fixtures.
+    ///
+    /// Reads [`Self::wing_thicknesses`]' entry 0 rather than running its own
+    /// [`Self::area_weighted_thickness`] pass: `parasite_drag`'s own index-0
+    /// term is that exact same quantity, cached there for the same reason.
     pub fn korn_thickness(&self) -> f64 {
         match self.plane.wings.first() {
-            Some(wing) if !self.reference_compatibility => Self::area_weighted_thickness(wing),
+            Some(_) if !self.reference_compatibility => self.wing_thicknesses()[0],
             _ => self.section_thickness(),
         }
     }

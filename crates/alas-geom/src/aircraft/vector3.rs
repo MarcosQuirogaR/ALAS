@@ -5,7 +5,6 @@
 // vector-axis branch) and the plain vector arithmetic `reference geometry.numpy`
 // performs on 3-element geometry-axis arrays throughout `wing.py`.
 // Upstream: reference geometry 4.2.8, MIT.
-// Reference: alas @ rust-port-baseline.
 
 //! Plain 3-vector arithmetic and the axis-angle rotation matrix
 //! [`Wing`](super::wing::Wing)'s frame computation needs.

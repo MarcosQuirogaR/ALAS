@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/config/physics_config.py
-// Reference: alas @ rust-port-baseline.
 
 //! Coefficients of the semi-empirical drag buildup.
 //!

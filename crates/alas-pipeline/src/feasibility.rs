@@ -12,12 +12,9 @@
 #[cfg(test)]
 use alas_config::CgEnvelopeEvidence;
 use alas_config::{AlasConfig, DesignVector};
-use alas_mass::breakdown::{
-    calculate_physical_cg, MassBreakdown, MassCoordinates, FUEL, FURNISHINGS, FUSELAGE, GEAR,
-    H_STAB, PAYLOAD, PROPULSION, SYSTEMS, V_STAB, WING,
-};
+#[cfg(test)]
+use alas_mass::breakdown::{FUEL, PROPULSION};
 use alas_mission::MissionResult;
-use alas_opt::{assess_model_cg_envelope, ModelCgConstraint, ModelCgEnvelopeAssessment};
 use alas_perf::performance::{
     assess_oei_climb, compute_field_performance_at_masses, compute_v_speeds_at_masses,
     density_ratio, far25_oei_gradient, tw_cruise_constraint, tw_takeoff_constraint,
@@ -29,14 +26,18 @@ use crate::mission_stage::SelectedLoadCase;
 
 mod acceptance;
 mod cruise_equilibrium;
+mod design_mass;
 mod dispatch;
 mod fuel;
 mod mass_balance;
+mod model_cg;
+mod operational_envelope;
 mod planning;
 mod report_format;
 mod reported_attitude;
 mod static_thrust;
 mod structural_mass;
+pub(crate) mod structure;
 mod types;
 
 pub use acceptance::{
@@ -44,15 +45,20 @@ pub use acceptance::{
 };
 pub(crate) use cruise_equilibrium::assess as assess_cruise_equilibrium;
 pub use cruise_equilibrium::CruiseEquilibriumAssessment;
+pub use design_mass::{design_mass_config, design_vn_diagram, design_vn_mass_kg};
 pub use dispatch::{DispatchAssessment, DispatchOutcome};
+pub(crate) use fuel::plan_fuel_loading;
 pub use fuel::{
     assess_fuel_capacity, CarriedFuelBasis, FuelCapacityAssessment, FuelCapacityEvidence,
     FuelLoadingAssessment, MissionFuelAssessment, MissionFuelStatus,
 };
-pub(crate) use fuel::{plan_fuel_loading, report_mass_basis_kg};
 pub use mass_balance::{
     takeoff_mass_properties, LedgerItemSummary, MassBalanceAssessment, MassStateSummary,
     TankSummary,
+};
+pub use operational_envelope::{
+    append_envelope_findings, assess_operational_envelope, balance_index, CheckedPoint,
+    OperationalEnvelopeAssessment,
 };
 use planning::assess_public_cg_reference;
 #[cfg(test)]
@@ -77,122 +83,29 @@ fn error(
     }
 }
 
-fn model_cg_assessment(
-    config: &AlasConfig,
-    report: &AnalysisReport,
-    fuel_loading: &FuelLoadingAssessment,
-) -> Result<ModelCgEnvelopeAssessment, String> {
-    let mass = |name: &str| {
-        report
-            .component_masses
-            .get(name)
-            .copied()
-            .ok_or_else(|| format!("model CG assessment is missing {name} mass"))
-    };
-    let coordinate = |name: &str| {
-        report
-            .mass_coordinates
-            .get(name)
-            .copied()
-            .ok_or_else(|| format!("model CG assessment is missing {name} coordinates"))
-    };
-    let mut masses = MassBreakdown {
-        wing: mass(WING)?,
-        h_stab: mass(H_STAB)?,
-        v_stab: mass(V_STAB)?,
-        fuselage: mass(FUSELAGE)?,
-        gear: mass(GEAR)?,
-        propulsion: mass(PROPULSION)?,
-        systems: mass(SYSTEMS)?,
-        furnishings: mass(FURNISHINGS)?,
-        payload: mass(PAYLOAD)?,
-        fuel: mass(FUEL)?,
-    };
-    let coordinates = MassCoordinates {
-        wing: coordinate(WING)?,
-        h_stab: coordinate(H_STAB)?,
-        v_stab: coordinate(V_STAB)?,
-        fuselage: coordinate(FUSELAGE)?,
-        gear: coordinate(GEAR)?,
-        propulsion: coordinate(PROPULSION)?,
-        systems: coordinate(SYSTEMS)?,
-        furnishings: coordinate(FURNISHINGS)?,
-        payload: coordinate(PAYLOAD)?,
-        fuel: coordinate(FUEL)?,
-    };
-    masses.fuel = fuel_loading.analyzed_carried_fuel_kg;
-    let analyzed_cg = calculate_physical_cg(&masses, &coordinates);
-    assess_model_cg_envelope(
-        &report.airplane,
-        &masses,
-        &coordinates,
-        analyzed_cg[0],
-        report.x_neutral_point,
-        report.airplane.c_ref,
-        config,
-    )
-    .map_err(|error| error.to_string())
+/// Same shape as [`error`], severity [`FindingSeverity::Warning`]: for
+/// findings against a configured/assumed requirement rather than a physical
+/// limit (e.g. `ModelCgConstraint::MinimumUsableCgRange`'s configured
+/// `cg_range_pct_mac`), which must not reject an otherwise-feasible design
+/// on the strength of an assumption alone.
+fn warning(
+    code: FindingCode,
+    message: impl Into<String>,
+    actual: Option<f64>,
+    limit: Option<f64>,
+    unit: &'static str,
+) -> PhysicalFinding {
+    PhysicalFinding {
+        code,
+        severity: FindingSeverity::Warning,
+        message: message.into(),
+        actual,
+        limit,
+        unit,
+    }
 }
 
-fn append_model_cg_findings(
-    findings: &mut Vec<PhysicalFinding>,
-    assessment: &ModelCgEnvelopeAssessment,
-) {
-    let constraints = [
-        ModelCgConstraint::StaticStabilityFloor,
-        ModelCgConstraint::ConfiguredForwardCgRange,
-        ModelCgConstraint::NoseGearStrength,
-        ModelCgConstraint::MainGearStrength,
-        ModelCgConstraint::MinimumNoseGearLoad,
-    ];
-    for constraint in constraints {
-        let worst = assessment
-            .loading_states
-            .iter()
-            .flat_map(|state| {
-                state
-                    .constraints
-                    .iter()
-                    .filter(move |item| item.constraint == constraint && item.violated)
-                    .map(move |item| (state.state, item))
-            })
-            .max_by(|(_, left), (_, right)| {
-                left.normalized_exceedance
-                    .total_cmp(&right.normalized_exceedance)
-            });
-        let Some((state, result)) = worst else {
-            continue;
-        };
-        let code = match constraint {
-            ModelCgConstraint::StaticStabilityFloor => FindingCode::InsufficientStaticMargin,
-            ModelCgConstraint::ConfiguredForwardCgRange => {
-                FindingCode::ModelCgForwardRangeViolation
-            }
-            ModelCgConstraint::NoseGearStrength => FindingCode::NoseGearStrengthViolation,
-            ModelCgConstraint::MainGearStrength => FindingCode::MainGearStrengthViolation,
-            ModelCgConstraint::MinimumNoseGearLoad => FindingCode::MinimumNoseGearLoadViolation,
-        };
-        findings.push(error(
-            code,
-            format!(
-                "{} loading state violates the model {} constraint",
-                state.label(),
-                constraint.label()
-            ),
-            Some(result.actual),
-            Some(result.limit),
-            constraint.unit(),
-        ));
-    }
-    // The aft-boundary governance diagnostic that explains a nose-load
-    // violation is carried on the typed assessment itself
-    // (`ModelCgEnvelopeAssessment::aft_limit_governance`) and reported by
-    // `report_format` and `acceptance`. It is deliberately not a
-    // `PhysicalFinding`: `FindingCode` is an interface whose exhaustive
-    // consumers live outside this crate's ownership boundary, and the
-    // diagnostic changes no verdict: a layout whose gear cannot carry the
-    // envelope still fails `MinimumNoseGearLoadViolation` above.
-}
+use model_cg::{append_model_cg_findings, model_cg_assessment};
 
 /// Evaluate conservation laws and configured limits on a completed run.
 ///
@@ -219,12 +132,8 @@ pub fn assess_physical_feasibility_with_load_case(
     load_case: Option<&SelectedLoadCase>,
 ) -> FeasibilityReport {
     let mut findings = Vec::new();
-    let envelope = alas_perf::performance::build_vn_diagram(
-        report.airplane.s_ref,
-        &config.requirements,
-        &config.performance,
-        config.requirements.cruise_altitude_m,
-    );
+    structure::append_native(config, design, report, &mut findings);
+    let envelope = design_vn_diagram(config, report);
     if let Err(message) = envelope.validate_speed_order() {
         findings.push(error(
             FindingCode::InvalidEnvelopeSpeedOrder,
@@ -262,11 +171,6 @@ pub fn assess_physical_feasibility_with_load_case(
             ));
         }
     }
-    // Public planning limits apply to the load actually carried: a mass-closure
-    // remainder can exceed usable tank capacity, so `report.physical_cg` would
-    // compare a capped mass case against a CG still holding uncarried fuel.
-    let cg_envelope =
-        assess_public_cg_reference(config, report, fuel_loading.analyzed_carried_fuel_kg);
     fuel_loading.mission = fuel::assess_mission_fuel(config.mission.enabled, mission);
     findings.extend(fuel::findings(config.requirements.mtow_kg, &fuel_loading));
     structural_mass::append_structural_mass_findings(
@@ -277,7 +181,16 @@ pub fn assess_physical_feasibility_with_load_case(
         &mut findings,
     );
 
-    let model_cg = match model_cg_assessment(config, report, &fuel_loading) {
+    // Built before the model CG assessment: when the ledger
+    // exists, `model_cg_assessment` reads its OEW/ZFW/TOW points instead of
+    // the lumped ten-group model's, so the hard gate evaluates the same
+    // tank-fill-order, detailed-payload centre of gravity this statement
+    // shows a reviewer. `assess_mass_balance` depends only on `config`,
+    // `design`, `report` and the already-finalized `fuel_loading` above, so
+    // moving it ahead of `model_cg_assessment` changes no result of its own.
+    let mass_balance =
+        mass_balance::assess_mass_balance(config, design, report, &fuel_loading, &mut findings);
+    let model_cg = match model_cg_assessment(config, report, &fuel_loading, mass_balance.as_ref()) {
         Ok(assessment) => {
             append_model_cg_findings(&mut findings, &assessment);
             Some(assessment)
@@ -293,7 +206,25 @@ pub fn assess_physical_feasibility_with_load_case(
             None
         }
     };
-
+    let operational_envelope = model_cg.as_ref().and_then(|assessment| {
+        operational_envelope::assess_operational_envelope(config, report, assessment)
+    });
+    operational_envelope::append_envelope_findings(operational_envelope.as_ref(), &mut findings);
+    // Public planning limits apply to the load actually carried: a mass-closure
+    // remainder can exceed usable tank capacity, so `report.physical_cg` would
+    // compare a capped mass case against a CG still holding uncarried fuel.
+    //
+    // Computed after `model_cg`/`operational_envelope` : the
+    // planning-curve sweep needs every named loading state and every
+    // potato/fuel-vector extreme those two already built, not just the one
+    // analyzed point the frozen single-point comparison used.
+    let cg_envelope = assess_public_cg_reference(
+        config,
+        report,
+        fuel_loading.analyzed_carried_fuel_kg,
+        model_cg.as_ref(),
+        operational_envelope.as_ref(),
+    );
     if let Some(alas_payload::layout::LayoutSummary::Passenger(summary)) =
         report.payload_layout.as_ref().map(|layout| &layout.summary)
     {
@@ -630,10 +561,12 @@ pub fn assess_physical_feasibility_with_load_case(
             }
         };
         // Report the input that actually failed. This guard covers three
-        // different quantities; publishing `wing_area_m2` as the finding's
-        // `actual` whichever one was at fault would tell a reader that a
-        // healthy 61.0 m^2 ATR 72-600 wing is "not finite and positive" when
-        // the quantity at fault is the static thrust-to-weight ratio.
+        // different quantities, so publishing `wing_area_m2` as the finding's
+        // `actual` whichever one was at fault would mislead: the ATR
+        // 72-600 - whose wing area is a perfectly healthy 61.0 m2 - would report
+        // "inputs are not finite and positive (actual 61.000 m^2, limit
+        // 0.000 m^2)". A reader cannot act on that, and the quantity really
+        // at fault there is the static thrust-to-weight ratio.
         let unusable = |value: f64| !value.is_finite() || value <= 0.0;
         let failure = if unusable(wing_area_m2) {
             Some(("wing reference area", wing_area_m2, "m^2"))
@@ -839,8 +772,6 @@ pub fn assess_physical_feasibility_with_load_case(
         }
     }
 
-    let mass_balance =
-        mass_balance::assess_mass_balance(config, design, report, &fuel_loading, &mut findings);
     FeasibilityReport {
         findings,
         cg_envelope,
@@ -848,6 +779,8 @@ pub fn assess_physical_feasibility_with_load_case(
         fuel_loading,
         cruise_equilibrium,
         mass_balance,
+        propulsion_station_fallback: structural_mass::propulsion_fallback_station(config, report),
+        operational_envelope,
     }
 }
 

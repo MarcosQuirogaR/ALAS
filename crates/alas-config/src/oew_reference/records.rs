@@ -342,9 +342,9 @@ pub(super) static RECORDS: &[OewReference] = &[
     },
     OewReference {
         preset: "ATR72-600",
-        // The model is no longer unsupported: the shaft-power propulsion
+        // The shaft-power propulsion
         // group evaluates this aircraft through the production path, so a
-        // prediction now exists and the record must say what it may be
+        // prediction exists and the record must say what it may be
         // compared with. It is still not a validation anchor - the factsheet
         // does not state the definition's inclusion list, and the two
         // published bases differ by 440 kg.

@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/reporting/visualization.py (`figure_mses_*`)
-// Reference: alas @ rust-port-baseline.
 
 //! MSES surface distributions and sampled flow-field views.
 

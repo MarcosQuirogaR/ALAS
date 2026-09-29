@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/config/geometry_config.py (`EmpennageConfig`)
-// Reference: alas @ rust-port-baseline.
 
 //! The tail surfaces, at unit scale.
 //!
@@ -16,11 +15,6 @@
 //!
 //! Both surfaces share one airfoil, and it is symmetric: a stabilizer with
 //! camber carries load at zero incidence, which a trimming surface must not.
-//!
-//! Several fields here declared a label and a unit upstream but no
-//! explanation. This port supplies one for each, as CONTRIBUTING.md requires;
-//! that adds prose and changes no value, and the parity test compares `help`
-//! only where the dataclass declared one.
 
 use serde::{Deserialize, Serialize};
 

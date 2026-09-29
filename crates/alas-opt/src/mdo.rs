@@ -6,8 +6,9 @@
 //! the configured fuel policy and ranked feasibility first.
 //!
 //! [`crate::objective::DesignObjective::evaluate`] delegates here for every
-//! product evaluation; only the frozen reference-compatibility replay keeps
-//! the legacy weighted penalty so its parity fixture stays meaningful.
+//! product evaluation. The selectable `scipy_legacy` profile and the explicit
+//! reference-compatibility replay use the weighted-penalty objective instead,
+//! so the recorded reference runs and their parity fixture stay meaningful.
 //!
 //! The evaluation is a pipeline of four stages, one module each:
 //! [`build`] evaluates the geometry, mass and trimmed aerodynamic operating
@@ -30,6 +31,7 @@ mod residuals_geometry;
 mod residuals_layout;
 mod residuals_performance;
 mod sizing;
+pub mod structural_feasibility;
 mod tanks;
 mod trim;
 mod types;
@@ -121,11 +123,22 @@ pub fn evaluate_mission_sized_with_assessment(
         );
         return (cost, None);
     }
-    match sizing::run_candidate_with_fuselage_policy(
-        &objective.config,
-        x,
-        objective.preserve_explicit_fuselage_length,
-    ) {
+    let outcome = if objective.cancellation.is_some() {
+        sizing::run_candidate_cancellable(
+            &objective.config,
+            x,
+            None,
+            objective.preserve_explicit_fuselage_length,
+            objective.cancellation.clone(),
+        )
+    } else {
+        sizing::run_candidate_with_fuselage_policy(
+            &objective.config,
+            x,
+            objective.preserve_explicit_fuselage_length,
+        )
+    };
+    match outcome {
         Ok(outcome) => {
             let history = outcome.history;
             let residuals = residuals::build(
@@ -160,11 +173,12 @@ pub fn evaluate_mission_sized_with_assessment(
             // `CandidateFailure` carries only the reason, not the design
             // vector (see its doc comment); rebuild it from `x` for the
             // history entry, falling back to the default vector exactly as
-            // the legacy path does when `x` itself does not parse.
+            // the weighted-penalty path does when `x` itself does not parse.
+
             let dv = DesignVector::from_array(x).unwrap_or_default();
             // A candidate that never reached a sized takeoff mass has no
             // finite objective value or L/D; the kernels in
-            // `differential_evolution_parts::part_01::scored_point` already
+            // `differential_evolution::scored_point_at` already
             // rank a non-finite or nonpositive L/D below every physical
             // miss, which is why this stays `0.0` rather than a placeholder
             // positive number.
@@ -220,29 +234,49 @@ pub fn assess_product_candidate(
     config: &AlasConfig,
     design: &DesignVector,
 ) -> Result<CandidateAssessment, String> {
+    assess_product_candidate_cancellable(config, design, None)
+}
+
+/// Product finalist replay with cancellation inside the coupled mission solve.
+pub fn assess_product_candidate_cancellable(
+    config: &AlasConfig,
+    design: &DesignVector,
+    cancel: Option<&std::sync::atomic::AtomicBool>,
+) -> Result<CandidateAssessment, String> {
     if !config.mass_model.mass_architecture.is_production() {
         return Err(
-            "the product candidate assessor requires pure_flops_transport_v1; select the explicit reference-compatibility comparison path for legacy masses"
+            "the product candidate assessor requires pure_flops_transport_v1; select the explicit reference-compatibility comparison path for reference-compatible masses"
                 .to_owned(),
         );
     }
-    let objective = DesignObjective::new_with_nominal(config.clone(), *design);
-    assess_candidate(&objective, &design.to_array())
+    let mut objective = DesignObjective::new_with_nominal(config.clone(), *design);
+    let token = crate::cancellation::EvaluationCancellation::new();
+    objective.cancellation = Some(token.clone());
+    crate::cancellation::forward_evaluation_cancellation(cancel, &token, || {
+        assess_candidate(&objective, &design.to_array())
+    })
 }
 
 /// [`assess_candidate`] with the cruise drag polar supplied by an external
 /// aerodynamic solver instead of the native trim: the sizing loop then keeps
-/// that polar fixed and closes mass, fuel and takeoff mass around it.
+/// that polar fixed and closes mass, fuel and takeoff mass around it, with
+/// deep coupled-solve cancellation.
 ///
 /// # Errors
 ///
 /// As [`assess_candidate`]; an invalid polar is reported as `trim_solve`.
-pub fn assess_candidate_with_polar(
+pub fn assess_candidate_with_polar_cancellable(
     objective: &DesignObjective,
     x: &[f64],
     polar: &ExternalPolar,
+    cancel: Option<&std::sync::atomic::AtomicBool>,
 ) -> Result<CandidateAssessment, String> {
-    assess_with(objective, x, Some(polar))
+    let mut objective = objective.clone();
+    let token = crate::cancellation::EvaluationCancellation::new();
+    objective.cancellation = Some(token.clone());
+    crate::cancellation::forward_evaluation_cancellation(cancel, &token, || {
+        assess_with(&objective, x, Some(polar))
+    })
 }
 
 fn assess_with(
@@ -254,11 +288,12 @@ fn assess_with(
         .validate_design_space(x)
         .map_err(|_| "design_space".to_owned())?;
     let weights = objective.config.optimizer.weights.clone();
-    match sizing::run_candidate_with_polar_and_fuselage_policy(
+    match sizing::run_candidate_cancellable(
         &objective.config,
         x,
         polar,
         objective.preserve_explicit_fuselage_length,
+        objective.cancellation.clone(),
     ) {
         Ok(outcome) => {
             let residuals = residuals::build(
@@ -271,5 +306,18 @@ fn assess_with(
             Ok(cost::assemble(outcome, &objective.config, residuals))
         }
         Err(failure) => Err(failure.reason.to_owned()),
+    }
+}
+
+#[cfg(test)]
+mod cancellation_tests {
+    #[test]
+    fn pre_cancelled_product_finalist_reports_cancelled() {
+        let config = alas_config::AlasConfig::default();
+        let design = alas_config::DesignVector::default();
+        let flag = std::sync::atomic::AtomicBool::new(true);
+        assert!(
+            matches!(super::assess_product_candidate_cancellable(&config, &design, Some(&flag)), Err(reason) if reason == "cancelled")
+        );
     }
 }

@@ -144,20 +144,28 @@ impl FinalistVerification {
 /// The three steps are the application's own: replay the typed candidate
 /// assessment to recover the takeoff mass the coupled sizing closed at, run
 /// the reported analysis bound to that mass, then fly the mission and assess
-/// physical feasibility exactly as stages 5 and 6 do.
+/// physical feasibility exactly as stages 5 and 6 do. The coupled replay
+/// observes `cancel`.
 ///
 /// # Errors
 ///
 /// The replay, analysis or mission failure, as a description. A candidate
 /// that is not hard-feasible on replay is an error rather than a rejection:
 /// the search must not have offered it.
-pub fn verify_finalist(
+pub fn verify_finalist_cancellable(
     config: &AlasConfig,
     design: &DesignVector,
     route: Option<&AcceptanceRoute>,
+    cancel: Option<&std::sync::atomic::AtomicBool>,
 ) -> Result<FinalistVerification, String> {
-    let assessment = alas_opt::assess_product_candidate(config, design)
-        .map_err(|error| format!("finalist replay failed: {error}"))?;
+    let assessment = alas_opt::assess_product_candidate_cancellable(config, design, cancel)
+        .map_err(|error| {
+            if error == "cancelled" {
+                "Cancelled safely: finalist replay interrupted".to_owned()
+            } else {
+                format!("finalist replay failed: {error}")
+            }
+        })?;
     if !assessment.hard_feasible {
         let violations = assessment.violated_hard_ids().join(", ");
         return Err(format!(

@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-// Ported from alas/pipeline.py
-// Reference: alas @ rust-port-baseline.
-
 //! Complete multi-stage aircraft design, analysis, optimization and export pipeline.
 //!
 //! [`DesignPipeline::run`] executes the full sequence:
@@ -17,7 +14,7 @@
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use alas_aero::mses::{
@@ -41,11 +38,11 @@ use alas_route::{fetch_route_with_status, SimbriefFetchStatus};
 use serde::{Deserialize, Serialize};
 
 use crate::acceptance::AcceptanceRoute;
-use crate::avl::{run_avl_takeoff_comparison, AvlAnalysisResult};
+use crate::avl::{run_avl_takeoff_comparison_cancellable, AvlAnalysisResult};
 use crate::baseline::{analyze_baseline, BaselineReport};
 use crate::cabin_scene::export_cabin_scene;
 use crate::cpacs::{
-    export_cpacs, export_cpacs_with_analysis, read_cpacs_file, write_cpacs_run_manifest,
+    export_cpacs_document, export_cpacs_with_analysis, read_cpacs, write_cpacs_run_manifest,
     CpacsDocument, CpacsExportResult,
 };
 use crate::cpacs_adapters::CpacsAircraftData;
@@ -76,9 +73,11 @@ use events::{
     finish_stage, warn_artifact_failure,
 };
 mod helpers;
+mod mission_payload_override;
+mod sized_finalist;
 mod snapshots;
 use helpers::{
-    add_manifest_artifact, add_manifest_artifact_if_exists, check_preset_policy,
+    add_manifest_artifact, add_manifest_artifact_if_exists, check_preset_policy, finite_range_text,
     persist_mses_polar_diagnostics, persist_mses_raw_exports, validate_bounds,
 };
 use snapshots::SnapshotPublisher;
@@ -122,7 +121,15 @@ fn prepare_analysis_workspace(output_dir: Option<PathBuf>) -> Result<PathBuf, St
             .duration_since(UNIX_EPOCH)
             .map(|duration| duration.as_nanos())
             .unwrap_or_default();
-        std::env::temp_dir().join(format!("alas-analysis-{}-{nonce}", std::process::id()))
+        // The clock alone can repeat within one tick, so two runs started together
+        // in one process would otherwise share a workspace and overwrite each
+        // other's exports.
+        static SEQUENCE: AtomicU64 = AtomicU64::new(0);
+        let sequence = SEQUENCE.fetch_add(1, Ordering::Relaxed);
+        std::env::temp_dir().join(format!(
+            "alas-analysis-{}-{nonce}-{sequence}",
+            std::process::id()
+        ))
     });
     std::fs::create_dir_all(&analysis_dir)
         .map_err(|error| format!("analysis workspace creation failed: {error}"))?;
@@ -153,7 +160,14 @@ fn mses_section_condition(config: &AlasConfig, report: &AnalysisReport) -> MsesS
         });
     let reynolds =
         (atmo.density() * velocity * section_chord_m) / atmo.dynamic_viscosity().max(1e-9);
-    let mach = freestream_mach * report.design.sweep_deg.to_radians().cos();
+    // Section Mach normal to the quarter-chord line, with the same sweep
+    // definition as the AVL reference: the built wing's root-to-tip mean
+    // quarter-chord sweep, not the design-vector inboard leading-edge sweep.
+    let quarter_chord_sweep_deg = alas_aero::analysis::AeroAnalysis::quarter_chord_sweep_deg(
+        &report.airplane,
+        report.design.sweep_deg,
+    );
+    let mach = freestream_mach * quarter_chord_sweep_deg.to_radians().cos();
     let body_alpha_deg = report
         .trimmed_design_point
         .map_or(report.design_point.alpha_deg, |trim| {
@@ -353,6 +367,7 @@ pub struct DesignPipeline {
     /// aircraft. The public constructor keeps the existing configuration
     /// workflow unchanged.
     aircraft_override: Option<Airplane>,
+    mission_payload_override_kg: Option<f64>,
 }
 
 /// The three independently optional observation seams a design-space run can
@@ -371,12 +386,16 @@ pub struct RunObservers<'a> {
 }
 
 impl DesignPipeline {
-    /// Create a new design pipeline with `config`.
-    pub fn new(config: AlasConfig) -> Self {
+    fn based_on(config: AlasConfig, aircraft_override: Option<Airplane>) -> Self {
         Self {
             config,
-            aircraft_override: None,
+            aircraft_override,
+            mission_payload_override_kg: None,
         }
+    }
+    /// Create a new design pipeline with `config`.
+    pub fn new(config: AlasConfig) -> Self {
+        Self::based_on(config, None)
     }
 
     /// Create a pipeline whose aircraft geometry was imported from a generic
@@ -386,10 +405,7 @@ impl DesignPipeline {
     /// physics inputs. The imported CPACS aircraft remains authoritative for
     /// the geometry passed to the existing analysis formulas.
     pub fn new_with_airplane(config: AlasConfig, airplane: Airplane) -> Self {
-        Self {
-            config,
-            aircraft_override: Some(airplane),
-        }
+        Self::based_on(config, Some(airplane))
     }
 
     /// Create a pipeline from a validated CPACS 3.5 document.
@@ -551,33 +567,6 @@ impl DesignPipeline {
             Some(*initial_design),
             Some(bounds),
             None,
-            None,
-            None,
-            None,
-        )
-    }
-
-    /// Execute a desktop-style design-space run while reporting stage and
-    /// downstream-component progress. The callback is deliberately
-    /// synchronous and typed: callers can forward it across their own worker
-    /// boundary without the pipeline depending on a GUI or logging
-    /// implementation.
-    pub fn run_with_design_space_and_progress(
-        &self,
-        options: &PipelineOptions,
-        environment: &RunEnvironment,
-        initial_design: &DesignVector,
-        bounds: &[(f64, f64)],
-        progress: &(dyn Fn(&str) + Sync),
-    ) -> Result<PipelineResult, String> {
-        validate_bounds(bounds)?;
-        self.run_inner(
-            options,
-            environment,
-            None,
-            Some(*initial_design),
-            Some(bounds),
-            Some(progress),
             None,
             None,
             None,
@@ -769,7 +758,7 @@ impl DesignPipeline {
         // telemetry snapshot can say "the request arrived in the search" and
         // not merely "somewhere in the pipeline".
         alas_opt::CancelScope::attach(cancel).enter(alas_opt::CancelPhase::PipelineStage, 2);
-        let solver_optimizations = if options.optimize {
+        let mut solver_optimizations = if options.optimize {
             Some(run_solver_optimizations(
                 &self.config,
                 options.optimization_solver,
@@ -785,7 +774,9 @@ impl DesignPipeline {
         } else {
             None
         };
-        let (optimized_design, optimization_result, branch_report) = if let Some(solutions) =
+        let (mut optimized_design, mut optimization_result, branch_report) = if let Some(
+            solutions,
+        ) =
             solver_optimizations.as_ref()
         {
             match solutions.selected(options.optimization_solver) {
@@ -862,6 +853,12 @@ impl DesignPipeline {
             };
             report(&message);
             emit_diagnostic_with_severity(events, run_clock, "optimization", &message, severity);
+        } else if optimization_result.is_some()
+            && self.config.optimizer.solver.method == alas_config::optimizer::SCIPY_LEGACY_METHOD
+        {
+            report(
+                "SciPy legacy winner sent to full analysis; mission-sized finalist acceptance is disabled for this profile",
+            );
         }
         finish_stage(events, run_clock, stage_clock, 2, "optimization");
         check_cancelled(cancel)?;
@@ -884,73 +881,25 @@ impl DesignPipeline {
             },
         };
         if options.optimize
+            && self.config.optimizer.solver.method == alas_config::optimizer::PRODUCT_DE_METHOD
             && optimization_result.is_some()
             && self.aircraft_override.is_none()
             && !optimized_report
                 .geometry_summary
                 .contains_key("analysis_mass_basis_is_sized")
         {
-            // The optimizer's product objective closes the mass/dispatch
-            // fixed point below the configured MTOW limit.  A branch report
-            // built directly at `requirements.mtow_kg` would consequently
-            // calculate cruise lift, trim and component fuel for a heavier
-            // aircraft than the one that actually won the search.  Replay
-            // the typed finalist assessment and bind the report to its
-            // closed takeoff mass before any export or downstream tool sees
-            // it.  A disagreement is a real integration error, not a reason
-            // to silently fall back to the ceiling-mass report.
-            let assessment = alas_opt::assess_product_candidate(&self.config, &optimized_design)
-                .map_err(|error| {
-                    format!(
-                        "optimized finalist could not be re-evaluated at its exported design: {error}"
-                    )
-                })?;
-            if !assessment.hard_feasible {
-                let violations = assessment.violated_hard_ids().join(", ");
-                return Err(format!(
-                    "optimized finalist is not hard-feasible on replay: {}",
-                    if violations.is_empty() {
-                        "unidentified hard residual".to_owned()
-                    } else {
-                        violations
-                    }
-                ));
-            }
-            // Bind the report to the vector the assessment was *evaluated*
-            // on, not the one it was handed. A clean-sheet design space
-            // derives the fuselage coordinate from the cabin load case, so
-            // the two are the same vector for an optimizer finalist and can
-            // differ for any other supplied design (see
-            // `alas_opt::ResolvedProductState::design`). Reporting the
-            // caller's vector there would publish a different aeroplane from
-            // the one this gate just passed.
-            let assessed_design = assessment.resolved.design;
-            if assessed_design != optimized_design {
-                emit_diagnostic(
-                    events,
-                    run_clock,
-                    "full_analysis",
-                    &format!(
-                        "Finalist geometry re-derived by the design space: fuselage length {:.6} m evaluated against {:.6} m supplied; the report is bound to the evaluated aircraft",
-                        assessed_design.fuselage_length_m, optimized_design.fuselage_length_m,
-                    ),
-                );
-            }
-            optimized_report = full.run_at_sized_takeoff_mass(
-                &assessed_design,
-                true,
-                assessment.sized.takeoff_mass_kg,
-            )?;
-            emit_diagnostic(
+            // The optimizer closes the mass/dispatch fixed point below the
+            // configured MTOW limit, so a report built at that limit would
+            // describe a heavier aircraft than the finalist. Bind it to the
+            // sized mass, and publish the vector the replay evaluated.
+            (optimized_design, optimized_report) = sized_finalist::bind_sized_finalist(
+                &self.config,
+                &full,
+                optimized_design,
                 events,
                 run_clock,
-                "full_analysis",
-                &format!(
-                    "Finalist report bound to mission-sized takeoff mass {:.3} kg (MTOW limit {:.3} kg)",
-                    assessment.sized.takeoff_mass_kg,
-                    self.config.requirements.mtow_kg,
-                ),
-            );
+                cancel,
+            )?;
         }
         emit_diagnostic(
             events,
@@ -1009,12 +958,13 @@ impl DesignPipeline {
             "CPACS export and geometry canonicalization",
         );
         let cpacs_path = analysis_dir.join("cpacs/optimized_aircraft.cpacs.xml");
-        let cpacs_export = Some(
-            export_cpacs(&optimized_report, &self.config, &cpacs_path)
-                .map_err(|error| format!("CPACS export failed: {error}"))?,
-        );
-        if let Some(export) = cpacs_export.as_ref() {
-            let document = read_cpacs_file(&export.path)
+        let (export, xml) = export_cpacs_document(&optimized_report, &self.config, &cpacs_path)
+            .map_err(|error| format!("CPACS export failed: {error}"))?;
+        let cpacs_export = Some(export);
+        {
+            // Parse the XML just written, not the file: another run sharing the
+            // output directory may already have replaced it.
+            let document = read_cpacs(&xml)
                 .map_err(|error| format!("CPACS canonicalization read failed: {error}"))?;
             optimized_report.airplane = document
                 .to_airplane()
@@ -1117,12 +1067,13 @@ impl DesignPipeline {
                 finish_component(events, run_clock, stage_clock, "downstream/avl", "Skipped");
                 return None;
             }
-            let result = Some(run_avl_takeoff_comparison(
+            let result = Some(run_avl_takeoff_comparison_cancellable(
                 &optimized_report,
                 &self.config,
                 &analysis_dir,
                 environment.avl_exe.as_deref(),
-                300.0,
+                self.config.analysis.avl_timeout_s,
+                cancel,
             ));
             live_results.update(|snapshot| snapshot.avl_result = result.clone());
             finish_component(
@@ -1314,20 +1265,21 @@ impl DesignPipeline {
             );
             if self.config.structures.enabled {
                 let work_dir = Some(analysis_dir.join("structures"));
-                // Structural load cards are sized against the same takeoff
-                // mass that built the selected report.  For a mission-sized
-                // finalist the configured MTOW remains the upper limit, but
-                // using that larger limit here would make the wingbox and
-                // NASTRAN deck describe a different aircraft than the mass,
-                // CG and mission records above.
-                let structural_config = config_for_report_mass(&self.config, &optimized_report);
+                // Loads use the mass the report was evaluated at (the sized
+                // takeoff mass of a sized finalist); a registered aircraft keeps
+                // its declared design gross weight, so a light dispatch does not
+                // resize its box.
+                let structural_config =
+                    crate::feasibility::structure::design_config(&self.config, &optimized_report);
                 emit_diagnostic(
                     events,
                     run_clock,
                     "downstream/structural",
                     &format!(
-                        "Structural loads use report mass basis {:.3} kg (configured MTOW limit {:.3} kg)",
-                        report_mass_basis_kg(&optimized_report, self.config.requirements.mtow_kg),
+                        "Structural loads use design gross mass {:.3} kg (configured MTOW limit {:.3} kg)",
+                        alas_opt::mdo::structural_feasibility::structural_design_mass_kg(
+                            &structural_config
+                        ),
                         self.config.requirements.mtow_kg,
                     ),
                 );
@@ -1465,13 +1417,31 @@ impl DesignPipeline {
             "feasibility",
             "Physical feasibility assessment",
         );
-        let feasibility = assess_physical_feasibility_with_load_case(
+        let mut feasibility = assess_physical_feasibility_with_load_case(
             &self.config,
             &optimized_design,
             &optimized_report,
             mission_result.as_ref(),
             mission_load_case.as_ref(),
         );
+        crate::feasibility::structure::append_downstream(
+            &self.config,
+            structural_result.as_ref(),
+            &mut feasibility.findings,
+        );
+        if self.config.optimizer.solver.method == alas_config::optimizer::PRODUCT_DE_METHOD {
+            if let Some(message) = crate::feasibility::structure::revoke_delivery(
+                &feasibility.findings,
+                optimization_result.as_mut(),
+            ) {
+                emit_diagnostic(events, run_clock, "feasibility", &message);
+            }
+            crate::feasibility::structure::sync_selected_delivery(
+                solver_optimizations.as_mut(),
+                options.optimization_solver,
+                optimization_result.as_ref(),
+            );
+        }
         finish_stage(events, run_clock, stage_clock, 6, "feasibility");
         check_cancelled(cancel)?;
         if let Some(export) = cpacs_export.as_ref() {
@@ -1921,9 +1891,12 @@ impl DesignPipeline {
             .dest_airport
             .as_ref()
             .unwrap_or(selected_destination);
+        let overridden = self
+            .mission_payload_override_kg
+            .map(|kg| mission_payload_override::report_with_payload_override(report, kg));
         let (mission, load) = mission_stage::evaluate(
             &self.config,
-            report,
+            overridden.as_ref().unwrap_or(report),
             origin,
             destination,
             planned.route.total_distance_m(),
@@ -2068,49 +2041,6 @@ impl DesignPipeline {
     }
 }
 
-/// Read the report's explicit mass provenance without treating a missing or
-/// malformed value as a new mass limit. `fallback_kg` is the configured
-/// MTOW, which is the appropriate basis for reference and fixed requirement
-/// reports.
-fn report_mass_basis_kg(report: &AnalysisReport, fallback_kg: f64) -> f64 {
-    let is_sized = report
-        .geometry_summary
-        .get("analysis_mass_basis_is_sized")
-        .is_some_and(|value| value.is_finite() && *value > 0.5);
-    let sized = report
-        .geometry_summary
-        .get("analysis_mass_basis_kg")
-        .copied()
-        .filter(|value| value.is_finite() && *value > 0.0);
-    if is_sized {
-        if let Some(value) = sized {
-            return value;
-        }
-    }
-    fallback_kg
-}
-
-/// Clone the public configuration for a downstream discipline that consumes
-/// the report's actual mass. The configured MTOW is retained by the caller as
-/// a limit and remains in the final result; only the structural load cards
-/// need the closed mission-sized value as their working mass.
-fn config_for_report_mass(config: &AlasConfig, report: &AnalysisReport) -> AlasConfig {
-    config.at_closure_mass(report_mass_basis_kg(report, config.requirements.mtow_kg))
-}
-
-/// `lo..hi` over the finite entries of `values` at `decimals` places, or
-/// `none` when there are none.
-fn finite_range_text(values: &[f64], decimals: usize) -> String {
-    let mut finite = values.iter().copied().filter(|value| value.is_finite());
-    let Some(first) = finite.next() else {
-        return "none".to_owned();
-    };
-    let (lo, hi) = finite.fold((first, first), |(lo, hi), value| {
-        (lo.min(value), hi.max(value))
-    });
-    format!("{lo:.decimals$}..{hi:.decimals$}")
-}
-
 /// Whether a design-space call pins every coordinate to one literal value.
 ///
 /// This is the explicit review contract used by the desktop when it asks the
@@ -2155,5 +2085,4 @@ fn validate_run_configuration(
 #[cfg(test)]
 // Failed expectations and unwraps here are failed test assertions.
 #[allow(clippy::unwrap_used, clippy::expect_used)]
-#[path = "pipeline_tests.rs"]
 mod tests;

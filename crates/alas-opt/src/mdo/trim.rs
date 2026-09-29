@@ -46,7 +46,7 @@ use super::types::{CandidateFailure, ExternalPolar};
 
 /// History label for a trim that failed numerically or did not converge.
 ///
-/// Shared with the legacy objective's evaluation-failure vocabulary so
+/// Shared with the weighted-penalty objective's evaluation-failure vocabulary so
 /// `OptimizationHistory::reject_reason_counts` groups both paths together.
 pub(crate) const TRIM_SOLVE_FAILURE: &str = "trim_solve";
 

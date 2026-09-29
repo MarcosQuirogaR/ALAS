@@ -104,7 +104,7 @@ fn an_impossible_design_range_is_hard_infeasible_and_costs_more() {
     let mut impossible_config = block_fuel_config();
     // Far beyond the default aircraft's reach, yet still a mission the
     // model can fly to a mass excess: past about 16,000 nmi the mission
-    // itself stops closing and `mtow_ceiling` is no longer the reason.
+    // itself stops closing and `mtow_ceiling` is not the reason.
     impossible_config.optimizer.objective.design_range_nmi = 12_000.0;
     let impossible_objective = DesignObjective::new(impossible_config);
     let impossible =
@@ -196,7 +196,7 @@ fn the_reject_reason_lists_violated_ids_joined_by_plus() {
 /// under the default `Hard` geometry policy (its built wing area sits a few
 /// parts per million over `max_wing_area_m2`, and both tail-volume
 /// coefficients sit a few percent under their configured minimum window: the
-/// legacy weighted-penalty objective these defaults were tuned against
+/// weighted-penalty objective these defaults were tuned against
 /// treats both as soft preferences, not hard bounds), so whether this
 /// particular seed's population contains a candidate that clears every hard
 /// residual is itself part of what the test exercises.
@@ -512,9 +512,7 @@ fn landing_mass_limit_kg(assessment: &alas_opt::CandidateAssessment) -> f64 {
 /// "The three questions and the sizing basis").
 ///
 /// B787-9 is used because its mission-sized route closure converges under
-/// both modes on the baseline tree
-/// (`outputs/mass-model-consolidation/after/mission-cases.csv`,
-/// `B_baseline_sandbox_{sized_by_mission,unconstrained}_route`); it also
+/// both modes; it also
 /// carries a declared MLW, so a second case on AVE (no declared MLW) is
 /// added below to exercise the landing-limit fallback the declared-MLW
 /// aircraft cannot.
@@ -662,9 +660,8 @@ fn unconstrained_and_sized_by_mission_agree_on_a_fixed_aircraft_whose_mission_cl
 /// `mlw_fraction_mtow x declared MTOW` in every `MtowSizing` mode; it must
 /// not follow the dispatch/mission-closed mass the way
 /// `mdo::mda::converge`'s per-pass dispatch limit and the `landing_mass`
-/// residual used to before this fix (`outputs/mass-model-consolidation/after/mission-cases.csv`,
-/// `AVE,B_baseline_sandbox_unconstrained_route`, `landing_mass_limit_kg`
-/// 245,155 against the declared-basis 329,976).
+/// residual would (`landing_mass_limit_kg` 245,155 kg against the
+/// declared-basis 329,976 kg).
 #[test]
 fn ave_landing_limit_is_the_declared_mtow_fraction_in_every_mtow_sizing_mode_not_the_dispatch_mass()
 {

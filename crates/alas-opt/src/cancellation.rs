@@ -21,8 +21,8 @@
 //!   when the flag was read: one coupled evaluation, one screening block, or
 //!   one supervised external-solver call.
 //!
-//! A drain time on its own cannot say which of the two it was, or which phase
-//! it was spent in. The instrumentation here answers that: every phase entry,
+//! The total drain time alone cannot say which of the two it was, or which
+//! phase it was spent in. The instrumentation here records every phase entry,
 //! the phase and evaluation index in flight when the request arrived, the
 //! first observation, the return, and the per-evaluation cost that sets the
 //! bound.
@@ -92,6 +92,8 @@ pub enum CancelPhase {
     ReportingFidelityVerification,
     /// The search has returned.
     SearchFinished,
+    /// Bounded local restoration of hard-constraint feasibility.
+    FeasibilityRestoration,
 }
 
 impl CancelPhase {
@@ -107,6 +109,7 @@ impl CancelPhase {
             Self::ExternalSolverCall => 6,
             Self::ReportingFidelityVerification => 7,
             Self::SearchFinished => 8,
+            Self::FeasibilityRestoration => 9,
         }
     }
 
@@ -123,6 +126,7 @@ impl CancelPhase {
             6 => Self::ExternalSolverCall,
             7 => Self::ReportingFidelityVerification,
             8 => Self::SearchFinished,
+            9 => Self::FeasibilityRestoration,
             _ => Self::NotStarted,
         }
     }
@@ -139,6 +143,7 @@ impl CancelPhase {
             Self::ExternalSolverCall => "external_solver_call",
             Self::ReportingFidelityVerification => "reporting_fidelity_verification",
             Self::SearchFinished => "search_finished",
+            Self::FeasibilityRestoration => "feasibility_restoration",
         }
     }
 }
@@ -937,5 +942,41 @@ mod tests {
         second_scope.evaluation(|| ());
         assert_eq!(first.snapshot().evaluations_completed, 0);
         assert_eq!(second.snapshot().evaluations_completed, 1);
+    }
+}
+
+#[path = "cancellation/evaluation.rs"]
+mod evaluation;
+pub(crate) use evaluation::{forward_evaluation_cancellation, EvaluationCancellation};
+
+#[cfg(test)]
+mod forwarding_tests {
+    use super::*;
+    use std::time::Duration;
+    #[test]
+    fn direct_replay_cancellation_forwards_bare_flag_and_finishes_monitor_on_panic() {
+        let flag = AtomicBool::new(false);
+        let token = EvaluationCancellation::new();
+        let started = Instant::now();
+        std::thread::scope(|scope| {
+            scope.spawn(|| {
+                std::thread::sleep(Duration::from_millis(30));
+                flag.store(true, Ordering::Release);
+            });
+            forward_evaluation_cancellation(Some(&flag), &token, || {
+                while !token.requested() && started.elapsed() < Duration::from_secs(2) {
+                    std::thread::sleep(Duration::from_millis(1));
+                }
+                assert!(token.requested());
+            });
+        });
+        assert!(started.elapsed() < Duration::from_secs(1));
+        let flag = AtomicBool::new(false);
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            forward_evaluation_cancellation(Some(&flag), &EvaluationCancellation::new(), || {
+                panic!("controlled replay panic")
+            });
+        }));
+        assert!(result.is_err());
     }
 }

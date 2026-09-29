@@ -69,6 +69,26 @@ the pipeline all go through it. `SizedCandidate` reports `sizing_basis`,
 `design_gross_mass_kg` and `design_landing_mass_kg` next to the takeoff mass
 so a result always says which aircraft its ledger belongs to.
 
+### Structural design mass and the V-n envelope
+
+The wing-box loads and the V-n envelope read one mass,
+`alas_opt::mdo::structural_feasibility::structural_design_mass_kg` of the
+configuration closed at the report's takeoff mass
+(`alas_pipeline::design_mass_config`, `design_vn_mass_kg`):
+
+- Fixed-aircraft basis: the declared `DG`. A light dispatch never resizes
+  the box or relaxes the envelope.
+- Coupled (clean-sheet) basis: `DG` follows the closure, so the design loads
+  are at the **closure mass** of the evaluation. This holds whether or not
+  `MtowSizing` constrains the MTOW. When the closure lands below a
+  constrained MTOW requirement, the structure and the V-n envelope are sized
+  for the closed aircraft, not for the MTOW limit it stays under. The MTOW
+  requirement bounds the closure; it is not a structural design weight.
+
+This is the current, deliberate behaviour. How a constrained MTOW should
+enter the clean-sheet structural design weight is an open modelling
+decision, to be settled together with the MTOW sizing modes.
+
 ### What was wrong before
 
 Until 2026-09-12 every MDA pass rewrote `requirements.mtow_kg` to the

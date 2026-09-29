@@ -5,7 +5,6 @@
 // Energy.Processes.Thrust attach to each component during a network walk.
 // Upstream: mission reference 2.5.2, LGPL-2.1 (relicensed under GPL-2.0-or-later per
 // LGPL-2.1 section 3; compatible with this program's AGPL-3.0-or-later).
-// Reference: alas @ rust-port-baseline.
 
 //! The per-station output records one pass through the turbofan network fills.
 //!

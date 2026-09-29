@@ -19,8 +19,8 @@ use alas_geom::aircraft::airplane::Airplane;
 use alas_geom::aircraft::wing::Wing;
 
 use super::geometry::{
-    fuselage_station, horizontal_stabilizer, integrate_wing_box, section_box, semispan_bounds,
-    side_of_body_y_m, spar_box_limits, SectionBox, M3_PER_LITRE,
+    fuselage_station, horizontal_stabilizer, integrate_wing_box, section_box, section_box_at_y,
+    semispan_bounds, side_of_body_y_m, spar_box_limits, SectionBox, M3_PER_LITRE,
 };
 use super::types::{CapacitySource, FuelTank, FuelTankLayout, TankKind, TankLayoutError, TankSide};
 
@@ -175,6 +175,25 @@ fn wing_tank_pair(
     let y_centroid = integral.y_centroid_m();
     let z_centroid = integral.z_centroid_m();
 
+    // The tank's lowest point as it drains: the lower of its two spanwise
+    // boundary cross-sections. Dihedral (or anhedral) moves this
+    // point in z relative to the full-tank centroid; sweep moves it in x.
+    // Falls back to the full centroid when a boundary cross-section cannot
+    // be resolved (should not happen for a boundary this same call already
+    // used to build `integral`, but a fallback keeps `resolve` total rather
+    // than adding a new error variant for an unreachable case).
+    let low_point_m = [
+        section_box_at_y(wing, front, rear, start_y),
+        section_box_at_y(wing, front, rear, end_y),
+    ]
+    .into_iter()
+    .flatten()
+    .zip([start_y, end_y])
+    .min_by(|(a, _), (b, _)| a.z_mid_m.total_cmp(&b.z_mid_m))
+    .map_or([x_centroid, y_centroid, z_centroid], |(low, y_low)| {
+        [low.x_mid_m, y_low, low.z_mid_m]
+    });
+
     // A published wing-tank volume is both sides together; each side gets
     // half, since the two are geometrically mirrored and fed independently.
     let published_each_side_l = cell
@@ -204,6 +223,7 @@ fn wing_tank_pair(
             usable_capacity_kg,
             unusable_kg: pricing.unusable_fuel_fraction * usable_capacity_kg,
             centroid_m: [x_centroid, sign * y_centroid, z_centroid],
+            low_point_m: [low_point_m[0], sign * low_point_m[1], low_point_m[2]],
             extent_m,
             burn_priority: cell.burn_priority,
             capacity_source,
@@ -270,6 +290,10 @@ fn center_tank(
         usable_capacity_kg,
         unusable_kg: pricing.unusable_fuel_fraction * usable_capacity_kg,
         centroid_m: [representative.x_mid_m, 0.0, representative.z_mid_m],
+        // No spanwise low end is modelled for the carry-through centre
+        // cell (it does not taper across a dihedral break the way a wing
+        // cell does): the full centroid stands for every fill level.
+        low_point_m: [representative.x_mid_m, 0.0, representative.z_mid_m],
         extent_m: [representative.width_m, width_y_m, representative.depth_m],
         burn_priority: cell.burn_priority,
         capacity_source,
@@ -331,6 +355,10 @@ fn trim_tank(
         usable_capacity_kg,
         unusable_kg: pricing.unusable_fuel_fraction * usable_capacity_kg,
         centroid_m: [integral.x_centroid_m(), 0.0, integral.z_centroid_m()],
+        // Trim-tank pooling under horizontal-stabiliser dihedral is not
+        // modelled (partial-fill pooling applies to the wing tank only); the
+        // full centroid stands for every fill level.
+        low_point_m: [integral.x_centroid_m(), 0.0, integral.z_centroid_m()],
         extent_m,
         burn_priority: cell.burn_priority,
         capacity_source,
@@ -366,6 +394,9 @@ fn auxiliary_tank(
         usable_capacity_kg,
         unusable_kg: unusable_fuel_fraction * usable_capacity_kg,
         centroid_m,
+        // A declared fuselage tank has no modelled internal geometry to
+        // pool fuel against; the full centroid stands for every fill level.
+        low_point_m: centroid_m,
         extent_m: [side_m, side_m, side_m],
         burn_priority: cell.burn_priority,
         capacity_source: CapacitySource::Declared,

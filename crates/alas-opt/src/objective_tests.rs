@@ -129,35 +129,32 @@ fn the_product_transport_constraints_are_reached_at_the_default_area_requirement
     assert_ne!(reason, "transport_planform");
 }
 
-/// With every requirement family diagnostic, a physical miss is reported
-/// but does not make the candidate infeasible.
+/// Diagnostic objectives cannot make invalid mandatory structural inputs valid.
 #[test]
-fn diagnostic_families_accept_physical_misses_after_a_completed_analysis() {
+fn diagnostic_families_do_not_bypass_invalid_structure() {
     let mut config = AlasConfig::default();
     config.requirements.max_wing_area_m2 = 1.0;
     config.optimizer.objective.mass_constraints = ConstraintPolicy::Diagnostic;
     config.optimizer.objective.balance_constraints = ConstraintPolicy::Diagnostic;
     config.optimizer.objective.performance_constraints = ConstraintPolicy::Diagnostic;
     config.optimizer.objective.geometry_constraints = ConstraintPolicy::Diagnostic;
+    config.structures.max_linear_curvature_relative_error = f64::NAN;
 
     let mut objective = DesignObjective::new(config);
     let cost = objective.evaluate(&DesignVector::default().to_array());
 
     assert!(cost.is_finite());
-    assert_eq!(objective.history.valid, vec![true]);
-    assert_eq!(objective.history.reject_reason, vec![String::new()]);
+    assert_eq!(objective.history.valid, vec![false]);
+    assert!(objective.history.reject_reason[0].contains("structural_"));
 }
 
-/// The shape priors of the frozen weight table are inert for the product
-/// objective, whether or not they are enabled: the mission-sized search is
-/// bounded by requirement residuals, not by penalty weights.
+/// The fuselage-length penalty is confined to reference replay.
 #[test]
-fn subjective_shape_bounds_do_not_condition_the_product_search() {
+fn fuselage_penalty_does_not_condition_the_product_search() {
     let mut relaxed = AlasConfig::default();
     relaxed.optimizer.weights.fuselage_floor_m = 0.0;
     let mut aggressive = relaxed.clone();
     aggressive.optimizer.weights.fuselage_floor_m = 1_000.0;
-    aggressive.optimizer.weights.transport_shape_priors_enabled = true;
 
     let design = DesignVector::default().to_array();
     let relaxed_cost = DesignObjective::new(relaxed).evaluate(&design);
@@ -168,7 +165,7 @@ fn subjective_shape_bounds_do_not_condition_the_product_search() {
 }
 
 #[test]
-fn reference_compatibility_restores_the_legacy_three_station_planform() {
+fn reference_compatibility_restores_the_three_station_planform() {
     let config = AlasConfig::default();
     let product_objective = DesignObjective::new(config.clone());
     let reference_objective = DesignObjective::new_reference_compatibility(config);
@@ -197,7 +194,7 @@ fn reference_compatibility_restores_the_legacy_three_station_planform() {
         .geometry
         .wing
         .transport_planform(&design)
-        .expect("the legacy compatibility planform is valid");
+        .expect("the reference-compatible planform is valid");
 
     assert!(reference_objective
         .config

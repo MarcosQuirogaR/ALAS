@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/reporting/visualization.py (`_draw_planform`)
-// Reference: alas @ rust-port-baseline.
 
 //! Helpers shared by every `geometry` figure: the top-view planform outline
 //! (`_draw_planform` upstream), and an equal-aspect axis-range fitter that

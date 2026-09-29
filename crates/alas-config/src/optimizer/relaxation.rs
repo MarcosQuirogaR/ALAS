@@ -1,29 +1,28 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! Controlled constraint relaxation (clarified ledger decisions D01-D03).
+//! Controlled constraint relaxation.
 //!
 //! Mass, Balance, Performance and Geometry stay hard by default, and this
-//! group is off by default, so a shipped run behaves exactly as it did before
-//! this existed. What it adds is a way for a user who has overconstrained the
+//! group is off by default, so a shipped run is strict. What it adds is a way for a user who has overconstrained the
 //! problem to say, explicitly, that a bounded number of *discipline groups*
 //! may be missed - not individual limits, and not by an arbitrary global
 //! percentage.
 //!
-//! The rules, in the ledger's own terms:
+//! The rules:
 //!
-//! - **D01, counting.** Violated discipline *groups* are counted, not limits.
+//! - **Counting.** Violated discipline *groups* are counted, not limits.
 //!   Several eligible exceeded limits inside Mass count as one violated
 //!   group.
-//! - **D02, eligibility and tolerance.** Only a limit on the eligibility list
+//! - **Eligibility and tolerance.** Only a limit on the eligibility list
 //!   may be missed, and only by its own declared tolerance. Every entry
 //!   carries the provenance of that tolerance, and a limit outside the list
 //!   is rejected exactly as before.
-//! - **D03, ranking.** A fully feasible design always ranks ahead of a
+//! - **Ranking.** A fully feasible design always ranks ahead of a
 //!   relaxed one, and a relaxed design is never labelled fully feasible.
 //!
-//! **The shipped eligibility list is empty, deliberately.** The D02 review
-//! itself is recorded in [`super::policy_review`], one determination per
+//! **The shipped eligibility list is empty, deliberately.** The eligibility
+//! review itself is recorded in [`super::policy_review`], one determination per
 //! residual identifier with the reason and the source behind it, and its
 //! present outcome is that no limit is eligible: no primary engineering or
 //! regulatory source states a fraction of any of these limits that may be
@@ -48,10 +47,10 @@ use crate::ConfigNode;
 /// the geometry could not be built, the design vector left its declared
 /// space, the coupled sizing did not close, or the dispatch model could not
 /// be evaluated. There is no aircraft behind such a candidate to relax a
-/// limit on. Then the structural inventory: a wing whose strength-sized box
-/// exceeds the whole modelled wing has no non-box remainder, so its mass
-/// statement is incomplete rather than merely outside a limit, and admitting
-/// it would publish a partial aircraft as a complete one. Last are the
+/// limit on. Then the structural inventory: an explicitly incomplete component
+/// inventory cannot establish a complete aircraft mass. Disagreement between
+/// an FE material inventory and an empirical mass estimate alone does not
+/// establish incompleteness or physical infeasibility. Last are the
 /// boolean availability flags, whose normalized violation is exactly one
 /// because an input or a piece of evidence is absent: a fraction of an
 /// absent quantity has no meaning, and the tolerance ceiling below means
@@ -61,6 +60,28 @@ use crate::ConfigNode;
 /// [`super::policy_review`] carries the same set with its per-identifier
 /// reasoning, and a test holds the two in agreement.
 pub const NON_RELAXABLE_RESIDUAL_IDS: &[&str] = &[
+    "candidate_state_unavailable",
+    "structural_input_invalid",
+    "structural_geometry",
+    "structural_material",
+    "structural_response_invalid",
+    "structural_strength",
+    "structural_rib_spacing",
+    "structural_linear_model_domain",
+    "structural_relief_not_converged",
+    "structural_mesh_invalid",
+    "structural_stiffness_not_converged",
+    "structural_wing_mass_unavailable",
+    "structural_cap_packaging",
+    "transport_planform_invalid",
+    "transport_root_wingbox_depth",
+    "transport_kink_wingbox_depth",
+    "transport_kink_wingbox_width",
+    "transport_flap_area_fraction",
+    "transport_root_box_slenderness",
+    "transport_inboard_te_sweep",
+    "transport_break_root_chord_ratio",
+    "transport_tip_root_chord_ratio",
     "geometry_build",
     "design_space",
     "trim_solve",
@@ -203,7 +224,7 @@ impl ConstraintRelaxation {
                     limit.id
                 ));
             }
-            // The D02 review is consulted last, so the bounds above stay
+            // The eligibility review is consulted last, so the bounds above stay
             // reachable for every identifier, and it is enforced here rather
             // than inside `tolerance_for` because an `Ineligible`
             // determination is a statement about today's evidence: a later
@@ -231,7 +252,7 @@ impl ConstraintRelaxation {
                 }
                 _ => {
                     return Err(format!(
-                        "'{}' is not eligible for relaxation under the D02 review: {}",
+                        "'{}' is not eligible for relaxation under the eligibility review: {}",
                         limit.id, reviewed.rationale
                     ))
                 }
@@ -250,7 +271,7 @@ mod tests {
 
     /// An in-memory policy entry, used to exercise the mechanism.
     ///
-    /// It deliberately bypasses the D02 review gate in `validate`, which no
+    /// It deliberately bypasses the eligibility review gate in `validate`, which no
     /// identifier passes today (see `super::policy_review`). Tests that
     /// assert on the gate itself live there; these assert on what the
     /// mechanism does once an entry exists.

@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/integration/assets.py
-// Reference: alas @ rust-port-baseline.
 
 //! The optional downloadable assets: where each one lives, and whether it is
 //! there.
@@ -34,9 +33,10 @@ use std::path::{Path, PathBuf};
 
 /// Where the navigation data is published.
 ///
-/// This tracks a third party's default branch, so the data can change beneath
-/// a design run that is meant to be reproducible. Pinning to a commit would fix
-/// that; it is unpinned only because the mirror publishes no tags to pin to.
+/// This tracks a third party's default branch, which publishes no tags, so the
+/// URL itself cannot pin a revision. Reproducibility comes from the reviewed
+/// content hashes in [`NAVDATA_FILES`]: a transfer whose content differs from
+/// the reviewed file is rejected.
 pub const NAVDATA_BASE_URL: &str =
     "https://raw.githubusercontent.com/mcantsin/x-plane-navdata/master";
 
@@ -60,39 +60,33 @@ pub struct NavdataFile {
     pub name: &'static str,
     /// The floor a completed transfer must clear.
     pub min_bytes: u64,
-    /// A SHA-256, lowercase hex, of the last content a maintainer reviewed
-    /// and accepted for this file, or `None` when no review has pinned one
-    /// yet, in which case `min_bytes` alone still gates a completed
-    /// transfer, exactly as before this field existed.
+    /// A SHA-256, lowercase hex, of the content a maintainer reviewed and
+    /// accepted for this file, or `None` when no hash is pinned, in which
+    /// case `min_bytes` alone gates a completed transfer.
     ///
     /// This is a **reviewed-content pin, not an official release checksum**:
     /// this mirror (`NAVDATA_BASE_URL` above) publishes no version tags, so a
     /// pinned value here can only mean "matches what a maintainer looked at
-    /// and accepted on the stated review date," never "matches what X-Plane
-    /// or the mirror's author intended to ship." A mismatch means the
+    /// and accepted," never "matches what X-Plane or the mirror's author
+    /// intended to ship." A mismatch means the
     /// content changed since that review and needs a human to look at it
     /// again: an ordinary upstream edit to the tracked `master` branch
     /// produces the same symptom as tampering, so a mismatch must not be
     /// reported as proof of the latter.
     ///
-    /// The three values below were pinned 2026-09-22 from a direct HTTPS
-    /// fetch of each file at `NAVDATA_BASE_URL`, cross-checked against the
-    /// byte sizes GitHub's contents API independently reports for the same
-    /// commit, with the mirror's GPL-3.0 licence claim confirmed from its
-    /// own `README.md` (matching `THIRD-PARTY-NOTICES.md`). Retained
-    /// fetch logs, headers and hash evidence:
-    /// `deliverables/alas-v1.2-dispatch/navdata-review/`. This mirror is a
-    /// single-maintainer personal repository with no cryptographic release
-    /// signature and no push since 2019; the pin only attests to content
-    /// reviewed on that date, not to the publisher's identity or intent.
+    /// The three values below were taken from a direct HTTPS fetch of each
+    /// file at `NAVDATA_BASE_URL`, cross-checked against the byte sizes
+    /// GitHub's contents API reports for the same commit; the mirror's
+    /// GPL-3.0 licence claim matches `THIRD-PARTY-NOTICES.md`. This mirror is
+    /// a single-maintainer personal repository with no cryptographic release
+    /// signature and no push since 2019; the pin attests only to the
+    /// reviewed content, not to the publisher's identity or intent.
     ///
     /// To refresh a value after a legitimate upstream change: fetch the file
     /// over HTTPS, read and accept its content, then hash it (`sha256sum
-    /// <file>` on Linux, `Get-FileHash <file> -Algorithm SHA256` on Windows),
-    /// place the lowercase hex digest here, and update the review note
-    /// above: the verification itself is already implemented and enforced
-    /// by `alas_exec::download::download_files` whenever a spec carries a
-    /// hash.
+    /// <file>` on Linux, `Get-FileHash <file> -Algorithm SHA256` on Windows)
+    /// and place the lowercase hex digest here. Verification is enforced by
+    /// `alas_exec::download::download_files` whenever a spec carries a hash.
     pub expected_sha256: Option<&'static str>,
 }
 

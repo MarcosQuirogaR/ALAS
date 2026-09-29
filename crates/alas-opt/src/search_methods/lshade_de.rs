@@ -2,7 +2,8 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 //! The one product search kernel: L-SHADE differential evolution under the
-//! epsilon-constrained method, with an explicit convergence test.
+//! epsilon-constrained restoration method, feasible elites, and an explicit
+//! convergence test.
 //!
 //! # Basis and citations
 //!
@@ -24,13 +25,17 @@
 //!   10.1109/CEC.2006.1688283, and "Constrained Optimization by the epsilon
 //!   Constrained Differential Evolution with an Archive and Gradient-Based
 //!   Mutation," CEC 2010, DOI 10.1109/CEC.2010.5586484. Supplies the
-//!   epsilon-level comparison (two candidates within `epsilon` of feasible
-//!   are ranked by objective alone; otherwise the less-violating one wins)
+//!   epsilon-level comparison between infeasible candidates (two candidates
+//!   within `epsilon` are ranked by objective; otherwise less violation wins)
 //!   and the schedule that decays `epsilon` to exactly zero at a configured
 //!   fraction of the budget, after which the comparison is exactly Deb's
 //!   feasibility rule (K. Deb, "An Efficient Constraint Handling Method for
 //!   Genetic Algorithms," Computer Methods in Applied Mechanics and
 //!   Engineering 186(2-4), 2000).
+//!
+//! Fully feasible candidates always outrank infeasible candidates, even during
+//! epsilon restoration. The reference-conditioned population and finite-score
+//! barriers are product safeguards, not a literal benchmark reproduction.
 //!
 //! Population sizing, memory size, archive rate and the epsilon schedule's
 //! control fraction below are the values commonly reported for these methods
@@ -53,7 +58,9 @@
 //! can change what the search explores; it can never change what it reports
 //! as feasible. A caller that finds `winner.valid == false` has firm
 //! evidence that no evaluated candidate satisfied every hard constraint, not
-//! a candidate that merely stopped being tracked.
+//! a candidate that merely stopped being tracked. This statement is conditional
+//! on the evaluator's validity policy and model: no search algorithm can prove
+//! physical validity beyond the constraints its evaluator actually checks.
 //!
 //! # Determinism and cancellation
 //!
@@ -62,7 +69,7 @@
 //! evaluated; the whole generation is then evaluated as one batch through
 //! `evaluate_batch`. Nothing about which points are evaluated or in what
 //! order depends on `solver.workers`; only how the batch is spread across
-//! threads does (see `differential_evolution_optimizer::BatchEvaluator`). A
+//! threads does (see `differential_evolution::optimizer::scan::BatchEvaluator`). A
 //! seeded run therefore replays bit-identically at any worker count.
 //!
 //! The cancellation flag is checked before every block of
@@ -85,10 +92,10 @@ use super::{EvaluateBatch, ScoredPoint};
 #[path = "lshade_de_ops.rs"]
 mod ops;
 use ops::{
-    choose_distinct, choose_from_union, choose_pbest, clamp_into_bounds, epsilon_key,
-    epsilon_schedule, latin_hypercube, linear_reduced_size, min_by_feasibility, normalized_spread,
-    push_archive, quantile, reduce_population, relative_change, relative_change_signed,
-    repair_midpoint, sample_cr, sample_f, trim_archive, unevaluated, update_memory,
+    choose_distinct, choose_from_union, choose_pbest, conditioned_population, epsilon_key,
+    epsilon_schedule, linear_reduced_size, min_by_feasibility, normalized_spread, push_archive,
+    quantile, reduce_population, relative_change, relative_change_signed, repair_midpoint,
+    sample_cr, sample_f, selection_improvement, trim_archive, unevaluated, update_memory,
 };
 
 /// Smallest population L-SHADE's linear reduction may shrink to. Below four,
@@ -132,6 +139,9 @@ pub(crate) struct Settings {
     /// Candidates evaluated between two cancellation checks (at least one).
     /// Never changes which points are evaluated or their order.
     pub(crate) block_size: usize,
+    /// Initial local radius in bound-normalized coordinates; a quarter of
+    /// the population still explores the full envelope when this is enabled.
+    pub(crate) seed_radius: Option<f64>,
 }
 
 /// Evaluate `points` in index order, one block of `block_size` at a time,
@@ -154,9 +164,21 @@ fn evaluate_in_blocks(
             ));
             return (scores, true);
         }
-        scores.extend(scope.block(block.len() as u64, || evaluate_batch(block)));
+        // The adapter times and counts actual analyses after exact-cache
+        // lookup. Counting requested scores here would inflate evaluation
+        // telemetry for repeated or fixed designs that require no solve.
+        let evaluated = evaluate_batch(block);
+        scores.extend(evaluated.into_iter().map(|mut point| {
+            if !point.cost.is_finite() || !point.constraint_violation.is_finite() {
+                point.valid = false;
+                point.constraint_violation = f64::INFINITY;
+            }
+            point
+        }));
     }
-    (scores, false)
+    // A deep evaluation can acknowledge cancellation inside the final block.
+    // There may be no next block or generation to observe that request.
+    (scores, scope.requested())
 }
 
 /// What one run measured about itself, for [`crate::SearchDiagnostics`] and
@@ -221,12 +243,18 @@ pub(crate) fn run(
         };
     }
 
-    let mut population = latin_hypercube(bounds, population_initial, &mut rng);
-    if let Some(initial) = initial_design.filter(|values| values.len() == dimension) {
-        let mut seeded = initial.to_vec();
-        clamp_into_bounds(&mut seeded, bounds);
-        population[0] = seeded;
-    }
+    let active: Vec<usize> = bounds
+        .iter()
+        .enumerate()
+        .filter_map(|(index, &(lower, upper))| (upper > lower).then_some(index))
+        .collect();
+    let mut population = conditioned_population(
+        bounds,
+        population_initial,
+        initial_design,
+        settings.seed_radius,
+        &mut rng,
+    );
     let (mut scored, initial_cut) =
         evaluate_in_blocks(&population, settings.block_size, scope, evaluate_batch);
     if initial_cut {
@@ -267,6 +295,7 @@ pub(crate) fn run(
     let mut violations: Vec<f64> = scored
         .iter()
         .map(|point| point.constraint_violation)
+        .filter(|value| value.is_finite() && *value >= 0.0)
         .collect();
     violations.sort_by(f64::total_cmp);
     let epsilon0 = quantile(&violations, EPSILON_INITIAL_QUANTILE);
@@ -286,7 +315,11 @@ pub(crate) fn run(
     let mut epsilon_final = epsilon0;
     let mut population_size = population_initial;
 
-    for generation in 0..settings.generations {
+    for generation in 0..if active.is_empty() {
+        0
+    } else {
+        settings.generations
+    } {
         scope.enter(CancelPhase::DeGeneration, generation as u64);
         if scope.requested() {
             cancelled = true;
@@ -333,7 +366,10 @@ pub(crate) fn run(
                 mutant[j] = repair_midpoint(value, base[j], bounds[j]);
             }
 
-            let forced = rng.randint(dimension);
+            // A locked coordinate cannot supply binomial crossover's forced
+            // mutation; drawing from it spends a full coupled analysis on
+            // an unchanged parent in reference/adaptation studies.
+            let forced = active[rng.randint(active.len())];
             let mut trial = base.clone();
             for j in 0..dimension {
                 if j == forced || rng.uniform(0.0, 1.0) < cr {
@@ -366,7 +402,7 @@ pub(crate) fn run(
                 first_feasible_cost = Some(trial_point.cost);
             }
             if epsilon_key(trial_point, epsilon_t) < epsilon_key(&scored[target], epsilon_t) {
-                let improvement = (scored[target].cost - trial_point.cost).abs();
+                let improvement = selection_improvement(&scored[target], trial_point);
                 successes.push((trial_f[target], trial_cr[target], improvement));
                 push_archive(
                     &mut archive,
@@ -395,14 +431,14 @@ pub(crate) fn run(
             });
             if improved {
                 last_improved_generation = generation;
+                last_feasible_cost = Some(best_ever.cost);
             }
-            last_feasible_cost = Some(best_ever.cost);
         }
 
         let spread = normalized_spread(&population[..population_size], bounds);
         let stagnated =
             generation.saturating_sub(last_improved_generation) >= settings.stagnation_generations;
-        if best_ever.valid && spread <= settings.spread_tolerance && stagnated {
+        if best_ever.valid && epsilon_t == 0.0 && spread <= settings.spread_tolerance && stagnated {
             converged = true;
             break;
         }

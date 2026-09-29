@@ -50,11 +50,6 @@ pub fn open_wing_analysis(ctx: &egui::Context) {
     });
 }
 
-/// Whether the detached Wing Analysis window is open.
-pub fn is_open() -> bool {
-    with_window(|window| window.window_open)
-}
-
 /// Render the detached Wing Analysis window when it is open.
 ///
 /// Called once per frame from the shell so the window keeps its own native

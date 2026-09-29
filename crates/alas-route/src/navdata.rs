@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/routing/navdata_graph.py
-// Reference: alas @ rust-port-baseline.
 
 //! Enroute routing along real jet airways, from the open navigation data.
 //!

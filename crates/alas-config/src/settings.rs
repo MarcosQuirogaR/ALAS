@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/config/settings.py
-// Reference: alas @ rust-port-baseline.
 
 //! The one object that fully specifies a run.
 //!
@@ -360,7 +359,7 @@ impl AlasConfig {
                     // distinction is kept, not blurred: `CleanSheet` re-derives
                     // the fuselage from the cabin load case and searches the
                     // global box, `ReferenceAdaptation` holds the preset's
-                    // declared geometry and searches the D09 +/-10 % window
+                    // declared geometry and searches the +/-10 % preset window
                     // around it. What was wrong was which of them a bare
                     // `{"preset": "..."}` document selected. It selected the
                     // clean sheet, so loading an ATR 72-600 and pressing run
@@ -373,7 +372,7 @@ impl AlasConfig {
                     // product answered a question nobody asked and then
                     // reported that it had no answer.
                     //
-                    // This widens nothing. The D09 envelope, the frozen
+                    // This widens nothing. The preset envelope, the frozen
                     // reference variables and every hard residual are
                     // untouched; a document that explicitly asks for
                     // `clean_sheet` still gets it, because the file overlay

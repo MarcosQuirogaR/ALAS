@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/sidecar/schema.py
-// Reference: alas @ rust-port-baseline.
 
 //! The description a configuration struct gives of its own fields.
 //!
@@ -67,6 +66,10 @@ pub enum Entry {
 pub struct LeafField {
     /// Which editor the interface should use.
     pub kind: Kind,
+    /// The declared type inside an `Option<T>`, even while its value is null.
+    /// This is GUI-only metadata and is deliberately absent from the
+    /// serialized schema, whose established wire format reports only `kind`.
+    pub optional_value_kind: Option<OptionalValueKind>,
     /// The current value.
     pub value: serde_json::Value,
     /// The smallest accepted value, if the field states one.
@@ -156,6 +159,27 @@ pub enum Kind {
     Unsupported,
 }
 
+/// The declared scalar type of an optional leaf. `Kind::Optional` describes
+/// its *current value*, so it cannot tell an editor whether text entered into
+/// an empty field must be serialized as a number, boolean, or string.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OptionalValueKind {
+    /// Optional boolean.
+    Bool,
+    /// Optional signed 64-bit integer.
+    I64,
+    /// Optional unsigned 32-bit integer.
+    U32,
+    /// Optional platform-sized unsigned integer.
+    Usize,
+    /// Optional 64-bit floating-point number.
+    Float,
+    /// Optional UTF-8 string.
+    String,
+    /// Custom or aggregate optional leaf without a scalar editor.
+    Other,
+}
+
 /// Where a string field's accepted values come from.
 ///
 /// Most of these lists are owned by crates that sit above this one (the
@@ -181,7 +205,7 @@ pub enum OptionSource {
     TeRibMode,
     /// The differential-evolution strategy names.
     Strategy,
-    /// The top-level aircraft optimization algorithms.
+    /// Complete aircraft optimization profiles.
     OptimizerMethod,
     /// Whether the aircraft carries passengers or freight.
     AircraftType,
@@ -256,7 +280,7 @@ impl OptionSource {
                 "currenttobest1bin",
                 "currenttobest1exp",
             ]),
-            Self::OptimizerMethod => Some(&["differential_evolution"]),
+            Self::OptimizerMethod => Some(&["scipy_legacy", "differential_evolution"]),
             Self::AircraftType => Some(&["passenger", "cargo"]),
             Self::MassArchitecture => Some(&[
                 "pure_flops_transport_v1",

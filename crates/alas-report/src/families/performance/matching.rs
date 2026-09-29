@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/sidecar/figures_extra.py (`figure_matching_chart`).
-// Reference: alas @ rust-port-baseline.
 
 //! The configuration- and report-driven aircraft sizing matching chart.
 
@@ -70,6 +69,9 @@ pub fn figure_matching_chart(
 
     let performance = &config.performance;
     let requirements = &config.requirements;
+    // The sized takeoff mass when the report carries one; the declared MTOW
+    // is only the unsized fallback.
+    let takeoff_mass_kg = report.analysis_takeoff_mass_kg(requirements.mtow_kg);
     let wing_area = report
         .geometry_summary
         .get("wing_area_m2")
@@ -77,13 +79,13 @@ pub fn figure_matching_chart(
         .unwrap_or(report.airplane.s_ref);
     let n_engines = config.geometry.engine.spanwise_positions_m.len() as i64;
     let oei_gradient = far25_oei_gradient(n_engines).unwrap_or(performance.oei_gradient);
-    let tw_design = static_thrust_to_weight(config, 0.30);
+    let tw_design = static_thrust_to_weight(config, takeoff_mass_kg, 0.30);
     let mut data = build_matching_chart(
         report.polar_fit.cd0,
         report.polar_fit.k,
         requirements.cruise_mach,
         requirements.cruise_altitude_m,
-        requirements.mtow_kg,
+        takeoff_mass_kg,
         wing_area,
         n_engines,
         &[departure.clone(), arrival.clone()],
@@ -104,7 +106,7 @@ pub fn figure_matching_chart(
     // lapse is not a valid conversion for the OEI V2 condition, so only use a
     // condition-specific ratio when departure/V2 evidence is present.
     let v_speeds = compute_v_speeds(
-        requirements.mtow_kg,
+        takeoff_mass_kg,
         wing_area,
         departure,
         performance.cl_max_to,

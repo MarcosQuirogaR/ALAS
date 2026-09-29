@@ -191,7 +191,7 @@ const GEAR_STATION_ID_PATTERN = /(\.x_|_x_m|wheelbase|track_width|wheel_track)/i
 // Surfaces provenance markers the model export already declares about itself
 // (never invented here) so a within-tolerance row can be read correctly: it
 // may confirm data retention rather than an independent prediction.
-// Quantities that crates/alas-pipeline/examples/model_reference_dump.rs
+// Quantities that crates/alas-pipeline/examples/model_reference_dump/main.rs
 // exports straight from the preset's design vector, requirements or gear
 // layout definition. A match confirms the preset was entered correctly; it is
 // not an output of any ALAS analysis.

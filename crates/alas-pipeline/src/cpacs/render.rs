@@ -3,7 +3,6 @@
 
 //! CPACS XML rendering and source-geometry validation.
 
-#[path = "analysis.rs"]
 mod analysis;
 mod engine;
 

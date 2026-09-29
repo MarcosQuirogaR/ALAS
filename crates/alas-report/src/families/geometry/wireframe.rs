@@ -5,7 +5,6 @@
 // (`figure_wireframe_wing` L1164-1186, `figure_wireframe_fuselage` L1189-1204,
 // `figure_wireframe_empennage` L1207-1233)
 // and alas/sidecar/figures.py (`_preview_exterior` L372-407)
-// Reference: alas @ rust-port-baseline.
 
 //! Isolated-component 3D wireframes and the exterior live-preview scene.
 //!

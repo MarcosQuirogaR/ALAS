@@ -31,6 +31,7 @@
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
 pub mod analytical;
+pub mod feasibility;
 pub mod loads;
 pub mod mesh;
 pub mod nastran;

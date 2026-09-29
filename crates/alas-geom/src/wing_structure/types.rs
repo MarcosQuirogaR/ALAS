@@ -66,4 +66,8 @@ pub enum WingStructureError {
     /// around.
     #[error("at least one spar_chord_fractions entry is required")]
     NoSpars,
+    /// The design vector and wing configuration do not describe a
+    /// constructible planform (`WingConfig::transport_planform` failed).
+    #[error("the wing planform is not physically constructible")]
+    InvalidPlanform,
 }

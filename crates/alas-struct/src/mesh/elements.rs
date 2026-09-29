@@ -327,6 +327,8 @@ pub(super) fn add_spar_caps(
                 gb: upper[index + 1],
                 x: CAP_ORIENTATION,
                 offt: CAP_OFFT,
+                offset_a: [0.0; 3],
+                offset_b: [0.0; 3],
             });
             *eid += 1;
         }
@@ -403,7 +405,7 @@ pub(super) fn last_spar_point(station: &RibStation) -> i64 {
 
 /// A sizing quantity sampled at `eta` by linear interpolation over the
 /// sizing's own station grid, held at the end values outside it.
-fn station_value(eta: f64, stations: &[f64], values: &[f64]) -> f64 {
+pub(super) fn station_value(eta: f64, stations: &[f64], values: &[f64]) -> f64 {
     let n = stations.len().min(values.len());
     if n == 0 {
         return 0.0;

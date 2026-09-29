@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/reporting/visualization.py:figure_cg_envelope (L2354-2835)
-// Reference: alas @ rust-port-baseline.
 
 use super::super::with_alpha;
 use crate::scene::{Axes2D, Color, Fill, Scene, SceneElement, Stroke, TextAlign, TextBaseline};
@@ -61,7 +60,12 @@ pub(super) fn draw_curve_with_label(
     label_color: &str,
     dx: f64,
 ) {
-    let stroke = Stroke::dashed(Color::from_hex(color), 1.5, dash, gap);
+    let base = Color::from_hex(color);
+    let stroke = if dash > 0.0 {
+        Stroke::dashed(base, 1.5, dash, gap)
+    } else {
+        Stroke::new(base, 2.5)
+    };
     let series: Vec<(f64, f64)> = w_calc
         .iter()
         .zip(curve_pct)

@@ -3,7 +3,6 @@
 
 // Ported from alas/physics/cabin_layout.py (`build_passenger_layout`, the
 // seating pass)
-// Reference: alas @ rust-port-baseline.
 
 //! Packing the seat rows into the decks, and carving out the bays that
 //! everything else is hung on.

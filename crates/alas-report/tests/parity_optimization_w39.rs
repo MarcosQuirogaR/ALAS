@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! W3.9 optimization-history parity: the Rust scene preserves the reference
+//! Optimization-history parity: the Rust scene preserves the reference
 //! panel shape, objective series, span color encoding, running-best trace, and
 //! colorbar contract.
 
@@ -29,12 +29,12 @@ fn optimization_history_matches_the_reference_panel_and_series_contract() {
     let fixture: Value = serde_json::from_str(include_str!(
         "../../../golden/report/reference_render_w39.json"
     ))
-    .expect("W3.9 fixture is valid JSON");
+    .expect("fixture is valid JSON");
     let reference = &fixture["figures"]["optimization_history:light"];
     assert_eq!(reference["available"], true);
     assert_eq!(reference["panel_count"], 2);
     assert_eq!(reference["axes"][0]["series"][0], "best so far");
-    // The checked-in W3.9 artifact records the historical L/D axis. The
+    // the checked-in artifact records the historical L/D axis. The
     // producer now exposes the generic objective quantity, so keep the
     // historical value as fixture evidence while checking the current scene
     // contract below.

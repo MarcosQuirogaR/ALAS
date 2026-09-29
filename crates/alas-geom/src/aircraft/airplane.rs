@@ -3,7 +3,6 @@
 
 // Ported from reference geometry/geometry/airplane.py
 // Upstream: reference geometry 4.2.8, MIT.
-// Reference: alas @ rust-port-baseline.
 
 //! reference geometry's `Airplane`, scoped to the one call site that constructs it:
 //! `alas-geom::builder`'s `AircraftBuilder::build`, which always supplies

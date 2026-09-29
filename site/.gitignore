@@ -28,5 +28,3 @@ __pycache__/
 *.sln
 *.sw?
 
-# Agent review artifacts
-.agent/

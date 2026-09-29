@@ -3,7 +3,6 @@
 
 // Ported from alas/physics/payload.py (`build_payload_layout`,
 // `simulate_passenger_counts`)
-// Reference: alas @ rust-port-baseline.
 
 //! The entry point every consumer uses, and the fast auto-sizer that runs
 //! before any interior is built.

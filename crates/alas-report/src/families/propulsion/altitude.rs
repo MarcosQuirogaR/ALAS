@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/reporting/visualization.py (figure_propulsion_altitude_sweep)
-// Reference: alas @ rust-port-baseline.
 
 //! Per-engine thrust and TSFC over the full (altitude, Mach) flight
 //! envelope, as filled contours: the closed-form, first-principles

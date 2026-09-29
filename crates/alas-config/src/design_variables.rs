@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/config/design_variables.py
-// Reference: alas @ rust-port-baseline.
 
 //! The design space the optimizer searches.
 //!
@@ -200,8 +199,8 @@ mod tests {
     fn the_named_vector_and_the_spec_table_describe_the_same_space() {
         // Upstream asserts this at import because its two views are written
         // twice. Here they come from one table, so this checks a property the
-        // construction already guarantees, which is the point: the failure
-        // it used to guard against can no longer be expressed.
+        // construction already guarantees, which is the point: a mismatch between
+        // the two views cannot be expressed.
         let vector = DesignVector::default();
         assert_eq!(vector.to_array().len(), SPECS.len());
         for (value, spec) in vector.to_array().iter().zip(SPECS) {

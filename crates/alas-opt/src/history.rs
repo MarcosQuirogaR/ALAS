@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-// Ported from alas/optimization/objective.py
-// Reference: alas @ rust-port-baseline.
-
 //! Recording evaluated design candidates and tracking convergence diagnostics.
 
 use std::collections::HashMap;
@@ -36,20 +33,20 @@ pub struct OptimizationHistory {
     /// Reason string for invalid designs (e.g. `"static_margin+cg_envelope"`).
     pub reject_reason: Vec<String>,
     /// Mission-sized objective value before normalization; `NaN` for a
-    /// legacy weighted-penalty evaluation.
+    /// weighted-penalty evaluation.
     #[serde(default)]
     pub objective_value: Vec<f64>,
-    /// Sized takeoff mass, kg; `NaN` for a legacy weighted-penalty evaluation.
+    /// Sized takeoff mass, kg; `NaN` for a weighted-penalty evaluation.
     #[serde(default)]
     pub takeoff_mass_kg: Vec<f64>,
-    /// Sized block fuel, kg; `NaN` for a legacy weighted-penalty evaluation.
+    /// Sized block fuel, kg; `NaN` for a weighted-penalty evaluation.
     #[serde(default)]
     pub block_fuel_kg: Vec<f64>,
-    /// Sum of normalized hard-constraint violations; `0.0` for a legacy
+    /// Sum of normalized hard-constraint violations; `0.0` for a
     /// weighted-penalty evaluation.
     #[serde(default)]
     pub hard_violation: Vec<f64>,
-    /// Sum of normalized soft-constraint violations; `0.0` for a legacy
+    /// Sum of normalized soft-constraint violations; `0.0` for a
     /// weighted-penalty evaluation.
     #[serde(default)]
     pub soft_violation: Vec<f64>,
@@ -85,7 +82,7 @@ impl OptimizationHistory {
         self.trim_ih_deg.push(trim_ih);
         self.reject_reason.push(reason.into());
         // Keeps the mission-sized vectors aligned with every other one even
-        // when the evaluation that just ran is a legacy weighted-penalty
+        // when the evaluation that just ran is a weighted-penalty
         // candidate that never computed them.
         self.objective_value.push(f64::NAN);
         self.takeoff_mass_kg.push(f64::NAN);
@@ -96,10 +93,10 @@ impl OptimizationHistory {
 
     /// Record a mission-sized evaluation step.
     ///
-    /// Pushes the same legacy fields [`Self::record`] does, then overwrites
+    /// Pushes the same fields [`Self::record`] does, then overwrites
     /// the sentinel it just pushed into the five mission-sized vectors with
     /// the real values, which is what keeps every vector's length identical
-    /// without duplicating the legacy push logic.
+    /// without duplicating the push logic.
     #[allow(clippy::too_many_arguments)] // mirrors `record`'s own arity plus the five mission-sized fields
     pub fn record_mission_sized(
         &mut self,
@@ -211,7 +208,7 @@ mod tests {
     }
 
     #[test]
-    fn a_legacy_record_pushes_sentinels_into_the_mission_sized_vectors() {
+    fn a_weighted_penalty_record_pushes_sentinels_into_the_mission_sized_vectors() {
         let mut history = OptimizationHistory::new();
         history.record(
             DesignVector::default(),

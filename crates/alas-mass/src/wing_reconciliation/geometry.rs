@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! Geometry seams for the clean-sheet wing inventory: the FLOPS and
-//! non-box-planform inputs read off the built wing, and the configured
-//! control-surface areas and centroids the inventory items are placed at.
+//! Geometry seams for the clean-sheet wing inventory: the FLOPS and non-box-planform inputs read off
+//! the built wing, and the configured control-surface areas and centroids the inventory items sit at.
 
 use alas_config::AlasConfig;
 use alas_geom::aircraft::wing::Wing;
@@ -12,7 +11,8 @@ use crate::flops_transport::structure::{FlopsWingInputs, WingBendingFactor};
 use crate::torenbeek::WingSecondaryMassBreakdown;
 use crate::wing_inventory::FixedNonBoxStructure;
 
-use super::{design_gross_mass_kg, WingReconciliationError};
+use super::design_gross_mass_kg;
+use super::WingReconciliationError;
 
 /// FLOPS Eqs. 33-38 inputs read off the built wing.
 ///

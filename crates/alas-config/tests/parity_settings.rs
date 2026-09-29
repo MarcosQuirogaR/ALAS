@@ -39,7 +39,7 @@
 
 use std::collections::BTreeMap;
 
-use alas_config::AlasConfig;
+use alas_config::{AlasConfig, AnalysisConfig, StructuresConfig};
 use alas_testkit::{Comparison, Tier};
 use serde::Deserialize;
 use serde_json::Value;
@@ -579,6 +579,12 @@ fn preset_source_corrections() -> BTreeMap<String, SourceCorrection> {
             "A220-300", "A320-200", "A340-300", "A380-800", "AVE", "B787-9", "DC-10",
         ],
     );
+    add_native_solver_limit_corrections(
+        &mut corrections,
+        &[
+            "A220-300", "A320-200", "A340-300", "A380-800", "AVE", "B787-9", "DC-10",
+        ],
+    );
     add_certified_landing_mass_ratio_corrections(&mut corrections);
     corrections
 }
@@ -665,6 +671,14 @@ fn saved_file_source_corrections() -> BTreeMap<String, SourceCorrection> {
             "preset_then_field.mass_model.mlw_fraction_mtow",
             0.92,
             192_776.0 / 254_692.0,
+        ),
+        // Wing roots re-anchored to the manufacturer quarter-MAC point
+        // (see support/product_corrections.rs).
+        correction("preset_only.geometry.wing.root_datum_x_m", 13.3, 13.424),
+        correction(
+            "preset_then_field.geometry.wing.root_datum_x_m",
+            21.0,
+            22.227,
         ),
         correction("preset_only.landing_gear.n_mlg_struts", 0, 2),
         correction("preset_only.landing_gear.n_nlg_wheels", 0, 2),
@@ -776,6 +790,18 @@ fn saved_file_source_corrections() -> BTreeMap<String, SourceCorrection> {
             "deep_partial",
         ],
     );
+    add_native_solver_limit_corrections(
+        &mut corrections,
+        &[
+            "empty",
+            "preset_only",
+            "preset_then_field",
+            "tuple_field_from_a_list",
+            "airports",
+            "unknown_preset",
+            "deep_partial",
+        ],
+    );
     corrections
 }
 
@@ -807,15 +833,8 @@ fn add_planning_cabin_corrections(
 
 /// The native worker count.
 ///
-/// `workers` moved from the frozen literal `1` to `0`, meaning "resolve
-/// against this machine": the product L-SHADE search evaluates each
-/// generation's batch in parallel at that count without changing which
-/// points it evaluates or which one it returns. The frozen
-/// reference-compatibility replay is deliberately excluded from the
-/// automatic setting - its generation loop batches only on an explicit
-/// request, because a batched generation defers the population update and is a
-/// different algorithm - so the frozen replay keeps the reference
-/// interleaving.
+/// The v1.1.0 profile keeps SciPy's upstream serial default. A caller can
+/// select multiple workers, which chooses the matching deferred-update mode.
 fn add_native_worker_corrections(
     corrections: &mut BTreeMap<String, SourceCorrection>,
     cases: &[&str],
@@ -825,7 +844,7 @@ fn add_native_worker_corrections(
             format!("{case}.optimizer.solver.workers"),
             SourceCorrection {
                 upstream: Value::from(1.0),
-                corrected: Value::from(0.0),
+                corrected: Value::from(1.0),
             },
         );
     }
@@ -840,7 +859,32 @@ fn add_optimizer_method_corrections(
             format!("{case}.optimizer.solver.method"),
             SourceCorrection {
                 upstream: Value::String("absent upstream".to_owned()),
-                corrected: Value::String("differential_evolution".to_owned()),
+                corrected: Value::String("scipy_legacy".to_owned()),
+            },
+        );
+    }
+}
+
+/// The external-solver resource limits the Rust application added: the AVL
+/// timeout and the NASTRAN memory request. The frozen Python configuration
+/// has neither, so a loaded file receives the product defaults.
+fn add_native_solver_limit_corrections(
+    corrections: &mut BTreeMap<String, SourceCorrection>,
+    cases: &[&str],
+) {
+    for case in cases {
+        corrections.insert(
+            format!("{case}.analysis.avl_timeout_s"),
+            SourceCorrection {
+                upstream: Value::String("absent upstream".to_owned()),
+                corrected: Value::from(AnalysisConfig::default().avl_timeout_s),
+            },
+        );
+        corrections.insert(
+            format!("{case}.structures.nastran_memory_mb"),
+            SourceCorrection {
+                upstream: Value::String("absent upstream".to_owned()),
+                corrected: Value::from(StructuresConfig::default().nastran_memory_mb),
             },
         );
     }

@@ -17,7 +17,7 @@ use alas_gui::sandbox::viewport::{
 use alas_gui::state::{AppState, PreviewCamera};
 use alas_gui::theme::AppTheme;
 use alas_report::scene::Color;
-use common::{click_on, drag_on, frame_on, rasterize_frame, write_png};
+use common::{click_on, drag_on, frame_on, rasterize_frame};
 use egui::{pos2, Context, Rect};
 
 const WIDE: (f32, f32) = (1280.0, 820.0);
@@ -369,92 +369,4 @@ fn the_summary_button_toggles_the_metric_card_beside_the_stack_without_orbiting(
     frame_on(&ctx, &mut state, WIDE, vec![]);
     assert!(overlay_rect_tagged(&ctx, "summary_card").is_none());
     assert!(overlay_rects_tagged(&ctx, "metric").is_empty());
-}
-
-/// Writes headless workspace renders for the three themes in English and
-/// Spanish on a wide and a narrow viewport, and the four camera presets
-/// plus two orbit views, to an internal evidence directory
-/// (2026-09-14); run with
-/// `--ignored`. Glyphs render as coverage blocks (no font texture in the
-/// rasterizer), so these show layout, colours and states, not legible text.
-#[test]
-#[ignore = "writes evidence images"]
-fn write_workspace_evidence_images() {
-    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../out/evidence/sandbox-depth-layout-scale-2026-09-14");
-    std::fs::create_dir_all(&dir).expect("evidence directory");
-    alas_i18n::es::install();
-    for (lang, code) in [
-        (alas_gui::state::Language::En, "en"),
-        (alas_gui::state::Language::Es, "es"),
-    ] {
-        alas_i18n::set_language(Some(code));
-        for theme in [AppTheme::Light, AppTheme::Grey, AppTheme::Dark] {
-            for (size_name, size) in [("wide", WIDE), ("narrow", NARROW)] {
-                let (ctx, mut state) = settled(theme, size);
-                state.language = lang;
-                frame_on(&ctx, &mut state, size, vec![]);
-                let output = frame_on(&ctx, &mut state, size, vec![]);
-                let (w, h, rgba) =
-                    rasterize_frame(&ctx, output, size, ctx.style().visuals.panel_fill);
-                let name = format!(
-                    "workspace-{}-{code}-{size_name}.png",
-                    theme.name().to_ascii_lowercase()
-                );
-                write_png(&dir.join(name), w, h, &rgba);
-            }
-        }
-    }
-    alas_i18n::set_language(Some("en"));
-    let views = [
-        ("iso", PreviewCamera::isometric()),
-        ("top", PreviewCamera::top()),
-        ("front", PreviewCamera::front()),
-        ("side", PreviewCamera::side()),
-        (
-            "orbit-a",
-            PreviewCamera {
-                pitch_deg: 35.0,
-                yaw_deg: -60.0,
-                zoom: 1.0,
-            },
-        ),
-        (
-            "orbit-b",
-            PreviewCamera {
-                pitch_deg: -25.0,
-                yaw_deg: 140.0,
-                zoom: 1.0,
-            },
-        ),
-    ];
-    for (name, camera) in views {
-        let (ctx, mut state) = settled(AppTheme::Dark, WIDE);
-        *state.preview_camera_mut(SANDBOX_CAMERA_ID) = camera;
-        state.reproject_sandbox_scene();
-        frame_on(&ctx, &mut state, WIDE, vec![]);
-        let output = frame_on(&ctx, &mut state, WIDE, vec![]);
-        let (w, h, rgba) = rasterize_frame(&ctx, output, WIDE, ctx.style().visuals.panel_fill);
-        write_png(
-            &dir.join(format!("workspace-camera-{name}.png")),
-            w,
-            h,
-            &rgba,
-        );
-    }
-    // The same aircraft after a span edit at the kept scale, top view.
-    let (ctx, mut state) = settled(AppTheme::Dark, WIDE);
-    *state.preview_camera_mut(SANDBOX_CAMERA_ID) = PreviewCamera::top();
-    state.reproject_sandbox_scene();
-    for (name, extra) in [("span-base", 0.0), ("span-plus-12m", 12.0)] {
-        let span = AppState::default().design_values["span_m"];
-        state
-            .design_values
-            .insert("span_m".to_owned(), span + extra);
-        state.on_sandbox_model_changed();
-        frame_on(&ctx, &mut state, WIDE, vec![]);
-        let output = frame_on(&ctx, &mut state, WIDE, vec![]);
-        let (w, h, rgba) = rasterize_frame(&ctx, output, WIDE, ctx.style().visuals.panel_fill);
-        write_png(&dir.join(format!("workspace-{name}.png")), w, h, &rgba);
-    }
 }
