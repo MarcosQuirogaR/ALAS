@@ -58,6 +58,23 @@ is the user's statement that the structure was designed for a heavier weight
 variant than the MTOW in use. `flops_structure.design_landing_mass_kg` pins
 `WLDG` the same way.
 
+`mlw_fraction_mtow` only matters for a configuration with no certified
+MLW/MTOW pair, because a registered aircraft replaces it with its own
+certified ratio when it loads. Its default follows the declared
+`flops_transport.haul_class`, the class the LTH operating-item relations
+already read; no mass threshold is introduced
+(`alas_config::landing_mass_ratio`). Long haul takes 0.7574, the 777-9
+ratio (Boeing D6-86073 Rev G, Table 2-1: 266,258 / 351,534 kg). Short and
+medium haul takes 0.858, the mean of the registry's short/medium-haul jet
+transports: A320-200 0.846 and A220-300 0.869. The ATR 72-600 (0.972)
+shares the haul class but is excluded. It is a regional turboprop,
+certified for short sectors with its landing mass near its takeoff mass,
+and it has its own mass method; including it would give 0.896. The
+unconfigured defaults and AVE declare
+long haul. A document that states its own `mlw_fraction_mtow` keeps it. The
+class default is applied when a document loads, so changing the haul class
+in memory later does not re-derive it.
+
 `AlasConfig::at_closure_mass(closure_mass_kg)` is the one seam that
 evaluates the ledger at a takeoff mass other than the requirement: it writes
 the closure mass into `requirements.mtow_kg` (what the fuel remainder, the
@@ -79,15 +96,65 @@ configuration closed at the report's takeoff mass
 - Fixed-aircraft basis: the declared `DG`. A light dispatch never resizes
   the box or relaxes the envelope.
 - Coupled (clean-sheet) basis: `DG` follows the closure, so the design loads
-  are at the **closure mass** of the evaluation. This holds whether or not
-  `MtowSizing` constrains the MTOW. When the closure lands below a
-  constrained MTOW requirement, the structure and the V-n envelope are sized
-  for the closed aircraft, not for the MTOW limit it stays under. The MTOW
-  requirement bounds the closure; it is not a structural design weight.
+  are at the **closure mass** of the evaluation. When the closure lands
+  below a constrained MTOW requirement, the structure and the V-n envelope
+  are sized for the closed aircraft, not for the MTOW limit it stays under.
+  The MTOW requirement bounds the closure; it is not a structural design
+  weight.
+- The `mtow_band` and `payload_adjusted` modes design the structure at the
+  closure in every design mode (table below).
 
-This is the current, deliberate behaviour. How a constrained MTOW should
-enter the clean-sheet structural design weight is an open modelling
-decision, to be settled together with the MTOW sizing modes.
+The structural design mass of each `MtowSizing` mode is resolved once, by
+`AlasConfig::mtow_plan()` (`MtowPlan::structural_basis`), and applied by
+`AlasConfig::at_sized_closure_mass`, which the MDA passes, the residuals,
+the sized final report and `design_mass_config` all call. The analysis
+takeoff mass (`SizedCandidate::takeoff_mass_kg`, the report's
+`analysis_takeoff_mass_kg`) is the mass the structural stage is designed
+for in every mode:
+
+| `MtowSizing` | Closed on | Analysis takeoff mass | Structural `DG` | `WLDG` |
+|---|---|---|---|---|
+| `fixed_requirement` | route, one pass | declared cap | declared cap | design-mode basis (above) |
+| `sized_by_mission` | route, ceiling = cap | closure | design-mode basis: declared `DG` (fixed aircraft) or the closure (clean sheet) | design-mode basis; clean sheet uses the fraction of the cap |
+| `unconstrained` | route, no ceiling | closure | design-mode basis | design-mode basis |
+| `mtow_band` | design mission, clamp `T (1 + p)` | closure | the closure, in every design mode | `max(scaled, ZFW + reserves)`: scaled is `(MLW / MTOW) x closure` from the preset reference weights for a registered aircraft in `BaselineSandbox`/`ReferenceAdaptation`, otherwise `mlw_fraction_mtow x closure`; ZFW + reserves is the sizing closure's zero-fuel mass plus contingency, alternate and final reserve |
+| `payload_adjusted` | route (or the design range when set), no ceiling | closure | the closure, in every design mode | as `mtow_band` |
+
+An explicit `flops_structure.design_gross_mass_kg` keeps the structure at
+that declared weight in every mode (a validation warning in the two design
+modes). `T` is `optimizer.objective.mtow_target_kg` (zero: the declared
+MTOW) and `p` is `mtow_band_fraction` (default 0.05). The design mission is
+`AlasConfig::design_mission()`: range `optimizer.objective.design_range_nmi`
+when positive, else the declared FLOPS `design_range_nmi`, else the route
+great-circle distance; payload the preset's `reference.planning_seats` x
+`passenger_mass_kg` plus `belly_cargo_kg` when declared, else the
+configured payload plus that freight. It is flown at the sizing cruise
+altitude; the selected route is then flown off-design at the closed mass
+(`SizedCandidate::offdesign`). `SizedCandidate::derived_design_mzfw_kg` =
+OEW + the payload the closure flew; it is derived, not a declared weight.
+
+Non-optimizing (baseline) runs ignore `mtow_sizing`: their reports carry no
+sized mass and `design_mass_config` falls back to `at_closure_mass` at the
+declared MTOW, so they are identical under every mode
+(`alas-pipeline/tests/baseline_keeps_declared_mass.rs`).
+
+The reserve floor of the two design modes
+(`AlasConfig::design_landing_mass_with_reserve_floor`) follows the usual
+transport design practice that the maximum landing mass covers the maximum
+zero-fuel mass plus the reserves (E. Torenbeek, *Synthesis of Subsonic
+Airplane Design*, 1982, Sec. 8.4; section not re-checked, [E]). A ratio
+scaled from a long-range preset alone falls below it on a short closure
+mission: the A320-200 payload-adjusted closure on LEMD-LEPA is 63,699 kg,
+where the ratio gives 53,900 kg and ZFW + reserves 61,637 kg. With no
+additional or extra fuel the planned landing mass equals the floor, so the
+`landing_mass` residual sits on its limit; any additional or extra fuel
+shows as an honest excess. The gear is designed at the floored mass in the
+MDA passes (floor of the previous pass) and in the sized report.
+
+The declared maximum landing mass the fixed-aircraft checks read
+(`AlasConfig::landing_mass_limit_kg`) is unchanged; the design landing mass
+of a structure designed at a closure is
+`AlasConfig::design_landing_mass_at_closure`.
 
 ### What was wrong before
 
@@ -332,6 +399,30 @@ fit in the route.
   here and are not attributable to a component with the retained evidence;
   no calibration was fitted. Metrics: `outputs/oew-evidence-closeout/validation-metrics.json`
   (validated set empty; conditional statistics descriptive only).
+* Empty-aircraft centre of gravity: the one primary anchor is the nominal
+  26.5 % MAC empty-weight CG that the Airbus A320 ACAP (June 2024, chapter
+  2-3-0, page 3) uses for ground clearance and jacking. It is a reference
+  value, not a weighed aircraft and not a calibration target. The A320-200
+  operating-empty CG is 34.35 % MAC, which is +7.85 % MAC (0.33 m) aft of
+  it.
+  - A review of every station rule (`alas_mass::stations`) against the
+    published placement rules at hand changed no rule, because none is
+    contradicted:
+    - the jet systems groups sit inside Scholz's 40-50 % fuselage-length
+      band;
+    - the fuselage uses the textbook 0.45 length;
+    - the wingbox centroid (37 % MAC) lies forward of Raymer's 40 % MAC;
+    - the TCDS E.003 bare-engine CG can only move the engine aft of the
+      nacelle mid-length point.
+  - The residual comes from the A320's wing position at 0.41 of the
+    fuselage length, where the generic fuselage, systems and cabin rules
+    land at 36-44 % MAC. On the A220-300 (wing at 0.43 L) the same rules
+    give 23-29 % MAC.
+  - Closing the gap would need an aircraft-specific fraction or a sourced
+    fuselage-group fraction; neither is available, so the residual is
+    reported, not tuned.
+  - The ATR 72-600 empty aircraft still fails its minimum nose load and
+    tip-back limits.
 
 ## Explicit boundaries
 

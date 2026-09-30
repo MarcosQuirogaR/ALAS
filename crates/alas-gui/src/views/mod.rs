@@ -13,6 +13,9 @@ pub mod form;
 pub mod form_page;
 pub mod guide_data;
 pub(crate) mod inputs_custom;
+pub(crate) mod inputs_mtow;
+#[cfg(test)]
+mod inputs_mtow_tests;
 pub(crate) mod inputs_relaxation;
 pub mod inputs_view;
 pub(crate) mod mission_profile_inputs;

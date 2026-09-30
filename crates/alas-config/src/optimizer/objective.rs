@@ -74,6 +74,17 @@ pub enum MtowSizing {
     /// sizing mode for producing a certifiable design against a declared
     /// requirement.
     Unconstrained,
+    /// The takeoff mass is closed on the design mission (design range at
+    /// design payload, with the fuel-policy reserves), seeded at the MTOW
+    /// target `T` and clamped at `T (1 + p)`. A closure outside
+    /// `[T (1 - p), T (1 + p)]` is rejected on either side; inside the band
+    /// nothing pulls it toward `T`. The selected route is then flown
+    /// off-design at the closed mass as a check.
+    MtowBand,
+    /// The takeoff mass is closed with no ceiling at the configured payload
+    /// on the selected route, or on the design range when one is set, with
+    /// the fuel-policy reserves, seeded from the declared MTOW.
+    PayloadAdjusted,
 }
 
 impl MtowSizing {
@@ -83,7 +94,41 @@ impl MtowSizing {
             Self::FixedRequirement => "fixed_requirement",
             Self::SizedByMission => "sized_by_mission",
             Self::Unconstrained => "unconstrained",
+            Self::MtowBand => "mtow_band",
+            Self::PayloadAdjusted => "payload_adjusted",
         }
+    }
+
+    /// Every variant, in the order the form lists them.
+    pub const ALL: [Self; 5] = [
+        Self::FixedRequirement,
+        Self::SizedByMission,
+        Self::Unconstrained,
+        Self::MtowBand,
+        Self::PayloadAdjusted,
+    ];
+
+    /// The stable serialized names of [`Self::ALL`], in the same order: the
+    /// schema's option list.
+    pub const NAMES: [&'static str; 5] = [
+        "fixed_requirement",
+        "sized_by_mission",
+        "unconstrained",
+        "mtow_band",
+        "payload_adjusted",
+    ];
+
+    /// Whether the mode closes the takeoff mass on a mission rather than
+    /// taking it as the requirement value.
+    pub const fn closes_mass(self) -> bool {
+        !matches!(self, Self::FixedRequirement)
+    }
+
+    /// Whether the mode is evaluated by the mission-sized closure under
+    /// every optimizer method. The two design modes are; the three original
+    /// modes keep the reference replay under the legacy profile.
+    pub const fn requires_mission_sized_evaluation(self) -> bool {
+        matches!(self, Self::MtowBand | Self::PayloadAdjusted)
     }
 }
 
@@ -150,9 +195,24 @@ pub struct ObjectiveConfig {
     #[config(
         options = MtowSizing,
         label = "Takeoff mass sizing",
-        help = "Whether the maximum takeoff mass is the fixed requirement value, is iterated by the mission up to the requirement value, or is iterated by the mission with the requirement used only to seed the first pass. Sizing by mission makes the structural mass follow the closed takeoff mass, which is what lets a lighter wing pay for itself. Unconstrained runs the same mission-sized iteration with the requirement dropped as a ceiling after the seed, for asking what the closure converges to on its own rather than for producing a design bounded by a declared requirement."
+        help = "Whether the maximum takeoff mass is the fixed requirement value, is iterated by the mission up to the requirement value, or is iterated by the mission with the requirement used only to seed the first pass. Sizing by mission makes the structural mass follow the closed takeoff mass, which is what lets a lighter wing pay for itself. Unconstrained runs the same mission-sized iteration with the requirement dropped as a ceiling after the seed, for asking what the closure converges to on its own rather than for producing a design bounded by a declared requirement. MTOW band closes the takeoff mass on the design mission (design range at design payload, with reserves), rejects a closure outside the target plus or minus the band fraction, and then flies the selected route off-design at the closed mass as a check. Payload adjusted closes it with no ceiling at the configured payload on the route, or on the design range when one is set. In both design modes the structure is sized at the closed mass."
     )]
     pub mtow_sizing: MtowSizing,
+
+    /// Target MTOW of the band mode, kg; zero uses the requirement MTOW.
+    #[config(
+        label = "MTOW target",
+        unit = "kg",
+        help = "Centre of the MTOW band: the takeoff mass the design mission is expected to close at. Zero uses the requirement MTOW. Read only by the MTOW band mode."
+    )]
+    pub mtow_target_kg: f64,
+
+    /// Half-width of the MTOW band as a fraction of its target.
+    #[config(
+        label = "MTOW band fraction",
+        help = "Half-width of the MTOW band as a fraction of the target: a closed takeoff mass below the target times one minus this fraction, or above the target times one plus it, is rejected. Inside the band the closure is free and nothing pulls it toward the target. Read only by the MTOW band mode."
+    )]
+    pub mtow_band_fraction: f64,
 
     /// How many closure passes the sizing loop may take.
     #[config(
@@ -240,6 +300,8 @@ impl Default for ObjectiveConfig {
             kind: ObjectiveKind::BlockFuel,
             design_range_nmi: 0.0,
             mtow_sizing: MtowSizing::SizedByMission,
+            mtow_target_kg: 0.0,
+            mtow_band_fraction: DEFAULT_MTOW_BAND_FRACTION,
             sizing_max_iterations: 30,
             sizing_tolerance_kg: 1.0,
             retrim_cg_tolerance_pct_mac: 0.1,
@@ -253,6 +315,13 @@ impl Default for ObjectiveConfig {
         }
     }
 }
+
+/// Default half-width of the MTOW band, as a fraction of the target.
+///
+/// Engineering estimate: plus or minus five per cent is of the order of the
+/// MTOW step between successive weight variants of one transport type, so a
+/// closure outside it describes a different variant from the targeted one.
+pub const DEFAULT_MTOW_BAND_FRACTION: f64 = 0.05;
 
 impl ObjectiveConfig {
     /// Whether the serialized group equals the defaults.
@@ -270,6 +339,12 @@ impl ObjectiveConfig {
         }
         if !self.sizing_tolerance_kg.is_finite() || self.sizing_tolerance_kg <= 0.0 {
             return Err("sizing tolerance must be positive".to_owned());
+        }
+        if !self.mtow_target_kg.is_finite() || self.mtow_target_kg < 0.0 {
+            return Err("MTOW target must be finite and nonnegative".to_owned());
+        }
+        if !(self.mtow_band_fraction > 0.0 && self.mtow_band_fraction < 1.0) {
+            return Err("MTOW band fraction must lie strictly between zero and one".to_owned());
         }
         for (name, value) in [
             ("max_span_m", self.max_span_m),
@@ -336,6 +411,49 @@ mod tests {
             serde_json::to_value(MtowSizing::Unconstrained).ok(),
             Some(serde_json::json!("unconstrained"))
         );
+        for (sizing, name) in MtowSizing::ALL.into_iter().zip(MtowSizing::NAMES) {
+            assert_eq!(sizing.as_str(), name);
+            assert_eq!(
+                serde_json::to_value(sizing).ok(),
+                Some(serde_json::json!(sizing.as_str()))
+            );
+        }
+        assert_eq!(MtowSizing::MtowBand.as_str(), "mtow_band");
+        assert_eq!(MtowSizing::PayloadAdjusted.as_str(), "payload_adjusted");
+    }
+
+    #[test]
+    fn a_saved_objective_without_the_band_fields_loads_with_their_defaults() {
+        let saved = serde_json::json!({"kind": "block_fuel", "mtow_sizing": "sized_by_mission"});
+        let objective: ObjectiveConfig =
+            serde_json::from_value(saved).unwrap_or_else(|error| panic!("{error}"));
+        assert_eq!(objective.mtow_target_kg, 0.0);
+        assert_eq!(objective.mtow_band_fraction, DEFAULT_MTOW_BAND_FRACTION);
+        assert!(objective.is_default());
+        let band: ObjectiveConfig = serde_json::from_value(serde_json::json!({
+            "mtow_sizing": "mtow_band",
+            "mtow_target_kg": 80_000.0,
+            "mtow_band_fraction": 0.08
+        }))
+        .unwrap_or_else(|error| panic!("{error}"));
+        assert_eq!(band.mtow_sizing, MtowSizing::MtowBand);
+        assert!(band.validate().is_ok());
+    }
+
+    #[test]
+    fn a_band_fraction_outside_the_open_unit_interval_is_rejected() {
+        for fraction in [0.0, 1.0, -0.1, f64::NAN] {
+            let objective = ObjectiveConfig {
+                mtow_band_fraction: fraction,
+                ..Default::default()
+            };
+            assert!(objective.validate().is_err(), "{fraction}");
+        }
+        let negative_target = ObjectiveConfig {
+            mtow_target_kg: -1.0,
+            ..Default::default()
+        };
+        assert!(negative_target.validate().is_err());
     }
 
     #[test]

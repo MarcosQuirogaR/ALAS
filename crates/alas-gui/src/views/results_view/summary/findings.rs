@@ -51,6 +51,7 @@ pub(super) fn finding_title(code: FindingCode) -> String {
             "Mission throttle exceeds the modeled envelope"
         }
         FindingCode::PassengerCapacityShortfall => "Passenger seating shortfall",
+        FindingCode::BaggageOverload => "Baggage exceeds the modelled hold compartments",
         FindingCode::CargoCapacityShortfall => "Cargo capacity shortfall",
         FindingCode::MaximumZeroFuelWeightViolation => "Maximum zero-fuel weight exceeded",
         FindingCode::StructuralPayloadLimitViolation => "Structural payload limit exceeded",
@@ -101,6 +102,7 @@ pub(super) fn finding_meaning(code: FindingCode) -> String {
         FindingCode::ThrustMarginViolation => "Static thrust-to-weight is below the preliminary value required by the selected departure field.",
         FindingCode::MissionThrottleLimitViolation => "At least one mission control point requires a throttle command above the modeled full-throttle limit of 1.0.",
         FindingCode::PassengerCapacityShortfall => "The generated cabin placed fewer passenger seats than the requested passenger count.",
+        FindingCode::BaggageOverload => "The passenger baggage is heavier than the hold compartments the cabin model derived can take. The excess is kept in the payload mass and reported as overload, not dropped.",
         FindingCode::CargoCapacityShortfall => "The generated ULD layout delivered less net cargo than requested.",
         FindingCode::MaximumZeroFuelWeightViolation => "The modeled zero-fuel mass exceeds the published maximum zero-fuel weight for this unchanged preset.",
         FindingCode::StructuralPayloadLimitViolation => "The modeled payload exceeds the configured structural payload limit.",
@@ -152,9 +154,9 @@ pub(super) fn finding_next_step(code: FindingCode) -> String {
         | FindingCode::FieldLandingDistanceViolation
         | FindingCode::LandingMassLimitViolation
         | FindingCode::ThrustMarginViolation => "Field Performance and Weight & Balance",
-        FindingCode::PassengerCapacityShortfall | FindingCode::CargoCapacityShortfall => {
-            "Weight & Balance payload layout"
-        }
+        FindingCode::PassengerCapacityShortfall
+        | FindingCode::BaggageOverload
+        | FindingCode::CargoCapacityShortfall => "Weight & Balance payload layout",
         FindingCode::ReserveFuelShortfall
         | FindingCode::DispatchNotConverged
         | FindingCode::FuelPolicyUnavailable => "Mission & Route and the fuel policy",
@@ -206,9 +208,9 @@ pub(super) fn affected_disciplines(code: FindingCode) -> String {
         | FindingCode::FieldLandingDistanceViolation => "Field performance | Airport constraints",
         FindingCode::LandingMassLimitViolation => "Weight & balance | Mission | Field performance",
         FindingCode::ThrustMarginViolation => "Propulsion | Field performance",
-        FindingCode::PassengerCapacityShortfall | FindingCode::CargoCapacityShortfall => {
-            "Payload layout | Weight & balance"
-        }
+        FindingCode::PassengerCapacityShortfall
+        | FindingCode::BaggageOverload
+        | FindingCode::CargoCapacityShortfall => "Payload layout | Weight & balance",
         FindingCode::MaximumZeroFuelWeightViolation => {
             "Weight & balance | Mass properties | Payload"
         }
@@ -231,6 +233,7 @@ pub(super) fn actual_label(code: FindingCode) -> String {
     tr(match code {
         FindingCode::MissionFuelShortfall => "Burn at stop / evaluated burn",
         FindingCode::PassengerCapacityShortfall => "Seats placed",
+        FindingCode::BaggageOverload => "Baggage overload",
         FindingCode::CargoCapacityShortfall => "Net cargo loaded",
         FindingCode::FieldTakeoffDistanceViolation => "TODR",
         FindingCode::FieldLandingDistanceViolation => "Required value",

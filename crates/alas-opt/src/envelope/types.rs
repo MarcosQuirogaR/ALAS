@@ -3,7 +3,7 @@
 
 //! Result and error types of the model-derived CG envelope assessment.
 
-use super::{ModelCgConstraintAssessment, PhysicalCgLimits};
+use super::{ModelCgConstraint, ModelCgConstraintAssessment, PhysicalCgLimits};
 use alas_mass::stations::StationError;
 
 /// Outcome of the frozen Python-compatible envelope check.
@@ -32,6 +32,9 @@ pub enum ModelCgLoadingState {
     OperationalReserve,
     /// Takeoff load actually analyzed after any usable-fuel cap is applied.
     AnalyzedTakeoff,
+    /// Landing load of the flown mission (the mass ledger's landing state),
+    /// present only when the caller supplies one.
+    AnalyzedLanding,
 }
 
 impl ModelCgLoadingState {
@@ -43,6 +46,93 @@ impl ModelCgLoadingState {
             Self::OperationalMidMission => "operational mid-mission",
             Self::OperationalReserve => "operational reserve",
             Self::AnalyzedTakeoff => "analyzed TOW",
+            Self::AnalyzedLanding => "analyzed landing",
+        }
+    }
+}
+
+/// Which physical CG-limit mechanisms apply to one loading state.
+///
+/// The ground mechanisms (maximum nose load forward; minimum nose load and
+/// tip-back aft) apply to every state, because every state can stand on its
+/// gear. The phase-specific mechanisms are scoped to the flight phase the
+/// state represents:
+/// - OEW and loading steps: ground only ([`Self::GROUND`]);
+/// - zero-fuel, mid-mission and reserve: landing trim forward, static-margin
+///   floor aft ([`Self::FLIGHT`]);
+/// - takeoff: rotation forward, static-margin floor aft ([`Self::TAKEOFF`]);
+/// - landing: landing trim forward, static-margin floor aft ([`Self::LANDING`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PhaseLimits {
+    /// The nose-wheel liftoff (rotation) forward boundary applies.
+    pub rotation: bool,
+    /// The landing trim/flare forward boundary applies.
+    pub landing_trim: bool,
+    /// The static-margin floor (aerodynamic aft boundary) applies.
+    pub static_margin: bool,
+}
+
+impl PhaseLimits {
+    /// Ground mechanisms only.
+    pub const GROUND: Self = Self {
+        rotation: false,
+        landing_trim: false,
+        static_margin: false,
+    };
+    /// Takeoff: rotation forward and the static-margin floor aft.
+    pub const TAKEOFF: Self = Self {
+        rotation: true,
+        landing_trim: false,
+        static_margin: true,
+    };
+    /// En-route flight: landing trim forward and the static-margin floor aft.
+    pub const FLIGHT: Self = Self {
+        rotation: false,
+        landing_trim: true,
+        static_margin: true,
+    };
+    /// Landing: landing trim forward and the static-margin floor aft, since
+    /// the approach is flown.
+    pub const LANDING: Self = Self {
+        rotation: false,
+        landing_trim: true,
+        static_margin: true,
+    };
+
+    /// The mechanisms that apply to `state`.
+    #[must_use]
+    pub const fn for_state(state: ModelCgLoadingState) -> Self {
+        match state {
+            ModelCgLoadingState::OperatingEmpty => Self::GROUND,
+            ModelCgLoadingState::AnalyzedZeroFuel
+            | ModelCgLoadingState::OperationalMidMission
+            | ModelCgLoadingState::OperationalReserve => Self::FLIGHT,
+            ModelCgLoadingState::AnalyzedTakeoff => Self::TAKEOFF,
+            ModelCgLoadingState::AnalyzedLanding => Self::LANDING,
+        }
+    }
+
+    /// Whether `constraint` is gated in a state with these mechanisms.
+    ///
+    /// The static-stability floor needs [`Self::static_margin`]. The
+    /// physical forward limit and the minimum usable range need a flight
+    /// forward mechanism: in a ground-only state the forward limit is the
+    /// maximum nose load alone, which
+    /// [`ModelCgConstraint::MaximumNoseGearLoadFraction`] already gates.
+    /// Every ground-reaction constraint applies in every state.
+    #[must_use]
+    pub const fn admits(self, constraint: ModelCgConstraint) -> bool {
+        match constraint {
+            ModelCgConstraint::StaticStabilityFloor => self.static_margin,
+            ModelCgConstraint::PhysicalForwardCgLimit | ModelCgConstraint::MinimumUsableCgRange => {
+                self.rotation || self.landing_trim
+            }
+            ModelCgConstraint::NoseGearStrength
+            | ModelCgConstraint::MainGearStrength
+            | ModelCgConstraint::MinimumNoseGearLoad
+            | ModelCgConstraint::MaximumNoseGearLoadFraction
+            | ModelCgConstraint::TipBack
+            | ModelCgConstraint::TailScrape => true,
         }
     }
 }
@@ -79,8 +169,11 @@ pub struct ModelCgLoadingAssessment {
     /// describes this state and is always retained.
     pub ground_reactions_admissible: bool,
     /// This state's physical aft/forward CG boundaries and which mechanism
-    /// governs each: weight/`h_cg`
-    /// dependent, so reported per state rather than once for the design.
+    /// governs each: weight/`h_cg` dependent, so reported per state rather
+    /// than once for the design. The governing limits are scoped to this
+    /// state's phase ([`PhaseLimits::for_state`], see
+    /// [`PhysicalCgLimits::scoped`]); every mechanism's own boundary is still
+    /// reported in the diagnostic fields.
     pub physical_limits: PhysicalCgLimits,
     /// Independently evaluated hard constraints.
     pub constraints: Vec<ModelCgConstraintAssessment>,
@@ -181,10 +274,13 @@ pub struct ModelCgEnvelopeAssessment {
     /// Diagnostic only: the clean, single-condition neutral point,
     /// `%MAC`; never used as a limit.
     pub clean_np_pct_mac: f64,
-    /// The physical forward CG boundary: the more aft of
-    /// [`Self::max_nose_load_fwd_limit_pct_mac`] and
-    /// [`Self::scissor_plot_fwd_limit_pct_mac`]. Weight/state independent.
-    /// (See [`ModelCgConstraint::PhysicalForwardCgLimit`].)
+    /// The envelope-wide physical forward CG boundary: the most aft of the
+    /// rotation boundary (evaluated at the analyzed takeoff state), the
+    /// landing-trim boundary and the maximum-nose-load boundary, whatever
+    /// the phase. It is not scoped per state: each state's
+    /// [`ModelCgConstraint::PhysicalForwardCgLimit`] is gated against its own
+    /// scoped [`ModelCgLoadingAssessment::physical_limits`], which can lie
+    /// forward of this value. Gear sizing places the forward design CG here.
     pub configured_forward_limit_pct_mac: f64,
     /// Diagnostic only: the maximum-nose-load-handling forward boundary.
     pub max_nose_load_fwd_limit_pct_mac: f64,

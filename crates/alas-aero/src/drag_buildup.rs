@@ -175,7 +175,8 @@ pub fn evaluate(
         components::compressibility_drag_total_unweighted(&compressible_wings)
     };
 
-    let miscellaneous = components::miscellaneous_drag_aircraft_esdu(vehicle);
+    let miscellaneous =
+        components::miscellaneous_drag_aircraft_esdu(vehicle, settings.clamp_excrescence_fit);
 
     let untrimmed = parasite_total + induced.total + compressible_total + miscellaneous.total;
     let trim_corrected = settings.trim_drag_correction_factor * untrimmed;

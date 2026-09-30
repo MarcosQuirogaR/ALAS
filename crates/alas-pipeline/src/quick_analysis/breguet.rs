@@ -7,10 +7,11 @@
 //! The corner convention matches the report's payload-range figure: point A
 //! carries the maximum payload with fuel to the declared MTOW, point B
 //! carries the maximum fuel with the payload traded down to MTOW, point C is
-//! the ferry case, and every range is a Breguet cruise at the requested
-//! Mach and altitude with the analysed lift-to-drag. Reserves are not
-//! deducted here, so the corners are capability envelopes, not dispatch
-//! ranges.
+//! the ferry case. Each range is the largest distance whose fuel plan,
+//! reserves included, fits the corner's fuel (see `corners`); only when the
+//! production burn model is unavailable does it fall back to a single-point
+//! Breguet cruise with no reserves, and the published basis says so. The
+//! Breguet range model in this module is that fallback.
 //!
 //! The maximum payload is an *estimated achievable* capacity of the fixed
 //! aircraft: the declared structural cap bounded by the preset's
@@ -25,10 +26,11 @@
 //! aircraft (`TurbopropEngineSpec::installed_cruise_fuel_flow_kg_h`).
 
 use alas_atmo::Atmosphere;
-use alas_config::{ActiveEngineModel, AlasConfig};
+use alas_config::{presets, ActiveEngineModel, AlasConfig};
 use alas_perf::performance::breguet_range_m;
 use serde::{Deserialize, Serialize};
 
+use super::corners::{corner_ranges, CornerMasses, RangeBasis};
 use crate::feasibility::{assess_fuel_capacity, FuelCapacityEvidence};
 use crate::full_analysis::{effective_structural_payload_limit_kg, AnalysisReport};
 
@@ -182,6 +184,13 @@ pub struct QuickPayloadRange {
     pub fuel_capacity_kg: f64,
     /// Which evidence set the capacity.
     pub fuel_capacity_basis: String,
+    /// Reserve fuel the plan holds back at each point, kg, aligned with
+    /// `points`; zero on the no-reserve Breguet fallback.
+    #[serde(default)]
+    pub reserve_fuel_kg: Vec<f64>,
+    /// What the ranges include.
+    #[serde(default)]
+    pub range_basis: RangeBasis,
     /// The assumptions behind the ranges.
     pub note: String,
 }
@@ -203,11 +212,22 @@ pub fn payload_range_corners(
             "operating empty mass {oew_kg:.0} kg is not below the declared MTOW {mtow_kg:.0} kg, so the fixed aircraft can lift neither payload nor fuel"
         )));
     }
-    let mzfw_limit_kg = report
+    let effective_limit_kg = report
         .geometry_summary
         .get("effective_structural_payload_limit_kg")
         .copied()
         .or_else(|| effective_structural_payload_limit_kg(config, &report.design, oew_kg));
+    // The published MZFW less the modeled OEW bounds the payload as well, the
+    // same basis the report's payload-range chart uses.
+    let published_limit_kg = presets::get(&config.preset)
+        .ok()
+        .and_then(|preset| preset.reference.mzfw_kg)
+        .map(|mzfw_kg| mzfw_kg - oew_kg);
+    let mzfw_limit_kg = [effective_limit_kg, published_limit_kg]
+        .into_iter()
+        .flatten()
+        .filter(|value| value.is_finite() && *value > 0.0)
+        .reduce(f64::min);
     let carried_payload_kg = report
         .component_masses
         .get("Payload")
@@ -240,33 +260,17 @@ pub fn payload_range_corners(
         basis = "MTOW budget".to_owned();
         structural_capacity_kg
     };
-    let l_over_d = report
-        .trimmed_design_point
-        .as_ref()
-        .map(|point| point.l_over_d)
-        .unwrap_or(report.design_point.l_over_d);
-    let Some(model) = range_model(config, l_over_d) else {
-        return Err(PayloadRangeUnavailable::Unsupported(
-            "no cruise fuel-flow anchor for the selected propulsion model or no engine installed"
-                .to_owned(),
-        ));
+    let masses = CornerMasses {
+        mtow_kg,
+        oew_kg,
+        max_payload_kg,
+        tank_capacity_kg: capacity_kg,
     };
-
-    let fuel_b = fuel_capacity_kg
-        .min(mtow_kg - oew_kg - max_payload_kg)
-        .max(0.0);
-    let payload_c = (mtow_kg - oew_kg - fuel_capacity_kg)
-        .min(max_payload_kg)
-        .max(0.0);
-    let tow_b = oew_kg + max_payload_kg + fuel_b;
-    let tow_c = oew_kg + payload_c + fuel_capacity_kg;
-    let tow_d = oew_kg + fuel_capacity_kg;
-    let points = vec![
-        (0.0, max_payload_kg),
-        (model.range_m(tow_b, tow_b - fuel_b), max_payload_kg),
-        (model.range_m(tow_c, tow_c - fuel_capacity_kg), payload_c),
-        (model.range_m(tow_d, oew_kg), 0.0),
-    ];
+    let ranges =
+        corner_ranges(config, report, &masses).map_err(PayloadRangeUnavailable::Unsupported)?;
+    let points = (0..4)
+        .map(|index| (ranges.range_m[index], ranges.payload_kg[index]))
+        .collect();
     Ok(QuickPayloadRange {
         points,
         oew_kg,
@@ -275,13 +279,9 @@ pub fn payload_range_corners(
         payload_basis: payload.basis.to_owned(),
         fuel_capacity_kg,
         fuel_capacity_basis: basis,
-        note: format!(
-            "Breguet cruise at Mach {:.3}, {:.0} m, L/D {:.1}; {}; no reserves deducted",
-            config.requirements.cruise_mach,
-            config.requirements.cruise_altitude_m,
-            l_over_d,
-            model.note
-        ),
+        reserve_fuel_kg: ranges.reserve_fuel_kg.to_vec(),
+        range_basis: ranges.basis,
+        note: ranges.note,
     })
 }
 

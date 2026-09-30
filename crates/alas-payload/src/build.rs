@@ -23,6 +23,7 @@
 //! reserves the same monument bays, applies the same exit-derived cap, and
 //! reads the same [`crate::cabin::cabin_deck_segments`].
 
+mod mix_solve;
 mod presets;
 
 pub use presets::{
@@ -32,6 +33,7 @@ pub use presets::{
 use alas_config::{AlasConfig, CertifiedExitLayout, PassengerCabinConfig, SeatClassConfig};
 use alas_geom::aircraft::airplane::Airplane;
 
+use self::mix_solve::length_mix_for_seat_targets;
 use crate::cabin::{
     abreast, build_passenger_layout_reference_compatibility,
     build_passenger_layout_with_aircraft_cg_target, cabin_deck_segments, ceil_div,
@@ -44,10 +46,18 @@ use crate::geometry::{CabinGeometry, CabinGeometryError};
 use crate::layout::{LayoutSummary, PayloadLayout};
 use crate::numeric::round_half_even;
 
-/// Resolve the immutable passenger capacity declared for a registered
-/// aircraft.  A clean-sheet or unknown-preset configuration has no source
-/// limit to apply, and the frozen compatibility path deliberately preserves
-/// its historical geometry-only result.
+/// Resolve the passenger capacity ceiling for a registered aircraft.
+///
+/// The certified maximum (the exit-derived evacuation limit) always applies.
+/// In a fixed-aircraft design basis
+/// ([`alas_config::preset_policy::preset_mode_active`]: baseline sandbox or
+/// reference adaptation) the percent-mode layout is also capped at the
+/// preset's `planning_seats`, the manufacturer's typical cabin, so the analyzed
+/// aircraft carries the seats its reference operating-empty mass belongs to
+/// instead of a floor-filling layout. The cap is a ceiling: a count-mode cabin
+/// declared below it is honored unchanged. A clean-sheet or unknown-preset
+/// configuration has no source limit to apply, and the frozen compatibility
+/// path deliberately preserves its historical geometry-only result.
 pub(crate) fn registered_source_capacity_cap(
     config: &AlasConfig,
     reference_compatibility: bool,
@@ -55,10 +65,52 @@ pub(crate) fn registered_source_capacity_cap(
     if reference_compatibility || config.requirements.aircraft_type == "cargo" {
         return None;
     }
-    alas_config::presets::get(&config.preset)
-        .ok()
-        .and_then(|preset| preset.reference.certified_max_seats)
+    let reference = &alas_config::presets::get(&config.preset).ok()?.reference;
+    let (certified, planning) = seat_caps(config, reference);
+    match (certified, planning) {
+        (Some(certified), Some(planning)) => Some(certified.min(planning)),
+        (certified, planning) => certified.or(planning),
+    }
+}
+
+/// The certified maximum and the fixed-aircraft planning seat count of a
+/// registered aircraft, each when it applies.
+fn seat_caps(
+    config: &AlasConfig,
+    reference: &alas_config::AircraftReferenceData,
+) -> (Option<i64>, Option<i64>) {
+    let certified = reference.certified_max_seats.filter(|cap| *cap > 0);
+    let planning = reference
+        .planning_seats
         .filter(|cap| *cap > 0)
+        .filter(|_| alas_config::preset_policy::preset_mode_active(config));
+    (certified, planning)
+}
+
+/// Whether the planning seat count, not the certified maximum, is the lower
+/// of the two source caps of [`registered_source_capacity_cap`].
+fn planning_cap_binds(config: &AlasConfig, reference_compatibility: bool) -> bool {
+    if reference_compatibility || config.requirements.aircraft_type == "cargo" {
+        return false;
+    }
+    let Some(preset) = alas_config::presets::get(&config.preset).ok() else {
+        return false;
+    };
+    match seat_caps(config, &preset.reference) {
+        (Some(certified), Some(planning)) => planning < certified,
+        (None, Some(_)) => true,
+        _ => false,
+    }
+}
+
+/// Name the planning seat count as the binding ceiling when it, rather than
+/// the certified maximum, capped the row allocation.
+fn label_planning_cap(layout: &mut PayloadLayout, planning_binds: bool) {
+    if let LayoutSummary::Passenger(summary) = &mut layout.summary {
+        if planning_binds && summary.capacity_binding == "source_certified_cap" {
+            summary.capacity_binding = "planning_seat_cap";
+        }
+    }
 }
 
 /// Resolve the source-defined exit arrangement for a registered passenger
@@ -260,6 +312,11 @@ fn build_payload_layout_with_mass_semantics(
             }
             layout
         };
+        let mut layout = layout;
+        label_planning_cap(
+            &mut layout,
+            planning_cap_binds(config, reference_compatibility),
+        );
         Ok(layout)
     }
 }
@@ -447,68 +504,6 @@ pub(crate) fn simulate_passenger_counts_for_seat_mix_with_source_cap(
     simulate_passenger_counts_product(g, pax, &length_mix, source_capacity_cap, source_exit_layout)
 }
 
-fn length_mix_for_seat_targets<'a>(
-    g: &CabinGeometry,
-    pax: &PassengerCabinConfig,
-    target_mix: &[(&'a str, f64)],
-    source_capacity_cap: Option<i64>,
-    source_exit_layout: Option<CertifiedExitLayout>,
-) -> Vec<(&'a str, f64)> {
-    let mut weights = target_mix
-        .iter()
-        .filter(|(_, share)| share.is_finite() && *share > 0.0)
-        .map(|&(name, share)| {
-            let class = class_config(pax, name);
-            let deck = &g.passenger_decks[0];
-            let x = 0.5 * (g.cabin_start_x + g.cabin_end_x);
-            let seats_abreast = abreast(class, deck, g, resolve_aisle_width(pax, 20), x).max(1);
-            (
-                name,
-                share * class.pitch_m.max(MIN_PITCH) / seats_abreast as f64,
-            )
-        })
-        .collect::<Vec<_>>();
-    normalize_mix(&mut weights);
-
-    // Row rounding makes the inverse discontinuous, so a damped multiplicative
-    // correction is both more stable and more honest than pretending there is
-    // a closed form. Twenty passes is tiny beside one geometry build.
-    for _ in 0..20 {
-        let counts = simulate_passenger_counts_product(
-            g,
-            pax,
-            &weights,
-            source_capacity_cap,
-            source_exit_layout,
-        );
-        let total = counts.total().max(1) as f64;
-        for (name, weight) in &mut weights {
-            let target = target_mix
-                .iter()
-                .find(|(other, _)| other == name)
-                .map_or(0.0, |(_, share)| *share);
-            let achieved = counts.for_class(name) as f64 / total;
-            let correction = if achieved > 0.0 {
-                (target / achieved).clamp(0.25, 4.0).powf(0.65)
-            } else {
-                2.0
-            };
-            *weight *= correction;
-        }
-        normalize_mix(&mut weights);
-    }
-    weights
-}
-
-fn normalize_mix(mix: &mut [(&str, f64)]) {
-    let total = mix.iter().map(|(_, share)| *share).sum::<f64>();
-    if total > 0.0 && total.is_finite() {
-        for (_, share) in mix {
-            *share /= total;
-        }
-    }
-}
-
 /// One deck stretch, as the counting pass reads it.
 struct Deck<'a> {
     geometry: &'a CabinGeometry,
@@ -664,7 +659,15 @@ mod product_tests {
                 // above still require a physically consistent row pack: no
                 // passenger is reported seated without a mass-bearing row.
                 assert_eq!(summary.source_exit_layout, None);
-                assert_eq!(summary.capacity_binding, "geometry_exit_limit");
+                // The DC-10 also carries a planning-seat ceiling below its
+                // geometric exit sum, which the summary reports as the cap
+                // even though this shell cannot seat that many.
+                let expected_binding = if name == "DC-10" {
+                    "planning_seat_cap"
+                } else {
+                    "geometry_exit_limit"
+                };
+                assert_eq!(summary.capacity_binding, expected_binding);
                 assert!(
                     summary.total_pax < preset.requirements.num_passengers,
                     "{name} source/layout gap was hidden by a planning-count pin"
@@ -672,7 +675,9 @@ mod product_tests {
             } else {
                 assert!(
                     summary.total_pax >= preset.requirements.num_passengers,
-                    "{name} preset capacity regressed below its published planning load"
+                    "{name} preset capacity regressed below its published planning load: {} of {}",
+                    summary.total_pax,
+                    preset.requirements.num_passengers
                 );
             }
         }
@@ -713,6 +718,33 @@ mod product_tests {
             summary.total_pax,
             "payload must account for every declared passenger"
         );
+    }
+
+    #[test]
+    fn a_seat_ceiling_is_reached_when_the_floor_allows_it() {
+        let config = AlasConfig::from_value(&serde_json::json!({ "preset": "B787-9" })).unwrap();
+        let preset = presets::get("B787-9").unwrap();
+        let plane = AircraftBuilder::new(Some(config.geometry.clone()))
+            .build(Some(&preset.design_vector), true)
+            .unwrap();
+        let g = CabinGeometry::new(
+            &plane,
+            &config.geometry,
+            config.cabin.passenger.wall_thickness_m,
+        )
+        .unwrap();
+        let pax = &config.cabin.passenger;
+        let mix = pax.length_share_mix();
+        let seats =
+            |cap| simulate_passenger_counts_for_seat_mix_with_source_cap(&g, pax, &mix, cap, None);
+        // The floor holds 303 seats; a ceiling below that must be filled to
+        // the seat rather than left a whole business row short of it, and a
+        // ceiling above the floor must not change the uncapped answer.
+        assert_eq!(seats(None).total(), 303);
+        assert_eq!(seats(Some(420)), seats(None));
+        assert_eq!(seats(Some(290)).total(), 290);
+        assert_eq!(seats(Some(300)).total(), 300);
+        assert_eq!(seats(Some(290)).business, 42);
     }
 
     #[test]

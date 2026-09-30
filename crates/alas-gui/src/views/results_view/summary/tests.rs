@@ -3,8 +3,8 @@
 
 use super::findings::finding_margin;
 use super::metrics::{
-    fuel_margin_rows, mass_metrics, mass_triplet_kg, payload_summary_metrics, static_margin_rows,
-    takeoff_mass_margin, takeoff_mass_rows,
+    fuel_margin_rows, mass_metrics, mass_triplet_kg, mtow_band_row, payload_summary_metrics,
+    static_margin_rows, takeoff_mass_margin, takeoff_mass_rows,
 };
 use super::propulsion::{
     localized_propulsion_label, propulsion_metric_card, propulsion_summary_entries,
@@ -91,6 +91,12 @@ fn passenger_layout() -> PayloadLayout {
             hold_capacity_t: 8.0,
             hold_used_t: 3.5,
             hold_ulds: 5,
+            forward_hold_baggage_fraction: 0.55,
+            hold_compartment_masses_kg: vec![
+                ("Forward hold".to_owned(), 1.9),
+                ("Aft hold".to_owned(), 1.6),
+            ],
+            overload_kg: 0.0,
             aisle_width_m: 0.51,
             max_abreast: 6,
             n_aisles: 1,
@@ -278,6 +284,20 @@ fn summary_masses_of_an_optimized_run_are_the_pipeline_result() {
         (analyzed_kg - sized_kg).abs() < 0.005 * sized_kg,
         "analysed {analyzed_kg} kg vs sized {sized_kg} kg"
     );
+}
+
+#[test]
+fn mtow_band_row_needs_the_band_mode_and_a_sized_report() {
+    let mut plan = alas_config::AlasConfig::default().mtow_plan();
+    plan.mode = alas_config::MtowSizing::MtowBand;
+    plan.lower_bound_kg = Some(60_000.0);
+    plan.upper_bound_kg = Some(66_000.0);
+    let (label, value) = mtow_band_row(&plan, true).expect("sized band report shows the row");
+    assert_eq!(label, "MTOW band (lower to upper edge)");
+    assert_eq!(value, "60.0 to 66.0 t");
+    assert!(mtow_band_row(&plan, false).is_none());
+    plan.mode = alas_config::MtowSizing::FixedRequirement;
+    assert!(mtow_band_row(&plan, true).is_none());
 }
 
 #[test]

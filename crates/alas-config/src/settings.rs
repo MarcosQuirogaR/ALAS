@@ -459,7 +459,7 @@ impl AlasConfig {
         // without the hidden schema-version field is already making an
         // explicit version-2 selection (as the settings form does), so it
         // must remain selectable rather than being mistaken for an old file.
-        let migration = loaded.mass_model.normalize_architecture();
+        let migration = crate::landing_mass_ratio::finish_loaded_mass_model(&mut loaded, data);
         Ok(load_notes::finish(loaded, migration, data))
     }
 

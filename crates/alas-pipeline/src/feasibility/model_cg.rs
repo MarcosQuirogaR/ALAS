@@ -9,10 +9,12 @@ use alas_mass::breakdown::{
     calculate_physical_cg, MassBreakdown, MassCoordinates, FUEL, FURNISHINGS, FUSELAGE, GEAR,
     H_STAB, PAYLOAD, PROPULSION, SYSTEMS, V_STAB, WING,
 };
-use alas_opt::{
-    assess_model_cg_envelope, assess_model_cg_envelope_with_ledger, LedgerLoadingBasis,
-    ModelCgConstraint, ModelCgEnvelopeAssessment,
+use alas_opt::envelope::{
+    assess_model_cg_envelope_with_ledger_and_landing, LedgerLandingState, LedgerLoadingBasis,
 };
+use alas_opt::{assess_model_cg_envelope, ModelCgConstraint, ModelCgEnvelopeAssessment};
+
+use super::phase_limits::{aft_mechanism_label, forward_mechanism_label};
 
 use super::{error, warning, FindingCode, PhysicalFinding};
 use crate::full_analysis::AnalysisReport;
@@ -53,6 +55,24 @@ fn ledger_loading_basis(mass_balance: &MassBalanceAssessment) -> Option<LedgerLo
         takeoff_cg_x_m: takeoff.cg_m[0],
         takeoff_cg_z_m: takeoff.cg_m[2],
     })
+}
+
+/// The ledger's flown landing state, gated by the landing limits. `None`
+/// when the ledger carries no landing state or its mass or CG is not finite.
+fn ledger_landing_state(mass_balance: &MassBalanceAssessment) -> Option<LedgerLandingState> {
+    let landing = mass_balance
+        .states
+        .iter()
+        .find(|state| state.label == "flown landing")?;
+    let state = LedgerLandingState {
+        mass_kg: landing.mass_kg,
+        cg_x_m: landing.cg_m[0],
+        cg_z_m: landing.cg_m[2],
+    };
+    [state.mass_kg, state.cg_x_m, state.cg_z_m]
+        .iter()
+        .all(|value| value.is_finite())
+        .then_some(state)
 }
 
 pub(super) fn model_cg_assessment(
@@ -113,9 +133,10 @@ pub(super) fn model_cg_assessment(
     // statement and the feasibility verdict describe the same centre of
     // gravity.
     if let Some(ledger) = mass_balance.and_then(ledger_loading_basis) {
-        return assess_model_cg_envelope_with_ledger(
+        return assess_model_cg_envelope_with_ledger_and_landing(
             &report.airplane,
             ledger,
+            mass_balance.and_then(ledger_landing_state),
             report.x_neutral_point,
             critical_x_np,
             report.airplane.c_ref,
@@ -162,15 +183,19 @@ pub(super) fn append_model_cg_findings(
                     .constraints
                     .iter()
                     .filter(move |item| item.constraint == constraint && item.violated)
-                    .map(move |item| (state.state, item))
+                    .map(move |item| (state, item))
             })
             .max_by(|(_, left), (_, right)| {
                 left.normalized_exceedance
                     .total_cmp(&right.normalized_exceedance)
             });
-        let Some((state, result)) = worst else {
+        let Some((loading_state, result)) = worst else {
             continue;
         };
+        let state = loading_state.state;
+        let limits = &loading_state.physical_limits;
+        let forward_mechanism = forward_mechanism_label(limits.fwd_limit_governance);
+        let aft_mechanism = aft_mechanism_label(limits.aft_limit_governance);
         let code = match constraint {
             ModelCgConstraint::StaticStabilityFloor => FindingCode::InsufficientStaticMargin,
             ModelCgConstraint::PhysicalForwardCgLimit | ModelCgConstraint::MinimumUsableCgRange => {
@@ -220,10 +245,17 @@ pub(super) fn append_model_cg_findings(
                 "{} loading state's usable CG range is {:.2} % MAC, below the configured \
                  requirement of {:.2} % MAC (cg_range_pct_mac; a configured assumption, not \
                  a physical limit -- the physical forward/aft boundaries themselves are \
-                 unaffected)",
+                 unaffected); the forward limit of this state is governed by \
+                 {forward_mechanism} and its aft limit by {aft_mechanism}",
                 state.label(),
                 result.actual,
                 result.limit
+            ),
+            ModelCgConstraint::PhysicalForwardCgLimit => format!(
+                "{} loading state violates the model {} constraint (the forward limit of \
+                 this state is governed by {forward_mechanism})",
+                state.label(),
+                constraint.label()
             ),
             _ => format!(
                 "{} loading state violates the model {} constraint",
@@ -293,6 +325,50 @@ mod tests {
                 && other.message.contains("usable CG range")
                 && other.severity == FindingSeverity::Error
         }));
+    }
+
+    /// The ledger's flown landing state enters the gate as the analyzed
+    /// landing state, at the ledger's own mass and CG, gated by landing trim
+    /// and the ground mechanisms (no rotation, no static-margin floor).
+    #[test]
+    fn the_flown_landing_state_is_gated_by_the_landing_limits() {
+        let config = AlasConfig::from_value(&serde_json::json!({ "preset": "A320-200" }))
+            .expect("A320-200 preset config");
+        let preset = alas_config::presets::get("A320-200").expect("registered preset");
+        let report = crate::full_analysis::FullAnalysis::new(config.clone())
+            .run(&preset.design_vector, true)
+            .expect("A320-200 must analyze");
+        let feasibility =
+            assess_physical_feasibility(&config, &preset.design_vector, &report, None);
+        let ledger_landing = feasibility
+            .mass_balance
+            .as_ref()
+            .expect("A320-200 builds an item-level mass ledger")
+            .states
+            .iter()
+            .find(|state| state.label == "flown landing")
+            .expect("the ledger reports a flown-landing state");
+        let landing = feasibility
+            .model_cg
+            .as_ref()
+            .expect("A320-200 produces a model CG assessment")
+            .loading_states
+            .iter()
+            .find(|state| state.state == alas_opt::ModelCgLoadingState::AnalyzedLanding)
+            .expect("the gate reports an analyzed-landing state");
+        assert_eq!(landing.mass_kg, ledger_landing.mass_kg);
+        assert_eq!(landing.cg_x_m, ledger_landing.cg_m[0]);
+        assert_eq!(
+            landing.physical_limits.fwd_limit_pct_mac,
+            landing
+                .physical_limits
+                .fwd_for(alas_opt::envelope::PhaseLimits::LANDING)
+                .0
+        );
+        assert_ne!(
+            landing.physical_limits.fwd_limit_governance,
+            alas_opt::envelope::ForwardLimitGovernance::RotationNoseWheelLiftoff
+        );
     }
 
     /// When the ledger exists, the hard gate's analyzed-TOW

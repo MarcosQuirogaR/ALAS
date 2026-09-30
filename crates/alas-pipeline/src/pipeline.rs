@@ -856,9 +856,7 @@ impl DesignPipeline {
         } else if optimization_result.is_some()
             && self.config.optimizer.solver.method == alas_config::optimizer::SCIPY_LEGACY_METHOD
         {
-            report(
-                "SciPy legacy winner sent to full analysis; mission-sized finalist acceptance is disabled for this profile",
-            );
+            report(sized_finalist::legacy_winner_notice(&self.config));
         }
         finish_stage(events, run_clock, stage_clock, 2, "optimization");
         check_cancelled(cancel)?;
@@ -881,7 +879,7 @@ impl DesignPipeline {
             },
         };
         if options.optimize
-            && self.config.optimizer.solver.method == alas_config::optimizer::PRODUCT_DE_METHOD
+            && sized_finalist::binds_sized_finalist(&self.config)
             && optimization_result.is_some()
             && self.aircraft_override.is_none()
             && !optimized_report

@@ -5,7 +5,7 @@
 //! `mod`, not an `include!`, so this does not count against
 //! `envelope.rs`'s frozen `docs/source-size-budgets.tsv` ceiling.
 
-use super::{ModelCgLoadingAssessment, ModelCgLoadingState, PhysicalCgLimits};
+use super::{ModelCgLoadingAssessment, ModelCgLoadingState, PhaseLimits, PhysicalCgLimits};
 
 /// One independently evaluated hard model constraint.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -13,10 +13,11 @@ pub enum ModelCgConstraint {
     /// Positive stability buffer from the critical (most-forward) neutral
     /// point, as a fraction of MAC.
     StaticStabilityFloor,
-    /// The physical forward CG limit: the most aft of the rotation,
-    /// landing-trim and maximum-nose-load-handling boundaries. It does not
-    /// depend on the aft limit, so it cannot collapse when the critical
-    /// neutral point moves forward of the ground boundary.
+    /// The physical forward CG limit: the most aft of the boundaries this
+    /// state's phase admits (rotation at takeoff, landing trim in flight and
+    /// at landing, and the maximum-nose-load-handling boundary always). It
+    /// does not depend on the aft limit, so it cannot collapse when the
+    /// critical neutral point moves forward of the ground boundary.
     PhysicalForwardCgLimit,
     /// Rated nose-gear tire capacity (only meaningful when
     /// [`alas_perf::landing_gear::LandingGearLayout::capacity_basis_declared`]).
@@ -234,6 +235,13 @@ pub(super) fn assess_loading_constraints(
             1.0,
         ));
     }
+    // Each state is gated only by the mechanisms of its own phase: a
+    // ground-only state keeps no flight CG-range or static-margin verdict.
+    // `physical_limits` is expected to be scoped to the same phase
+    // (`PhysicalCgLimits::scoped`), so the forward limit and usable range
+    // gated here are this state's own.
+    let phase = PhaseLimits::for_state(inputs.state);
+    constraints.retain(|constraint| phase.admits(constraint.constraint));
     if !ground_reactions_admissible {
         // Drop only the two rated-capacity comparisons. This cannot admit a
         // candidate that would otherwise be rejected: both are upper bounds

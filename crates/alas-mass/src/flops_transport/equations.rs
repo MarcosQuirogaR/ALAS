@@ -5,7 +5,12 @@
 
 use alas_units::{FOOT, POUND_FORCE, POUND_MASS, PSI};
 
+mod lth_cabin;
+mod regional_cabin;
+
+use self::lth_cabin::{lth_furnishings_kg, lth_operating_items_kg};
 use super::propulsion::{scaled_engine_count, scaled_nacelle_diameter_m};
+
 use super::{
     FlopsOperatingItemsBreakdown, FlopsSystemsBreakdown, FlopsTransportBreakdown,
     FlopsTransportInputError, FlopsTransportInputs, PropulsionSizing,
@@ -208,64 +213,6 @@ pub(super) fn cargo_containers_kg(containerized_mass_kg: f64) -> f64 {
     pounds_to_kg(175.0 * containers)
 }
 
-/// LTH MA 401 12-01 B furnishings, **excluding** passenger seats, kg.
-///
-/// `m_fur = 200 + 3.35 (l_fus d_fus)^1.3368`, both lengths in metres, as
-/// reproduced with its coefficients by Pape (2018) equation 2.14 p. 22. It is
-/// the alternative to FLOPS equation 110 selected by
-/// [`alas_config::CabinEquipmentMethod::LthCivilTransportV1`]; the seats it
-/// leaves out are inside [`lth_operating_items_kg`], which is why the two are
-/// only ever evaluated together.
-///
-/// `d_fus` is the **average** fuselage diameter `D_av = (width + depth) / 2`,
-/// not the maximum width. The source does not define the symbol in words, so
-/// it is decided here by reproducing its own two worked examples (Pape 2018
-/// Tab. 3.24 p. 31), both to the tenth of a kilogram:
-///
-/// | case | `l_fus` m | candidate `d_fus` m | this relation kg | Pape kg |
-/// |---|---:|---|---:|---:|
-/// | A320-200 | 37.57 | width 3.95 | 2,878.1 | n/a |
-/// | A320-200 | 37.57 | depth 4.14 | 3,051.7 | n/a |
-/// | A320-200 | 37.57 | `sqrt(w d)` 4.0439 | 2,963.5 | n/a |
-/// | **A320-200** | 37.57 | **`(w + d)/2` 4.045** | **2,964.5** | **2,964.5** |
-/// | **A340-300** | 62.47 | **circular 5.64** | **8,707.6** | **8,707.6** |
-///
-/// Only the arithmetic mean reproduces the published A320-200 value, and the
-/// circular A340-300 case, where every candidate coincides, reproduces
-/// exactly as well, which confirms the coefficients and the exponent
-/// independently of the convention. It is also the same `D_av` that FLOPS
-/// equation 56 uses in this crate (`structure.rs`), so the two methods read
-/// the same quantity from the same geometry.
-///
-/// Feeding the maximum width instead understates a non-circular fuselage:
-/// 1,723.8 kg on the A380-800 (7.14 m wide, 8.41 m deep) and 86.4 kg on the
-/// A320-200. Every other registered preset has a circular section and is
-/// unaffected.
-pub(super) fn lth_furnishings_kg(fuselage_length_m: f64, average_fuselage_diameter_m: f64) -> f64 {
-    200.0 + 3.35 * (fuselage_length_m * average_fuselage_diameter_m).powf(1.336_8)
-}
-
-/// LTH MA 401 12-01 B operating items, **including** passenger seats, kg.
-///
-/// `m_opp = 32.907 n_pax^1.021` short/medium-haul and
-/// `m_opp = 35.782 n_pax^1.1141` long-haul (Pape 2018 equations 2.15 and
-/// 2.16, p. 23). It replaces the occupant-driven FLOPS operating items (the
-/// cabin crew and their baggage, the flight crew and theirs, and the passenger
-/// service items), including unusable fuel and engine/APU oil: these fluids
-/// are listed in Pape section 2.11, pp. 22-23. Their explicit rows are allocated
-/// within this total. Cargo container tare remains separate.
-pub(super) fn lth_operating_items_kg(passengers: usize, long_haul: bool) -> f64 {
-    let count = passengers as f64;
-    if count <= 0.0 {
-        return 0.0;
-    }
-    if long_haul {
-        35.782 * count.powf(1.114_1)
-    } else {
-        32.907 * count.powf(1.021)
-    }
-}
-
 fn validate_positive(value: f64, field: &'static str) -> Result<(), FlopsTransportInputError> {
     if value.is_finite() && value > 0.0 {
         Ok(())
@@ -432,32 +379,16 @@ pub fn estimate_flops_transport(
         fuselage_planform_area_m2,
     );
     // Equation 110, or the LTH civil-transport relation that replaces it and
-    // the three occupant-driven operating items together. The two methods put
-    // the passenger seats on opposite sides of the furnishings/operating-item
-    // boundary, so neither half may be taken on its own. The container tare is
-    // not one of the three: it is hold architecture, not cabin equipment, and
-    // it is evaluated the same way under both methods below.
+    // the three occupant-driven operating items together, or the regional
+    // turboprop remainder that keeps the FLOPS operating items. The LTH method
+    // puts the passenger seats on the other side of the furnishings/operating
+    // item boundary, so neither half may be taken on its own. The container
+    // tare is hold architecture, not cabin equipment, and it is evaluated the
+    // same way under every method below.
     let lth_cabin_equipment = matches!(
         inputs.cabin_equipment_method,
         alas_config::CabinEquipmentMethod::LthCivilTransportV1
     );
-    let furnishings = if lth_cabin_equipment {
-        lth_furnishings_kg(
-            inputs.fuselage_length_m,
-            (inputs.fuselage_width_m + inputs.fuselage_depth_m) / 2.0,
-        )
-    } else {
-        furnishings_kg(
-            inputs.flight_crew_count,
-            inputs.first_class_passenger_count,
-            inputs.business_class_passenger_count,
-            inputs.tourist_class_passenger_count,
-            inputs.passenger_compartment_length_m,
-            inputs.fuselage_width_m,
-            inputs.fuselage_depth_m,
-            inputs.fuselage_count,
-        )
-    };
     let air_conditioning = air_conditioning_kg(
         fuselage_planform_area_m2,
         inputs.fuselage_depth_m,
@@ -472,6 +403,36 @@ pub fn estimate_flops_transport(
         scaled_engines,
         inputs.fuselage_width_m,
     );
+    let furnishings = match inputs.cabin_equipment_method {
+        alas_config::CabinEquipmentMethod::LthCivilTransportV1 => lth_furnishings_kg(
+            inputs.fuselage_length_m,
+            (inputs.fuselage_width_m + inputs.fuselage_depth_m) / 2.0,
+        ),
+        alas_config::CabinEquipmentMethod::RegionalTurbopropV1 => {
+            regional_cabin::furnishings_remainder_kg(
+                inputs.design_gross_mass_kg,
+                passengers,
+                surface_controls
+                    + apu
+                    + instruments
+                    + hydraulics
+                    + electrical
+                    + avionics
+                    + air_conditioning
+                    + anti_ice,
+            )?
+        }
+        alas_config::CabinEquipmentMethod::FlopsTransportV1 => furnishings_kg(
+            inputs.flight_crew_count,
+            inputs.first_class_passenger_count,
+            inputs.business_class_passenger_count,
+            inputs.tourist_class_passenger_count,
+            inputs.passenger_compartment_length_m,
+            inputs.fuselage_width_m,
+            inputs.fuselage_depth_m,
+            inputs.fuselage_count,
+        ),
+    };
 
     let systems = FlopsSystemsBreakdown {
         surface_controls_kg: surface_controls,
@@ -1132,6 +1093,61 @@ mod tests {
         assert!(
             widebody_mass > narrowbody_mass,
             "widebody avionics {widebody_mass} kg must exceed narrowbody {narrowbody_mass} kg"
+        );
+    }
+
+    #[test]
+    fn regional_method_changes_only_the_furnishings_row() {
+        let mut flops = representative_inputs();
+        flops.design_gross_mass_kg = 23_000.0;
+        flops.fuselage_length_m = 27.2;
+        flops.fuselage_width_m = 2.77;
+        flops.fuselage_depth_m = 2.77;
+        flops.passenger_compartment_length_m = 19.0;
+        flops.first_class_passenger_count = 0;
+        flops.business_class_passenger_count = 0;
+        flops.tourist_class_passenger_count = 72;
+        let mut regional = flops;
+        regional.cabin_equipment_method = alas_config::CabinEquipmentMethod::RegionalTurbopropV1;
+
+        let base = estimate_flops_transport(&flops).expect("valid inputs");
+        let result = estimate_flops_transport(&regional).expect("valid inputs");
+
+        for (a, b) in [
+            (
+                base.systems.surface_controls_kg,
+                result.systems.surface_controls_kg,
+            ),
+            (base.systems.apu_kg, result.systems.apu_kg),
+            (base.systems.instruments_kg, result.systems.instruments_kg),
+            (base.systems.hydraulics_kg, result.systems.hydraulics_kg),
+            (base.systems.electrical_kg, result.systems.electrical_kg),
+            (base.systems.avionics_kg, result.systems.avionics_kg),
+            (
+                base.systems.air_conditioning_kg,
+                result.systems.air_conditioning_kg,
+            ),
+            (base.systems.anti_ice_kg, result.systems.anti_ice_kg),
+        ] {
+            assert_eq!(a.to_bits(), b.to_bits());
+        }
+        assert_eq!(base.operating_items, result.operating_items);
+        let expected = 0.11 * 23_000.0 + 0.768 * 0.88 * 23_000.0_f64.powf(2.0 / 3.0) + 15.0 * 72.0;
+        assert!((result.systems.total_kg - expected).abs() < 1e-9);
+    }
+
+    #[test]
+    fn regional_method_refuses_a_negative_furnishings_remainder() {
+        let mut inputs = representative_inputs();
+        inputs.cabin_equipment_method = alas_config::CabinEquipmentMethod::RegionalTurbopropV1;
+        // The other eight FLOPS terms of a 60 m fuselage exceed the Torenbeek
+        // group of a 2 t aircraft.
+        inputs.design_gross_mass_kg = 2_000.0;
+        assert_eq!(
+            estimate_flops_transport(&inputs),
+            Err(FlopsTransportInputError {
+                field: "regional_cabin_furnishings_remainder"
+            })
         );
     }
 }

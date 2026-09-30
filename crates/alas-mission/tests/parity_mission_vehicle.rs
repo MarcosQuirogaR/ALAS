@@ -419,6 +419,12 @@ fn request_corrections() -> BTreeMap<&'static str, RequestCorrection> {
         ),
         correction("A340-300.geometry_config.engine.thrust_kn", 151.0, 144.56),
         correction("A340-300.mtow_kg", 275_000.0, 260_000.0),
+        // The registered A340-300 cabin is the published planning cabin of
+        // 335 seats [S Airbus A340 ACAP], replacing the 290 seats of the
+        // frozen table. The fixture holds only the A320 (150 seats, unchanged)
+        // and the A340, so the A380 (555), A220 (140) and DC-10 (255) planning
+        // seeds have no leaf here; the alas-config preset ledger pins them.
+        correction("A340-300.requirements.num_passengers", 290.0, 335.0),
     ]
     .into_iter()
     .collect()

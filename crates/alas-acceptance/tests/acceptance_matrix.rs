@@ -30,12 +30,6 @@ fn a380() -> &'static PresetAcceptanceResult {
     A380.get_or_init(|| evaluate_preset("A380-800").expect("A380 evaluation"))
 }
 
-/// Presets whose cruise force telemetry is not asserted until the mass model is
-/// calibrated. ATR72-600: the modelled OEW (15.2 t) against the 13.45 t
-/// reference leaves 830 kg of admissible fuel, so the single-climb schedule
-/// exhausts its fuel in `initial_climb` and no cruise point is flown.
-const PENDING_MASS_CALIBRATION: &[&str] = &["ATR72-600"];
-
 #[test]
 fn acceptance_matrix_evaluates_all_registered_presets() {
     let report = run_acceptance_matrix();
@@ -78,9 +72,6 @@ fn acceptance_matrix_evaluates_all_registered_presets() {
             "Generates at least 8 figure scenes for {}",
             p.name
         );
-        if PENDING_MASS_CALIBRATION.contains(&p.name.as_str()) {
-            continue;
-        }
         let equilibrium = p
             .cruise_equilibrium
             .as_ref()
@@ -131,7 +122,7 @@ fn public_planning_cg_uses_the_source_frame_without_becoming_a_certification_cla
             .physical_findings
             .iter()
             .any(|finding| finding.code == FindingCode::PublicPlanningCgEnvelopeViolation),
-        "the corrected bulk-hold trim no longer violates the public planning envelope: {:?}",
+        "the bulk-hold trim keeps the loaded CG inside the public planning envelope: {:?}",
         result.physical_findings
     );
     // No Error-severity finding: tail scrape is a warning (see above), and
@@ -158,24 +149,50 @@ fn public_planning_cg_uses_the_source_frame_without_becoming_a_certification_cla
         .iter()
         .any(|finding| finding.code == FindingCode::TrimUnavailable));
 
-    // Regression pins of the same analyzed takeoff state in the two frames.
-    // They are product-state values, not validated aircraft data. The model
-    // frame reads the detailed item ledger, which places this loading state
-    // about 5 %MAC further aft than the lumped-station model the public frame
-    // sums (see the `MassModelDisagreement` finding); the A220 wing datum is
-    // anchored at the published quarter-MAC point (`root_datum_x_m` 13.424 m).
-    let pin_tolerance = 1.0e-2;
-    assert!(
-        (result.model_cg_pct_mac - 25.565_215_742_793_473).abs() < pin_tolerance,
-        "model-frame CG was {}% MAC",
-        result.model_cg_pct_mac
-    );
+    // The analyzed takeoff CG in the two frames is checked against the
+    // published flight envelope at the analyzed takeoff mass (A220-300
+    // Aircraft Recovery Publication BD500-3AB48-10400-00, p. 119: forward
+    // 12.0 %MAC, aft 31.0 %MAC at 36,287 kg rising to 37.3 %MAC at 54,431 kg),
+    // not against a pin: the loaded CG moves with every mass-model change, the
+    // published limits do not. The model frame is compared unshifted; its MAC
+    // differs from the manufacturer's, so this is a plausibility bound on the
+    // frame, while the public frame is the conformance check.
     let public_pct_mac = result
         .public_planning_cg_pct_mac
         .expect("A220 has a source planning frame");
+    let published = presets::get("A220-300")
+        .expect("registered A220")
+        .reference
+        .planning_cg_envelope
+        .expect("A220 planning envelope");
+    let limits = published
+        .limits_at(
+            alas_config::CgEnvelopeCondition::Flight,
+            result.analyzed_takeoff_mass_kg,
+        )
+        .expect("the analyzed takeoff mass lies inside the published mass range");
+    let aft = limits
+        .aft_pct_mac
+        .expect("published aft limit at takeoff mass");
+    for (frame, value) in [
+        ("public", public_pct_mac),
+        ("model", result.model_cg_pct_mac),
+    ] {
+        assert!(
+            value >= limits.forward_pct_mac && value <= aft,
+            "{frame}-frame CG {value} %MAC outside the published [{}, {aft}] %MAC",
+            limits.forward_pct_mac
+        );
+    }
+    // One mechanism guard: the model frame reads the detailed item ledger,
+    // which places this loading state further aft than the lumped-station
+    // model the public frame sums (the `MassModelDisagreement` finding). The
+    // offset is 4.6 %MAC today; the band is wide enough for mass-model changes
+    // and fails if the ledger preference or the frame mapping is lost.
+    let ledger_offset = result.model_cg_pct_mac - public_pct_mac;
     assert!(
-        (public_pct_mac - 20.964_348_191_540_28).abs() < pin_tolerance,
-        "public-frame CG was {public_pct_mac}% MAC"
+        (2.0..8.0).contains(&ledger_offset),
+        "ledger-minus-lumped CG offset {ledger_offset} %MAC"
     );
 
     // The public frame is the manufacturer's LEMAC and MAC from the
@@ -292,10 +309,12 @@ fn a220_full_analysis_uses_registered_percent_capacity_before_mass_build() {
         .expect("A220 preset configuration");
 
     // This is the same registered configuration/design path used by the
-    // acceptance evaluator. The brief's 130 passengers remains an input,
-    // while the percent mix and built cabin geometry determine the filled
-    // layout; planning_seats is not smuggled in as a fixed target.
-    assert_eq!(config.requirements.num_passengers, 130);
+    // acceptance evaluator. The brief's 140 passengers is the manufacturer's
+    // typical cabin (`planning_seats`); in a fixed-aircraft design basis it is
+    // also the ceiling on the percent-mode layout, below the 145-seat exit
+    // limit, so the analyzed aircraft carries the seats its reference
+    // operating-empty mass belongs to.
+    assert_eq!(config.requirements.num_passengers, 140);
     assert_eq!(config.cabin.passenger.class_mix_mode, "percent");
     let report = FullAnalysis::new(config)
         .run(&preset.design_vector, false)
@@ -308,13 +327,13 @@ fn a220_full_analysis_uses_registered_percent_capacity_before_mass_build() {
         panic!("A220 full analysis must use passenger layout");
     };
 
-    assert_eq!(summary.source_capacity_cap, Some(145));
+    assert_eq!(summary.source_capacity_cap, Some(140));
     assert_eq!(summary.source_exit_layout, Some("C-III-C"));
     assert_eq!(summary.geometric_capacity, 145);
-    assert_eq!(summary.max_certifiable_capacity, 145);
+    assert_eq!(summary.max_certifiable_capacity, 140);
     assert_eq!(summary.capacity_binding, "source_exit_layout");
-    assert_eq!(summary.total_pax, 145);
-    assert_eq!(summary.seated_pax, 145);
+    assert_eq!(summary.total_pax, 140);
+    assert_eq!(summary.seated_pax, 140);
     assert_eq!(summary.unseated_pax, 0);
     let row_seats: i64 = layout
         .items
@@ -328,7 +347,6 @@ fn a220_full_analysis_uses_registered_percent_capacity_before_mass_build() {
 }
 
 #[test]
-#[ignore = "forward-CG limit rejects 6/8 presets (A380 TOW CG 35.16 %MAC vs 36.27 forward limit); pending mass/CG calibration"]
 fn a380_soft_static_margin_target_does_not_become_a_hard_model_constraint() {
     let result = a380();
 
@@ -492,25 +510,28 @@ fn acceptance_narrowbody_and_widebody_mass_calibrations() {
     );
     // Tail scrape (9.49 deg vs 10 deg) is a warning
     // (`ModelCgConstraint::is_diagnostic`). The `ModelCgForwardRangeViolation`
-    // warnings are the usable CG-range shortfall, the potato boundary
-    // excursion, and the full-fuel point of the fuel vector, which sits on the
-    // aft limit (34.880 against 34.879 % MAC) once the mission surrogate reads
-    // the built tail position.
+    // warnings are the usable CG-range shortfall and the potato boundary
+    // excursion. The full-fuel point of the fuel vector clears the aft limit
+    // with the 150-seat planning cabin.
     assert_eq!(
         a320.physical_findings
             .iter()
             .filter(|finding| finding.code == FindingCode::ModelCgForwardRangeViolation)
             .count(),
-        3,
+        2,
         "{:?}",
         a320.physical_findings
     );
     // Ledger-preferred model-frame CG (see the wing-datum and ledger
-    // discussion above).
-    let a320_tolerance = 0.2;
+    // discussion above), checked against the published A320 limits rather than
+    // a pin: 17 %MAC forward (Airbus A320 Aircraft Characteristics for Airport
+    // Planning, Fig. 7-3-0-991-010) and 40 %MAC aft (the same document at MRW
+    // with 6.0 % nose load). Both are the ACAP CG used in the pavement-load
+    // analysis at MRW, not certified limits, so they bound the loaded CG
+    // loosely; the model frame is compared unshifted.
     assert!(
-        (a320.model_cg_pct_mac - 33.833_406_384_089_94).abs() < a320_tolerance,
-        "model-frame CG was {}% MAC",
+        (17.0..=40.0).contains(&a320.model_cg_pct_mac),
+        "model-frame CG {}% MAC outside the published ACAP [17, 40] %MAC",
         a320.model_cg_pct_mac
     );
     // With tip-back cleared and only warnings left, the default A320 loading
@@ -528,7 +549,17 @@ fn acceptance_narrowbody_and_widebody_mass_calibrations() {
         all_design_missions_verified: false,
     });
     assert!(a320_text.contains("Tank-limited load cases:"));
-    assert!(a320_text.contains("- None"));
+    // With the 150-seat planning cabin the payload is 30 passengers lighter, so
+    // the MTOW closure fuel exceeds the usable tanks: the report lists the load
+    // as tank-limited instead of "None". That is the shortfall identity above,
+    // read through the report, not a new limit.
+    assert!(
+        expected_mtow_shortfall_kg > 0.0,
+        "closure fuel {} kg vs usable {usable_capacity_kg} kg",
+        a320.mtow_closure_fuel_kg
+    );
+    assert!(a320_text.contains("- A320-200: the tanks admit a takeoff mass of"));
+    assert!(!a320_text.contains("- None"));
     assert!(!a320_text.contains("usable fuel was exhausted during mission segment"));
 
     // A380 mega-widebody MTOW is around 500-600 tonnes
@@ -547,12 +578,11 @@ fn acceptance_narrowbody_and_widebody_mass_calibrations() {
 }
 
 #[test]
-#[ignore = "AVE usable-CG-range ModelCgForwardRangeViolation is now Error, expected Warning; pending mass/CG calibration"]
 fn ave_usable_cg_range_and_tail_scrape_are_warnings() {
     let ave = evaluate_preset("AVE").expect("AVE evaluation");
-    // The forward CG limit is the more aft of the max-nose-load and
-    // scissor-plot boundaries; AVE reports the usable-range shortfall as a
-    // warning, and tail scrape is a diagnostic warning as well.
+    // Each state's forward limit is the most aft of the boundaries its own
+    // phase admits; AVE reports the usable-range shortfall as a warning, and
+    // tail scrape is a diagnostic warning as well.
     let ave_forward_finding = ave
         .physical_findings
         .iter()
@@ -562,11 +592,20 @@ fn ave_usable_cg_range_and_tail_scrape_are_warnings() {
         ave_forward_finding.severity,
         alas_pipeline::FindingSeverity::Warning
     );
+    // The usable range is the aft ground limit (minimum nose load) minus the
+    // rotation forward limit at the analyzed takeoff state (stall-branch V_R,
+    // V_R/V_S = 1.10, thrust and rolling-friction term), so it moves with the
+    // mass model and the rotation physics and is not pinned. The physical
+    // property asserted: the range is positive (the limits do not cross) and
+    // it is reported as a warning because it falls short of the configured
+    // 30 %MAC minimum.
+    let ave_usable_range = ave_forward_finding.actual.expect("AVE CG range actual");
+    let ave_range_limit = ave_forward_finding.limit.expect("AVE CG range limit");
     assert!(
-        (ave_forward_finding.actual.expect("AVE CG range actual") - 17.396_178_386_156_77).abs()
-            < 0.01
+        ave_usable_range > 0.0 && ave_usable_range < ave_range_limit,
+        "AVE usable CG range {ave_usable_range} %MAC against the {ave_range_limit} %MAC minimum"
     );
-    assert!((ave_forward_finding.limit.expect("AVE CG range limit") - 30.0).abs() < 0.01);
+    assert!((ave_range_limit - 30.0).abs() < 0.01);
     // AVE has no Error finding: tail scrape is a warning
     // (`ModelCgConstraint::is_diagnostic`).
     assert!(!ave
@@ -597,6 +636,11 @@ fn a320_source_max_payload_case_separates_net_tare_gross_and_usable_fuel() {
     // at zero; this test names the source maximum-payload load explicitly so
     // its net freight, ULD tare, gross payload and fuel basis cannot be
     // mistaken for that ordinary product load.
+    //
+    // The source maximum-payload load is the 180-seat certified cabin, not the
+    // 150-seat planning cabin the fixed-aircraft basis caps the registered
+    // preset at. The clean-sheet basis applies the certified exit limit only,
+    // so this case names its cabin explicitly.
     let preset = presets::get("A320-200").expect("A320 preset");
     let requested_belly_cargo_kg = 2_682.0;
     let mut config = AlasConfig::from_value(&serde_json::json!({
@@ -604,6 +648,7 @@ fn a320_source_max_payload_case_separates_net_tare_gross_and_usable_fuel() {
     }))
     .expect("A320 preset configuration");
     config.cabin.passenger.belly_cargo_kg = requested_belly_cargo_kg;
+    config.optimizer.design_space.mode = alas_config::optimizer::DesignMode::CleanSheet;
     // The registered preset declares the *delivered* WV017 arrangement, whose
     // lower hold has no installed loading system (`lower_deck_uld == "BLK"`,
     // see `preset_flops::declared_cargo_loading`). This source maximum-payload

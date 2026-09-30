@@ -38,10 +38,12 @@ pub(super) struct OperatingEmptyMassReconciliation {
     /// production FLOPS buildup and the reference-compatible one are
     /// different models of the same aeroplane and answer differently. The
     /// ATR 72-600's 12,014.6 kg figure in `docs/aircraft-parity.md` and the
-    /// 15,257 kg of the preset acceptance baseline are both real outputs of
-    /// this workspace; neither states which architecture produced it, so they
-    /// cannot be reconciled from the figures alone. Every figure this function
-    /// returns states it.
+    /// 15,257 kg of an earlier preset acceptance baseline are both outputs of
+    /// this workspace at different model states; neither states which
+    /// architecture produced it, so they cannot be reconciled from the
+    /// figures alone. Neither is a reference: the published ATR 72-600
+    /// typical in-service OEW is 13,450 kg [S ATR factsheet]. Every figure
+    /// this function returns states its architecture.
     pub(super) architecture: MassArchitecture,
 }
 

@@ -410,6 +410,18 @@ fn fuselage_mass_evidence_matches_in_input_and_correlation_order() {
             .as_object_mut()
             .expect("mass model serializes as an object")
             .remove("schema_version");
+        // The default landing ratio is now the AVE's 777-9 benchmark instead
+        // of the frozen 0.92 (see `alas_config::landing_mass_ratio::LONG_HAUL_MLW_FRACTION_MTOW`).
+        // The fuselage correlation does not read it; the source correction is
+        // checked here and the frozen value restored for the comparison.
+        let mlw_view = mass_model_view
+            .get_mut("mlw_fraction_mtow")
+            .expect("mass model serializes its landing ratio");
+        if *mlw_view
+            == serde_json::json!(alas_config::landing_mass_ratio::LONG_HAUL_MLW_FRACTION_MTOW)
+        {
+            *mlw_view = serde_json::json!(0.92);
+        }
         assert_eq!(
             mass_model_view, case.mass_model,
             "first W6.3 divergence in {} at mass_model",

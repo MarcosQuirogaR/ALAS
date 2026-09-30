@@ -82,6 +82,7 @@ pub fn check_file(root: &Path, path: &Path, text: &str) -> Vec<String> {
     findings.extend(check_license_header(&display, &lines));
     findings.extend(check_banned_phrases(&display, &lines));
     findings.extend(check_allow_is_explained(&display, &lines));
+    findings.extend(check_no_runnable_doctests(&display, &lines));
     findings
 }
 
@@ -174,6 +175,65 @@ fn check_allow_is_explained(display: &str, lines: &[&str]) -> Vec<String> {
     findings
 }
 
+/// Attributes rustdoc accepts on a Rust fence. A fence whose info string holds
+/// only these (or nothing) is compiled and run as a doctest.
+const RUSTY_FENCE_TOKENS: &[&str] = &[
+    "rust",
+    "should_panic",
+    "compile_fail",
+    "test_harness",
+    "standalone_crate",
+    "allow_fail",
+];
+
+/// Whether the info string after an opening fence makes rustdoc run the block.
+/// Anything else (`ignore`, `no_run`, `text`, another language) is not run.
+fn fence_is_runnable(info: &str) -> bool {
+    info.split(|c: char| c == ',' || c.is_whitespace())
+        .filter(|token| !token.is_empty())
+        .all(|token| {
+            let four_digits = |s: &str| s.len() == 4 && s.bytes().all(|b| b.is_ascii_digit());
+            let is_edition = token.strip_prefix("edition").is_some_and(four_digits);
+            let is_error_code = token.strip_prefix('E').is_some_and(four_digits);
+            RUSTY_FENCE_TOKENS.contains(&token) || is_edition || is_error_code
+        })
+}
+
+/// The gate runs no doctests (rustdoc costs minutes of startup per crate and
+/// nextest cannot run them), so a doc example that rustdoc would run is a test
+/// that silently never executes. Only fenced blocks in `///` and `//!` lines
+/// are examined; indented blocks are not.
+fn check_no_runnable_doctests(display: &str, lines: &[&str]) -> Vec<String> {
+    let mut findings = Vec::new();
+    let mut in_fence = false;
+    for (i, line) in lines.iter().enumerate() {
+        let trimmed = line.trim_start();
+        let Some(doc) = trimmed
+            .strip_prefix("///")
+            .or_else(|| trimmed.strip_prefix("//!"))
+        else {
+            // A fence cannot continue past the end of its doc comment.
+            in_fence = false;
+            continue;
+        };
+        let Some(after_ticks) = doc.trim_start().strip_prefix("```") else {
+            continue;
+        };
+        if in_fence {
+            in_fence = false;
+        } else {
+            in_fence = true;
+            if fence_is_runnable(after_ticks.trim_start_matches('`')) {
+                findings.push(format!(
+                    "{display}:{}: doctests are not run by the gate; use a unit test",
+                    i + 1
+                ));
+            }
+        }
+    }
+    findings
+}
+
 fn is_comment(line: &str) -> bool {
     line.trim_start().starts_with("//")
 }
@@ -254,5 +314,64 @@ mod tests {
         assert!(check(&text)
             .iter()
             .any(|f| f.contains("allow without a reason")));
+    }
+
+    fn doctest_findings(fence_lines: &[&str]) -> usize {
+        let text = format!("{HEADER}\n{}\npub fn f() {{}}\n", fence_lines.join("\n"));
+        check(&text)
+            .iter()
+            .filter(|f| f.contains("doctests are not run"))
+            .count()
+    }
+
+    #[test]
+    fn rejects_doc_fences_rustdoc_would_run() {
+        for open in [
+            "/// ```",
+            "/// ```rust",
+            "//! ```should_panic",
+            "/// ```rust,edition2021",
+            "/// ```compile_fail,E0308",
+        ] {
+            assert_eq!(
+                doctest_findings(&[open, "/// f();", "/// ```"]),
+                1,
+                "{open}"
+            );
+        }
+    }
+
+    #[test]
+    fn accepts_doc_fences_rustdoc_does_not_run() {
+        for open in [
+            "/// ```ignore",
+            "/// ```no_run",
+            "/// ```text",
+            "/// ```json",
+            "/// ```toml",
+            "/// ```sh",
+            "/// ```rust,ignore",
+            "/// ```math",
+        ] {
+            assert_eq!(doctest_findings(&[open, "/// x", "/// ```"]), 0, "{open}");
+        }
+    }
+
+    #[test]
+    fn a_closing_fence_is_not_flagged_and_the_next_block_is_judged_alone() {
+        let lines = [
+            "/// ```text",
+            "/// x",
+            "/// ```",
+            "/// ```",
+            "/// y",
+            "/// ```",
+        ];
+        assert_eq!(doctest_findings(&lines), 1);
+    }
+
+    #[test]
+    fn fences_in_ordinary_comments_are_ignored() {
+        assert_eq!(doctest_findings(&["// ```", "// x", "// ```"]), 0);
     }
 }

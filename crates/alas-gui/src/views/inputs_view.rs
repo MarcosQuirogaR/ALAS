@@ -28,6 +28,7 @@ pub fn show_inputs_view(state: &mut AppState, ui: &mut Ui) {
             ui.add_space(8.0);
             show_requirements_card(state, ui);
             ui.add_space(8.0);
+            crate::views::inputs_mtow::show_mtow_card(state, ui);
             show_route_card(state, ui);
             ui.add_space(8.0);
             crate::views::mission_profile_inputs::show_mission_profile_inputs(state, ui);
@@ -36,7 +37,7 @@ pub fn show_inputs_view(state: &mut AppState, ui: &mut Ui) {
         });
 }
 
-fn card(ui: &mut Ui, title: &str, body: impl FnOnce(&mut Ui)) -> egui::Response {
+pub(super) fn card(ui: &mut Ui, title: &str, body: impl FnOnce(&mut Ui)) -> egui::Response {
     crate::theme::card_frame(ui)
         .show(ui, |ui| {
             ui.set_min_width(ui.available_width());
@@ -240,7 +241,7 @@ fn show_requirements_card(state: &mut AppState, ui: &mut Ui) {
             })
             .unwrap_or_default()
             .into_iter()
-            .filter(|field| !field.advanced)
+            .filter(|field| !field.advanced && field.name != "mtow_kg")
             .collect::<Vec<_>>();
         let error_fields: std::collections::HashSet<String> = state
             .validation_findings
@@ -617,8 +618,7 @@ fn apply_optimize_choice(state: &mut AppState, optimize: bool) {
 
 fn show_run_content_options(state: &mut AppState, ui: &mut Ui) {
     ui.label(RichText::new(tr("Run contents")).strong());
-    let mut optimize =
-        state.run_options.optimize && state.design_mode() != DesignMode::BaselineSandbox;
+    let mut optimize = crate::views::inputs_mtow::optimize_active(state);
     if ui
         .checkbox(&mut optimize, tr("Optimize design space"))
         .on_hover_text(tr(

@@ -10,16 +10,31 @@
 //! constant-%MAC line is then a straight line through `(K, W = 0)`, so the
 //! %MAC grid is a fan of oblique lines. A loading item of mass `dW` at
 //! station `x_i` adds `dI = dW (x_i - x_ref) / C` whatever the aircraft
-//! weight, so loading is vector addition: that is why load sheets use it,
-//! and why the loading envelope of all boarding orders is a convex polygon
-//! (see [`loading_envelope_polygon`]).
+//! weight, so loading is vector addition: that is why load sheets use it.
+//!
+//! # What the sheet shows
+//!
+//! - The boarding potato: the minimum and maximum CG, at common mass levels,
+//!   over the composed loading orders cargo (per hold), passengers (zone by
+//!   zone, window-middle-aisle, and cabin-wide category-first extremes) and
+//!   fuel (`alas_payload::loading_sequence::LoadSequenceSet`). Each named
+//!   order is also drawn as a thin line. This is not the reorder polygon of
+//!   [`loading_envelope_polygon`], which also holds physically impossible
+//!   orders and is kept only as the superset the potato must lie inside.
+//! - Four limit sets, each drawn where its mechanism applies: ground
+//!   (dashed, DOW to ramp mass), takeoff (solid, takeoff-mass band), flight
+//!   (dotted) and landing (dash-dot, up to the landing mass). The potato is
+//!   checked against the ground limits only.
 //!
 //! The figure takes an explicit [`LoadTrimSheetData`]; [`data`] builds one
 //! from a pipeline result.
 
 pub mod data;
+mod layers;
+mod limits;
 mod panel;
 mod render;
+mod sequences;
 
 pub use render::figure_load_trim_sheet;
 
@@ -86,6 +101,26 @@ pub struct LimitVertex {
     pub aft_pct_mac: f64,
 }
 
+/// The CG spread of the composed loading orders at one mass level.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PotatoLevel {
+    /// Aircraft mass, kg.
+    pub mass_kg: f64,
+    /// Most forward CG any composed order reaches at this mass, %MAC.
+    pub fwd_pct_mac: f64,
+    /// Most aft CG any composed order reaches at this mass, %MAC.
+    pub aft_pct_mac: f64,
+}
+
+/// One named loading order: (mass kg, %MAC) after each loaded item.
+#[derive(Debug, Clone, PartialEq)]
+pub struct NamedPath {
+    /// Order name, e.g. `holds forward-first | zones front-to-back, ...`.
+    pub name: String,
+    /// Cumulative (mass kg, CG %MAC), ascending mass.
+    pub points: Vec<(f64, f64)>,
+}
+
 /// A labelled structural weight line (MTOW, MLW, MZFW).
 #[derive(Debug, Clone, PartialEq)]
 pub struct WeightLine {
@@ -120,14 +155,26 @@ pub struct LoadTrimSheetData {
     pub mac_m: f64,
     /// Balance-index definition.
     pub index: BalanceIndex,
-    /// Takeoff/landing operational limits, ascending mass.
+    /// Ground limits (maximum nose load forward; minimum nose load and
+    /// tip-back aft), ascending mass, from DOW to the ramp mass.
+    pub ground_limits: Vec<LimitVertex>,
+    /// Takeoff limits (rotation forward, static-margin floor aft), ascending
+    /// mass, over the takeoff-mass band.
     pub takeoff_limits: Vec<LimitVertex>,
+    /// En-route flight limits (landing trim forward, static-margin floor
+    /// aft), ascending mass.
+    pub flight_limits: Vec<LimitVertex>,
+    /// Landing limits (landing trim forward, ground mechanisms aft),
+    /// ascending mass, up to the landing mass.
+    pub landing_limits: Vec<LimitVertex>,
     /// Zero-fuel operational limits, ascending mass (empty if unknown).
     pub zfw_limits: Vec<LimitVertex>,
     /// Structural weight lines.
     pub weight_lines: Vec<WeightLine>,
-    /// Closed loading-envelope polygon (mass kg, %MAC) from DOW to ZFW.
-    pub loading_envelope: Vec<(f64, f64)>,
+    /// The boarding potato, ascending mass, from DOW to takeoff mass.
+    pub potato: Vec<PotatoLevel>,
+    /// Every composed loading order, drawn as a thin line.
+    pub sequences: Vec<NamedPath>,
     /// Fuel curve (mass kg, %MAC), ascending mass, from ZFW to TOW; burn
     /// retraces it downwards.
     pub fuel_curve: Vec<(f64, f64)>,
@@ -153,6 +200,20 @@ impl LoadTrimSheetData {
     pub fn pct_at(&self, index: f64, mass_kg: f64) -> f64 {
         let x_m = (index - self.index.k) * self.index.c_kg_m / mass_kg + self.index.x_ref_m;
         (x_m - self.x_lemac_m) / self.mac_m * 100.0
+    }
+
+    /// The largest amount, %MAC, by which the potato leaves the ground
+    /// limits at any level; zero when it lies inside them.
+    pub fn potato_ground_exceedance_pct_mac(&self) -> f64 {
+        self.potato
+            .iter()
+            .map(|level| {
+                let fwd = limit_at(&self.ground_limits, level.mass_kg, true) - level.fwd_pct_mac;
+                let aft = level.aft_pct_mac - limit_at(&self.ground_limits, level.mass_kg, false);
+                fwd.max(aft)
+            })
+            .filter(|v| v.is_finite())
+            .fold(0.0, f64::max)
     }
 
     /// Structural weight line mass by label.
@@ -295,10 +356,10 @@ pub(crate) fn weight_step_kg(span_kg: f64) -> f64 {
 /// Choose the frame so the envelope, weight lines, loading envelope and
 /// steps fit.
 pub(crate) fn frame_for(data: &LoadTrimSheetData) -> Frame {
-    let mut masses: Vec<f64> = data.takeoff_limits.iter().map(|v| v.mass_kg).collect();
+    let mut masses: Vec<f64> = data.ground_limits.iter().map(|v| v.mass_kg).collect();
     masses.extend(data.weight_lines.iter().map(|l| l.mass_kg));
     masses.extend(data.steps.iter().map(|s| s.mass_kg));
-    masses.extend(data.loading_envelope.iter().map(|p| p.0));
+    masses.extend(data.potato.iter().map(|p| p.mass_kg));
     let lo = masses.iter().copied().fold(f64::INFINITY, f64::min);
     let hi = masses.iter().copied().fold(f64::NEG_INFINITY, f64::max);
     let step = weight_step_kg(hi - lo * 0.9);
@@ -307,7 +368,7 @@ pub(crate) fn frame_for(data: &LoadTrimSheetData) -> Frame {
     let mut indices = Vec::new();
     for w in [w_range_kg.0, w_range_kg.1] {
         for fwd in [true, false] {
-            indices.push(data.index_at(w, limit_at(&data.takeoff_limits, w, fwd)));
+            indices.push(data.index_at(w, limit_at(&data.ground_limits, w, fwd)));
         }
     }
     indices.extend(
@@ -315,11 +376,10 @@ pub(crate) fn frame_for(data: &LoadTrimSheetData) -> Frame {
             .iter()
             .map(|s| data.index_at(s.mass_kg, s.pct_mac)),
     );
-    indices.extend(
-        data.loading_envelope
-            .iter()
-            .map(|&(m, p)| data.index_at(m, p)),
-    );
+    for level in &data.potato {
+        indices.push(data.index_at(level.mass_kg, level.fwd_pct_mac));
+        indices.push(data.index_at(level.mass_kg, level.aft_pct_mac));
+    }
     let finite = indices.iter().copied().filter(|v| v.is_finite());
     let i_lo = finite.clone().fold(f64::INFINITY, f64::min);
     let i_hi = finite.fold(f64::NEG_INFINITY, f64::max);

@@ -119,6 +119,21 @@ fn renders_a_populated_envelope_from_a_real_analysis_report() {
 }
 
 #[test]
+fn governing_lines_name_their_mechanism_and_do_not_imply_a_flight_limit_at_oew() {
+    let scene = figure_cg_envelope(&sample_report(), &AlasConfig::default(), Some("light"));
+    let texts = scene_texts(&scene);
+    assert!(texts.iter().any(|t| t == super::render::SCOPE_NOTE));
+    assert!(texts
+        .iter()
+        .any(|t| t.contains("Governing fwd limit (per state)")));
+    // The lightest state is OEW: its forward limit is the ground mechanism.
+    assert!(
+        texts.iter().any(|t| t == "max nose load (ground)"),
+        "{texts:?}"
+    );
+}
+
+#[test]
 fn empty_mass_data_renders_the_placeholder_without_panicking() {
     let mut report = sample_report();
     report.component_masses.clear();

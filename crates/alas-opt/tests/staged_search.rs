@@ -120,7 +120,6 @@ fn the_reference_envelope_is_the_ten_percent_window_around_the_loaded_preset() {
 }
 
 #[test]
-#[ignore = "F-07 forward-CG limit rejects 6/8 presets; pending mass/CG calibration"]
 fn the_same_seed_reaches_the_same_finalist_serially_and_across_workers() {
     // The poll block boundary is a search setting and the worker count only
     // decides how a block is distributed, so a user with more cores must get
@@ -173,7 +172,6 @@ fn the_same_seed_reaches_the_same_finalist_serially_and_across_workers() {
 }
 
 #[test]
-#[ignore = "F-07 forward-CG limit rejects 6/8 presets; pending mass/CG calibration"]
 fn a_run_that_reports_convergence_has_a_feasible_improved_candidate() {
     // Convergence is a claim about the aircraft, not about the loop: it may
     // only be reported when the winner satisfies every hard residual (which
@@ -231,7 +229,6 @@ fn a_run_that_reports_convergence_has_a_feasible_improved_candidate() {
 }
 
 #[test]
-#[ignore = "F-07 forward-CG limit rejects 6/8 presets; pending mass/CG calibration"]
 fn a_watchdog_stop_is_never_presented_as_convergence() {
     // The watchdog exists so a pathological configuration cannot run
     // unbounded. It is a diagnostic limit, so if it ever fires the run must

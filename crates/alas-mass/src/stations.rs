@@ -33,6 +33,12 @@
 //! an aircraft outside that rule's domain with no registered gear stations
 //! gets [`StationError::MainGearStationNotMeasured`] rather than a placement;
 //! see [`main_gear_station`].
+//!
+//! Validation: the A320-200 operating-empty CG lands near 34 % MAC against
+//! the nominal 26.5 % MAC of the Airbus A320 ACAP (June 2024, 2-3-0 p. 3), a
+//! reference value, not a calibration target. No rule here contradicts a
+//! published placement rule at hand, so the residual is reported, not tuned;
+//! see `alas-pipeline/tests/oew_cg_station_review.rs`.
 
 use alas_config::{
     DesignRequirements, GeometryConfig, LandingGearConfig, MassModelConfig, StructuresConfig,
@@ -45,6 +51,7 @@ use crate::wing_centroid::wing_structural_centroid;
 
 mod coordinates;
 mod landing_gear;
+mod propulsion;
 pub use coordinates::NOSE_GEAR_MASS_FRACTION;
 #[cfg(test)]
 use landing_gear::{
@@ -53,6 +60,7 @@ use landing_gear::{
 };
 pub use landing_gear::{ground_plane_z_m, FALLBACK_BELLY_CLEARANCE_DIAMETER_FRACTION};
 use landing_gear::{main_gear_station, nose_gear_station};
+use propulsion::propulsion_stations;
 
 /// Chordwise sample stations `Airfoil::max_thickness` is evaluated at to
 /// recover a root section's thickness-to-chord ratio.
@@ -423,30 +431,6 @@ fn fuselage_station(fuselage: &Fuselage, geometry: &GeometryConfig) -> Component
             "0.45 fuselage length (wing-mounted engines)"
         },
     }
-}
-
-/// One station per engine nacelle, at each nacelle's mid-length point.
-fn propulsion_stations(plane: &Airplane) -> Vec<ComponentStation> {
-    plane
-        .fuselages
-        .iter()
-        .filter(|fuselage| fuselage.name.contains("Nacelle"))
-        .map(|nacelle| {
-            let start = nacelle.xsecs.first().map_or([0.0; 3], |xsec| xsec.xyz_c);
-            let end_x = nacelle.xsecs.last().map_or(start[0], |xsec| xsec.xyz_c[0]);
-            let length = end_x - start[0];
-            let radius = nacelle
-                .xsecs
-                .iter()
-                .map(|xsec| xsec.width.max(xsec.height) / 2.0)
-                .fold(0.0, f64::max);
-            ComponentStation {
-                position_m: [start[0] + length * 0.5, start[1], start[2]],
-                extent_m: [length, 2.0 * radius, 2.0 * radius],
-                method: "nacelle mid-length",
-            }
-        })
-        .collect()
 }
 
 /// The systems, furnishings and operating-items station: `fraction` of the

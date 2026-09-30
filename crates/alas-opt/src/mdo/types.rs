@@ -230,8 +230,8 @@ impl ExternalPolar {
 /// One design candidate closed against the sizing mission.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SizedCandidate {
-    /// Analysis takeoff mass, kg: the mission-closed dispatch mass for the
-    /// two mission-sized modes, the declared MTOW for `FixedRequirement`; the
+    /// Analysis takeoff mass, kg: the mission-closed dispatch mass in every
+    /// mode but `FixedRequirement`, where it is the declared MTOW; the
     /// dispatch plan keeps the mission-required mass for the ceiling check.
     pub takeoff_mass_kg: f64,
     /// `fixed_aircraft` or `coupled` (`alas_config::MassSizingBasis`).
@@ -240,6 +240,8 @@ pub struct SizedCandidate {
     pub design_gross_mass_kg: f64,
     /// Design landing mass `WLDG` the gear was evaluated at, kg.
     pub design_landing_mass_kg: f64,
+    /// What the takeoff-mass sizing plan adds to the closure.
+    pub mtow: super::mtow_modes::MtowPlanOutcome,
     /// Operating empty mass at the closed takeoff mass, kg.
     pub operating_empty_mass_kg: f64,
     /// Zero-fuel mass (operating empty plus payload) at closure, kg.
@@ -284,8 +286,7 @@ pub struct SizedCandidate {
     pub dispatch: DispatchSolution,
     /// Outer sizing passes taken (fixed-point iterations of empty mass, fuel
     /// and takeoff mass; always `1` under `MtowSizing::FixedRequirement`,
-    /// up to the configured iteration limit under `MtowSizing::SizedByMission`
-    /// and `MtowSizing::Unconstrained`).
+    /// up to the configured iteration limit under every mission-closed mode).
     pub sizing_iterations: usize,
     /// Whether the outer sizing loop closed within its iteration budget.
     pub sizing_closed: bool,

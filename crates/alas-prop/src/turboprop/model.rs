@@ -40,20 +40,29 @@ impl Pw127m568fModel {
         static_value + weight * (forward_value - static_value)
     }
 
-    pub(super) fn power_lapse_fraction(self, density_kg_m3: f64) -> f64 {
-        let density_ratio = (density_kg_m3 / self.power_lapse_reference_density_kg_m3).min(1.0);
-        density_ratio
-            .powf(self.power_lapse_density_exponent)
-            .max(self.minimum_power_lapse_fraction)
-    }
-
-    /// Evaluate one engine and propeller. No limit is silently clipped.
-    pub fn evaluate(
+    /// Evaluate one engine and propeller at a stated ambient static
+    /// temperature, K. No limit is silently clipped.
+    ///
+    /// The temperature sets the fuel flow through
+    /// [`Self::psfc_kg_kwh`]; shaft power and thrust follow the density.
+    pub fn evaluate_at_temperature(
         self,
         condition: TurbopropCondition,
+        ambient_temperature_k: f64,
         command: TurbopropCommand,
     ) -> Result<TurbopropOutput, TurbopropError> {
         self.validate(condition, command)?;
+        if !ambient_temperature_k.is_finite() {
+            return Err(TurbopropError::NonFinite("ambient_temperature_k"));
+        }
+        // Colder than any tropospheric/stratospheric ISA day minus 60 K, or
+        // hotter than any airfield, is outside the relation's basis.
+        if !(150.0..=350.0).contains(&ambient_temperature_k) {
+            return Err(TurbopropError::OutsideDomain {
+                field: "ambient_temperature_k",
+                value: ambient_temperature_k,
+            });
+        }
         if matches!(
             command.mode,
             TurbopropMode::Reverse | TurbopropMode::Feathered
@@ -85,7 +94,7 @@ impl Pw127m568fModel {
 
         let engine_power_w = self.rated_shaft_power_w(command.rating)
             * command.power_fraction
-            * self.power_lapse_fraction(condition.density_kg_m3);
+            * self.power_lapse_fraction(command.rating, condition.density_kg_m3);
         if engine_power_w <= self.accessory_power_w {
             return Err(TurbopropError::OutsideDomain {
                 field: "engine_shaft_power_minus_accessories_w",
@@ -227,18 +236,10 @@ impl Pw127m568fModel {
                 "propulsive efficiency is outside [0, 1]",
             ));
         }
-        // The 762 kg/h anchor is an optimum-altitude cruise datum, whereas the
-        // typed rating is sea-level power. Correct the rating-basis coefficient
-        // by the lapse at the declared fuel-reference density so the anchor is
-        // reproduced after applying actual shaft-power lapse.
-        // `reference_psfc_kg_kwh` is fuel flow per unit *sea-level-rated*
-        // shaft power, not a PSFC; dividing by the lapse at the declared
-        // anchor density turns it into the PSFC the engine is actually run at.
-        // That PSFC is a single constant: it is reported on the output so a
-        // consumer can see both what the engine burns and that it does not
-        // vary with the operating point.
-        let calibrated_psfc_kg_kwh = self.implied_psfc_kg_kwh();
-        let fuel_flow_kg_s = engine_power_w * calibrated_psfc_kg_kwh / JOULES_PER_KWH;
+        // Class PSFC on free-turbine shaft power: flat in power, sqrt(theta)
+        // in ambient temperature (see `psfc_kg_kwh`).
+        let psfc_kg_kwh = self.psfc_kg_kwh(ambient_temperature_k);
+        let fuel_flow_kg_s = engine_power_w * psfc_kg_kwh / JOULES_PER_KWH;
         let output = TurbopropOutput {
             engine_shaft_power_w: engine_power_w,
             accessory_power_w: self.accessory_power_w,
@@ -249,7 +250,7 @@ impl Pw127m568fModel {
             residual_jet_thrust_n: self.residual_jet_thrust_n,
             total_thrust_n: propeller_thrust_n + self.residual_jet_thrust_n,
             fuel_flow_kg_s,
-            psfc_kg_kwh: calibrated_psfc_kg_kwh,
+            psfc_kg_kwh,
             blade_angle_deg,
             advance_ratio,
             propulsive_efficiency: efficiency,
@@ -334,6 +335,19 @@ impl Pw127m568fModel {
             (
                 "fuel_reference_density_kg_m3",
                 self.fuel_reference_density_kg_m3,
+            ),
+            ("psfc_reference_kg_kwh", self.psfc_reference_kg_kwh),
+            (
+                "psfc_reference_temperature_k",
+                self.psfc_reference_temperature_k,
+            ),
+            (
+                "takeoff_flat_rating_temperature_k",
+                self.takeoff_flat_rating_temperature_k,
+            ),
+            (
+                "maximum_continuous_flat_rating_temperature_k",
+                self.maximum_continuous_flat_rating_temperature_k,
             ),
             ("static_figure_of_merit", self.static_figure_of_merit),
             ("blade_efficiency_cruise", self.blade_efficiency_cruise),

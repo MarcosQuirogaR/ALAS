@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! The ledger-derived loading-state basis and the registered-MRW lookup, both
-//! consumed by `assess_model_cg_envelope_from_states`'s callers.
+//! The shared per-state assessment body behind every envelope entry point,
+//! and the registered-MRW lookup it sizes the gear with.
 //!
 //! Private items of `envelope.rs` (e.g.
 //! `operational_loading_states_with_z`, `assess_model_cg_envelope_from_states`)
@@ -11,91 +11,11 @@
 use alas_config::{AlasConfig, MacFrame};
 use alas_geom::aircraft::airplane::Airplane;
 
+use super::rotation_thrust::{rotation_lift_coefficient, RotationThrustModel};
 use super::support::{
     horizontal_tail_ac_x_m, tail_area_ratio, tail_ground_effect_factor, ROTATION_CM_AC_WB_TAKEOFF,
 };
 use super::*;
-
-/// The OEW/analyzed-ZFW/analyzed-TOW points the item-level mass ledger
-/// placed, in the shape [`super::assess_model_cg_envelope_with_ledger`]
-/// needs to anchor the same five named states the shared loading-state
-/// builder produces. Mid-mission/reserve are not carried here: the ledger
-/// has no named state for them (see [`Self::payload_and_fuel`]'s doc
-/// comment).
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct LedgerLoadingBasis {
-    /// Ledger operating-empty mass, kg.
-    pub oew_mass_kg: f64,
-    /// Ledger operating-empty longitudinal CG, m.
-    pub oew_cg_x_m: f64,
-    /// Ledger operating-empty vertical CG, m.
-    pub oew_cg_z_m: f64,
-    /// Ledger zero-fuel mass, kg.
-    pub zero_fuel_mass_kg: f64,
-    /// Ledger zero-fuel longitudinal CG, m.
-    pub zero_fuel_cg_x_m: f64,
-    /// Ledger zero-fuel vertical CG, m.
-    pub zero_fuel_cg_z_m: f64,
-    /// Ledger analyzed-takeoff mass, kg.
-    pub takeoff_mass_kg: f64,
-    /// Ledger analyzed-takeoff longitudinal CG, m.
-    pub takeoff_cg_x_m: f64,
-    /// Ledger analyzed-takeoff vertical CG, m.
-    pub takeoff_cg_z_m: f64,
-}
-
-impl LedgerLoadingBasis {
-    /// Back-solve the payload and fuel mass/CG deltas the shared
-    /// operational-loading-state builder needs from this basis's three
-    /// ledger points, so feeding them back in reproduces the ledger's own
-    /// OEW/ZFW/TOW points exactly (mass and moment both close over the
-    /// subtraction by construction) while still deriving mid-mission/
-    /// reserve the same way the lumped path always did: the ledger itself
-    /// carries no named mid-mission/reserve state, only the four
-    /// `LoadState` points (`OperatingEmpty`, `ZeroFuel`, `Takeoff`,
-    /// `Landing`), and `Landing` is not one of this envelope's five named
-    /// states.
-    ///
-    /// Returns `(payload_mass_kg, payload_cg_x_m, payload_cg_z_m,
-    /// fuel_mass_kg, fuel_cg_x_m, fuel_cg_z_m)`.
-    #[must_use]
-    pub fn payload_and_fuel(self) -> (f64, f64, f64, f64, f64, f64) {
-        let payload_mass = (self.zero_fuel_mass_kg - self.oew_mass_kg).max(0.0);
-        let (payload_cg_x, payload_cg_z) = if payload_mass > 0.0 {
-            (
-                (self.zero_fuel_mass_kg * self.zero_fuel_cg_x_m
-                    - self.oew_mass_kg * self.oew_cg_x_m)
-                    / payload_mass,
-                (self.zero_fuel_mass_kg * self.zero_fuel_cg_z_m
-                    - self.oew_mass_kg * self.oew_cg_z_m)
-                    / payload_mass,
-            )
-        } else {
-            (self.oew_cg_x_m, self.oew_cg_z_m)
-        };
-        let fuel_mass = (self.takeoff_mass_kg - self.zero_fuel_mass_kg).max(0.0);
-        let (fuel_cg_x, fuel_cg_z) = if fuel_mass > 0.0 {
-            (
-                (self.takeoff_mass_kg * self.takeoff_cg_x_m
-                    - self.zero_fuel_mass_kg * self.zero_fuel_cg_x_m)
-                    / fuel_mass,
-                (self.takeoff_mass_kg * self.takeoff_cg_z_m
-                    - self.zero_fuel_mass_kg * self.zero_fuel_cg_z_m)
-                    / fuel_mass,
-            )
-        } else {
-            (self.zero_fuel_cg_x_m, self.zero_fuel_cg_z_m)
-        };
-        (
-            payload_mass,
-            payload_cg_x,
-            payload_cg_z,
-            fuel_mass,
-            fuel_cg_x,
-            fuel_cg_z,
-        )
-    }
-}
 
 /// The registered preset's maximum ramp weight (CS 25.733 /
 /// Currey: MRW, not MTOW, governs the gear design load). `None` for a
@@ -107,50 +27,12 @@ pub(super) fn registered_mrw_kg(config: &AlasConfig) -> Option<f64> {
         .and_then(|preset| preset.reference.mrw_kg)
 }
 
-/// The same hard gate as `super::assess_model_cg_envelope`,
-/// but its OEW/ZFW/TOW states come verbatim from the item-level mass
-/// ledger (`ledger`) instead of the lumped model's centroids -- which
-/// removes the `MassModelDisagreement` disagreement. Mid-mission/reserve stay
-/// the same linear fuel-fraction mix, anchored to the ledger's own
-/// endpoints instead of the lumped ones (the ledger carries no named
-/// state for them). The lumped path remains the fallback with no ledger.
-pub fn assess_model_cg_envelope_with_ledger(
-    plane: &Airplane,
-    ledger: LedgerLoadingBasis,
-    x_np: f64,
-    critical_x_np: f64,
-    mac: f64,
-    config: &AlasConfig,
-) -> Result<ModelCgEnvelopeAssessment, ModelCgEnvelopeError> {
-    let (payload_mass, payload_cg_x, payload_cg_z, fuel_mass, fuel_cg_x, fuel_cg_z) =
-        ledger.payload_and_fuel();
-    let states = super::operational_loading_states_with_z(
-        ledger.oew_mass_kg,
-        ledger.oew_cg_x_m,
-        ledger.oew_cg_z_m,
-        payload_mass,
-        payload_cg_x,
-        payload_cg_z,
-        fuel_mass,
-        fuel_cg_x,
-        fuel_cg_z,
-        ledger.takeoff_cg_x_m,
-    );
-    assess_model_cg_envelope_from_states(
-        plane,
-        states,
-        ledger.takeoff_cg_x_m,
-        x_np,
-        critical_x_np,
-        mac,
-        config,
-    )
-}
-
 /// Shared body of `super::assess_model_cg_envelope` and
-/// [`assess_model_cg_envelope_with_ledger`]: everything downstream of the
-/// five named `(state, cg_x, cg_z, mass_kg)` tuples, whichever basis built
-/// them.
+/// [`super::assess_model_cg_envelope_with_ledger_and_landing`]: everything
+/// downstream of the named `(state, cg_x, cg_z, mass_kg)` tuples, whichever
+/// basis built them. The list must contain an
+/// [`ModelCgLoadingState::AnalyzedTakeoff`] state and may carry an
+/// [`ModelCgLoadingState::AnalyzedLanding`] state.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn assess_model_cg_envelope_from_states(
     plane: &Airplane,
@@ -252,18 +134,14 @@ pub(super) fn assess_model_cg_envelope_from_states(
     // it, replacing the `1.1 * fuselage_diameter` placeholder with the mass
     // model's own per-state vertical CG.
     let ground_z_m = ground_z_m(fuselage, config);
-    let mtow_mass_kg = states
-        .last()
-        .map(|(_, _, _, mass_kg)| *mass_kg)
-        .unwrap_or_default();
-    let mtow_state_x_m = states
-        .last()
-        .map(|(_, state_cg_x, _, _)| *state_cg_x)
-        .unwrap_or(cg_x);
-    let mtow_h_cg_m = states
-        .last()
-        .map(|(_, _, state_cg_z, _)| *state_cg_z - ground_z_m)
-        .unwrap_or(f64::NAN);
+    // The analyzed takeoff state, found by name: the state list may carry a
+    // landing state after it.
+    let (_, mtow_state_x_m, mtow_state_z_m, mtow_mass_kg) = states
+        .iter()
+        .copied()
+        .find(|(state, _, _, _)| *state == ModelCgLoadingState::AnalyzedTakeoff)
+        .ok_or(ModelCgEnvelopeError::InvalidInput)?;
+    let mtow_h_cg_m = mtow_state_z_m - ground_z_m;
     let scrape_points = fuselage_lower_points_aft_of(fuselage, x_main_gear);
     let scrape_angle_deg = alas_perf::landing_gear::geometry::tail_scrape_angle_deg(
         &scrape_points,
@@ -282,20 +160,21 @@ pub(super) fn assess_model_cg_envelope_from_states(
         to_pct_mac(critical_x_np) - 100.0 * config.requirements.min_physical_static_margin;
     let physical_aft_x_m = x_mac_le + aerodynamic_aft_limit_pct_mac / 100.0 * mac;
     let s_ref = wing.reference_area();
-    // The rotation/landing-trim/max-nose-load forward mechanisms are
-    // all state-independent (no per-loading-state mass or CG dependence),
-    // so they are computed once here from the shared physical helper rather
-    // than duplicated as a standalone scissor-only estimate. `h_cg_m: NAN`
-    // only disables this throwaway call's tip-back/aft outputs, which are
-    // discarded; every per-state call below recomputes the aft side with
-    // this state's own `h_cg_m` and reuses these same forward inputs.
+    // The envelope-wide forward limit (gear sizing and the top-level
+    // report) is evaluated once here at the analyzed takeoff state: the
+    // landing-trim and max-nose-load mechanisms are state-independent, and
+    // the rotation one depends on the state only through its thrust-to-weight
+    // and CG height. This call's aft outputs are discarded; every per-state
+    // call below recomputes both sides with that state's own height and
+    // thrust.
     let x_h_ac_m = horizontal_tail_ac_x_m(plane);
     let tail_area_ratio_val = tail_area_ratio(plane, s_ref);
     let tail_ground_effect_factor_val = tail_ground_effect_factor(plane, ground_z_m);
     let cl_ground_attitude =
         config.performance.cl_max_to * config.landing_gear.cl_ground_attitude_frac_of_cl_max_to;
-    let cl_r_rotation =
-        config.performance.cl_max_to / config.performance.vr_vstall_factor.powi(2).max(1.0e-6);
+    let cl_r_rotation = rotation_lift_coefficient(&config.performance);
+    let thrust_model = RotationThrustModel::new(plane, config, ground_z_m, cl_r_rotation);
+    let takeoff_thrust = thrust_model.at_mass(mtow_mass_kg);
     let forward_mechanism_input = PhysicalCgLimitsInput {
         mac_frame,
         critical_np_x_m: critical_x_np,
@@ -304,7 +183,9 @@ pub(super) fn assess_model_cg_envelope_from_states(
         x_main_gear_m: x_main_gear,
         x_mlg_aft_axle_m: x_main_gear,
         wheelbase_m,
-        h_cg_m: f64::NAN,
+        // The analyzed takeoff state's height and thrust, so the forward
+        // limit used for gear sizing is the takeoff rotation boundary.
+        h_cg_m: mtow_h_cg_m,
         min_tip_back_deg: config.landing_gear.min_tip_back_deg,
         scrape_angle_deg: None,
         pct_load_nlg_min: config.mass_model.pct_load_nlg_min,
@@ -325,6 +206,11 @@ pub(super) fn assess_model_cg_envelope_from_states(
         pitch_radius_of_gyration_frac_mac: config.landing_gear.pitch_radius_of_gyration_frac_mac,
         rotation_angular_accel_deg_s2: config.landing_gear.rotation_pitch_acceleration_deg_s2,
         gravity_m_s2: config.requirements.gravity_m_s2,
+        rotation_thrust_to_weight: takeoff_thrust.thrust_to_weight,
+        rotation_thrust_line_height_m: takeoff_thrust.thrust_line_height_m,
+        rotation_rolling_friction_coefficient: config
+            .landing_gear
+            .rotation_rolling_friction_coefficient,
     };
     let forward_limit_pct_mac = physical_cg_limits(&forward_mechanism_input).fwd_limit_pct_mac;
     let physical_forward_x_m = x_mac_le + forward_limit_pct_mac / 100.0 * mac;
@@ -353,15 +239,23 @@ pub(super) fn assess_model_cg_envelope_from_states(
         let nose_gear_load_kg = mass_kg * (x_main_gear - state_cg_x) / wheelbase_m;
         let main_gear_load_kg = mass_kg - nose_gear_load_kg;
         let h_cg_m = state_cg_z - ground_z_m;
-        // Reuses `forward_mechanism_input`'s state-independent forward
-        // fields verbatim; only the aft-side/per-state fields (gear axle,
-        // this state's own CG height, tail-scrape) are overridden.
-        let physical_limits = physical_cg_limits(&PhysicalCgLimitsInput {
+        // Reuses `forward_mechanism_input`'s state-independent fields
+        // verbatim; only the per-state fields (gear axle, this state's own CG
+        // height and rotation thrust, tail-scrape) are overridden.
+        let state_thrust = if state == ModelCgLoadingState::AnalyzedTakeoff {
+            takeoff_thrust
+        } else {
+            thrust_model.at_mass(mass_kg)
+        };
+        let unscoped_limits = physical_cg_limits(&PhysicalCgLimitsInput {
             x_mlg_aft_axle_m: gear.x_mlg_aft_axle_m,
             h_cg_m,
             scrape_angle_deg,
+            rotation_thrust_to_weight: state_thrust.thrust_to_weight,
+            rotation_thrust_line_height_m: state_thrust.thrust_line_height_m,
             ..forward_mechanism_input
         });
+        let physical_limits = unscoped_limits.scoped(PhaseLimits::for_state(state));
         let tip_back_angle_deg = alas_perf::landing_gear::geometry::tip_back_angle_deg(
             gear.x_mlg_aft_axle_m,
             state_cg_x,
@@ -390,9 +284,10 @@ pub(super) fn assess_model_cg_envelope_from_states(
             };
         }
         if state == ModelCgLoadingState::AnalyzedTakeoff {
-            top_level_limits = Some(physical_limits);
+            // Envelope-wide top-level values keep every mechanism.
+            top_level_limits = Some(unscoped_limits);
         }
-        let mut assessment = assess_loading_constraints(LoadingConstraintInputs {
+        let assessment = assess_loading_constraints(LoadingConstraintInputs {
             state,
             mass_kg,
             cg_x_m: state_cg_x,
@@ -414,15 +309,6 @@ pub(super) fn assess_model_cg_envelope_from_states(
             required_rotation_angle_deg: config.landing_gear.required_rotation_angle_deg,
             cg_range_pct_mac: config.requirements.cg_range_pct_mac,
         });
-        if !is_flight_eligible_state(state) {
-            // This model's applicability contract treats bare OEW as a
-            // ground-only reference condition, not a loaded flight/dispatch
-            // case: keep only the ground-reaction constraints and drop the
-            // flight CG-range/static-margin verdicts that do not apply to it.
-            assessment
-                .constraints
-                .retain(|constraint| ground_reaction_constraint(constraint.constraint));
-        }
         loading_assessments.push(assessment);
     }
     let mtow_static_margin = loading_assessments
@@ -467,77 +353,7 @@ pub(super) fn assess_model_cg_envelope_from_states(
 #[allow(clippy::expect_used)]
 #[cfg(test)]
 mod tests {
-    use super::super::assess_model_cg_envelope;
-    use super::LedgerLoadingBasis;
-    use alas_config::AlasConfig;
-    use alas_geom::builder::AircraftBuilder;
-    use alas_mass::breakdown::run_mass_analysis;
-
-    /// The governing forward limit (most aft of rotation, landing
-    /// trim, max nose load) against each manufacturer's own figure,
-    /// converted to that manufacturer's MAC frame (LEMAC m aft of nose, MAC
-    /// m): A380-800 34.65-37.8 %MAC at MRW (Airbus AC section 7 pavement
-    /// loads; LEMAC 28.765 m, MAC 12.295 m from two-point statics), A220-300
-    /// 12.0-18.6 %MAC (registered planning envelope; LEMAC 16.535 m, MAC
-    /// 3.781 m), A320-200 17 %MAC most-forward CG (Airbus AC Fig.
-    /// 7-3-0-991-010; LEMAC 15.26 m, MAC 4.1935 m). Tolerance 3 %MAC past
-    /// the published band, except the A320 at 7 %MAC: its conceptual
-    /// rotation estimate sits about 6.5 %MAC aft of the published value, a
-    /// known residual of the conceptual rotation estimate.
-    #[test]
-    // Printing the compared values is deliberate: they are quoted in the report.
-    #[allow(
-        clippy::print_stdout,
-        reason = "prints the compared values for the report"
-    )]
-    fn the_governing_forward_limit_matches_published_forward_limits() {
-        let cases: [(&str, f64, f64, f64, f64, f64); 3] = [
-            ("A380-800", 28.765, 12.295, 34.65, 37.8, 3.0),
-            ("A220-300", 16.535, 3.781, 12.0, 18.6, 3.0),
-            ("A320-200", 15.26, 4.1935, 17.0, 17.0, 7.0),
-        ];
-        for (preset, lemac_m, mac_m, lo, hi, tolerance) in cases {
-            let config = AlasConfig::from_value(&serde_json::json!({ "preset": preset }))
-                .unwrap_or_else(|error| panic!("{preset}: {error}"));
-            let registered = alas_config::presets::get(preset)
-                .unwrap_or_else(|error| panic!("{preset}: {error}"));
-            let plane = AircraftBuilder::new(Some(config.geometry.clone()))
-                .build(Some(&registered.design_vector), true)
-                .unwrap_or_else(|error| panic!("{preset}: {error}"));
-            let (masses, coordinates, cg) = run_mass_analysis(
-                &plane,
-                &config.requirements,
-                &config.geometry,
-                Some(&config.mass_model),
-                None,
-            );
-            let x_np = cg[0] + 0.10 * plane.c_ref;
-            let assessment = assess_model_cg_envelope(
-                &plane,
-                &masses,
-                &coordinates,
-                cg[0],
-                x_np,
-                x_np,
-                plane.c_ref,
-                &config,
-            )
-            .unwrap_or_else(|error| panic!("{preset}: {error}"));
-            let frame = plane
-                .mac_frame()
-                .unwrap_or_else(|| panic!("{preset}: no MAC frame"));
-            let x_fwd_m = frame.x_at_pct(assessment.configured_forward_limit_pct_mac);
-            let published_frame_pct = (x_fwd_m - lemac_m) / mac_m * 100.0;
-            println!(
-                "{preset}: governing forward limit {:.2} %MAC model frame = {:.2} %MAC manufacturer frame (published {lo}-{hi})",
-                assessment.configured_forward_limit_pct_mac, published_frame_pct
-            );
-            assert!(
-                published_frame_pct >= lo - tolerance && published_frame_pct <= hi + tolerance,
-                "{preset}: {published_frame_pct:.2} %MAC outside published {lo}-{hi} +- {tolerance}"
-            );
-        }
-    }
+    use super::super::LedgerLoadingBasis;
 
     /// Feeding `payload_and_fuel`'s back-solved deltas into the same
     /// mass-weighted mixing the shared loading-state builder uses must
