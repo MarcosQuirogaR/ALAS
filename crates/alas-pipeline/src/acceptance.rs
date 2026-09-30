@@ -189,10 +189,11 @@ pub fn verify_finalist_cancellable(
     // derivation is not the aircraft that was assessed
     // (`alas_opt::ResolvedProductState::design`).
     let report = FullAnalysis::new(config.clone())
-        .run_at_sized_takeoff_mass(
+        .run_at_sized_design_weights(
             &assessment.resolved.design,
             true,
             assessment.sized.takeoff_mass_kg,
+            Some(assessment.sized.design_landing_mass_kg),
         )
         .map_err(|error| format!("reporting-fidelity analysis failed: {error}"))?;
 

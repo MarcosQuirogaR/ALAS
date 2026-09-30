@@ -57,6 +57,8 @@ pub fn a320_200() -> AircraftPreset {
             usable_fuel_volume_l: Some(24_167.0),
             usable_fuel_mass_kg: Some(19_334.0),
             fuel_density_kg_l: Some(0.8),
+            // Airbus A320 Aircraft Characteristics for Airport Planning, Rev 46, section 2-4-1 (typical two-class cabin).
+            planning_seats: Some(150),
             certified_max_seats: Some(180),
             certified_exit_layout: Some(A320_200_CERTIFIED_EXIT_LAYOUT),
             partial_design_mission_evidence: vec![PartialDesignMissionEvidence {
@@ -440,7 +442,7 @@ pub fn a220_300() -> AircraftPreset {
             min_wing_loading_kg_m2: 480.0,
             cabin_preset: "Custom".to_owned(),
             optimize_passenger_capacity: true,
-            num_passengers: 130,
+            num_passengers: 140,
             cargo_payload_kg: 15_000.0,
             // Airbus recovery publication: MZFW 55,792 kg less OEW 37,149 kg.
             max_structural_payload_kg: 18_643.0,

@@ -163,6 +163,22 @@ pub(super) fn fuel_margin_rows(
     }
 }
 
+/// The MTOW band edges, shown only for the band mode and only when the
+/// report is a sized closure: an unsized report has no closed mass to compare
+/// with the band.
+pub(super) fn mtow_band_row(
+    plan: &alas_config::MtowPlan,
+    sized: bool,
+) -> Option<(&'static str, String)> {
+    match (plan.mode, plan.lower_bound_kg, plan.upper_bound_kg) {
+        (alas_config::MtowSizing::MtowBand, Some(lower_kg), Some(upper_kg)) if sized => Some((
+            "MTOW band (lower to upper edge)",
+            format!("{:.1} to {:.1} t", lower_kg / 1_000.0, upper_kg / 1_000.0),
+        )),
+        _ => None,
+    }
+}
+
 pub(super) fn mass_metrics(result: &alas_pipeline::PipelineResult) -> Vec<(&'static str, String)> {
     let fuel = &result.feasibility.fuel_loading;
     let mut metrics = Vec::new();
@@ -175,6 +191,9 @@ pub(super) fn mass_metrics(result: &alas_pipeline::PipelineResult) -> Vec<(&'sta
             metrics.extend(takeoff_mass_rows(oew_kg, tow_kg, mtow_kg));
         }
     }
+    let sized =
+        selected_analysis(result).is_some_and(|report| report.sized_takeoff_mass_kg().is_some());
+    metrics.extend(mtow_band_row(&result.config.mtow_plan(), sized));
     metrics.push((
         "Takeoff mass margin",
         takeoff_mass_margin(fuel.mtow_shortfall_kg),

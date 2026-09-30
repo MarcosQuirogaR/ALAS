@@ -13,8 +13,10 @@
 
 mod constraints;
 mod ledger_basis;
+mod ledger_states;
 mod loading;
 mod physical_limits;
+mod rotation_thrust;
 mod support;
 #[cfg(test)]
 mod tests;
@@ -30,7 +32,10 @@ use alas_perf::landing_gear::{
 };
 use constraints::{assess_loading_constraints, LoadingConstraintInputs};
 pub use constraints::{ModelCgConstraint, ModelCgConstraintAssessment};
-pub use ledger_basis::{assess_model_cg_envelope_with_ledger, LedgerLoadingBasis};
+pub use ledger_states::{
+    assess_model_cg_envelope_with_ledger, assess_model_cg_envelope_with_ledger_and_landing,
+    LedgerLandingState, LedgerLoadingBasis,
+};
 use loading::{loading_states, operational_loading_states_with_z};
 pub use physical_limits::{
     physical_cg_limits, AftLimitGovernance, ForwardLimitGovernance, PhysicalCgLimits,
@@ -38,40 +43,8 @@ pub use physical_limits::{
 };
 pub use types::{
     AftCgLimitGovernance, CgEnvelopeResult, ModelCgEnvelopeAssessment, ModelCgEnvelopeError,
-    ModelCgLoadingAssessment, ModelCgLoadingState, StaticMarginPreferenceAssessment,
+    ModelCgLoadingAssessment, ModelCgLoadingState, PhaseLimits, StaticMarginPreferenceAssessment,
 };
-
-/// Whether `state` is, under this model's applicability contract, a loaded
-/// flight/dispatch case to which the flight center-of-gravity range and
-/// static-margin-floor constraints apply.
-///
-/// The contract treats bare OEW ([`ModelCgLoadingState::OperatingEmpty`]) as
-/// a ground-only reference condition (it carries no payload or fuel, so it
-/// is not one of the loaded flight/dispatch cases this envelope bounds)
-/// and it is the only state excluded here. Every other named state (analyzed
-/// ZFW, the explicit mid-mission/reserve fuel cases, and analyzed TOW) is a
-/// loaded flight/dispatch case and remains fully gated.
-fn is_flight_eligible_state(state: ModelCgLoadingState) -> bool {
-    !matches!(state, ModelCgLoadingState::OperatingEmpty)
-}
-
-/// Whether `constraint` is a static ground-reaction/gear-capacity check that
-/// stays meaningful for a state resting on its gear, independent of whether
-/// that state is flight-eligible per [`is_flight_eligible_state`].
-///
-/// This is the complement of the flight CG-range/static-margin constraints;
-/// it is what a ground-only state such as bare OEW keeps.
-fn ground_reaction_constraint(constraint: ModelCgConstraint) -> bool {
-    matches!(
-        constraint,
-        ModelCgConstraint::NoseGearStrength
-            | ModelCgConstraint::MainGearStrength
-            | ModelCgConstraint::MinimumNoseGearLoad
-            | ModelCgConstraint::MaximumNoseGearLoadFraction
-            | ModelCgConstraint::TipBack
-            | ModelCgConstraint::TailScrape
-    )
-}
 
 /// The typed refusal when this aircraft has no main-gear longitudinal station
 /// the mass model can supply, `None` when it has one.
@@ -127,10 +100,11 @@ use support::{
 /// point, `critical_x_np`, not the clean single-condition `x_np`.
 /// `target_static_margin` is a reported preference only.
 ///
-/// Bare OEW ([`ModelCgLoadingState::OperatingEmpty`]) is ground-only (see
-/// [`is_flight_eligible_state`]): its flight CG-range/static-margin
-/// constraints are dropped, its ground/gear ones (see
-/// [`ground_reaction_constraint`]) stay in force.
+/// Each state is gated against the mechanisms of its own phase
+/// ([`PhaseLimits::for_state`]): bare OEW
+/// ([`ModelCgLoadingState::OperatingEmpty`]) keeps only its ground/gear
+/// constraints, zero-fuel and the fuel cases get landing trim and the
+/// static-margin floor, and takeoff gets rotation and the static-margin floor.
 #[allow(clippy::too_many_arguments)] // mirrors the reference-compatible seam beside it
 pub fn assess_model_cg_envelope(
     plane: &Airplane,

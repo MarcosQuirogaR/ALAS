@@ -403,6 +403,13 @@ fn correction(
 fn preset_source_corrections() -> BTreeMap<String, SourceCorrection> {
     let mut corrections = [
         correction("A220-300.requirements.cabin_preset", "Ryanair", "Custom"),
+        // The registered cabin seeds are the manufacturers' typical-cabin
+        // seat counts, the basis of each reference operating-empty mass; see
+        // `AircraftReferenceData::planning_seats`.
+        correction("A220-300.requirements.num_passengers", 130, 140),
+        correction("A340-300.requirements.num_passengers", 290, 335),
+        correction("A380-800.requirements.num_passengers", 525, 555),
+        correction("DC-10.requirements.num_passengers", 250, 255),
         // Wing-box material families assigned per preset from the airport
         // planning documents (`alas_config::preset_structures`); the frozen
         // files carried the database default for every type.
@@ -586,6 +593,7 @@ fn preset_source_corrections() -> BTreeMap<String, SourceCorrection> {
         ],
     );
     add_certified_landing_mass_ratio_corrections(&mut corrections);
+    add_default_landing_ratio_corrections(&mut corrections, &["AVE"]);
     corrections
 }
 
@@ -596,8 +604,8 @@ fn preset_source_corrections() -> BTreeMap<String, SourceCorrection> {
 /// put 515 t of landing weight into the A380-800's gear equation against its
 /// certified 386 t. Both masses are already in the registry with their
 /// airport-planning and type-certificate provenance, so the ratio is read
-/// from them. AVE declares no certified pair and keeps 0.92, which is why it
-/// is absent here.
+/// from them. AVE declares no certified pair and keeps the default ratio; see
+/// [`add_default_landing_ratio_corrections`].
 fn add_certified_landing_mass_ratio_corrections(
     corrections: &mut BTreeMap<String, SourceCorrection>,
 ) {
@@ -622,6 +630,7 @@ fn add_certified_landing_mass_ratio_corrections(
 fn saved_file_source_corrections() -> BTreeMap<String, SourceCorrection> {
     let mut corrections = [
         correction("preset_only.requirements.cabin_preset", "Ryanair", "Custom"),
+        correction("preset_only.requirements.num_passengers", 130, 140),
         // The saved-file cases load the A220-300 and B787-9 presets, whose
         // wing-box materials are now assigned per type; see the preset table.
         correction(
@@ -802,7 +811,40 @@ fn saved_file_source_corrections() -> BTreeMap<String, SourceCorrection> {
             "deep_partial",
         ],
     );
+    // The five cases that load no registered aircraft keep the default
+    // landing ratio; the two preset cases carry their own (above).
+    add_default_landing_ratio_corrections(
+        &mut corrections,
+        &[
+            "empty",
+            "tuple_field_from_a_list",
+            "airports",
+            "unknown_preset",
+            "deep_partial",
+        ],
+    );
     corrections
+}
+
+/// Configurations with no certified MLW/MTOW pair (AVE and the unconfigured
+/// defaults) carry the default landing ratio, which is now the AVE's 777-9
+/// benchmark (Boeing D6-86073 Rev G Table 2-1) instead of the frozen,
+/// unsourced 0.92; see `alas_config::landing_mass_ratio::LONG_HAUL_MLW_FRACTION_MTOW`.
+fn add_default_landing_ratio_corrections(
+    corrections: &mut BTreeMap<String, SourceCorrection>,
+    cases: &[&str],
+) {
+    for case in cases {
+        corrections.insert(
+            format!("{case}.mass_model.mlw_fraction_mtow"),
+            SourceCorrection {
+                upstream: Value::from(0.92),
+                corrected: Value::from(
+                    alas_config::landing_mass_ratio::LONG_HAUL_MLW_FRACTION_MTOW,
+                ),
+            },
+        );
+    }
 }
 
 /// The product presets now load an explicit, physically representable generic

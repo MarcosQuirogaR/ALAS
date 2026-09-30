@@ -257,6 +257,20 @@ pub struct LandingGearConfig {
         help = "Wing-body lift coefficient at the ground (pre-rotation) pitch attitude at V_R, as a fraction of the takeoff maximum lift coefficient (CLmax_TO): before rotation the aircraft flies at a low, gear-limited angle of attack well below CLmax_TO. Used by the forward-CG nose-wheel-liftoff moment balance's wing-lift term. Torenbeek order-of-magnitude estimate; not a measured value."
     )]
     pub cl_ground_attitude_frac_of_cl_max_to: f64,
+
+    /// Tire rolling-friction coefficient on the runway at rotation, for the
+    /// same rotation criterion's longitudinal-force term.
+    #[serde(default = "default_rotation_rolling_friction_coefficient")]
+    #[config(
+        label = "Rolling friction coefficient at rotation",
+        help = "Tire rolling-friction coefficient on a dry paved runway during the takeoff roll, used by the forward-CG nose-wheel-liftoff moment balance: the friction force mu*(W - L) acts at the ground and reduces the forward acceleration, so its inertial reaction at the center of gravity is a nose-down moment. 0.02 is the usual conceptual-design value for a dry hard runway; it is an engineering estimate, not a measured value for any specific aircraft."
+    )]
+    pub rotation_rolling_friction_coefficient: f64,
+}
+
+const fn default_rotation_rolling_friction_coefficient() -> f64 {
+    // Conceptual-design value for a dry hard runway (engineering estimate).
+    0.02
 }
 
 const fn default_rotation_pitch_acceleration_deg_s2() -> f64 {
@@ -321,6 +335,7 @@ impl Default for LandingGearConfig {
             rotation_pitch_acceleration_deg_s2: default_rotation_pitch_acceleration_deg_s2(),
             pitch_radius_of_gyration_frac_mac: default_pitch_radius_of_gyration_frac_mac(),
             cl_ground_attitude_frac_of_cl_max_to: default_cl_ground_attitude_frac_of_cl_max_to(),
+            rotation_rolling_friction_coefficient: default_rotation_rolling_friction_coefficient(),
         }
     }
 }
@@ -559,6 +574,30 @@ mod tests {
         config.reference_wheelbase_m = Some(12.64);
         config.reference_track_m = Some(7.59);
         assert!(config.validation_errors().is_empty());
+    }
+
+    #[test]
+    fn the_rotation_friction_coefficient_defaults_to_a_dry_runway_and_rejects_nonphysical_values() {
+        let mut config = LandingGearConfig::default();
+        assert_eq!(config.rotation_rolling_friction_coefficient, 0.02);
+        assert!(config.validation_errors().is_empty());
+        for bad in [-0.01, 1.0, f64::NAN, f64::INFINITY] {
+            config.rotation_rolling_friction_coefficient = bad;
+            assert!(
+                config
+                    .validation_errors()
+                    .iter()
+                    .any(|(path, _)| path == "landing_gear.rotation_rolling_friction_coefficient"),
+                "{bad} must be rejected"
+            );
+        }
+        let mut value = serde_json::to_value(LandingGearConfig::default()).expect("serializes");
+        if let Some(object) = value.as_object_mut() {
+            object.remove("rotation_rolling_friction_coefficient");
+        }
+        let legacy: LandingGearConfig =
+            serde_json::from_value(value).expect("a configuration without the field still loads");
+        assert_eq!(legacy.rotation_rolling_friction_coefficient, 0.02);
     }
 
     #[test]

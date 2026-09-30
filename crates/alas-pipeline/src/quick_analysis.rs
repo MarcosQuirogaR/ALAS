@@ -62,7 +62,9 @@ use alas_opt::assess_product_candidate;
 use crate::feasibility::{assess_physical_feasibility, FindingSeverity};
 use crate::full_analysis::{effective_structural_payload_limit_kg, FullAnalysis};
 
+pub mod band;
 mod breguet;
+pub mod corners;
 mod cruise;
 mod types;
 

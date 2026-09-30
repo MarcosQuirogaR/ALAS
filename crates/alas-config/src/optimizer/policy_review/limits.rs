@@ -63,6 +63,16 @@ const THE_BRIEF: &str = "The value is the mission brief the user asked for. An a
 carries less or flies less far is a different requirement, not the same requirement within a \
 tolerance.";
 
+/// A reviewed, ineligible limit of the Mass family.
+const fn ineligible_mass(id: &'static str, rationale: &'static str) -> ReviewedLimit {
+    ReviewedLimit {
+        id,
+        family: "Mass",
+        review: RelaxationReview::Ineligible,
+        rationale,
+    }
+}
+
 /// Every residual identifier the optimizer can emit that is not part of
 /// `mdo::residuals_layout`'s wing-to-fuselage family
 /// ([`super::limits_layout::LAYOUT_LIMITS`]), with its determination.
@@ -115,42 +125,22 @@ are an iterate rather than an aircraft.",
 measure a miss against.",
     },
     // --- Mass ---
-    ReviewedLimit {
-        id: "dispatch_mtow_limited",
-        family: "Mass",
-        review: RelaxationReview::Ineligible,
-        rationale: CAPACITY_IDENTITY,
-    },
-    ReviewedLimit {
-        id: "dispatch_tank_limited",
-        family: "Mass",
-        review: RelaxationReview::Ineligible,
-        rationale: CAPACITY_IDENTITY,
-    },
-    ReviewedLimit {
-        id: "fuel_capacity",
-        family: "Mass",
-        review: RelaxationReview::Ineligible,
-        rationale: CAPACITY_IDENTITY,
-    },
+    ineligible_mass("dispatch_mtow_limited", CAPACITY_IDENTITY),
+    ineligible_mass("dispatch_tank_limited", CAPACITY_IDENTITY),
+    ineligible_mass("fuel_capacity", CAPACITY_IDENTITY),
     ReviewedLimit {
         id: "fuel_capacity_unavailable",
         family: "Mass",
         review: RelaxationReview::NeverRelaxable,
         rationale: BOOLEAN_FLAG,
     },
-    ReviewedLimit {
-        id: "landing_mass",
-        family: "Mass",
-        review: RelaxationReview::Ineligible,
-        rationale: ESTABLISHED_WEIGHT,
-    },
-    ReviewedLimit {
-        id: "mtow_ceiling",
-        family: "Mass",
-        review: RelaxationReview::Ineligible,
-        rationale: ESTABLISHED_WEIGHT,
-    },
+    ineligible_mass("landing_mass", ESTABLISHED_WEIGHT),
+    ineligible_mass("mtow_band_lower", THE_BRIEF),
+    ineligible_mass("mtow_band_upper", THE_BRIEF),
+    ineligible_mass("mtow_ceiling", ESTABLISHED_WEIGHT),
+    ineligible_mass("offdesign_fuel_capacity", CAPACITY_IDENTITY),
+    ineligible_mass("offdesign_payload", CAPACITY_IDENTITY),
+    ineligible_mass("offdesign_tow", CAPACITY_IDENTITY),
     ReviewedLimit {
         id: "structural_inventory_unverified",
         family: "Mass",

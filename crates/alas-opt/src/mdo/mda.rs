@@ -28,9 +28,12 @@
 //! extrapolation's admissibility bound on every pass, while `Unconstrained`
 //! drops both after the seed, so the requirement never reappears as a limit
 //! anywhere in the closure, only the freely converging dispatch mass does.
+//! `MtowBand` seeds at its target and clamps at the band's upper edge;
+//! `PayloadAdjusted` seeds at the requirement and has no ceiling. Every
+//! number comes from `alas_config::MtowPlan`.
 
 use alas_config::design_variables::DesignVector;
-use alas_config::{AlasConfig, MassSizingBasis, MtowSizing};
+use alas_config::{AlasConfig, MtowPlan};
 use alas_geom::aircraft::airplane::Airplane;
 use alas_mass::breakdown::{MassBreakdown, MassCoordinates, PayloadLayoutSummary};
 use alas_mass::dispatch::{solve_dispatch, DispatchLimits, DispatchSolution, DispatchStatus};
@@ -54,6 +57,11 @@ pub(crate) struct MdaContext<'a> {
     pub model: SegmentMissionModel,
     /// Design-mission still-air distance, m.
     pub range_m: f64,
+    /// The resolved takeoff-mass sizing plan: seed, ceilings, pass budget.
+    pub plan: MtowPlan,
+    /// Payload the dispatch closure flies instead of the laid-out load case,
+    /// kg, when the plan closes on a design payload.
+    pub dispatch_payload_kg: Option<f64>,
     /// Usable tank capacity, kg, when the tank arrangement resolved.
     pub tank_capacity_kg: Option<f64>,
     /// Whether the loop may re-trim; false when the polar was supplied by
@@ -108,20 +116,6 @@ fn mass_coordinates_failure() -> CandidateFailure {
     }
 }
 
-/// The declared-requirement dispatch ceiling `MtowSizing::Unconstrained`
-/// substitutes with, so far above any physically credible transport takeoff
-/// mass that [`alas_mass::dispatch::solve_dispatch`]'s own `.min(mtow_kg)`
-/// clamp and its `required_unclamped_kg > mtow_kg + tolerance_kg` boundary
-/// check are both inert: the free-converged mass this closure ever produces
-/// is not observed anywhere near it.
-///
-/// This cannot be `f64::INFINITY`, even though the outer loop's own Aitken
-/// admissibility bound (below) can and does use it: `solve_dispatch`'s
-/// `validate_inputs` requires `limits.mtow_kg.is_finite()` and reports an
-/// infinite MTOW as a `DispatchStatus::ModelFailed` input error before the
-/// Picard loop ever runs, which would fail every Unconstrained pass outright.
-const UNCONSTRAINED_DISPATCH_MTOW_KG: f64 = 1.0e9;
-
 /// Aitken delta-squared extrapolation of the fixed-point iterates
 /// `x0 -> x1 -> x2`, or `None` when the denominator vanishes or the
 /// estimate leaves `(0, ceiling]`.
@@ -149,6 +143,7 @@ fn evaluate_state_at_tow(
     context: &MdaContext<'_>,
     plane: &mut Airplane,
     tow_k: f64,
+    landing_floor_kg: Option<f64>,
     state: &mut MdaState,
     model: &mut SegmentMissionModel,
     structural_feedback: &mut alas_mass::wingbox_feedback::WingboxFeedback,
@@ -163,8 +158,10 @@ fn evaluate_state_at_tow(
     // (`BaselineSandbox`, `ReferenceAdaptation`) keeps its declared design
     // gross and landing masses, so a mission-only change cannot re-size its
     // structure; a clean-sheet design couples, so every pass re-evaluates
-    // the components at the current iterate.
-    let pass_config = config.at_closure_mass(tow_k);
+    // the components at the current iterate. The MTOW band and
+    // payload-adjusted modes design every structure at the iterate
+    // (`AlasConfig::at_sized_closure_mass`).
+    let pass_config = config.at_sized_closure_mass_with_landing_floor(tow_k, landing_floor_kg);
     let (lumped_masses, lumped_coords, ..) = mass_analysis_with_structural_feedback(
         &pass_config,
         context.dv,
@@ -250,13 +247,12 @@ pub(crate) fn converge(
 ) -> Result<MdaClosure, CandidateFailure> {
     let config = context.config;
     let objective = &config.optimizer.objective;
-    // The declared requirement seeds the first pass under every mode (see
+    let plan = &context.plan;
+    // The plan's seed is the first pass's takeoff mass under every mode (see
     // the module doc comment). `FixedRequirement` takes exactly that one
-    // pass; `SizedByMission` and `Unconstrained` both iterate it, so both
-    // get the configured pass budget instead of one.
-    let ceiling = config.requirements.mtow_kg;
-    let unconstrained = objective.mtow_sizing == MtowSizing::Unconstrained;
-    let sizing_iterates = objective.mtow_sizing != MtowSizing::FixedRequirement;
+    // pass; every mission-closed mode iterates it with the configured budget.
+    let seed = plan.seed_kg;
+    let sizing_iterates = plan.iterates;
     let max_passes = if sizing_iterates {
         objective.sizing_max_iterations.max(1) as usize
     } else {
@@ -267,31 +263,19 @@ pub(crate) fn converge(
     // aircraft (`BaselineSandbox`, `ReferenceAdaptation`, or any mode with a
     // declared `flops_structure.design_gross_mass_kg` override) is designed
     // to one landing weight regardless of what the dispatch mass converges
-    // to, so every pass (under `FixedRequirement`, `SizedByMission` and
-    // `Unconstrained` alike) uses the sizing basis's own
-    // `design_landing_mass_kg`. Only a coupled clean-sheet closure recomputes
-    // the limit from the current takeoff-mass iterate, because there the
-    // landing mass is defined as a fraction of whatever the design converges
-    // to.
-    let basis = config.mass_sizing_basis();
-    // The dispatch-loop MTOW clamp: the declared ceiling for the two
-    // ceiling-bound modes, unchanged, and a sentinel so far above any
-    // credible transport mass that it never binds for `Unconstrained` (see
-    // its doc comment for why this cannot be `f64::INFINITY`).
-    let dispatch_mtow_kg = if unconstrained {
-        UNCONSTRAINED_DISPATCH_MTOW_KG
-    } else {
-        ceiling
-    };
-    // The Aitken extrapolation's admissible-estimate upper bound: the same
-    // declared ceiling for the two ceiling-bound modes, and no bound at all
-    // for `Unconstrained`, where only the finite/positive checks in
-    // `aitken` still guard against genuine divergence.
-    let aitken_ceiling = if unconstrained {
-        f64::INFINITY
-    } else {
-        ceiling
-    };
+    // to, and only a coupled clean-sheet closure recomputes the limit from
+    // the current iterate. The two design modes design a registered
+    // aircraft's structure at the iterate too, with its declared MLW/MTOW
+    // ratio (`AlasConfig::design_landing_mass_at_closure`).
+    //
+    // The dispatch-loop MTOW clamp and the Aitken extrapolation's
+    // admissible-estimate upper bound are the plan's: the declared ceiling
+    // for the two original ceiling-bound modes, the band's upper edge for
+    // `MtowBand`, and no bound for `Unconstrained` and `PayloadAdjusted`
+    // (a finite sentinel for the dispatch solver, which validates a finite
+    // MTOW; only the finite/positive checks in `aitken` remain there).
+    let dispatch_mtow_kg = plan.dispatch_ceiling_kg;
+    let aitken_ceiling = plan.aitken_ceiling_kg;
     let tolerance_kg = objective.sizing_tolerance_kg;
     // The report and the search both consume the converged state, but the
     // dispatch map returns the *next* takeoff mass. A final state refresh below
@@ -302,16 +286,19 @@ pub(crate) fn converge(
 
     let mut state = initial;
     let mut cg_at_trim = state.cg[0];
-    // The initial state was trimmed at the ceiling mass, so that is the mass
+    // The initial state was trimmed at the seed mass, so that is the mass
     // the standing polar belongs to.
-    let mut mass_at_trim = ceiling;
-    let mut tow_k = ceiling;
+    let mut mass_at_trim = seed;
+    let mut tow_k = seed;
     let mut iterates: Vec<f64> = vec![tow_k];
     let mut model = context.model.clone();
     let mut outcome: Option<(DispatchSolution, bool)> = None;
     let mut sizing_iterations = 0;
     let mut retrim_count = 0;
     let mut structural_feedback = context.structural_feedback;
+    // The reserve-covering landing floor of the last dispatch solution, which
+    // the next pass designs the gear to (`AlasConfig::design_landing_mass_with_reserve_floor`).
+    let mut landing_floor_kg: Option<f64> = None;
 
     for pass in 0..max_passes {
         model.check_cancelled().map_err(|_| CandidateFailure {
@@ -323,6 +310,7 @@ pub(crate) fn converge(
                 context,
                 plane,
                 tow_k,
+                landing_floor_kg,
                 &mut state,
                 &mut model,
                 &mut structural_feedback,
@@ -332,21 +320,15 @@ pub(crate) fn converge(
             )?;
         }
         let (oew_k, _) = oew_and_cg(&state.masses, &state.coords);
-        let mlw_kg = match basis {
-            MassSizingBasis::FixedAircraft {
-                design_landing_mass_kg,
-                ..
-            } => design_landing_mass_kg,
-            MassSizingBasis::Coupled => config.landing_mass_limit_kg(tow_k),
-        };
         let limits = DispatchLimits {
             mtow_kg: dispatch_mtow_kg,
             mzfw_kg: None,
-            mlw_kg: Some(mlw_kg),
+            mlw_kg: Some(config.design_landing_mass_with_reserve_floor(tow_k, landing_floor_kg)),
             usable_capacity_kg: context.tank_capacity_kg,
         };
+        let payload_kg = context.dispatch_payload_kg.unwrap_or(state.masses.payload);
         let solution = solve_dispatch(
-            oew_k + state.masses.payload,
+            oew_k + payload_kg,
             context.range_m,
             &config.fuel_policy,
             &model,
@@ -360,6 +342,7 @@ pub(crate) fn converge(
             });
         }
         let dispatch_converged = matches!(solution.status, DispatchStatus::Converged);
+        landing_floor_kg = super::mtow_modes::landing_floor_kg(&solution);
         if !sizing_iterates {
             outcome = Some((solution, dispatch_converged));
             break;
@@ -377,6 +360,7 @@ pub(crate) fn converge(
                 context,
                 plane,
                 next_tow,
+                landing_floor_kg,
                 &mut state,
                 &mut model,
                 &mut structural_feedback,

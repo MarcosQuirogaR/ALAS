@@ -10,7 +10,7 @@
 //! performance and geometry families are large enough on their own that they
 //! live in `mdo::residuals_performance` and `mdo::residuals_geometry`.
 
-use alas_config::{AlasConfig, ConstraintPolicy, MtowSizing, ObjectiveConfig, ObjectiveWeights};
+use alas_config::{AlasConfig, ConstraintPolicy, ObjectiveConfig, ObjectiveWeights};
 
 use crate::envelope::{
     assess_model_cg_envelope_with_ledger, ModelCgConstraint, ModelCgConstraintAssessment,
@@ -27,6 +27,7 @@ use super::types::ConstraintResidual;
 mod balance_ledger;
 #[cfg(test)]
 mod critical_tests;
+mod mtow_modes;
 
 /// Every requirement family's residuals for one sized candidate.
 pub(crate) fn build(
@@ -41,8 +42,9 @@ pub(crate) fn build(
     // Loads use the sized closure mass in every mode, the same binding the
     // pipeline gives the final report and its structural stage; a registered
     // aircraft keeps its declared design gross mass through the overrides
-    // `at_closure_mass` writes.
-    let structural_config = config.at_closure_mass(outcome.sized.takeoff_mass_kg);
+    // `at_closure_mass` writes, except in the two design modes, which design
+    // it at the closure (`at_sized_closure_mass`).
+    let structural_config = config.at_sized_closure_mass(outcome.sized.takeoff_mass_kg);
     residuals.extend(super::structural_feasibility::residuals(
         &structural_config,
         &outcome.history.dv,
@@ -127,27 +129,19 @@ fn mass_residuals(outcome: &SizingOutcome, objective: &ObjectiveConfig) -> Vec<C
         ));
     }
 
-    let unconstrained = objective.mtow_sizing == MtowSizing::Unconstrained;
-
-    // `MtowSizing::Unconstrained` uses the declared requirement only to seed
-    // the closure (see `mdo::mda`); it declares no ceiling for the
-    // free-converged mass to be checked against, so there is no residual to
-    // push here. Pushing one against the seed value would reject any
-    // candidate whose free-converged mass exceeded it under the default hard
-    // policy, defeating the entire point of the mode.
-    if !unconstrained {
-        let required_takeoff_mass_kg =
-            sized.dispatch.zero_fuel_mass_kg + sized.dispatch.plan.takeoff_fuel_kg();
-        residuals.push(ConstraintResidual::scaled(
-            "mtow_ceiling",
-            Mass,
-            required_takeoff_mass_kg,
-            outcome.mtow_ceiling,
-            "kg",
-            required_takeoff_mass_kg - outcome.mtow_ceiling,
-            policy,
-        ));
-    }
+    // The takeoff-mass limits follow the plan (`alas_config::MtowPlan`):
+    // `mtow_ceiling` for the two original ceiling-bound modes, the hard band
+    // pair for `MtowBand`, and nothing for `Unconstrained` and
+    // `PayloadAdjusted`, which declare no ceiling (a residual against the
+    // seed would reject every closure above it under the default hard
+    // policy, defeating the mode). A design-mission closure adds the
+    // off-design route checks.
+    residuals.extend(mtow_modes::plan_residuals(
+        &outcome.plan,
+        sized,
+        outcome.mtow_ceiling,
+        policy,
+    ));
 
     // The landing-mass limit is the sizing basis's own `design_landing_mass_kg`
     // (`alas_config::MassSizingBasis`, computed once in `mdo::sizing` and

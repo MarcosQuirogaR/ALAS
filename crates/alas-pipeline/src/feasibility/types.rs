@@ -84,6 +84,9 @@ pub enum FindingCode {
     MissionThrottleLimitViolation,
     /// The requested passenger count exceeds the seats the layout placed.
     PassengerCapacityShortfall,
+    /// The baggage mass exceeds every modelled hold compartment; the excess
+    /// is reported as overload rather than dropped from the payload.
+    BaggageOverload,
     /// The requested net cargo exceeds the net load the ULD layout placed.
     CargoCapacityShortfall,
     /// The modeled zero-fuel mass exceeds the published maximum zero-fuel
@@ -152,6 +155,7 @@ impl FindingCode {
             Self::ThrustMarginViolation => "thrust_margin_violation",
             Self::MissionThrottleLimitViolation => "mission_throttle_limit_violation",
             Self::PassengerCapacityShortfall => "passenger_capacity_shortfall",
+            Self::BaggageOverload => "baggage_overload",
             Self::CargoCapacityShortfall => "cargo_capacity_shortfall",
             Self::MaximumZeroFuelWeightViolation => "maximum_zero_fuel_weight_violation",
             Self::StructuralPayloadLimitViolation => "structural_payload_limit_violation",

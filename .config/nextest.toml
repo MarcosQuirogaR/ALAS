@@ -1,0 +1,65 @@
+# cargo-nextest configuration. Install with `cargo install cargo-nextest --locked`.
+#
+# Three tiers, selected by profile:
+#   default  the fast tier, run on every change (`cargo nextest run`)
+#   slow     only the slow tier, run at phase integration
+#   full     everything, run by CI and `cargo xtask gate`
+#
+# Nextest does not run doctests. The repository checks reject runnable doc
+# examples, so nothing is lost; use a unit test instead.
+
+# The slow tier is one filter expression. The default profile excludes it as
+# `not (<expression>)` and the slow profile selects it; a unit test in xtask
+# fails if the two disagree. Serial times measured on a 32-thread machine:
+#   staged_search                   876 s  optimizer search over three presets
+#   a380_default_regression         153 s
+#   downstream_mass_connectivity     73 s  } the same seeded A220 optimizer
+#   downstream_design_connectivity   69 s  } run, repeated in four places
+#   sized_mass_single_source         64 s  }
+#   summary_masses_of_an_optimized_run_are_the_pipeline_result (alas-gui)  }
+#   sandbox_occlusion                27 s  (89 s when run beside other tests)
+#   acceptance_benchmarks             5 s  (asserts only that timings exist)
+
+[profile.default]
+default-filter = "not (binary(staged_search) | binary(a380_default_regression) | binary(downstream_mass_connectivity) | binary(downstream_design_connectivity) | binary(sized_mass_single_source) | binary(sandbox_occlusion) | binary(acceptance_benchmarks) | test(=views::results_view::summary::tests::summary_masses_of_an_optimized_run_are_the_pipeline_result))"
+slow-timeout = { period = "60s", terminate-after = 10 }
+fail-fast = false
+retries = 0
+
+[profile.full]
+default-filter = "all()"
+# The slow tier's longest test takes about 15 minutes alone; the default
+# profile's ten-minute limit would kill it.
+slow-timeout = { period = "120s", terminate-after = 30 }
+
+[profile.slow]
+default-filter = "binary(staged_search) | binary(a380_default_regression) | binary(downstream_mass_connectivity) | binary(downstream_design_connectivity) | binary(sized_mass_single_source) | binary(sandbox_occlusion) | binary(acceptance_benchmarks) | test(=views::results_view::summary::tests::summary_masses_of_an_optimized_run_are_the_pipeline_result)"
+slow-timeout = { period = "120s", terminate-after = 30 }
+
+[test-groups]
+# Tests that spawn child processes and assert on wall-clock bounds (timeouts,
+# cancellation, kill latency). Beside a full parallel run they miss their
+# bounds, so at most two of them run at once.
+wall-clock = { max-threads = 2 }
+
+# Overrides in the default profile apply to every profile. The first override
+# that matches a test sets each setting, so the narrower one comes first.
+#
+# Kill-latency tests with bounds of a few seconds: spawning and killing a
+# process tree on Windows beside a full parallel run takes 5-10 s, so these run
+# alone rather than having their bounds loosened.
+[[profile.default.overrides]]
+filter = "package(alas-exec) & test(/^openfoam::tests::(timeout|cancellation)_|^avl::avl_tests::(a_timeout_kills|cancellation_interrupts)|^process::tests::heavy_piped_output/)"
+threads-required = "num-test-threads"
+retries = 2
+
+#
+# Quarantine list: tests that depend on wall-clock time or machine load. They
+# run in the wall-clock group and get two retries. Nextest reports every retry
+# (FLAKY), so a test that needs one stays visible, and a test that fails all
+# three attempts still fails. Remove an entry once the test stops depending on
+# timing.
+[[profile.default.overrides]]
+filter = "(package(alas-exec) & test(/^(process|openfoam|supervise)::|^avl::avl_tests::/)) | (package(alas-aero) & (test(/^mses::exec::/) | binary(mses_dynamic_boundaries))) | (package(alas-opt) & test(/^cancellation::|native_pool::/)) | (package(alas-screen) & test(/^runner::/)) | (package(alas-gui) & test(/openvsp_runtime_setup|screening_readiness/))"
+test-group = "wall-clock"
+retries = 2

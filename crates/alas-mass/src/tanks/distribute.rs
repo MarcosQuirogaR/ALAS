@@ -6,7 +6,8 @@
 //!
 //! Loading uses tank capacities and arrangement. The A380 arrangement has an
 //! approximate feed-containing-cell and outer-cell rule; other layouts fill tanks burned
-//! last first, with trim last. Burning follows burn priorities independently.
+//! last first. Every layout fills a trim tank last and burns it first
+//! ([`super::order`]); burning otherwise follows the declared burn priorities.
 //!
 //! # The fill order is an assumption, not a source
 //!
@@ -48,6 +49,7 @@ use alas_geom::aircraft::spacing::linspace;
 use crate::inertia::rectangular_prism;
 use crate::ledger::{MassGroup, MassItem, MassMethod, MassProperties, MassRole};
 
+use super::order::{burn_groups, fill_groups};
 use super::types::{
     FuelCgPoint, FuelTank, FuelTankLayout, FuelVectorPoint, TankKind, TankLayoutError, TankSide,
 };
@@ -114,8 +116,9 @@ fn distribute_a380(tanks: &[FuelTank], usable_fuel_kg: f64) -> FuelState {
     // Positive model-cell fuel cannot prove positive fuel in each actual
     // feed tank or aircraft dispatchability. Fill all
     // wing cells together first; then hold the outers at half capacity while
-    // the inner/mid and trim cells have space (Airbus Training Center A380
-    // ATA 28 p.0012: outer tanks <=50% whenever possible). The 39.5% MAC
+    // the inner/mid cells have space (Airbus Training Center A380 ATA 28
+    // p.0012: outer tanks <=50% whenever possible); the trim tank fills last
+    // (`super::order`), so the outers complete before it. The 39.5% MAC
     // refuelling target requires ZFW/CG and is not solved here. These stages
     // are an engineering approximation, not FQMS or a dispatch minimum.
     fill_to_fraction(
@@ -141,14 +144,14 @@ fn distribute_a380(tanks: &[FuelTank], usable_fuel_kg: f64) -> FuelState {
         tanks,
         &mut fills_kg,
         &mut remaining_kg,
-        |kind| kind == TankKind::Trim,
+        |kind| kind == TankKind::WingOuter,
         1.0,
     );
     fill_to_fraction(
         tanks,
         &mut fills_kg,
         &mut remaining_kg,
-        |kind| kind == TankKind::WingOuter,
+        |kind| kind == TankKind::Trim,
         1.0,
     );
     FuelState { fills_kg }
@@ -208,8 +211,8 @@ fn fuel_prism_item(tank: &FuelTank, mass_kg: f64, role: MassRole, id: String) ->
 
 impl FuelTankLayout {
     /// Allocate `usable_fuel_kg` to tanks. The A380 arrangement follows the
-    /// approximate rule above; other layouts fill tanks burned last first,
-    /// except trim, which fills last.
+    /// approximate rule above; other layouts fill tanks burned last first.
+    /// Trim tanks fill last in every layout ([`super::order`]).
     ///
     /// # Errors
     ///
@@ -231,19 +234,6 @@ impl FuelTankLayout {
         if is_a380_arrangement(&self.tanks) {
             return Ok(distribute_a380(&self.tanks, usable_fuel_kg));
         }
-        let mut fill_order: Vec<usize> = (0..self.tanks.len()).collect();
-        // General-layout assumption: defer trim until the other cells are
-        // full. This is not a sourced ground/taxi CG limit or a claim about
-        // any registered aircraft's actual refuelling sequence.
-        fill_order.sort_by(|&a, &b| {
-            let a_trim = self.tanks[a].kind == TankKind::Trim;
-            let b_trim = self.tanks[b].kind == TankKind::Trim;
-            a_trim.cmp(&b_trim).then_with(|| {
-                self.tanks[b]
-                    .burn_priority
-                    .cmp(&self.tanks[a].burn_priority)
-            })
-        });
         let mut fills_kg = vec![0.0; self.tanks.len()];
         let mut remaining_kg = usable_fuel_kg;
         // Tanks that share a burn priority (mirrored left/right pairs, most
@@ -252,16 +242,14 @@ impl FuelTankLayout {
         // otherwise always saturate the first-listed tank of the tie before
         // touching the other, biasing every partial load toward one side of
         // a symmetric aircraft with no physical cause.
-        for group in
-            fill_order.chunk_by(|&a, &b| self.tanks[a].burn_priority == self.tanks[b].burn_priority)
-        {
+        for group in fill_groups(&self.tanks) {
             let group_capacity_kg: f64 = group
                 .iter()
                 .map(|&index| self.tanks[index].usable_capacity_kg)
                 .sum();
             let group_fill_kg = remaining_kg.min(group_capacity_kg);
             if group_capacity_kg > 0.0 {
-                for &index in group {
+                for &index in &group {
                     let share = self.tanks[index].usable_capacity_kg / group_capacity_kg;
                     fills_kg[index] = share * group_fill_kg;
                 }
@@ -350,7 +338,8 @@ impl FuelState {
         MassProperties::combine(parts.iter())
     }
 
-    /// Remove `burned_kg`, lowest burn-priority tank first.
+    /// Remove `burned_kg`: trim tanks first, then the lowest burn-priority
+    /// tank first ([`super::order`]).
     ///
     /// # Errors
     ///
@@ -367,8 +356,6 @@ impl FuelState {
                 shortfall_kg: burned_kg - available_kg,
             });
         }
-        let mut burn_order: Vec<usize> = (0..layout.tanks.len()).collect();
-        burn_order.sort_by_key(|&index| layout.tanks[index].burn_priority);
         let mut fills_kg = self.fills_kg.clone();
         let mut remaining_kg = burned_kg;
         // Same-priority tanks (mirrored pairs) burn down together, split by
@@ -376,16 +363,14 @@ impl FuelState {
         // fills them together: a sequential drain of the first-listed tank
         // of a tie would otherwise walk the aircraft's fuel CG off-axis on a
         // symmetric default with no asymmetric load to justify it.
-        for group in burn_order
-            .chunk_by(|&a, &b| layout.tanks[a].burn_priority == layout.tanks[b].burn_priority)
-        {
+        for group in burn_groups(&layout.tanks) {
             if remaining_kg <= 0.0 {
                 break;
             }
             let group_available_kg: f64 = group.iter().map(|&index| fills_kg[index]).sum();
             let group_take_kg = remaining_kg.min(group_available_kg);
             if group_available_kg > 0.0 {
-                for &index in group {
+                for &index in &group {
                     let share = fills_kg[index] / group_available_kg;
                     fills_kg[index] -= share * group_take_kg;
                 }
@@ -400,8 +385,8 @@ impl FuelState {
 /// `takeoff` down to empty, at `n_points` evenly spaced burned-fuel levels.
 ///
 /// Every point comes from [`FuelState::burned`] applied to `takeoff`, so it
-/// follows the layout's actual burn order (centre tank first, trim last,
-/// etc.) rather than mixing the takeoff and a lumped-zero-fuel centroid on
+/// follows the layout's actual burn order (trim tank first, then centre
+/// tank, etc.) rather than mixing the takeoff and a lumped-zero-fuel centroid on
 /// a straight line: the two agree only when the tank burned down is the
 /// same one the takeoff load itself sits in, which is not the general case
 /// for a multi-cell swept wing. The first point is

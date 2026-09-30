@@ -110,6 +110,7 @@ pub fn seat_category_capacities(blocks: &[i64]) -> (f64, f64, f64) {
 }
 
 /// One seat row's longitudinal station and its mass split by seat category.
+#[derive(Debug, Clone, Copy)]
 struct RowShare {
     x_m: f64,
     window_kg: f64,
@@ -126,27 +127,29 @@ struct RowShare {
 /// occupied, so this is the least-biased split available from what
 /// [`crate::layout::SeatMeta`] actually carries.
 fn row_shares(layout: &PayloadLayout) -> Vec<RowShare> {
-    layout
-        .items
-        .iter()
-        .filter(|item| item.kind == ItemKind::SeatRow)
-        .filter_map(|item| {
-            let ItemMeta::Seat(seat) = &item.meta else {
-                return None;
-            };
-            if seat.abreast <= 0 || item.mass <= 0.0 {
-                return None;
-            }
-            let (window_cap, middle_cap, aisle_cap) = seat_category_capacities(&seat.blocks);
-            let abreast = seat.abreast as f64;
-            Some(RowShare {
-                x_m: item.x,
-                window_kg: item.mass * window_cap / abreast,
-                middle_kg: item.mass * middle_cap / abreast,
-                aisle_kg: item.mass * aisle_cap / abreast,
-            })
-        })
-        .collect()
+    layout.items.iter().filter_map(row_share_of).collect()
+}
+
+/// The category mass split of one seat-row item; `None` for any other item
+/// and for a row with no seats or no mass.
+fn row_share_of(item: &DeckItem) -> Option<RowShare> {
+    if item.kind != ItemKind::SeatRow {
+        return None;
+    }
+    let ItemMeta::Seat(seat) = &item.meta else {
+        return None;
+    };
+    if seat.abreast <= 0 || item.mass <= 0.0 {
+        return None;
+    }
+    let (window_cap, middle_cap, aisle_cap) = seat_category_capacities(&seat.blocks);
+    let abreast = seat.abreast as f64;
+    Some(RowShare {
+        x_m: item.x,
+        window_kg: item.mass * window_cap / abreast,
+        middle_kg: item.mass * middle_cap / abreast,
+        aisle_kg: item.mass * aisle_cap / abreast,
+    })
 }
 
 /// Build the cumulative path for one ordering of category tiers over rows
@@ -338,158 +341,23 @@ pub fn cargo_loading_sequences(
     ]
 }
 
-/// One level of the loading-sequence envelope: at `mass_kg`, the most
-/// forward and most aft CG any of the sampled sequences reaches.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct PotatoPoint {
-    /// The common mass level, kg.
-    pub mass_kg: f64,
-    /// The most forward (smallest x) CG any sequence reaches at this mass,
-    /// aircraft body axes, m.
-    pub min_x_m: f64,
-    /// The most aft (largest x) CG any sequence reaches at this mass,
-    /// aircraft body axes, m.
-    pub max_x_m: f64,
-}
+mod holds;
+mod potato;
+mod set;
+mod zones;
 
-/// Linearly interpolate `sequence`'s CG at `mass_kg`; `None` if `sequence`
-/// has no points, or if `mass_kg` lies outside this sequence's own
-/// `[first.mass_kg, last.mass_kg]` span (beyond a small floating-point
-/// tolerance).
-///
-/// Earlier versions clamped an out-of-span query to the nearest endpoint,
-/// which let a sequence that ends below the shared ZFW (e.g. a cargo-only
-/// sequence with no passenger mass added) hold its *last* CG flat at every
-/// higher mass level a longer sequence still reaches -- silently
-/// manufacturing a boundary at masses this sequence never actually visited.
-/// Returning `None` instead makes the caller ([`potato_boundary`]) exclude
-/// this sequence from every mass level it does not cover, so the envelope
-/// at a given mass only ever reflects sequences that actually reach it.
-fn interpolate_x(sequence: &LoadingSequence, mass_kg: f64) -> Option<f64> {
-    const TOLERANCE_KG: f64 = 1.0e-6;
-    let points = &sequence.points;
-    let first = points.first()?;
-    let last = points.last()?;
-    if mass_kg < first.mass_kg - TOLERANCE_KG || mass_kg > last.mass_kg + TOLERANCE_KG {
-        return None;
-    }
-    if mass_kg <= first.mass_kg {
-        return Some(first.x_m);
-    }
-    if mass_kg >= last.mass_kg {
-        return Some(last.x_m);
-    }
-    for pair in points.windows(2) {
-        let (a, b) = (pair[0], pair[1]);
-        if mass_kg >= a.mass_kg && mass_kg <= b.mass_kg {
-            let span = b.mass_kg - a.mass_kg;
-            if span <= 0.0 {
-                return Some(a.x_m);
-            }
-            let blend = (mass_kg - a.mass_kg) / span;
-            return Some(a.x_m + blend * (b.x_m - a.x_m));
-        }
-    }
-    Some(last.x_m)
-}
+pub use holds::{cargo_hold_sequences, layout_hold_spans, HoldSpan};
+#[cfg(test)]
+use potato::interpolate_x;
+pub use potato::{concat_sequences, potato_boundary, potato_boundary_at, PotatoPoint};
+pub use set::{fuel_loading_sequence, LoadSequenceSet};
+pub use zones::{boarding_zones, zone_boarding_sequences, BoardingZone};
 
-/// The CG envelope (potato) of `sequences`, at `n_levels` mass levels evenly
-/// spaced between the lowest DOW mass and the highest ZFW mass any sequence
-/// carries.
-///
-/// Every physical sequence built by this module shares the same DOW and ZFW
-/// mass (all load the same total payload from the same starting point), so
-/// in the ordinary case this samples from one shared endpoint to the other;
-/// sequences from different starting points are still accepted; the
-/// envelope is simply wider at the shared range's edges.
-///
-/// Returns an empty vector for `n_levels == 0` or an empty `sequences`.
-///
-/// A mass level where no sequence reaches (per [`interpolate_x`]'s own
-/// exclusion of out-of-span queries) is omitted from the result rather than
-/// synthesized from whichever sequence happens to hold that mass flat: see
-/// [`interpolate_x`]'s doc comment for the composition bug this avoids.
-pub fn potato_boundary(sequences: &[LoadingSequence], n_levels: usize) -> Vec<PotatoPoint> {
-    if n_levels == 0 || sequences.is_empty() {
-        return Vec::new();
-    }
-    let min_mass_kg = sequences
-        .iter()
-        .filter_map(|sequence| sequence.points.first().map(|point| point.mass_kg))
-        .fold(f64::INFINITY, f64::min);
-    let max_mass_kg = sequences
-        .iter()
-        .filter_map(|sequence| sequence.points.last().map(|point| point.mass_kg))
-        .fold(f64::NEG_INFINITY, f64::max);
-    if !(min_mass_kg.is_finite() && max_mass_kg.is_finite()) || max_mass_kg < min_mass_kg {
-        return Vec::new();
-    }
-    (0..n_levels)
-        .filter_map(|index| {
-            let mass_kg = if n_levels == 1 {
-                max_mass_kg
-            } else {
-                min_mass_kg + (max_mass_kg - min_mass_kg) * index as f64 / (n_levels - 1) as f64
-            };
-            let mut min_x_m = f64::INFINITY;
-            let mut max_x_m = f64::NEG_INFINITY;
-            for sequence in sequences {
-                if let Some(x_m) = interpolate_x(sequence, mass_kg) {
-                    min_x_m = min_x_m.min(x_m);
-                    max_x_m = max_x_m.max(x_m);
-                }
-            }
-            if !(min_x_m.is_finite() && max_x_m.is_finite()) {
-                return None;
-            }
-            Some(PotatoPoint {
-                mass_kg,
-                min_x_m,
-                max_x_m,
-            })
-        })
-        .collect()
-}
-
-/// Physically compose two sequences end to end: `second` must already start
-/// (its first point) at `first`'s own last point -- i.e. `second` was built
-/// with `first`'s end point as its own `dow` argument. Returns `first`'s
-/// points followed by `second`'s points with that shared junction point not
-/// duplicated.
-///
-/// This is how a cargo sequence and a passenger sequence are chained into
-/// one sequence that starts at the aircraft's true DOW and ends at the true
-/// ZFW (DOW plus *all* payload, not just one category): loading cargo alone
-/// or boarding passengers alone each only carries the aircraft to a partial
-/// mass, so neither one, by itself, is a physical loading order for a
-/// mixed-payload aircraft. Composing both orders (cargo-then-passengers and
-/// passengers-then-cargo, in both directions each) is what
-/// [`crate::loading_sequence`]'s callers are expected to build before
-/// calling [`potato_boundary`] on a mixed-payload layout.
-#[must_use]
-pub fn concat_sequences(
-    name: &str,
-    first: &LoadingSequence,
-    second: &LoadingSequence,
-) -> LoadingSequence {
-    let mut points = first.points.clone();
-    if let (Some(junction), Some(second_first)) = (points.last().copied(), second.points.first()) {
-        let same_junction = (junction.mass_kg - second_first.mass_kg).abs() < 1.0e-6
-            && (junction.x_m - second_first.x_m).abs() < 1.0e-9;
-        let tail = if same_junction {
-            &second.points[1..]
-        } else {
-            &second.points[..]
-        };
-        points.extend_from_slice(tail);
-    } else {
-        points.extend_from_slice(&second.points);
-    }
-    LoadingSequence {
-        name: name.to_owned(),
-        points,
-    }
-}
+// A test asserts on values it constructed or loaded from a fixture it
+// controls, so a failed unwrap or expect there is the assertion failing.
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+#[cfg(test)]
+mod zone_tests;
 
 // A test asserts on values it constructed or loaded from a fixture it
 // controls, so a failed unwrap or expect there is the assertion failing.
@@ -500,7 +368,7 @@ mod tests {
     use crate::layout::{ItemKind, ItemMeta, Mode, PayloadLayout, SeatMeta};
     use crate::layout::{LayoutSummary, MAIN};
 
-    fn seat_row(x: f64, mass_kg: f64, blocks: Vec<i64>) -> DeckItem {
+    pub(super) fn seat_row(x: f64, mass_kg: f64, blocks: Vec<i64>) -> DeckItem {
         let abreast: i64 = blocks.iter().sum();
         DeckItem {
             kind: ItemKind::SeatRow,
@@ -526,7 +394,7 @@ mod tests {
         }
     }
 
-    fn narrowbody_layout(rows: usize) -> PayloadLayout {
+    pub(super) fn narrowbody_layout(rows: usize) -> PayloadLayout {
         let items: Vec<DeckItem> = (0..rows)
             .map(|index| seat_row(10.0 + index as f64, 3.0 * 84.0, vec![3, 3]))
             .collect();
@@ -561,6 +429,9 @@ mod tests {
                 hold_capacity_t: 0.0,
                 hold_used_t: 0.0,
                 hold_ulds: 0,
+                forward_hold_baggage_fraction: 0.0,
+                hold_compartment_masses_kg: Vec::new(),
+                overload_kg: 0.0,
                 aisle_width_m: 0.5,
                 max_abreast: 6,
                 n_aisles: 1,

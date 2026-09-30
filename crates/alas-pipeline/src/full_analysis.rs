@@ -183,6 +183,18 @@ impl AnalysisReport {
             .filter(|value| value.is_finite() && *value > 0.0)
     }
 
+    /// The design landing mass `WLDG`, kg, the sized run designed its gear and
+    /// structure for (including the `ZFW + reserves` floor of the MTOW band
+    /// and payload-adjusted modes); `None` for an unsized report or a sizing
+    /// plan that couples the landing mass to the closure by ratio alone.
+    pub fn design_landing_mass_kg(&self) -> Option<f64> {
+        self.sized_takeoff_mass_kg()?;
+        self.geometry_summary
+            .get("analysis_design_landing_mass_kg")
+            .copied()
+            .filter(|value| value.is_finite() && *value > 0.0)
+    }
+
     /// The takeoff mass a downstream figure or export analyses, in kg: the
     /// sized mass when the report carries one, else the declared
     /// `fallback_mtow_kg` (the unsized, pre-optimization basis).

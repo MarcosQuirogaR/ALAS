@@ -25,9 +25,13 @@ fn a220_search_and_finalist_gate_use_the_same_item_ledger() {
         .model_cg
         .as_ref()
         .unwrap_or_else(|| panic!("finalist item CG envelope unavailable"));
+    // The report also gates the flown landing state, which the search's
+    // closed ledger does not build; the comparison covers the states both
+    // sides evaluate.
     let report_worst = envelope
         .loading_states
         .iter()
+        .filter(|state| state.state != alas_opt::ModelCgLoadingState::AnalyzedLanding)
         .flat_map(|state| state.constraints.iter())
         .filter(|constraint| {
             constraint.constraint == alas_opt::ModelCgConstraint::PhysicalForwardCgLimit

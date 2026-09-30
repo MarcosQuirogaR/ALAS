@@ -6,10 +6,10 @@
 #![allow(clippy::expect_used)]
 
 use super::{
-    assess_loading_constraints, assess_model_cg_envelope, check_cg_envelope,
-    ground_reaction_constraint, is_flight_eligible_state, ledger_basis, loading_states,
-    AftCgLimitGovernance, AftLimitGovernance, ForwardLimitGovernance, LoadingConstraintInputs,
-    ModelCgConstraint, ModelCgEnvelopeError, ModelCgLoadingState, PhysicalCgLimits, StationError,
+    assess_loading_constraints, assess_model_cg_envelope, check_cg_envelope, ledger_basis,
+    loading_states, AftCgLimitGovernance, AftLimitGovernance, ForwardLimitGovernance,
+    LoadingConstraintInputs, ModelCgConstraint, ModelCgEnvelopeError, ModelCgLoadingState,
+    PhaseLimits, PhysicalCgLimits, StationError,
 };
 use alas_config::{AlasConfig, DesignVector};
 use alas_geom::aircraft::airplane::Airplane;
@@ -34,6 +34,7 @@ fn passing_physical_limits() -> PhysicalCgLimits {
         scissor_plot_fwd_pct_mac: 8.0,
         // `fwd_limit_pct_mac` is still governed by `MaxNoseLoadHandling`.
         rotation_fwd_pct_mac: 9.0,
+        rotation_longitudinal_force_shift_pct_mac: 0.0,
         landing_trim_fwd_pct_mac: 9.5,
         usable_range_pct_mac: 80.0,
     }
@@ -265,41 +266,203 @@ fn preferred_static_margin_does_not_replace_the_physical_floor() {
     assert_eq!(assessment.target_static_margin.target, 0.20);
 }
 
+/// The phase of each named state, as a matrix.
 #[test]
-fn oew_is_the_only_state_excluded_from_flight_eligibility() {
-    assert!(!is_flight_eligible_state(
-        ModelCgLoadingState::OperatingEmpty
-    ));
-    for state in [
-        ModelCgLoadingState::AnalyzedZeroFuel,
-        ModelCgLoadingState::OperationalMidMission,
-        ModelCgLoadingState::OperationalReserve,
-        ModelCgLoadingState::AnalyzedTakeoff,
-    ] {
-        assert!(
-            is_flight_eligible_state(state),
-            "{state:?} must remain flight-eligible"
-        );
+fn each_state_maps_to_its_phase_mechanisms() {
+    let cases = [
+        (ModelCgLoadingState::OperatingEmpty, PhaseLimits::GROUND),
+        (ModelCgLoadingState::AnalyzedZeroFuel, PhaseLimits::FLIGHT),
+        (
+            ModelCgLoadingState::OperationalMidMission,
+            PhaseLimits::FLIGHT,
+        ),
+        (ModelCgLoadingState::OperationalReserve, PhaseLimits::FLIGHT),
+        (ModelCgLoadingState::AnalyzedTakeoff, PhaseLimits::TAKEOFF),
+        (ModelCgLoadingState::AnalyzedLanding, PhaseLimits::LANDING),
+    ];
+    for (state, expected) in cases {
+        assert_eq!(PhaseLimits::for_state(state), expected, "{state:?}");
     }
+    // Rotation is scoped to takeoff alone; landing trim to flight and
+    // landing; the static-margin floor to flight, takeoff and landing.
+    let phase = |rotation, landing_trim, static_margin| PhaseLimits {
+        rotation,
+        landing_trim,
+        static_margin,
+    };
+    assert_eq!(PhaseLimits::GROUND, phase(false, false, false));
+    assert_eq!(PhaseLimits::TAKEOFF, phase(true, false, true));
+    assert_eq!(PhaseLimits::FLIGHT, phase(false, true, true));
+    assert_eq!(PhaseLimits::LANDING, phase(false, true, true));
 }
 
 #[test]
-fn ground_reaction_constraint_keeps_gear_checks_and_excludes_flight_cg_checks() {
-    assert!(!ground_reaction_constraint(
-        ModelCgConstraint::StaticStabilityFloor
-    ));
-    assert!(!ground_reaction_constraint(
-        ModelCgConstraint::PhysicalForwardCgLimit
-    ));
-    assert!(ground_reaction_constraint(
-        ModelCgConstraint::NoseGearStrength
-    ));
-    assert!(ground_reaction_constraint(
-        ModelCgConstraint::MainGearStrength
-    ));
-    assert!(ground_reaction_constraint(
-        ModelCgConstraint::MinimumNoseGearLoad
-    ));
+fn a_ground_only_phase_keeps_gear_checks_and_excludes_flight_cg_checks() {
+    for constraint in [
+        ModelCgConstraint::StaticStabilityFloor,
+        ModelCgConstraint::PhysicalForwardCgLimit,
+        ModelCgConstraint::MinimumUsableCgRange,
+    ] {
+        assert!(!PhaseLimits::GROUND.admits(constraint), "{constraint:?}");
+        assert!(PhaseLimits::FLIGHT.admits(constraint), "{constraint:?}");
+        assert!(PhaseLimits::TAKEOFF.admits(constraint), "{constraint:?}");
+    }
+    assert!(PhaseLimits::LANDING.admits(ModelCgConstraint::StaticStabilityFloor));
+    assert!(PhaseLimits::LANDING.admits(ModelCgConstraint::PhysicalForwardCgLimit));
+    for constraint in [
+        ModelCgConstraint::NoseGearStrength,
+        ModelCgConstraint::MainGearStrength,
+        ModelCgConstraint::MinimumNoseGearLoad,
+        ModelCgConstraint::MaximumNoseGearLoadFraction,
+        ModelCgConstraint::TipBack,
+        ModelCgConstraint::TailScrape,
+    ] {
+        for phase in [
+            PhaseLimits::GROUND,
+            PhaseLimits::FLIGHT,
+            PhaseLimits::TAKEOFF,
+            PhaseLimits::LANDING,
+        ] {
+            assert!(phase.admits(constraint), "{phase:?} {constraint:?}");
+        }
+    }
+}
+
+/// Per-state matrix on a real assessment with a landing state: every state
+/// carries its own phase-scoped limits, and its forward-limit constraint is
+/// gated against exactly that state's own forward limit.
+#[test]
+fn every_state_is_gated_against_its_own_phase_scoped_limits() {
+    let config = AlasConfig::default();
+    let plane = AircraftBuilder::new(Some(config.geometry.clone()))
+        .build(Some(&DesignVector::default()), false)
+        .expect("default geometry");
+    let (masses, coordinates, cg) = run_mass_analysis(
+        &plane,
+        &config.requirements,
+        &config.geometry,
+        Some(&config.mass_model),
+        None,
+    );
+    let (oew_mass, oew_cg_x) = alas_payload::oew::oew_and_cg(&masses, &coordinates);
+    let oew_cg_z = super::support::oew_cg_z(&masses, &coordinates);
+    let states = super::operational_loading_states_with_z(
+        oew_mass,
+        oew_cg_x,
+        oew_cg_z,
+        masses.payload,
+        coordinates.payload[0],
+        coordinates.payload[2],
+        masses.fuel,
+        coordinates.fuel[0],
+        coordinates.fuel[2],
+        cg[0],
+    );
+    let point = |wanted: ModelCgLoadingState| {
+        states
+            .iter()
+            .copied()
+            .find(|(state, _, _, _)| *state == wanted)
+            .expect("named state")
+    };
+    let (_, oew_x, oew_z, oew_m) = point(ModelCgLoadingState::OperatingEmpty);
+    let (_, zfw_x, zfw_z, zfw_m) = point(ModelCgLoadingState::AnalyzedZeroFuel);
+    let (_, tow_x, tow_z, tow_m) = point(ModelCgLoadingState::AnalyzedTakeoff);
+    let (_, ldg_x, ldg_z, ldg_m) = point(ModelCgLoadingState::OperationalReserve);
+    let basis = super::LedgerLoadingBasis {
+        oew_mass_kg: oew_m,
+        oew_cg_x_m: oew_x,
+        oew_cg_z_m: oew_z,
+        zero_fuel_mass_kg: zfw_m,
+        zero_fuel_cg_x_m: zfw_x,
+        zero_fuel_cg_z_m: zfw_z,
+        takeoff_mass_kg: tow_m,
+        takeoff_cg_x_m: tow_x,
+        takeoff_cg_z_m: tow_z,
+    };
+    let x_np = cg[0] + 0.10 * plane.c_ref;
+    let landing = super::LedgerLandingState {
+        mass_kg: ldg_m,
+        cg_x_m: ldg_x,
+        cg_z_m: ldg_z,
+    };
+    let assessment = super::assess_model_cg_envelope_with_ledger_and_landing(
+        &plane,
+        basis,
+        Some(landing),
+        x_np,
+        x_np,
+        plane.c_ref,
+        &config,
+    )
+    .expect("assessment with a landing state");
+    let without_landing = super::assess_model_cg_envelope_with_ledger(
+        &plane,
+        basis,
+        x_np,
+        x_np,
+        plane.c_ref,
+        &config,
+    )
+    .expect("assessment without a landing state");
+
+    let names: Vec<_> = assessment.loading_states.iter().map(|s| s.state).collect();
+    assert_eq!(names.last(), Some(&ModelCgLoadingState::AnalyzedLanding));
+    assert_eq!(names.len(), without_landing.loading_states.len() + 1);
+    // The landing state changes neither the envelope-wide values nor any
+    // other state's verdicts.
+    assert_eq!(
+        assessment.configured_forward_limit_pct_mac,
+        without_landing.configured_forward_limit_pct_mac
+    );
+    assert_eq!(
+        &assessment.loading_states[..names.len() - 1],
+        &without_landing.loading_states[..]
+    );
+
+    for state in &assessment.loading_states {
+        let phase = PhaseLimits::for_state(state.state);
+        let limits = state.physical_limits;
+        assert_eq!(
+            limits,
+            limits.scoped(phase),
+            "{:?} limits are not scoped",
+            state.state
+        );
+        let (fwd, _) = limits.fwd_for(phase);
+        assert_eq!(limits.fwd_limit_pct_mac, fwd);
+        // The envelope-wide limit is at least as aft as every scoped one.
+        assert!(limits.fwd_limit_pct_mac <= assessment.configured_forward_limit_pct_mac + 1.0e-9);
+        let forward = state
+            .constraints
+            .iter()
+            .find(|c| c.constraint == ModelCgConstraint::PhysicalForwardCgLimit);
+        match forward {
+            Some(constraint) => {
+                assert!(phase.rotation || phase.landing_trim);
+                assert_eq!(constraint.limit, limits.fwd_limit_pct_mac);
+            }
+            None => assert_eq!(phase, PhaseLimits::GROUND),
+        }
+        let has_floor = state
+            .constraints
+            .iter()
+            .any(|c| c.constraint == ModelCgConstraint::StaticStabilityFloor);
+        assert_eq!(has_floor, phase.static_margin, "{:?}", state.state);
+        for constraint in &state.constraints {
+            assert!(phase.admits(constraint.constraint));
+        }
+        match state.state {
+            ModelCgLoadingState::AnalyzedTakeoff => assert!(
+                limits.fwd_limit_pct_mac >= limits.rotation_fwd_pct_mac - 1.0e-9
+                    && limits.fwd_limit_pct_mac >= limits.max_nose_load_fwd_pct_mac - 1.0e-9
+            ),
+            ModelCgLoadingState::OperatingEmpty => {
+                assert_eq!(limits.fwd_limit_pct_mac, limits.max_nose_load_fwd_pct_mac);
+            }
+            _ => assert!(limits.fwd_limit_pct_mac >= limits.landing_trim_fwd_pct_mac - 1.0e-9),
+        }
+    }
 }
 
 /// Bare OEW must not fail `PhysicalForwardCgLimit`, a flight constraint,
@@ -349,7 +512,7 @@ fn bare_oew_keeps_ground_checks_but_not_flight_cg_constraints() {
     assert!(
         oew_constraint_kinds
             .iter()
-            .all(|constraint| ground_reaction_constraint(*constraint)),
+            .all(|constraint| PhaseLimits::GROUND.admits(*constraint)),
         "bare OEW must keep only ground-reaction/gear-capacity constraints, got {oew_constraint_kinds:?}"
     );
     assert!(oew_constraint_kinds.contains(&ModelCgConstraint::MinimumNoseGearLoad));
@@ -795,57 +958,72 @@ fn the_a320_200_aerodynamic_aft_limit_is_not_the_governing_one() {
         }
     }
 
-    // The measured band, pinned so a future geometry, gear-anchor or
-    // neutral-point change that closes or widens it is a visible result
-    // rather than a silent one. The tolerance is loose enough to survive
-    // floating-point drift and tight enough that a centimetre-scale
-    // station change shows up.
-    //
-    // The forward boundary's governing mechanism is the most aft of the
-    // rotation (nose-wheel liftoff), landing-trim-in-ground-effect and
-    // maximum-nose-load candidates; the scissor-plot estimate is only a
-    // diagnostic (5.050 %MAC here). The rotation criterion governs this
-    // layout, so `configured_forward_limit_pct_mac` sits aft of that
-    // diagnostic estimate.
-    for (measured, expected, name) in [
-        (assessment.main_gear_station_pct_mac, 58.322, "main gear"),
-        (
-            assessment.aerodynamic_aft_limit_pct_mac,
-            70.197,
-            "aerodynamic aft limit",
-        ),
-        (
-            assessment.ground_aft_limit_pct_mac,
-            40.237,
-            "ground minimum-nose-load aft boundary",
-        ),
-        (
-            // Rotation criterion with the elevator-limited tail lift
-            // coefficient (no clamp).
-            assessment.configured_forward_limit_pct_mac,
-            23.533,
-            "configured forward limit",
-        ),
-        (
-            assessment.scissor_plot_fwd_limit_pct_mac,
-            5.050,
-            "scissor-plot forward estimate (diagnostic only)",
-        ),
-    ] {
-        assert!(
-            (measured - expected).abs() < 5.0e-3,
-            "{name}: {measured:.4} % MAC against the pinned {expected:.3} % MAC"
-        );
-    }
-    // The overhang is not the plain aerodynamic-minus-ground gap
-    // (29.960 %MAC): with the registered MRW sized through, `TipBack`
-    // governs instead of `GroundMinimumNoseLoad`, and its own overhang is
-    // measured against the more forward of the aerodynamic and ground
-    // boundaries, both pinned above.
+    // Published and physical references, not copies of model output. Frame:
+    // x metres aft of the nose tip, % MAC from LEMAC.
+    let mac_frame = plane.mac_frame().expect("a main wing");
+    let to_m = |pct_mac: f64| mac_frame.x_lemac_m + pct_mac / 100.0 * plane.c_ref;
+
+    // The registered main-gear station is Airbus' 17.71 m nose-tip drawing
+    // dimension [S Airbus A320 Aircraft Characteristics AC, section 2].
     assert!(
-        (assessment.aft_limit_governance.overhang_pct_mac() - 3.015_2).abs() < 5.0e-3,
-        "overhang: {:.4} % MAC against the pinned 3.0152 % MAC",
-        assessment.aft_limit_governance.overhang_pct_mac()
+        (to_m(assessment.main_gear_station_pct_mac) - 17.71).abs() < 0.30,
+        "main gear at {:.2} m against the published 17.71 m",
+        to_m(assessment.main_gear_station_pct_mac)
+    );
+    // The ground minimum-nose-load aft boundary reproduces the published A320
+    // aft CG limit of 40 % MAC [S Airbus A320 ACAP pavement-analysis range
+    // 17 to 40 % MAC]; the residual is the model's 6 % minimum nose load
+    // against the aircraft's own (engineering estimate, 2 % MAC band).
+    assert!(
+        (assessment.ground_aft_limit_pct_mac - 40.0).abs() < 2.0,
+        "ground aft limit {:.2} % MAC against the published 40 %",
+        assessment.ground_aft_limit_pct_mac
+    );
+    // The configured forward limit (rotation at V_R with the elevator-limited
+    // tail lift) against the published 17 % MAC forward limit [S ACAP]; the
+    // model is conservative (more aft) by a few percent MAC [E, 3 % MAC band].
+    assert!(
+        (assessment.configured_forward_limit_pct_mac - 17.0).abs() < 3.0,
+        "forward limit {:.2} % MAC against the published 17 %",
+        assessment.configured_forward_limit_pct_mac
+    );
+    // Thrust and rolling friction push the rotation limit aft of the bare
+    // moment balance: a nose-down pitching moment of the thrust line and
+    // ground friction, so the shift carries a negative sign here.
+    let shift = assessment
+        .loading_states
+        .iter()
+        .find(|state| state.state == ModelCgLoadingState::AnalyzedTakeoff)
+        .expect("analyzed takeoff state")
+        .physical_limits
+        .rotation_longitudinal_force_shift_pct_mac;
+    assert!(
+        shift < 0.0,
+        "thrust and rolling-friction shift {shift} % MAC"
+    );
+    // By definition the aerodynamic aft limit is the critical neutral point
+    // less the physical static-margin floor.
+    let np_pct = 100.0 * (x_np - mac_frame.x_lemac_m) / plane.c_ref;
+    assert!(
+        (assessment.aerodynamic_aft_limit_pct_mac
+            - (np_pct - 100.0 * config.requirements.min_physical_static_margin))
+            .abs()
+            < 1.0e-6,
+        "aerodynamic aft limit {:.3} % MAC, neutral point {np_pct:.3} % MAC",
+        assessment.aerodynamic_aft_limit_pct_mac
+    );
+    // The forward limit sits forward of every aft limit.
+    assert!(
+        assessment.configured_forward_limit_pct_mac < assessment.ground_aft_limit_pct_mac,
+        "the usable CG range must be positive"
+    );
+    // Tip-back governs here: the overhang past the more forward of the
+    // aerodynamic and ground boundaries is positive and of the order of a few
+    // percent MAC [E, below 10 % MAC].
+    let overhang = assessment.aft_limit_governance.overhang_pct_mac();
+    assert!(
+        overhang > 0.0 && overhang < 10.0,
+        "overhang {overhang:.3} % MAC"
     );
     // The scissor-plot estimate is diagnostic only and not a
     // governance candidate, so the governing forward limit need not

@@ -179,8 +179,10 @@ fn the_declared_minimum_window_keeps_both_the_dock_and_a_readable_form() {
 #[test]
 fn the_tlar_values_are_painted_inside_the_clip_rectangle_on_a_narrow_window() {
     // The capture's concrete loss: the three TLAR editors showed no value at
-    // all. AVE's defaults are Mach 0.84, 11887 m and 358670 kg.
-    let output = render_inputs(NARROW, None);
+    // all. AVE's defaults are Mach 0.84, 11887 m and 358670 kg. The MTOW
+    // editor sits on the card after the requirements, so the window is
+    // tall enough to hold both.
+    let output = render_inputs((NARROW.0, 1400.0), None);
     let mut painted = Vec::new();
     fn walk(shape: &Shape, clip: Rect, painted: &mut Vec<String>) {
         match shape {
@@ -288,5 +290,6 @@ fn spanish_keeps_the_narrow_layout_and_the_blocking_reason_readable() {
     let output = output.expect("two rendered frames");
     alas_i18n::set_language(Some("en"));
     assert!(widest_painted_edge(&output) <= NARROW.0 + 0.5);
-    assert!(horizontally_clipped_text(&output).is_empty());
+    let clipped = horizontally_clipped_text(&output);
+    assert!(clipped.is_empty(), "clipped Spanish text: {clipped:?}");
 }

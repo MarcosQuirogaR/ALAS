@@ -41,6 +41,14 @@ pub struct DragSettings {
     /// evaluations use `true`; frozen translation fixtures may set `false`
     /// to replay the historical direct coefficient sum explicitly.
     pub area_weighted_compressibility: bool,
+    /// Whether the ESDU 94044 excrescence fit is held at its vertex value
+    /// (about 2075 m2 of wetted area) beyond its peak. The fit is a downward
+    /// parabola that turns negative near 4150 m2, so unclamped a very large
+    /// aircraft gets a negative excrescence drag. The mission stage sets `true`
+    /// in Product mode; `Default` and [`Self::reference_compatibility`] keep the
+    /// raw fit because the frozen parity fixtures (wetted areas above the
+    /// vertex) are evaluated with it.
+    pub clamp_excrescence_fit: bool,
 }
 
 impl Default for DragSettings {
@@ -54,6 +62,7 @@ impl Default for DragSettings {
             spoiler_drag_increment: 0.0,
             lift_to_drag_adjustment: 0.0,
             area_weighted_compressibility: true,
+            clamp_excrescence_fit: false,
         }
     }
 }
@@ -68,6 +77,7 @@ impl DragSettings {
     pub fn reference_compatibility() -> Self {
         Self {
             area_weighted_compressibility: false,
+            clamp_excrescence_fit: false,
             ..Self::default()
         }
     }

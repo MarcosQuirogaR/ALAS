@@ -12,9 +12,14 @@ use alas_config::airports::get as get_airport;
 use alas_config::design_variables::DesignVector;
 use alas_config::AlasConfig;
 use alas_exec::RunEnvironment;
+use alas_mission::SegmentKind;
 use alas_pipeline::{DesignPipeline, FullAnalysis, PipelineOptions};
 use alas_route::route::{Route, RouteSource, Waypoint, EARTH_RADIUS_M};
 use serde::Deserialize;
+
+/// Tag suffix Product mission guidance gives the upper piece of a climb split
+/// at its saturation altitude (`mission_stage::guidance`).
+const UPPER_CLIMB_TAG_SUFFIX: &str = "_upper";
 
 #[derive(Debug, Deserialize)]
 struct Fixture {
@@ -211,7 +216,33 @@ fn public_native_mission_matches_pinned_provenance_checkpoints() {
         * 1000.0;
     assert!((rated_total_thrust_n - 934_000.0).abs() < 1.0e-9);
 
-    assert_eq!(mission.segments.len(), fixture.solver.segment_count);
+    // The fixture records the SUAVE reference schedule. Product guidance may
+    // split a climb that saturates the throttle part way up into a lower piece
+    // that keeps the scheduled tag and an upper piece tagged `<tag>_upper`
+    // (repeated splits append the suffix again). Compare like with like: merge
+    // every upper piece back into the scheduled segment it came from, and
+    // require every extra flown segment to be exactly such a split.
+    assert_eq!(mission.scheduled_segment_count, mission.segments.len());
+    assert_eq!(mission.solutions.len(), mission.segments.len());
+    let mut scheduled_tags: Vec<&str> = Vec::new();
+    for segment in &mission.segments {
+        let tag = segment.spec.tag.as_str();
+        let parent = tag.trim_end_matches(UPPER_CLIMB_TAG_SUFFIX);
+        if parent.len() == tag.len() {
+            scheduled_tags.push(tag);
+            continue;
+        }
+        assert!(
+            matches!(segment.spec.kind, SegmentKind::Climb { .. }),
+            "only a climb may be split at its saturation altitude: {tag}"
+        );
+        assert_eq!(
+            scheduled_tags.last().copied(),
+            Some(parent),
+            "upper piece {tag} must directly follow the pieces of its scheduled climb"
+        );
+    }
+    assert_eq!(scheduled_tags.len(), fixture.solver.segment_count);
     assert!(mission.solutions.iter().all(|solution| solution.converged));
     assert_eq!(
         mission.segments[0].conditions.len(),

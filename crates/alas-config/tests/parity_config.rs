@@ -465,6 +465,16 @@ fn product_default_correction(path: &str) -> Option<(Value, Value)> {
     // most configured presets, where it rarely governed anything.
     else if path.ends_with(".pct_load_nlg_min") || path == "MassModelConfig.pct_load_nlg_min" {
         Some((serde_json::json!(0.02), serde_json::json!(0.06)))
+    }
+    // The unconfigured defaults build the AVE long-range twin, and its
+    // landing ratio is now its 777-9 benchmark (Boeing D6-86073 Rev G Table
+    // 2-1) instead of the frozen unsourced 0.92; see
+    // `alas_config::landing_mass_ratio::LONG_HAUL_MLW_FRACTION_MTOW`.
+    else if path.ends_with(".mlw_fraction_mtow") || path == "MassModelConfig.mlw_fraction_mtow" {
+        Some((
+            serde_json::json!(0.92),
+            serde_json::json!(alas_config::landing_mass_ratio::LONG_HAUL_MLW_FRACTION_MTOW),
+        ))
     } else {
         None
     }
@@ -760,6 +770,7 @@ fn is_native_config_field(path: &str, key: &str) -> bool {
                 | "rotation_pitch_acceleration_deg_s2"
                 | "pitch_radius_of_gyration_frac_mac"
                 | "cl_ground_attitude_frac_of_cl_max_to"
+                | "rotation_rolling_friction_coefficient"
         ) && (path.ends_with("LandingGearConfig") || path.ends_with(".landing_gear")))
         // Condition-specific OEI evidence fields are native additions; the
         // frozen Python schema predates them. Their optional/default
@@ -792,6 +803,11 @@ fn is_native_config_field(path: &str, key: &str) -> bool {
                 | "part_power_fuel_flow_ratios"
                 | "part_power_source"
         ) && (path.ends_with("EngineConfig") || path.ends_with(".engine")))
+        // The baggage split policy and declared hold compartments are native
+        // product additions; both are omitted from serialization at their
+        // defaults, so the frozen default tree is unchanged.
+        || (matches!(key, "baggage_policy" | "hold_compartments")
+            && (path.ends_with("CargoDeckConfig") || path.ends_with(".cargo")))
         || (key == "exclude_buried_main_wing_area"
             && (path.ends_with("DragModelConfig") || path.ends_with(".drag_model")))
         || (matches!(

@@ -82,7 +82,7 @@ impl AeroAnalysis<'_> {
     /// that panel area is not itself exposed across the crate boundary.
     /// Falls back to [`Self::wing_section_thickness`] for a wing with fewer
     /// than two cross-sections, where no panel exists to weight.
-    pub(super) fn area_weighted_thickness(wing: &Wing) -> f64 {
+    pub fn area_weighted_thickness(wing: &Wing) -> f64 {
         // Each section's thickness is sampled once; interior sections bound
         // two panels and would otherwise be sampled twice.
         let samples = linspace(0.0, 1.0, MAX_THICKNESS_SAMPLES);

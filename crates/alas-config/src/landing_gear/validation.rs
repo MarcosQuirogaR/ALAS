@@ -151,6 +151,16 @@ impl LandingGearConfig {
             }
         }
 
+        let friction = self.rotation_rolling_friction_coefficient;
+        if !friction.is_finite() || !(0.0..1.0).contains(&friction) {
+            errors.push((
+                "landing_gear.rotation_rolling_friction_coefficient".to_owned(),
+                format!(
+                    "Rolling friction coefficient at rotation ({friction:?}) must be finite, non-negative and below one."
+                ),
+            ));
+        }
+
         errors
     }
 }

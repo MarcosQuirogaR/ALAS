@@ -117,7 +117,7 @@ pub(super) fn select_load_case(
     let limits = DispatchLimits {
         mtow_kg: config.requirements.mtow_kg,
         mzfw_kg: None,
-        mlw_kg: Some(config.landing_mass_limit_kg(config.requirements.mtow_kg)),
+        mlw_kg: Some(crate::feasibility::landing_mass_limit_kg(config, report)),
         usable_capacity_kg: fuel_loading.usable_capacity.capacity_kg,
     };
     let range_m = request.route_distance_m;

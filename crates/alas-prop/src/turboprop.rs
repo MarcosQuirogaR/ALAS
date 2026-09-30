@@ -23,8 +23,10 @@ mod model;
 #[cfg(test)]
 use model::*;
 mod evidence;
+mod ratings;
 mod system;
 pub use evidence::*;
+use ratings::isa_temperature_from_density_k;
 pub use system::*;
 
 #[cfg(test)]
@@ -148,10 +150,172 @@ mod tests {
 
         assert!(sea_level_power_w > intermediate_power_w);
         assert!(intermediate_power_w > fl170_power_w);
+        // Was `(0.70 / 1.225)^0.75`, a lapse from sea-level ISA with an
+        // aircraft-calibrated exponent. The climb rating now shares the
+        // maximum-continuous flat-rating corner (sea-level pressure at 48 C,
+        // TCDS IM.E.041) and lapses with Nita's PW120 exponent 0.728 below it.
+        let corner_kg_m3 = 1.225 * 288.15 / 321.15;
+        assert!(
+            (model.flat_rating_corner_density_kg_m3(Pw127mRating::MaximumClimb) - corner_kg_m3)
+                .abs()
+                < 1e-12
+        );
         assert_eq!(
             fl170_power_w,
-            model.maximum_climb_power_w * (0.70_f64 / 1.225).powf(0.75)
+            model.maximum_climb_power_w * (0.70_f64 / corner_kg_m3).powf(0.728)
         );
+    }
+
+    /// The TCDS flat rating: take-off power is available unchanged at sea
+    /// level up to 39 C and maximum-continuous power up to 48 C; above that
+    /// corner the density lapse takes over, and it is continuous there.
+    #[test]
+    fn ratings_are_flat_to_the_tcds_temperatures_and_lapse_beyond_them() {
+        let model = Pw127m568fModel::default();
+        // Sea-level pressure at an ambient temperature, as a density.
+        let sea_level_density = |temperature_k: f64| 1.225 * 288.15 / temperature_k;
+        let takeoff =
+            |density: f64| model.available_shaft_power_w(Pw127mRating::NormalTakeoff, density);
+        let continuous =
+            |density: f64| model.available_shaft_power_w(Pw127mRating::MaximumContinuous, density);
+        // ISA, ISA+15 and exactly 39 C: the whole take-off rating.
+        for temperature_k in [288.15, 303.15, 312.15] {
+            assert_eq!(
+                takeoff(sea_level_density(temperature_k)),
+                model.normal_takeoff_power_w
+            );
+        }
+        // 44 C is past the take-off corner but inside the continuous one.
+        let hot = sea_level_density(317.15);
+        assert!(takeoff(hot) < model.normal_takeoff_power_w);
+        assert_eq!(continuous(hot), model.maximum_continuous_power_w);
+        assert!(continuous(sea_level_density(325.15)) < model.maximum_continuous_power_w);
+        // Continuous across the corner.
+        let corner = model.flat_rating_corner_density_kg_m3(Pw127mRating::NormalTakeoff);
+        let just_below = takeoff(corner * (1.0 - 1e-9));
+        assert!((just_below / model.normal_takeoff_power_w - 1.0).abs() < 1e-8);
+        // The corner as an ISA altitude is about 810 m for take-off and
+        // 1,110 m for maximum continuous: flat rating that ends low, as a
+        // sea-level temperature limit implies.
+        let corner_temperature_k = isa_temperature_from_density_k(corner, 1.225);
+        let corner_altitude_m = (288.15 - corner_temperature_k) / 0.0065;
+        assert!(
+            (700.0..900.0).contains(&corner_altitude_m),
+            "{corner_altitude_m}"
+        );
+    }
+
+    /// PSFC is flat in power setting and scales as `sqrt(T / T_ref)`
+    /// (Majeed 2009, SRS-TSD-002 Tab. 4.1-4.3), from a reference inside
+    /// the source's 0.28-0.31 kg/kWh band.
+    #[test]
+    fn psfc_is_flat_in_power_and_scales_with_the_root_of_ambient_temperature() {
+        let model = Pw127m568fModel::default();
+        assert!((0.28..=0.31).contains(&model.psfc_reference_kg_kwh));
+        let at = |temperature_k: f64, rating: Pw127mRating, power_fraction: f64| {
+            model
+                .evaluate_at_temperature(
+                    TurbopropCondition {
+                        density_kg_m3: 0.72,
+                        true_airspeed_m_s: 130.0,
+                    },
+                    temperature_k,
+                    TurbopropCommand {
+                        rating,
+                        power_fraction,
+                        mode: TurbopropMode::Governed,
+                        propeller_speed_rpm: model.governed_propeller_speed_rpm,
+                    },
+                )
+                .unwrap()
+        };
+        let reference = at(254.4, Pw127mRating::MaximumCruise, 1.0);
+        for (rating, fraction) in [
+            (Pw127mRating::MaximumCruise, 0.46),
+            (Pw127mRating::MaximumClimb, 0.8),
+            (Pw127mRating::NormalTakeoff, 1.0),
+        ] {
+            let output = at(254.4, rating, fraction);
+            assert_eq!(output.psfc_kg_kwh, reference.psfc_kg_kwh);
+            assert!(
+                (output.fuel_flow_kg_s
+                    - output.engine_shaft_power_w * output.psfc_kg_kwh / JOULES_PER_KWH)
+                    .abs()
+                    < 1e-15
+            );
+        }
+        let cold = at(230.0, Pw127mRating::MaximumCruise, 1.0).psfc_kg_kwh;
+        let warm = at(270.0, Pw127mRating::MaximumCruise, 1.0).psfc_kg_kwh;
+        assert!(cold < reference.psfc_kg_kwh && reference.psfc_kg_kwh < warm);
+        assert!((warm / cold - (270.0_f64 / 230.0).sqrt()).abs() < 1e-12);
+        // Independent check at sea level: Majeed Tab. 3.2 measures 0.322-0.328
+        // kg/kWh at normal take-off power, which this relation reaches from a
+        // cruise reference to within 3 %.
+        let sea_level = model.psfc_kg_kwh(288.15);
+        assert!((0.312..=0.338).contains(&sea_level), "{sea_level}");
+        // Outside the relation's temperature basis the model refuses.
+        assert!(model
+            .evaluate_at_temperature(
+                TurbopropCondition {
+                    density_kg_m3: 0.72,
+                    true_airspeed_m_s: 130.0,
+                },
+                f64::NAN,
+                nominal_command(),
+            )
+            .is_err());
+    }
+
+    /// Momentum-theory static thrust grows with power and density, and the
+    /// thrust at constant power falls monotonically as the propeller
+    /// accelerates, from the figure-of-merit static value into `eta_p P / V`.
+    #[test]
+    fn static_thrust_follows_momentum_theory_and_falls_monotonically_with_speed() {
+        let model = Pw127m568fModel::default();
+        let at = |density_kg_m3: f64, true_airspeed_m_s: f64, power_fraction: f64| {
+            model
+                .evaluate(
+                    TurbopropCondition {
+                        density_kg_m3,
+                        true_airspeed_m_s,
+                    },
+                    TurbopropCommand {
+                        rating: Pw127mRating::NormalTakeoff,
+                        power_fraction,
+                        mode: TurbopropMode::Governed,
+                        propeller_speed_rpm: model.governed_propeller_speed_rpm,
+                    },
+                )
+                .unwrap()
+        };
+        let mut previous = 0.0;
+        for fraction in [0.4, 0.6, 0.8, 1.0] {
+            let thrust = at(1.225, 0.0, fraction).total_thrust_n;
+            assert!(thrust > previous);
+            previous = thrust;
+        }
+        assert!(at(1.1, 0.0, 1.0).total_thrust_n < at(1.225, 0.0, 1.0).total_thrust_n);
+        // FM 0.70 on the ATR's 3.93 m disc at 2,475 shp: about 37 kN per
+        // engine (46.7 kN ideal).
+        let static_n = at(1.225, 0.0, 1.0).total_thrust_n;
+        assert!((34_000.0..40_000.0).contains(&static_n), "{static_n}");
+        let mut previous = f64::INFINITY;
+        for step in 0..=60 {
+            let speed_m_s = 2.5 * f64::from(step);
+            let output = at(1.225, speed_m_s, 1.0);
+            assert!(
+                output.total_thrust_n <= previous,
+                "thrust rises at {speed_m_s} m/s"
+            );
+            previous = output.total_thrust_n;
+            if speed_m_s > 0.0 {
+                // Never above the forward-flight blend `eta_p P / V`.
+                assert!(
+                    output.total_thrust_n * speed_m_s
+                        <= model.maximum_propulsive_efficiency * output.propeller_power_w + 1e-6
+                );
+            }
+        }
     }
 
     #[test]
@@ -177,8 +341,12 @@ mod tests {
         assert_eq!(output.engine_shaft_power_w, 1_400_000.0);
     }
 
+    /// Was `cruise_fuel_anchor_reproduces_the_published_aircraft_flow`, which
+    /// pinned the constant-PSFC calibration to 762 kg/h to 1e-9. The flow is
+    /// now shaft power times the class PSFC at the ISA temperature of the
+    /// density, and the published point is not reproduced by construction.
     #[test]
-    fn cruise_fuel_anchor_reproduces_the_published_aircraft_flow() {
+    fn cruise_fuel_flow_is_shaft_power_times_the_class_psfc() {
         let model = Pw127m568fModel::default();
         let command = TurbopropCommand {
             rating: Pw127mRating::MaximumCruise,
@@ -186,27 +354,33 @@ mod tests {
             mode: TurbopropMode::Governed,
             propeller_speed_rpm: model.governed_propeller_speed_rpm,
         };
-        let reference_output = model
-            .evaluate(
-                TurbopropCondition {
-                    density_kg_m3: model.fuel_reference_density_kg_m3,
-                    true_airspeed_m_s: 140.0,
-                },
-                command,
-            )
-            .unwrap();
-        let sea_level_output = model
-            .evaluate(
-                TurbopropCondition {
-                    density_kg_m3: model.power_lapse_reference_density_kg_m3,
-                    true_airspeed_m_s: 140.0,
-                },
-                command,
-            )
-            .unwrap();
-
-        assert!((2.0 * reference_output.fuel_flow_kg_s * 3_600.0 - 762.0).abs() < 1.0e-9);
-        assert!(sea_level_output.fuel_flow_kg_s > reference_output.fuel_flow_kg_s);
+        let at = |density_kg_m3: f64| {
+            model
+                .evaluate(
+                    TurbopropCondition {
+                        density_kg_m3,
+                        true_airspeed_m_s: 140.0,
+                    },
+                    command,
+                )
+                .unwrap()
+        };
+        let cruise = at(model.fuel_reference_density_kg_m3);
+        let sea_level = at(model.power_lapse_reference_density_kg_m3);
+        let cruise_temperature_k = isa_temperature_from_density_k(0.70, 1.225);
+        // ISA 0.70 kg/m^3 is about FL180, 252.4 K.
+        assert!((cruise_temperature_k - 252.4).abs() < 0.3);
+        assert_eq!(cruise.psfc_kg_kwh, model.psfc_kg_kwh(cruise_temperature_k));
+        assert!(
+            (cruise.fuel_flow_kg_s
+                - cruise.engine_shaft_power_w * cruise.psfc_kg_kwh / JOULES_PER_KWH)
+                .abs()
+                < 1e-15
+        );
+        // More power and a warmer day at sea level: more fuel, and a higher
+        // specific consumption.
+        assert!(sea_level.fuel_flow_kg_s > cruise.fuel_flow_kg_s);
+        assert!(sea_level.psfc_kg_kwh > cruise.psfc_kg_kwh);
     }
 
     /// A propeller that reaches the ideal actuator-disk bound has no profile
@@ -359,8 +533,10 @@ mod tests {
         assert!(output.power_balance_residual_w.abs() < 1.0e-8);
         let reconstructed_power = output.propeller_torque_n_m * 2.0 * PI * 20.0;
         assert!((reconstructed_power - output.propeller_power_w).abs() < 1.0e-8);
-        let expected_fuel = output.engine_shaft_power_w * model.reference_psfc_kg_kwh
-            / model.power_lapse_fraction(model.fuel_reference_density_kg_m3)
+        // Was the constant calibrated PSFC; now the class PSFC at the ISA
+        // temperature of the evaluated density.
+        let expected_fuel = output.engine_shaft_power_w
+            * model.psfc_kg_kwh(isa_temperature_from_density_k(1.0, 1.225))
             / JOULES_PER_KWH;
         assert!((output.fuel_flow_kg_s - expected_fuel).abs() < 1.0e-12);
     }
@@ -763,7 +939,7 @@ mod tests {
         let density_kg_m3 = 0.95;
         let revolutions_s = model.governed_propeller_speed_rpm / 60.0;
         let engine_power_w = model.rated_shaft_power_w(Pw127mRating::FlightIdleSurrogate)
-            * model.power_lapse_fraction(density_kg_m3);
+            * model.power_lapse_fraction(Pw127mRating::FlightIdleSurrogate, density_kg_m3);
         let propeller_power_w =
             (engine_power_w - model.accessory_power_w) * model.gearbox_efficiency;
         let advance_ratio_at_100 = 100.0 / (revolutions_s * model.propeller_diameter_m);
@@ -955,12 +1131,13 @@ mod tests {
         assert!(field.provenance.contains("568F"));
     }
 
-    /// The declared bands must have the sign the evidence gives them: the
-    /// static thrust can only be lower than modelled because its figure of
-    /// merit sits at the optimistic end of its band, and the forward-flight
-    /// thrust can only be higher because its blade efficiency sits at the
-    /// conservative end of a different one. A band that pointed both ways
-    /// would be a guess, not a reading of the evidence.
+    /// The declared bands must have the sign the evidence gives them. The
+    /// static figure of merit is now the class preliminary-design 0.70 inside
+    /// a 0.65-0.80 band (it was 0.72 at the optimistic end of an older
+    /// 0.50-0.70 band, so the static band was one-sided), so the static thrust
+    /// band points both ways; the forward-flight thrust can still only be
+    /// higher, because its blade efficiency sits at the conservative end of
+    /// its band.
     #[test]
     fn the_declared_thrust_bands_carry_the_sign_their_evidence_gives_them() {
         let model = Pw127m568fModel::default();
@@ -969,25 +1146,34 @@ mod tests {
             .unwrap();
 
         let static_band = field.static_thrust_uncertainty;
-        assert_eq!(static_band.relative_high, 0.0);
-        // (0.50 / 0.72)^(2/3) - 1.
-        assert!((static_band.relative_low - (-0.215_803_3)).abs() < 1e-6);
+        // (0.65 / 0.70)^(2/3) - 1 and (0.80 / 0.70)^(2/3) - 1.
+        assert!((static_band.relative_low - (-0.048_205)).abs() < 1e-5);
+        assert!((static_band.relative_high - 0.093_103).abs() < 1e-5);
 
         let forward_band = field.forward_flight_thrust_uncertainty;
         assert_eq!(forward_band.relative_low, 0.0);
         // 0.91 / 0.86 - 1.
         assert!((forward_band.relative_high - 0.058_139_5).abs() < 1e-6);
 
-        // A model already at the optimistic end of both bands must be given
-        // no band at all rather than a fabricated symmetric one.
-        let mut bounded = model;
-        bounded.static_figure_of_merit = 0.50;
-        bounded.blade_efficiency_cruise = 0.91;
-        let bounded = bounded
-            .field_performance(1.225, Pw127mRating::NormalTakeoff, 59.2)
-            .unwrap();
-        assert_eq!(bounded.static_thrust_uncertainty.relative_low, 0.0);
-        assert_eq!(bounded.forward_flight_thrust_uncertainty.relative_high, 0.0);
+        // A model already at an end of a band is given nothing beyond it
+        // rather than a fabricated symmetric band.
+        for (figure_of_merit, low_is_zero) in [(0.65, true), (0.80, false)] {
+            let mut bounded = model;
+            bounded.static_figure_of_merit = figure_of_merit;
+            bounded.blade_efficiency_cruise = 0.91;
+            let bounded = bounded
+                .field_performance(1.225, Pw127mRating::NormalTakeoff, 59.2)
+                .unwrap();
+            let band = bounded.static_thrust_uncertainty;
+            if low_is_zero {
+                assert_eq!(band.relative_low, 0.0);
+                assert!(band.relative_high > 0.0);
+            } else {
+                assert_eq!(band.relative_high, 0.0);
+                assert!(band.relative_low < 0.0);
+            }
+            assert_eq!(bounded.forward_flight_thrust_uncertainty.relative_high, 0.0);
+        }
     }
 
     /// The envelope is only honest if the evaluator actually enforces it: a
@@ -1045,20 +1231,30 @@ mod tests {
         assert!(envelope.fuel_validity.contains("762 kg/h"));
     }
 
-    /// The one aircraft-level datum the fuel model has must be reproduced
-    /// exactly, and nothing in this lane's propeller work may disturb it: the
-    /// blade-efficiency correction changed thrust, not shaft power, so the
-    /// published 762 kg/h must still come back to the gram.
+    /// Replaces `the_published_cruise_fuel_flow_anchor_is_reproduced_exactly`
+    /// and `the_implied_fuel_consumption_is_constant_and_its_excess_is_quantified`,
+    /// which pinned the single-point calibration (762 kg/h to the gram, a
+    /// constant 0.3646 kg/kWh 21-28 % above measured PW120A data). The
+    /// published flow is now a validation point: the model is evaluated
+    /// against it, and moving the published datum does not move the model.
     #[test]
-    fn the_published_cruise_fuel_flow_anchor_is_reproduced_exactly() {
+    fn the_published_cruise_fuel_flow_is_a_validation_point_not_a_fit() {
         let model = Pw127m568fModel::default();
-        let calibration = model.fuel_calibration();
-        let cruise = model
-            .evaluate(
+        let validation = model.fuel_validation().unwrap();
+        assert!((validation.published_total_fuel_flow_kg_s * 3_600.0 - 762.0).abs() < 1e-6);
+        assert_eq!(validation.published_engine_count, 2);
+        assert!(!validation.altitude_is_published);
+
+        // The modelled number is exactly the evaluator's at the stated point.
+        let temperature_k =
+            isa_temperature_from_density_k(model.fuel_reference_density_kg_m3, 1.225);
+        let point = model
+            .evaluate_at_temperature(
                 TurbopropCondition {
                     density_kg_m3: model.fuel_reference_density_kg_m3,
                     true_airspeed_m_s: model.operating_envelope().maximum_cruise_true_airspeed_m_s,
                 },
+                temperature_k,
                 TurbopropCommand {
                     rating: Pw127mRating::MaximumCruise,
                     power_fraction: 1.0,
@@ -1067,81 +1263,44 @@ mod tests {
                 },
             )
             .unwrap();
-        let both_engines_kg_h = 2.0 * cruise.fuel_flow_kg_s * 3_600.0;
         assert!(
-            (both_engines_kg_h - 762.0).abs() < 1e-3,
-            "published anchor is 762 kg/h for both engines, got {both_engines_kg_h}"
+            (validation.modelled_total_fuel_flow_kg_s - 2.0 * point.fuel_flow_kg_s).abs() < 1e-12
         );
-        assert_eq!(calibration.anchor_engine_count, 2);
+        // An engine-level comparison inside the lapse relation's own 5-10 %
+        // rms scatter plus the unpublished altitude: within 15 %.
         assert!(
-            (calibration.anchor_total_fuel_flow_kg_s * 3_600.0 - 762.0).abs() < 1e-9,
-            "the typed anchor must be the same number the model reproduces"
+            validation.relative_error.abs() < 0.15,
+            "modelled {:.0} kg/h against 762 kg/h",
+            validation.modelled_total_fuel_flow_kg_s * 3_600.0
         );
-    }
-
-    /// The fuel model is one constant, and the contract has to say so in a way
-    /// a consumer can act on rather than in prose only.
-    #[test]
-    fn the_implied_fuel_consumption_is_constant_and_its_excess_is_quantified() {
-        let model = Pw127m568fModel::default();
-        let calibration = model.fuel_calibration();
-
-        // `reference_psfc_kg_kwh` is not a PSFC. The distinction is the whole
-        // point of the field's documentation and is worth 52 % of the number.
         assert!(
-            (model.implied_psfc_kg_kwh() - 0.364_630).abs() < 1e-6,
-            "{}",
-            model.implied_psfc_kg_kwh()
+            (validation.source_psfc_band_kg_kwh.0..=validation.source_psfc_band_kg_kwh.1)
+                .contains(&model.psfc_reference_kg_kwh)
         );
-        assert!(model.implied_psfc_kg_kwh() > 1.5 * model.reference_psfc_kg_kwh);
+        // Higher is thinner and colder: less power and a lower PSFC, so less
+        // fuel, monotonically across the flight levels the aircraft uses.
+        let errors: Vec<f64> = validation
+            .altitude_sensitivity
+            .iter()
+            .map(|entry| entry.1)
+            .collect();
+        assert!(
+            errors.windows(2).all(|pair| pair[1] < pair[0]),
+            "{errors:?}"
+        );
 
-        // Flat across the whole envelope: same value at sea-level take-off, at
-        // cruise and at flight idle. If a future fuel deck ever varies it,
-        // this assertion is the one that has to be rewritten deliberately.
-        let at = |density_kg_m3: f64, true_airspeed_m_s: f64, rating: Pw127mRating| {
-            model
-                .evaluate(
-                    TurbopropCondition {
-                        density_kg_m3,
-                        true_airspeed_m_s,
-                    },
-                    TurbopropCommand {
-                        rating,
-                        power_fraction: 1.0,
-                        mode: TurbopropMode::Governed,
-                        propeller_speed_rpm: model.governed_propeller_speed_rpm,
-                    },
-                )
-                .unwrap()
-                .psfc_kg_kwh
+        // Not a fit: halving the published datum changes the comparison and
+        // leaves the engine's fuel flow untouched.
+        let other = Pw127m568fModel {
+            reference_psfc_kg_kwh: 0.5 * model.reference_psfc_kg_kwh,
+            ..model
         };
-        let sea_level_takeoff = at(1.225, 0.0, Pw127mRating::NormalTakeoff);
-        let cruise = at(0.70, 141.47, Pw127mRating::MaximumCruise);
-        let low_power = at(1.0, 100.0, Pw127mRating::FlightIdleSurrogate);
-        assert_eq!(sea_level_takeoff, cruise);
-        assert_eq!(cruise, low_power);
-        assert!(!calibration.psfc_varies_with_condition);
-
-        // The excess over measurement is computed, not asserted in prose.
-        let (low, high) = calibration.relative_excess_over_measured;
-        assert!((low - 0.283_9).abs() < 1e-3, "{low}");
-        assert!((high - 0.207_4).abs() < 1e-3, "{high}");
-        assert!(calibration.measured_psfc_band_kg_kwh.0 < calibration.implied_psfc_kg_kwh);
-
-        // The anchor's altitude is not published, and the model says so rather
-        // than presenting the assumed density as a datum.
-        assert!(!calibration.anchor_altitude_is_published);
-        let spread = calibration.anchor_altitude_sensitivity;
-        assert!(spread.len() >= 3);
-        let lowest = spread.iter().map(|entry| entry.1).fold(f64::MAX, f64::min);
-        let highest = spread.iter().map(|entry| entry.1).fold(f64::MIN, f64::max);
-        assert!(
-            highest / lowest > 1.2,
-            "the undeclared anchor altitude is worth more than a rounding error"
+        let other_validation = other.fuel_validation().unwrap();
+        assert_eq!(
+            other_validation.modelled_total_fuel_flow_kg_s,
+            validation.modelled_total_fuel_flow_kg_s
         );
-        // And the declared assumption sits inside the range it spans.
-        assert!(calibration.implied_psfc_kg_kwh > lowest);
-        assert!(calibration.implied_psfc_kg_kwh < highest);
+        assert!((other_validation.published_total_fuel_flow_kg_s * 3_600.0 - 381.0).abs() < 1e-6);
     }
 
     /// A shut-down engine burns nothing; the specific consumption of nothing

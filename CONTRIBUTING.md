@@ -35,8 +35,25 @@ tests that use them are marked `#[ignore]` and run with
 
 ## Before you push
 
-1. `cargo xtask gate` passes. It runs formatting, lints, tests and the
-   repository checks described below, and it is what the pre-commit hook runs.
+1. The gate passes. It has three tiers:
+   - `cargo xtask gate --quick` on every change: the repository checks and
+     formatting, then lints and the fast tests of only the packages your
+     changes affect (and their dependents). The pre-commit hook runs this.
+     `--base <ref>` sets what "changed" is measured against (default
+     `origin/dev`).
+   - `cargo xtask gate` at phase integration and in CI: the repository checks,
+     formatting, lints, and every test in the workspace.
+   - `cargo xtask gate --slow`: only the slow tests, on their own.
+
+   The tiers need [cargo-nextest](https://nexte.st):
+   `cargo install cargo-nextest --locked`. `cargo nextest run` runs the fast
+   tier and `cargo nextest run --profile full` everything; the split is defined
+   in `.config/nextest.toml`. Without nextest the gate still works but falls
+   back to `cargo test` and cannot separate the slow tests.
+
+   Doctests are not used: the gate does not run them, and the repository checks
+   reject a doc example that rustdoc would run. Put the test in a unit test and
+   mark illustrative snippets `text` or `ignore`.
 2. If you touched anything numerical, say in the commit body **what changed in
    the output and why**. "No change expected" is a valid and useful claim; say
    it so a reviewer knows to verify it.

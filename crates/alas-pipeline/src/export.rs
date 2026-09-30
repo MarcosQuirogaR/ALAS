@@ -715,7 +715,11 @@ mod tests {
             assert!(maximum_credit_wing > 0.0 && maximum_credit_wing < baseline_wing);
             assert_eq!(
                 exported["equation_methods"]["cabin_equipment"],
-                "lth_civil_transport_v1"
+                if name == "ATR72-600" {
+                    "regional_turboprop_v1"
+                } else {
+                    "lth_civil_transport_v1"
+                }
             );
             let propulsion = exported["equation_methods"]["installed_propulsion"]
                 .as_str()

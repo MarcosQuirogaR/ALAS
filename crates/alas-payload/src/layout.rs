@@ -269,6 +269,14 @@ pub struct PassengerSummary {
     pub hold_used_t: f64,
     /// Containers used in the holds.
     pub hold_ulds: i64,
+    /// Share of the net hold mass in compartments ahead of the wing box, 0 to
+    /// 1. Zero when the holds are empty.
+    pub forward_hold_baggage_fraction: f64,
+    /// Net baggage and freight mass per compartment, kg, forward to aft.
+    pub hold_compartment_masses_kg: Vec<(String, f64)>,
+    /// Mass stowed above the compartment limits, kg. It is carried, never
+    /// dropped, so a positive value means the compartments are overfull.
+    pub overload_kg: f64,
     /// The aisle width laid out against.
     pub aisle_width_m: f64,
     /// The widest row placed.

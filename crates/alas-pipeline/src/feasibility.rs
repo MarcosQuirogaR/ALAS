@@ -32,6 +32,8 @@ mod fuel;
 mod mass_balance;
 mod model_cg;
 mod operational_envelope;
+mod payload_findings;
+mod phase_limits;
 mod planning;
 mod report_format;
 mod reported_attitude;
@@ -45,7 +47,9 @@ pub use acceptance::{
 };
 pub(crate) use cruise_equilibrium::assess as assess_cruise_equilibrium;
 pub use cruise_equilibrium::CruiseEquilibriumAssessment;
-pub use design_mass::{design_mass_config, design_vn_diagram, design_vn_mass_kg};
+pub use design_mass::{
+    design_mass_config, design_vn_diagram, design_vn_mass_kg, landing_mass_limit_kg,
+};
 pub use dispatch::{DispatchAssessment, DispatchOutcome};
 pub(crate) use fuel::plan_fuel_loading;
 pub use fuel::{
@@ -60,6 +64,7 @@ pub use operational_envelope::{
     append_envelope_findings, assess_operational_envelope, balance_index, CheckedPoint,
     OperationalEnvelopeAssessment,
 };
+pub use phase_limits::CheckedPhase;
 use planning::assess_public_cg_reference;
 #[cfg(test)]
 use planning::{assess_reference_limits, planning_cg_pct_mac};
@@ -225,43 +230,7 @@ pub fn assess_physical_feasibility_with_load_case(
         model_cg.as_ref(),
         operational_envelope.as_ref(),
     );
-    if let Some(alas_payload::layout::LayoutSummary::Passenger(summary)) =
-        report.payload_layout.as_ref().map(|layout| &layout.summary)
-    {
-        if summary.unseated_pax > 0 {
-            findings.push(error(
-                FindingCode::PassengerCapacityShortfall,
-                format!(
-                    "passenger payload leaves {} requested passengers without seats",
-                    summary.unseated_pax
-                ),
-                Some(summary.seated_pax as f64),
-                Some(summary.total_pax as f64),
-                "passengers",
-            ));
-        }
-    }
-    if let Some(alas_payload::layout::LayoutSummary::Cargo(summary)) =
-        report.payload_layout.as_ref().map(|layout| &layout.summary)
-    {
-        let requested_net_kg = summary.requested_net_payload_t * 1_000.0;
-        let loaded_net_kg = summary.loaded_net_payload_t * 1_000.0;
-        if requested_net_kg.is_finite()
-            && loaded_net_kg.is_finite()
-            && loaded_net_kg + 1.0e-6 < requested_net_kg
-        {
-            findings.push(error(
-                FindingCode::CargoCapacityShortfall,
-                format!(
-                    "cargo layout delivers {:.1} kg net against {:.1} kg requested",
-                    loaded_net_kg, requested_net_kg
-                ),
-                Some(loaded_net_kg),
-                Some(requested_net_kg),
-                "kg net",
-            ));
-        }
-    }
+    payload_findings::append_payload_findings(report, &mut findings);
 
     if matches!(
         cg_envelope.planning_status,
@@ -362,7 +331,6 @@ pub fn assess_physical_feasibility_with_load_case(
         .copied()
         .or(Some(report.airplane.s_ref))
         .unwrap_or(f64::NAN);
-    let mtow_kg = config.requirements.mtow_kg;
     let takeoff_mass_kg = fuel_loading.analyzed_takeoff_mass_kg;
     let gravity_m_s2 = config.requirements.gravity_m_s2;
     // The installed sea-level reference thrust, taken from whichever physical
@@ -409,7 +377,7 @@ pub fn assess_physical_feasibility_with_load_case(
             unit: "fraction weight",
         });
     }
-    let mlw_limit_kg = config.landing_mass_limit_kg(mtow_kg);
+    let mlw_limit_kg = landing_mass_limit_kg(config, report);
     let landing_mass_kg = fuel_loading
         .analyzed_landing_mass_kg
         .unwrap_or(mlw_limit_kg.min(takeoff_mass_kg));
@@ -499,18 +467,12 @@ pub fn assess_physical_feasibility_with_load_case(
             config.performance.cl_max_to,
             oei_condition,
         );
-        if cruise_required_tw.is_finite() && static_tw < cruise_required_tw {
-            findings.push(error(
-                FindingCode::ThrustMarginViolation,
-                format!(
-                    "cruise requires static T/W {:.4}, but the configured rating provides {:.4}",
-                    cruise_required_tw, static_tw
-                ),
-                Some(static_tw),
-                Some(cruise_required_tw),
-                "T/W",
-            ));
-        }
+        findings.extend(static_thrust::cruise_thrust_margin(
+            config,
+            static_tw,
+            cruise_required_tw,
+            takeoff_mass_kg * gravity_m_s2,
+        ));
         // An in-flight OEI estimate is useful as a diagnostic, but it is not
         // dimensionally comparable with the SLS axis used here. Only the
         // shared assessor's condition-specific SLS result may create a hard

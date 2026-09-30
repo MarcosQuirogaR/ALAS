@@ -45,7 +45,11 @@ fn seats(summary: &PassengerSummary, class: &str) -> i64 {
 
 #[test]
 fn the_report_flops_cabin_is_the_cabin_the_layout_seated() {
-    let config = AlasConfig::from_value(&serde_json::json!({ "preset": "A320-200" })).unwrap();
+    let mut config = AlasConfig::from_value(&serde_json::json!({ "preset": "A320-200" })).unwrap();
+    // The registered seed equals the 150-seat planning cabin the layout seats,
+    // so a different seed is set to keep the synchronization below from
+    // passing by coincidence of equal numbers.
+    config.requirements.num_passengers = 120;
     let preset = presets::get("A320-200").unwrap();
     let report = FullAnalysis::new(config.clone())
         .run(&preset.design_vector, true)
@@ -65,9 +69,8 @@ fn the_report_flops_cabin_is_the_cabin_the_layout_seated() {
         usize::try_from(summary.seated_pax).unwrap(),
         "the FLOPS cabin must be the seated cabin"
     );
-    // The registered seed count differs from the seated cabin on this
-    // preset, so the synchronization above is load-bearing rather than a
-    // coincidence of equal numbers.
+    // The seed count differs from the seated cabin, so the synchronization
+    // above is load-bearing rather than a coincidence of equal numbers.
     assert_ne!(config.requirements.num_passengers, summary.seated_pax);
     assert!(
         (buildup.masses.payload - layout.total_mass).abs() < 1.0e-6,
@@ -263,16 +266,13 @@ fn a_declared_cabin_the_shell_cannot_seat_keeps_its_shortfall_visible() {
         summary.seated_pax,
         seats(summary, "First") + seats(summary, "Economy")
     );
-    // The shortfall is attributable: the declared total exceeds both the
-    // registered certified capacity and, before it, the floor the shell has
-    // at the declared pitch, so what binds is cabin length rather than the
-    // exit rating the summary reports alongside it.
+    // The shortfall is attributable: the declared total exceeds the ceiling
+    // the fixed aircraft carries, which is the 150-seat planning cabin (below
+    // the 180-seat certified exit limit), and the row pass stops exactly
+    // there.
     assert!(summary.total_pax > summary.max_certifiable_capacity);
-    assert!(
-        summary.seated_pax < summary.max_certifiable_capacity,
-        "floor, not the {} seat certified ceiling, binds at this pitch",
-        summary.max_certifiable_capacity
-    );
+    assert_eq!(summary.max_certifiable_capacity, 150);
+    assert_eq!(summary.seated_pax, summary.max_certifiable_capacity);
 
     // Installed equipment is priced as declared: a shortfall is an occupancy
     // finding, not a lighter cabin.

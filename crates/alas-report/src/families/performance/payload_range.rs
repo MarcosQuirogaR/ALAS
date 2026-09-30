@@ -11,12 +11,11 @@
 //! the inputs here prevents a renderer from quietly reverting to a plausible
 //! transport-sized set of points when the aircraft or its fuel model changes.
 
-use alas_atmo::Atmosphere;
-use alas_config::{presets, ActiveEngineModel, AlasConfig};
+use alas_config::{presets, AlasConfig};
 use alas_mass::breakdown::OEW_KEYS;
-use alas_perf::performance::breguet_range_m;
 use alas_pipeline::feasibility::{assess_fuel_capacity, FuelCapacityEvidence};
 use alas_pipeline::full_analysis::AnalysisReport;
+use alas_pipeline::quick_analysis::corners::{corner_ranges, CornerMasses, RangeBasis};
 use alas_pipeline::quick_analysis::payload_capacity_estimate;
 
 use super::support::format_thousands;
@@ -24,7 +23,6 @@ use crate::chart_kit::draw_title;
 use crate::scene::{Axes2D, Color, Fill, Scene, SceneElement, Stroke, TextAlign, TextBaseline};
 use crate::theme::get_palette;
 
-const G: f64 = 9.81;
 const M_TO_NM: f64 = 1852.0;
 const BLUE: &str = "tab:blue";
 
@@ -33,7 +31,8 @@ const BLUE: &str = "tab:blue";
 pub struct PayloadRangePoint {
     /// Which corner of the A-B-C-D curve this is.
     pub label: &'static str,
-    /// Still-air Breguet range at this corner, nautical miles.
+    /// Still-air range at this corner, nautical miles (see
+    /// [`PayloadRangeData::range_basis`]).
     pub range_nm: f64,
     /// Payload carried at this corner, kilograms.
     pub payload_kg: f64,
@@ -62,7 +61,13 @@ pub struct PayloadRangeData {
     /// True when `mtow_kg` is the pipeline's sized takeoff mass rather than
     /// the declared MTOW.
     pub mass_is_sized: bool,
-    /// Range method and its provenance.
+    /// Reserve fuel the plan holds back at each corner (A to D), kilograms;
+    /// zero at A and on the no-reserve fallback.
+    pub reserve_fuel_kg: [f64; 4],
+    /// What the ranges include: the reserve-inclusive fuel plan, or the
+    /// labelled Breguet fallback.
+    pub range_basis: RangeBasis,
+    /// Range method and its provenance, including the fuel scheme.
     pub method_note: String,
 }
 
@@ -213,6 +218,16 @@ pub fn figure_payload_range(
         angle_deg: 0.0,
         bold: false,
     });
+    scene.add(SceneElement::Text {
+        text: format!("Range basis: {}", data.range_basis.label()),
+        pos: [axes.left + axes.width * 0.5, axes.top + axes.height + 70.0],
+        font_size: 7.5,
+        color: Color::from_hex(pal.tick),
+        align: TextAlign::Center,
+        baseline: TextBaseline::Bottom,
+        angle_deg: 0.0,
+        bold: false,
+    });
     scene
 }
 
@@ -270,7 +285,7 @@ pub fn payload_range_data(
     let (max_payload_kg, payload_basis) = (capacity.capacity_kg, capacity.basis);
 
     let fuel_capacity = assess_fuel_capacity(config, &report.design, report);
-    let fuel_capacity_kg = fuel_capacity
+    let tank_capacity_kg = fuel_capacity
         .capacity_kg
         .filter(|value| value.is_finite())?;
     let fuel_capacity_limit = match fuel_capacity.evidence {
@@ -279,85 +294,43 @@ pub fn payload_range_data(
         FuelCapacityEvidence::Unavailable => "unavailable",
     };
     let structural_capacity_kg = (mtow_kg - oew_kg).max(0.0);
-    let (fuel_capacity_kg, fuel_capacity_limit) = if fuel_capacity_kg <= structural_capacity_kg {
-        (fuel_capacity_kg, fuel_capacity_limit)
+    let (fuel_capacity_kg, fuel_capacity_limit) = if tank_capacity_kg <= structural_capacity_kg {
+        (tank_capacity_kg, fuel_capacity_limit)
     } else {
         (structural_capacity_kg, "MTOW budget")
     };
 
-    let l_over_d = report
-        .trimmed_design_point
-        .as_ref()
-        .map(|point| point.l_over_d)
-        .unwrap_or(report.design_point.l_over_d);
-    let atmo = Atmosphere::new(config.requirements.cruise_altitude_m);
-    let tas_m_s = config.requirements.cruise_mach * atmo.speed_of_sound();
-    let active_model = config.geometry.engine.active_model().ok()?;
-    let (range_nm, method_note): (Box<dyn Fn(f64, f64) -> f64>, String) = match active_model {
-        ActiveEngineModel::Turbofan(spec) => {
-            let tsfc_si = spec.cruise_tsfc_kg_kgf_hr / (G * 3600.0);
-            (
-                Box::new(move |start_kg, end_kg| {
-                    breguet_range_m(tas_m_s, l_over_d, tsfc_si, start_kg, end_kg) / M_TO_NM
-                }),
-                // Keep the stable figure label generic; the engine family is
-                // already explicit in the typed calculation branch and the
-                // footer's limitation warning.
-                "CONCEPTUAL BREGUET RANGE ONLY".to_owned(),
-            )
-        }
-        ActiveEngineModel::Turboprop(spec) => {
-            // The catalogue anchor is a two-engine figure; scale it with the
-            // installed engine count so an edited installation changes range.
-            let installed = config.geometry.engine.spanwise_positions_m.len();
-            let fuel_flow_kg_h = spec.installed_cruise_fuel_flow_kg_h(installed)?;
-            if !fuel_flow_kg_h.is_finite() || fuel_flow_kg_h <= 0.0 {
-                return None;
-            }
-            (Box::new(move |start_kg, end_kg| tas_m_s * 3600.0 * (start_kg - end_kg).max(0.0) / fuel_flow_kg_h / M_TO_NM), format!("CONCEPTUAL TURBOPROP CONSTANT-FLOW RANGE AT MAX-CRUISE ANCHOR ({fuel_flow_kg_h:.0} kg/h TOTAL); NO OFF-DESIGN DECK"))
-        }
-    };
-
-    let fuel_b = fuel_capacity_kg
-        .min(mtow_kg - oew_kg - max_payload_kg)
-        .max(0.0);
-    let tow_b = oew_kg + max_payload_kg + fuel_b;
-    let payload_c = (mtow_kg - oew_kg - fuel_capacity_kg)
-        .min(max_payload_kg)
-        .max(0.0);
-    let tow_c = oew_kg + payload_c + fuel_capacity_kg;
-    let tow_d = oew_kg + fuel_capacity_kg;
+    // The ranges come from the same routine the sandbox Quick Analysis uses,
+    // so both surfaces publish one set of corners for one report.
+    let ranges = corner_ranges(
+        config,
+        report,
+        &CornerMasses {
+            mtow_kg,
+            oew_kg,
+            max_payload_kg,
+            tank_capacity_kg,
+        },
+    )
+    .ok()?;
+    let labels = ["A", "B", "C", "D"];
+    let points = std::array::from_fn(|index| PayloadRangePoint {
+        label: labels[index],
+        range_nm: ranges.range_m[index] / M_TO_NM,
+        payload_kg: ranges.payload_kg[index],
+    });
 
     Some(PayloadRangeData {
-        points: [
-            PayloadRangePoint {
-                label: "A",
-                range_nm: 0.0,
-                payload_kg: max_payload_kg,
-            },
-            PayloadRangePoint {
-                label: "B",
-                range_nm: range_nm(tow_b, tow_b - fuel_b),
-                payload_kg: max_payload_kg,
-            },
-            PayloadRangePoint {
-                label: "C",
-                range_nm: range_nm(tow_c, tow_c - fuel_capacity_kg),
-                payload_kg: payload_c,
-            },
-            PayloadRangePoint {
-                label: "D",
-                range_nm: range_nm(tow_d, oew_kg),
-                payload_kg: 0.0,
-            },
-        ],
+        points,
         fuel_capacity_kg,
         fuel_capacity_limit,
         payload_basis,
         oew_kg,
         mass_is_sized: report.sized_takeoff_mass_kg().is_some(),
         mtow_kg,
-        method_note,
+        reserve_fuel_kg: ranges.reserve_fuel_kg,
+        range_basis: ranges.basis,
+        method_note: ranges.note,
     })
 }
 

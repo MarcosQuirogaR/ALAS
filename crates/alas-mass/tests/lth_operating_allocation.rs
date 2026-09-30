@@ -12,9 +12,9 @@ use alas_mass::statement::{LoadState, MassStatement, MassStatementInputs};
 use alas_mass::stations::component_stations_with_gear;
 
 #[test]
-fn atr_lth_crew_is_allocated_to_cockpit_without_changing_operating_total() {
-    let config = AlasConfig::from_value(&serde_json::json!({"preset": "ATR72-600"})).unwrap();
-    let design = presets::get("ATR72-600").unwrap().design_vector;
+fn lth_crew_is_allocated_to_cockpit_without_changing_operating_total() {
+    let config = AlasConfig::from_value(&serde_json::json!({"preset": "A320-200"})).unwrap();
+    let design = presets::get("A320-200").unwrap().design_vector;
     let plane = AircraftBuilder::new(Some(config.geometry.clone()))
         .build(Some(&design), true)
         .unwrap();
@@ -54,7 +54,7 @@ fn atr_lth_crew_is_allocated_to_cockpit_without_changing_operating_total() {
         .unwrap()
     };
     let flops = &groups.systems_and_operating_items;
-    assert!((flops.operating_items.total_kg - 32.907 * 72_f64.powf(1.021)).abs() < 1e-8);
+    assert!((flops.operating_items.total_kg - 32.907 * 150_f64.powf(1.021)).abs() < 1e-8);
     // Eq.120: two pilots at225lb/person including baggage; the LTH source
     // includes crew, so allocating this known count does not add OEW.
     let pilot_mass = 2.0 * 225.0 * 0.453_592_37;

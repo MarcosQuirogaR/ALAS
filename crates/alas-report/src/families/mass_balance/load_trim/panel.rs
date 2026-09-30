@@ -4,11 +4,45 @@
 //! Side panel of the load-and-trim sheet: limit key, worked loading case
 //! as an additive index table, and method notes.
 
+use super::layers::{limit_style, LimitKind};
 use super::render::{tag, text, Ink};
 use super::{LoadTrimSheetData, SHEET_W};
 use crate::scene::{Fill, Scene, SceneElement, Stroke, TextAlign};
 
 const ROW: f64 = 17.0;
+
+/// Key text of each limit set. Static strings so the desktop catalog can
+/// translate them.
+/// Each entry is a title line and a mechanism line, one line each so they
+/// translate as whole strings.
+pub(super) const LIMIT_KEY: [(LimitKind, &str, &str); 4] = [
+    (
+        LimitKind::Ground,
+        "Ground limits (dashed), DOW to ramp mass",
+        "Fwd max nose load; aft min nose load, tip-back",
+    ),
+    (
+        LimitKind::Takeoff,
+        "Takeoff limits (solid), takeoff-mass band",
+        "Fwd rotation; aft static-margin floor",
+    ),
+    (
+        LimitKind::Flight,
+        "Flight limits (dotted)",
+        "Fwd landing trim; aft static-margin floor",
+    ),
+    (
+        LimitKind::Landing,
+        "Landing limits (dash-dot), up to landing mass",
+        "Fwd landing trim; aft ground mechanisms",
+    ),
+];
+/// Key text of the shaded field.
+pub(super) const KEY_SHADE: &str = "Do not operate (outside ground limits)";
+/// Key text of the boarding potato.
+pub(super) const KEY_POTATO: &str = "Boarding potato: CG range of the composed orders";
+/// Key text of a thin loading-order line.
+pub(super) const KEY_ORDER: &str = "One composed order: cargo, passengers, fuel";
 
 /// Group thousands with a space: 78000 -> "78 000".
 pub(super) fn kg(value: f64) -> String {
@@ -72,40 +106,26 @@ pub(super) fn draw_panel(scene: &mut Scene, data: &LoadTrimSheetData, ink: &Ink,
     let mut y = y;
 
     // Limit key.
-    let key: [(&str, String); 3] = [
-        (
-            "A",
-            format!(
-                "Forward limit, takeoff/landing and zero fuel ({})",
-                data.governance[0]
-            ),
-        ),
-        (
-            "B",
-            format!("Aft limit, takeoff/landing ({})", data.governance[1]),
-        ),
-        (
-            "C",
-            "Aft limit, zero fuel: fuelling from any ZFW aft of C would cross B".to_owned(),
-        ),
-    ];
     let mut lines = Vec::new();
-    for (letter, label) in &key {
-        for (k, l) in wrap(label, 50).into_iter().enumerate() {
-            lines.push((if k == 0 { Some(*letter) } else { None }, l));
-        }
+    for (kind, title, detail) in LIMIT_KEY {
+        lines.push((Some(kind), title, 0.0));
+        lines.push((None, detail, 10.0));
     }
-    let key_h = 30.0 + ROW * (lines.len() as f64 + 2.4);
+    let key_h = 30.0 + ROW * (lines.len() as f64 + 4.4);
     boxed(scene, ink, x, y, w, key_h, "LIMIT DEFINITIONS");
     let mut ly = y + 34.0;
-    for (letter, l) in &lines {
-        if let Some(letter) = letter {
-            tag(scene, [x + 20.0, ly], letter, ink.paper, ink.text, ink.text);
+    for (kind, l, indent) in &lines {
+        if let Some(kind) = kind {
+            scene.add(SceneElement::Line {
+                p1: [x + 8.0, ly],
+                p2: [x + 30.0, ly],
+                stroke: limit_style(*kind, ink.text),
+            });
         }
         text(
             scene,
-            l.clone(),
-            [x + 36.0, ly],
+            *l,
+            [x + 36.0 + indent, ly],
             10.5,
             ink.text,
             TextAlign::Left,
@@ -124,7 +144,7 @@ pub(super) fn draw_panel(scene: &mut Scene, data: &LoadTrimSheetData, ink: &Ink,
     });
     text(
         scene,
-        "Do not operate (outside limits)",
+        KEY_SHADE,
         [x + 36.0, ly],
         10.5,
         ink.text,
@@ -145,7 +165,24 @@ pub(super) fn draw_panel(scene: &mut Scene, data: &LoadTrimSheetData, ink: &Ink,
     });
     text(
         scene,
-        "Loading envelope: every boarding/hold order",
+        KEY_POTATO,
+        [x + 36.0, ly],
+        10.5,
+        ink.text,
+        TextAlign::Left,
+        false,
+    );
+    ly += ROW;
+    let mut thin = ink.envelope;
+    thin.a = 160;
+    scene.add(SceneElement::Line {
+        p1: [x + 8.0, ly],
+        p2: [x + 30.0, ly],
+        stroke: Stroke::new(thin, 0.8),
+    });
+    text(
+        scene,
+        KEY_ORDER,
         [x + 36.0, ly],
         10.5,
         ink.text,

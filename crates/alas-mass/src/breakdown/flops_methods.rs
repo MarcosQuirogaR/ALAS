@@ -4,7 +4,8 @@
 //! The FLOPS-based product mass buildup.
 //!
 //! The eight operating-empty slots use FLOPS grouping, with explicitly
-//! selected LTH cabin/pylon relations and a shaft-power installation branch.
+//! selected LTH cabin/pylon relations, the regional turboprop systems relation
+//! and a shaft-power installation branch.
 //! The resolved buildup retains those equation sources. It is independent of
 //! the Torenbeek/fraction comparison buildup. The mapping into the
 //! ALAS slots is fixed here:
@@ -15,7 +16,7 @@
 //! | Fuselage + paint (eqs. 56, 68) | `fuselage` |
 //! | Installed propulsion + **nacelles** (eqs. 73-92, 136) | `propulsion` |
 //! | Systems and equipment less furnishings (eq. 138) | `systems` |
-//! | Furnishings `WFURN` + operating items `WOPIT` (eqs. 138, 140) | `furnishings` |
+//! | Furnishings `WFURN` (regional turboprop: Torenbeek group less the other eight terms) + operating items `WOPIT` (eqs. 138, 140) | `furnishings` |
 //! | Empty-mass margin `WMARG` (eq. 139) | `systems` |
 //!
 //! **Nacelles are charged to `propulsion` and to nothing else.** FLOPS prints

@@ -170,7 +170,6 @@ fn reviewed_fixed_design_config() -> AlasConfig {
 /// therefore pins the structure (reviewable, not promotable, with a named
 /// reason) and the residual that actually binds.
 #[test]
-#[ignore = "F-07 forward-CG limit rejects 6/8 presets; pending mass/CG calibration"]
 fn fixed_design_review_exposes_its_binding_constraint_without_promoting_a_finalist() {
     let mut config = reviewed_fixed_design_config();
     // The corrected pair-rated exit layout seats the complete default
@@ -337,15 +336,18 @@ fn a_passenger_brief_is_reconciled_to_what_the_cabin_seats_rather_than_constrain
 }
 
 #[test]
-#[ignore = "F-07 forward-CG limit rejects 6/8 presets; pending mass/CG calibration"]
 fn diagnostic_policies_deliver_a_bounded_baseline_when_requirements_are_missed() {
-    // Every requirement family is diagnostic, so the wing-area miss is
-    // reported on the finalist rather than making the search infeasible.
-    let mut config = AlasConfig::default();
+    // Every requirement family is diagnostic, so a missed minimum wing loading
+    // is reported on the finalist rather than making the search infeasible. The
+    // registered A220-300 is the baseline because its design passes the hard
+    // takeoff-rotation gate that the default clean-sheet design fails; no hard
+    // requirement (such as the wing-area limit) is set.
+    let mut config = AlasConfig::from_value(&serde_json::json!({ "preset": "A220-300" }))
+        .expect("A220-300 preset configuration");
     config.optimizer.solver.method = alas_config::optimizer::PRODUCT_DE_METHOD.to_owned();
     config.mission.enabled = false;
     config.structures.enabled = false;
-    config.requirements.max_wing_area_m2 = 1.0;
+    config.requirements.min_wing_loading_kg_m2 = 2_000.0;
     let diagnostic = alas_config::ConstraintPolicy::Diagnostic;
     config.optimizer.objective.mass_constraints = diagnostic;
     config.optimizer.objective.balance_constraints = diagnostic;
@@ -356,7 +358,9 @@ fn diagnostic_policies_deliver_a_bounded_baseline_when_requirements_are_missed()
     config.optimizer.solver.workers = 1;
     config.optimizer.solver.display_progress = false;
 
-    let design = DesignVector::default();
+    let design = alas_config::presets::get("A220-300")
+        .expect("A220-300 preset")
+        .design_vector;
     let initial_span = design.to_array()[0];
     let mut bounds = design
         .to_array()

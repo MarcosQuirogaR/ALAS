@@ -8,14 +8,18 @@
 //! physical CG limits [`crate::feasibility::model_cg_assessment`] already
 //! placed per named loading state.
 //!
-//! Weight-dependent aft limits (tip-back) are interpolated linearly in mass
-//! between the two nearest named states' own [`alas_opt::envelope::PhysicalCgLimits`]
-//! rather than recomputing `h_cg` at an arbitrary sequence point (a coarse,
-//! documented approximation: the item's own "cheap mode" allowance).
+//! Every checked point is classified by the phase it stands for
+//! ([`CheckedPhase`]) and gated by that phase's mechanisms only: partial
+//! loading by the ground limits, fuel loading up to takeoff by the takeoff
+//! limits, the flown landing point by the landing limits. Weight-dependent
+//! limits are interpolated linearly in mass between the named states (see
+//! [`super::phase_limits`]) rather than recomputing `h_cg` at an arbitrary
+//! sequence point (a coarse, documented approximation: the item's own "cheap
+//! mode" allowance).
 
 use alas_config::AlasConfig;
 use alas_mass::tanks::{fuel_vector, resolve_product_layout, FuelVectorPoint};
-use alas_opt::envelope::ModelCgEnvelopeAssessment;
+use alas_opt::envelope::{AftLimitGovernance, ForwardLimitGovernance, ModelCgEnvelopeAssessment};
 use alas_payload::loading_sequence::{
     cargo_loading_sequences, concat_sequences, passenger_loading_sequences, potato_boundary,
     LoadingPoint, LoadingSequence, PotatoPoint,
@@ -23,6 +27,9 @@ use alas_payload::loading_sequence::{
 
 use crate::full_analysis::AnalysisReport;
 
+use super::phase_limits::{
+    aft_mechanism_label, forward_mechanism_label, limits_at_mass, CheckedPhase,
+};
 use super::{FindingCode, FindingSeverity, PhysicalFinding};
 
 /// Warning-severity findings for every extreme potato/fuel-vector point
@@ -37,8 +44,9 @@ pub fn append_envelope_findings(
         return;
     };
     for (label, checks) in [
-        ("potato extreme", &envelope.potato_checks),
-        ("fuel-vector", &envelope.fuel_vector_checks),
+        ("potato extreme", envelope.potato_checks.as_slice()),
+        ("fuel-vector", envelope.fuel_vector_checks.as_slice()),
+        ("landing", envelope.landing_check.as_slice()),
     ] {
         let Some(worst) = checks
             .iter()
@@ -47,18 +55,30 @@ pub fn append_envelope_findings(
         else {
             continue;
         };
-        let limit = if worst.cg_pct_mac < worst.fwd_limit_pct_mac {
-            worst.fwd_limit_pct_mac
+        let (limit, side, mechanism) = if worst.cg_pct_mac < worst.fwd_limit_pct_mac {
+            (
+                worst.fwd_limit_pct_mac,
+                "forward",
+                forward_mechanism_label(worst.fwd_governance),
+            )
         } else {
-            worst.aft_limit_pct_mac
+            (
+                worst.aft_limit_pct_mac,
+                "aft",
+                aft_mechanism_label(worst.aft_governance),
+            )
         };
         findings.push(PhysicalFinding {
             code: FindingCode::ModelCgForwardRangeViolation,
             severity: FindingSeverity::Warning,
             message: format!(
                 "{label} point at {:.0} kg lies at {:.2} % MAC, outside the physical [{:.2}, \
-                 {:.2}] % MAC band",
-                worst.mass_kg, worst.cg_pct_mac, worst.fwd_limit_pct_mac, worst.aft_limit_pct_mac
+                 {:.2}] % MAC band of the {} phase (the {side} limit is governed by {mechanism})",
+                worst.mass_kg,
+                worst.cg_pct_mac,
+                worst.fwd_limit_pct_mac,
+                worst.aft_limit_pct_mac,
+                worst.phase.label(),
             ),
             actual: Some(worst.cg_pct_mac),
             limit: Some(limit),
@@ -67,8 +87,8 @@ pub fn append_envelope_findings(
     }
 }
 
-/// One checked point: its own mass/CG, the physical limits interpolated at
-/// that mass, and whether it lies inside them.
+/// One checked point: its own mass/CG, the physical limits of its phase
+/// interpolated at that mass, and whether it lies inside them.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct CheckedPoint {
     /// Cumulative aircraft mass, kg.
@@ -77,11 +97,18 @@ pub struct CheckedPoint {
     pub x_m: f64,
     /// Longitudinal CG, percent MAC.
     pub cg_pct_mac: f64,
-    /// Physical aft limit interpolated at this point's mass, percent MAC.
+    /// The phase whose mechanisms gate this point.
+    pub phase: CheckedPhase,
+    /// Physical aft limit of the phase interpolated at this point's mass,
+    /// percent MAC.
     pub aft_limit_pct_mac: f64,
-    /// Physical forward limit at this point's mass (weight-independent
-    /// except for the interpolation's own bracketing), percent MAC.
+    /// Mechanism governing [`Self::aft_limit_pct_mac`].
+    pub aft_governance: AftLimitGovernance,
+    /// Physical forward limit of the phase interpolated at this point's
+    /// mass, percent MAC.
     pub fwd_limit_pct_mac: f64,
+    /// Mechanism governing [`Self::fwd_limit_pct_mac`].
+    pub fwd_governance: ForwardLimitGovernance,
     /// Whether `cg_pct_mac` lies inside `[fwd_limit_pct_mac, aft_limit_pct_mac]`.
     pub inside_limits: bool,
 }
@@ -108,6 +135,9 @@ pub struct OperationalEnvelopeAssessment {
     /// (`alas_mass::tanks::fuel_vector`), each point checked against the
     /// physical limits at its own mass.
     pub fuel_vector_checks: Vec<CheckedPoint>,
+    /// The flown landing point checked against the landing limits; `None`
+    /// when the model CG assessment carries no analyzed landing state.
+    pub landing_check: Option<CheckedPoint>,
     /// The zero-fuel operational envelope: the range of ZFW CGs, percent
     /// MAC, from which adding fuel along [`Self::fuel_vector_checks`]'s own
     /// burn order stays inside the physical limits at every intermediate
@@ -130,69 +160,40 @@ pub fn balance_index(
     mass_kg * (x_m - x_ref_m) / index_constant_kg_m + k
 }
 
-/// Interpolate the physical aft limit, percent MAC, at `mass_kg` between the
-/// two nearest named loading states' own [`alas_opt::envelope::PhysicalCgLimits`].
-/// Clamps to the lightest/heaviest state outside the bracket rather than
-/// extrapolating.
-fn interpolated_aft_limit_pct_mac(model_cg: &ModelCgEnvelopeAssessment, mass_kg: f64) -> f64 {
-    let mut states: Vec<(f64, f64)> = model_cg
-        .loading_states
-        .iter()
-        .map(|state| (state.mass_kg, state.physical_limits.aft_limit_pct_mac))
-        .filter(|(mass, limit)| mass.is_finite() && limit.is_finite())
-        .collect();
-    states.sort_by(|a, b| a.0.total_cmp(&b.0));
-    match states.as_slice() {
-        [] => f64::NAN,
-        [(_, only)] => *only,
-        _ => {
-            if mass_kg <= states[0].0 {
-                return states[0].1;
-            }
-            if mass_kg >= states[states.len() - 1].0 {
-                return states[states.len() - 1].1;
-            }
-            for window in states.windows(2) {
-                let (mass_lo, limit_lo) = window[0];
-                let (mass_hi, limit_hi) = window[1];
-                if mass_kg >= mass_lo && mass_kg <= mass_hi {
-                    let span = (mass_hi - mass_lo).max(1.0e-9);
-                    let fraction = (mass_kg - mass_lo) / span;
-                    return limit_lo + fraction * (limit_hi - limit_lo);
-                }
-            }
-            states[states.len() - 1].1
-        }
-    }
-}
-
-/// The physical forward limit, percent MAC: weight-independent,
-/// so any named state's own value stands for every mass.
-fn forward_limit_pct_mac(model_cg: &ModelCgEnvelopeAssessment) -> f64 {
-    model_cg.configured_forward_limit_pct_mac
-}
-
 fn check_point(
     mac_frame: alas_geom::aircraft::mac_frame::MacFrame,
     model_cg: &ModelCgEnvelopeAssessment,
     mass_kg: f64,
     x_m: f64,
+    phase: CheckedPhase,
 ) -> CheckedPoint {
     let cg_pct_mac = mac_frame.pct_mac(x_m);
-    let aft_limit_pct_mac = interpolated_aft_limit_pct_mac(model_cg, mass_kg);
-    let fwd_limit_pct_mac = forward_limit_pct_mac(model_cg);
+    let limits = limits_at_mass(model_cg, mass_kg, phase);
     let inside_limits = cg_pct_mac.is_finite()
-        && aft_limit_pct_mac.is_finite()
-        && fwd_limit_pct_mac.is_finite()
-        && cg_pct_mac >= fwd_limit_pct_mac
-        && cg_pct_mac <= aft_limit_pct_mac;
+        && limits.aft_pct_mac.is_finite()
+        && limits.fwd_pct_mac.is_finite()
+        && cg_pct_mac >= limits.fwd_pct_mac
+        && cg_pct_mac <= limits.aft_pct_mac;
     CheckedPoint {
         mass_kg,
         x_m,
         cg_pct_mac,
-        aft_limit_pct_mac,
-        fwd_limit_pct_mac,
+        phase,
+        aft_limit_pct_mac: limits.aft_pct_mac,
+        aft_governance: limits.aft_governance,
+        fwd_limit_pct_mac: limits.fwd_pct_mac,
+        fwd_governance: limits.fwd_governance,
         inside_limits,
+    }
+}
+
+/// The fuel-vector point's phase: the zero-fuel point is the ZFW state, every
+/// fuel-loaded point is fuelling toward takeoff.
+fn fuel_phase(fuel_kg: f64) -> CheckedPhase {
+    if fuel_kg > 0.0 {
+        CheckedPhase::Takeoff
+    } else {
+        CheckedPhase::ZeroFuel
     }
 }
 
@@ -303,8 +304,20 @@ pub fn assess_operational_envelope(
         .iter()
         .flat_map(|point| {
             [
-                check_point(mac_frame, model_cg, point.mass_kg, point.min_x_m),
-                check_point(mac_frame, model_cg, point.mass_kg, point.max_x_m),
+                check_point(
+                    mac_frame,
+                    model_cg,
+                    point.mass_kg,
+                    point.min_x_m,
+                    CheckedPhase::Loading,
+                ),
+                check_point(
+                    mac_frame,
+                    model_cg,
+                    point.mass_kg,
+                    point.max_x_m,
+                    CheckedPhase::Loading,
+                ),
             ]
         })
         .collect();
@@ -327,9 +340,22 @@ pub fn assess_operational_envelope(
             } else {
                 zfw_state.cg_x_m
             };
-            check_point(mac_frame, model_cg, mass_kg, x_m)
+            check_point(mac_frame, model_cg, mass_kg, x_m, fuel_phase(point.fuel_kg))
         })
         .collect();
+    let landing_check = model_cg
+        .loading_states
+        .iter()
+        .find(|state| state.state == alas_opt::envelope::ModelCgLoadingState::AnalyzedLanding)
+        .map(|state| {
+            check_point(
+                mac_frame,
+                model_cg,
+                state.mass_kg,
+                state.cg_x_m,
+                CheckedPhase::Landing,
+            )
+        });
 
     // The zero-fuel operational envelope : the set of ZFW CGs from
     // which adding fuel along the same burn order stays inside the physical
@@ -337,8 +363,8 @@ pub fn assess_operational_envelope(
     // of candidate ZFW stations (cheap, like the potato sampling):
     // the physical limits at ZFW mass already bracket the search domain.
     const ZFW_CANDIDATES: usize = 21;
-    let zfw_aft = interpolated_aft_limit_pct_mac(model_cg, zfw_state.mass_kg);
-    let zfw_fwd = forward_limit_pct_mac(model_cg);
+    let zfw_limits = limits_at_mass(model_cg, zfw_state.mass_kg, CheckedPhase::ZeroFuel);
+    let (zfw_aft, zfw_fwd) = (zfw_limits.aft_pct_mac, zfw_limits.fwd_pct_mac);
     let zfw_operational_limits_pct_mac = if zfw_aft.is_finite() && zfw_fwd.is_finite() {
         let mut admissible_fwd = f64::INFINITY;
         let mut admissible_aft = f64::NEG_INFINITY;
@@ -354,7 +380,8 @@ pub fn assess_operational_envelope(
                 } else {
                     candidate_x_m
                 };
-                let checked = check_point(mac_frame, model_cg, mass_kg, x_m);
+                let checked =
+                    check_point(mac_frame, model_cg, mass_kg, x_m, fuel_phase(point.fuel_kg));
                 checked.inside_limits
             });
             if admissible {
@@ -374,6 +401,7 @@ pub fn assess_operational_envelope(
         potato_pct_mac,
         potato_checks,
         fuel_vector_checks,
+        landing_check,
         zfw_operational_limits_pct_mac,
     })
 }
@@ -471,6 +499,106 @@ mod tests {
             .zfw_operational_limits_pct_mac
             .expect("a bracketable ZFW operational band");
         assert!(fwd.is_finite() && aft.is_finite() && fwd <= aft);
+    }
+
+    /// Partial-loading points see the ground mechanisms only, fuel-loaded
+    /// points the takeoff limits at the takeoff state, and the flown landing
+    /// point the landing limits: no point is gated by an envelope-wide limit
+    /// of a phase it does not stand for.
+    #[test]
+    fn every_point_is_gated_by_the_limits_of_its_phase() {
+        let (config, report, model_cg) = a320_report_and_model_cg();
+        let envelope = assess_operational_envelope(&config, &report, &model_cg)
+            .expect("the A320-200 resolves a payload layout and a fuel-tank arrangement");
+        let state = |which| {
+            model_cg
+                .loading_states
+                .iter()
+                .find(|state| state.state == which)
+                .expect("named loading state")
+        };
+
+        assert!(!envelope.potato_checks.is_empty());
+        for check in &envelope.potato_checks {
+            assert_eq!(check.phase, CheckedPhase::Loading);
+            assert_eq!(
+                check.fwd_governance,
+                ForwardLimitGovernance::MaxNoseLoadHandling
+            );
+            assert!(check.fwd_limit_pct_mac <= model_cg.configured_forward_limit_pct_mac + 1.0e-9);
+        }
+
+        let by_mass = |a: &&CheckedPoint, b: &&CheckedPoint| a.mass_kg.total_cmp(&b.mass_kg);
+        let lightest = envelope
+            .fuel_vector_checks
+            .iter()
+            .min_by(by_mass)
+            .expect("fuel vector");
+        assert_eq!(lightest.phase, CheckedPhase::ZeroFuel);
+        let heaviest = envelope
+            .fuel_vector_checks
+            .iter()
+            .max_by(by_mass)
+            .expect("fuel vector");
+        assert_eq!(heaviest.phase, CheckedPhase::Takeoff);
+        let tow = state(alas_opt::envelope::ModelCgLoadingState::AnalyzedTakeoff);
+        assert!((heaviest.mass_kg - tow.mass_kg).abs() < 1.0);
+        assert!(
+            (heaviest.fwd_limit_pct_mac - tow.physical_limits.fwd_limit_pct_mac).abs() < 1.0e-3
+        );
+        assert_eq!(
+            heaviest.fwd_governance,
+            tow.physical_limits.fwd_limit_governance
+        );
+
+        let landing_state = state(alas_opt::envelope::ModelCgLoadingState::AnalyzedLanding);
+        let landing = envelope
+            .landing_check
+            .expect("the ledger's flown landing state is checked");
+        assert_eq!(landing.phase, CheckedPhase::Landing);
+        assert_eq!(landing.mass_kg, landing_state.mass_kg);
+        assert!(
+            (landing.fwd_limit_pct_mac - landing_state.physical_limits.fwd_limit_pct_mac).abs()
+                < 1.0e-9
+        );
+    }
+
+    /// A finding names the phase of the point and the mechanism that governs
+    /// the violated limit.
+    #[test]
+    fn an_envelope_finding_names_its_phase_and_governing_mechanism() {
+        let point = |cg_pct_mac| CheckedPoint {
+            mass_kg: 60_000.0,
+            x_m: 12.0,
+            cg_pct_mac,
+            phase: CheckedPhase::Loading,
+            aft_limit_pct_mac: 40.0,
+            aft_governance: AftLimitGovernance::TipBack,
+            fwd_limit_pct_mac: 10.0,
+            fwd_governance: ForwardLimitGovernance::MaxNoseLoadHandling,
+            inside_limits: (10.0..=40.0).contains(&cg_pct_mac),
+        };
+        let envelope = OperationalEnvelopeAssessment {
+            passenger_sequences: Vec::new(),
+            cargo_sequences: Vec::new(),
+            potato_pct_mac: Vec::new(),
+            potato_checks: vec![point(25.0), point(45.0)],
+            fuel_vector_checks: vec![point(5.0)],
+            landing_check: None,
+            zfw_operational_limits_pct_mac: None,
+        };
+        let mut findings = Vec::new();
+        append_envelope_findings(Some(&envelope), &mut findings);
+        assert_eq!(findings.len(), 2);
+        assert!(findings[0].message.contains("partial loading phase"));
+        assert!(findings[0]
+            .message
+            .contains("aft limit is governed by tip-back"));
+        assert_eq!(findings[0].limit, Some(40.0));
+        assert!(findings[1]
+            .message
+            .contains("forward limit is governed by maximum nose-gear load"));
+        assert_eq!(findings[1].limit, Some(10.0));
     }
 
     #[test]

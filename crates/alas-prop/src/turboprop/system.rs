@@ -3,7 +3,7 @@
 
 use super::*;
 
-pub(super) const PROVENANCE: &str = "PW127M takeoff/continuous ratings: certification evidence; ATR 72-600 climb/cruise ratings, 568F-1 diameter, 762 kg/h maximum-cruise fuel flow and 17.5 min climb to FL170: ATR manufacturer factsheet; rated shaft power lapses as max(0.15, min(1, rho/1.225)^0.75), an aircraft-level minimum-hypothesis calibration rather than an OEM engine deck; the 762 kg/h fuel anchor is calibrated after power lapse at rho=0.70 kg/m3 (FL170-like optimum-altitude cruise), so sea-level use remains extrapolated; propeller coefficients: generic six-blade surrogate (not OEM 568F data), bounded by one-dimensional actuator-disk momentum theory evaluated on the blade-efficiency share of shaft power rather than on the whole of it, so no operating point sits on the loss-free ideal bound; blade efficiency blends the 0.72 static figure of merit into a declared forward-flight 0.86, the conservative end of the 0.86-0.91 band that NASA TM-83458 p.8 interpolation, Nita 2008 Table 3.4 (Scholz chart read for the ATR 72) and the published 762 kg/h and 1,355 ft/min aircraft-level closures agree on; the blend shape between the two ends is a surrogate and the resulting cruise efficiency carries about -0/+6 percent; propulsive efficiency is additionally capped at 0.88 as a guard; flight-idle propeller force is the neutral zero-force hypothesis because no OEM idle/windmilling map is available; fuel model has one aircraft-level calibration anchor, not a PW127M deck";
+pub(super) const PROVENANCE: &str = "PW127M take-off/continuous ratings and flat-rating temperatures (take-off to 39 C, maximum continuous to 48 C): EASA TCDS IM.E.041 section 5; ATR 72-600 climb/cruise ratings and 568F-1 diameter: ATR manufacturer factsheet; rated shaft power is flat down to the density of sea-level pressure at the flat-rating temperature and lapses as (rho/rho_corner)^0.728 below it (Nita 2008 eq. 3.5.11, PW120 maximum-cruise chart fit), floored at 0.15, a class relation rather than an OEM engine deck; fuel flow is shaft power times a class PSFC of 0.2945 kg/kWh at 249.65 K (measured PW120A, Majeed 2009 Tab. 3.3) scaled as sqrt(T/T_ref), flat in power over the sourced 46-100 percent band and held flat below it as an unsourced assumption; ATR's 762 kg/h maximum-cruise flow is a validation point, not a calibration anchor; propeller coefficients: generic six-blade surrogate (not OEM 568F data), bounded by one-dimensional actuator-disk momentum theory evaluated on the blade-efficiency share of shaft power rather than on the whole of it, so no operating point sits on the loss-free ideal bound; blade efficiency blends the 0.70 static figure of merit (class preliminary-design value, 0.65-0.80 band) into a declared forward-flight 0.86, the conservative end of the 0.86-0.91 band that NASA TM-83458 p.8 interpolation and Nita 2008 Table 3.4 (Scholz chart read for the ATR 72) agree on; the blend shape between the two ends is a surrogate and the resulting cruise efficiency carries about -0/+6 percent; propulsive efficiency is additionally capped at 0.88 as a guard; flight-idle propeller force is the neutral zero-force hypothesis because no OEM idle/windmilling map is available";
 
 /// Technology-neutral adapter for the two-engine ATR 72 PW127M/568F installation.
 ///
@@ -50,9 +50,9 @@ impl Atr72TurbopropSystem {
                 },
                 dataset: Some("ATR 72-212A / PW127M / 568F-1 preliminary".to_owned()),
                 sources: vec![
-                    "EASA TCDS E.041: PW127M certified shaft-power ratings".to_owned(),
+                    "EASA TCDS IM.E.041: PW127M certified shaft-power ratings and flat-rating temperatures".to_owned(),
                     "EASA TCDS A.084 and ATR public data: ATR 72 installation and 3.93 m 568F-1 propeller".to_owned(),
-                    "ATR 72-600 factsheet: 762 kg/h two-engine fuel flow at maximum cruise; single-point PSFC calibration only".to_owned(),
+                    "Majeed 2009 SRS-TSD-002: class PW100-family PSFC with sqrt(theta) scaling; ATR 72-600 factsheet 762 kg/h maximum-cruise flow as a validation point only".to_owned(),
                     "Generic six-blade CT/CP/J surrogate: no public OEM 568F map; unvalidated".to_owned(),
                 ],
             },
@@ -203,7 +203,7 @@ impl Atr72TurbopropSystem {
 
     fn extrapolated() -> ValidityStatus {
         ValidityStatus::Extrapolated {
-            reason: "generic unvalidated six-blade propeller surrogate, family-level PSFC prior, and no PW127M altitude-lapse deck".to_owned(),
+            reason: "generic unvalidated six-blade propeller surrogate, class-level PSFC and flat-rated lapse relations, and no PW127M engine deck".to_owned(),
         }
     }
 
@@ -362,7 +362,7 @@ impl PropulsionSystemModel for Atr72TurbopropSystem {
         let mut power_residual = 0.0;
         for index in active {
             let output = unit_model
-                .evaluate(condition, command)
+                .evaluate_at_temperature(condition, request.flight.temperature_k, command)
                 .map_err(Self::map_error)?;
             let axis = self.installation.thrust_axes_body[index];
             let unit_force = [

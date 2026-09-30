@@ -17,6 +17,20 @@ pub(super) struct StatePoint {
     pub(super) label: String,
 }
 
+/// The governing mechanism of each side of the physical limit at one
+/// loading state, for labelling the governing lines.
+pub(super) struct LimitMark {
+    pub(super) mass_kg: f64,
+    pub(super) fwd_pct_mac: f64,
+    pub(super) fwd_label: &'static str,
+    pub(super) aft_pct_mac: f64,
+    pub(super) aft_label: &'static str,
+}
+
+/// Footnote on which mechanisms apply to which loading state.
+pub(super) const SCOPE_NOTE: &str =
+    "Limits are phase-scoped: OEW shows ground limits only (no flight limit); landing trim from ZFW, rotation at TOW";
+
 /// Inputs shared by the CG-envelope preparation and rendering phases. Every
 /// aft/forward series here is read from the gate assessment (or linearly
 /// interpolated between its named states, see `figure::series_over`), not
@@ -42,6 +56,7 @@ pub(super) struct CgEnvelopeRenderData {
     pub(super) max_nose_active: bool,
     pub(super) scissor_active: bool,
     pub(super) state_points: Vec<StatePoint>,
+    pub(super) limit_marks: Vec<LimitMark>,
 }
 
 /// The plot's data-space viewport, derived from every finite `%MAC` series
@@ -107,6 +122,7 @@ pub(super) fn render(scene: &mut Scene, pal: &Palette, data: CgEnvelopeRenderDat
         max_nose_active,
         scissor_active,
         state_points,
+        limit_marks,
     } = data;
     axes.draw_frame_with_labels(scene, pal, "CG position [% MAC]", "Mass [t]");
     let view_min = axes.x_min;
@@ -190,7 +206,7 @@ pub(super) fn render(scene: &mut Scene, pal: &Palette, data: CgEnvelopeRenderDat
         0.0,
         0.0,
         w_lo,
-        "  Governing aft limit",
+        "  Governing aft limit (per state)",
         "#27ae60",
         10.0,
     );
@@ -235,7 +251,7 @@ pub(super) fn render(scene: &mut Scene, pal: &Palette, data: CgEnvelopeRenderDat
         0.0,
         0.0,
         w_hi,
-        "  Governing fwd limit",
+        "  Governing fwd limit (per state)",
         "#27ae60",
         -10.0,
     );
@@ -275,6 +291,39 @@ pub(super) fn render(scene: &mut Scene, pal: &Palette, data: CgEnvelopeRenderDat
         fill: Some(Fill::new(with_alpha(Color::from_hex("#2ecc71"), 0.2))),
         stroke: None,
     });
+
+    // --- Mechanism of each governing line, named where it changes.
+    let mut previous: (&str, &str) = ("", "");
+    for mark in &limit_marks {
+        for (fwd, pct, label, prev) in [
+            (true, mark.fwd_pct_mac, mark.fwd_label, previous.0),
+            (false, mark.aft_pct_mac, mark.aft_label, previous.1),
+        ] {
+            if label == prev || !pct.is_finite() {
+                continue;
+            }
+            let p = axes.map_point(
+                pct.clamp(axes.x_min, axes.x_max),
+                (mark.mass_kg / 1000.0).clamp(axes.y_min, axes.y_max),
+            );
+            let dx = if fwd { -4.0 } else { 4.0 };
+            scene.add(SceneElement::Text {
+                text: label.to_owned(),
+                pos: [p[0] + dx, p[1] + if fwd { 9.0 } else { -9.0 }],
+                font_size: 7.0,
+                color: Color::from_hex("#27ae60"),
+                align: if fwd {
+                    TextAlign::Right
+                } else {
+                    TextAlign::Left
+                },
+                baseline: crate::scene::TextBaseline::Middle,
+                angle_deg: 0.0,
+                bold: false,
+            });
+        }
+        previous = (mark.fwd_label, mark.aft_label);
+    }
 
     // --- Loading states, connected in ascending-mass order.
     let state_cg: Vec<f64> = state_points.iter().map(|p| p.cg_pct_mac).collect();
@@ -317,6 +366,16 @@ pub(super) fn render(scene: &mut Scene, pal: &Palette, data: CgEnvelopeRenderDat
         8.0,
     );
 
+    scene.add(SceneElement::Text {
+        text: SCOPE_NOTE.to_owned(),
+        pos: [scene.width * 0.5, 596.0],
+        font_size: 7.5,
+        color: Color::from_hex(pal.tick),
+        align: TextAlign::Center,
+        baseline: crate::scene::TextBaseline::Bottom,
+        angle_deg: 0.0,
+        bold: false,
+    });
     scene.add(SceneElement::Text {
         text: "MODEL-DERIVED CG CHECK ONLY; NOT AN AFM/WBM OPERATIONAL ENVELOPE".to_owned(),
         pos: [scene.width * 0.5, 607.0],

@@ -5,7 +5,7 @@
 //! depend on the takeoff mass run once, then `mdo::mda` closes the coupled
 //! mass, centre-of-gravity, trim and mission-fuel fixed point.
 
-use alas_config::{airport_dataset, airports, AlasConfig, MtowSizing};
+use alas_config::{airport_dataset, airports, AlasConfig, MtowPlan};
 use alas_geom::aircraft::airplane::Airplane;
 use alas_mass::breakdown::{MassBreakdown, MassCoordinates};
 use alas_payload::oew::oew_and_cg;
@@ -81,7 +81,11 @@ pub(crate) struct SizingOutcome {
     pub mission_distance_known: bool,
     /// Minimum still-air distance for the configured climb/descent profile.
     pub minimum_profile_range_m: f64,
+    /// Upper takeoff-mass limit of the plan, or the declared MTOW when the
+    /// plan has none.
     pub mtow_ceiling: f64,
+    /// The resolved takeoff-mass sizing plan of the candidate.
+    pub plan: MtowPlan,
     pub sized: SizedCandidate,
     pub history: HistoryFields,
     #[expect(dead_code, reason = "retained for finalist load-case reporting")]
@@ -145,13 +149,20 @@ pub(crate) fn run_candidate_cancellable(
         x,
         preserve_explicit_fuselage_length,
     )?;
-    // The ceiling-mass cabin layout is consumed inside `first_mass_pass`;
-    // the closure re-places the cabin at every closed mass itself.
+    // The seed-mass cabin layout is consumed inside `first_mass_pass`; the
+    // closure re-places the cabin at every closed mass itself. The two
+    // design modes evaluate the first pass at their seed with the structure
+    // designed there; every other mode's seed is the declared requirement.
+    let plan = candidate_config.mtow_plan();
+    let seeded = plan
+        .requires_mission_sized_evaluation()
+        .then(|| candidate_config.at_sized_closure_mass(plan.seed_kg));
     let (masses0, coords0, cg0, _summary, capacity, structural_reference) =
-        first_mass_pass(&candidate_config, &dv, &plane)?;
+        first_mass_pass(seeded.as_ref().unwrap_or(&candidate_config), &dv, &plane)?;
 
     let req = &candidate_config.requirements;
-    let mtow_ceiling = req.mtow_kg;
+    let declared_mtow_kg = req.mtow_kg;
+    let mtow_ceiling = plan.upper_bound_kg.unwrap_or(declared_mtow_kg);
     let polar0 = match external {
         // An external polar must describe this candidate at this cruise
         // point: a polar evaluated at another Mach, altitude or reference
@@ -174,7 +185,7 @@ pub(crate) fn run_candidate_cancellable(
                 reason: "trim_solve",
             })
         }
-        None => trim_and_polar(&candidate_config, &mut plane, cg0[0], &dv, mtow_ceiling)?,
+        None => trim_and_polar(&candidate_config, &mut plane, cg0[0], &dv, plan.seed_kg)?,
     };
     let n_engines = candidate_config
         .geometry
@@ -214,6 +225,10 @@ pub(crate) fn run_candidate_cancellable(
         departure_coordinates,
         arrival_coordinates,
     );
+    // The selected route alone, for a plan that closes on a design mission
+    // and flies the route off-design.
+    let route_distance_m =
+        mission_range_from_coordinates(0.0, departure_coordinates, arrival_coordinates);
 
     let departure_elevation_m = departure_record
         .as_ref()
@@ -288,11 +303,42 @@ pub(crate) fn run_candidate_cancellable(
     let tank_capacity = tank_capacity_kg(&candidate_config, &plane, &dv);
 
     model.cancellation = cancellation;
+    let design_mission = super::mtow_modes::closure_mission(
+        &plan,
+        &candidate_config,
+        &model,
+        route_distance_m,
+        (masses0.payload, capacity.carried_passengers),
+    )?;
+    let route_model = design_mission.as_ref().map(|_| model.clone());
+    let (model, range_m, dispatch_payload_kg, mission_distance_known, minimum_profile_range_m) =
+        match design_mission {
+            Some(mission) => {
+                let minimum_m = mission.model.minimum_flyable_profile_range_m();
+                let known = mission.distance_known;
+                (
+                    mission.model,
+                    mission.range_m,
+                    mission.payload_kg,
+                    known,
+                    minimum_m,
+                )
+            }
+            None => (
+                model,
+                range_m,
+                None,
+                mission_distance_known,
+                minimum_profile_range_m,
+            ),
+        };
     let context = MdaContext {
         config: &candidate_config,
         dv: &dv,
         model,
         range_m,
+        plan,
+        dispatch_payload_kg,
         tank_capacity_kg: tank_capacity,
         retrim_allowed: external.is_none(),
         structural_reference: structural_reference.reference,
@@ -317,71 +363,58 @@ pub(crate) fn run_candidate_cancellable(
     // compared against that ceiling by the mass residuals.  Keeping those
     // quantities separate prevents geometry/thrust/CG checks from using the
     // lower mission-required mass while the component ledger is closed at
-    // the declared MTOW.  Both mission-sized modes (`SizedByMission`,
-    // bounded above by the declared MTOW, and `Unconstrained`, which only
-    // seeds its first pass from it) use the converged dispatch mass for
-    // both purposes instead, since there each candidate's own closure, not
-    // the declared requirement, is what the analysis mass answers to.
-    let analysis_takeoff_mass_kg =
-        if candidate_config.optimizer.objective.mtow_sizing == MtowSizing::FixedRequirement {
-            mtow_ceiling
-        } else {
-            closure.dispatch.takeoff_mass_kg
-        };
+    // the declared MTOW.  Every mission-closed mode (`SizedByMission`,
+    // `Unconstrained`, `MtowBand`, `PayloadAdjusted`) uses the converged
+    // dispatch mass for both purposes instead, since there each candidate's
+    // own closure, not the declared requirement, is what the analysis mass
+    // answers to.
+    let analysis_takeoff_mass_kg = if plan.analyses_at_closure() {
+        closure.dispatch.takeoff_mass_kg
+    } else {
+        declared_mtow_kg
+    };
     // The design-weight basis the ledger was closed on, made explicit so a
     // report can say whether the components belong to the declared aircraft
     // or to the sized one (`alas_config::MassSizingBasis`).
-    let basis = candidate_config.mass_sizing_basis();
-    let (design_gross_mass_kg, design_landing_mass_kg) = match basis {
-        alas_config::MassSizingBasis::FixedAircraft {
-            design_gross_mass_kg,
-            design_landing_mass_kg,
-        } => (design_gross_mass_kg, design_landing_mass_kg),
-        alas_config::MassSizingBasis::Coupled => {
-            // The component ledger is closed on this candidate's own
-            // dispatched mass, which is what "coupled" means and is left
-            // alone. The *landing* limit is a different quantity and must
-            // not follow it.
-            //
-            // A maximum landing mass is a structural design weight: a
-            // fraction of the design gross weight the airframe and gear are
-            // built for. Referring it to the mass this particular sector
-            // happens to close at makes the `landing_mass` residual say
-            // "burn at least (1 - mlw_fraction) of your own take-off mass on
-            // this flight", which is a statement about the mission with no
-            // aircraft property in it, and it is unsatisfiable by
-            // construction on a short sector: measured on the shipped
-            // clean-sheet path it rejected 434 of 462 A320-200 candidates,
-            // 438 of 460 A220-300 and 603 of 605 A340-300.
-            //
-            // Under `MtowSizing::SizedByMission` - the product default - the
-            // closure is explicitly bounded above by the declared MTOW, so
-            // that declared mass *is* the design gross weight the structure
-            // must support and the closure is only this mission's dispatch.
-            // The limit is therefore taken against the ceiling there.
-            // `Unconstrained` declares no ceiling at all (see the
-            // `mtow_ceiling` residual above), so it keeps the closed mass,
-            // which is the only design weight that mode has.
-            let limit_basis_kg = if candidate_config.optimizer.objective.mtow_sizing
-                == MtowSizing::SizedByMission
-                && mtow_ceiling.is_finite()
-                && mtow_ceiling > 0.0
-            {
-                mtow_ceiling
-            } else {
-                analysis_takeoff_mass_kg
-            };
-            (
-                analysis_takeoff_mass_kg,
-                candidate_config.landing_mass_limit_kg(limit_basis_kg),
-            )
-        }
+    let (sizing_basis, design_gross_mass_kg, design_landing_mass_kg) =
+        super::mtow_modes::design_weights(
+            &candidate_config,
+            &plan,
+            analysis_takeoff_mass_kg,
+            declared_mtow_kg,
+            super::mtow_modes::landing_floor_kg(&closure.dispatch),
+        );
+    // The payload the closure flew: the design payload of a design mission,
+    // otherwise the laid-out load case. The derived design MZFW adds it to
+    // the operating empty mass.
+    let design_payload_kg = dispatch_payload_kg.unwrap_or(state.masses.payload);
+    let offdesign = match route_model.as_ref() {
+        Some(route) if route_distance_m > 0.0 => Some(super::offdesign::fly_route(
+            &candidate_config,
+            route,
+            route_distance_m,
+            &super::offdesign::ClosedAircraft {
+                polar: &polar,
+                operating_empty_mass_kg,
+                payload_kg: state.masses.payload,
+                design_payload_kg,
+                mtow_kg: analysis_takeoff_mass_kg,
+                usable_capacity_kg: tank_capacity,
+            },
+        )?),
+        _ => None,
     };
     let sized = SizedCandidate {
         takeoff_mass_kg: analysis_takeoff_mass_kg,
-        sizing_basis: basis.as_str(),
+        sizing_basis,
         design_gross_mass_kg,
         design_landing_mass_kg,
+        mtow: super::mtow_modes::MtowPlanOutcome {
+            structural_basis: plan.structural_basis.as_str(),
+            design_payload_kg,
+            derived_design_mzfw_kg: operating_empty_mass_kg + design_payload_kg,
+            offdesign,
+        },
         operating_empty_mass_kg,
         zero_fuel_mass_kg: closure.dispatch.zero_fuel_mass_kg,
         payload_kg: state.masses.payload,
@@ -449,6 +482,7 @@ pub(crate) fn run_candidate_cancellable(
         mission_distance_known,
         minimum_profile_range_m,
         mtow_ceiling,
+        plan,
         sized,
         history,
         capacity,

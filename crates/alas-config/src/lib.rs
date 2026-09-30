@@ -43,6 +43,7 @@ pub mod fuel_policy;
 pub mod fuel_tanks;
 pub mod geometry;
 pub mod landing_gear;
+pub mod landing_mass_ratio;
 pub mod mass;
 pub mod mass_architecture;
 pub mod materials;
@@ -63,6 +64,7 @@ pub mod requirements;
 pub mod settings;
 pub mod sizing_basis;
 pub use sizing_basis::MassSizingBasis;
+mod cabin_method;
 pub mod solver_presets;
 pub mod structures;
 pub mod systems_mass;
@@ -82,7 +84,11 @@ pub use airport_dataset::{
     ProvenancedAirport, RunwayDataKind,
 };
 pub use analysis::AnalysisConfig;
-pub use cabin::{CabinConfig, CargoDeckConfig, PassengerCabinConfig, SeatClassConfig};
+pub use cabin::{
+    BaggagePolicy, CabinConfig, CargoDeckConfig, HoldCompartmentConfig, HoldDeck,
+    PassengerCabinConfig, SeatClassConfig,
+};
+pub use cabin_method::CabinEquipmentMethod;
 pub use control_surfaces::ControlSurfacesConfig;
 pub use design_variables::{
     DesignVariableSpec, DesignVector, DesignVectorError, SPECS as DESIGN_VARIABLE_SPECS,
@@ -124,8 +130,9 @@ pub use oew_reference::{
     OewReferenceConfiguration, OewSource, OewSourceTier, PublishedOewValue,
 };
 pub use optimizer::{
-    ConstraintPolicy, DesignMode, DesignSpaceConfig, MtowSizing, ObjectiveConfig, ObjectiveKind,
-    ObjectiveWeights, OptimizerConfig, SolverSettings, VariableEnvelope, LEGACY_METHOD_TOKENS,
+    ConstraintPolicy, DesignMission, DesignMode, DesignPayloadSource, DesignRange,
+    DesignSpaceConfig, MtowPlan, MtowSizing, ObjectiveConfig, ObjectiveKind, ObjectiveWeights,
+    OptimizerConfig, SolverSettings, StructuralBasis, VariableEnvelope, LEGACY_METHOD_TOKENS,
 };
 pub use performance::PerformanceConfig;
 pub use performance_presets::{PerformancePreset, UnknownPerformancePreset};
@@ -146,8 +153,8 @@ pub use settings::{legacy_mission_disabled, AlasConfig, ConfigLoadNotes, WORKSPA
 pub use solver_presets::{SolverPreset, UnknownSolverPreset};
 pub use structures::StructuresConfig;
 pub use systems_mass::{
-    CabinEquipmentMethod, CargoHoldLoading, FlopsInputEvidence, FlopsInputProvenance,
-    FlopsTransportConfig, FlopsTransportProvenance, OperatingHaulClass, SystemsMassMethod,
+    CargoHoldLoading, FlopsInputEvidence, FlopsInputProvenance, FlopsTransportConfig,
+    FlopsTransportProvenance, OperatingHaulClass, SystemsMassMethod,
 };
 pub use turboprop_mass::{FlopsTurbopropConfig, PropellerConstruction};
 pub use validation::{validate, Severity, ValidationIssue};

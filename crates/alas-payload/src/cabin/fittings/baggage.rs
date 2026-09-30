@@ -2,6 +2,10 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 use super::*;
+use crate::cargo::{derive_hold_compartments, HoldCompartment};
+use alas_config::BaggagePolicy;
+
+mod overflow;
 
 /// Containerise the checked bags and whatever belly freight fits with them.
 ///
@@ -31,6 +35,7 @@ pub(in super::super) fn place_baggage(
     mass_semantics: CargoMassSemantics,
     aircraft_cg_target: Option<(f64, f64)>,
     cargo: &CargoDeckConfig,
+    cabin_items: &[DeckItem],
 ) -> Baggage {
     let bag_mass = seated as f64 * pax.checked_bag_mass_kg;
     let belly_explicit = pax.belly_cargo_kg.max(0.0);
@@ -51,6 +56,10 @@ pub(in super::super) fn place_baggage(
     let mut hold_capacity = 0.0;
     let mut hold_used = 0.0;
     let mut hold_ulds = 0i64;
+    let mut compartment_masses_kg = Vec::new();
+    let mut forward_fraction = 0.0;
+    let mut overload_kg = 0.0;
+    let policy = cargo.baggage_policy;
 
     if bag_mass + belly_cargo > 0.0 {
         let holds_only = CargoDeckConfig {
@@ -78,7 +87,7 @@ pub(in super::super) fn place_baggage(
         for _ in 0..8 {
             let hold_mass = (bag_mass + belly_cargo).min(hold_capacity);
             let target_cg = hold_target_cg(aircraft_cg_target, seat_mass, seat_cg, hold_mass);
-            solve_baggage_load(&mut manager, mass_semantics, hold_mass, target_cg);
+            solve_baggage_load(&mut manager, mass_semantics, policy, hold_mass, target_cg);
 
             // ULD tare changes the moment carried by the variable hold load.
             // Recompute the target with the actual gross mass and solve once
@@ -93,7 +102,13 @@ pub(in super::super) fn place_baggage(
                     && corrected_target.is_finite()
                     && (corrected_target - target_cg).abs() > 1.0e-12
                 {
-                    solve_baggage_load(&mut manager, mass_semantics, hold_mass, corrected_target);
+                    solve_baggage_load(
+                        &mut manager,
+                        mass_semantics,
+                        policy,
+                        hold_mass,
+                        corrected_target,
+                    );
                 }
             }
 
@@ -179,7 +194,37 @@ pub(in super::super) fn place_baggage(
         } else {
             (bag_mass + belly_cargo) - hold_used
         };
-        if leftover > MIN_PLACED_MASS_KG {
+        if mass_semantics == CargoMassSemantics::Net {
+            let compartments = derive_hold_compartments(
+                g,
+                &manager.slots,
+                cabin_extent(cabin_items),
+                &cargo.hold_compartments,
+            );
+            let mut overflow_kg = vec![0.0; compartments.len()];
+            if leftover > MIN_PLACED_MASS_KG {
+                let (m0, x0, _) = manager.mass_props();
+                let target_x = overflow_target_x(
+                    hold_target_cg(aircraft_cg_target, seat_mass, seat_cg, m0 + leftover),
+                    (m0, x0),
+                    leftover,
+                );
+                let stowed = overflow::place_overflow(
+                    g,
+                    &compartments,
+                    &manager.slots,
+                    leftover,
+                    policy,
+                    target_x,
+                );
+                items.extend(stowed.items);
+                overflow_kg = stowed.shares_kg;
+                overload_kg = stowed.overload_kg;
+                hold_used += leftover;
+            }
+            (compartment_masses_kg, forward_fraction) =
+                compartment_summary(g, &compartments, &manager.slots, &overflow_kg);
+        } else if leftover > MIN_PLACED_MASS_KG {
             let xx = g.cabin_end_x - BULK_BLOCK_INSET_M;
             let height = g.clamp_height(low, xx, BULK_BLOCK_HEIGHT_M);
             let bottom = g.floor_z(low, xx);
@@ -220,7 +265,80 @@ pub(in super::super) fn place_baggage(
         hold_capacity,
         hold_used,
         hold_ulds,
+        compartment_masses_kg,
+        forward_fraction,
+        overload_kg,
     }
+}
+
+/// Longitudinal extent `(x_min, x_max)` of the seats and monuments, which is
+/// the floor the main-deck baggage compartments must stay outside of.
+fn cabin_extent(items: &[DeckItem]) -> Option<(f64, f64)> {
+    items
+        .iter()
+        .filter(|item| {
+            matches!(
+                item.kind,
+                ItemKind::SeatRow
+                    | ItemKind::Galley
+                    | ItemKind::Lav
+                    | ItemKind::AccessibleLav
+                    | ItemKind::WheelchairStowage
+            )
+        })
+        .fold(None, |extent, item| {
+            let (a, b) = (item.x - item.length * 0.5, item.x + item.length * 0.5);
+            Some(extent.map_or((a, b), |(lo, hi): (f64, f64)| (lo.min(a), hi.max(b))))
+        })
+}
+
+/// The station the overflow mass must balance at so that the whole hold load,
+/// the loaded positions `(mass, cg)` included, reaches `hold_target`.
+fn overflow_target_x(hold_target: f64, placed: (f64, f64), overflow_kg: f64) -> Option<f64> {
+    let (mass, cg) = placed;
+    let x = (hold_target * (mass + overflow_kg) - mass * cg) / overflow_kg;
+    (x.is_finite() && overflow_kg > 0.0).then_some(x)
+}
+
+/// Net mass per compartment, forward to aft, and the share of it ahead of the
+/// wing box.
+fn compartment_summary(
+    g: &CabinGeometry,
+    compartments: &[HoldCompartment],
+    slots: &[crate::cargo::CargoSlot],
+    overflow_kg: &[f64],
+) -> (Vec<(String, f64)>, f64) {
+    let mut masses = overflow_kg.to_vec();
+    for slot in slots
+        .iter()
+        .filter(|slot| slot.payload > MIN_PLACED_MASS_KG)
+    {
+        if let Some(index) = overflow::compartment_index(compartments, slot.x) {
+            masses[index] += slot.payload;
+        }
+    }
+    let (wing_start, wing_end) = g.wing_box_x_range();
+    let wing_mid = 0.5 * (wing_start + wing_end);
+    let total: f64 = masses.iter().sum();
+    let forward: f64 = compartments
+        .iter()
+        .zip(&masses)
+        .filter(|(compartment, _)| compartment.centroid_x_m() < wing_mid)
+        .map(|(_, mass)| mass)
+        .sum();
+    let mut named: Vec<(f64, String, f64)> = compartments
+        .iter()
+        .zip(masses)
+        .map(|(compartment, mass)| (compartment.x_start_m, compartment.name.clone(), mass))
+        .collect();
+    named.sort_by(|a, b| a.0.total_cmp(&b.0));
+    (
+        named
+            .into_iter()
+            .map(|(_, name, mass)| (name, mass))
+            .collect(),
+        if total > 0.0 { forward / total } else { 0.0 },
+    )
 }
 
 /// The hold-load CG that makes seats plus hold load balance the empty
@@ -252,11 +370,16 @@ fn hold_target_cg(
 fn solve_baggage_load(
     manager: &mut CargoLoadManager<'_>,
     mass_semantics: CargoMassSemantics,
+    policy: BaggagePolicy,
     target_mass: f64,
     target_cg: f64,
 ) {
     let priority = |slot: &crate::cargo::CargoSlot| (slot.x - target_cg).abs();
     match mass_semantics {
+        CargoMassSemantics::Net if policy == BaggagePolicy::VolumeProportional => {
+            manager.clear();
+            overflow::fill_slots_by_volume(&mut manager.slots, target_mass);
+        }
         CargoMassSemantics::Net => manager.solve(target_mass, target_cg, &priority, true),
         CargoMassSemantics::ReferenceGross => {
             manager.solve_reference_compatibility(target_mass, target_cg, &priority, true)

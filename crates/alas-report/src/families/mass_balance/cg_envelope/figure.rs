@@ -5,11 +5,12 @@
 
 use super::super::no_data_scene;
 use super::helpers::{interp, linspace};
-use super::render::{render, CgEnvelopeRenderData, StatePoint};
+use super::render::{render, CgEnvelopeRenderData, LimitMark, StatePoint};
 use crate::chart_kit::draw_title;
 use crate::families::{model_cg_gate_assessment, MAIN_GEAR_STATION_NOT_MEASURED};
 use crate::scene::{Color, Scene};
 use crate::theme::get_palette;
+use alas_config::optimizer::StructuralBasis;
 use alas_config::AlasConfig;
 use alas_mass::breakdown::{FUEL, OEW_KEYS, PAYLOAD};
 use alas_opt::envelope::{AftLimitGovernance, ForwardLimitGovernance};
@@ -139,12 +140,32 @@ pub(super) fn prepare(
     let max_nose_fwd = series_over(&w_ops, &masses_kg, &max_nose_fwd);
     let scissor_fwd = series_over(&w_ops, &masses_kg, &scissor_fwd);
 
+    let limit_marks: Vec<LimitMark> = states
+        .iter()
+        .map(|s| LimitMark {
+            mass_kg: s.mass_kg,
+            fwd_pct_mac: s.physical_limits.fwd_limit_pct_mac,
+            fwd_label: forward_mark(s.physical_limits.fwd_limit_governance),
+            aft_pct_mac: s.physical_limits.aft_limit_pct_mac,
+            aft_label: aft_mark(s.physical_limits.aft_limit_governance),
+        })
+        .collect();
+
     let get_mass = |k: &str| report.component_masses.get(k).copied().unwrap_or(0.0);
     let oew_mass: f64 = OEW_KEYS.iter().map(|&k| get_mass(k)).sum();
     let payload = get_mass(PAYLOAD);
     let fuel = get_mass(FUEL);
     let mtow_mass = oew_mass + payload + fuel.max(0.0);
-    let mlw_mass = config.landing_mass_limit_kg(mtow_mass);
+    // A run that designs its structure at the closed takeoff mass reads the
+    // design landing mass at that closure; every other run keeps the
+    // declared landing limit.
+    let mlw_mass = if let Some(design_kg) = report.design_landing_mass_kg() {
+        design_kg
+    } else if config.mtow_plan().structural_basis == StructuralBasis::ClosureMass {
+        config.design_landing_mass_at_closure(mtow_mass)
+    } else {
+        config.landing_mass_limit_kg(mtow_mass)
+    };
     let mzfw_mass = oew_mass + payload;
     let (has_structural_mtow, has_structural_mzfw) = declared_reference_weights(config);
 
@@ -190,7 +211,27 @@ pub(super) fn prepare(
         max_nose_active,
         scissor_active,
         state_points,
+        limit_marks,
     })
+}
+
+/// Short name of the mechanism governing a forward limit.
+fn forward_mark(governance: ForwardLimitGovernance) -> &'static str {
+    match governance {
+        ForwardLimitGovernance::MaxNoseLoadHandling => "max nose load (ground)",
+        ForwardLimitGovernance::ScissorPlotEstimate => "scissor estimate",
+        ForwardLimitGovernance::RotationNoseWheelLiftoff => "rotation (takeoff)",
+        ForwardLimitGovernance::LandingTrimGroundEffect => "landing trim",
+    }
+}
+
+/// Short name of the mechanism governing an aft limit.
+fn aft_mark(governance: AftLimitGovernance) -> &'static str {
+    match governance {
+        AftLimitGovernance::Aerodynamic => "static-margin floor",
+        AftLimitGovernance::GroundMinimumNoseLoad => "min nose load (ground)",
+        AftLimitGovernance::TipBack => "tip-back (ground)",
+    }
 }
 
 /// Generate a model-derived CG loading-state check figure.

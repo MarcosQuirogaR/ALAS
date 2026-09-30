@@ -5,6 +5,16 @@
 
 use super::*;
 
+/// Least-squares slope and intercept of `y` against `x`.
+pub(super) fn lin(x: &[f64], y: &[f64]) -> (f64, f64) {
+    let n = x.len() as f64;
+    let mx = x.iter().sum::<f64>() / n;
+    let my = y.iter().sum::<f64>() / n;
+    let num: f64 = x.iter().zip(y).map(|(a, b)| (a - mx) * (b - my)).sum();
+    let den: f64 = x.iter().map(|a| (a - mx).powi(2)).sum();
+    (num / den, my - num / den * mx)
+}
+
 /// Coarse-versus-fine mesh sensitivity of the cruise polar, so a reported L/D
 /// can be told apart from a mesh artifact.
 #[allow(dead_code)]
@@ -13,7 +23,7 @@ pub(super) fn mesh_study(name: &str) -> Result<Value, String> {
     let config = AlasConfig::from_value(&json!({ "preset": name })).map_err(|e| e.to_string())?;
     let dv = &preset.design_vector;
     let report = FullAnalysis::new(config.clone())
-        .run(dv, false)
+        .run(dv, true)
         .map_err(|e| e.to_string())?;
     let mut rows = Vec::new();
     for (label, span, chord) in [
@@ -38,7 +48,7 @@ pub(super) fn mesh_study(name: &str) -> Result<Value, String> {
         analysis.chordwise_resolution = chord;
         let sweep = AeroAnalysis::new(
             &report.airplane,
-            report.design.sweep_deg,
+            AeroAnalysis::quarter_chord_sweep_deg(&report.airplane, dv.sweep_deg),
             Some(config.geometry.clone()),
             Some(config.drag_model.clone()),
             Some(analysis),

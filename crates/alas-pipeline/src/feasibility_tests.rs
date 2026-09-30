@@ -323,3 +323,47 @@ fn tank_limited_model_cg_uses_the_analyzed_fuel_and_names_the_load_case_honestly
     );
     assert!(takeoff.mass_kg < config.requirements.mtow_kg);
 }
+
+/// A propeller aircraft's cruise thrust margin comes from the propeller
+/// model at its maximum-cruise rating, not from the jet form's static rating
+/// times the configured take-off lapse. The jet form put the ATR 72-600 about
+/// 32 % short (static T/W 0.211 against 0.308); the propeller model puts it a
+/// few percent short at take-off mass, a model finding inside the lapse
+/// relation's scatter, reported rather than hidden. A turbofan keeps the jet
+/// form and is given no propeller cruise thrust at all.
+#[test]
+fn a_propeller_aircraft_gets_its_cruise_thrust_margin_from_the_propeller_model() {
+    let preset = presets::get("ATR72-600").expect("registered ATR preset");
+    let config = AlasConfig::from_value(&serde_json::json!({ "preset": "ATR72-600" }))
+        .expect("ATR72-600 config");
+    let available_n = static_thrust::propeller_cruise_thrust_n(&config)
+        .expect("a turboprop has a propeller cruise thrust")
+        .expect("the propeller model evaluates at the design cruise point");
+    // Two engines at maximum-cruise power, FL170, M0.44: about 2 x 6.7 kN.
+    assert!((12_000.0..16_000.0).contains(&available_n), "{available_n}");
+
+    let report = crate::full_analysis::FullAnalysis::new(config.clone())
+        .run(&preset.design_vector, true)
+        .expect("ATR full analysis");
+    let feasibility = assess_physical_feasibility(&config, &preset.design_vector, &report, None);
+    for finding in feasibility
+        .findings
+        .iter()
+        .filter(|finding| finding.code == FindingCode::ThrustMarginViolation)
+    {
+        assert!(
+            finding.message.contains("maximum-cruise thrust"),
+            "{}",
+            finding.message
+        );
+        let (actual, limit) = (
+            finding.actual.expect("actual"),
+            finding.limit.expect("limit"),
+        );
+        assert!(actual / limit > 0.95, "{}", finding.message);
+    }
+
+    let jet = AlasConfig::from_value(&serde_json::json!({ "preset": "A320-200" }))
+        .expect("A320-200 config");
+    assert!(static_thrust::propeller_cruise_thrust_n(&jet).is_none());
+}

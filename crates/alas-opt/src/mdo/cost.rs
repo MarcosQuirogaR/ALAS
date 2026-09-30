@@ -6,8 +6,9 @@
 //! The configured mission quantity is normalized by a fixed reference scale
 //! rather than by a value observed during the run, because dividing by "the
 //! first evaluated candidate" is not deterministic once worker threads
-//! evaluate candidates in parallel. Masses are normalized by the takeoff-mass
-//! ceiling, since every mission-sized candidate is bounded by it; block fuel
+//! evaluate candidates in parallel. Masses are normalized by the plan's mass
+//! scale (`alas_config::MtowPlan::normalisation_kg`: the declared MTOW, or
+//! the band target in the MTOW band mode), called the ceiling below; block fuel
 //! is normalized by three tenths of the ceiling, a generous upper bound on
 //! trip fuel fraction for a long-range transport; fuel per seat-kilometre is
 //! normalized by 1e-3 kg/(seat km), the order of magnitude of a modern
@@ -104,7 +105,8 @@ pub(crate) fn assemble(
     mut residuals: Vec<ConstraintResidual>,
 ) -> CandidateAssessment {
     let objective_config = &config.optimizer.objective;
-    let mtow_ceiling = outcome.mtow_ceiling;
+    // The mass scale of the plan: the declared MTOW, or the band target.
+    let mtow_ceiling = outcome.plan.normalisation_kg;
     let kind = objective_config.kind;
     let range_km = outcome.sized.design_range_m / 1_000.0;
     // Efficiency is reported per seat actually carried by the detailed load

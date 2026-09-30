@@ -86,6 +86,7 @@ pub(super) fn relocated_paths(group: &str) -> &'static [&'static str] {
             "empennage.tail_airfoil",
         ],
         "mission" => &["navdata_dir", "texture_path", "routes_dir"],
+        "optimizer" => crate::views::inputs_mtow::RELOCATED_OBJECTIVE_PATHS,
         _ => &[],
     }
 }
@@ -554,6 +555,25 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn the_optimizer_page_hides_the_fields_the_inputs_mtow_card_owns() {
+        let schema = AlasConfig::default().schema();
+        let fields = node_fields_at(&schema, "/optimizer").expect("optimizer group");
+        let mut before = Vec::new();
+        leaf_paths(&fields, "", &mut before);
+        let mut after = Vec::new();
+        leaf_paths(
+            &visible_fields(page("optimizer").expect("page"), "optimizer", &fields),
+            "",
+            &mut after,
+        );
+        for path in crate::views::inputs_mtow::RELOCATED_OBJECTIVE_PATHS {
+            assert!(before.iter().any(|leaf| leaf == path), "{path} is a field");
+            assert!(!after.iter().any(|leaf| leaf == path), "{path} is hidden");
+        }
+        assert!(after.iter().any(|leaf| leaf == "objective.kind"));
     }
 
     fn shown(fields: &[Field], leaf: &str) -> bool {

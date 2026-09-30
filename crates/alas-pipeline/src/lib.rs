@@ -31,9 +31,11 @@ pub mod cabin_scene;
 pub mod cpacs;
 #[path = "cpacs/adapters.rs"]
 pub mod cpacs_adapters;
+pub mod cruise_mass;
 pub mod dual_solver;
 pub mod export;
 pub mod feasibility;
+pub mod field_reference;
 pub mod flowunsteady;
 pub mod fuel_model;
 pub mod full_analysis;

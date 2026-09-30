@@ -169,7 +169,7 @@ pub fn a340_300() -> AircraftPreset {
             min_wing_loading_kg_m2: 500.0,
             cabin_preset: "Custom".to_owned(),
             optimize_passenger_capacity: true,
-            num_passengers: 290,
+            num_passengers: 335,
             cargo_payload_kg: 45_000.0,
             // Maximum zero-fuel weight 178.0 t less an operating empty weight
             // of about 129.4 t.
@@ -388,7 +388,7 @@ pub fn a380_800() -> AircraftPreset {
             min_wing_loading_kg_m2: 450.0,
             cabin_preset: "Custom".to_owned(),
             optimize_passenger_capacity: true,
-            num_passengers: 525,
+            num_passengers: 555,
             cargo_payload_kg: 150_000.0,
             // Maximum zero-fuel weight about 361 t less an operating empty
             // weight of about 277 t.

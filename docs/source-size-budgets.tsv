@@ -42,7 +42,6 @@ crates/alas-opt/src/mdo/propulsion.rs	784	The off-design propulsion deck every c
 crates/alas-opt/src/mdo/residuals_geometry.rs	561	The planform, wing-loading and accommodation requirement family. Pending decomposition into modules with interfaces.
 crates/alas-payload/src/build.rs	590	The entry point every consumer uses, and the fast auto-sizer that runs before any interior is built. Pending decomposition into modules with interfaces.
 crates/alas-payload/src/cabin.rs	602	The passenger cabin: what the regulation allows, and where the furniture goes. Pending decomposition into modules with interfaces.
-crates/alas-payload/src/cargo.rs	526	Freight: which containers exist, where they physically go in this fuselage, and how the load is distributed so the aircraft trims. Pending decomposition into modules with interfaces.
 crates/alas-perf/src/performance/constraints.rs	562	The four matching-chart constraint curves and the assembled chart. Pending decomposition into modules with interfaces.
 crates/alas-pipeline/src/cpacs/render.rs	730	CPACS XML rendering and source-geometry validation. Pending decomposition into modules with interfaces.
 crates/alas-pipeline/src/export.rs	670	Exporting design databases to JSON, Selig `.dat` files, and formatted summaries. Pending decomposition into modules with interfaces.
@@ -53,6 +52,5 @@ crates/alas-pipeline/src/structural.rs	527	Structural wingbox sizing, mesh gener
 crates/alas-report/src/families/geometry/sandbox_scene.rs	539	The sandbox workspace's central aircraft scene. Pending decomposition into modules with interfaces.
 crates/alas-report/src/families/structures_dynamics/modes.rs	744	Rayleigh-versus-MSC/NASTRAN-95 normal-mode frequencies and spanwise shapes. Pending decomposition into modules with interfaces.
 xtask/src/dist.rs	1804	Packaging and distribution assembly task for xtask. Pending decomposition into modules with interfaces.
-crates/alas-config/src/schema.rs	505	Schema tree and field metadata. Frozen at the current size pending decomposition into modules with interfaces.
 crates/alas-opt/src/mdo/residuals_layout.rs	524	Residual layout for the MDO problem. Frozen at the current size pending decomposition into modules with interfaces.
 crates/alas-pipeline/examples/model_reference_dump/main.rs	656	Per-preset dump of every model output that has a real-world counterpart, assembled in one function.

@@ -51,6 +51,60 @@ pub struct EmpiricalTurbofanModel {
     deck: EmpiricalTurbofanDeck,
     fuel_model: LegacyTurbofanModel,
     provenance: ModelProvenance,
+    tsfc: TsfcBasis,
+}
+
+/// Standard gravity defining the kilogram-force, m/s^2 (CGPM 1901).
+const STANDARD_GRAVITY_M_S2: f64 = 9.806_65;
+
+/// Highest Mach number accepted by [validate_flight].
+const MAXIMUM_DECK_MACH: f64 = 0.9;
+
+/// Full-rating thrust-specific fuel consumption closed on the deck's two
+/// declared anchors.
+///
+/// At every altitude the TSFC follows the static-anchored linear-in-Mach
+/// form with a square-root temperature correction,
+///
+/// `c(M, theta) = c_SLS * theta^0.5 * (1 + k M)`,
+///
+/// from Mair & Birdsall, "Aircraft Performance" (1992) and ESDU 73019, as
+/// transcribed by O. Schulz, "Assessment of Numerical Models for Thrust and
+/// Specific Fuel Consumption for Turbofan Engines", HAW Hamburg (2007),
+/// Eq. 2.21 (linear Mach term, anchored on the static sea-level TSFC) and
+/// Eqs. 2.15/2.17 (theta^0.5; Martinez-Val & Perez, J. Aircraft 29(4), 1992).
+/// The power law `c ~ M^n` of Eq. 2.15/2.17 is not used because it vanishes
+/// at M = 0 and cannot hold the sea-level-static ICAO anchor. Schulz gives no
+/// value for the engine-dependent slope `k`; it is closed here on the engine's
+/// own anchors, `c(M_ref, theta_ref) = c_cruise`, so no aircraft- or
+/// preset-specific factor enters.
+///
+/// Because `k` is closed on the cruise anchor, the form is identical to the
+/// cruise-referenced form of the same source,
+/// `c = c_cruise * (theta/theta_ref)^0.5 * (1 + k M)/(1 + k M_ref)`, so one
+/// expression holds both anchors exactly and keeps the temperature and Mach
+/// trends above the reference altitude and on non-standard days. The previous
+/// altitude smoothstep onto a constant cruise TSFC dropped both trends at and
+/// above the reference altitude.
+///
+/// Throttle basis of the cruise anchor: the catalogue pairs the cruise TSFC
+/// with `off_design.cruise_reference_thrust_n` at the same altitude and Mach
+/// (the OpenAP `engines.csv` cruise thrust/SFC pair, both quoted at the
+/// cruise altitude and Mach). The deck uses that thrust as its full rating
+/// there, so the catalogue value is the TSFC at rating utilization 1 at the
+/// reference condition, where the ICAO part-power factor is exactly 1. The
+/// part-power shape therefore applies relative to the reference thrust and
+/// is not counted twice; a mission cruising below that thrust delivers the
+/// ICAO-shaped part-power TSFC, not the catalogue figure.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct TsfcBasis {
+    /// ICAO take-off fuel flow over take-off thrust at sea-level static,
+    /// kg/(N s).
+    static_tsfc_kg_n_s: f64,
+    /// US 1976 sea-level static temperature defining theta, K.
+    sea_level_temperature_k: f64,
+    /// Linear Mach coefficient `k` closed on the two anchors, 1/Mach.
+    mach_slope: f64,
 }
 
 impl EmpiricalTurbofanModel {
@@ -97,11 +151,46 @@ impl EmpiricalTurbofanModel {
                 value: f64::NAN,
             });
         }
+        let static_tsfc_kg_n_s = deck.takeoff_fuel_flow_kg_s / deck.takeoff_thrust_n;
+        let sea_level_temperature_k = alas_atmo::us1976_compute_values(0.0, 0.0).temperature_k;
+        let reference_temperature_k =
+            alas_atmo::us1976_compute_values(deck.max_climb_reference_altitude_m, 0.0)
+                .temperature_k;
+        let cruise_tsfc_kg_n_s =
+            deck.cruise_reference_tsfc_kg_kgf_h / (STANDARD_GRAVITY_M_S2 * 3_600.0);
+        let mach_slope = (cruise_tsfc_kg_n_s
+            / (static_tsfc_kg_n_s * (reference_temperature_k / sea_level_temperature_k).sqrt())
+            - 1.0)
+            / deck.max_climb_reference_mach;
+        // The closure needs a non-zero reference Mach, and the resulting TSFC
+        // must stay positive over the whole accepted Mach domain.
+        if !mach_slope.is_finite() || 1.0 + mach_slope * MAXIMUM_DECK_MACH <= 0.0 {
+            return Err(PropulsionError::InvalidInput {
+                field: "empirical turbofan TSFC Mach slope",
+                value: mach_slope,
+            });
+        }
         Ok(Self {
             deck,
             fuel_model,
             provenance,
+            tsfc: TsfcBasis {
+                static_tsfc_kg_n_s,
+                sea_level_temperature_k,
+                mach_slope,
+            },
         })
+    }
+
+    /// Full-rating TSFC at `flight`, kg/(N s), from the [TsfcBasis] form.
+    ///
+    /// Sea-level static reproduces the ICAO take-off TSFC; the US 1976
+    /// standard-day reference altitude and Mach reproduce the declared cruise
+    /// TSFC. `theta` uses the flight's ambient temperature, so non-standard
+    /// days and off-reference Mach numbers move TSFC at every altitude.
+    fn full_rating_tsfc_kg_n_s(&self, flight: FlightCondition) -> f64 {
+        let theta = flight.temperature_k / self.tsfc.sea_level_temperature_k;
+        self.tsfc.static_tsfc_kg_n_s * theta.sqrt() * (1.0 + self.tsfc.mach_slope * flight.mach)
     }
 
     fn takeoff_available_n(&self, flight: FlightCondition) -> f64 {
@@ -245,18 +334,13 @@ impl PropulsionSystemModel for EmpiricalTurbofanModel {
         } else {
             thrust_n
         };
-        let cruise_reference_fuel_flow_kg_s = self.deck.cruise_reference_tsfc_kg_kgf_h
-            * rated_thrust_n
-            / request.flight.gravity_m_s2
-            / 3_600.0;
-        let altitude_fraction =
-            (request.flight.altitude_m / self.deck.max_climb_reference_altitude_m).clamp(0.0, 1.0);
-        // Smoothly join the two independently declared absolute anchors. This
-        // is a bounded interpolation inside the mission deck's validity
-        // domain, not an altitude extrapolation of the ICAO static schedule.
-        let blend = altitude_fraction * altitude_fraction * (3.0 - 2.0 * altitude_fraction);
-        let full_rating_fuel_flow_kg_s = self.deck.takeoff_fuel_flow_kg_s
-            + blend * (cruise_reference_fuel_flow_kg_s - self.deck.takeoff_fuel_flow_kg_s);
+        // Interpolate TSFC, not absolute fuel flow: blending the constant
+        // static take-off flow into the lapsed rating charged low-altitude
+        // flight with sea-level-static fuel flow for a fraction of the thrust.
+        // The full-rating flow is TSFC times the lapsed rated thrust; the ICAO
+        // part-power shape then scales it with rating utilization.
+        let full_rating_fuel_flow_kg_s =
+            self.full_rating_tsfc_kg_n_s(request.flight) * rated_thrust_n;
         let fuel_flow = full_rating_fuel_flow_kg_s * fuel_fraction;
         if !fuel_flow.is_finite() || fuel_flow < 0.0 {
             return Err(PropulsionError::NonFiniteOutput(
@@ -285,7 +369,7 @@ impl PropulsionSystemModel for EmpiricalTurbofanModel {
             active_limits,
             residuals: Vec::new(),
             validity: ValidityStatus::Extrapolated {
-                reason: "thrust uses the Bartel-Young/OpenAP correlation; fuel interpolates between declared ICAO takeoff and cruise-TSFC anchors and remains uncalibrated between anchors".to_owned(),
+                reason: "thrust uses the Bartel-Young/OpenAP correlation; fuel is TSFC times lapsed thrust, with TSFC joining the ICAO takeoff and cruise-TSFC anchors through a Mach/temperature form and remaining uncalibrated between anchors".to_owned(),
             },
             provenance: self.provenance.clone(),
             trace: None,
@@ -335,7 +419,7 @@ impl PropulsionSystemModel for EmpiricalTurbofanModel {
             query,
             items: vec![DiagnosticItem {
                 code: "bartel-young-openap-thrust".to_owned(),
-                message: "Three-region thrust lapse with an engine-specific maximum-climb anchor; fuel uses active-rating utilization and interpolates between absolute ICAO takeoff and cruise-TSFC anchors.".to_owned(),
+                message: "Three-region thrust lapse with an engine-specific maximum-climb anchor; fuel uses active-rating utilization and a TSFC joining the ICAO takeoff and cruise-TSFC anchors.".to_owned(),
             }],
             provenance: self.provenance.clone(),
         }
@@ -363,6 +447,7 @@ fn validate_flight(flight: FlightCondition) -> Result<(), PropulsionError> {
         ("empirical turbofan altitude_m", flight.altitude_m),
         ("empirical turbofan mach", flight.mach),
         ("empirical turbofan pressure_pa", flight.pressure_pa),
+        ("empirical turbofan temperature_k", flight.temperature_k),
         ("empirical turbofan gamma", flight.gamma),
         ("empirical turbofan velocity_m_s", flight.velocity_m_s),
         ("empirical turbofan gravity_m_s2", flight.gravity_m_s2),
@@ -378,8 +463,9 @@ fn validate_flight(flight: FlightCondition) -> Result<(), PropulsionError> {
         // bounded 45,000-ft correlation domain and retain Extrapolated
         // validity outside the declared engine reference point.
         || flight.altitude_m > 13_716.0
-        || !(0.0..=0.9).contains(&flight.mach)
+        || !(0.0..=MAXIMUM_DECK_MACH).contains(&flight.mach)
         || flight.pressure_pa <= 0.0
+        || flight.temperature_k <= 0.0
         || flight.gamma <= 1.0
         || flight.velocity_m_s < 0.0
         || flight.gravity_m_s2 <= 0.0
@@ -405,15 +491,49 @@ mod tests {
     }
 
     fn model_with_climb_rate(max_climb_rate_ft_min: Option<f64>) -> EmpiricalTurbofanModel {
+        model_from_deck(EmpiricalTurbofanDeck {
+            takeoff_thrust_n: 235_800.0,
+            max_climb_reference_thrust_n: 44_482.0,
+            max_climb_reference_altitude_m: 10_668.0,
+            max_climb_reference_mach: 0.8,
+            bypass_ratio: 5.9,
+            takeoff_fuel_flow_kg_s: 2.284,
+            cruise_reference_tsfc_kg_kgf_h: 0.58,
+            part_power_fuel_flow_ratios: [0.0893, 0.2767, 0.8222, 1.0],
+            max_climb_rate_ft_min,
+            flight_idle_fraction: 0.07,
+        })
+    }
+
+    /// Two CFM56-5B4/3 as the mission builds them from the engine catalogue
+    /// (`alas-config/data/engines.json`): catalogue thrust, ICAO EEDB
+    /// 01P08CM105 take-off fuel flow, bypass ratio and part-power ratios,
+    /// catalogue cruise TSFC and the declared maximum-climb anchor.
+    fn a320_class_model() -> EmpiricalTurbofanModel {
+        model_from_deck(EmpiricalTurbofanDeck {
+            takeoff_thrust_n: 2.0 * 117_770.0,
+            max_climb_reference_thrust_n: 2.0 * 22_241.0,
+            max_climb_reference_altitude_m: 10_668.0,
+            max_climb_reference_mach: 0.8,
+            bypass_ratio: 5.7,
+            takeoff_fuel_flow_kg_s: 2.0 * 1.142,
+            cruise_reference_tsfc_kg_kgf_h: 0.60,
+            part_power_fuel_flow_ratios: [0.089_316_99, 0.276_707_53, 0.822_241_68, 1.0],
+            max_climb_rate_ft_min: None,
+            flight_idle_fraction: 0.07,
+        })
+    }
+
+    fn model_from_deck(deck: EmpiricalTurbofanDeck) -> EmpiricalTurbofanModel {
         let inputs = TurbofanInputs {
             number_of_engines: 2.0,
-            bypass_ratio: 5.9,
+            bypass_ratio: deck.bypass_ratio,
             overall_pressure_ratio: 27.1,
             fan_pressure_ratio: 1.6,
             turbine_inlet_temperature_k: 1_600.0,
-            cruise_mach: 0.8,
-            cruise_altitude_m: 10_668.0,
-            design_thrust_total_n: 235_800.0,
+            cruise_mach: deck.max_climb_reference_mach,
+            cruise_altitude_m: deck.max_climb_reference_altitude_m,
+            design_thrust_total_n: deck.takeoff_thrust_n,
         };
         let params = VehicleBuilderParams::default();
         let sized = size_turbofan(&inputs, &params);
@@ -439,23 +559,61 @@ mod tests {
             },
         )
         .unwrap_or_else(|error| panic!("legacy fixture: {error}"));
-        EmpiricalTurbofanModel::new(
-            EmpiricalTurbofanDeck {
-                takeoff_thrust_n: 235_800.0,
-                max_climb_reference_thrust_n: 44_482.0,
-                max_climb_reference_altitude_m: 10_668.0,
-                max_climb_reference_mach: 0.8,
-                bypass_ratio: 5.9,
-                takeoff_fuel_flow_kg_s: 2.284,
-                cruise_reference_tsfc_kg_kgf_h: 0.58,
-                part_power_fuel_flow_ratios: [0.0893, 0.2767, 0.8222, 1.0],
-                max_climb_rate_ft_min,
-                flight_idle_fraction: 0.07,
-            },
-            legacy,
-            provenance,
-        )
-        .unwrap_or_else(|error| panic!("empirical fixture: {error}"))
+        EmpiricalTurbofanModel::new(deck, legacy, provenance)
+            .unwrap_or_else(|error| panic!("empirical fixture: {error}"))
+    }
+
+    /// US 1976 standard-day flight condition at `altitude_m` and `mach`.
+    fn standard_flight(altitude_m: f64, mach: f64) -> FlightCondition {
+        let air = alas_atmo::us1976_compute_values(altitude_m, 0.0);
+        let mut flight = sea_level_static();
+        flight.altitude_m = altitude_m;
+        flight.mach = mach;
+        flight.pressure_pa = air.pressure_pa;
+        flight.temperature_k = air.temperature_k;
+        flight.density_kg_m3 = air.density_kg_m3;
+        flight.speed_of_sound_m_s = air.speed_of_sound_m_s;
+        flight.velocity_m_s = mach * air.speed_of_sound_m_s;
+        flight
+    }
+
+    fn request_at(flight: FlightCondition, demand: PropulsionDemand) -> PropulsionRequest {
+        PropulsionRequest {
+            flight,
+            demand,
+            mode: OperatingMode::Normal,
+            failure: FailureState::None,
+            loads: PropulsionLoads::default(),
+            state: PropulsionState::default(),
+            time_step_s: None,
+        }
+    }
+
+    /// Fuel flow over thrust of an evaluated request, kg/(kgf h).
+    fn evaluated_tsfc_kg_kgf_h(
+        model: &EmpiricalTurbofanModel,
+        flight: FlightCondition,
+        demand: PropulsionDemand,
+    ) -> f64 {
+        let result = model
+            .evaluate(&request_at(flight, demand))
+            .unwrap_or_else(|error| panic!("evaluate: {error}"));
+        let fuel_flow_kg_s = result.resource_flows[0].mass_flow_kg_s.unwrap();
+        fuel_flow_kg_s * flight.gravity_m_s2 * 3_600.0 / result.body_force_n[0]
+    }
+
+    /// Mach number of `cas_m_s` at `flight`'s pressure, by bisection.
+    fn mach_for_cas(cas: f64, flight: FlightCondition) -> f64 {
+        let (mut low, mut high) = (0.0, 0.9);
+        for _ in 0..80 {
+            let mid = 0.5 * (low + high);
+            if cas_m_s(mid, flight.pressure_pa, flight.gamma) < cas {
+                low = mid;
+            } else {
+                high = mid;
+            }
+        }
+        0.5 * (low + high)
     }
 
     fn sea_level_static() -> FlightCondition {
@@ -641,11 +799,10 @@ mod tests {
     #[test]
     fn cruise_reference_tsfc_anchor_is_reproduced() {
         let model = model();
-        let mut flight = sea_level_static();
-        flight.altitude_m = model.deck.max_climb_reference_altitude_m;
-        flight.pressure_pa = standard_pressure_pa(flight.altitude_m);
-        flight.mach = model.deck.max_climb_reference_mach;
-        flight.velocity_m_s = flight.mach * flight.speed_of_sound_m_s;
+        let flight = standard_flight(
+            model.deck.max_climb_reference_altitude_m,
+            model.deck.max_climb_reference_mach,
+        );
         let result = model
             .evaluate(&PropulsionRequest {
                 flight,
@@ -751,5 +908,196 @@ mod tests {
             .unwrap_or_else(|error| panic!("normalized maximum: {error}"));
         assert!((result.body_force_n[0] - capability.maximum_body_force_n[0]).abs() < 1.0e-9);
         assert!(result.active_limits.is_empty());
+    }
+
+    #[test]
+    fn tsfc_rises_monotonically_between_the_anchors_along_a_constant_cas_climb() {
+        let model = model();
+        let full = PropulsionDemand::Rating(PropulsionRating::MaximumClimb);
+        let takeoff_tsfc = 2.284 * 9.806_65 * 3_600.0 / 235_800.0;
+        let cruise_tsfc = model.deck.cruise_reference_tsfc_kg_kgf_h;
+        let static_tsfc = evaluated_tsfc_kg_kgf_h(&model, sea_level_static(), full);
+        assert!((static_tsfc - takeoff_tsfc).abs() < 1.0e-12);
+
+        // Climb at 300 kt CAS, then at the reference Mach, from sea level to
+        // the reference altitude. TSFC rises strictly while it is below the
+        // cruise anchor. Once the climb reaches the reference Mach below the
+        // reference altitude, the warmer air's sqrt(theta) term leaves TSFC
+        // above the anchor by sqrt(T/T_ref) and it then falls onto the anchor
+        // with altitude; that is the physical temperature trend.
+        let reference_temperature_k =
+            standard_flight(model.deck.max_climb_reference_altitude_m, 0.0).temperature_k;
+        let cas = 300.0 * 1_852.0 / 3_600.0;
+        let mut previous = static_tsfc;
+        let mut altitude_m: f64 = 0.0;
+        let mut rising_to_m = 0.0;
+        while altitude_m <= model.deck.max_climb_reference_altitude_m {
+            let mach = mach_for_cas(cas, standard_flight(altitude_m, 0.0))
+                .min(model.deck.max_climb_reference_mach);
+            let flight = standard_flight(altitude_m, mach);
+            let tsfc = evaluated_tsfc_kg_kgf_h(&model, flight, full);
+            if previous < cruise_tsfc {
+                assert!(
+                    tsfc > previous,
+                    "TSFC {tsfc} at {altitude_m} m after {previous}"
+                );
+                rising_to_m = altitude_m;
+            }
+            let temperature_bound = (flight.temperature_k / reference_temperature_k).sqrt();
+            assert!(
+                tsfc <= temperature_bound * cruise_tsfc * (1.0 + 1.0e-12),
+                "TSFC {tsfc} at {altitude_m} m"
+            );
+            previous = tsfc;
+            altitude_m += 250.0;
+        }
+        assert!(rising_to_m > 8_000.0, "rising only to {rising_to_m} m");
+
+        let mach_6_km = mach_for_cas(cas, standard_flight(6_000.0, 0.0));
+        let tsfc_6_km = evaluated_tsfc_kg_kgf_h(&model, standard_flight(6_000.0, mach_6_km), full);
+        assert!(
+            takeoff_tsfc < tsfc_6_km && tsfc_6_km < cruise_tsfc,
+            "{takeoff_tsfc} < {tsfc_6_km} < {cruise_tsfc}"
+        );
+    }
+
+    #[test]
+    fn declared_cruise_tsfc_is_delivered_at_the_reference_condition_and_thrust() {
+        // The catalogue pairs the cruise TSFC with the cruise reference
+        // thrust at the reference altitude and Mach. The mission commands the
+        // deck with NormalizedForce; at the reference condition a unit demand
+        // is exactly that reference thrust, where the ICAO part-power factor
+        // is 1, so the declared TSFC is delivered without a second part-power
+        // correction.
+        for model in [model(), a320_class_model()] {
+            let flight = standard_flight(
+                model.deck.max_climb_reference_altitude_m,
+                model.deck.max_climb_reference_mach,
+            );
+            let result = model
+                .evaluate(&request_at(flight, PropulsionDemand::NormalizedForce(1.0)))
+                .unwrap();
+            assert!(
+                (result.body_force_n[0] - model.deck.max_climb_reference_thrust_n).abs() < 1.0e-9
+            );
+            let tsfc =
+                evaluated_tsfc_kg_kgf_h(&model, flight, PropulsionDemand::NormalizedForce(1.0));
+            assert!(
+                (tsfc - model.deck.cruise_reference_tsfc_kg_kgf_h).abs() < 1.0e-12,
+                "TSFC {tsfc}"
+            );
+            // Below the reference thrust the ICAO shape applies relative to
+            // it: the delivered TSFC is the declared value times f(u)/u.
+            let utilization = 0.8;
+            let part = evaluated_tsfc_kg_kgf_h(
+                &model,
+                flight,
+                PropulsionDemand::NormalizedForce(utilization),
+            );
+            let shape =
+                part_power_fuel_fraction(utilization, model.deck.part_power_fuel_flow_ratios)
+                    / utilization;
+            assert!((part - model.deck.cruise_reference_tsfc_kg_kgf_h * shape).abs() < 1.0e-12);
+        }
+    }
+
+    #[test]
+    fn tsfc_keeps_temperature_and_mach_trends_above_the_reference_altitude() {
+        let model = model();
+        let cruise = PropulsionDemand::Rating(PropulsionRating::Cruise);
+        let reference_altitude_m = model.deck.max_climb_reference_altitude_m;
+        let reference_mach = model.deck.max_climb_reference_mach;
+        let reference = standard_flight(reference_altitude_m, reference_mach);
+        let c_ref = model.deck.cruise_reference_tsfc_kg_kgf_h;
+        let slope = model.tsfc.mach_slope;
+        let expected = |flight: FlightCondition| {
+            c_ref
+                * (flight.temperature_k / reference.temperature_k).sqrt()
+                * (1.0 + slope * flight.mach)
+                / (1.0 + slope * reference_mach)
+        };
+        for (altitude_m, mach) in [
+            (reference_altitude_m, 0.70),
+            (reference_altitude_m, 0.85),
+            (11_500.0, 0.78),
+            (12_500.0, 0.82),
+        ] {
+            let flight = standard_flight(altitude_m, mach);
+            let tsfc = evaluated_tsfc_kg_kgf_h(&model, flight, cruise);
+            assert!(
+                (tsfc - expected(flight)).abs() < 1.0e-12,
+                "{altitude_m} m M{mach}"
+            );
+        }
+
+        // Mach: faster is costlier at fixed altitude above the reference.
+        let slow = evaluated_tsfc_kg_kgf_h(&model, standard_flight(11_500.0, 0.75), cruise);
+        let fast = evaluated_tsfc_kg_kgf_h(&model, standard_flight(11_500.0, 0.85), cruise);
+        assert!(fast > slow, "{fast} > {slow}");
+
+        // Temperature: an ISA+15 K day above the reference raises TSFC by
+        // sqrt(T_hot/T_std); an ISA-15 K day lowers it.
+        let standard = standard_flight(11_500.0, 0.8);
+        let mut hot = standard;
+        hot.temperature_k += 15.0;
+        let mut cold = standard;
+        cold.temperature_k -= 15.0;
+        let tsfc_std = evaluated_tsfc_kg_kgf_h(&model, standard, cruise);
+        let tsfc_hot = evaluated_tsfc_kg_kgf_h(&model, hot, cruise);
+        let tsfc_cold = evaluated_tsfc_kg_kgf_h(&model, cold, cruise);
+        assert!(tsfc_cold < tsfc_std && tsfc_std < tsfc_hot);
+        let ratio = (hot.temperature_k / standard.temperature_k).sqrt();
+        assert!((tsfc_hot / tsfc_std - ratio).abs() < 1.0e-12);
+
+        // In the isothermal stratosphere at constant Mach TSFC is constant.
+        let low = evaluated_tsfc_kg_kgf_h(&model, standard_flight(11_200.0, 0.8), cruise);
+        let high = evaluated_tsfc_kg_kgf_h(&model, standard_flight(13_000.0, 0.8), cruise);
+        assert!((low - high).abs() < 1.0e-12);
+    }
+
+    #[test]
+    fn a320_class_fl207_cruise_tsfc_is_not_inflated_by_the_static_fuel_flow() {
+        // A320-200 final cruise from the 2026-09 preset census: FL207
+        // (6324.45 m), M 0.715, 80.3% of maximum-climb thrust.
+        let model = a320_class_model();
+        let flight = standard_flight(6_324.45, 0.715);
+        let utilization = 0.803;
+        let result = model
+            .evaluate(&request_at(
+                flight,
+                PropulsionDemand::NormalizedForce(utilization),
+            ))
+            .unwrap_or_else(|error| panic!("A320 cruise: {error}"));
+        let thrust_n = result.body_force_n[0];
+        let fuel_flow_kg_s = result.resource_flows[0].mass_flow_kg_s.unwrap();
+        let tsfc = fuel_flow_kg_s * flight.gravity_m_s2 * 3_600.0 / thrust_n;
+
+        // The superseded schedule blended absolute take-off fuel flow into the
+        // lapsed rating by altitude.
+        let deck = &model.deck;
+        let x = flight.altitude_m / deck.max_climb_reference_altitude_m;
+        let blend = x * x * (3.0 - 2.0 * x);
+        let rated_thrust_n = thrust_n / utilization;
+        let cruise_flow_kg_s =
+            deck.cruise_reference_tsfc_kg_kgf_h * rated_thrust_n / flight.gravity_m_s2 / 3_600.0;
+        let old_flow_kg_s = (deck.takeoff_fuel_flow_kg_s
+            + blend * (cruise_flow_kg_s - deck.takeoff_fuel_flow_kg_s))
+            * part_power_fuel_fraction(utilization, deck.part_power_fuel_flow_ratios);
+        let old_tsfc = old_flow_kg_s * flight.gravity_m_s2 * 3_600.0 / thrust_n;
+
+        assert!((0.80..0.87).contains(&old_tsfc), "old TSFC {old_tsfc}");
+        assert!((0.55..0.65).contains(&tsfc), "TSFC {tsfc}");
+    }
+
+    #[test]
+    fn anchors_that_would_make_tsfc_non_positive_are_rejected() {
+        let mut deck = a320_class_model().deck;
+        deck.cruise_reference_tsfc_kg_kgf_h = 0.01;
+        let legacy = a320_class_model().fuel_model;
+        let provenance = a320_class_model().provenance;
+        assert!(matches!(
+            EmpiricalTurbofanModel::new(deck, legacy, provenance),
+            Err(PropulsionError::InvalidInput { .. })
+        ));
     }
 }

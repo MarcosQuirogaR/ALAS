@@ -498,7 +498,7 @@ impl Default for MassModelConfig {
             pct_load_mlg_max: 0.93,
             pct_load_nlg_min: 0.06, // Raymer/Torenbeek ~6-8% min.
             pct_load_nlg_max_handling: default_pct_load_nlg_max_handling(),
-            mlw_fraction_mtow: 0.92,
+            mlw_fraction_mtow: crate::landing_mass_ratio::working_default_mlw_fraction_mtow(),
             fuel_density_kg_m3: 804.0,
             fuel_tank_usable_fraction: 0.85,
         }

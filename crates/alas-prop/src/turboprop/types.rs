@@ -102,51 +102,73 @@ pub struct Pw127m568fModel {
     pub accessory_power_w: f64,
     /// Per-engine residual core exhaust thrust kept outside propeller thrust, N.
     pub residual_jet_thrust_n: f64,
-    /// Fuel flow per unit of **sea-level-rated** maximum-cruise shaft power,
-    /// kg/(kW h), **not** the power-specific fuel consumption the engine
-    /// actually runs at.
+    /// The published maximum-cruise fuel flow per unit of sea-level
+    /// maximum-cruise rating, kg/(kW h): a **validation datum**, not a model
+    /// input and not a PSFC.
     ///
-    /// Despite the name, the quantity is a rating-basis bookkeeping
-    /// coefficient. ATR publishes 762 kg/h for both engines at maximum cruise
-    /// power, and the typed `MaximumCruise` rating is a *sea-level* 2,132 shp;
-    /// dividing the one by the other gives this number directly:
-    /// `762 / (2 x 1,589.83 kW) = 0.239648 kg/kWh`. The PSFC the model then
-    /// applies at every operating point is this value divided by the shaft
-    /// power lapse at [`Self::fuel_reference_density_kg_m3`], so that the
-    /// anchor is reproduced after the lapse is applied: **0.364630 kg/kWh**
-    /// at the declared inputs.
-    ///
-    /// **Not a plain PSFC.** Writing a measured PW120A
-    /// PSFC of 0.295 kg/kWh into this field does *not* give the model a
-    /// 0.295 kg/kWh engine: it gives it `0.295 x 0.657 = 0.194 kg/kWh`, 34 %
-    /// below the intention. Use [`Pw127m568fModel::implied_psfc_kg_kwh`] to
-    /// read what the engine is actually burning, and
-    /// [`Pw127m568fModel::fuel_calibration`] for the whole typed statement.
+    /// ATR publishes 762 kg/h for both engines at maximum cruise power, and
+    /// the typed `MaximumCruise` rating is a sea-level 2,132 shp, so this is
+    /// `762 / (2 x 1,589.83 kW) = 0.239648 kg/kWh`; a caller mapping a
+    /// catalogue entry writes the published flow here the same way. The
+    /// model no longer burns fuel from it: the fuel flow is
+    /// [`Self::psfc_reference_kg_kwh`] scaled by ambient temperature.
+    /// [`Pw127m568fModel::fuel_validation`] multiplies it back by
+    /// `2 x maximum_cruise_power_w` to recover the published flow and reports
+    /// the model against it.
     pub reference_psfc_kg_kwh: f64,
-    /// Assumed ambient density of the published maximum-cruise fuel-flow
-    /// anchor, kg/m^3. **An engineering estimate, not a source datum.**
+    /// Assumed ambient density of the published 762 kg/h point, kg/m^3, used
+    /// only to evaluate [`Pw127m568fModel::fuel_validation`]. **An
+    /// engineering estimate, not a source datum.**
     ///
-    /// The anchor's stated condition is *"95 % MTOW, ISA, optimum FL, 275
-    /// KTAS"* (ATR 72-600 factsheet; ATR Family brochure p. 19). **ATR does
-    /// not publish which flight level "optimum" is**, and no retrieved
-    /// document states it, so this value is an assumption standing in for a
-    /// missing one. The declared 0.70 kg/m^3 is ISA at about FL180.
-    ///
-    /// It matters more than its size suggests. The 762 kg/h anchor is
-    /// reproduced at *any* value of this field, because the calibration
-    /// divides by the lapse at this same density, but the physical PSFC it
-    /// implies, and therefore **every fuel flow away from the anchor**, moves
-    /// with it: 0.3476 kg/kWh if the anchor is at FL160, 0.3564 at FL170,
-    /// 0.3654 at FL180, 0.3843 at FL200, 0.4376 at FL250. That 26 % spread is
-    /// driven entirely by an undeclared input.
-    /// [`Pw127m568fModel::fuel_calibration`] reports it rather than hiding it.
+    /// The point's stated condition is *"95 % MTOW, ISA, optimum FL, 275
+    /// KTAS"* (ATR 72-600 factsheet; ATR Family brochure p. 19). ATR does not
+    /// publish which flight level "optimum" is, so 0.70 kg/m^3 (ISA at about
+    /// FL180) stands in for it; the validation also reports the comparison
+    /// across FL160-FL250.
     pub fuel_reference_density_kg_m3: f64,
+    /// Power-specific fuel consumption on free-turbine shaft power at
+    /// [`Self::psfc_reference_temperature_k`], kg/(kW h).
+    ///
+    /// 0.2945 kg/kWh is the mean of the two engines' PSFC in the Dash 8-100
+    /// DFDR flight record of Majeed, O., *Parametric Specific Fuel
+    /// Consumption Analysis of the PW120A Turboprop Engine*, Specific Range
+    /// Solutions SRS-TSD-002 Rev. 1, 2009, Tab. 3.3 (0.287 and 0.302 kg/kWh
+    /// at 15,616 ft, SAT -23.5 C, about 62 % of take-off power). It is chosen
+    /// because it is *measured* PW100-family PSFC on the same shaft-power
+    /// basis this model burns on (power from torque and propeller speed, no
+    /// exhaust-thrust credit, and this installation declares zero residual
+    /// jet thrust), at a power inside the flat band, and it sits in the
+    /// middle of that document's 0.28-0.31 kg/kWh range. It is **not** chosen
+    /// to reproduce the ATR's 762 kg/h, which is only a validation point.
+    /// The PW127M is a later variant and is probably a few percent better;
+    /// no primary PW127M figure was retrieved, so that is a known
+    /// conservative bias rather than a correction.
+    pub psfc_reference_kg_kwh: f64,
+    /// Ambient static temperature of [`Self::psfc_reference_kg_kwh`], K:
+    /// the -23.5 C SAT of Majeed (2009) Tab. 3.3.
+    pub psfc_reference_temperature_k: f64,
+    /// Ambient temperature to which the take-off ratings (normal and maximum
+    /// reserve) are flat-rated at sea level, K: 39 C, EASA TCDS IM.E.041
+    /// (PW100 series), section 5 "Ratings", PW127M row.
+    pub takeoff_flat_rating_temperature_k: f64,
+    /// Ambient temperature to which the maximum-continuous rating is
+    /// flat-rated at sea level, K: 48 C, EASA TCDS IM.E.041, section 5, PW127M
+    /// row. The climb, cruise and flight-idle ratings share this corner; see
+    /// [`Pw127m568fModel::flat_rating_corner_density_kg_m3`].
+    pub maximum_continuous_flat_rating_temperature_k: f64,
     /// Static figure of merit: the share of shaft power that reaches the
     /// ideal actuator-disk induced power at zero airspeed.
     ///
     /// At `V = 0` this is what separates the thrust from its ideal bound,
-    /// `T = FM^(2/3) T_ideal`, and the same number is the `J = 0` end of
-    /// [`Self::blade_efficiency_cruise`]'s blend.
+    /// `T = FM^(2/3) (2 rho A)^(1/3) P^(2/3)` (momentum theory, Lutze,
+    /// *Performance 10: Thrust Models*, Virginia Tech AOE 3104, eq. 5-14),
+    /// and the same number is the `J = 0` end of
+    /// [`Self::blade_efficiency_cruise`]'s blend. The declared 0.70 is the
+    /// class-level preliminary-design value (0.68-0.73, "0.7 for preliminary
+    /// estimates"; 0.65-0.80 is the defensible band for real propellers).
+    /// Confidence is medium-low: the figure comes from a secondary
+    /// transcription of Gudmundsson-type text and no 568F-1 static datum is
+    /// public.
     pub static_figure_of_merit: f64,
     /// Share of shaft power that reaches ideal induced power in forward
     /// flight, i.e. `eta_p / eta_ideal`, once the blade is unstalled.
@@ -193,9 +215,19 @@ pub struct Pw127m568fModel {
     /// retrieved source; it is a guard against an unphysical operating point
     /// reaching a mission or a report, not a working part of the model.
     pub maximum_propulsive_efficiency: f64,
-    /// Sea-level reference density for the shaft-power lapse law, kg/m^3.
+    /// ISA sea-level density, kg/m^3: the reference the flat-rating corners
+    /// are placed against (the corner density is this times
+    /// `288.15 K / T_flat`, i.e. sea-level pressure at the flat-rating
+    /// temperature).
     pub power_lapse_reference_density_kg_m3: f64,
-    /// Exponent in the density-ratio shaft-power lapse law.
+    /// Exponent `n` of the density lapse `P / P_corner = (rho / rho_corner)^n`
+    /// above the flat-rating corner.
+    ///
+    /// 0.728 is Nita (2008, HAW Hamburg, ATR 72 design study) eq. 3.5.11, a
+    /// regression on McCormick's (1995) PW120 maximum-cruise power chart,
+    /// `P_CR / P_TO = 0.9 sigma^0.728`; Ruijgrok (1996, via Nita Tab. 3.2)
+    /// gives 0.75 for the class. The PW100-family fit is used because it is
+    /// the same engine family.
     pub power_lapse_density_exponent: f64,
     /// Lower bound on the available rated-power fraction at very low density.
     pub minimum_power_lapse_fraction: f64,
@@ -216,23 +248,28 @@ impl Default for Pw127m568fModel {
             gearbox_efficiency: 0.98,
             accessory_power_w: 25_000.0,
             residual_jet_thrust_n: 0.0,
-            // Calibrated to ATR's published 762 kg/h two-engine fuel flow at
-            // maximum cruise power (2,132 shp per engine). This is one
-            // aircraft-level anchor, not a complete PW127M fuel deck.
+            // ATR's published 762 kg/h two-engine flow at maximum cruise power
+            // over 2 x 2,132 shp: the validation point, not a model input.
             reference_psfc_kg_kwh: 0.239_647_943_644_226,
             fuel_reference_density_kg_m3: 0.70,
-            static_figure_of_merit: 0.72,
+            // Majeed (2009) Tab. 3.3: mean of 0.287 and 0.302 kg/kWh at SAT
+            // -23.5 C.
+            psfc_reference_kg_kwh: 0.2945,
+            psfc_reference_temperature_k: 249.65,
+            // EASA TCDS IM.E.041: take-off to 39 C, MCT to 48 C.
+            takeoff_flat_rating_temperature_k: 312.15,
+            maximum_continuous_flat_rating_temperature_k: 321.15,
+            static_figure_of_merit: 0.70,
             // The conservative end of the 0.86-0.91 band the three routes in
             // the field documentation agree on.
             blade_efficiency_cruise: 0.86,
             // 115 KCAS take-off at 1,200 rev/min on 3.93 m: J = 59.2/(20 x 3.93).
             blade_efficiency_knee_advance_ratio: 0.753,
             maximum_propulsive_efficiency: 0.88,
-            // Minimum-hypothesis lapse calibrated at aircraft level to the
-            // published ATR 72-600 time to FL170, without segment-specific
-            // schedules: sigma_FL170^0.75 is approximately 0.66.
+            // Flat to the TCDS corner, then Nita (2008) eq. 3.5.11's PW120
+            // exponent.
             power_lapse_reference_density_kg_m3: 1.225,
-            power_lapse_density_exponent: 0.75,
+            power_lapse_density_exponent: 0.728,
             minimum_power_lapse_fraction: 0.15,
             surrogate: PropellerSurrogate::generic_six_blade(),
         }
@@ -247,6 +284,19 @@ impl Pw127m568fModel {
         for (field, value) in [
             ("propeller_diameter_m", self.propeller_diameter_m),
             ("reference_psfc_kg_kwh", self.reference_psfc_kg_kwh),
+            ("psfc_reference_kg_kwh", self.psfc_reference_kg_kwh),
+            (
+                "psfc_reference_temperature_k",
+                self.psfc_reference_temperature_k,
+            ),
+            (
+                "takeoff_flat_rating_temperature_k",
+                self.takeoff_flat_rating_temperature_k,
+            ),
+            (
+                "maximum_continuous_flat_rating_temperature_k",
+                self.maximum_continuous_flat_rating_temperature_k,
+            ),
             ("normal_takeoff_power_w", self.normal_takeoff_power_w),
             (
                 "maximum_takeoff_reserve_power_w",
@@ -328,16 +378,15 @@ pub struct TurbopropOutput {
     pub residual_jet_thrust_n: f64,
     /// Sum of propeller and residual-jet thrust, N.
     pub total_thrust_n: f64,
-    /// Jet-A consumption predicted from shaft power and the PSFC prior, kg/s.
+    /// Jet-A consumption, engine shaft power times [`Self::psfc_kg_kwh`], kg/s.
     pub fuel_flow_kg_s: f64,
     /// The power-specific fuel consumption this flow implies, kg/(kW h).
     ///
-    /// Reported because it is the quantity a reader can compare against a
-    /// measured engine, and because it is **constant**: the model carries no
-    /// variation of PSFC with power setting, altitude or temperature, so this
-    /// field returns the same number at maximum take-off power and at flight
-    /// idle. See [`Pw127m568fModel::fuel_calibration`] for what that constant
-    /// rests on and how far it sits from measurement.
+    /// It follows ambient temperature as `sqrt(T / T_ref)` and is flat in
+    /// power setting (see [`Pw127m568fModel::psfc_kg_kwh`]), so it is the same
+    /// at maximum take-off power and at flight idle at one temperature. See
+    /// [`Pw127m568fModel::fuel_validation`] for how the resulting flow
+    /// compares with the published cruise point.
     pub psfc_kg_kwh: f64,
     /// Blade angle selected by the generic governor, deg.
     pub blade_angle_deg: f64,

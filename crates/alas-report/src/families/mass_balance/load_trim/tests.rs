@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
+use super::sequences::potato_and_paths;
 use super::*;
 use crate::theme::{PALETTE_DARK, PALETTE_LIGHT};
+use alas_payload::loading_sequence::{LoadingPoint, LoadingSequence};
 
 const X_LEMAC: f64 = 15.26;
 const MAC: f64 = 4.1935;
@@ -19,11 +21,74 @@ fn sample() -> LoadTrimSheetData {
     let dow_x = X_LEMAC + 0.265 * MAC;
     let envelope = loading_envelope_polygon(42_000.0, dow_x, &items(), X_LEMAC, MAC);
     let zfw = envelope.iter().map(|p| p.0).fold(0.0, f64::max);
+    let dow = LoadingPoint {
+        mass_kg: 42_000.0,
+        x_m: dow_x,
+    };
+    let path = |name: &str, order: Vec<(f64, f64)>| {
+        let (mut mass, mut moment) = (dow.mass_kg, dow.mass_kg * dow.x_m);
+        let mut points = vec![dow];
+        for (m, x) in order {
+            mass += m;
+            moment += m * x;
+            points.push(LoadingPoint {
+                mass_kg: mass,
+                x_m: moment / mass,
+            });
+        }
+        LoadingSequence {
+            name: name.to_owned(),
+            points,
+        }
+    };
+    let mut reversed = items();
+    reversed.reverse();
+    let composed = vec![path("fwd", items()), path("aft", reversed)];
+    let (potato, sequences) = potato_and_paths(&composed, &[], |x| (x - X_LEMAC) / MAC * 100.0);
+    let ground = vec![
+        LimitVertex {
+            mass_kg: 42_000.0,
+            fwd_pct_mac: 5.0,
+            aft_pct_mac: 45.0,
+        },
+        LimitVertex {
+            mass_kg: 78_000.0,
+            fwd_pct_mac: 5.0,
+            aft_pct_mac: 45.0,
+        },
+    ];
     LoadTrimSheetData {
         title: "test".to_owned(),
         x_lemac_m: X_LEMAC,
         mac_m: MAC,
-        index: BalanceIndex::for_aircraft(X_LEMAC, MAC, 78_000.0, 17.0, 40.0),
+        index: BalanceIndex::for_aircraft(X_LEMAC, MAC, 78_000.0, 5.0, 45.0),
+        ground_limits: ground,
+        flight_limits: vec![
+            LimitVertex {
+                mass_kg: 52_000.0,
+                fwd_pct_mac: 12.0,
+                aft_pct_mac: 38.0,
+            },
+            LimitVertex {
+                mass_kg: 78_000.0,
+                fwd_pct_mac: 12.0,
+                aft_pct_mac: 38.0,
+            },
+        ],
+        landing_limits: vec![
+            LimitVertex {
+                mass_kg: 52_000.0,
+                fwd_pct_mac: 14.0,
+                aft_pct_mac: 45.0,
+            },
+            LimitVertex {
+                mass_kg: 66_000.0,
+                fwd_pct_mac: 14.0,
+                aft_pct_mac: 45.0,
+            },
+        ],
+        potato,
+        sequences,
         takeoff_limits: vec![
             LimitVertex {
                 mass_kg: 42_000.0,
@@ -67,7 +132,6 @@ fn sample() -> LoadTrimSheetData {
                 mass_kg: 62_500.0,
             },
         ],
-        loading_envelope: envelope,
         fuel_curve: vec![(zfw, 27.0), (60_000.0, 29.0), (70_000.0, 28.0)],
         steps: vec![
             LoadStep {
@@ -136,8 +200,9 @@ fn limits_interpolate_between_vertices_and_hold_beyond_them() {
 fn the_loading_envelope_contains_every_loading_order_and_its_chains_are_convex_in_index_space() {
     let data = sample();
     let n = items().len();
+    let polygon = loading_envelope_polygon(42_000.0, X_LEMAC + 0.265 * MAC, &items(), X_LEMAC, MAC);
     // Forward chain = first n+1 points; its index slopes per kg increase.
-    let fwd: Vec<(f64, f64)> = data.loading_envelope[..=n]
+    let fwd: Vec<(f64, f64)> = polygon[..=n]
         .iter()
         .map(|&(m, p)| (m, data.index_at(m, p)))
         .collect();
@@ -161,8 +226,8 @@ fn the_loading_envelope_contains_every_loading_order_and_its_chains_are_convex_i
             mass += m;
             moment += m * x;
             let pct = (moment / mass - X_LEMAC) / MAC * 100.0;
-            let lo = data.loading_envelope[k + 1].1;
-            let hi = data.loading_envelope[2 * n - k - 1].1;
+            let lo = polygon[k + 1].1;
+            let hi = polygon[2 * n - k - 1].1;
             assert!(
                 pct >= lo - 1e-9 && pct <= hi + 1e-9,
                 "order point {k}: {pct} not in [{lo}, {hi}]"
@@ -194,4 +259,69 @@ fn the_sheet_renders_without_non_finite_coordinates_in_both_themes() {
         assert!(svg.contains("LIMIT DEFINITIONS") && svg.contains("WORKED LOADING CASE"));
         assert!(svg.contains("MTOW 78 000 KG") && svg.contains("%MAC"));
     }
+}
+
+fn polylines_with_dash(scene: &crate::scene::Scene, dash: Option<&[f64]>) -> usize {
+    scene
+        .elements
+        .iter()
+        .filter(|e| {
+            matches!(e, crate::scene::SceneElement::Polyline { stroke, .. }
+                if stroke.dash_array.as_deref() == dash && stroke.width > 1.5)
+        })
+        .count()
+}
+
+#[test]
+fn every_limit_set_is_drawn_in_its_own_style() {
+    let scene = figure_load_trim_sheet(&sample(), &PALETTE_LIGHT);
+    // Two lines (forward, aft) per set present in the sample.
+    assert_eq!(
+        polylines_with_dash(&scene, Some(&[7.0, 4.0])),
+        2,
+        "ground dashed"
+    );
+    assert_eq!(
+        polylines_with_dash(&scene, Some(&[1.5, 3.5])),
+        2,
+        "flight dotted"
+    );
+    assert_eq!(
+        polylines_with_dash(&scene, Some(&[8.0, 3.0, 1.5, 3.0])),
+        2,
+        "landing dash-dot"
+    );
+    assert_eq!(polylines_with_dash(&scene, None), 2, "takeoff solid");
+}
+
+#[test]
+fn the_potato_lies_inside_the_reorder_polygon_and_inside_the_ground_limits() {
+    let data = sample();
+    let polygon = loading_envelope_polygon(42_000.0, X_LEMAC + 0.265 * MAC, &items(), X_LEMAC, MAC);
+    let n = items().len();
+    let chain = |pts: &[(f64, f64)], m: f64| {
+        let (a, b) = pts
+            .windows(2)
+            .find(|w| m >= w[0].0 - 1e-9 && m <= w[1].0 + 1e-9)
+            .map(|w| (w[0], w[1]))
+            .expect("mass inside chain");
+        a.1 + (m - a.0) / (b.0 - a.0) * (b.1 - a.1)
+    };
+    let fwd = &polygon[..=n];
+    let mut aft: Vec<(f64, f64)> = polygon[n..].to_vec();
+    aft.reverse();
+    assert!(!data.potato.is_empty());
+    for level in &data.potato {
+        let (lo, hi) = (chain(fwd, level.mass_kg), chain(&aft, level.mass_kg));
+        assert!(
+            level.fwd_pct_mac >= lo - 0.05 && level.aft_pct_mac <= hi + 0.05,
+            "potato at {} kg outside the reorder polygon",
+            level.mass_kg
+        );
+    }
+    assert_eq!(data.potato_ground_exceedance_pct_mac(), 0.0);
+    let mut tight = data.clone();
+    tight.ground_limits[0].aft_pct_mac = 26.0;
+    tight.ground_limits[1].aft_pct_mac = 26.0;
+    assert!(tight.potato_ground_exceedance_pct_mac() > 0.0);
 }

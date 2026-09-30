@@ -36,6 +36,8 @@ pub fn ave() -> AircraftPreset {
             tank_configuration: "conceptual integral wing tanks",
         },
         reference: AircraftReferenceData {
+            // Declared notional-cabin requirement (DesignRequirements default); not a published aircraft datum.
+            planning_seats: Some(350),
             cg_evidence: CgEnvelopeEvidence::DesignRequirement,
             sources: vec!["notional design requirement; no published aircraft data"],
             ..AircraftReferenceData::default()
@@ -45,8 +47,16 @@ pub fn ave() -> AircraftPreset {
         landing_gear: LandingGearConfig::default(),
         design_vector: DesignVector {
             span_m: 71.75,
-            root_chord_m: 16.50,
-            break_chord_m: 7.80,
+            // With the 34 deg leading-edge sweep and the kink at 35 % semi-span,
+            // the root-to-kink trailing edge runs aft (at most 90 deg to the
+            // aft fuselage axis, the `root_to_kink_te_angle` limit) only when
+            // the kink trailing edge is at or behind the root trailing edge:
+            // The 16.0 m root and 8.0 m break chords give a root-to-kink
+            // trailing-edge angle of 87.9 deg, inside the 90 deg limit.
+            // Engineering choice for a notional aircraft; the chords are
+            // set together with the wing area, span and tip chord.
+            root_chord_m: 16.00,
+            break_chord_m: 8.00,
             tip_chord_m: 1.60,
             sweep_deg: 34.0,
             tip_twist_deg: 0.0,

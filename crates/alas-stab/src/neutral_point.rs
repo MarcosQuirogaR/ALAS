@@ -234,6 +234,12 @@ mod tests {
     }
 
     fn probe_airplane() -> Airplane {
+        probe_airplane_with_tail_scale(1.0)
+    }
+
+    /// The probe with both horizontal-tail chords scaled by `tail_scale`, so
+    /// the tail area and tail volume scale by the same factor.
+    fn probe_airplane_with_tail_scale(tail_scale: f64) -> Airplane {
         let main = Wing::new(
             "Main Wing",
             vec![
@@ -245,8 +251,8 @@ mod tests {
         let hstab = Wing::new(
             "Horizontal Stabilizer",
             vec![
-                WingXSec::new([20.0, 0.0, 0.0], 1.8, -2.0, naca("naca0012")),
-                WingXSec::new([20.6, 4.0, 0.0], 1.0, -2.0, naca("naca0012")),
+                WingXSec::new([20.0, 0.0, 0.0], 1.8 * tail_scale, -2.0, naca("naca0012")),
+                WingXSec::new([20.6, 4.0, 0.0], 1.0 * tail_scale, -2.0, naca("naca0012")),
             ],
             true,
         );
@@ -275,6 +281,47 @@ mod tests {
         assert!(result.critical <= result.cruise + 1e-9);
         assert!(result.critical <= result.high_lift + 1e-9);
         assert!(result.elastic_band.0 <= result.elastic_band.1);
+    }
+
+    /// Physical properties of the neutral point, in metres aft of the nose
+    /// tip: a tailed aircraft has its neutral point aft of the wing-alone
+    /// aerodynamic centre (the tail adds a stabilizing, aft-acting lift-curve
+    /// slope; Raymer, Aircraft Design: A Conceptual Approach, 6th ed.,
+    /// section 16.3), and a larger tail moves it further aft (Etkin and Reid,
+    /// Dynamics of Flight, 3rd ed., section 2.5: the tail contribution grows
+    /// with tail volume).
+    #[test]
+    fn the_neutral_point_is_aft_of_the_wing_alone_centre_and_grows_with_tail_volume() {
+        let analysis = AnalysisConfig::default();
+        let input = NpConditionsInput::default();
+        let mut previous: Option<f64> = None;
+        for tail_scale in [0.5, 1.0, 1.5, 2.0] {
+            let plane = probe_airplane_with_tail_scale(tail_scale);
+            let result = neutral_point_conditions(&plane, &analysis, &input)
+                .expect("the probe meshes and solves");
+            assert!(
+                result.clean_low_speed.is_finite()
+                    && result.diagnostics.x_wing_alone_ac.is_finite()
+            );
+            // The wing-alone centre is the reference; the fuselage term can
+            // move the wing-body centre forward, so the claim is on the
+            // tailed neutral point against the wing alone.
+            assert!(
+                result.clean_low_speed > result.diagnostics.x_wing_alone_ac,
+                "tail scale {tail_scale}: neutral point {:.3} m not aft of the wing-alone \
+                 centre {:.3} m",
+                result.clean_low_speed,
+                result.diagnostics.x_wing_alone_ac
+            );
+            if let Some(before) = previous {
+                assert!(
+                    result.clean_low_speed > before,
+                    "tail scale {tail_scale}: neutral point {:.3} m did not move aft of {before:.3} m",
+                    result.clean_low_speed
+                );
+            }
+            previous = Some(result.clean_low_speed);
+        }
     }
 
     #[test]

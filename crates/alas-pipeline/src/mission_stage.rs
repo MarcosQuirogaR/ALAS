@@ -11,9 +11,8 @@
 
 use std::f64::consts::PI;
 
-use alas_aero::drag_buildup::{DragSettings, FuselageParams, NacelleParams, WingParams};
-use alas_aero::lift_surrogate::{LiftSurrogate, TrainingGrid};
-use alas_aero::vorlax::{VlmGeometry, VlmSettings, VlmWing};
+use alas_aero::drag_buildup::{FuselageParams, NacelleParams, WingParams};
+use alas_aero::vorlax::{VlmGeometry, VlmWing};
 use alas_config::airports::Airport;
 use alas_config::{ActiveEngineModel, AlasConfig};
 #[cfg(test)]
@@ -36,17 +35,21 @@ use crate::feasibility::plan_fuel_loading;
 use crate::full_analysis::AnalysisReport;
 
 pub mod dispatch;
+mod drag_inputs;
 mod flight;
 mod guidance;
 mod schedule;
 mod tail_geometry;
+mod trefftz;
 
 pub(crate) use dispatch::{LoadCaseSelection, SelectedLoadCase};
+use drag_inputs::{drag_settings, main_quarter_chord_sweep, main_thickness, tail_thickness};
 use guidance::{adapt_failed_climb, adapt_failed_cruise, adapt_failed_descent};
 use schedule::build_schedule;
 #[cfg(test)]
 use schedule::schedule_horizontal_distance;
 use tail_geometry::{tail_span, tail_surfaces};
+use trefftz::mission_lift_surrogate;
 
 const METRES_PER_SECOND_TO_FEET_PER_MINUTE: f64 = 3.28084 * 60.0;
 
@@ -116,13 +119,7 @@ fn build_analyses_with_mode(
     reference_mode: MissionReferenceMode,
 ) -> Result<MissionAnalyses, String> {
     let vlm_geometry = vlm_geometry(config, report, reference_mode)?;
-    let surrogate = LiftSurrogate::train(
-        &vlm_geometry,
-        &VlmSettings::default(),
-        &TrainingGrid::default(),
-    )
-    .map_err(|error| format!("mission lift surrogate failed: {error}"))?;
-
+    let surrogate = mission_lift_surrogate(&vlm_geometry, reference_mode)?;
     let engine = &config.geometry.engine;
     let n_engines = engine.spanwise_positions_m.len();
     if n_engines == 0 {
@@ -246,10 +243,7 @@ fn build_analyses_with_mode(
         MissionReferenceMode::Product => report.airplane.s_ref,
         MissionReferenceMode::ReferenceCompatibility => geometry_value(report, "wing_area_m2")?,
     };
-    let drag_settings = match reference_mode {
-        MissionReferenceMode::Product => DragSettings::default(),
-        MissionReferenceMode::ReferenceCompatibility => DragSettings::reference_compatibility(),
-    };
+    let drag_settings = drag_settings(reference_mode);
     if !reference_area_m2.is_finite() || reference_area_m2 <= 0.0 {
         return Err("mission aircraft has no positive finite reference area".to_owned());
     }
@@ -397,22 +391,22 @@ fn mission_wings(
     Ok(vec![
         wing(
             geometry_value(report, "mean_aerodynamic_chord_m")?,
-            report.design.sweep_deg.to_radians(),
-            0.12 * report.design.airfoil_thickness_scale,
+            main_quarter_chord_sweep(report, reference_mode),
+            main_thickness(report, reference_mode),
             wing_area,
             main_aspect_ratio,
         ),
         wing(
             hstab.mean_aerodynamic_chord_m,
             hstab.sweep_rad,
-            0.10,
+            tail_thickness(report, reference_mode, "Horizontal Stabilizer", 0.10),
             hstab_area,
             hstab_span * hstab_span / hstab_area,
         ),
         wing(
             vstab.mean_aerodynamic_chord_m,
             vstab.sweep_rad,
-            0.08,
+            tail_thickness(report, reference_mode, "Vertical Stabilizer", 0.08),
             vstab_area,
             vstab_span * vstab_span / vstab_area,
         ),
@@ -532,7 +526,7 @@ fn vlm_geometry(
                 design.span_m * design.span_m / main_area
             }
         },
-        sweep_quarter_chord_rad: design.sweep_deg.to_radians(),
+        sweep_quarter_chord_rad: main_quarter_chord_sweep(report, reference_mode),
         sweep_leading_edge_rad: None,
         twist_root_rad: wing.root_twist_deg.to_radians(),
         twist_tip_rad: design.tip_twist_deg.to_radians(),

@@ -103,7 +103,11 @@ own, each published cell becomes a per-cell factor between its published
 volume and the geometric estimate on the preset's geometry, applied to the
 candidate's own spar box (`FuelTankLayout::resolve_scaled`), so the optimizer
 sees fuel volume grow and shrink with the wing. Fuel is loaded in the reverse of the
-burn order and burned centre first, outer wing last; unusable fuel (CS
+burn order and burned centre first, outer wing last. A trim tank is a CG
+control tank: it is filled after every other tank and emptied first,
+standing for the forward transfer that empties it before landing on the
+A330, A340 and A380 (`alas-mass::tanks::order`; secondary source, the
+in-flight transfer path is not modelled); unusable fuel (CS
 25.959) is part of the empty mass and expansion space (CS 25.969, at least
 two percent) is excluded from the usable volume.
 
