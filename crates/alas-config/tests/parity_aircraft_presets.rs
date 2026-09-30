@@ -27,11 +27,12 @@ mod product_corrections;
 
 /// How many source corrections the ledger is allowed to hold.
 ///
-/// Pinned so a correction cannot be added without someone noticing. 65 became
-/// 72 when the seven frozen presets moved from a per-section spanwise
-/// subdivision multiplier to an absolute panel count; see
-/// [`add_spanwise_panel_corrections`].
-const SOURCE_CORRECTION_COUNT: usize = 72;
+/// Pinned so a correction cannot be added without someone noticing. The count
+/// includes the absolute panel counts (see [`add_spanwise_panel_corrections`]),
+/// the four registered planning-cabin seat counts, the two AVE inboard chords
+/// that keep its root-to-kink trailing edge running aft, and the default
+/// landing ratio the A220 calibration inherits.
+const SOURCE_CORRECTION_COUNT: usize = 79;
 const DC_10_UPSTREAM_DISPLAY_NAME: &str = "McDonnell Douglas DC-10";
 const DC_10_CORRECTED_DISPLAY_NAME: &str = "McDonnell Douglas DC-10-30 (572k option)";
 
@@ -476,6 +477,12 @@ fn source_corrections() -> BTreeMap<String, SourceCorrection> {
         source_correction("A320-200.requirements.cabin_preset", "Ryanair", "Custom"),
         source_correction("A220-300.requirements.cabin_preset", "Ryanair", "Custom"),
         source_correction("DC-10.requirements.cabin_preset", "Ryanair", "Custom"),
+        source_correction("A340-300.requirements.num_passengers", 290.0, 335.0),
+        source_correction("A380-800.requirements.num_passengers", 525.0, 555.0),
+        source_correction("A220-300.requirements.num_passengers", 130.0, 140.0),
+        source_correction("DC-10.requirements.num_passengers", 250.0, 255.0),
+        source_correction("AVE.design_vector.root_chord_m", 16.5, 16.0),
+        source_correction("AVE.design_vector.break_chord_m", 7.8, 8.0),
         source_correction(
             "A340-300.description",
             "Long-range quad-engine widebody with CFM56-5C engines.",
@@ -545,6 +552,15 @@ fn source_corrections() -> BTreeMap<String, SourceCorrection> {
             18_643.0,
         ),
         source_correction("A220-300.requirements.mtow_kg", 70_900.0, 67_585.0),
+        // The A220 calibration spreads `MassModelConfig::default()`, so it
+        // carries the default landing ratio (the 777-9 benchmark, see
+        // `LONG_HAUL_MLW_FRACTION_MTOW`). Loading the preset replaces it with
+        // the A220's own certified 58,740 / 67,585 either way.
+        source_correction(
+            "A220-300.mass_model.mlw_fraction_mtow",
+            0.92,
+            alas_config::landing_mass_ratio::LONG_HAUL_MLW_FRACTION_MTOW,
+        ),
         source_correction(
             "DC-10.description",
             "Classic long-range trijet widebody with underwing and tail-mounted CF6-50 engines.",

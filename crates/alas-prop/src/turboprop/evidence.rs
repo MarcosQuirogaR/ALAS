@@ -13,7 +13,7 @@ use super::*;
 // are only valid inside) were reachable only by knowing which operating
 // points to ask for and which caveats to carry. A consumer that reads a bare
 // number out of [`TurbopropOutput`] cannot tell a certificated rating from a
-// single-point calibration; this contract makes that impossible to lose.
+// class-level surrogate; this contract makes that impossible to lose.
 //
 // **No jet thrust is manufactured anywhere in this file.**
 // `residual_jet_thrust_n` stays whatever the installation declares, which is
@@ -42,27 +42,35 @@ pub struct TurbopropThrustUncertainty {
 impl TurbopropThrustUncertainty {
     /// The band on a **static** thrust, which is set by the figure of merit.
     ///
-    /// `T = FM^(2/3) T_ideal`, so the declared 0.72 against the defensible
-    /// 0.50-0.70 band of the evidence file gives
-    /// `(0.50/0.72)^(2/3) - 1 = -21.6 %` at the pessimistic end and nothing
-    /// above, because 0.72 is already the optimistic end of the band. A
-    /// take-off energy balance against the ATR 72-600's published 1,333 m
-    /// field length independently wants a lower mean roll thrust than this
-    /// model produces, which is consistent with the sign of the band.
+    /// Momentum theory gives `T = FM^(2/3) (2 rho A)^(1/3) P^(2/3)` (Lutze,
+    /// *Performance 10: Thrust Models*, Virginia Tech AOE 3104, eq. 5-14).
+    /// The class-level static figure of merit is 0.70 for preliminary design
+    /// with 0.65-0.80 the band real propellers of this size sit in (secondary
+    /// transcription of Gudmundsson-type text; no 568F-1 static datum is
+    /// public), so the declared 0.70 gives `(0.65/0.70)^(2/3) - 1 = -4.8 %`
+    /// and `(0.80/0.70)^(2/3) - 1 = +9.3 %`. An end of the band the declared
+    /// value already sits on contributes nothing.
     #[must_use]
     pub fn static_thrust(figure_of_merit: f64) -> Self {
-        /// Pessimistic end of the defensible static figure-of-merit band.
-        const LOWER_FIGURE_OF_MERIT: f64 = 0.50;
-        let relative_low = if figure_of_merit.is_finite() && figure_of_merit > LOWER_FIGURE_OF_MERIT
-        {
+        /// Pessimistic end of the static figure-of-merit band.
+        const LOWER_FIGURE_OF_MERIT: f64 = 0.65;
+        /// Optimistic end of the static figure-of-merit band.
+        const UPPER_FIGURE_OF_MERIT: f64 = 0.80;
+        let usable = figure_of_merit.is_finite() && figure_of_merit > 0.0;
+        let relative_low = if usable && figure_of_merit > LOWER_FIGURE_OF_MERIT {
             (LOWER_FIGURE_OF_MERIT / figure_of_merit).powf(2.0 / 3.0) - 1.0
+        } else {
+            0.0
+        };
+        let relative_high = if usable && figure_of_merit < UPPER_FIGURE_OF_MERIT {
+            (UPPER_FIGURE_OF_MERIT / figure_of_merit).powf(2.0 / 3.0) - 1.0
         } else {
             0.0
         };
         Self {
             relative_low,
-            relative_high: 0.0,
-            basis: "static figure of merit declared at 0.72, the optimistic end of a defensible 0.50-0.70 band; T scales as FM^(2/3). Closing it needs a measured 568F-1 map, which is not public.",
+            relative_high,
+            basis: "static figure of merit declared at the class preliminary-design value 0.70 inside a 0.65-0.80 band; momentum-theory static thrust scales as FM^(2/3). Closing it needs a measured 568F-1 map, which is not public.",
         }
     }
 
@@ -127,7 +135,7 @@ pub struct TurbopropOperatingEnvelope {
     /// [`TurbopropError::UnsupportedMode`], and why. Enforced, not advisory:
     /// a test pins that every entry here is actually refused.
     pub unsupported_modes: &'static [(TurbopropMode, &'static str)],
-    /// What the fuel flow is calibrated on, and where it is extrapolated.
+    /// What the fuel flow rests on, and where it is extrapolated.
     pub fuel_validity: &'static str,
     /// Documents behind the limits above.
     pub source: &'static str,
@@ -167,99 +175,120 @@ impl TurbopropOperatingEnvelope {
                     "no public beta/reverse map; reverse is by blade pitch and cannot be inferred from the forward surrogate",
                 ),
             ],
-            fuel_validity: "single-point calibration: the PSFC constant reproduces ATR's published 762 kg/h two-engine maximum-cruise flow and does not vary with power setting or altitude. Against a measured PW120A (0.287-0.302 kg/kWh) and NASA GASP (0.284) the implied 0.3646 kg/kWh is 21-28 % high, and it is cancelling an optimistic drag polar; neither was changed alone because the 762 kg/h anchor is the only aircraft-level datum that constrains the pair. Climb, descent, hold, taxi and sea-level take-off fuel are extrapolated from that one point.",
-            source: "ATR 72-600 factsheet (ratings, 3.93 m 568F-1, 1,200 rev/min, 762 kg/h, 275 kt, 25,000 ft); EASA TCDS EASA.A.084; EASA TCDS IM.E.041 for the PW127M certification basis.",
+            fuel_validity: "class PSFC on shaft power, 0.2945 kg/kWh at 249.65 K (measured PW120A, Majeed 2009 Tab. 3.3), scaled as sqrt(T/T_ref) and flat in power over the 46-100 % band it is sourced on; below 46 % of take-off power it is held flat as an unsourced assumption, so descent, hold and idle fuel are a lower bound. ATR's published 762 kg/h two-engine maximum-cruise flow is a validation point, not an input: the model is compared against it, it is not fitted to it.",
+            source: "ATR 72-600 factsheet (ratings, 3.93 m 568F-1, 1,200 rev/min, 762 kg/h, 275 kt, 25,000 ft); EASA TCDS EASA.A.084; EASA TCDS IM.E.041 section 5 for the PW127M ratings and flat-rating temperatures; Majeed 2009 SRS-TSD-002 for the PSFC; Nita 2008 eq. 3.5.11 for the lapse exponent.",
         }
     }
 }
 
-/// What the turboprop fuel flow is, in one typed statement.
+/// How the class fuel model compares with ATR's published cruise fuel flow.
 ///
-/// The fuel model is a **single-point calibration**, and every field here
-/// exists so a consumer cannot read it as anything else. Nothing in this
-/// struct is a new model: every number is either a declared input, the
-/// published anchor, or arithmetic on the two.
+/// The fuel flow is **not** calibrated on this point any more: it is shaft
+/// power times [`Pw127m568fModel::psfc_kg_kwh`], a measured PW100-family
+/// PSFC scaled by ambient temperature, with the available power from the
+/// TCDS flat rating and a sourced density lapse. The published 762 kg/h is
+/// what the result is checked against, and every field here is either the
+/// published datum, a declared assumption, or the model's own evaluation.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct TurbopropFuelCalibration {
-    /// The one aircraft-level datum the model is calibrated on, kg/s, summed
-    /// over both engines. ATR's published maximum-cruise flow, 762 kg/h.
-    pub anchor_total_fuel_flow_kg_s: f64,
-    /// Installed engine count the anchor is quoted for.
-    pub anchor_engine_count: u32,
-    /// The anchor's condition, verbatim from the source.
-    pub anchor_condition: &'static str,
-    /// Assumed ambient density at the anchor, kg/m^3, and the reason it is an
-    /// assumption.
-    pub assumed_anchor_density_kg_m3: f64,
-    /// Whether the anchor's altitude is published at all. It is not.
-    pub anchor_altitude_is_published: bool,
-    /// The constant power-specific fuel consumption the calibration implies,
-    /// kg/(kW h). Identical at every altitude, airspeed and power setting.
-    pub implied_psfc_kg_kwh: f64,
-    /// Whether the implied PSFC varies with anything. It does not.
-    pub psfc_varies_with_condition: bool,
-    /// Lower and upper ends of the measured comparison band, kg/(kW h).
-    pub measured_psfc_band_kg_kwh: (f64, f64),
-    /// Relative excess of [`Self::implied_psfc_kg_kwh`] over the two ends of
-    /// that band, as signed fractions.
-    pub relative_excess_over_measured: (f64, f64),
-    /// How the implied PSFC would move if the undeclared anchor altitude were
-    /// resolved, as `(density kg/m^3, implied PSFC kg/kWh)` pairs across the
-    /// flight levels this aircraft actually cruises at. The spread is the
-    /// uncertainty the missing datum injects into every off-anchor fuel flow.
-    pub anchor_altitude_sensitivity: &'static [(f64, f64)],
+pub struct TurbopropFuelValidation {
+    /// ATR's published maximum-cruise flow, kg/s, summed over both engines:
+    /// 762 kg/h.
+    pub published_total_fuel_flow_kg_s: f64,
+    /// Installed engine count the published flow is quoted for.
+    pub published_engine_count: u32,
+    /// The published point's condition, verbatim from the source.
+    pub published_condition: &'static str,
+    /// Assumed ambient density of the published point, kg/m^3 (ISA day).
+    pub assumed_density_kg_m3: f64,
+    /// Whether the point's altitude is published at all. It is not.
+    pub altitude_is_published: bool,
+    /// The model's two-engine flow at maximum-cruise power, 275 KTAS and the
+    /// assumed density on the ISA day, kg/s.
+    pub modelled_total_fuel_flow_kg_s: f64,
+    /// `modelled / published - 1`.
+    pub relative_error: f64,
+    /// The PSFC the model burns at that point, kg/(kW h).
+    pub modelled_psfc_kg_kwh: f64,
+    /// Shaft power per engine the model makes available there, W.
+    pub modelled_shaft_power_per_engine_w: f64,
+    /// The PW100-family PSFC range of the source, kg/(kW h): Majeed (2009)
+    /// flight data and cycle model, 0.28-0.31.
+    pub source_psfc_band_kg_kwh: (f64, f64),
+    /// The comparison repeated with the point placed at ISA FL160, FL170,
+    /// FL180, FL200 and FL250, as `(density kg/m^3, relative error)`; the
+    /// spread is what the missing altitude alone is worth.
+    pub altitude_sensitivity: [(f64, f64); 5],
     /// What may and may not be concluded from the numbers above.
     pub validity: &'static str,
-    /// Documents behind the anchor.
+    /// Documents behind the published point and the model.
     pub source: &'static str,
 }
 
 impl Pw127m568fModel {
-    /// The constant power-specific fuel consumption this model burns at,
-    /// kg/(kW h).
+    /// Compare the class fuel model with the published 762 kg/h.
     ///
-    /// This is the physical quantity; [`Self::reference_psfc_kg_kwh`] is the
-    /// rating-basis coefficient it is derived from and is **not** a PSFC.
-    #[must_use]
-    pub fn implied_psfc_kg_kwh(self) -> f64 {
-        self.reference_psfc_kg_kwh / self.power_lapse_fraction(self.fuel_reference_density_kg_m3)
-    }
-
-    /// The typed fuel-calibration statement for this installation.
-    #[must_use]
-    pub fn fuel_calibration(self) -> TurbopropFuelCalibration {
-        /// Measured PW120A from DFDR flight data, SRS-TSD-002 Tab. 3.3 p. 5,
-        /// and NASA GASP's ATR 42-600 BSFC, NTRS 20230006542 Tab. 4 p. 9. The
-        /// band is taken from the lowest published value to the highest.
-        const MEASURED_BAND_KG_KWH: (f64, f64) = (0.284, 0.302);
-        let implied = self.implied_psfc_kg_kwh();
-        TurbopropFuelCalibration {
-            // 762 kg/h, both engines, no APU.
-            anchor_total_fuel_flow_kg_s: 762.0 / 3_600.0,
-            anchor_engine_count: 2,
-            anchor_condition: "95 % MTOW, ISA, optimum FL, 275 KTAS, both engines, no APU (the ATR 72-600 has none)",
-            assumed_anchor_density_kg_m3: self.fuel_reference_density_kg_m3,
-            // The factsheet says "optimum FL" and stops there.
-            anchor_altitude_is_published: false,
-            implied_psfc_kg_kwh: implied,
-            psfc_varies_with_condition: false,
-            measured_psfc_band_kg_kwh: MEASURED_BAND_KG_KWH,
-            relative_excess_over_measured: (
-                implied / MEASURED_BAND_KG_KWH.0 - 1.0,
-                implied / MEASURED_BAND_KG_KWH.1 - 1.0,
-            ),
-            // ISA density at FL160, FL170, FL180, FL200, FL250, with the PSFC
-            // the calibration would imply if the anchor sat there.
-            anchor_altitude_sensitivity: &[
-                (0.7460, 0.34764),
-                (0.7218, 0.35636),
-                (0.6981, 0.36536),
-                (0.6527, 0.38428),
-                (0.5489, 0.43755),
-            ],
-            validity: "Single-point calibration. The implied PSFC is constant at every altitude, airspeed and power setting, so climb, descent, hold, taxi, flight idle and sea-level take-off fuel are all extrapolated from one cruise point; a real turboprop's PSFC rises steeply as power falls, so low-power fuel flow is a lower bound rather than an estimate. The constant is 21-28 % above a measured PW120A and it is cancelling an optimistic drag polar: closing the published 762 kg/h with a measured PSFC implies an aircraft-level cruise L/D of about 13.0 against this model's 16.5. Neither was changed alone, because the anchor is the only aircraft-level datum that constrains the pair and moving one would break it while leaving the other wrong. The anchor's own flight level is not published, and that missing datum alone spans a 26 % range of implied PSFC.",
-            source: "ATR 72-600 factsheet and ATR Family brochure p. 19 (762 kg/h, 275 KTAS, 95 % MTOW, ISA, optimum FL); Pratt & Whitney Canada PW127M ratings via EASA TCDS IM.E.041; measured comparison from SRS-TSD-002 Tab. 3.3 p. 5 and NASA NTRS 20230006542 Tab. 4 p. 9.",
+    /// Engine level only: maximum-cruise power is what ATR quotes the flow
+    /// at, so the check needs no airframe drag. Whether the aircraft needs
+    /// that power at 275 KTAS is an aircraft-level question for the mission.
+    ///
+    /// # Errors
+    ///
+    /// Any [`TurbopropError`] from evaluating the maximum-cruise point.
+    pub fn fuel_validation(self) -> Result<TurbopropFuelValidation, TurbopropError> {
+        /// 275 KTAS, m/s.
+        const PUBLISHED_TRUE_AIRSPEED_M_S: f64 = 275.0 * 1_852.0 / 3_600.0;
+        /// ISA density at FL160, FL170, FL180, FL200 and FL250, kg/m^3.
+        const ISA_DENSITIES_KG_M3: [f64; 5] = [0.7460, 0.7218, 0.6981, 0.6527, 0.5489];
+        // The catalogue writes the published two-engine flow into
+        // `reference_psfc_kg_kwh` per unit of maximum-cruise rating; for the
+        // ATR 72-600 this recovers 762 kg/h.
+        let published_total_fuel_flow_kg_s =
+            self.reference_psfc_kg_kwh * 2.0 * self.maximum_cruise_power_w / JOULES_PER_KWH;
+        let at = |density_kg_m3: f64| {
+            let temperature_k = isa_temperature_from_density_k(
+                density_kg_m3,
+                self.power_lapse_reference_density_kg_m3,
+            );
+            self.evaluate_at_temperature(
+                TurbopropCondition {
+                    density_kg_m3,
+                    true_airspeed_m_s: PUBLISHED_TRUE_AIRSPEED_M_S,
+                },
+                temperature_k,
+                TurbopropCommand {
+                    rating: Pw127mRating::MaximumCruise,
+                    power_fraction: 1.0,
+                    mode: TurbopropMode::Governed,
+                    propeller_speed_rpm: self.governed_propeller_speed_rpm,
+                },
+            )
+        };
+        let point = at(self.fuel_reference_density_kg_m3)?;
+        let modelled_total_fuel_flow_kg_s = 2.0 * point.fuel_flow_kg_s;
+        let mut altitude_sensitivity = [(0.0, 0.0); 5];
+        for (entry, density_kg_m3) in altitude_sensitivity.iter_mut().zip(ISA_DENSITIES_KG_M3) {
+            let flow_kg_s = 2.0 * at(density_kg_m3)?.fuel_flow_kg_s;
+            *entry = (
+                density_kg_m3,
+                flow_kg_s / published_total_fuel_flow_kg_s - 1.0,
+            );
         }
+        Ok(TurbopropFuelValidation {
+            published_total_fuel_flow_kg_s,
+            published_engine_count: 2,
+            published_condition: "95 % MTOW, ISA, optimum FL, 275 KTAS, maximum cruise power, both engines, no APU (the ATR 72-600 has none)",
+            assumed_density_kg_m3: self.fuel_reference_density_kg_m3,
+            // The factsheet says "optimum FL" and stops there.
+            altitude_is_published: false,
+            modelled_total_fuel_flow_kg_s,
+            relative_error: modelled_total_fuel_flow_kg_s / published_total_fuel_flow_kg_s - 1.0,
+            modelled_psfc_kg_kwh: point.psfc_kg_kwh,
+            modelled_shaft_power_per_engine_w: point.engine_shaft_power_w,
+            source_psfc_band_kg_kwh: (0.28, 0.31),
+            altitude_sensitivity,
+            validity: "Validation, not calibration: no model constant was chosen to reproduce this point. The PSFC is measured PW120A data (a PW127M is probably a few percent better, so the flow is biased high on that account) and the available maximum-cruise power follows the TCDS flat rating and Nita's PW120 sigma^0.728 chart fit, whose own scatter is 5-10 % rms; Majeed's constant-TIT cycle model lapses much less (sigma^0.31 between 13,000 and 25,000 ft), so the modelled power, and with it this flow, is more likely low than high. The point's flight level is not published.",
+            source: "ATR 72-600 factsheet and ATR Family brochure p. 19 (762 kg/h, 275 KTAS, 95 % MTOW, ISA, optimum FL); EASA TCDS IM.E.041 section 5 (PW127M ratings and flat-rating temperatures); Majeed, SRS-TSD-002 Rev. 1, 2009, Tab. 3.3, 4.1-4.3 (PSFC); Nita 2008 eq. 3.5.11 (lapse).",
+        })
     }
 }
 
@@ -306,10 +335,11 @@ pub struct TurbopropFieldPerformance {
     /// Residual core exhaust thrust the installation declares, N. `0.0` on the
     /// ATR 72-600, and never a converted shaft power.
     pub residual_jet_thrust_per_engine_n: f64,
-    /// What the fuel flow above rests on. Carried with the number so a
-    /// consumer cannot display or gate on a single-point calibration without
-    /// being able to see that that is what it is.
-    pub fuel_calibration: TurbopropFuelCalibration,
+    /// How the fuel model behind the flow above compares with the published
+    /// cruise point. Carried with the number so a consumer can see how far
+    /// the class model is from the one aircraft-level fuel datum; `None` when
+    /// this model cannot be evaluated at that point.
+    pub fuel_validation: Option<TurbopropFuelValidation>,
     /// Evidence class of the propeller model behind every thrust above.
     pub model_uncertainty: ModelUncertainty,
     /// Envelope the numbers above are only meaningful inside.
@@ -319,24 +349,14 @@ pub struct TurbopropFieldPerformance {
 }
 
 impl Pw127m568fModel {
-    /// The shaft power this rating actually delivers at an ambient density, W.
-    ///
-    /// The rating is a sea-level-static certificated number; this applies the
-    /// declared minimum-hypothesis lapse to it. Exposed because a consumer
-    /// sizing a field length or a climb gradient needs the available power,
-    /// and back-computing it from a thrust and an efficiency would invert a
-    /// surrogate.
-    #[must_use]
-    pub fn available_shaft_power_w(self, rating: Pw127mRating, density_kg_m3: f64) -> f64 {
-        self.rated_shaft_power_w(rating) * self.power_lapse_fraction(density_kg_m3)
-    }
-
     /// The declared installation envelope, with its lapse floor filled in.
     #[must_use]
     pub fn operating_envelope(self) -> TurbopropOperatingEnvelope {
-        // The density at which `(rho/rho_ref)^n` reaches the declared floor.
+        // The density at which `(rho/rho_corner)^n` reaches the declared
+        // floor, taken from the take-off corner, the highest of the corners,
+        // so the floor is not understated for any rating.
         let floor_density_kg_m3 = if self.power_lapse_density_exponent > 0.0 {
-            self.power_lapse_reference_density_kg_m3
+            self.flat_rating_corner_density_kg_m3(Pw127mRating::NormalTakeoff)
                 * self
                     .minimum_power_lapse_fraction
                     .powf(1.0 / self.power_lapse_density_exponent)
@@ -405,7 +425,7 @@ impl Pw127m568fModel {
                 self.blade_efficiency_cruise,
             ),
             residual_jet_thrust_per_engine_n: self.residual_jet_thrust_n,
-            fuel_calibration: self.fuel_calibration(),
+            fuel_validation: self.fuel_validation().ok(),
             model_uncertainty: lift_off.propeller_model_uncertainty,
             envelope: self.operating_envelope(),
             provenance: lift_off.provenance,

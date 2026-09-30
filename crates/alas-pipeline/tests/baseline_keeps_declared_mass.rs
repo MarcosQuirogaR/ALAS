@@ -7,13 +7,14 @@
 //! takeoff mass. The baseline and preset/parity reports must publish no sized
 //! mass, so every consumer that draws payload-range, landing and take-off or
 //! static thrust-to-weight through `analysis_takeoff_mass_kg` falls back to
-//! the declared `requirements.mtow_kg`.
+//! the declared `requirements.mtow_kg`. A baseline run ignores the
+//! takeoff-mass sizing mode: every `MtowSizing` produces the same report.
 
 // A test asserts on values it constructed or loaded from a fixture it
 // controls, so a failed unwrap there is the assertion failing.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-use alas_config::{presets, AlasConfig, DesignMode};
+use alas_config::{presets, AlasConfig, DesignMode, MtowSizing};
 use alas_pipeline::baseline::analyze_baseline;
 use alas_pipeline::full_analysis::AnalysisReport;
 use alas_pipeline::{DesignPipeline, FullAnalysis, PipelineOptions, RunEnvironment};
@@ -21,8 +22,13 @@ use alas_pipeline::{DesignPipeline, FullAnalysis, PipelineOptions, RunEnvironmen
 const PRESETS: [&str; 2] = ["A320-200", "ATR72-600"];
 
 fn preset_config(name: &str) -> AlasConfig {
+    preset_config_in(name, MtowSizing::default())
+}
+
+fn preset_config_in(name: &str, sizing: MtowSizing) -> AlasConfig {
     let mut config = AlasConfig::from_value(&serde_json::json!({ "preset": name })).unwrap();
     config.optimizer.design_space.mode = DesignMode::BaselineSandbox;
+    config.optimizer.objective.mtow_sizing = sizing;
     config
 }
 
@@ -56,50 +62,69 @@ fn assert_declared_basis(report: &AnalysisReport, declared_mtow_kg: f64, what: &
 #[test]
 fn baseline_pipeline_run_keeps_the_declared_mtow() {
     for name in PRESETS {
-        let mut config = preset_config(name);
-        config.mission.enabled = false;
-        config.mses.enabled = false;
-        config.structures.enabled = false;
-        let declared_mtow_kg = config.requirements.mtow_kg;
-        let options = PipelineOptions {
-            optimize: false,
-            compare_baseline: true,
-            parallel: false,
-            aerodynamic_solver: Default::default(),
-            optimization_solver: Default::default(),
-            output_dir: None,
-            save_plots: false,
-            seed: Some(42),
-            quiet: true,
-        };
-        let result = DesignPipeline::new(config)
-            .run(&options, &RunEnvironment::default())
-            .unwrap();
-        let mut checked = 0;
-        for report in [&result.baseline_analysis, &result.optimized_report]
-            .into_iter()
-            .flatten()
-        {
-            assert_declared_basis(report, declared_mtow_kg, name);
-            checked += 1;
+        let mut reference: Option<(Option<AnalysisReport>, Option<AnalysisReport>)> = None;
+        for sizing in MtowSizing::ALL {
+            let mut config = preset_config_in(name, sizing);
+            config.mission.enabled = false;
+            config.mses.enabled = false;
+            config.structures.enabled = false;
+            let declared_mtow_kg = config.requirements.mtow_kg;
+            let options = PipelineOptions {
+                optimize: false,
+                compare_baseline: true,
+                parallel: false,
+                aerodynamic_solver: Default::default(),
+                optimization_solver: Default::default(),
+                output_dir: None,
+                save_plots: false,
+                seed: Some(42),
+                quiet: true,
+            };
+            let result = DesignPipeline::new(config)
+                .run(&options, &RunEnvironment::default())
+                .unwrap();
+            let what = format!("{name} {sizing:?}");
+            let mut checked = 0;
+            for report in [&result.baseline_analysis, &result.optimized_report]
+                .into_iter()
+                .flatten()
+            {
+                assert_declared_basis(report, declared_mtow_kg, &what);
+                checked += 1;
+            }
+            assert!(checked > 0, "{what}: the run produced no report to check");
+            assert!(
+                result.baseline_analysis.is_some(),
+                "{what}: {:?}",
+                result.baseline_analysis_error
+            );
+            // The sizing mode is an optimizer setting: the baseline reports
+            // are identical, digit for digit, under every mode.
+            let reports = (result.baseline_analysis, result.optimized_report);
+            match &reference {
+                Some(first) => assert!(first == &reports, "{what}: report differs by mode"),
+                None => reference = Some(reports),
+            }
         }
-        assert!(checked > 0, "{name}: the run produced no report to check");
-        assert!(
-            result.baseline_analysis.is_some(),
-            "{name}: {:?}",
-            result.baseline_analysis_error
-        );
     }
 }
 
 #[test]
 fn preset_parity_analysis_keeps_the_declared_mtow() {
     for name in PRESETS {
-        let config = preset_config(name);
-        let declared_mtow_kg = config.requirements.mtow_kg;
-        let design = presets::get(name).unwrap().design_vector;
-        let report = FullAnalysis::new(config).run(&design, true).unwrap();
-        assert_declared_basis(&report, declared_mtow_kg, name);
+        let mut reference: Option<AnalysisReport> = None;
+        for sizing in MtowSizing::ALL {
+            let config = preset_config_in(name, sizing);
+            let declared_mtow_kg = config.requirements.mtow_kg;
+            let design = presets::get(name).unwrap().design_vector;
+            let report = FullAnalysis::new(config).run(&design, true).unwrap();
+            let what = format!("{name} {sizing:?}");
+            assert_declared_basis(&report, declared_mtow_kg, &what);
+            match &reference {
+                Some(first) => assert!(first == &report, "{what}: report differs by mode"),
+                None => reference = Some(report),
+            }
+        }
     }
 }
 
@@ -122,17 +147,58 @@ fn a_sized_binding_is_the_only_thing_that_moves_the_basis() {
 #[test]
 fn preset_baseline_balance_is_computed_at_the_declared_mtow() {
     for name in PRESETS {
-        let config = preset_config(name);
-        let design = presets::get(name).unwrap().design_vector;
-        let baseline = analyze_baseline(&config, &design);
-        assert_eq!(baseline.status, "ok", "{name}: {:?}", baseline.error);
-        // The lumped baseline is the unsized preset: its masses come from the
-        // declared MTOW basis, never from a mission-sized one.
-        let mtow_kg = config.requirements.mtow_kg;
-        let total: f64 = baseline.component_masses.values().sum();
+        let mut reference = None;
+        for sizing in MtowSizing::ALL {
+            let config = preset_config_in(name, sizing);
+            let design = presets::get(name).unwrap().design_vector;
+            let baseline = analyze_baseline(&config, &design);
+            assert_eq!(baseline.status, "ok", "{name}: {:?}", baseline.error);
+            // The lumped baseline is the unsized preset: its masses come from
+            // the declared MTOW basis, never from a mission-sized one.
+            let mtow_kg = config.requirements.mtow_kg;
+            let total: f64 = baseline.component_masses.values().sum();
+            assert!(
+                total > 0.0 && total <= mtow_kg * 1.001,
+                "{name}: component sum {total} kg vs declared MTOW {mtow_kg} kg"
+            );
+            match &reference {
+                Some(first) => assert!(
+                    first == &baseline.component_masses,
+                    "{name} {sizing:?}: differs by mode"
+                ),
+                None => reference = Some(baseline.component_masses.clone()),
+            }
+        }
+    }
+}
+
+#[test]
+fn a_design_mode_binding_designs_a_registered_structure_at_the_closure() {
+    // The sized report of the two design modes carries the closure as the
+    // structural design mass; the original modes keep the declared MTOW.
+    let design = presets::get("A320-200").unwrap().design_vector;
+    for sizing in MtowSizing::ALL {
+        let mut config = preset_config_in("A320-200", sizing);
+        config.optimizer.design_space.mode = DesignMode::ReferenceAdaptation;
+        let declared_mtow_kg = config.requirements.mtow_kg;
+        let sized_kg = 0.9 * declared_mtow_kg;
+        let report = FullAnalysis::new(config.clone())
+            .run_at_sized_takeoff_mass(&design, true, sized_kg)
+            .unwrap();
+        let structural_kg = alas_pipeline::design_vn_mass_kg(&config, &report);
+        let expected = if sizing.requires_mission_sized_evaluation() {
+            sized_kg
+        } else {
+            declared_mtow_kg
+        };
         assert!(
-            total > 0.0 && total <= mtow_kg * 1.001,
-            "{name}: component sum {total} kg vs declared MTOW {mtow_kg} kg"
+            (structural_kg - expected).abs() < 1e-6,
+            "{sizing:?}: {structural_kg} kg"
+        );
+        let design_gross = report.geometry_summary["analysis_design_gross_mass_kg"];
+        assert!(
+            (design_gross - expected).abs() < 1e-6,
+            "{sizing:?}: DG {design_gross} kg"
         );
     }
 }

@@ -142,27 +142,43 @@ Ranked by what would most surprise someone using a result.
      to calibrate it.
    - The `new_reference_compatibility` constructors replay the historical
      objective and DE search for the parity fixtures.
-9. **The physical forward-CG limit is not calibrated.** The take-off rotation
-   estimate that sets it (main-gear position, tail download, wing lift and
-   pitch inertia from declared Torenbeek-order terms) lies about 6.5 %MAC aft
-   of the published A320 forward limit and rejects six of the eight presets at
-   their loaded nominal design (AVE, A340-300, A380-800, B787-9, DC-10 and,
-   through other findings, ATR72-600). The loaded CG and the limit share one
-   MAC frame, so this is a calibration question, not a reference mismatch.
-   Until it is calibrated these tests are ignored, and nothing automated checks
-   a feasible search result from AVE or the default configuration:
-   - `alas-opt` `tests/staged_search.rs`:
-     `the_same_seed_reaches_the_same_finalist_serially_and_across_workers`,
-     `a_run_that_reports_convergence_has_a_feasible_improved_candidate`,
-     `a_watchdog_stop_is_never_presented_as_convergence`.
-   - `alas-pipeline` `pipeline::tests`:
-     `fixed_design_review_exposes_its_binding_constraint_without_promoting_a_finalist`,
-     `diagnostic_policies_deliver_a_bounded_baseline_when_requirements_are_missed`.
-   - `alas-acceptance` `tests/acceptance_matrix.rs`:
-     `a380_soft_static_margin_target_does_not_become_a_hard_model_constraint`,
-     `ave_usable_cg_range_and_tail_scrape_are_warnings`; the ATR72-600 cruise
-     telemetry assertion of `acceptance_matrix_evaluates_all_registered_presets`
-     is skipped for the OEW reason in item 2.
+9. **Phase-scoped CG limits: checked against two published forward limits
+   only, not validated.** Each loading state is gated only by the mechanisms
+   of its phase (`PhaseLimits`): rotation and the static-margin floor at
+   takeoff, landing trim and ground mechanisms at landing, ground mechanisms
+   at OEW. The rotation limit is the nose-wheel liftoff moment balance at
+   VR = 1.10 VS (stall branch) with the all-engine thrust term and runway
+   friction (mu 0.02, an engineering estimate). Drag is omitted: it would move
+   the limit 0.3-0.4 %MAC and the omission is non-conservative. Elevator
+   authority is not derived (CL_h is a fixed estimate). Against published
+   limits, on the manufacturer's MAC frame:
+   - Forward, rotation at takeoff: A320 15.4 vs 17 (ACAP most-forward CG used
+     in the pavement-load analysis at MRW, not a certified limit) and A220
+     10.7 vs 12.0 (ARP p. 119, a flight envelope). The model admits a CG 1.6
+     and 1.3 %MAC further forward than the manufacturer does
+     (non-conservative). The A340 (26.0 vs 20.3, same ACAP provenance) is an
+     ignored known residual 5.7 points aft of the ACAP value; the A380 (33.3)
+     has only pavement-load figures (34.65-37.8) and is not an anchor. B787
+     (22.0), AVE (22.6) and ATR (22.3) are unanchored.
+   - Aft: the A320 aft limit is the minimum-nose-load ground limit (6 % nose
+     load) and reproduces the published 40 %MAC. Tip-back is about 5 points
+     too restrictive on the A320 (h_cg over the aft axle). The A220 aft limit
+     is not weight-dependent in the model while the published one is (31.0 to
+     37.3 %MAC), so it is too tight at mid weights. The aerodynamic aft limit
+     never governs.
+   - DC-10 is a known failure: its rotation limit (32.3 %MAC) rejects the
+     loaded takeoff; the centerline tail engine puts the thrust line above the
+     CG and the main-gear station is not anchored to a source.
+   - OEW-CG residual: the A320 model OEW CG sits +7.85 %MAC aft of the ACAP
+     nominal 26.5 %, so the A320 load-trim potato leaves the ground limits
+     aft. The A320 OperationalReserve state (33.3) and the tank-burn path
+     (34.8) also disagree at the same mass.
+   - The ATR72-600 fails the ground limits at OEW.
+   - OEW residuals against the reference aggregator: ATR +6.1 %, A380 -7.2 %
+     (the census probe `alas-pipeline/examples/phase_census.rs` lists all).
+   The acceptance tests assert inequalities against the published envelopes
+   (A220 ARP; A320 17 to 40 %MAC from ACAP pavement and nose-load values), not
+   pins on the model CG.
 10. **One takeoff mass per report, one flown mass per dispatch.** Figures,
     summary, structural loads and the V-n envelope read the report's sized
     takeoff mass (the declared design gross weight for the structure and V-n of
@@ -170,6 +186,31 @@ Ranked by what would most surprise someone using a result.
     pipeline's mission model and keeps the sized mass when its fuel re-price
     agrees within max(5 kg, 1e-4 of the takeoff mass); otherwise the flown mass
     is refined separately and may differ by about that tolerance.
+
+    Known limitation, method dependence: under scipy_legacy, the default
+    (sized_by_mission) and unconstrained modes are not mass-closed; resolved
+    when the optimizer consolidates on one differential-evolution core.
+    MtowBand and PayloadAdjusted always use mass closure.
+
+    Known limitation, open: the optimizer, the report and the flown mission
+    use three fuel models and disagree on the sized takeoff mass. The MDO trip
+    fuel is priced on the optimizer's polar; the dispatch flies the native
+    mission. The gap reaches +8.6 % of sized-vs-flown mass on long-haul
+    aircraft. Single-model unification is pending and its selection will be
+    based on correlation with sourced references. The A220 case (26 kg) comes
+    from the reserves being priced on the report's untrimmed sweep polar
+    against the optimizer's trimmed one.
+    `report_load_case_and_mission_share_the_sized_takeoff_mass` is ignored for
+    this reason.
+
+    | Preset | Mass gap | MDO trip (kg) | Native trip (kg) |
+    |---|---|---|---|
+    | A220 | +26 kg | 1,400 | 1,399 |
+    | A320 | +0.5 % | 1,936 | 2,199 |
+    | A340 | +6.4 % | 41,889 | 54,617 |
+    | A380 | -1.5 % | 76,899 | 70,670 |
+    | B787 | +5.5 % | 52,892 | 64,230 |
+    | DC-10 | +8.6 % | 50,894 | 67,348 |
 11. **Mass sizing is bound to the product search.** Only the
     `differential_evolution` profile replays its finalist at the sized takeoff
     mass; the `scipy_legacy` default profile and the AVL branch report at the

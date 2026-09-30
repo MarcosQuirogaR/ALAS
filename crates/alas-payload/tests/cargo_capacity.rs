@@ -207,7 +207,7 @@ fn a220_registered_source_capacity_is_applied_during_row_allocation() {
     let preset = presets::get("A220-300").expect("registered A220");
     let config = AlasConfig::from_value(&serde_json::json!({"preset": "A220-300"}))
         .expect("A220 configuration");
-    assert_eq!(config.requirements.num_passengers, 130);
+    assert_eq!(config.requirements.num_passengers, 140);
     assert_eq!(config.cabin.passenger.class_mix_mode, "percent");
     let plane = AircraftBuilder::new(Some(config.geometry.clone()))
         .build(Some(&preset.design_vector), true)
@@ -230,7 +230,7 @@ fn a220_registered_source_capacity_is_applied_during_row_allocation() {
     };
 
     assert_eq!(preset.reference.certified_max_seats, Some(145));
-    assert_eq!(summary.source_capacity_cap, Some(145));
+    assert_eq!(summary.source_capacity_cap, Some(140));
     assert_eq!(summary.source_exit_layout, Some("C-III-C"));
     assert_eq!(summary.exit_type, "C-III-C");
     assert_eq!(summary.exit_pairs, 3);
@@ -240,15 +240,17 @@ fn a220_registered_source_capacity_is_applied_during_row_allocation() {
     // visible; this must not turn the source cap into a post-hoc count
     // truncation.
     assert_eq!(summary.geometric_capacity, 145);
+    // The fixed-aircraft basis further caps the layout at the 140-seat planning
+    // cabin, below the 145-seat exit sum, so the row pass stops there.
     assert!(
-        summary.geometric_capacity
-            <= summary
-                .source_capacity_cap
-                .expect("the source exit layout caps the capacity")
+        summary
+            .source_capacity_cap
+            .expect("the source caps the capacity")
+            <= summary.geometric_capacity
     );
-    assert_eq!(summary.max_certifiable_capacity, summary.geometric_capacity);
+    assert_eq!(summary.max_certifiable_capacity, 140);
     assert_eq!(summary.capacity_binding, "source_exit_layout");
-    assert_eq!(summary.total_pax, summary.geometric_capacity);
+    assert_eq!(summary.total_pax, summary.max_certifiable_capacity);
     assert_eq!(summary.seated_pax, summary.total_pax);
     assert_eq!(summary.unseated_pax, 0);
 

@@ -26,10 +26,11 @@ use alas_pipeline::{DesignPipeline, PipelineOptions, RunEnvironment};
 use serde_json::{json, Value};
 
 mod gear_reference;
+mod performance;
 mod studies;
 
 use gear_reference::source_gear_reference;
-use studies::{mesh_study, payload_range};
+use studies::{lin, mesh_study, payload_range};
 
 fn main() {
     let out = PathBuf::from(
@@ -75,7 +76,7 @@ fn dump(name: &str) -> Result<Value, String> {
         .build(Some(dv), true)
         .map_err(|e| format!("{e:?}"))?;
     let report = FullAnalysis::new(config.clone())
-        .run(dv, false)
+        .run(dv, true)
         .map_err(|e| e.to_string())?;
 
     // Keep the validation export tied to the same gear sizing inputs used by
@@ -409,7 +410,7 @@ fn dump(name: &str) -> Result<Value, String> {
 
     // ---- aerodynamics ----------------------------------------------------
     let atmo = Atmosphere::new(config.requirements.cruise_altitude_m);
-    let sweep = report.design.sweep_deg;
+    let sweep = AeroAnalysis::quarter_chord_sweep_deg(&report.airplane, dv.sweep_deg);
     // Same mesh the full analysis uses, otherwise the polar is not the one
     // the reported design point came from.
     let mut fine = config.analysis.clone();
@@ -427,14 +428,6 @@ fn dump(name: &str) -> Result<Value, String> {
         config.requirements.cruise_altitude_m,
     )
     .map_err(|e| e.to_string())?;
-    let lin = |x: &[f64], y: &[f64]| {
-        let n = x.len() as f64;
-        let mx = x.iter().sum::<f64>() / n;
-        let my = y.iter().sum::<f64>() / n;
-        let num: f64 = x.iter().zip(y).map(|(a, b)| (a - mx) * (b - my)).sum();
-        let den: f64 = x.iter().map(|a| (a - mx).powi(2)).sum();
-        (num / den, my - num / den * mx)
-    };
     let (cl_alpha_deg, cl_intercept) = lin(&cruise_sweep.geometric_alpha_deg, &cruise_sweep.cl);
     // `PolarSweep::alpha_deg` is the Prandtl-Glauert *relabelled* reporting
     // axis; the coefficients are not recomputed. Report the slope on both axes
@@ -620,6 +613,7 @@ fn dump(name: &str) -> Result<Value, String> {
                         .zip(last.and_then(|s| s.conditions.total_mass_kg.last().copied()))
                         .map(|(a, b)| a - b),
                     "final_cruise": cruise,
+                    "cruise_drag_breakdown": performance::cruise_drag_breakdown(m, &report.airplane),
                 });
                 if let (Some(target), Some(fields)) =
                     (summary.as_object_mut(), telemetry.as_object())
@@ -631,7 +625,7 @@ fn dump(name: &str) -> Result<Value, String> {
         }
     };
 
-    Ok(json!({
+    let mut doc = json!({
         "identity": {
             "preset": name,
             "model": preset.identity.model,
@@ -652,5 +646,7 @@ fn dump(name: &str) -> Result<Value, String> {
             "density_kg_m3": atmo.density(),
             "speed_of_sound_m_s": atmo.speed_of_sound(),
         },
-    }))
+    });
+    performance::attach(&mut doc, &config, preset, &report);
+    Ok(doc)
 }

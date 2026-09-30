@@ -40,6 +40,13 @@ impl DesignObjective {
         if !self.reference_mass_coordinates {
             return crate::mdo::evaluate_mission_sized(self, x);
         }
+        // The MTOW band and payload-adjusted modes close the takeoff mass on
+        // a mission, so they take the mission-sized evaluation under every
+        // method; the reference replay keeps the three original modes.
+        let sizing = self.config.optimizer.objective.mtow_sizing;
+        if sizing.requires_mission_sized_evaluation() {
+            return crate::mdo::evaluate_mission_sized_with_production_mass(self, x);
+        }
 
         let w = self.config.optimizer.weights.clone();
 

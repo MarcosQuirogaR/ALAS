@@ -25,7 +25,7 @@ pub(super) fn loading_basis(
     outcome: &SizingOutcome,
     config: &AlasConfig,
 ) -> Result<LedgerLoadingBasis, String> {
-    let mut config = config.at_closure_mass(outcome.sized.takeoff_mass_kg);
+    let mut config = config.at_sized_closure_mass(outcome.sized.takeoff_mass_kg);
     crate::objective::apply_candidate_payload_load_case(&mut config, &outcome.history.dv)
         .map_err(|error| format!("ledger load case: {error}"))?;
     let plane = &outcome.plane;

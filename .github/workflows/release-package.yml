@@ -103,6 +103,11 @@ jobs:
           } > "$record"
           cat "$record"
 
+      - name: Install cargo-nextest for the test tiers
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest
+
       # The subset named in this task: repository checks, formatting, the
       # deny-warnings clippy lint set, and the workspace test suite, in that
       # order, matching what `cargo xtask gate` already runs for the

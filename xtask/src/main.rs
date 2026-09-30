@@ -7,12 +7,14 @@
 //! identically from a terminal, from a hook and from an editor, on a machine
 //! where the only tool guaranteed to exist is Cargo.
 
+mod affected;
 mod bench;
 mod checks;
 mod dist;
 mod dist_archive;
 mod dist_avl;
 mod evidence;
+mod gate;
 mod ledger;
 mod source_size;
 
@@ -20,11 +22,12 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 
 fn main() -> ExitCode {
-    let task = std::env::args().nth(1);
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let task = args.first().cloned();
     let root = repo_root();
 
     let outcome = match task.as_deref() {
-        Some("gate") => gate(&root),
+        Some("gate") => gate::run(&root, &args[1..]),
         Some("checks") => run_checks(&root),
         Some("evidence-audit") => run_evidence_audit(&root),
         Some("install-hooks") => install_hooks(&root),
@@ -55,10 +58,13 @@ fn usage() {
     println!(
         "cargo xtask <task>\n\
          \n\
-         gate           formatting, lints, tests and the repository checks\n\
+         gate           full tier: repository checks, formatting, lints and all tests\n\
+         gate --quick [--base <ref>]\n\
+                        checks, formatting, then lints and fast tests of affected packages\n\
+         gate --slow    only the slow test tier (needs cargo-nextest)\n\
          checks         the repository checks alone, without invoking Cargo\n\
          evidence-audit audit ledger, fixture and generator evidence bookkeeping\n\
-         install-hooks  install the pre-commit hook that runs the gate\n\
+         install-hooks  install the pre-commit hook that runs the quick gate\n\
          bench          build and execute the release computational benchmark suite\n\
          dist           compile release binary and assemble standalone distribution archive\n\
          package        alias for dist\n\
@@ -81,48 +87,7 @@ fn run_evidence_audit(root: &Path) -> Result<(), String> {
     Err(format!("evidence-audit: {} finding(s)", findings.len()))
 }
 
-/// The full gate, in increasing order of cost.
-///
-/// The repository checks run first because they need no compilation, so a file
-/// that is too long or missing a licence header fails in under a second rather
-/// than after a full build. Every step below runs even if an earlier one
-/// failed, an array literal evaluates all of its elements before
-/// `report_gate_results` sees any of them, so one failing step can never hide
-/// the others.
-fn gate(root: &Path) -> Result<(), String> {
-    let results = [
-        run_checks(root),
-        cargo(root, &["fmt", "--all", "--check"]),
-        cargo(
-            root,
-            &[
-                "clippy",
-                "--workspace",
-                "--all-targets",
-                "--",
-                "-D",
-                "warnings",
-            ],
-        ),
-        cargo(root, &["test", "--workspace", "--no-fail-fast"]),
-    ];
-    report_gate_results(results)
-}
-
-/// Reports every failed gate step instead of stopping at the first one.
-fn report_gate_results(results: [Result<(), String>; 4]) -> Result<(), String> {
-    let failures: Vec<String> = results.into_iter().filter_map(Result::err).collect();
-    if failures.is_empty() {
-        println!("\ngate: pass");
-        return Ok(());
-    }
-    for failure in &failures {
-        println!("\ngate: {failure}");
-    }
-    Err(format!("gate: {} of 4 check(s) failed", failures.len()))
-}
-
-fn run_checks(root: &Path) -> Result<(), String> {
+pub(crate) fn run_checks(root: &Path) -> Result<(), String> {
     let sources = checks::rust_sources(root)?;
     println!("checking {} source files", sources.len());
 
@@ -148,7 +113,7 @@ fn run_checks(root: &Path) -> Result<(), String> {
 
 fn install_hooks(root: &Path) -> Result<(), String> {
     let hook = root.join(".git").join("hooks").join("pre-commit");
-    let body = "#!/bin/sh\nexec cargo xtask gate\n";
+    let body = "#!/bin/sh\nexec cargo xtask gate --quick\n";
     std::fs::write(&hook, body).map_err(|e| format!("cannot write {}: {e}", hook.display()))?;
     println!("installed {}", hook.display());
     Ok(())
@@ -184,7 +149,7 @@ fn backup(root: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn cargo(root: &Path, args: &[&str]) -> Result<(), String> {
+pub(crate) fn cargo(root: &Path, args: &[&str]) -> Result<(), String> {
     println!("\ncargo {}", args.join(" "));
     let status = Command::new(env!("CARGO"))
         .current_dir(root)
@@ -206,27 +171,4 @@ fn repo_root() -> PathBuf {
     manifest
         .parent()
         .map_or(manifest.clone(), Path::to_path_buf)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::report_gate_results;
-
-    #[test]
-    fn report_gate_results_passes_when_all_steps_pass() {
-        let results = [Ok(()), Ok(()), Ok(()), Ok(())];
-        assert!(report_gate_results(results).is_ok());
-    }
-
-    #[test]
-    fn report_gate_results_reports_every_failure_not_just_the_first() {
-        let results = [
-            Err("checks: 1 finding(s)".to_owned()),
-            Ok(()),
-            Err("cargo clippy --workspace --all-targets -- -D warnings failed".to_owned()),
-            Ok(()),
-        ];
-        let error = report_gate_results(results).expect_err("two steps failed");
-        assert_eq!(error, "gate: 2 of 4 check(s) failed");
-    }
 }

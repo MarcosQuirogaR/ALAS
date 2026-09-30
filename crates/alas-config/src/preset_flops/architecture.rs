@@ -341,18 +341,14 @@ pub(super) fn declared_architecture(name: &str) -> Option<DeclaredArchitecture> 
 /// same function selects the method for a configuration built without a
 /// preset, so the two modes cannot disagree.
 ///
-/// An earlier revision coded only the mass half of that statement and defended
-/// the result with *"the ATR 72-600 is the only preset below the floor, and it
-/// is also the one aircraft the switch would make worse"*. The arithmetic was
-/// right and the premise was not: at 72 installed seats the ATR is **inside**
-/// the source's stated domain. The full rule is now applied, the ATR 72-600
-/// takes the LTH relations with every other registered aircraft, and its
-/// operating empty mass gets **280 kg worse** as a result - furnishings
-/// -1,549 kg, occupant operating items +1,829 kg, +15.09 % to +17.17 % against
-/// the ATR factsheet figure. That is the cost of a domain rule that is not
-/// trimmed to the answer, and it is also evidence in its own right: the ATR's
-/// cabin group is over-priced by *both* published methods, so its excess does
-/// not live in the method selection.
+/// A shaft-power aircraft below 40 t takes
+/// [`CabinEquipmentMethod::RegionalTurbopropV1`] instead: the LTH fit
+/// population is four turbofans of 52-233 t and contains no turboprop, so the
+/// seat clause is not evidence that the relations describe a light turboprop
+/// cabin. The 72-seat ATR 72-600 is the one registered aircraft this affects.
+/// The 40 t boundary is the LTH statement's own mass figure, used as an
+/// engineering-estimate class boundary; a shaft-power aircraft of 40 t or more
+/// keeps the LTH selection.
 ///
 /// Why the domain rule selects against FLOPS above 40 t, rather than merely
 /// permitting the alternative there: on the one aircraft where a manufacturer
@@ -398,10 +394,12 @@ pub(super) fn declared_architecture(name: &str) -> Option<DeclaredArchitecture> 
 /// **Four of the eight registered aircraft seat fewer passengers in the model
 /// than in the published cabin their reference OEW belongs to**, always in the
 /// same direction: A340-300 290 against 335, A380-800 525 against 555,
-/// A220-300 130 against 140, DC-10-30 250 against 255. Under the LTH method
-/// the seat count reaches exactly one mass term, `m_opp`, so matching the
-/// published cabins would add 3,454.8 / 2,451.7 / 372.4 / 374.7 kg
-/// respectively. That is a **configuration mismatch, not a model error**, and
+/// A220-300 130 against 140, DC-10-30 250 against 255. The seat count feeds
+/// several mass terms - the LTH operating items (proportional to
+/// `n_pax^1.114` on long haul), the passenger service items, the flight
+/// attendants, the APU, the electrical system and the air conditioning - so
+/// matching the published cabins would add at least the LTH operating-item
+/// part, 3,454.8 / 2,451.7 / 372.4 / 374.7 kg respectively. That is a **configuration mismatch, not a model error**, and
 /// it is not closed here: changing the FLOPS seat input would price a cabin
 /// the rest of the product does not fly. It has to be closed in the cabin
 /// layout, which this module does not own - and until it is, a real share of
@@ -412,9 +410,14 @@ fn declared_cabin_equipment_method(preset: &crate::AircraftPreset) -> CabinEquip
         .reference
         .mtow_kg
         .unwrap_or(preset.requirements.mtow_kg);
+    let shaft_power = matches!(
+        preset.geometry.engine.active_model(),
+        Ok(crate::ActiveEngineModel::Turboprop(_))
+    );
     CabinEquipmentMethod::for_civil_transport_size(
         Some(mtom_kg),
         Some(preset.requirements.num_passengers),
+        shaft_power,
     )
 }
 

@@ -460,4 +460,10 @@ pub(in super::super) struct Baggage {
     pub hold_used: f64,
     /// Containers used.
     pub hold_ulds: i64,
+    /// Net baggage and freight mass per compartment, kg, forward to aft.
+    pub compartment_masses_kg: Vec<(String, f64)>,
+    /// Share of the net hold mass ahead of the wing box, 0 to 1.
+    pub forward_fraction: f64,
+    /// Mass stowed above every compartment limit, kg.
+    pub overload_kg: f64,
 }

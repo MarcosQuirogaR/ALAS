@@ -294,7 +294,7 @@ pub fn dc_10() -> AircraftPreset {
             min_wing_loading_kg_m2: 500.0,
             cabin_preset: "Custom".to_owned(),
             optimize_passenger_capacity: true,
-            num_passengers: 250,
+            num_passengers: 255,
             cargo_payload_kg: 65_000.0,
             // ACAP 572k planning option: MZFW 166,922 kg less OEW 120,914 kg.
             max_structural_payload_kg: 46_008.0,

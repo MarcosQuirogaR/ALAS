@@ -3,11 +3,13 @@
 
 //! Chart area of the load-and-trim sheet (the side panel is `panel`).
 //!
-//! Layering, bottom to top: shaded "do not operate" field, the clear
-//! takeoff/landing envelope, weight gridlines and the %MAC fan, hatching
-//! where a zero-fuel CG is not permitted, the loading envelope, limit
-//! outlines with letter tags, structural weight lines, the worked case.
+//! Layering, bottom to top: shaded "do not operate" field, the clear region
+//! inside the ground limits, weight gridlines and the %MAC fan, hatching
+//! where a zero-fuel CG is not permitted, the boarding potato with its
+//! named orders, the four phase limit sets, structural weight lines, the
+//! worked case (the highlighted path).
 
+use super::layers::{draw_limit_sets, draw_potato};
 use super::panel::{draw_panel, kg};
 use super::{
     envelope_outline, fan_segment, frame_for, limit_at, weight_step_kg, Frame, LoadTrimSheetData,
@@ -161,12 +163,12 @@ pub fn figure_load_trim_sheet(data: &LoadTrimSheetData, pal: &Palette) -> Scene 
     let (w0, w1) = fr.w_range_kg;
     let top_kg = data
         .weight("MTOW")
-        .unwrap_or_else(|| data.takeoff_limits.last().map_or(w1, |v| v.mass_kg));
+        .unwrap_or_else(|| data.ground_limits.last().map_or(w1, |v| v.mass_kg));
     let mzfw = data.weight("MZFW");
-    let fwd_i = |m: f64| data.index_at(m, limit_at(&data.takeoff_limits, m, true));
-    let aft_i = |m: f64| data.index_at(m, limit_at(&data.takeoff_limits, m, false));
+    let fwd_i = |m: f64| data.index_at(m, limit_at(&data.ground_limits, m, true));
+    let aft_i = |m: f64| data.index_at(m, limit_at(&data.ground_limits, m, false));
 
-    // 1. Shaded field, clear takeoff/landing envelope.
+    // 1. Shaded field, clear region inside the ground limits.
     scene.add(SceneElement::Rect {
         x: fr.left,
         y: fr.top,
@@ -176,7 +178,7 @@ pub fn figure_load_trim_sheet(data: &LoadTrimSheetData, pal: &Palette) -> Scene 
         fill: Some(Fill::new(ink.shade)),
         stroke: None,
     });
-    let outline: Vec<Point2D> = envelope_outline(data, &data.takeoff_limits, w0, top_kg)
+    let outline: Vec<Point2D> = envelope_outline(data, &data.ground_limits, w0, top_kg)
         .iter()
         .map(|&(i, m)| px(i, m))
         .collect();
@@ -239,37 +241,11 @@ pub fn figure_load_trim_sheet(data: &LoadTrimSheetData, pal: &Palette) -> Scene 
         );
     }
 
-    // 4. Loading envelope of every boarding order (convex polygon).
-    if data.loading_envelope.len() >= 3 {
-        let pts: Vec<Point2D> = data
-            .loading_envelope
-            .iter()
-            .map(|&(m, p)| px(data.index_at(m, p), m))
-            .collect();
-        let mut fill = ink.envelope;
-        fill.a = 38;
-        scene.add(SceneElement::Polygon {
-            points: pts,
-            fill: Some(Fill::new(fill)),
-            stroke: Some(Stroke::dashed(ink.envelope, 1.1, 4.0, 3.0)),
-        });
-    }
+    // 4. Boarding potato and every composed loading order.
+    draw_potato(&mut scene, data, &fr, &ink);
 
-    // 5. Limit outlines with letter tags: A forward, B aft takeoff, C aft zero fuel.
-    scene.add(SceneElement::Polygon {
-        points: outline.clone(),
-        fill: None,
-        stroke: Some(Stroke::new(ink.text, 2.4)),
-    });
-    let tag_at = |scene: &mut Scene, p: Point2D, letter: &str, dx: f64| {
-        let c = [p[0] + dx, p[1]];
-        line(scene, p, c, Stroke::new(ink.text, 1.0));
-        tag(scene, c, letter, ink.paper, ink.text, ink.text);
-    };
-    let m_a = w0 + 0.12 * (top_kg - w0);
-    tag_at(&mut scene, px(fwd_i(m_a), m_a), "A", -26.0);
-    let m_b = w0 + 0.80 * (top_kg - w0);
-    tag_at(&mut scene, px(aft_i(m_b), m_b), "B", 26.0);
+    // 5. Limit sets by phase, then the zero-fuel CG limit outline.
+    draw_limit_sets(&mut scene, data, &fr, &ink);
     if let (Some(mzfw), Some(first)) = (mzfw, data.zfw_limits.first()) {
         let bottom = first.mass_kg.max(w0);
         let z: Vec<Point2D> = envelope_outline(data, &data.zfw_limits, bottom, mzfw)
@@ -279,18 +255,8 @@ pub fn figure_load_trim_sheet(data: &LoadTrimSheetData, pal: &Palette) -> Scene 
         scene.add(SceneElement::Polygon {
             points: z,
             fill: None,
-            stroke: Some(Stroke::new(ink.text, 1.9)),
+            stroke: Some(Stroke::new(ink.muted, 1.2)),
         });
-        let m_c = bottom + 0.35 * (mzfw - bottom);
-        tag_at(
-            &mut scene,
-            px(
-                data.index_at(m_c, limit_at(&data.zfw_limits, m_c, false)),
-                m_c,
-            ),
-            "C",
-            26.0,
-        );
     }
 
     // 6. Structural weight lines across the envelope.

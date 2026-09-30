@@ -20,6 +20,7 @@
 //! window.
 
 pub mod design_space;
+pub mod mtow_plan;
 mod objective;
 pub mod plausibility;
 pub mod policy_review;
@@ -28,7 +29,13 @@ mod solver;
 mod weights;
 
 pub use design_space::{DesignMode, DesignSpaceConfig, VariableEnvelope};
-pub use objective::{ConstraintPolicy, MtowSizing, ObjectiveConfig, ObjectiveKind};
+pub use mtow_plan::{
+    DesignMission, DesignPayloadSource, DesignRange, MtowPlan, StructuralBasis,
+    UNBOUNDED_DISPATCH_MTOW_KG,
+};
+pub use objective::{
+    ConstraintPolicy, MtowSizing, ObjectiveConfig, ObjectiveKind, DEFAULT_MTOW_BAND_FRACTION,
+};
 pub use plausibility::PlausibilityLimits;
 pub use policy_review::{review_for, reviewed_limits, RelaxationReview, ReviewedLimit};
 pub use relaxation::{ConstraintRelaxation, RelaxableLimit, NON_RELAXABLE_RESIDUAL_IDS};

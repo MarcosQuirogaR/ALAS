@@ -37,11 +37,9 @@
 
 use serde::{Deserialize, Serialize};
 
-#[path = "validation/fuel_scheme.rs"]
 mod fuel_scheme;
-#[path = "validation/mass_model.rs"]
 mod mass_model;
-#[path = "validation/wave_drag.rs"]
+mod mtow_sizing;
 mod wave_drag;
 
 use crate::AlasConfig;
@@ -98,6 +96,7 @@ pub fn validate(config: &AlasConfig) -> Vec<ValidationIssue> {
     issues.extend(crate::optimizer::policy_review::policy_group_issues(config));
     issues.extend(mass_model::active_issues(config));
     issues.extend(fuel_scheme::fuel_scheme_matches_the_propulsion_type(config));
+    issues.extend(mtow_sizing::mtow_sizing_issues(config));
     issues.extend(passenger_and_mass_inputs_are_coherent(config));
     issues.extend(custom_geometry_is_physical(config));
     issues.extend(vlm_mesh_is_solvable(config));

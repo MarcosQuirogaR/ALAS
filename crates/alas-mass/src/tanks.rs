@@ -26,6 +26,7 @@
 
 mod distribute;
 mod geometry;
+mod order;
 mod product;
 mod resolve;
 mod scaled;

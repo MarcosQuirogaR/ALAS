@@ -13,6 +13,7 @@
 use alas_config::MacFrame;
 
 use super::support::ROTATION_CL_H;
+use super::PhaseLimits;
 
 /// Which physical mechanism governs the aft CG boundary.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -148,6 +149,17 @@ pub struct PhysicalCgLimitsInput {
     /// the pitch-inertia moment into the same weight-normalized fraction of
     /// MAC as every other rotation-criterion term.
     pub gravity_m_s2: f64,
+    /// All-engine takeoff/go-around thrust at `V_R` over this state's
+    /// weight, dimensionless; non-finite means not evaluated, and the
+    /// rotation criterion then takes no thrust credit (friction still
+    /// applies).
+    pub rotation_thrust_to_weight: f64,
+    /// Thrust-line height above the shared ground plane, m; non-finite
+    /// means not evaluated (no thrust credit).
+    pub rotation_thrust_line_height_m: f64,
+    /// Tire rolling-friction coefficient during the takeoff roll,
+    /// dimensionless (`config.landing_gear.rotation_rolling_friction_coefficient`).
+    pub rotation_rolling_friction_coefficient: f64,
 }
 
 /// The physical aft/forward CG boundaries this state's weight and geometry
@@ -179,6 +191,10 @@ pub struct PhysicalCgLimits {
     /// Diagnostic and governance candidate: the rotation (nose-wheel
     /// liftoff) moment-balance boundary.
     pub rotation_fwd_pct_mac: f64,
+    /// Diagnostic only: the signed shift the thrust and rolling-friction
+    /// term applies to [`Self::rotation_fwd_pct_mac`], `%MAC`; negative
+    /// moves the rotation boundary forward.
+    pub rotation_longitudinal_force_shift_pct_mac: f64,
     /// Diagnostic and governance candidate: the landing trim/flare boundary
     /// in ground effect.
     pub landing_trim_fwd_pct_mac: f64,
@@ -189,6 +205,131 @@ pub struct PhysicalCgLimits {
 
 fn pct_mac(frame: MacFrame, x_m: f64) -> f64 {
     frame.pct_mac(x_m).unwrap_or(f64::NAN)
+}
+
+/// Every mechanism, the scope of the unscoped [`physical_cg_limits`] result.
+const ALL_PHASES: PhaseLimits = PhaseLimits {
+    rotation: true,
+    landing_trim: true,
+    static_margin: true,
+};
+
+impl PhysicalCgLimits {
+    /// The governing forward boundary among the mechanisms `phase` admits:
+    /// the maximum nose load always, rotation and landing trim when scoped
+    /// in. `NaN` candidates are skipped.
+    #[must_use]
+    pub fn fwd_for(&self, phase: PhaseLimits) -> (f64, ForwardLimitGovernance) {
+        most_aft([
+            (
+                self.max_nose_load_fwd_pct_mac,
+                ForwardLimitGovernance::MaxNoseLoadHandling,
+            ),
+            (
+                if phase.rotation {
+                    self.rotation_fwd_pct_mac
+                } else {
+                    f64::NAN
+                },
+                ForwardLimitGovernance::RotationNoseWheelLiftoff,
+            ),
+            (
+                if phase.landing_trim {
+                    self.landing_trim_fwd_pct_mac
+                } else {
+                    f64::NAN
+                },
+                ForwardLimitGovernance::LandingTrimGroundEffect,
+            ),
+        ])
+    }
+
+    /// The governing aft boundary among the mechanisms `phase` admits: the
+    /// minimum nose load and tip-back always, the static-margin floor when
+    /// scoped in. `NaN` candidates are skipped.
+    #[must_use]
+    pub fn aft_for(&self, phase: PhaseLimits) -> (f64, AftLimitGovernance) {
+        most_forward([
+            (
+                if phase.static_margin {
+                    self.aerodynamic_aft_pct_mac
+                } else {
+                    f64::NAN
+                },
+                AftLimitGovernance::Aerodynamic,
+            ),
+            (
+                self.ground_aft_pct_mac,
+                AftLimitGovernance::GroundMinimumNoseLoad,
+            ),
+            (self.tip_back_aft_pct_mac, AftLimitGovernance::TipBack),
+        ])
+    }
+
+    /// These limits with the governing boundaries, their governance and the
+    /// usable range restricted to the mechanisms `phase` admits. Every
+    /// mechanism's own diagnostic boundary is kept unchanged.
+    #[must_use]
+    pub fn scoped(&self, phase: PhaseLimits) -> Self {
+        let (fwd_limit_pct_mac, fwd_limit_governance) = self.fwd_for(phase);
+        let (aft_limit_pct_mac, aft_limit_governance) = self.aft_for(phase);
+        Self {
+            fwd_limit_pct_mac,
+            fwd_limit_governance,
+            aft_limit_pct_mac,
+            aft_limit_governance,
+            usable_range_pct_mac: aft_limit_pct_mac - fwd_limit_pct_mac,
+            ..*self
+        }
+    }
+}
+
+/// The thrust and rolling-friction moment about the main-gear contact at
+/// nose-wheel liftoff, over `W c`, nose-up positive: the amount the rotation
+/// boundary moves forward (as a fraction of MAC).
+///
+/// Statics about the main-gear ground contact, heights above the shared
+/// ground plane. Thrust `T` acts forward at `h_T` (moment `-T h_T`). The
+/// runway friction `mu (W - L)` acts in the contact plane (no moment). The
+/// inertial reaction of the forward acceleration,
+/// `m a = T - mu (W - L)`, acts aft at the CG (moment `+m a h_cg`). So
+///
+/// `dM / (W c) = [T/W (h_cg - h_T) - mu (1 - L/W) h_cg] / c`,
+///
+/// with `L/W = (CL_g + CL_h eta k_ge S_h/S) / CL_R` at `V_R`, clamped so
+/// the wheels never carry a negative load. A thrust line below the CG is
+/// nose-up; friction is always nose-down.
+///
+/// Aerodynamic drag is **omitted**; its net moment about the CG is
+/// `D (h_D - h_cg)` and its sign depends on where the drag line sits:
+///
+/// - low wing (drag line below the CG): the moment is nose-down, so leaving
+///   drag out moves the rotation boundary *forward*, which is **not
+///   conservative** (about 0.3-0.4 %MAC, an engineering estimate [E]);
+/// - high wing or high thrust line such as a turboprop like the ATR (drag
+///   line above the CG): the moment is nose-up, so omitting drag is
+///   **conservative**.
+///
+/// Adding a takeoff-configuration drag polar is a documented follow-up.
+///
+/// A non-finite or non-positive `h_cg_m` returns `0.0` (term not
+/// evaluated); a non-finite thrust or thrust-line height drops only the
+/// thrust part.
+fn rotation_longitudinal_force_frac(input: &PhysicalCgLimitsInput, lift_over_weight: f64) -> f64 {
+    let h_cg = input.h_cg_m;
+    if !h_cg.is_finite() || h_cg <= 0.0 || input.mac_frame.chord_m <= 0.0 {
+        return 0.0;
+    }
+    let thrust_moment = if input.rotation_thrust_to_weight.is_finite()
+        && input.rotation_thrust_line_height_m.is_finite()
+    {
+        input.rotation_thrust_to_weight * (h_cg - input.rotation_thrust_line_height_m)
+    } else {
+        0.0
+    };
+    let wheel_load_fraction = (1.0 - lift_over_weight).max(0.0);
+    let friction_moment = input.rotation_rolling_friction_coefficient * wheel_load_fraction * h_cg;
+    (thrust_moment - friction_moment) / input.mac_frame.chord_m
 }
 
 fn most_forward(candidates: [(f64, AftLimitGovernance); 3]) -> (f64, AftLimitGovernance) {
@@ -225,7 +366,12 @@ fn most_aft(candidates: [(f64, ForwardLimitGovernance); 3]) -> (f64, ForwardLimi
 ///   nondimensionalized by the weight-support lift coefficient `CL_R`
 ///   (see [`PhysicalCgLimitsInput::cl_r_rotation`]), solved for the most
 ///   forward CG admitting nose liftoff at the tail's maximum download,
-///   including the required pitch angular acceleration.
+///   including the required pitch angular acceleration and the thrust and
+///   rolling-friction moment (drag omitted, non-conservative; see
+///   `rotation_longitudinal_force_frac`). The tail lift coefficient
+///   (`CL_h = -0.55`), the takeoff `Cm_ac,wb = -0.15` and `x_ac,wb = 0.25`
+///   are declared estimates; deriving the elevator authority from the tail
+///   geometry is a documented follow-up.
 /// - **Landing trim in ground effect**: the same scissor-plot construction
 ///   as the diagnostic-only estimate below, with a ground-effect knockdown
 ///   on the tail's available download coefficient.
@@ -256,15 +402,6 @@ pub fn physical_cg_limits(input: &PhysicalCgLimitsInput) -> PhysicalCgLimits {
         f64::NAN
     };
     let tip_back_aft_pct_mac = pct_mac(frame, tip_back_aft_x_m);
-
-    let (aft_limit_pct_mac, aft_limit_governance) = most_forward([
-        (aerodynamic_aft_pct_mac, AftLimitGovernance::Aerodynamic),
-        (
-            ground_aft_pct_mac,
-            AftLimitGovernance::GroundMinimumNoseLoad,
-        ),
-        (tip_back_aft_pct_mac, AftLimitGovernance::TipBack),
-    ]);
 
     let max_nose_load_fwd_x_m =
         input.x_main_gear_m - input.pct_load_nlg_max_handling * input.wheelbase_m;
@@ -309,44 +446,38 @@ pub fn physical_cg_limits(input: &PhysicalCgLimitsInput) -> PhysicalCgLimits {
     // moment arm about the main-gear contact is (x_h - x_mg), so this term
     // is positive (nose-up credit). No clamp: the result follows the
     // geometry.
-    let tail_download_term =
-        (ROTATION_CL_H * input.eta * input.tail_ground_effect_factor * input.tail_area_ratio
-            / cl_r)
-            * (x_mg_frac - x_h_frac);
-    let rotation_fwd_frac =
-        x_mg_frac + inertia_frac - wing_lift_term - pitching_moment_term - tail_download_term;
+    let tail_lift_coefficient =
+        ROTATION_CL_H * input.eta * input.tail_ground_effect_factor * input.tail_area_ratio;
+    let tail_download_term = (tail_lift_coefficient / cl_r) * (x_mg_frac - x_h_frac);
+    // Thrust and runway friction about the main-gear contact (see
+    // `rotation_longitudinal_force_frac`); the lift that unloads the wheels
+    // is the same wing and tail lift the moment terms above use.
+    let lift_over_weight = (input.cl_ground_attitude + tail_lift_coefficient) / cl_r;
+    let longitudinal_force_frac = rotation_longitudinal_force_frac(input, lift_over_weight);
+    let rotation_fwd_frac = x_mg_frac + inertia_frac
+        - wing_lift_term
+        - pitching_moment_term
+        - tail_download_term
+        - longitudinal_force_frac;
     let rotation_fwd_pct_mac = rotation_fwd_frac * 100.0;
 
-    let (fwd_limit_pct_mac, fwd_limit_governance) = most_aft([
-        (
-            max_nose_load_fwd_pct_mac,
-            ForwardLimitGovernance::MaxNoseLoadHandling,
-        ),
-        (
-            rotation_fwd_pct_mac,
-            ForwardLimitGovernance::RotationNoseWheelLiftoff,
-        ),
-        (
-            landing_trim_fwd_pct_mac,
-            ForwardLimitGovernance::LandingTrimGroundEffect,
-        ),
-    ]);
-
-    PhysicalCgLimits {
-        aft_limit_pct_mac,
-        aft_limit_governance,
+    let limits = PhysicalCgLimits {
+        aft_limit_pct_mac: f64::NAN,
+        aft_limit_governance: AftLimitGovernance::Aerodynamic,
         clean_np_pct_mac,
         aerodynamic_aft_pct_mac,
         ground_aft_pct_mac,
         tip_back_aft_pct_mac,
-        fwd_limit_pct_mac,
-        fwd_limit_governance,
+        fwd_limit_pct_mac: f64::NAN,
+        fwd_limit_governance: ForwardLimitGovernance::MaxNoseLoadHandling,
         max_nose_load_fwd_pct_mac,
         scissor_plot_fwd_pct_mac,
         rotation_fwd_pct_mac,
+        rotation_longitudinal_force_shift_pct_mac: -100.0 * longitudinal_force_frac,
         landing_trim_fwd_pct_mac,
-        usable_range_pct_mac: aft_limit_pct_mac - fwd_limit_pct_mac,
-    }
+        usable_range_pct_mac: f64::NAN,
+    };
+    limits.scoped(ALL_PHASES)
 }
 
 #[cfg(test)]
@@ -383,7 +514,117 @@ mod tests {
             pitch_radius_of_gyration_frac_mac: 0.30,
             rotation_angular_accel_deg_s2: 7.0,
             gravity_m_s2: 9.806_65,
+            rotation_thrust_to_weight: 0.30,
+            rotation_thrust_line_height_m: 1.8,
+            rotation_rolling_friction_coefficient: 0.02,
         }
+    }
+
+    /// Hand-computed thrust and rolling-friction term against
+    /// [`base_input`]: h_cg 3.0 m, T/W 0.30 at h_T 1.8 m, mu 0.02, c 4.0 m.
+    #[test]
+    fn the_thrust_and_friction_term_matches_a_hand_computed_moment_balance() {
+        let with_term = physical_cg_limits(&base_input());
+        let mut input = base_input();
+        input.rotation_thrust_to_weight = f64::NAN;
+        input.rotation_rolling_friction_coefficient = 0.0;
+        let without = physical_cg_limits(&input);
+
+        // L/W = (CL_g + CL_h eta k_ge S_h/S) / CL_R
+        //     = (0.6 + (-0.55)(0.9)(0.9)(0.25)) / 1.3 = 0.488625 / 1.3 = 0.375865.
+        let lift_over_weight = (0.6 + ROTATION_CL_H * 0.9 * 0.9 * 0.25) / 1.3;
+        // Thrust below the CG: 0.30 * (3.0 - 1.8) = 0.36 m, nose-up.
+        // Friction: 0.02 * (1 - 0.375865) * 3.0 = 0.037448 m, nose-down.
+        // Net 0.322552 m over c = 4.0 m: -8.0638 %MAC.
+        let moment_m = 0.30 * (3.0 - 1.8) - 0.02 * (1.0 - lift_over_weight) * 3.0;
+        let expected_shift_pct = -100.0 * moment_m / 4.0;
+        assert!((expected_shift_pct - -8.0638).abs() < 1.0e-3);
+        assert!(
+            (with_term.rotation_longitudinal_force_shift_pct_mac - expected_shift_pct).abs()
+                < 1.0e-9
+        );
+        assert!(
+            (with_term.rotation_fwd_pct_mac - (without.rotation_fwd_pct_mac + expected_shift_pct))
+                .abs()
+                < 1.0e-9
+        );
+        assert_eq!(without.rotation_longitudinal_force_shift_pct_mac, 0.0);
+        // The thrust line below the CG outweighs the friction here, so the
+        // rotation boundary moves forward.
+        assert!(with_term.rotation_fwd_pct_mac < without.rotation_fwd_pct_mac);
+
+        // A thrust line above the CG (tail engines) is nose-down and moves
+        // the boundary aft.
+        let mut high = base_input();
+        high.rotation_thrust_line_height_m = 4.0;
+        assert!(physical_cg_limits(&high).rotation_fwd_pct_mac > without.rotation_fwd_pct_mac);
+
+        // Friction alone (no thrust credit) is always nose-down.
+        let mut friction_only = base_input();
+        friction_only.rotation_thrust_to_weight = f64::NAN;
+        let friction_limits = physical_cg_limits(&friction_only);
+        assert!(friction_limits.rotation_longitudinal_force_shift_pct_mac > 0.0);
+
+        // An unknown CG height disables the whole term, never NaN-poisons it.
+        let mut no_height = base_input();
+        no_height.h_cg_m = f64::NAN;
+        let limits = physical_cg_limits(&no_height);
+        assert_eq!(limits.rotation_longitudinal_force_shift_pct_mac, 0.0);
+        assert!(limits.rotation_fwd_pct_mac.is_finite());
+    }
+
+    #[test]
+    fn scoping_restricts_each_boundary_to_the_admitted_mechanisms() {
+        let mut input = base_input();
+        // Make every forward mechanism distinct and the rotation one govern.
+        input.rotation_thrust_to_weight = f64::NAN;
+        let all = physical_cg_limits(&input);
+        let ground = all.scoped(PhaseLimits::GROUND);
+        assert_eq!(ground.fwd_limit_pct_mac, all.max_nose_load_fwd_pct_mac);
+        assert_eq!(
+            ground.fwd_limit_governance,
+            ForwardLimitGovernance::MaxNoseLoadHandling
+        );
+        assert!(
+            ground.aft_limit_pct_mac == all.ground_aft_pct_mac
+                || ground.aft_limit_pct_mac == all.tip_back_aft_pct_mac
+        );
+        let takeoff = all.scoped(PhaseLimits::TAKEOFF);
+        assert_eq!(
+            takeoff.fwd_limit_pct_mac,
+            all.max_nose_load_fwd_pct_mac.max(all.rotation_fwd_pct_mac)
+        );
+        let flight = all.scoped(PhaseLimits::FLIGHT);
+        assert_eq!(
+            flight.fwd_limit_pct_mac,
+            all.max_nose_load_fwd_pct_mac
+                .max(all.landing_trim_fwd_pct_mac)
+        );
+        for scoped in [ground, takeoff, flight, all.scoped(PhaseLimits::LANDING)] {
+            assert!(scoped.fwd_limit_pct_mac <= all.fwd_limit_pct_mac);
+            assert!(scoped.aft_limit_pct_mac >= all.aft_limit_pct_mac);
+            assert_eq!(
+                scoped.usable_range_pct_mac,
+                scoped.aft_limit_pct_mac - scoped.fwd_limit_pct_mac
+            );
+            assert_eq!(scoped.rotation_fwd_pct_mac, all.rotation_fwd_pct_mac);
+        }
+        // The static-margin floor is the only mechanism that can make the
+        // flight aft boundary tighter than the ground one.
+        input.critical_np_x_m = 10.5;
+        let aero = physical_cg_limits(&input);
+        assert_eq!(
+            aero.scoped(PhaseLimits::FLIGHT).aft_limit_governance,
+            AftLimitGovernance::Aerodynamic
+        );
+        assert_eq!(
+            aero.scoped(PhaseLimits::LANDING).aft_limit_governance,
+            AftLimitGovernance::Aerodynamic
+        );
+        assert_eq!(
+            aero.scoped(PhaseLimits::TAKEOFF),
+            aero.scoped(ALL_PHASES).scoped(PhaseLimits::TAKEOFF)
+        );
     }
 
     #[test]
@@ -419,7 +660,10 @@ mod tests {
     /// term by term.
     #[test]
     fn the_rotation_criterion_matches_a_hand_computed_moment_balance() {
-        let limits = physical_cg_limits(&base_input());
+        let mut input = base_input();
+        input.rotation_thrust_to_weight = f64::NAN;
+        input.rotation_rolling_friction_coefficient = 0.0;
+        let limits = physical_cg_limits(&input);
         // x_mg_frac = (17.0-10.0)/4.0 = 1.75; x_h_frac = (30.0-10.0)/4.0 = 5.0.
         let x_mg_frac = 1.75;
         let x_h_frac = 5.0;

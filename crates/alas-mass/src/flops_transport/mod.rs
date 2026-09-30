@@ -3,17 +3,16 @@
 
 //! NASA FLOPS transport systems, equipment, and operating-item mass.
 //!
-//! The equations are the transport-aircraft relations in NASA/TM-2017-219627
-//! Vol. I, sections 5.4-5.5, equations 97, 101-106, 108, 110, 113, and
-//! 115-126. FLOPS publishes them in US customary units; this API accepts and
-//! returns SI and brackets every equation with the exact legal conversions in
-//! `alas-units`.
+//! The equations are the transport-aircraft relations in NASA/TM-2017-219627 Vol. I, sections
+//! 5.4-5.5, equations 97, 101-106, 108, 110, 113, and 115-126. FLOPS publishes them in US
+//! customary units; this API accepts and returns SI and brackets every equation with the exact
+//! legal conversions in `alas-units`.
 //!
 //! [`evaluate_product_at_design_gross_mass`] resolves outer geometry from the built airplane and
-//! reads every architecture datum from [`alas_config::FlopsTransportConfig`].
-//! It returns [`FlopsTransportEvaluation::Unverified`] when any required datum
-//! is absent or inconsistent. The reference-compatible MTOW fractions remain
-//! a different, explicit method and are never a fallback from this module.
+//! reads every architecture datum from [`alas_config::FlopsTransportConfig`]. It returns
+//! [`FlopsTransportEvaluation::Unverified`] when any required datum is absent or inconsistent.
+//! The reference-compatible MTOW fractions remain a different, explicit method and are never a
+//! fallback from this module.
 
 mod airframe;
 mod airframe_geometry;

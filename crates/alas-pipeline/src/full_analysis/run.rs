@@ -229,7 +229,14 @@ impl FullAnalysis {
             .run_sweep_with_system(&fine_system, req.cruise_mach, req.cruise_altitude_m)
             .map_err(|e| format!("polar sweep error: {e:?}"))?;
 
-        let design_point = self.compute_design_point(&plane, &polar)?;
+        let component_masses = breakdown_to_map(&masses);
+        let zero_fuel_mass_kg = crate::cruise_mass::zero_fuel_mass_kg(&component_masses);
+        // The trim solution and everything that constrains the aircraft run at
+        // the takeoff-mass lift coefficient; only the reported cruise CL, CD
+        // and L/D move to the mid-cruise mass (`crate::cruise_mass`).
+        let takeoff_cl = self.cruise_cl(&plane);
+        let cruise_cl = self.reported_cruise_cl(&plane, zero_fuel_mass_kg);
+        let design_point = self.compute_design_point(&polar, cruise_cl)?;
         let polar_fit = self.fit_polar(&plane, &polar);
 
         let (x_np, sm, _) = if self.reference_compatibility {
@@ -269,10 +276,36 @@ impl FullAnalysis {
         };
 
         // Trimmed cruise operating point.
-        let trimmed_design_point =
-            self.compute_trimmed_design_point(&plane, &aero, &fine_analysis, &fine_system);
+        let trimmed_at_takeoff_cl = self.compute_trimmed_design_point(
+            &plane,
+            takeoff_cl,
+            &aero,
+            &fine_analysis,
+            &fine_system,
+        );
+        let (trimmed_design_point, trimmed_clamped) =
+            trimmed_at_takeoff_cl.map_or((None, false), |trimmed| {
+                let (point, clamped) =
+                    self.trimmed_point_at_reported_cl(trimmed, &polar, cruise_cl);
+                (Some(point), clamped)
+            });
 
         let mut geometry_summary = self.geometry_summary(&plane, design);
+        // Report note: the reported cruise CL lies outside the analysed polar,
+        // so the reported cruise drag and L/D are the polar's end values rather
+        // than interpolations. The key is present only when that happens.
+        let polar_cl_range = polar
+            .cl
+            .iter()
+            .filter(|cl| cl.is_finite())
+            .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), &cl| {
+                (lo.min(cl), hi.max(cl))
+            });
+        if !self.reference_compatibility
+            && (trimmed_clamped || cruise_cl < polar_cl_range.0 || cruise_cl > polar_cl_range.1)
+        {
+            geometry_summary.insert("reported_cruise_cl_outside_polar".to_owned(), 1.0);
+        }
         if let Some(limit_kg) = effective_structural_payload_limit_kg {
             geometry_summary.insert("effective_structural_payload_limit_kg".to_owned(), limit_kg);
         }
@@ -286,7 +319,7 @@ impl FullAnalysis {
             static_margin: sm,
             x_neutral_point: x_np,
             geometry_summary,
-            component_masses: breakdown_to_map(&masses),
+            component_masses,
             flops_mass_buildup,
             mass_coordinates: coordinates_to_map(&coords),
             physical_cg: cg,
@@ -308,15 +341,39 @@ impl FullAnalysis {
         include_engines: bool,
         takeoff_mass_kg: f64,
     ) -> Result<AnalysisReport, String> {
+        self.run_at_sized_design_weights(design, include_engines, takeoff_mass_kg, None)
+    }
+
+    /// [`Self::run_at_sized_takeoff_mass`] with the landing gear of the MTOW
+    /// band and payload-adjusted modes designed at no less than
+    /// `landing_floor_kg`, the finalist's reported design landing mass
+    /// (`AlasConfig::at_sized_closure_mass_with_landing_floor`). Every other
+    /// mode ignores the floor.
+    pub fn run_at_sized_design_weights(
+        &self,
+        design: &DesignVector,
+        include_engines: bool,
+        takeoff_mass_kg: f64,
+        landing_floor_kg: Option<f64>,
+    ) -> Result<AnalysisReport, String> {
         if !takeoff_mass_kg.is_finite() || takeoff_mass_kg <= 0.0 {
             return Err(format!(
                 "sized takeoff mass must be finite and positive, got {takeoff_mass_kg} kg"
             ));
         }
         let mtow_limit_kg = self.config.requirements.mtow_kg;
+        // The takeoff-mass sizing plan decides which structure the closure
+        // belongs to: the MTOW band and payload-adjusted modes design it at
+        // the closure (`AlasConfig::at_sized_closure_mass`).
+        let sized_config = self
+            .config
+            .at_sized_closure_mass_with_landing_floor(takeoff_mass_kg, landing_floor_kg);
+        let design_landing_mass_kg = sized_config
+            .mass_model
+            .flops_structure
+            .design_landing_mass_kg;
         let design_gross_mass_kg =
-            cabin_sync::sized_design_gross_mass_kg(&self.config, takeoff_mass_kg);
-        let sized_config = self.config.at_closure_mass(takeoff_mass_kg);
+            cabin_sync::sized_design_gross_mass_kg(&sized_config, takeoff_mass_kg);
         let sized_analysis = Self {
             config: sized_config,
             reference_compatibility: self.reference_compatibility,
@@ -337,6 +394,11 @@ impl FullAnalysis {
             "analysis_design_gross_mass_kg".to_owned(),
             design_gross_mass_kg,
         );
+        if let Some(landing_kg) = design_landing_mass_kg {
+            report
+                .geometry_summary
+                .insert("analysis_design_landing_mass_kg".to_owned(), landing_kg);
+        }
         Ok(report)
     }
 }

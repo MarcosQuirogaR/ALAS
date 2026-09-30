@@ -24,6 +24,8 @@ mod cost;
 mod engine;
 mod mda;
 pub mod mission_model;
+mod mtow_modes;
+mod offdesign;
 pub mod propulsion;
 mod range;
 mod residuals;
@@ -37,6 +39,8 @@ mod trim;
 mod types;
 
 pub use mission_model::SegmentMissionModel;
+pub use mtow_modes::MtowPlanOutcome;
+pub use offdesign::OffDesignFlight;
 pub use types::{
     CandidateAssessment, ConstraintFamily, ConstraintResidual, ExternalPolar,
     PolarConditionTolerance, ProductStateProvenance, ResolvedProductState, SizedCandidate,
@@ -93,6 +97,28 @@ pub fn canonicalize_design(
 /// be called directly on a kind that is not mission-sized.
 pub fn evaluate_mission_sized(objective: &mut DesignObjective, x: &[f64]) -> f64 {
     evaluate_mission_sized_with_assessment(objective, x).0
+}
+
+/// [`evaluate_mission_sized`] on a reference-replay objective, under the
+/// production mass architecture.
+///
+/// The replay constructor pins the frozen comparison buildup, which the
+/// mission-sized structural stage rejects on every candidate as
+/// `legacy_mass_architecture`. A takeoff-mass mode that has to be closed by
+/// the mission (`MtowSizing::requires_mission_sized_evaluation`) therefore
+/// runs on the production FLOPS buildup, and the replay configuration is
+/// restored afterwards.
+pub(crate) fn evaluate_mission_sized_with_production_mass(
+    objective: &mut DesignObjective,
+    x: &[f64],
+) -> f64 {
+    let mut production = objective.config.clone();
+    production.mass_model.mass_architecture = alas_config::MassArchitecture::default();
+    production.mass_model.apply_architecture();
+    let replay = std::mem::replace(&mut objective.config, production);
+    let cost = evaluate_mission_sized(objective, x);
+    objective.config = replay;
+    cost
 }
 
 /// [`evaluate_mission_sized`], also returning the residual table the cost

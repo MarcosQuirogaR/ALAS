@@ -137,6 +137,7 @@ pub fn native_field(path: &str, key: &str) -> bool {
                     | "rotation_pitch_acceleration_deg_s2"
                     | "pitch_radius_of_gyration_frac_mac"
                     | "cl_ground_attitude_frac_of_cl_max_to"
+                    | "rotation_rolling_friction_coefficient"
             ))
         || (path.ends_with(".optimizer") && matches!(key, "objective" | "design_space"))
         || (path.ends_with(".mass_model")

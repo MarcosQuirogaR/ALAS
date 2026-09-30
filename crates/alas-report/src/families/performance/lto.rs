@@ -65,8 +65,9 @@ pub fn figure_lto_for_airport(
     // The sized takeoff mass when the report carries one, never the declared
     // MTOW ceiling.
     let takeoff_mass_kg = report.analysis_takeoff_mass_kg(config.requirements.mtow_kg);
-    let landing_mass_kg = config
-        .design_landing_mass_for(takeoff_mass_kg)
+    let landing_mass_kg = report
+        .design_landing_mass_kg()
+        .unwrap_or_else(|| config.design_landing_mass_at_closure(takeoff_mass_kg))
         .clamp(0.0, takeoff_mass_kg);
     figure_lto_for_airport_at_masses(
         report,

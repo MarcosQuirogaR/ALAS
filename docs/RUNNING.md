@@ -114,6 +114,23 @@ conventions (file sizes, licence headers, comment rules), formatting, the
 compiler's lints, and the whole test suite. It reports every failed step and
 says what it wants.
 
+The gate has three tiers. The test split needs
+[cargo-nextest](https://nexte.st) (`cargo install cargo-nextest --locked`);
+without it the gate falls back to `cargo test` and cannot separate the slow
+tests.
+
+```powershell
+cargo xtask gate --quick           # every change: checks, fmt, lints and fast tests of affected packages
+cargo xtask gate                   # phase integration and CI: everything
+cargo xtask gate --slow            # only the slow tests
+cargo nextest run                  # the fast tier alone
+cargo nextest run --profile full   # every test
+```
+
+The tiers are defined in `.config/nextest.toml`. Doctests are not used: the gate
+does not run them, and the repository checks reject a doc example that rustdoc
+would run.
+
 For numerical parity against the Python reference and licence provenance,
 read `docs/PORTING.md`; every translated module has a row there. It is not
 a project-completion tracker any more, since orchestration layers such as

@@ -670,6 +670,22 @@ fn a_partial_a380_load_supplies_feed_containing_groups_and_balances_pairs() {
         "resolved {capacity_kg} kg against certified {certified_tank_kg} kg"
     );
 
+    // Until every nonouter wing cell is full, the outer cells stay at half;
+    // the trim tank fills last, after the outers (`super::order`).
+    let capacity_of = |kind: TankKind| -> f64 {
+        layout
+            .tanks()
+            .iter()
+            .filter(|tank| tank.kind == kind)
+            .map(|tank| tank.usable_capacity_kg)
+            .sum()
+    };
+    let outer_capacity_kg = capacity_of(TankKind::WingOuter);
+    let trim_capacity_kg = capacity_of(TankKind::Trim);
+    assert!(trim_capacity_kg > 0.0);
+    let outer_half_break_kg = capacity_kg - trim_capacity_kg - 0.5 * outer_capacity_kg;
+    let wings_full_kg = capacity_kg - trim_capacity_kg;
+
     // A former loading rule left the inner feed-containing model cells empty.
     let partial_kg = 0.3735 * capacity_kg;
     for fraction in [0.0001, 0.3735, 0.8, 0.95, 1.0] {
@@ -690,11 +706,18 @@ fn a_partial_a380_load_supplies_feed_containing_groups_and_balances_pairs() {
                     tank.id
                 );
             }
-            if tank.kind == TankKind::WingOuter && fraction <= 0.95 {
+            if tank.kind == TankKind::WingOuter && requested_kg <= outer_half_break_kg {
                 assert!(
                     fill_kg <= 0.5 * tank.usable_capacity_kg + 1.0e-8 * capacity_kg,
                     "{} exceeds half capacity at {fraction}",
                     tank.id
+                );
+            }
+            if tank.kind == TankKind::Trim {
+                let expected_kg = (requested_kg - wings_full_kg).max(0.0);
+                assert!(
+                    (fill_kg - expected_kg).abs() < 1.0e-6,
+                    "trim holds {fill_kg} kg at {fraction}, expected {expected_kg} kg"
                 );
             }
         }
@@ -735,16 +758,9 @@ fn a_partial_a380_load_supplies_feed_containing_groups_and_balances_pairs() {
         assert!(fill <= 0.5 * tank.usable_capacity_kg + 1.0e-8 * capacity_kg);
     }
 
-    // Until every nonouter cell is full, the outer cells can stay at half.
-    // A kilogram across that breakpoint must go to the outer cells, while
-    // zero and full loads remain exact endpoints of the same allocation.
-    let outer_capacity_kg: f64 = layout
-        .tanks()
-        .iter()
-        .filter(|tank| tank.kind == TankKind::WingOuter)
-        .map(|tank| tank.usable_capacity_kg)
-        .sum();
-    let outer_half_break_kg = capacity_kg - 0.5 * outer_capacity_kg;
+    // A kilogram across the half-outer breakpoint must go to the outer
+    // cells, while zero and full loads remain exact endpoints of the same
+    // allocation.
     for (requested_kg, expected_outer_kg) in [
         (outer_half_break_kg - 1.0, 0.5 * outer_capacity_kg),
         (outer_half_break_kg, 0.5 * outer_capacity_kg),
@@ -771,4 +787,78 @@ fn a_partial_a380_load_supplies_feed_containing_groups_and_balances_pairs() {
             .map_or(0.0, |item| item.mass_kg);
         assert!((fill - tank.usable_capacity_kg).abs() < 1.0e-6);
     }
+}
+
+/// Wing cells burned 1, 2, 4 around a trim tank declared third and a wing
+/// cell that shares the trim tank's priority, the A380 burn order on a
+/// layout the A380 rule does not match.
+fn trim_layout() -> FuelTankLayout {
+    let trim = FuelTank {
+        kind: TankKind::Trim,
+        ..synthetic_tank("trim", 400.0, 3, 60.0)
+    };
+    FuelTankLayout {
+        tanks: vec![
+            synthetic_tank("wing_inner", 1_000.0, 1, 20.0),
+            synthetic_tank("wing_mid", 800.0, 2, 25.0),
+            trim,
+            synthetic_tank("wing_aux", 200.0, 3, 27.0),
+            synthetic_tank("wing_outer", 300.0, 4, 30.0),
+        ],
+        geometric_calibration_factor: 1.0,
+        density_kg_m3: DENSITY_KG_M3,
+    }
+}
+
+fn fill_of(layout: &FuelTankLayout, state: &FuelState, id: &str) -> f64 {
+    state
+        .mass_items(layout)
+        .iter()
+        .find(|item| item.id == id)
+        .map_or(0.0, |item| item.mass_kg)
+}
+
+/// A trim tank is filled after every other tank, whatever its declared
+/// burn priority, and never shares a fill group with a wing cell that has
+/// the same priority.
+#[test]
+fn a_trim_tank_fills_only_once_every_other_tank_is_full() {
+    let layout = trim_layout();
+    let wings_kg = layout.usable_capacity_kg() - 400.0;
+    for (load_kg, trim_kg) in [(1_000.0, 0.0), (wings_kg, 0.0), (wings_kg + 150.0, 150.0)] {
+        let state = layout.distribute(load_kg).expect("load fits");
+        assert!((fill_of(&layout, &state, "trim") - trim_kg).abs() < 1.0e-9);
+        assert!((state.total_kg() - load_kg).abs() < 1.0e-9);
+    }
+    let partial = layout.distribute(1_000.0).expect("load fits");
+    assert!((fill_of(&layout, &partial, "wing_outer") - 300.0).abs() < 1.0e-9);
+    assert!((fill_of(&layout, &partial, "wing_aux") - 200.0).abs() < 1.0e-9);
+}
+
+/// A trim tank is emptied before every other tank, so a landing state
+/// burned down from a full load carries no trim fuel, and the fuel CG only
+/// moves forward while the trim tank drains.
+#[test]
+fn a_trim_tank_is_emptied_before_every_other_tank() {
+    let layout = trim_layout();
+    let full = layout
+        .distribute(layout.usable_capacity_kg())
+        .expect("full fits");
+    let drained = full.burned(&layout, 400.0).expect("burn fits");
+    assert_eq!(fill_of(&layout, &drained, "trim"), 0.0);
+    assert!((fill_of(&layout, &drained, "wing_inner") - 1_000.0).abs() < 1.0e-9);
+    let landing = full.burned(&layout, 2_000.0).expect("burn fits");
+    assert_eq!(fill_of(&layout, &landing, "trim"), 0.0);
+    assert_eq!(fill_of(&layout, &landing, "wing_inner"), 0.0);
+    assert!((landing.total_kg() - 700.0).abs() < 1.0e-9);
+
+    let vector = fuel_vector(&layout, &full, 41);
+    let trim_draining: Vec<_> = vector
+        .iter()
+        .filter(|point| point.fuel_kg >= layout.usable_capacity_kg() - 400.0)
+        .collect();
+    assert!(trim_draining.len() > 2);
+    assert!(trim_draining
+        .windows(2)
+        .all(|pair| pair[1].x_m <= pair[0].x_m + 1.0e-12));
 }
