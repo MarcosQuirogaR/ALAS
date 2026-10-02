@@ -400,8 +400,8 @@ fn a_headless_run_can_be_cancelled_and_joined_instead_of_being_abandoned() {
     let mut config = AlasConfig::default();
     // A budget large enough that a run which ignored the flag would not
     // finish inside this test, so a pass cannot be an accident of speed.
-    config.optimizer.solver.max_iterations = 200;
-    config.optimizer.solver.population_size = 6;
+    config.optimizer.solver.refinement.max_evaluations = 19296;
+    config.optimizer.solver.screening.max_evaluations = 8;
 
     let options = PipelineOptions {
         optimize: true,

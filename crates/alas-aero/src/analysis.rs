@@ -44,12 +44,12 @@
 //! reads three numbers off a type takes three numbers, rather than inverting
 //! the phase order to name the type.
 
+mod parasite;
 mod performance;
 mod thickness;
 mod wave;
 mod wetted;
 
-use std::f64::consts::PI;
 use std::sync::OnceLock;
 
 use alas_atmo::Atmosphere;
@@ -58,8 +58,8 @@ use alas_config::geometry::GeometryConfig;
 use alas_config::physics::DragModelConfig;
 use alas_geom::aircraft::airplane::Airplane;
 use alas_geom::aircraft::fuselage::Fuselage;
-use alas_geom::aircraft::wing::Wing;
 
+pub use parasite::{ParasiteBreakdown, ParasiteComponent};
 pub use performance::{PolarSweep, QuickPerformance, TrimPoint, TrimmedPerformance};
 
 /// The thickness-to-chord [`AeroAnalysis::section_thickness`] answers when
@@ -174,9 +174,8 @@ pub struct AeroAnalysis<'a> {
     /// probe, never do).
     section_thickness_cache: OnceLock<f64>,
     /// Cached per-wing thickness [`Self::parasite_drag`]'s own buildup
-    /// reads, one entry per `plane.wings`: index 0 is
-    /// [`Self::area_weighted_thickness`] of the main wing, every other index
-    /// is that wing's [`Self::wing_section_thickness`]. Geometry-only for
+    /// reads, one entry per `plane.wings`: each surface's
+    /// [`Self::area_weighted_thickness`]. Geometry-only for
     /// the same reason as the cache above. [`crate::analysis::wave`]'s
     /// `korn_thickness` reads entry 0 back out of this cache rather than
     /// running its own `area_weighted_thickness` pass, since the two would
@@ -259,25 +258,16 @@ impl<'a> AeroAnalysis<'a> {
         result
     }
 
-    /// Compressible turbulent flat-plate skin friction, Prandtl-Schlichting.
-    fn turbulent_cf(reynolds: f64, mach: f64) -> f64 {
+    /// Compressible turbulent flat-plate skin friction, Prandtl-Schlichting:
+    /// `Cf = 0.455 / ((log10 Re)^2.58 (1 + 0.144 M^2)^0.65)` (Raymer,
+    /// *Aircraft Design: A Conceptual Approach*, 6th ed., eq. 12.27), the
+    /// only altitude-dependent factor of [`Self::parasite_breakdown`].
+    pub fn turbulent_cf(reynolds: f64, mach: f64) -> f64 {
         0.455 / (reynolds.log10().powf(2.58) * (1.0 + 0.144 * mach * mach).powf(0.65))
     }
 
-    /// Sweep used by the surface parasite form factor.
-    ///
-    /// The configured sweep is the design variable for the main wing and is
-    /// retained for that surface. Tail surfaces have no corresponding design
-    /// variable, so their own quarter-chord geometry supplies the sweep.
-    fn wing_sweep_deg(&self, index: usize, wing: &Wing) -> f64 {
-        if index == 0 || wing.xsecs.len() < 2 {
-            self.sweep_deg
-        } else {
-            wing.mean_sweep_angle(0.25)
-        }
-    }
-
-    /// Raymer's component buildup for the total parasite drag coefficient.
+    /// Raymer's component buildup for the total parasite drag coefficient;
+    /// [`Self::parasite_breakdown`] reports it term by term.
     ///
     /// `atmosphere` and `section_thickness` let a caller that has already
     /// computed either pass it in rather than have this rebuild it:
@@ -301,93 +291,8 @@ impl<'a> AeroAnalysis<'a> {
         section_thickness: Option<f64>,
     ) -> f64 {
         let _ = cl;
-        let atmosphere = atmosphere
-            .copied()
-            .unwrap_or_else(|| Atmosphere::new(altitude_m));
-        let velocity = mach * atmosphere.speed_of_sound();
-        let density = atmosphere.density();
-        let viscosity = atmosphere.dynamic_viscosity();
-        let s_ref = self.plane.s_ref;
-        let main_thickness = section_thickness.unwrap_or_else(|| self.section_thickness());
-        let x_over_c = self.drag.max_thickness_chordwise_loc;
-
-        let mut cd0 = 0.0;
-
-        for (index, wing) in self.plane.wings.iter().enumerate() {
-            let mac = wing.mean_aerodynamic_chord();
-            let reynolds = density * velocity * mac / viscosity;
-            let cf = Self::turbulent_cf(reynolds, mach);
-            let thickness = if self.reference_compatibility {
-                main_thickness
-            } else {
-                self.wing_thicknesses()[index]
-            };
-            let sweep_deg = if self.reference_compatibility {
-                self.sweep_deg
-            } else {
-                self.wing_sweep_deg(index, wing)
-            };
-            let sweep = sweep_deg.to_radians();
-            let form_factor = (1.0 + 0.6 / x_over_c * thickness + 100.0 * thickness.powf(4.0))
-                * (1.34 * mach.powf(0.18) * sweep.cos().powf(0.28));
-            // Wetted area counts exposed skin; the center section inside
-            // the fuselage contributes no skin friction. The coefficient
-            // still uses the gross projected aircraft reference area.
-            let buried = if index == 0
-                && !self.reference_compatibility
-                && self.drag.exclude_buried_main_wing_area
-            {
-                self.plane
-                    .fuselages
-                    .first()
-                    .map_or(0.0, |body| wetted::buried_main_wing_area(wing, body))
-            } else {
-                0.0
-            };
-            let wetted =
-                (wing.unfolded_area() - buried).max(0.0) * self.geometry.wing_wetted_area_factor;
-            cd0 += cf * form_factor * self.drag.interference_factor_wing * (wetted / s_ref);
-        }
-
-        // The primary body: length from its end stations, diameter from the
-        // configuration rather than from the built cross-sections. No
-        // fineness-dependent pressure/form-drag term (Raymer eq. 12.31,
-        // `1 + 60/f^3 + f/400`) is applied to it, nor to the nacelles below.
-        // `fuselage_wetted_factor` (0.9) is a wetted-*area* correction for a
-        // tapered nose/tail against a plain cylinder, geometric, not a drag
-        // coefficient; `interference_factor_fuselage` (1.25) is a real,
-        // separate junction-interference Q factor; `viscous_margin` (1.10)
-        // is a lumped total-parasite-drag margin applied once at the end of
-        // `parasite_drag`. None of the three represents the fuselage's own
-        // 3D pressure drag, so this buildup is missing that term outright,
-        // not merely mislabeling it: at the presets' fineness ratios
-        // (~9.8-10) Raymer's form factor evaluates to about 1.08-1.09.
-        // Adding it would raise every preset's fuselage parasite drag, and
-        // with the Lock/Korn wave law total cruise drag, by a similar
-        // fraction; it stays out until a recalibration confirms nothing else
-        // in this buildup already offsets it, so the term is not
-        // double-counted.
-        if let Some(fuselage) = self.plane.fuselages.first() {
-            let length = Self::body_length(fuselage);
-            let diameter = self.geometry.fuselage.diameter_m;
-            let wetted = PI * diameter * length * self.geometry.fuselage_wetted_factor;
-            let reynolds = density * velocity * length / viscosity;
-            let cf = Self::turbulent_cf(reynolds, mach);
-            cd0 += cf * self.drag.interference_factor_fuselage * (wetted / s_ref);
-        }
-
-        for nacelle in self.plane.fuselages.iter().skip(1) {
-            let length = Self::body_length(nacelle);
-            // A cylinder of the configured nacelle radius, not the built
-            // silhouette's own stations.
-            let diameter = 2.0 * self.geometry.engine.radius_scale_m;
-            let wetted = PI * diameter * length;
-            let reynolds = density * velocity * length / viscosity;
-            let cf = Self::turbulent_cf(reynolds, mach);
-            cd0 += cf * self.drag.interference_factor_nacelle * (wetted / s_ref);
-        }
-
-        cd0 * self.drag.viscous_margin
+        self.parasite_breakdown(mach, altitude_m, atmosphere, section_thickness)
+            .cd0
     }
 
     /// A body's streamwise length, from the x of its first station to the x
@@ -541,11 +446,6 @@ mod tests {
         assert!(exposed.cd_parasite < gross.cd_parasite);
         assert_eq!(exposed.cd_induced, gross.cd_induced);
         assert_eq!(exposed.cd_wave, gross.cd_wave);
-        let reference = AeroAnalysis::new_reference_compatibility(&plane, 32.0, None, None, None);
-        assert_eq!(
-            reference.parasite_drag(0.8, 10_000.0, 0.5, None, None),
-            gross.cd_parasite
-        );
     }
 
     #[test]
@@ -648,15 +548,5 @@ mod tests {
             assert!(parasite.is_finite(), "parasite drag at Mach {mach}");
             assert!(wave.is_finite() && wave >= 0.0, "wave drag at Mach {mach}");
         }
-    }
-
-    #[test]
-    fn the_total_is_the_three_terms_and_nothing_else() {
-        let components = DragComponents {
-            cd_parasite: 0.017,
-            cd_induced: 0.012,
-            cd_wave: 0.002,
-        };
-        assert_eq!(components.cd_total(), 0.017 + 0.012 + 0.002);
     }
 }

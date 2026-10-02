@@ -797,7 +797,8 @@ fn the_frozen_reference_path_fails_closed_without_a_measured_main_gear_station()
 /// this module's MAC-06 fix.
 #[test]
 fn low_wing_fallback_aircraft_keep_their_assessment_and_their_gear_constraints() {
-    for preset in ["DC-10"] {
+    {
+        let preset = "AVE";
         let (config, plane, masses, coordinates, cg_x) = preset_case(preset);
         let x_np = cg_x + 0.10 * plane.c_ref;
         let assessment = assess_model_cg_envelope(
@@ -938,15 +939,8 @@ fn the_a320_200_aerodynamic_aft_limit_is_not_the_governing_one() {
         assessment.main_gear_station_pct_mac,
         assessment.aerodynamic_aft_limit_pct_mac
     );
-    // With the registered MRW (78,400 kg, above
-    // this preset's 78,000 kg MTOW) sized through
-    // `size_landing_gear_at_design_state`, the heavier design weight
-    // moves the sized main-gear bogie geometry enough that the
-    // tip-back boundary (not the ground-minimum-nose-load one) becomes
-    // the more forward of the two non-aerodynamic mechanisms on this
-    // preset. Both are still forward of, and still not, the
-    // aerodynamic boundary this test's own name is about; only which
-    // *other* mechanism governs moved.
+    // Both non-aerodynamic mechanisms sit forward of, and are not, the
+    // aerodynamic boundary this test's own name is about.
     match assessment.aft_limit_governance {
         AftCgLimitGovernance::GroundMinimumNoseLoad { margin_pct_mac }
         | AftCgLimitGovernance::TipBack { margin_pct_mac } => assert!(
@@ -1017,13 +1011,26 @@ fn the_a320_200_aerodynamic_aft_limit_is_not_the_governing_one() {
         assessment.configured_forward_limit_pct_mac < assessment.ground_aft_limit_pct_mac,
         "the usable CG range must be positive"
     );
-    // Tip-back governs here: the overhang past the more forward of the
-    // aerodynamic and ground boundaries is positive and of the order of a few
-    // percent MAC [E, below 10 % MAC].
+    // The ground minimum nose load governs at the 78,000 kg takeoff state:
+    // the published WV017 gear split (Airbus A320 AC Jun 01/24, Figure
+    // 7-2-0-991-010-A01 sheet 6) read as a main-gear load limit leaves a
+    // 6.6 % nose share there, 38.4 % MAC, between the published 36.8 % at
+    // MRW and 40 % at 73,900 kg. Tip-back, measured from the belly ground
+    // plane, sits aft of it. The overhang is measured against the
+    // aerodynamic boundary and is positive.
     let overhang = assessment.aft_limit_governance.overhang_pct_mac();
     assert!(
-        overhang > 0.0 && overhang < 10.0,
-        "overhang {overhang:.3} % MAC"
+        matches!(
+            assessment.aft_limit_governance,
+            AftCgLimitGovernance::GroundMinimumNoseLoad { .. }
+        ) && overhang > 0.0,
+        "governance {:?}",
+        assessment.aft_limit_governance
+    );
+    assert!(
+        assessment.worst_aft_limit_pct_mac > 36.8 && assessment.worst_aft_limit_pct_mac < 40.0,
+        "governing aft limit {:.2} % MAC against the published 36.8-40 % MAC",
+        assessment.worst_aft_limit_pct_mac
     );
     // The scissor-plot estimate is diagnostic only and not a
     // governance candidate, so the governing forward limit need not
@@ -1080,7 +1087,7 @@ fn the_a340_300_aerodynamic_aft_limit_governs_its_own_layout() {
 
 /// The ground boundary is the same two-point split the loading states
 /// use, so it must reproduce the nose-load constraint exactly: a centre
-/// of gravity placed on it carries precisely the configured minimum nose
+/// of gravity placed on it carries precisely that state's minimum nose
 /// load, and the boundary sits forward of the main-gear station by the
 /// nose-load fraction of the wheelbase.
 #[test]
@@ -1118,9 +1125,21 @@ fn the_ground_aft_boundary_is_the_state_nose_load_split_read_backwards() {
         "the A320-200 registers published gear stations"
     );
     let wheelbase_m = stations.x_mlg_m - stations.x_nlg_m;
-    let expected_pct_mac = 100.0
-        * (stations.x_mlg_m - config.mass_model.pct_load_nlg_min * wheelbase_m - x_mac_le)
-        / mac;
+    // The top-level ground boundary is the analyzed takeoff state's, whose
+    // minimum is the published A320 WV017 gear split at that mass.
+    let takeoff_mass_kg = assessment
+        .loading_states
+        .iter()
+        .find(|state| state.state == ModelCgLoadingState::AnalyzedTakeoff)
+        .expect("a takeoff state")
+        .mass_kg;
+    let minimum_nose_fraction = ledger_basis::minimum_nose_gear_fraction(
+        &config,
+        ledger_basis::registered_aft_cg_nose_load(&config),
+        takeoff_mass_kg,
+    );
+    let expected_pct_mac =
+        100.0 * (stations.x_mlg_m - minimum_nose_fraction * wheelbase_m - x_mac_le) / mac;
     assert!(
         (assessment.ground_aft_limit_pct_mac - expected_pct_mac).abs() < 1.0e-9,
         "{} against {expected_pct_mac}",
@@ -1131,8 +1150,7 @@ fn the_ground_aft_boundary_is_the_state_nose_load_split_read_backwards() {
     let x_cg = x_mac_le + assessment.ground_aft_limit_pct_mac / 100.0 * mac;
     let nose_fraction = (stations.x_mlg_m - x_cg) / wheelbase_m;
     assert!(
-        (nose_fraction - config.mass_model.pct_load_nlg_min).abs() < 1.0e-9,
-        "{nose_fraction} against {}",
-        config.mass_model.pct_load_nlg_min
+        (nose_fraction - minimum_nose_fraction).abs() < 1.0e-9,
+        "{nose_fraction} against {minimum_nose_fraction}"
     );
 }

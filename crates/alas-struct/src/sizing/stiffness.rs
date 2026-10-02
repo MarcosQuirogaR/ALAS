@@ -35,7 +35,9 @@ pub struct StiffnessSizingResult {
     pub iterations: usize,
 }
 
-/// Strength-sized wingbox with additional cap area when stiffness requires it.
+/// Strength-sized wingbox with additional cap area when the 1 g flight shape
+/// leaves the linear-model budget of [`crate::feasibility`]. The ultimate
+/// manoeuvre deflection is reported there but never bought down here.
 ///
 /// All inputs are SI. `initial` must be a converged strength-sized box at the
 /// same requirements, fuel and mounted-mass state. Only cap sections increase;

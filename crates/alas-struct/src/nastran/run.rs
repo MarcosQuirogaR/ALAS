@@ -540,10 +540,10 @@ mod tests {
 
     #[cfg(windows)]
     #[test]
+    #[ignore = "needs ALAS_MSC_SOLVER: an installed MSC Nastran solver path"]
     fn the_installed_msc_solver_override_is_a_single_whitespace_free_token() {
-        let Some(path) = std::env::var_os("ALAS_MSC_SOLVER") else {
-            return;
-        };
+        let path = std::env::var_os("ALAS_MSC_SOLVER")
+            .expect("set ALAS_MSC_SOLVER to the installed MSC Nastran solver to run this test");
         let token = msc_command_token(Path::new(&path)).unwrap();
         assert!(
             !token.chars().any(char::is_whitespace),

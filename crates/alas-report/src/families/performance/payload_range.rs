@@ -62,17 +62,17 @@ pub struct PayloadRangeData {
     /// the declared MTOW.
     pub mass_is_sized: bool,
     /// Reserve fuel the plan holds back at each corner (A to D), kilograms;
-    /// zero at A and on the no-reserve fallback.
+    /// zero at A.
     pub reserve_fuel_kg: [f64; 4],
-    /// What the ranges include: the reserve-inclusive fuel plan, or the
-    /// labelled Breguet fallback.
+    /// What the ranges include: the reserve-inclusive fuel plan.
     pub range_basis: RangeBasis,
     /// Range method and its provenance, including the fuel scheme.
     pub method_note: String,
 }
 
-/// Generate an idealized Breguet payload-range curve from the report's masses,
-/// aerodynamic point, and typed fuel-capacity evidence.
+/// Generate the payload-range curve from the report's masses, fuel model
+/// and typed fuel-capacity evidence, every corner priced by the report's
+/// segment mission model with reserves (`alas_pipeline::quick_analysis::corners`).
 ///
 /// This is a conceptual model check, not an AFM/WBM operational capability
 /// envelope or a mission-certified range result.
@@ -86,7 +86,7 @@ pub fn figure_payload_range(
         let message = if report.airplane.wings.is_empty() {
             "The analyzed report has no main wing; conceptual payload range cannot be computed."
         } else {
-            "Typed usable-fuel capacity evidence is unavailable; conceptual payload range cannot be computed."
+            "Typed usable-fuel capacity evidence or the fuel model is unavailable; conceptual payload range cannot be computed."
         };
         return status_scene("Conceptual Payload-Range Diagram", message, theme);
     };

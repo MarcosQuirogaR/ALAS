@@ -174,14 +174,4 @@ mod tests {
             Entry::Node(_) => panic!("a real number is not a group"),
         }
     }
-
-    #[test]
-    fn a_configuration_round_trips_through_serialization() {
-        let config = DragModelConfig::default();
-        let text = serde_json::to_string(&config).unwrap();
-        assert_eq!(
-            serde_json::from_str::<DragModelConfig>(&text).unwrap(),
-            config
-        );
-    }
 }

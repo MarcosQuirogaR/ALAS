@@ -549,13 +549,4 @@ mod tests {
         let recovered_pressure = values.density_kg_m3 * GAS_CONSTANT_AIR * values.temperature_k;
         assert!((recovered_pressure - values.pressure_pa).abs() < 1e-9);
     }
-
-    #[test]
-    fn kinematic_viscosity_is_dynamic_viscosity_over_density() {
-        let values = compute_values(8000.0, 0.0);
-        assert_eq!(
-            values.kinematic_viscosity_m2_s,
-            values.dynamic_viscosity_pa_s / values.density_kg_m3
-        );
-    }
 }

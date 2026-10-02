@@ -457,9 +457,19 @@ mod tests {
     use super::*;
     use crate::fuel_plan::{FuelBurnModel, FuelModelError, LegEstimate};
 
+    /// Taxi-in budget of the toy models' 0.05 kg/s ground-idle flow over the
+    /// ICAO Doc 9889 7 min, kg: carried from brake release to the gate.
+    const TAXI_IN_KG: f64 = 0.05 * crate::fuel_plan::TAXI_IN_TIME_MIN * 60.0;
+
+    /// The trip-fuel-only fixed point of a linear toy model,
+    /// `TOW = ZFW + trip_fraction TOW + taxi-in`, kg.
+    fn closed_form_takeoff_mass_kg(zero_fuel_mass_kg: f64, trip_fraction: f64) -> f64 {
+        (zero_fuel_mass_kg + TAXI_IN_KG) / (1.0 - trip_fraction)
+    }
+
     /// A linear toy model: trip fuel is a fixed fraction of the takeoff
     /// mass it starts from, which makes the fixed point closed-form
-    /// (`TOW = ZFW / (1 - trip_fraction)`) and the convergence check exact.
+    /// ([`closed_form_takeoff_mass_kg`]) and the convergence check exact.
     struct ToyModel {
         trip_fraction: f64,
         cruise_speed_m_s: f64,
@@ -531,8 +541,22 @@ mod tests {
             .abs()
                 < 1e-2
         );
-        // Closed form: TOW = ZFW / (1 - trip_fraction).
-        assert!((solution.takeoff_mass_kg - 50_000.0 / 0.70).abs() < 1e-1);
+        assert!(
+            (solution.takeoff_mass_kg - closed_form_takeoff_mass_kg(50_000.0, 0.30)).abs() < 1e-1
+        );
+        // With no reserves the aircraft lands with exactly the taxi-in
+        // budget on board: landing mass = ZFW + reserves + taxi-in.
+        assert!(
+            (solution.destination_landing_mass_kg
+                - (solution.zero_fuel_mass_kg
+                    + solution.plan.reserve_fuel_kg()
+                    + solution.plan.extra.kg
+                    + TAXI_IN_KG))
+                .abs()
+                < 1e-2,
+            "{}",
+            solution.destination_landing_mass_kg
+        );
     }
 
     #[test]
@@ -759,16 +783,16 @@ mod tests {
     }
 
     /// ZFW 50 t, model valid through 75 t only, true MTOW 100 t. The fixed
-    /// point (`TOW = ZFW / (1 - trip_fraction)`) is 70 t, strictly below the
+    /// point ([`closed_form_takeoff_mass_kg`]) is 70.03 t, strictly below the
     /// model's failure ceiling and far below MTOW. The default seed
     /// (1.25 x ZFW = 62.5 t) never even enters the failing region here, so
-    /// this is the baseline: closure must converge normally, at 70 t, with
+    /// this is the baseline: closure must converge normally, at 70.03 t, with
     /// `limits.mtow_kg` untouched and no false `MtowLimited`.
     #[test]
     fn a_feasible_root_below_the_models_failure_ceiling_converges_normally() {
         let policy = trip_fuel_only_policy();
         let model = FailAboveMassModel {
-            trip_fraction: 2.0 / 7.0, // root: 50_000 / (1 - 2/7) = 70_000
+            trip_fraction: 2.0 / 7.0, // root: (50_000 + 21) / (1 - 2/7) = 70_029.4
             cruise_speed_m_s: 200.0,
             fail_above_kg: 75_000.0,
         };
@@ -784,7 +808,8 @@ mod tests {
         assert_eq!(limits, original_limits, "DispatchLimits must never mutate");
         assert_eq!(solution.status, DispatchStatus::Converged);
         assert!(
-            (solution.takeoff_mass_kg - 70_000.0).abs() < 1.0,
+            (solution.takeoff_mass_kg - closed_form_takeoff_mass_kg(50_000.0, 2.0 / 7.0)).abs()
+                < 1.0,
             "{}",
             solution.takeoff_mass_kg
         );
@@ -804,7 +829,7 @@ mod tests {
     /// that then lowered `limits.mtow_kg` to dodge it would have gone on to
     /// report a false `MtowLimited` against that fictitious ceiling instead
     /// of the real one. This proves the fixed closure instead recovers by
-    /// bisecting `limits` unchanged and finds the same 70 t root.
+    /// bisecting `limits` unchanged and finds the same 70.03 t root.
     #[test]
     fn seeding_inside_the_failure_region_still_finds_the_feasible_root() {
         let policy = trip_fuel_only_policy();
@@ -838,7 +863,8 @@ mod tests {
             "a seed inside the unevaluable region must not report ModelFailed or a false MtowLimited"
         );
         assert!(
-            (solution.takeoff_mass_kg - 70_000.0).abs() < 1.0,
+            (solution.takeoff_mass_kg - closed_form_takeoff_mass_kg(50_000.0, 2.0 / 7.0)).abs()
+                < 1.0,
             "{}",
             solution.takeoff_mass_kg
         );
@@ -852,7 +878,7 @@ mod tests {
     }
 
     /// A control case: an explicit seed strictly *below* the feasible root
-    /// (60 t, between the 50 t ZFW and the 70 t root) must converge to the
+    /// (60 t, between the 50 t ZFW and the 70.03 t root) must converge to the
     /// same root by ordinary Picard contraction, with no bracket recovery
     /// needed and no false limit reported.
     #[test]
@@ -884,7 +910,8 @@ mod tests {
         assert_eq!(limits, original_limits, "DispatchLimits must never mutate");
         assert_eq!(solution.status, DispatchStatus::Converged);
         assert!(
-            (solution.takeoff_mass_kg - 70_000.0).abs() < 1.0,
+            (solution.takeoff_mass_kg - closed_form_takeoff_mass_kg(50_000.0, 2.0 / 7.0)).abs()
+                < 1.0,
             "{}",
             solution.takeoff_mass_kg
         );

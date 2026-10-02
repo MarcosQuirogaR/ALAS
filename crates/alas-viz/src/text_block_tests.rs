@@ -86,10 +86,10 @@ fn a_long_diagnostic_wraps_inside_the_block_at_every_card_scale() {
 }
 
 #[test]
+#[ignore = "needs ALAS_STATUS_FIGURE_EVIDENCE_DIR: output directory for the status-figure evidence PNG/SVG files"]
 fn status_figure_evidence_renders_when_requested() {
-    let Ok(dir) = std::env::var("ALAS_STATUS_FIGURE_EVIDENCE_DIR") else {
-        return;
-    };
+    let dir = std::env::var("ALAS_STATUS_FIGURE_EVIDENCE_DIR")
+        .expect("set ALAS_STATUS_FIGURE_EVIDENCE_DIR to a directory for the evidence images");
     std::fs::create_dir_all(&dir).expect("evidence directory");
     let message = long_diagnostic();
     for theme in ["light", "grey", "dark"] {

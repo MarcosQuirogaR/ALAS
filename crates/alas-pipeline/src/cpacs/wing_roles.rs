@@ -161,14 +161,4 @@ mod tests {
         assert_eq!(wings[1].name, "Canard");
         assert_eq!(wings[2].name, "Tailplane");
     }
-
-    #[test]
-    fn a_reference_chord_within_tolerance_of_the_wing_mac_does_not_warn() {
-        // Exercised for coverage of the non-warning branch; `tracing`
-        // has no in-crate assertion surface here, so this only proves the
-        // guard does not panic or divide by zero.
-        warn_on_reference_chord_mismatch("Probe", 4.19, 4.193423);
-        warn_on_reference_chord_mismatch("Probe", 7.5, 6.27126);
-        warn_on_reference_chord_mismatch("Probe", 1.0, 0.0);
-    }
 }

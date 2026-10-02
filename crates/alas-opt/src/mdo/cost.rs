@@ -16,7 +16,7 @@
 
 use std::collections::BTreeSet;
 
-use alas_config::{AlasConfig, ConstraintPolicy, ObjectiveKind};
+use alas_config::{AlasConfig, ConstraintPolicy, ObjectiveKind, TailSizing};
 
 use super::sizing::SizingOutcome;
 use super::types::{
@@ -210,6 +210,14 @@ pub(crate) fn assemble(
         // coordinate solve replaced the caller's literal. See
         // `ResolvedProductState::design`.
         design: outcome.history.dv,
+        tail_sizing: TailSizing {
+            tail_scale: outcome.history.dv.tail_scale,
+            vstab_scale_ratio: super::tail_sizing::fin_scale_ratio(
+                &outcome.plane,
+                &config.geometry.empennage,
+                &outcome.history.dv,
+            ),
+        },
         masses: outcome.masses,
         coords: outcome.coords,
         cg_x_m: outcome.cg_x,

@@ -150,17 +150,6 @@ fn a_supersonic_training_grid_is_refused_rather_than_silently_mis_evaluated() {
 }
 
 #[test]
-fn the_default_grid_is_the_one_fidelity_zero_overrides_vortex_lattice_with() {
-    let grid = TrainingGrid::default();
-    assert_eq!(grid.mach, vec![0.0, 0.1, 0.2, 0.3, 0.5, 0.75, 0.85, 0.9]);
-    assert_eq!(grid.angle_of_attack_rad.len(), 10);
-    assert!(
-        grid.mach.iter().all(|&mach| mach < 1.0),
-        "the whole reason the supersonic branch is unreachable"
-    );
-}
-
-#[test]
 fn the_fuselage_allowance_is_a_scale_on_the_wings_only_lift() {
     assert_eq!(
         aircraft_lift_coefficient(0.5, FUSELAGE_LIFT_CORRECTION),

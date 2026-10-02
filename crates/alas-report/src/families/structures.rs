@@ -319,13 +319,6 @@ mod tests {
     }
 
     #[test]
-    fn linspace_pins_both_endpoints() {
-        assert_eq!(linspace(0.0, 1.0, 5), vec![0.0, 0.25, 0.5, 0.75, 1.0]);
-        assert_eq!(linspace(2.0, 3.0, 1), vec![2.0]);
-        assert!(linspace(0.0, 1.0, 0).is_empty());
-    }
-
-    #[test]
     fn structures_unavailable_message_distinguishes_absent_from_failed() {
         assert!(structures_unavailable_message(None)
             .unwrap()

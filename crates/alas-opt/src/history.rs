@@ -50,6 +50,14 @@ pub struct OptimizationHistory {
     /// weighted-penalty evaluation.
     #[serde(default)]
     pub soft_violation: Vec<f64>,
+    /// Complete mission-profile integrations each candidate's sizing closure
+    /// flew (`SizedCandidate::work`); zero when it did not size.
+    #[serde(default)]
+    pub trip_flights: Vec<u64>,
+    /// Propulsion-deck evaluations of each candidate
+    /// (`SizedCandidate::work`); zero when it did not size.
+    #[serde(default)]
+    pub deck_evals: Vec<u64>,
 }
 
 impl OptimizationHistory {
@@ -89,6 +97,18 @@ impl OptimizationHistory {
         self.block_fuel_kg.push(f64::NAN);
         self.hard_violation.push(0.0);
         self.soft_violation.push(0.0);
+        self.trip_flights.push(0);
+        self.deck_evals.push(0);
+    }
+
+    /// Overwrite the work counters of the last recorded evaluation.
+    pub(crate) fn record_sizing_work(&mut self, work: crate::mdo::SizingWork) {
+        if let Some(last) = self.trip_flights.last_mut() {
+            *last = work.trip_flights;
+        }
+        if let Some(last) = self.deck_evals.last_mut() {
+            *last = work.deck_evals;
+        }
     }
 
     /// Record a mission-sized evaluation step.
@@ -153,6 +173,8 @@ impl OptimizationHistory {
         self.block_fuel_kg.append(&mut other.block_fuel_kg);
         self.hard_violation.append(&mut other.hard_violation);
         self.soft_violation.append(&mut other.soft_violation);
+        self.trip_flights.append(&mut other.trip_flights);
+        self.deck_evals.append(&mut other.deck_evals);
     }
 
     /// Number of total evaluations recorded.
@@ -204,6 +226,8 @@ mod tests {
             history.block_fuel_kg.len(),
             history.hard_violation.len(),
             history.soft_violation.len(),
+            history.trip_flights.len(),
+            history.deck_evals.len(),
         ]
     }
 

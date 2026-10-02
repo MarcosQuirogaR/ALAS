@@ -7,42 +7,33 @@ in `docs/methods.md`; this page is the wiring and the input list.
 ## The driving path
 
 1. **Entry.** The GUI Run page and the headless CLI (`alas --config <yaml>
-   [--optimization-method <m>] [--optimization-solver vlm|avl|both]
-   [--seed <n>] [--no-optimize]`) both build `PipelineOptions` and call the
-   same `DesignPipeline`. `optimize = true` is the default.
+   [--optimization-solver vlm|avl|both] [--seed <n>] [--no-optimize]`) both
+   build `PipelineOptions` and call the same `DesignPipeline`. `optimize = true` is the default.
 2. **Stage 2, design-space optimization.** `run_solver_optimizations` runs
    the requested branches (native VLM, external AVL, or both in parallel).
    Each branch constructs `DesignOptimizer::new(config)` and calls
    `run(bounds, Some(preset design vector))`. The bounds are the sixteen
-   design-variable bounds of `alas_config::design_variables::SPECS`, recentred
-   on the preset when one is loaded.
-3. **The optimization profile.** Fresh configurations select
-   `optimizer.solver.method = scipy_legacy`, which restores ALAS v1.1.0's
-   weighted lift-to-drag objective, penalty table, legacy mass coordinates,
-   SciPy-style `best1bin` search, and seeded local population or
-   Latin-hypercube fallback. It runs without the product profile's broad scan
-   or feasibility-restoration stage. Select `differential_evolution` for the
-   mission-sized objective and L-SHADE epsilon-constrained product search.
-   Retired method tokens (`sqp`, `nsga2`, `turbo_1`, `cma_es`,
-   `feasibility_first_de`) still migrate to the product profile when loaded.
-4. **One evaluation.** `scipy_legacy` builds the reference-compatible
-   geometry and mass model, solves cruise trim and drag polar, then evaluates
-   the weighted L/D plus original scalar penalties. The product profile builds
-   geometry and payload load case, runs the mass analysis, cruise trim and
-   drag polar, then closes mission fuel and takeoff mass through `mdo::mda`;
-   its residual table and selected mission objective form the search cost.
+   design-variable bounds of `alas_config::design_variables::SPECS`. With no
+   bounds, `DesignOptimizer::resolved_bounds` derives the search box from the
+   configured design space and the nominal design (the preset's design vector
+   when one is loaded), so the desktop and the command line search the same
+   envelope.
+3. **The optimization method.** `optimizer.solver.method` is always
+   `differential_evolution`: the mission-sized objective, a budgeted screening
+   stage, a diverse elite and a budgeted refinement (current-to-pbest/1/bin
+   under Deb's rules with an epsilon level) with bounded feasibility
+   restoration. Retired method tokens (`scipy_legacy`, `sqp`, `nsga2`,
+   `turbo_1`, `cma_es`, `feasibility_first_de`) migrate to it when a saved file
+   is loaded, with a load note; the retired `optimizer.solver.strategy` and
+   the penalty-table keys of `optimizer.weights` are dropped.
+4. **One evaluation.** The evaluation builds geometry and payload load case,
+   runs the mass analysis, cruise trim and drag polar, then closes mission fuel
+   and takeoff mass through `mdo::mda`; its residual table and selected
+   mission objective form the search cost.
 5. **Result.** The best design is re-analysed at full fidelity
    (`FullAnalysis`) and becomes the optimized report; the history feeds the
    convergence figure and the run manifest. The AVL branch scores the same
-   objective around AVL's induced drag (`assess_candidate_with_polar_cancellable`). The
-   legacy profile does not apply the mission-sized finalist replay or revoke
-   its scalar-cost winner from product-only feasibility checks; those physical
-   findings remain visible in the final feasibility report.
-
-`scipy_legacy` is the application default. The
-`DesignOptimizer::new_reference_compatibility` constructor remains available
-for deterministic parity fixtures even when a caller explicitly selects the
-product profile.
+   objective around AVL's induced drag (`assess_candidate_with_polar_cancellable`).
 
 ## Inputs the mission-sized search reads
 
@@ -59,23 +50,97 @@ holds; presets override the physical inputs.
 | `sizing_max_iterations`, `sizing_tolerance_kg` | sizing-loop budget and closure tolerance | 30, 1 kg |
 | `retrim_cg_tolerance_pct_mac` | CG shift that triggers a re-trim inside the loop; zero keeps one trim | 0.1 |
 | `mass_constraints`, `balance_constraints`, `performance_constraints`, `geometry_constraints` | hard, soft, diagnostic or off per family | hard |
-| `max_span_m`, `max_approach_speed_kt` | aerodrome span limit, approach-category speed limit (zero disables) | 80 m, 0 |
+| `aerodrome_reference_code`, `max_approach_speed_kt` | ICAO Annex 14 code letter capping the clean-sheet wingspan (A 15 m ... F 80 m, strictly below the band edge; a registered aircraft in reference adaptation uses its own letter), approach-category speed limit (zero disables) | F, 0 |
 | `soft_penalty_weight` | weight of the soft-residual sum against the objective | 10 |
 
 ### `optimizer.solver`: how the search is run
 
-`method` chooses `scipy_legacy` (default) or `differential_evolution`.
-`max_iterations` sets the generation budget. `population_size` multiplies the
-number of free variables for the initial population; the product L-SHADE
-profile reduces population size while `scipy_legacy` keeps it fixed.
-`tolerance` controls SciPy's population-energy spread test in the legacy
-profile and the product profile's convergence test. The product-only
-`convergence_stagnation_generations` sets its stagnation window. `strategy`,
-`seed_near_initial_design` and `seed_perturbation_fraction` configure
-`scipy_legacy`; the product profile ignores them. A fixed seed reproduces
-serial runs; multiple legacy workers use deferred generation updates and can
-change the trajectory. `finite_difference_step` and `constraint_tolerance`
-remain only for saved-file compatibility with the retired SQP driver.
+`method` is `differential_evolution`, the only method.
+`screening` and `refinement` each hold `max_evaluations`, `time_limit_s` (at
+most 300 s; 30 s and 120 s by default) and an optional `replay_evaluations`.
+`max_evaluations` is a ceiling (20 000 by default) that the time limits reach
+first: at the measured 0.3 s to 1.5 s of lane time per analysis, about 8
+analyses per second on a 32-thread machine, even 300 s affords about 2 400.
+In time mode the refinement plans its budget from its measured throughput:
+`B = min(max_evaluations, floor(r (1 - 0.2) T eta) + 10)`, at least 240, with
+`T` the refinement time limit (a fifth kept for verification) and `eta = 0.9`
+an engineering safety factor. The refinement model first analyses the
+baseline and the first 11 elite members, the seeds of the smallest (24)
+initial population and so of every one the plan can choose; the set does not
+depend on the plan, so a replay analyses it too. `r` is the workers times the
+screening's lane utilization over their mean lane time. With the screening's
+own model they are cache hits and `r` is the screening's analyses per second.
+Measured (A320-200, 32 threads): the screening model's random samples cost
+0.95 s of lane time each, refinement candidates 2.4 s, so the screening rate
+alone would plan twice what the time affords. `B` sets the initial population
+and the population reduction, and the time limit stays the backstop. Without
+a time limit (`stop_on_evaluations_only`) `B = max_evaluations`, and a replay
+uses its recorded `replay_planned_evaluations`. The elite is sized for the
+initial population of `max_evaluations`, which a replay keeps.
+Screening evaluates seeded Latin-hypercube batches of 64 plus the baseline;
+its elite (the best half by the feasibility rule, the rest by max-min distance,
+`(6 D - 1) / 2` members) seeds the refinement, whose initial population is
+`clamp(B / 10, 24, 6 D)` for refinement budget `B`, the baseline and the
+first `(N_init - 1) / 2` elite members included, and shrinks linearly in
+evaluations to 8. A
+screening batch is refilled past the design-vector pre-gate: it draws
+points until 64 of them pass, so it keeps the workers busy. Every stage
+budget counts analysed candidates only: pre-gate rejects cost microseconds,
+are counted per failed check, and have their own cap `max_pregate_rejects`
+(20 times the analysed budget by default); reaching it stops the stage with
+`pregate_exhausted`. The screening sampler maps the root chord into the range
+the chord order and the exposed trailing-edge angle admit, so most draws
+pass the pre-gate. When a whole batch would overrun the screening time
+limit, the last batch carries only the whole waves of one analysis per
+worker that fit in the time left, projected from the previous batch, so the
+stage ends within one batch time of its limit. The evaluated points are a
+prefix of the seeded sequence whatever the partition, so they depend only on
+the seed and the recorded count. A refinement trial is not redrawn: a generation of
+at most `N_init` trials, not the rejects, bounds its lanes, and redrawing
+spent the budget on rejects. Each stage reports its lane wall time per
+analysed candidate and its lane utilization. The refinement keeps back
+`min(10, B / 10)` evaluations and a fifth of its time
+limit (an engineering estimate) for the reporting-fidelity work after the
+search: up to eight finalist verifications, the baseline analysis and the
+final analysis, so all of it runs inside the declared budget; the summary
+reports the analyses used against that reserve.
+
+The time limits are the default stopping rule. Each is checked only at
+generation (batch) boundaries, the first right after the initial population,
+so a generation in flight always finishes. Time-limited: the stopping point
+depends on machine speed and worker count; replay with the recorded
+counts for a bit-identical result at any worker count. The result, the
+results card, the CLI summary, the report figure and the run manifest record
+each stage's replay count (pre-gate-passed candidates, including repeats:
+exact repeats and the reused elite and baseline count, but cost no
+analysis), shown apart from its coupled analyses, its rejections, and the
+refinement's planned budget. Setting `replay_evaluations` to the replay
+count ignores that stage's time limit and stops at the first generation
+boundary that reaches it; the refinement's `replay_planned_evaluations` is
+set to the recorded planned budget, so its initial population and reduction
+schedule are those of the recorded run. The coupled-analysis count does not
+replay the run.
+`stop_on_evaluations_only = true` ignores both time limits, so a seeded run
+is bit-identical at any worker count however long it takes. The seed the run
+used is recorded even when none was configured. `parameter_adaptation`
+switches from static `F = 0.5`,
+`CR = 0.9` to L-SHADE success history (recommended above 800 evaluations per
+free variable). `tolerance` is the normalized spread below which a stagnated
+refinement (best feasible objective improving less than 1e-4 over
+`convergence_stagnation_generations` generations, or `ceil(2 N_init / 8)`
+if longer, i.e. two initial populations of trials at the final size) reports
+`converged` rather than `stagnated`. Stagnation never stops a run before half
+its budget `B` is spent (an engineering choice: without it A320-200, seed
+20260922, stopped after 215 of 590 evaluations, 1.6 % worse than the same
+seed run to its budget). `workers = 0` uses every thread; it changes what a stage
+evaluates only through a time-limit stop. A saved
+`max_iterations`/`population_size` pair loads as a refinement budget of
+`(max_iterations + 1) x population_size x 16` evaluations with a load note;
+the retired `display_progress`, `seed_near_initial_design`,
+`seed_perturbation_fraction`, `optimizer.objective.max_span_m` and weight
+keys are dropped with a load note. `finite_difference_step` and
+`constraint_tolerance` remain only for saved-file compatibility with the
+retired SQP driver.
 
 ### `optimizer.plausibility`: the model's validity domain
 
@@ -117,12 +182,11 @@ no entries. A configuration that lists an ineligible or unknown identifier
 is a blocking validation error quoting the recorded reason, so the shipped
 run is strict and stays strict.
 
-### `optimizer.weights`: penalty table
+### `optimizer.weights`: failure cost and planform thresholds
 
-`scipy_legacy` uses the full weighted L/D penalty table from ALAS v1.1.0,
-including `failure_cost` for a candidate that cannot be built, trimmed or
-analysed. The mission-sized product profile reads `failure_cost` and the
-tail-volume plausibility window; its objective and requirement policies live
+The search reads `failure_cost` for a candidate that cannot be built, trimmed
+or analysed and the transport-planform thresholds; its objective and
+requirement policies live
 under `optimizer.objective` and `requirements`.
 
 ### `requirements`: the brief

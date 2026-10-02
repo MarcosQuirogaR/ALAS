@@ -261,20 +261,11 @@ impl AlasConfig {
     pub fn from_value_with_notes(
         data: &serde_json::Value,
     ) -> Result<(Self, ConfigLoadNotes), OverlayError> {
-        // A workspace file carries the desktop session envelope next to the
-        // aircraft configuration. The envelope is not aircraft data, so it is
-        // removed before the strict overlay sees the document; a file with no
-        // envelope is unchanged by this step.
-        let without_envelope;
-        let data = match data.as_object() {
-            Some(map) if map.contains_key(WORKSPACE_ENVELOPE_KEY) => {
-                let mut map = map.clone();
-                map.remove(WORKSPACE_ENVELOPE_KEY);
-                without_envelope = serde_json::Value::Object(map);
-                &without_envelope
-            }
-            _ => data,
-        };
+        // The strict overlay must not see the desktop session envelope or the
+        // optimizer keys this build retired; see `aircraft_document`.
+        let retired_keys = crate::RetiredKeysDropped::of(data);
+        let (document, legacy_budget) = load_notes::aircraft_document(data);
+        let data = &*document;
         let mut instance = Self::default();
 
         if let Some(name) = data.get("preset").and_then(serde_json::Value::as_str) {
@@ -460,7 +451,9 @@ impl AlasConfig {
         // explicit version-2 selection (as the settings form does), so it
         // must remain selectable rather than being mistaken for an old file.
         let migration = crate::landing_mass_ratio::finish_loaded_mass_model(&mut loaded, data);
-        Ok(load_notes::finish(loaded, migration, data))
+        let (loaded, mut notes) = load_notes::finish(loaded, migration, data, legacy_budget);
+        notes.retired_keys = retired_keys;
+        Ok((loaded, notes))
     }
 
     /// The maximum landing mass to enforce for `candidate_mtow_kg`.

@@ -13,36 +13,6 @@ use super::emit_diagnostic;
 use crate::full_analysis::{AnalysisReport, FullAnalysis};
 use crate::runs::RunEvent;
 
-/// Whether an optimizer finalist's report is bound to its closed takeoff
-/// mass.
-///
-/// The product profile's finalist always is. A takeoff-mass mode that is
-/// closed by the mission under every method (the MTOW band and
-/// payload-adjusted modes, `MtowPlan::requires_mission_sized_evaluation`)
-/// is too, whatever the method, because the winner was sized by that
-/// closure rather than at the declared MTOW.
-pub(super) fn binds_sized_finalist(config: &AlasConfig) -> bool {
-    config.optimizer.solver.method == alas_config::optimizer::PRODUCT_DE_METHOD
-        || config.mtow_plan().requires_mission_sized_evaluation()
-}
-
-/// What happens to a `scipy_legacy` winner after the search, as the progress
-/// line states it.
-///
-/// Under the three original MTOW modes the winner goes to the full analysis
-/// at the declared MTOW with no finalist replay. Under the MTOW band and
-/// payload-adjusted modes it was sized by the mission-sized closure, so it is
-/// replayed with the production objective, must be hard-feasible there, and
-/// its report is bound to the closed takeoff mass
-/// ([`binds_sized_finalist`]).
-pub(super) fn legacy_winner_notice(config: &AlasConfig) -> &'static str {
-    if config.mtow_plan().requires_mission_sized_evaluation() {
-        "SciPy legacy winner was sized by the mission-sized closure of the selected MTOW mode; it is replayed with the production objective, must be hard-feasible there, and its report is bound to the closed takeoff mass"
-    } else {
-        "SciPy legacy winner sent to full analysis at the declared MTOW; mission-sized finalist acceptance is disabled for this profile"
-    }
-}
-
 /// Replay the typed finalist assessment and rebuild the report at its closed
 /// takeoff mass.
 ///
@@ -99,7 +69,9 @@ pub(super) fn bind_sized_finalist(
     // caller's vector there would publish a different aeroplane from
     // the one this gate just passed.
     let assessed_design = assessment.resolved.design;
-    if assessed_design != supplied_design {
+    // Tail sizing rewrites `tail_scale` on every reference adaptation, so
+    // only the fuselage coordinate the message names is compared.
+    if assessed_design.fuselage_length_m.to_bits() != supplied_design.fuselage_length_m.to_bits() {
         emit_diagnostic(
             events,
             run_clock,
@@ -110,12 +82,10 @@ pub(super) fn bind_sized_finalist(
             ),
         );
     }
-    let report = full.run_at_sized_design_weights(
-        &assessed_design,
-        true,
-        assessment.sized.takeoff_mass_kg,
-        Some(assessment.sized.design_landing_mass_kg),
-    )?;
+    let mut sized_full = full.clone();
+    let replayed_design =
+        crate::acceptance::apply_assessed_aircraft(&assessment.resolved, &mut sized_full.config);
+    let report = sized_full.run_sized_candidate(&replayed_design, &assessment.sized)?;
     emit_diagnostic(
         events,
         run_clock,

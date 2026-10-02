@@ -73,6 +73,13 @@ pub struct WingTankConfig {
         help = "Usable volume published by the manufacturer for this tank, both sides together. When set it is the authoritative capacity and the geometric estimate only supplies the centroid; leave unset for a notional design."
     )]
     pub published_usable_volume_l: Option<f64>,
+
+    /// An engine feed tank occupying one end of this cell.
+    #[config(
+        nested,
+        help = "An engine feed tank inside this cell, at its inboard or outboard end. The engines draw only from the feed tanks; every other wing, center and auxiliary tank is a transfer tank that refills them. Feed tanks are filled first on the ground and emptied last in flight. The cell's own span and published volume stay the totals, feed tank included."
+    )]
+    pub feed: FeedTankConfig,
 }
 
 impl Default for WingTankConfig {
@@ -83,6 +90,59 @@ impl Default for WingTankConfig {
             span_end_fraction: 0.65,
             usable_fraction: 0.92,
             burn_priority: 2,
+            published_usable_volume_l: None,
+            feed: FeedTankConfig::default(),
+        }
+    }
+}
+
+/// An engine feed tank carved out of one end of its host wing cell.
+///
+/// The host cell keeps its span and published volume as totals, so every
+/// consumer that reads whole wing cells (wingbox fuel relief, the FLOPS
+/// wing-fuel inputs) is unchanged; only the balance splits the cell into a
+/// transfer tank and this feed tank.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ConfigNode)]
+#[serde(default, deny_unknown_fields)]
+pub struct FeedTankConfig {
+    /// Whether the host cell contains a feed tank.
+    #[config(
+        label = "Installed",
+        help = "Whether part of this wing cell is an engine feed tank, kept as a separate tank for the fill and burn sequence."
+    )]
+    pub enabled: bool,
+
+    /// Inboard boundary of the feed tank.
+    #[config(
+        label = "Span start",
+        unit = "fraction of semi-span",
+        help = "Inboard boundary of the feed tank as a fraction of the semi-span. The feed tank must lie inside its host cell and share one of its ends."
+    )]
+    pub span_start_fraction: f64,
+
+    /// Outboard boundary of the feed tank.
+    #[config(
+        label = "Span end",
+        unit = "fraction of semi-span",
+        help = "Outboard boundary of the feed tank as a fraction of the semi-span. The feed tank must lie inside its host cell and share one of its ends."
+    )]
+    pub span_end_fraction: f64,
+
+    /// Manufacturer-published usable volume of the feed tanks.
+    #[config(
+        label = "Published usable volume",
+        unit = "L",
+        help = "Usable volume published by the manufacturer for this feed tank, both sides together. It is part of the host cell's published volume, and the rest of that volume is the transfer tank."
+    )]
+    pub published_usable_volume_l: Option<f64>,
+}
+
+impl Default for FeedTankConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            span_start_fraction: 0.10,
+            span_end_fraction: 0.20,
             published_usable_volume_l: None,
         }
     }
@@ -350,6 +410,7 @@ impl FuelTankLayoutConfig {
                     return Err(format!("{name} published usable volume must be positive"));
                 }
             }
+            validate_feed(name, cell)?;
             active.push((name, cell.span_start_fraction, cell.span_end_fraction));
         }
         for (index, (name, start, end)) in active.iter().enumerate() {
@@ -385,6 +446,36 @@ impl FuelTankLayoutConfig {
             )?;
         }
         Ok(())
+    }
+}
+
+/// A feed tank must be a strict sub-interval of its host cell sharing one of
+/// its ends, so the transfer remainder is one contiguous bay; a published
+/// feed volume must be a strict part of a published host volume, and a
+/// published host cannot be split without one.
+fn validate_feed(name: &str, cell: &WingTankConfig) -> Result<(), String> {
+    let feed = &cell.feed;
+    if !feed.enabled {
+        return Ok(());
+    }
+    validate_interval(name, feed.span_start_fraction, feed.span_end_fraction)?;
+    let at_inboard_end = feed.span_start_fraction == cell.span_start_fraction
+        && feed.span_end_fraction < cell.span_end_fraction;
+    let at_outboard_end = feed.span_end_fraction == cell.span_end_fraction
+        && feed.span_start_fraction > cell.span_start_fraction;
+    if !(at_inboard_end || at_outboard_end) {
+        return Err(format!(
+            "{name} feed tank must lie inside the cell and share exactly one of its ends"
+        ));
+    }
+    match (feed.published_usable_volume_l, cell.published_usable_volume_l) {
+        (None, None) => Ok(()),
+        (Some(feed_l), Some(cell_l)) if feed_l.is_finite() && feed_l > 0.0 && feed_l < cell_l => {
+            Ok(())
+        }
+        _ => Err(format!(
+            "{name} feed tank published volume must be a positive part of the cell's published volume"
+        )),
     }
 }
 

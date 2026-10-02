@@ -1,22 +1,19 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! Airbus twin-aisle presets: A340-300 and A380-800.
+//! Airbus twin-aisle presets: the A340-300 here, the A380-800 in its own
+//! module.
+
+mod a380;
+
+pub use a380::a380_800;
 
 use crate::{
     AircraftPreset, AircraftReferenceData, AircraftVariantIdentity, CgEnvelopeEvidence,
     DesignRequirements, DesignVector, EmpennageConfig, EngineConfig, FuselageConfig,
     GeometryConfig, LandingGearConfig, MissingDesignMissionDatum, MissionEvidenceApplicability,
-    PartialDesignMissionEvidence, PartialMissionEvidenceKind, PublishedRange,
-    PublishedReserveContract, WingConfig,
+    PartialDesignMissionEvidence, PartialMissionEvidenceKind, PublishedAftCgNoseLoad, WingConfig,
 };
-
-/// How far below the wing reference plane the A380's engines hang, in metres:
-/// inboard pair ~0.35 m clearance under the wing lower surface, outboard pair
-/// ~1.4 m. Named (not written in place) because the lint below reads 3.14 as
-/// a mistyped pi; it is a length in metres, not the constant.
-#[allow(clippy::approx_constant)]
-const A380_ENGINE_Z_M: f64 = -3.14;
 
 /// Long-range quad with a conventional tail.
 pub fn a340_300() -> AircraftPreset {
@@ -32,6 +29,10 @@ pub fn a340_300() -> AircraftPreset {
             tank_configuration: "three tanks",
         },
         reference: AircraftReferenceData {
+            // ICAO Annex 14 Vol. I Table 1-1 (aerodrome reference code) applied to the
+            // preset wingspan of 60.30 m (Airbus A340-300 Aircraft Characteristics):
+            // 52 m <= b < 65 m is code E.
+            aerodrome_reference_code: Some(crate::AerodromeReferenceCode::E),
             mrw_kg: Some(260_900.0),
             mtow_kg: Some(260_000.0),
             mlw_kg: Some(188_000.0),
@@ -41,6 +42,11 @@ pub fn a340_300() -> AircraftPreset {
             usable_fuel_mass_kg: Some(113_200.0),
             fuel_density_kg_l: Some(0.8),
             planning_seats: Some(335),
+            design_point: Some(crate::PayloadRangeDesignPoint {
+                range_nmi: 5_000.0,
+                payload_kg: Some(50_800.0),
+                source: "Airbus A340-200/-300 Aircraft Characteristics Rev 33 (2025-12) section 3-2-1 Figure 3-2-1-991-013-A01 (payload/range ISA, CFM56-5C3, A340-300): maximum-payload corner read as 5,000 nmi at 112,000 lb (50.8 t); read uncertainty +-100 nmi, +-1,000 lb; chart MTOW not printed; reserves not stated",
+            }),
             certified_max_seats: Some(375),
             partial_design_mission_evidence: vec![PartialDesignMissionEvidence {
                 kind: PartialMissionEvidenceKind::PayloadRangeChart,
@@ -61,6 +67,14 @@ pub fn a340_300() -> AircraftPreset {
                 source: "Airbus A340-200/-300 Aircraft Characteristics Rev 33, 2025-12-01, section 3-2-1 p.4, Figure 3-2-1-991-013-A01",
             }],
             cg_evidence: CgEnvelopeEvidence::AfmRequired,
+            // 1 - (2 x 102,950 + 41,120) / 260,900: two wing-gear legs and
+            // the centre gear at the most-aft CG.
+            aft_cg_nose_load: Some(PublishedAftCgNoseLoad {
+                mass_kg: 260_900.0,
+                nose_gear_fraction: 1.0 - (2.0 * 102_950.0 + 41_120.0) / 260_900.0,
+                aft_cg_pct_mac: Some(38.0),
+                source: "Airbus A340-200/-300 Aircraft Characteristics Rev 33, 2025-12-01, Figure 7-3-0-991-007-A01 sheet 2 (WV029, MRW 260,900 kg: wing-gear 102,950 kg per strut and centre-gear 41,120 kg static at the most-aft CG, 38 % MAC)",
+            }),
             reference_wing_area_m2: Some(361.6),
             sources: vec![
                 "EASA.A.015 Issue 28, 2026-01-15, pp.32-36",
@@ -88,14 +102,28 @@ pub fn a340_300() -> AircraftPreset {
                 32.05 / 63.66,
                 33.04 / 63.66,
             ]),
+            // Airbus A340-200/-300 AC Rev 33, Figure 2-3-0-991-005-A01 (PDF
+            // p.44, ground clearances, aft CG): fuselage bottom ahead of the
+            // wing (F2) 2.13 m; the 1.83 m BF is the belly fairing.
+            fuselage_ground_clearance_m: Some(2.13),
             ..LandingGearConfig::default()
         },
         design_vector: DesignVector {
             span_m: 60.30,
             root_chord_m: 12.00,
             break_chord_m: 6.50,
-            tip_chord_m: 1.80,
-            sweep_deg: 30.0,
+            // Airbus A340-200/-300 Aircraft Characteristics Rev 33,
+            // 2025-12-01, FIGURE-2-2-0-991-007-A01 sheet 2 (PDF p.40,
+            // A340-300 plan view): the wing tip runs 2.5 m streamwise from
+            // its leading edge, 39.1 m aft of the nose, to its trailing edge
+            // at the winglet root.
+            tip_chord_m: 2.5,
+            // 30 deg is the quarter-chord sweep of the A330-200/300 wing the
+            // A340-200/300 shares (NASA/TP-20210023843, December 2022,
+            // Table I). The outboard taper converts it to this leading-edge
+            // angle, which matches the 32.0 deg the same plan view reads at
+            // the leading edge.
+            sweep_deg: 32.037_361_654_529_35,
             tip_twist_deg: -2.0,
             wing_x_shift_m: -1.4,
             tail_scale: 1.0,
@@ -109,16 +137,28 @@ pub fn a340_300() -> AircraftPreset {
             wing: WingConfig {
                 // Quarter-MAC: LEMAC 28.083 m aft of nose (section 7 pavement-load
                 // two-point statics, 13 rows within +-0.014 m; TCDS MAC 7.270 m).
-                root_datum_x_m: 23.111,
+                // The model quarter-MAC point sits on the manufacturer's
+                // 29.901 m (model MAC 7.093 m, 2.4 % short of the TCDS).
+                root_datum_x_m: 22.341,
+                // Heights fitted to the Figure 2-3-0-991-005-A01 static
+                // clearances (aft CG), the drooped ground shape: wing tip
+                // lower surface 5.94 m above the ground (W2), and the kink
+                // height that, with one engine offset, puts the nacelle low
+                // points at N1 1.28 m and N2 2.35 m.
                 root_z_m: -1.8,
-                break_z_m: -0.3,
-                tip_z_m: 2.0,
+                break_z_m: -0.922,
+                tip_z_m: 1.315,
                 root_twist_deg: 3.5,
                 break_twist_deg: 1.5,
                 break_span_fraction: 0.35,
                 // Active side-of-body planform calibrated to the Airbus
-                // 361.6 m^2 reference area without changing the chords.
-                kink_span_fraction: Some(0.362_094_754_983_253_8),
+                // 361.6 m^2 reference area (section 2-1-1) without changing
+                // the chords: with the 12.0 m root, 6.5 m kink and 2.5 m tip
+                // chords over the 30.15 m semispan this puts the kink at
+                // 9.50 m, where the same plan view draws the trailing-edge
+                // break (about 8.5-9.2 m, read against the 7.46 m and
+                // 10.88 m flap-track dimensions).
+                kink_span_fraction: Some(9.5 / 30.15),
                 outboard_sweep_decrement_deg: 2.0,
                 root_airfoil: "sc20612".to_owned(),
                 tip_airfoil: "sc20410".to_owned(),
@@ -126,20 +166,33 @@ pub fn a340_300() -> AircraftPreset {
             },
             empennage: EmpennageConfig {
                 tail_airfoil: "naca0012".to_owned(),
-                hstab_offset_from_tail_m: 9.0,
+                // Figure 2-2-0-991-007-A01 sheet 2 (plan view): tailplane tip
+                // leading edge 61.67 m aft of the nose and 6.43 m aft of the
+                // root leading edge (55.24 m), tip trailing edge 63.69 m. The
+                // root chord and height are not dimensioned.
+                hstab_offset_from_tail_m: 8.42,
                 hstab_z_m: 1.0,
                 hstab_root_chord_m: 6.5,
-                hstab_tip_chord_m: 1.8,
+                hstab_tip_chord_m: 2.02,
                 hstab_root_twist_deg: -2.0,
                 hstab_tip_twist_deg: -2.0,
                 // Airbus A340 Aircraft Characteristics, general dimensions:
                 // 19.4 m full horizontal-tail span.
-                hstab_tip_le_m: (6.0, 9.7, 0.8),
-                vstab_offset_from_tail_m: 10.5,
+                hstab_tip_le_m: (6.43, 9.7, 0.8),
+                // Sheet 1 (side view): fin root leading edge 52.42 m aft of
+                // the nose, a 7.78 m root chord (role read off the drawing,
+                // low confidence), tip leading edge 8.14 m aft of the root,
+                // tip chord 62.84 - 60.56 m, and 8.3 m of fin above the
+                // local fuselage top. The root keeps its estimated height and
+                // the span holds the tip 8.3 m above the crown. The level
+                // model stands 16.07 m tall against the 16.67 m fin-top
+                // clearance, which the about 1 deg nose-down MRW attitude of
+                // Figure 2-3-0-991-005-A01 raises by about 0.6 m.
+                vstab_offset_from_tail_m: 11.24,
                 vstab_z_m: 1.8,
-                vstab_root_chord_m: 8.0,
-                vstab_tip_chord_m: 2.8,
-                vstab_tip_le_m: (7.5, 0.0, 8.5),
+                vstab_root_chord_m: 7.78,
+                vstab_tip_chord_m: 2.28,
+                vstab_tip_le_m: (8.14, 0.0, 9.52),
                 ..EmpennageConfig::default()
             },
             fuselage: FuselageConfig {
@@ -152,11 +205,17 @@ pub fn a340_300() -> AircraftPreset {
                 ..FuselageConfig::default()
             },
             engine: EngineConfig {
-                spanwise_positions_m: vec![7.5, -7.5, 14.0, -14.0],
-                // Calibrated for 0.35 m inboard clearance; outboard pair
-                // clears ~1.4 m under the thinner, higher wing at that offset.
-                z_m: -1.94,
-                inlet_x_offset_m: 3.0,
+                // Figure 2-2-0-991-007-A01 sheet 1 (front view): engine
+                // centrelines 18.74 m and 38.54 m apart.
+                spanwise_positions_m: vec![9.37, -9.37, 19.27, -19.27],
+                // Figure 2-3-0-991-005-A01 (aft CG): nacelle low points N1
+                // 1.28 m and N2 2.35 m above the ground under the 1.1 m
+                // nacelle radius.
+                z_m: -1.436,
+                // Sheet 2 inlets 22.39 m and 28.96 m aft of the nose; the mean
+                // of the two offsets from the leading edge leaves each inlet
+                // within 0.19 m.
+                inlet_x_offset_m: 4.227,
                 ..EngineConfig::default()
             },
             ..GeometryConfig::default()
@@ -175,225 +234,6 @@ pub fn a340_300() -> AircraftPreset {
             // of about 129.4 t.
             max_structural_payload_kg: 48_600.0,
             dive_speed_m_s: 200.0,
-            ..DesignRequirements::default()
-        },
-        mass_model: None,
-        performance: crate::presets::high_lift("advanced_highlift_widebody"),
-    }
-}
-
-/// Double-deck quad, the largest airliner in the registry.
-pub fn a380_800() -> AircraftPreset {
-    AircraftPreset {
-        name: "A380-800",
-        display_name: "Airbus A380-800",
-        description: "Airbus A380-841 WV000 with Trent 970-84 engines.",
-        identity: AircraftVariantIdentity {
-            model: "A380-841",
-            weight_variant: "WV000",
-            engine_model: "Trent 970-84",
-            modification_state: "WV000 public planning baseline",
-            tank_configuration: "323,546 L tanks + 793 L usable system inventory",
-        },
-        reference: AircraftReferenceData {
-            mrw_kg: Some(562_000.0),
-            mtow_kg: Some(560_000.0),
-            mlw_kg: Some(386_000.0),
-            mzfw_kg: Some(361_000.0),
-            // EASA TCDS EASA.A.110 Issue 17, 2026-08-05, section 3.3 "Fluid
-            // Capacities", p.14 of 20: 324,339 L usable and 1,086 L unusable
-            // at the sheet's 0.800 kg/L (324,339 x 0.800 = 259,471 kg). The
-            // aeroplane total stands here rather than the 323,546 L tank
-            // total, because the 793 L difference is the same table's
-            // "Systems" row - usable fuel in lines and engines, not in a tank
-            // - and this block is the certified aircraft record that
-            // docs/aircraft-parity.md compares the model against and that
-            // supplies the FLOPS maximum fuel capacity, which the A380
-            // declares nowhere else (`preset_flops::inputs_for`). The tanks
-            // themselves now carry the same table's certified per-tank
-            // volumes and sum to exactly 323,546 L, so the residual is that
-            // system inventory and nothing else; the derivation and the
-            // certified 0.00335 unusable fraction are in
-            // `preset_fuel_tanks::layout_for`.
-            usable_fuel_volume_l: Some(324_339.0),
-            usable_fuel_mass_kg: Some(259_471.0),
-            fuel_density_kg_l: Some(0.8),
-            reference_wing_area_m2: Some(845.0),
-            planning_seats: Some(555),
-            certified_max_seats: Some(868),
-            partial_design_mission_evidence: vec![PartialDesignMissionEvidence {
-                kind: PartialMissionEvidenceKind::PayloadRangeChart,
-                range: None,
-                payload_kg: None,
-                load_case: None,
-                profile_assumptions: Some(
-                    "ISA, no wind, labeled typical international flight profile",
-                ),
-                reserve_assumptions: Some(
-                    "200 nm diversion; 5% trip fuel allowance; 30 min holding",
-                ),
-                reserve_contract: Some(PublishedReserveContract {
-                    diversion_range: Some(PublishedRange::NauticalMiles(200.0)),
-                    trip_fuel_allowance_fraction: Some(0.05),
-                    holding_time_minutes: Some(30.0),
-                }),
-                applicability: "A380-800 Trent 900 chart matches the model and engine family but selects no weight-variant design point",
-                configuration_applicability: MissionEvidenceApplicability::ModelAndEngineFamily,
-                missing: vec![
-                    MissingDesignMissionDatum::Range,
-                    MissingDesignMissionDatum::Payload,
-                    MissingDesignMissionDatum::Profile,
-                    MissingDesignMissionDatum::ReserveFuel,
-                ],
-                source: "Airbus A380 Aircraft Characteristics Rev 20, 2025-12-01, section 3-2-1 p.2, Figure 3-2-1-991-001-A01",
-            }],
-            cg_evidence: CgEnvelopeEvidence::AfmRequired,
-            sources: vec![
-                "EASA.A.110 Issue 17, 2026-08-05, pp.10-15",
-                "Airbus A380 Aircraft Characteristics Rev 20, 2025-12-01, section 2-1-1",
-                "Airbus A380 Facts and Figures, February 2022, p.3",
-            ],
-            ..AircraftReferenceData::default()
-        },
-        engine_name: "Trent 970-84",
-        n_engines: 4,
-        landing_gear: LandingGearConfig {
-            n_nlg_wheels: 2,
-            n_mlg_struts: 4,
-            // AC 2-9-0: 4-wheel WLG + 6-wheel BLG bogies, kept as sourced.
-            mlg_strut_bogie_wheels: Some(vec![4, 4, 6, 6]),
-            wheels_per_mlg_strut: 0,
-            track_diameter_factor: 14.34 / 7.14,
-            // 14.34 m wing-gear track; 28.61 m NLG-WLG wheelbase, distinct from
-            // the 31.88 m NLG-BLG body-gear wheelbase below.
-            reference_wheelbase_m: Some(28.61),
-            reference_body_wheelbase_m: Some(31.88),
-            reference_track_m: Some(14.34),
-            reference_station_frame: Some("nose_tip_drawing_reference".to_owned()),
-            reference_station_fuselage_length_m: Some(72.73),
-            reference_nlg_x_fraction: Some(4.97 / 72.73),
-            reference_mlg_x_fractions: Some(vec![
-                33.58 / 72.73,
-                33.58 / 72.73,
-                36.85 / 72.73,
-                36.85 / 72.73,
-            ]),
-            ..LandingGearConfig::default()
-        },
-        design_vector: DesignVector {
-            span_m: 79.75,
-            // Airbus does not publish these three chords. Uniformly scaling
-            // the estimated distribution preserves both taper ratios while
-            // closing the projected planform on the published 845 m^2 S_ref.
-            root_chord_m: 22.952_583_900_271_1,
-            break_chord_m: 11.276_704_264_046_2,
-            tip_chord_m: 3.492_784_506_562_99,
-            // Airbus A380 Facts and Figures (2022) gives 33.5 deg wing
-            // sweep; Jane's identifies the quarter-chord convention. The
-            // outboard taper converts that to this leading-edge angle.
-            sweep_deg: 36.429_099_956_878_43,
-            tip_twist_deg: -2.5,
-            wing_x_shift_m: -7.5,
-            tail_scale: 1.0,
-            fuselage_length_m: 72.73,
-            tail_x_shift_m: 0.0,
-            airfoil_thickness_scale: 1.0,
-            airfoil_camber_scale: 1.0,
-            ..DesignVector::default()
-        },
-        geometry: GeometryConfig {
-            wing: WingConfig {
-                // Quarter-MAC: joint fit of 30 section 7 pavement-load rows gives
-                // LEMAC 28.765 m aft of nose, MAC 12.295 m (model MAC 5.6% longer).
-                root_datum_x_m: 25.310,
-                root_z_m: -2.5,
-                break_z_m: -0.4,
-                tip_z_m: 3.0,
-                root_twist_deg: 4.5,
-                break_twist_deg: 2.0,
-                break_span_fraction: 0.33,
-                // Preserve the area-calibrated body chord explicitly: sweep
-                // must not change it through the trailing-edge clipping rule.
-                side_of_body_chord_ratio: Some(0.789_394_889_312_722_8),
-                // This station and chord distribution recover 845 m^2.
-                kink_span_fraction: Some(0.359_236_516_064_625_5),
-                outboard_sweep_decrement_deg: 2.5,
-                root_airfoil: "SC2-0714".to_owned(),
-                tip_airfoil: "sc20410".to_owned(),
-                ..WingConfig::default()
-            },
-            empennage: EmpennageConfig {
-                tail_airfoil: "naca0012".to_owned(),
-                hstab_offset_from_tail_m: 11.0,
-                hstab_z_m: 1.5,
-                hstab_root_chord_m: 9.0,
-                hstab_tip_chord_m: 2.5,
-                hstab_root_twist_deg: -2.0,
-                hstab_tip_twist_deg: -2.0,
-                // Tailplane span 30.37 m (99.64 ft), so a 15.185 m tip
-                // station: Airbus A380 Aircraft Characteristics - Airport and
-                // Maintenance Planning, Revision 20 Dec 01/25, Subject 2-2-0
-                // General Aircraft Dimensions, FIGURE-2-2-0-991-001-A01 Sheet
-                // 1 of 2, page 2-2-0 Page 2. In that front elevation the
-                // dimension's extension lines terminate on the tailplane tips,
-                // between the 79.75 m wing span above it and the 7.14 m
-                // fuselage width below it; the figure is drawn to scale and
-                // this preset already matches both of those. The previous
-                // 12.5 m tip gave a 25.0 m tailplane, 17.7 % narrower than the
-                // published surface.
-                //
-                // Only the span is published. The chords, the leading-edge
-                // sweep and the root station are not, so the tip's x offset is
-                // left at its unsourced 8.5 m rather than scaled with the
-                // span: that keeps the tip trailing edge on the fuselage tail
-                // tip, where the original planform put it, and changes exactly
-                // the one quantity the source states. The resolved trapezoidal
-                // area moves from 143.75 m^2 to (9.0 + 2.5) x 15.185 =
-                // 174.63 m^2; aggregator pages carry about 205 m^2, which the
-                // unverified chords would have to account for and which no
-                // Airbus document retrieved here states.
-                hstab_tip_le_m: (8.5, 15.185, 1.2),
-                vstab_offset_from_tail_m: 13.0,
-                vstab_z_m: 2.5,
-                vstab_root_chord_m: 11.0,
-                vstab_tip_chord_m: 3.5,
-                vstab_tip_le_m: (10.0, 0.0, 11.0),
-                ..EmpennageConfig::default()
-            },
-            fuselage: FuselageConfig {
-                diameter_m: 7.14,
-                // The one non-circular body in the registry: two decks make it
-                // taller than it is wide.
-                height_m: Some(8.41),
-                nose_z_m: -0.6,
-                cabin_start_x_m: 7.0,
-                cabin_z_m: 0.3,
-                tailcone_length_m: 15.0,
-                tail_z_m: 2.0,
-                ..FuselageConfig::default()
-            },
-            engine: EngineConfig {
-                spanwise_positions_m: vec![10.0, -10.0, 18.5, -18.5],
-                z_m: A380_ENGINE_Z_M,
-                inlet_x_offset_m: 4.5,
-                ..EngineConfig::default()
-            },
-            ..GeometryConfig::default()
-        },
-        requirements: DesignRequirements {
-            cruise_mach: 0.85,
-            cruise_altitude_m: 11887.2,
-            mtow_kg: 560_000.0,
-            max_wing_area_m2: 845.0,
-            min_wing_loading_kg_m2: 450.0,
-            cabin_preset: "Custom".to_owned(),
-            optimize_passenger_capacity: true,
-            num_passengers: 555,
-            cargo_payload_kg: 150_000.0,
-            // Maximum zero-fuel weight about 361 t less an operating empty
-            // weight of about 277 t.
-            max_structural_payload_kg: 84_000.0,
-            dive_speed_m_s: 210.0,
             ..DesignRequirements::default()
         },
         mass_model: None,

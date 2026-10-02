@@ -141,9 +141,7 @@ the takeoff-mass limit and by the usable tanks less the taxi fuel; the
 shortfall beyond either bound is a reported finding, and the mission is
 flown at the admissible mass.
 
-The `scipy_legacy` profile minimizes the original weighted lift-to-drag cost
-plus the configured scalar penalties. The `differential_evolution` profile
-minimises a mission quantity through `optimizer.objective` and ranks
+The search minimises a mission quantity through `optimizer.objective` and ranks
 candidates feasibility first: a candidate that violates a hard requirement family
 costs more than any feasible one and infeasible candidates order by their
 normalised violation; soft families rank behind feasibility and ahead of the
@@ -224,26 +222,17 @@ does not renormalise when the stations stop short of the tip. This is
 implementation verification against the published equations as FLOPS
 evaluates them, not physical validation against weighed aircraft.
 
-## Current optimizer profiles (2026-09-27)
+## The optimizer
 
-Fresh configurations use `optimizer.solver.method = scipy_legacy`. This
-profile restores the ALAS v1.1.0 scalar objective and search contract:
-weighted lift-to-drag with the original additive penalty table, reference
-mass/geometry coordinates, and SciPy-compatible differential evolution.
-Defaults are `best1bin`, `max_iterations = 15`, population multiplier 6,
-energy-spread tolerance 0.01, mutation dithering in `[0.5, 1.0)`, crossover
-probability 0.7, no polishing, and one worker for immediate updating. When an
-initial design is supplied, the initial population is perturbed within 5% of
-each bound range and its first member is the unperturbed design; otherwise the
-profile uses Latin-hypercube sampling. It does not run the product scan or
-feasibility restoration.
+The one method is `optimizer.solver.method = differential_evolution`. A saved
+file that names a retired method (`scipy_legacy` included) loads as this one,
+with a load note.
 
 Set `optimizer.solver.method = differential_evolution` to select the current
 mission-sized profile. Its evaluation chain and optimizer are described
-below: mission sizing, explicit requirement policies, broad scan, L-SHADE,
-epsilon constraints, and bounded feasibility restoration. The explicit
-`DesignOptimizer::new_reference_compatibility` constructor remains for frozen
-parity fixtures.
+below: mission sizing, explicit requirement policies, a screening stage, a
+diverse elite, the refinement kernel under epsilon constraints, and bounded
+feasibility restoration.
 
 # Multidisciplinary sizing loop and the L-SHADE epsilon-constrained driver
 
@@ -276,33 +265,48 @@ penalty; and `cost` assembles that table into the scalar the search
 minimises, ranking feasibility ahead of the objective value. Every candidate
 the search ranks, including the reported winner, went through this whole
 chain; nothing downstream of `build` is skipped or approximated for a
-"cheap" evaluation inside the search (the reduced-fidelity Stage A screening
-described below is explicitly excluded from ever becoming the winner).
+"cheap" evaluation inside the search. The screening stage evaluates through
+a declared `ScreeningFidelity`, which today is the full model; a cheaper
+descriptor must first rank candidates like the full model in the
+`screening_rank_correlation` experiment, and a screening score only ever
+chooses where the refinement starts.
 
 Under the mission-sized `differential_evolution` profile, every candidate is
-a converged aircraft from the chain above: **L-SHADE differential evolution
-under the epsilon-constrained method** (`alas-opt::search_methods::lshade_de`).
+a converged aircraft from the chain above: **current-to-pbest/1/bin
+differential evolution under the epsilon-constrained method**
+(`alas-opt::search_methods::lshade_de`), with static `F = 0.5`, `CR = 0.9`
+(R. Tanabe and A. S. Fukunaga, "Reviewing and Benchmarking Parameter Control
+Methods in Differential Evolution," IEEE Trans. Cybern. 50(3), 2020, DOI
+10.1109/TCYB.2019.2892735: static beats adaptation within 800 D evaluations)
+and L-SHADE success-history adaptation as a switch.
 
 - **L-SHADE**: R. Tanabe and A. S. Fukunaga, "Improving the Search
   Performance of SHADE Using Linear Population Size Reduction," IEEE
   Congress on Evolutionary Computation (CEC) 2014, DOI
   10.1109/CEC.2014.6900380. Success-history parameter adaptation for the
-  mutation factor `F` and crossover rate `CR` (weighted Lehmer/arithmetic
-  means into a circular memory), `current-to-pbest/1` mutation with an
+  mutation factor `F` and crossover rate `CR` (weighted Lehmer means into a
+  circular memory; off by default), `current-to-pbest/1` mutation with an
   external archive (J. Zhang and A. C. Sanderson, "JADE: Adaptive
   Differential Evolution With Optional External Archive," IEEE Trans. Evol.
   Comput. 13(5), 2009, DOI 10.1109/TEVC.2009.2014613), and linear population
-  size reduction from an initial population (`population_size` times the
-  sixteen design variables) down to a small floor as the generation budget
-  (`max_iterations`) is spent.
+  size reduction in evaluations from `clamp(B / 10, 24, 6 D)` for refinement
+  budget `B` down to eight; with adaptation on, both memories take the
+  weighted Lehmer mean and the crossover rate has its terminal value.
 - **Epsilon-constrained method**: T. Takahama and S. Sakai, "Constrained
   Optimization by the epsilon Constrained Differential Evolution with
   Gradient-Based Mutation and Feasible Elites," CEC 2006, DOI
   10.1109/CEC.2006.1688283, and "...with an Archive and Gradient-Based
-  Mutation," CEC 2010, DOI 10.1109/CEC.2010.5586484. Two candidates within a
-  shrinking `epsilon` of feasible are ranked by objective alone, otherwise
-  the less-violating one wins; `epsilon` decays to exactly zero at a fifth of
-  the generation budget, after which the comparison is exactly Deb's
+  Mutation," CEC 2010, DOI 10.1109/CEC.2010.5586484. Two closed-infeasible
+  candidates within a shrinking `epsilon` are ranked by objective alone,
+  otherwise the less-violating one wins. Two engineering deviations from the
+  paper: a strictly feasible candidate always ranks ahead of an
+  epsilon-feasible one, and `epsilon(0)` is the 0.2 quantile of the
+  closed-infeasible initial violations only (not-closed and pre-gated
+  candidates carry barrier values, not physical misses). With adaptation on,
+  the memory weights are each parent's relative improvement, a tier change
+  counting as one, where L-SHADE uses the absolute objective change.
+  `epsilon` decays to exactly zero at a fifth of
+  the evaluation budget, after which the comparison is exactly Deb's
   feasibility rule (K. Deb, CMAME 186(2-4), 2000). This lets the search
   explore past a locally-blocking hard limit early on without ever reporting
   a candidate that violates one: `Outcome::winner` is tracked as the
@@ -312,19 +316,24 @@ under the epsilon-constrained method** (`alas-opt::search_methods::lshade_de`).
 - **Bound handling**: midpoint-to-parent repair - a mutant component that
   leaves its bound is placed halfway between the bound it crossed and the
   parent's own value there, rather than reflected or clamped to the bound.
-- **Convergence**: the population's normalised design-space spread and the
-  best feasible cost's relative improvement both have to fall below
-  `tolerance` for `convergence_stagnation_generations` consecutive
-  generations, and only once a feasible design has been found; a run
-  reports exactly one of `converged`, `iteration_limit` or `cancelled`.
+- **Termination**: with a feasible best whose relative improvement stays
+  below 1e-4 for `convergence_stagnation_generations` generations, the run
+  stops as `converged` when the normalised spread is below `tolerance` and
+  as `stagnated` otherwise; else it stops on `evaluation_budget`,
+  `time_budget` (checked at generation boundaries, the first right after
+  the initial population) or `cancelled`.
 - **Determinism**: one generation's trial vectors are built in fixed index
-  order from the seeded stream, then evaluated as a single batch; the
-  worker count changes only how that batch is spread across threads, never
-  which points are evaluated or the winner, so a seeded run replays
-  bit-identically at any `optimizer.solver.workers`.
+  order from the seeded stream, then evaluated as a single batch whose
+  scores return in index order, so a seeded run that stops on its
+  evaluation budgets replays bit-identically at any
+  `optimizer.solver.workers`. Time-limited: the stopping point depends on
+  machine speed and worker count; replay with the recorded evaluation counts
+  (`replay_evaluations` per stage) for a bit-identical result at any worker
+  count, or set `stop_on_evaluations_only`.
 
-A low-resolution Stage A scan seeds the population's first individual (see
-`alas-opt::search::staged`); it never selects the winner, since the search
-still decides it from the seed by the rule above. These scan, ranking and
-restoration rules apply only to `differential_evolution`; `scipy_legacy` uses
-the original scalar penalties and SciPy-style `best1bin` algorithm.
+A screening stage evaluates seeded Latin-hypercube batches of the design box
+plus the baseline with the full in-loop model; a diverse elite of it, its
+best point and the baseline seed the refinement's initial population
+(`alas-opt::search::screening` and `::elite`). It never selects the winner
+directly: every screened point the refinement keeps is scored again under
+the refinement's rule, as an exact cache hit when the models agree.

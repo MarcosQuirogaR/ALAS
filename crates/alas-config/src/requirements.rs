@@ -210,7 +210,7 @@ pub struct DesignRequirements {
         advanced,
         label = "Target static margin",
         unit = "fraction of MAC",
-        help = "Preferred static margin at the aerodynamic aft CG limit: Aft CG Limit (%MAC) = Neutral Point (%MAC) - target_static_margin*100. This is a design preference used by the scipy_legacy objective, frozen reference CG-envelope path and report figures; the product feasibility gate enforces the (typically smaller) min_physical_static_margin below, measured at the actual mass-model CG, not this aerodynamic-reference target. The two boundaries can differ by (target_static_margin - min_physical_static_margin)*100 %MAC."
+        help = "Preferred static margin at the aerodynamic aft CG limit: Aft CG Limit (%MAC) = Neutral Point (%MAC) - target_static_margin*100. This is a design preference used by the frozen reference CG-envelope path and report figures; the product feasibility gate enforces the (typically smaller) min_physical_static_margin below, measured at the actual mass-model CG, not this aerodynamic-reference target. The two boundaries can differ by (target_static_margin - min_physical_static_margin)*100 %MAC."
     )]
     pub target_static_margin: f64,
 
@@ -230,7 +230,7 @@ pub struct DesignRequirements {
         advanced,
         label = "Minimum physical static margin",
         unit = "fraction of MAC",
-        help = "Minimum static margin measured using the actual mass-model (physical) CG, not the aerodynamic reference point. Designs below this are hard-rejected as inherently unstable. 0.0 = bare stability; 0.05 = 5% MAC buffer (recommended). This is the boundary the product feasibility gate enforces at every loading state; target_static_margin above is a separate, larger design preference used by the scipy_legacy objective, frozen reference path and report figures."
+        help = "Minimum static margin measured using the actual mass-model (physical) CG, not the aerodynamic reference point. Designs below this are hard-rejected as inherently unstable. 0.0 = bare stability; 0.05 = 5% MAC buffer (recommended). This is the boundary the product feasibility gate enforces at every loading state; target_static_margin above is a separate, larger design preference used by the frozen reference path and report figures."
     )]
     pub min_physical_static_margin: f64,
 

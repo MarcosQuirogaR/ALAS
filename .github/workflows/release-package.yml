@@ -150,14 +150,14 @@ jobs:
 
       # Opt-in per crates/alas-acceptance/tests/distribution_license_boundary.rs:
       # it inspects the produced package directory named by
-      # ALAS_W55_PACKAGE_DIR rather than the checkout, and otherwise skips.
+      # ALAS_W55_PACKAGE_DIR rather than the checkout, and is `#[ignore]`d otherwise (hence --include-ignored).
       # This is the check that would fail a package shipping a proprietary
       # or Windows-only-and-mislabelled tool.
       - name: Run the license-boundary acceptance suite against the assembled package
         shell: bash
         env:
           ALAS_W55_PACKAGE_DIR: ${{ steps.package_dir.outputs.path }}
-        run: cargo test -p alas-acceptance --test distribution_license_boundary --locked -- --nocapture
+        run: cargo test -p alas-acceptance --test distribution_license_boundary --locked -- --include-ignored --nocapture
 
       # A second, CI-level headless confirmation beside `cargo xtask dist`'s
       # own: run the archived binary's only supported no-window flag

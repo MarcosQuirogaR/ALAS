@@ -50,15 +50,13 @@ fn residual<'a>(
         .find(|residual| residual.id == id)
 }
 
-/// Both current methods produce a mission-sized result for the two design
-/// modes; the original modes under the legacy profile keep the reference
-/// replay, which records no sized takeoff mass.
+/// Every MTOW sizing mode produces a mission-sized result.
 #[test]
-fn the_design_modes_are_mission_sized_under_both_methods() {
+fn every_mtow_mode_is_mission_sized() {
     let x = DesignVector::default().to_array();
     for sizing in MtowSizing::ALL {
         let config = clean_sheet(sizing);
-        let mut product = DesignObjective::new(config.clone());
+        let mut product = DesignObjective::new(config);
         product.evaluate(&x);
         let product_mass = product.history.takeoff_mass_kg[0];
         assert!(
@@ -66,25 +64,6 @@ fn the_design_modes_are_mission_sized_under_both_methods() {
             "{sizing:?}: product {:?}",
             product.history.reject_reason
         );
-
-        let mut legacy = DesignObjective::new_reference_compatibility(config);
-        legacy.evaluate(&x);
-        let legacy_mass = legacy.history.takeoff_mass_kg[0];
-        if sizing.requires_mission_sized_evaluation() {
-            assert!(
-                legacy_mass.is_finite() && legacy_mass > 0.0,
-                "{sizing:?}: legacy {:?}",
-                legacy.history.reject_reason
-            );
-            assert_ne!(
-                legacy.history.reject_reason[0], "legacy_mass_architecture",
-                "{sizing:?}"
-            );
-            // The replay configuration is restored after the routed call.
-            assert!(!legacy.config.mass_model.mass_architecture.is_production());
-        } else {
-            assert!(!legacy_mass.is_finite(), "{sizing:?}: replay path taken");
-        }
     }
 }
 
@@ -218,14 +197,18 @@ fn the_fixed_requirement_keeps_the_declared_cap() {
     assert_eq!(assessment.sized.mtow.structural_basis, "declared_cap");
 }
 
-/// Zero-fuel mass plus contingency, alternate and final reserve of the
-/// sizing closure, kg.
+/// Zero-fuel mass plus every fuel past the destination (contingency,
+/// alternate, final reserve, additional, extra and the taxi-in budget) of
+/// the sizing closure, kg.
 fn landing_floor(sized: &alas_opt::SizedCandidate) -> f64 {
     let plan = &sized.dispatch.plan;
     sized.dispatch.zero_fuel_mass_kg
         + plan.contingency.kg
         + plan.alternate.kg
         + plan.final_reserve.kg
+        + plan.additional.kg
+        + plan.extra.kg
+        + plan.taxi_in_fuel_kg()
 }
 
 /// The payload-adjusted design landing mass covers the zero-fuel mass and
@@ -234,13 +217,18 @@ fn landing_floor(sized: &alas_opt::SizedCandidate) -> f64 {
 /// mass with that WLDG. The fixed requirement keeps the declared MLW.
 #[test]
 fn the_payload_adjusted_landing_mass_covers_zero_fuel_mass_and_reserves() {
-    let (config, design) = a320_reference(MtowSizing::PayloadAdjusted);
+    let (mut config, design) = a320_reference(MtowSizing::PayloadAdjusted);
+    // A short design range (the LEMD-LEPA distance) with extra fuel carried
+    // past the destination: the floor has to hold that fuel as well.
+    config.optimizer.objective.design_range_nmi = 295.0;
+    config.fuel_policy.extra_fuel_kg = 400.0;
     let assessment = assess(&config, &design);
     let sized = &assessment.sized;
+    assert!((sized.dispatch.plan.extra.kg - 400.0).abs() < 1e-9);
     let closure_kg = sized.takeoff_mass_kg;
     let ratio_kg = config.design_landing_mass_at_closure(closure_kg);
     let floor_kg = landing_floor(sized);
-    // The short LEMD-LEPA sizing mission: the ratio alone is below the floor.
+    // The short sizing mission: the ratio alone is below the floor.
     assert!(
         ratio_kg < floor_kg,
         "ratio {ratio_kg} kg, floor {floor_kg} kg"
@@ -250,8 +238,9 @@ fn the_payload_adjusted_landing_mass_covers_zero_fuel_mass_and_reserves() {
     assert_eq!(landing.limit, sized.design_landing_mass_kg);
     let planned_kg = sized.dispatch.destination_landing_mass_kg;
     assert!((landing.raw_residual - (planned_kg - sized.design_landing_mass_kg)).abs() < 1e-6);
-    // With no additional or extra fuel the planned landing mass is exactly
-    // the zero-fuel mass plus the reserves, so the check sits on its limit.
+    // The planned landing mass is the zero-fuel mass plus everything carried
+    // past the destination, extra fuel included, so the check sits on its
+    // limit on one fuel basis.
     assert_eq!(landing.normalized_violation, 0.0, "{landing:?}");
 
     let (fixed, design) = a320_reference(MtowSizing::FixedRequirement);
@@ -272,5 +261,59 @@ fn the_clean_sheet_payload_adjusted_landing_mass_is_the_larger_bound() {
     let floor_kg = landing_floor(sized);
     assert!((sized.design_landing_mass_kg - fraction_kg.max(floor_kg)).abs() < 1e-6);
     let landing = residual(&assessment, "landing_mass").expect("landing residual");
-    assert!(landing.raw_residual < 0.0, "{landing:?}");
+    // The limit is designed at the reserve floor of the last closure pass;
+    // the closure stops once the takeoff mass moves by less than
+    // `sizing_tolerance_kg`, so the planned landing mass can sit above the
+    // limit by at most that fraction of it.
+    let closure_relative = config.optimizer.objective.sizing_tolerance_kg / sized.takeoff_mass_kg;
+    assert!(
+        landing.raw_residual < closure_relative * landing.limit,
+        "{landing:?}"
+    );
+}
+
+fn a220_reference(sizing: MtowSizing) -> (AlasConfig, DesignVector) {
+    let mut config = AlasConfig::from_value(&serde_json::json!({ "preset": "A220-300" })).unwrap();
+    config.optimizer.design_space.mode = DesignMode::ReferenceAdaptation;
+    config.optimizer.objective.mtow_sizing = sizing;
+    let design = alas_config::presets::get("A220-300").unwrap().design_vector;
+    (config, design)
+}
+
+/// A registered aircraft closes the MTOW band on its charted design point
+/// (ACP Issue 013: 2,150 nmi at the MZFW corner, 18,643 kg payload): the
+/// closure lies inside the band about the declared MTOW, the route landing
+/// mass stays below the design landing mass, and the candidate is feasible.
+#[test]
+fn the_a220_band_closes_on_its_charted_point_inside_the_declared_band() {
+    let (config, design) = a220_reference(MtowSizing::MtowBand);
+    let assessment = assess(&config, &design);
+    let sized = &assessment.sized;
+    assert!((sized.design_range_m - 2_150.0 * 1_852.0).abs() < 1e-6);
+    assert!((sized.mtow.design_payload_kg - 18_643.0).abs() < 1e-6);
+    let plan = config.mtow_plan();
+    assert!(sized.takeoff_mass_kg >= plan.lower_bound_kg.unwrap());
+    assert!(sized.takeoff_mass_kg <= plan.upper_bound_kg.unwrap());
+    let flight = sized
+        .mtow
+        .offdesign
+        .as_ref()
+        .expect("route flown off-design");
+    assert!(flight.dispatch.destination_landing_mass_kg <= sized.design_landing_mass_kg);
+    assert!(sized.dispatch.destination_landing_mass_kg <= sized.design_landing_mass_kg + 1e-6);
+    assert!(assessment.hard_feasible, "{:?}", assessment.residuals);
+}
+
+/// The payload-adjusted mode closes on the same charted range by default,
+/// at the laid-out payload, so the closure is a design-range mass and not
+/// the mass of the short selected route.
+#[test]
+fn the_payload_adjusted_mode_closes_on_the_charted_range_by_default() {
+    let (config, design) = a220_reference(MtowSizing::PayloadAdjusted);
+    let assessment = assess(&config, &design);
+    let sized = &assessment.sized;
+    assert!((sized.design_range_m - 2_150.0 * 1_852.0).abs() < 1e-6);
+    assert!(sized.takeoff_mass_kg <= config.requirements.mtow_kg);
+    assert!(sized.takeoff_mass_kg > 0.85 * config.requirements.mtow_kg);
+    assert!(assessment.hard_feasible, "{:?}", assessment.residuals);
 }

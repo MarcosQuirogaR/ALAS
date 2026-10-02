@@ -16,13 +16,9 @@ fn public_de_returns_a_valid_candidate_when_an_invalid_one_is_cheaper() {
     for seed in [0, 1, 42, 99] {
         let mut config = AlasConfig::default();
         config.optimizer.solver.method = alas_config::optimizer::PRODUCT_DE_METHOD.to_owned();
-        // A zero-iteration product search only evaluates the midpoint, so it
-        // cannot exercise feasibility-first ordering. One search iteration
-        // supplies the initial population and a competing trial set.
-        config.optimizer.solver.max_iterations = 1;
-        config.optimizer.solver.population_size = 1;
+        // The initial population and one generation of competing trials.
+        config.optimizer.solver.refinement.max_evaluations = 48;
         config.optimizer.solver.seed = Some(seed);
-        config.optimizer.solver.seed_near_initial_design = false;
 
         // Every fixed coordinate is a physically valid nominal value. The
         // only free coordinate is span, using its declared [60, 80] m range;
@@ -74,8 +70,7 @@ fn public_de_returns_a_valid_candidate_when_an_invalid_one_is_cheaper() {
 fn public_de_returns_typed_failure_for_an_all_invalid_population() {
     let mut config = AlasConfig::default();
     config.optimizer.solver.method = alas_config::optimizer::PRODUCT_DE_METHOD.to_owned();
-    config.optimizer.solver.max_iterations = 0;
-    config.optimizer.solver.population_size = 1;
+    config.optimizer.solver.refinement.max_evaluations = 24;
     config.optimizer.solver.seed = Some(7);
 
     let mut evaluator = |_design: &DesignVector| {

@@ -25,18 +25,41 @@ pub const FALLBACK_BELLY_CLEARANCE_DIAMETER_FRACTION: f64 = 0.35;
 /// `landing_gear.fuselage_ground_clearance_m` if registered, else
 /// [`FALLBACK_BELLY_CLEARANCE_DIAMETER_FRACTION`] of the fuselage diameter;
 /// the one ground plane every caller shares (see [`ground_plane_z_m`]).
+///
+/// The clearance is measured from the fuselage lower surface, so the ground
+/// plane hangs below the lowest point of the built lower contour
+/// ([`fuselage_belly_z_m`]): the constant section of a conventional body.
+/// The published clearances this reads are of that surface (Airbus A320
+/// Aircraft Characteristics, Jun 01/24, Figure 2-3-0-991-004-A01 sheet 2:
+/// fuselage bottom forward F1 1.786 m and aft F2 1.790 m at MRW, aft CG, a
+/// level belly). Hanging it below the nose-tip centreline less half the
+/// width instead puts the ground too low by the nose droop plus half the
+/// height-width difference (0.305 m on the A320), and every CG height,
+/// tip-back boundary and tail-scrape angle inherits that error.
 fn gear_vertical_datum(
     fuselage: &Fuselage,
     geometry: &alas_config::GeometryConfig,
     landing_gear: Option<&LandingGearConfig>,
 ) -> (f64, f64) {
-    let (_, _, z) = fuselage_datum(fuselage);
     let diameter = geometry.fuselage.diameter_m;
     let clearance = landing_gear.and_then(|config| config.fuselage_ground_clearance_m);
     let strut_length = clearance
         .filter(|v| v.is_finite() && *v > 0.0)
         .unwrap_or(FALLBACK_BELLY_CLEARANCE_DIAMETER_FRACTION * diameter);
-    (strut_length, z - diameter / 2.0 - strut_length)
+    (strut_length, fuselage_belly_z_m(fuselage) - strut_length)
+}
+
+/// The lowest point of the fuselage's built lower contour, `z_c - height/2`
+/// minimised over its cross-sections, m. A fuselage without cross-sections
+/// falls back to the nose-datum centreline.
+fn fuselage_belly_z_m(fuselage: &Fuselage) -> f64 {
+    fuselage
+        .xsecs
+        .iter()
+        .map(|xsec| xsec.xyz_c[2] - xsec.height / 2.0)
+        .filter(|z| z.is_finite())
+        .reduce(f64::min)
+        .unwrap_or_else(|| fuselage_datum(fuselage).2)
 }
 
 /// The static ground-line height in geometry axes, m: the plane the gear

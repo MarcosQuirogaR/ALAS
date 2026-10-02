@@ -46,7 +46,7 @@ impl DesignOptimizer {
 /// Explicit additional work spent restoring a failed evolutionary search.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RestorationDiagnostics {
-    /// Upper bound on requested scores, additional to the DE generation budget.
+    /// Upper bound on requested scores, inside the refinement budget.
     pub evaluation_budget: usize,
     /// Actual coupled analyses; exact cache reuse is excluded.
     pub analysis_evaluations: usize,

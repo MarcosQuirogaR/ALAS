@@ -374,8 +374,14 @@ fn feasibility_to_json(report: &FeasibilityReport) -> serde_json::Value {
                 "status": mission_fuel_status_name(fuel.mission.status),
                 "burned_fuel_kg": fuel.mission.burned_fuel_kg,
                 "required_trip_fuel_kg": fuel.mission.required_trip_fuel_kg,
+                "native": {
+                    "status": mission_fuel_status_name(fuel.mission.native.status),
+                    "burned_fuel_kg": fuel.mission.native.burned_fuel_kg,
+                    "throttle_limited": fuel.mission.native.throttle_limited,
+                    "error": report.native_mission_error,
+                },
             },
-            "dispatch": fuel.dispatch.map(dispatch_to_json),
+            "dispatch": fuel.dispatch.map(|dispatch| dispatch.to_json()),
         },
         "cruise_equilibrium": cruise_equilibrium,
         "mass_balance": report.mass_balance.as_ref().map(mass_balance_to_json),
@@ -451,37 +457,6 @@ fn mass_balance_to_json(
         },
         "ledger_items": items,
         "lumped_takeoff_cg_pct_mac": assessment.lumped_takeoff_cg_pct_mac,
-    })
-}
-
-fn dispatch_to_json(dispatch: crate::feasibility::DispatchAssessment) -> serde_json::Value {
-    let plan = dispatch.plan.map(|plan| {
-        let quantity = |quantity: alas_mass::fuel_plan::FuelQuantity| {
-            serde_json::json!({ "kg": quantity.kg, "rule": format!("{:?}", quantity.rule) })
-        };
-        serde_json::json!({
-            "scheme": plan.scheme.as_str(),
-            "taxi": quantity(plan.taxi),
-            "trip": quantity(plan.trip),
-            "contingency": quantity(plan.contingency),
-            "alternate": quantity(plan.alternate),
-            "final_reserve": quantity(plan.final_reserve),
-            "additional": quantity(plan.additional),
-            "extra": quantity(plan.extra),
-            "takeoff_fuel_kg": plan.takeoff_fuel_kg(),
-            "ramp_fuel_kg": plan.ramp_fuel_kg(),
-            "block_fuel_kg": plan.block_fuel_kg(),
-            "trip_time_s": plan.trip_time_s,
-            "destination_landing_mass_kg": plan.destination_landing_mass_kg,
-            "reserve_landing_mass_kg": plan.reserve_landing_mass_kg,
-        })
-    });
-    serde_json::json!({
-        "outcome": dispatch.outcome.as_str(),
-        "takeoff_mass_kg": dispatch.takeoff_mass_kg,
-        "shortfall_kg": dispatch.shortfall_kg,
-        "native_flights": dispatch.native_flights,
-        "plan": plan,
     })
 }
 
@@ -802,6 +777,7 @@ mod tests {
             trimmed_design_point: None,
             cg_envelope_ok: None,
             neutral_point_conditions: None,
+            fuel: Default::default(),
         };
 
         let database = report_to_database(&report, &AlasConfig::default());

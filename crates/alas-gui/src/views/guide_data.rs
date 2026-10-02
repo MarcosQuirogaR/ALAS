@@ -86,8 +86,8 @@ pub const CHAPTERS: &[Chapter] = &[
             Section {
                 heading: "The objective",
                 body: &[
-                    "The optimizer profile sets the candidate score. scipy_legacy is the default: it restores ALAS v1.1.0's weighted lift-to-drag objective and scalar penalty table. differential_evolution selects the mission-sized score: block fuel by default, or takeoff mass, operating empty mass or fuel per seat-kilometre, evaluated after mission closure. Whether a run optimises at all is the Optimize design space choice on Inputs; the search settings live under Advanced Settings > Optimizer.",
-                    "The mission-sized profile treats mass and fuel capacity, the CG envelope and gear reactions, the CS-25 climb and field requirements, and the planform limits as requirement families whose policy you set: hard, soft, diagnostic or off. The scipy_legacy profile instead uses the original scalar penalties, configured under the Optimizer weights group.",
+                    "The candidate score is mission-sized: block fuel by default, or takeoff mass, operating empty mass or fuel per seat-kilometre, evaluated after mission closure. Whether a run optimises at all is the Optimize design space choice on Inputs; the search settings live under Advanced Settings > Optimizer.",
+                    "The search treats mass and fuel capacity, the CG envelope and gear reactions, the CS-25 climb and field requirements, and the planform limits as requirement families whose policy you set: hard, soft, diagnostic or off.",
                 ],
             },
             Section {

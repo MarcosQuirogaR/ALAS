@@ -124,10 +124,8 @@ identifiers in the run log), after configuration and geometry are resolved.
    scaffold) from the design vector. Nothing downstream re-derives a planform.
 1. **`baseline`.** Fast weight-and-balance and stability estimate
    (`alas-mass`, `alas-payload`, `alas-perf`, `alas-stab`).
-2. **`optimization`.** `alas-opt` searches the design vector with either the
-   reference-compatible `scipy_legacy` profile or the product profile:
-   L-SHADE differential evolution under the epsilon-constrained method. In the
-   product profile each
+2. **`optimization`.** `alas-opt` searches the design vector with L-SHADE
+   differential evolution under the epsilon-constrained method. Each
    candidate is closed as a multidisciplinary analysis: geometry and mass build,
    aerodynamics (`alas-aero`), propulsion (`alas-prop`), mission sizing and fuel
    closure (`alas-mission`, `alas-mass::dispatch`), trim and CG envelope

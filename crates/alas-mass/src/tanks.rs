@@ -24,6 +24,7 @@
 //! arrangement's published cells onto a redesigned wing as per-cell
 //! factors, so a candidate's capacity follows its own spar box.
 
+mod bays;
 mod distribute;
 mod geometry;
 mod order;

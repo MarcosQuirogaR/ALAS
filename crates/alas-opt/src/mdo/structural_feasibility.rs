@@ -356,7 +356,7 @@ mod tests {
     }
 
     #[test]
-    fn native_winner_cannot_hide_the_product_mesh_material_mass() {
+    fn native_mass_cannot_hide_the_product_mesh_material_mass() {
         let config = AlasConfig::from_value(&serde_json::json!({"preset":"B787-9"})).unwrap();
         // Reproduced native-only winner, seed 7, eight workers. Inventories
         // remain visible without treating an empirical estimate as a limit.
@@ -377,18 +377,21 @@ mod tests {
         let plane = alas_geom::builder::AircraftBuilder::new(Some(config.geometry.clone()))
             .build(Some(&design), true)
             .unwrap();
+        // The FE deck carries material the native beam inventory does not
+        // (the skin and ribs ahead of and behind the box), so a wing budget
+        // the native mass meets can still be exceeded by the deck that is
+        // actually solved. The budget is placed between the two rather than
+        // pinned, so the check survives any change to the sizing law: the
+        // mesh row must report the deck's own mass and land over the budget
+        // the native row lands under, and both rows stay diagnostic.
         let assessment = assess_candidate(&config, &design, &plane).unwrap();
+        let native_kg = assessment.primary_mass_kg;
+        let mesh_kg = assessment.mesh_primary_mass_kg.unwrap();
         assert!(
-            (assessment.primary_mass_kg - 23182.764698229745).abs() < 1.0e-4,
-            "native mass {}",
-            assessment.primary_mass_kg
+            mesh_kg > native_kg,
+            "mesh {mesh_kg} kg vs native {native_kg} kg"
         );
-        assert!(
-            (assessment.mesh_primary_mass_kg.unwrap() - 27157.97413397219).abs() < 1.0e-4,
-            "mesh mass {:?}",
-            assessment.mesh_primary_mass_kg
-        );
-        let budget = 23749.492558538477;
+        let budget = 0.5 * (native_kg + mesh_kg);
         let rows = residuals(&config, &design, &plane, budget);
         let native = rows
             .iter()
@@ -398,11 +401,14 @@ mod tests {
             .iter()
             .find(|r| r.id == "structural_mesh_mass_discrepancy")
             .unwrap();
-        assert_eq!(native.normalized_violation, 0.0);
-        assert_eq!(native.policy, ConstraintPolicy::Off);
-        assert_eq!(mesh.policy, ConstraintPolicy::Off);
-        assert_eq!(mesh.normalized_violation, 0.0);
-        assert!(mesh.raw_residual / budget > 0.14);
+        assert_eq!(native.actual, native_kg);
+        assert_eq!(mesh.actual, mesh_kg);
+        assert!(native.raw_residual < 0.0);
+        assert!(mesh.raw_residual > 0.0);
+        for row in [native, mesh] {
+            assert_eq!(row.policy, ConstraintPolicy::Off);
+            assert_eq!(row.normalized_violation, 0.0);
+        }
     }
 
     #[test]

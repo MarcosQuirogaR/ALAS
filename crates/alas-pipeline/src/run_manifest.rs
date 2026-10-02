@@ -56,8 +56,24 @@ pub struct SearchManifest {
     pub strategy: String,
     /// Durable lifecycle reason the search stopped.
     pub termination: String,
-    /// Objective evaluations the search recorded.
+    /// Objective evaluations the search recorded, both stages.
     pub evaluations: usize,
+    /// Seed the run used, recorded for an unseeded run too.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seed: Option<u64>,
+    /// Per-stage budget, use, wall time and termination, screening first.
+    /// Each stage's `evaluations` is its replay count (pre-gate-passed
+    /// candidates, including repeats), distinct from its coupled analyses
+    /// (`analysis_evaluations`). It replays the stage bit-identically at any
+    /// worker count as `optimizer.solver.<stage>.replay_evaluations`, with
+    /// the refinement's `planned_evaluations` as `replay_planned_evaluations`;
+    /// `pre_gate_rejects` is the rejection count the replay reproduces.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub stages: Vec<alas_opt::StageSummary>,
+    /// Per stage, same order: the pre-gate rejections by reason and the
+    /// hard-constraint failures among the analysed candidates.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub rejections: Vec<alas_opt::StageRejections>,
     /// Search wall-clock seconds.
     pub wall_time_s: f64,
     /// Whether the search reached its own convergence criterion *and* the
@@ -65,6 +81,14 @@ pub struct SearchManifest {
     /// Absent for a search that reports no lifecycle diagnostics.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub converged: Option<bool>,
+    /// Whether the delivered design is feasible at reporting fidelity.
+    /// Absent on a manifest written before the field existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delivered_feasible: Option<bool>,
+    /// Status word of the optimization outcome; never `completed` when
+    /// `delivered_feasible` is false.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<String>,
     /// What the reporting-fidelity re-evaluation made of the delivered
     /// design. Absent when no caller performed one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -95,15 +119,15 @@ pub struct SearchDiagnosticsManifest {
     pub cache_hits: usize,
     /// Poll iterations completed.
     pub poll_iterations: usize,
-    /// Reduced-model analyses executed by the broad scan. Ranked on a
-    /// coarser mesh and a looser sizing closure, so not comparable with the
-    /// full-fidelity count above.
+    /// Evaluations requested by the screening stage, scored with the
+    /// screening model (the shipped one is the full in-loop model).
     pub screening_evaluations: usize,
-    /// Screened candidates that were feasible under the reduced model.
+    /// Screened candidates that were feasible under the screening model.
     pub screening_feasible: usize,
-    /// Full-fidelity analyses spent verifying the scan finalists.
+    /// Screening elite members seeded into the refinement; with the shipped
+    /// screening model they are cache hits, not new analyses.
     pub verification_evaluations: usize,
-    /// Wall-clock seconds in the broad scan.
+    /// Wall-clock seconds in the screening stage.
     pub scan_wall_time_s: f64,
     /// Wall-clock seconds in the search stage.
     pub search_wall_time_s: f64,
@@ -220,6 +244,17 @@ pub struct DeliveredAcceptanceManifest {
     pub delivered_is_search_finalist: bool,
     /// Wall-clock seconds the re-evaluation cost, inside the search stage.
     pub wall_time_s: f64,
+    /// Reporting-fidelity analyses run: ladder, baseline and the final
+    /// analysis of the delivered design.
+    #[serde(default)]
+    pub analyses: usize,
+    /// Refinement evaluations reserved for those analyses.
+    #[serde(default)]
+    pub reserved_evaluations: usize,
+    /// The baseline at reporting fidelity and the delivered design's
+    /// native-mission trip-fuel delta against it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub baseline: Option<alas_opt::ReportingBaseline>,
 }
 
 /// Everything a completed run can say about its own cost and dispatch.
@@ -263,6 +298,7 @@ impl RunManifest {
             .max()
             .unwrap_or(0) as f64
             / 1_000.0;
+        let summary = crate::optimizer_summary::OptimizerRunSummary::from_pipeline(result);
         let search = result
             .optimization_result
             .as_ref()
@@ -272,11 +308,25 @@ impl RunManifest {
                 strategy: optimization.strategy.clone(),
                 termination: optimization.termination.clone(),
                 evaluations: optimization.history.n_evaluations(),
+                seed: summary.as_ref().and_then(|summary| summary.seed),
+                stages: summary
+                    .as_ref()
+                    .map_or_else(Vec::new, |summary| summary.stages.clone()),
+                rejections: optimization
+                    .search_diagnostics
+                    .as_ref()
+                    .map_or_else(Vec::new, |diagnostics| diagnostics.rejections.clone()),
                 wall_time_s: optimization.wall_time_s,
                 converged: optimization
                     .search_diagnostics
                     .as_ref()
                     .map(|diagnostics| diagnostics.converged),
+                delivered_feasible: Some(optimization.is_delivered_feasible()),
+                status: Some(
+                    crate::SolverOptimizationStatus::for_delivered(optimization)
+                        .as_str()
+                        .to_owned(),
+                ),
                 delivered_acceptance: optimization.delivered_acceptance.as_ref().map(
                     |acceptance| DeliveredAcceptanceManifest {
                         verified: acceptance.verified,
@@ -286,6 +336,15 @@ impl RunManifest {
                         candidates_evaluated: acceptance.candidates_evaluated,
                         delivered_is_search_finalist: acceptance.delivered_is_search_finalist,
                         wall_time_s: acceptance.wall_time_s,
+                        analyses: summary
+                            .as_ref()
+                            .and_then(|summary| summary.verification)
+                            .map_or(0, |counts| counts.analyses),
+                        reserved_evaluations: summary
+                            .as_ref()
+                            .and_then(|summary| summary.verification)
+                            .map_or(0, |counts| counts.reserved),
+                        baseline: acceptance.baseline.clone(),
                     },
                 ),
                 diagnostics: optimization
@@ -391,6 +450,13 @@ mod tests {
             feasible_fraction: 0.92,
             epsilon_level: 0.0,
             restoration: None,
+            stages: Vec::new(),
+            rejections: Vec::new(),
+            seed: Some(7),
+            scope: alas_opt::SEARCH_SCOPE.to_owned(),
+            baseline: None,
+            winner_history_row: None,
+            baseline_clamped: false,
         }
     }
 

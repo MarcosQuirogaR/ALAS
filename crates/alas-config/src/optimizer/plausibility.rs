@@ -208,6 +208,11 @@ pub struct PlausibilityLimits {
 
     /// Least negative built geometric washout accepted, degrees.
     ///
+    /// It bounds the root-to-tip difference and, as the separate
+    /// `panel_washout_max` check, the worst tip-ward twist rise between any
+    /// two built sections, so neither the break nor the tip may be set above
+    /// the section inboard of it.
+    ///
     /// Zero: a transport wing is not built with wash-in. The vortex-lattice
     /// model rewards loading the tip (it lowers induced drag at a fixed span
     /// and lets the trimmed attitude fall), and nothing in the aerodynamic or
@@ -216,23 +221,24 @@ pub struct PlausibilityLimits {
     /// exists to control is represented. Positive twist at the tip would
     /// therefore be bought from an omission in the model rather than earned.
     ///
-    /// **This bound cannot be reached from the current design space**, and
-    /// saying so is the point of writing it down. `tip_twist_deg` is bounded
-    /// above at +1.0 degree and the smallest root incidence any registered
-    /// aircraft or the default geometry carries is +2.0, so the most positive
-    /// built washout reachable today is -1.0 degrees. The limit is a guard on
-    /// the quantity, not a correction of an observed pathology: it exists so
-    /// that widening the design variable, or a geometry document with no root
-    /// incidence, cannot silently produce a wash-in wing that the objective
-    /// would reward.
+    /// The root-to-tip bound is not reachable from the design space, but an
+    /// outboard panel is. `tip_twist_deg` is the tip section's absolute
+    /// incidence, bounded above at +1.0 degree globally and at +2.0 degrees
+    /// by the registered-aircraft window, while the break incidence is fixed
+    /// by `geometry.wing.break_twist_deg` (0 to +2 degrees on the registered
+    /// aircraft) and every root carries +2.0 to +4.5. The tip can therefore
+    /// rise above the break while the wing as a whole is still washed out:
+    /// the A320-200 and A220-300 optimizer winners of the Phase 4 audit
+    /// reached +0.47 degrees of outboard wash-in that way, which the
+    /// root-to-tip window alone cannot see.
     ///
     /// This is an engineering choice about conventional transport practice,
     /// not a certification limit and not a measured boundary of the
-    /// correlations.
+    /// correlations. No minimum washout is sourced, so no minimum is imposed.
     #[config(
         label = "Least negative built washout",
         unit = "deg",
-        help = "Least negative built washout accepted, in degrees. Zero: a transport wing is not built with wash-in. The vortex-lattice model rewards loading the tip while neither the stall progression nor the outboard gust and manoeuvre case that washout exists to control is represented here, so positive tip twist would be bought from an omission in the model. The current design space cannot reach this bound; it guards the quantity rather than correcting an observed pathology."
+        help = "Least negative built washout accepted, in degrees, applied to the root-to-tip difference and to every spanwise run, so neither the break nor the tip may be set above the section inboard of it. Zero: a transport wing is not built with wash-in. The vortex-lattice model rewards loading the tip while neither the stall progression nor the outboard gust and manoeuvre case that washout exists to control is represented here, so positive tip twist would be bought from an omission in the model."
     )]
     pub max_tip_washout_deg: f64,
 }

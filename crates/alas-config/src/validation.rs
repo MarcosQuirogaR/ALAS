@@ -498,16 +498,6 @@ fn optimizer_tokens_are_supported(config: &AlasConfig) -> Vec<ValidationIssue> {
             severity: Severity::Error,
         });
     }
-    if !crate::SolverSettings::is_supported_strategy(&solver.strategy) {
-        issues.push(ValidationIssue {
-            field_path: "optimizer.solver.strategy".to_owned(),
-            message: format!(
-                "Unknown differential-evolution strategy {:?}; choose one of the registered strategies.",
-                solver.strategy
-            ),
-            severity: Severity::Error,
-        });
-    }
     issues
 }
 
@@ -1147,16 +1137,12 @@ mod tests {
     }
 
     #[test]
-    fn unknown_optimizer_tokens_are_blocking_configuration_errors() {
+    fn an_unknown_optimizer_method_is_a_blocking_configuration_error() {
         let mut config = AlasConfig::default();
         config.optimizer.solver.method = "differential_evoluton".to_owned();
-        config.optimizer.solver.strategy = "best1bni".to_owned();
         let issues = validate(&config);
         assert!(issues.iter().any(|issue| {
             issue.field_path == "optimizer.solver.method" && issue.severity == Severity::Error
-        }));
-        assert!(issues.iter().any(|issue| {
-            issue.field_path == "optimizer.solver.strategy" && issue.severity == Severity::Error
         }));
     }
 

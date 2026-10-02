@@ -74,7 +74,8 @@ impl ConstraintResidual {
     }
 
     /// Whether this residual is on the infeasible side of its limit.
-    pub(super) fn violated(&self) -> bool {
+    #[must_use]
+    pub fn violated(&self) -> bool {
         !self.normalized_violation.is_finite() || self.normalized_violation > 0.0
     }
 }

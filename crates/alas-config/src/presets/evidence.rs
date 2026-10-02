@@ -172,3 +172,22 @@ pub struct PartialDesignMissionEvidence {
     /// Exact document, revision, page, and figure when one is numbered.
     pub source: &'static str,
 }
+
+/// A payload/range point a preset is sized against: the design range flown
+/// at the design payload, read from the manufacturer's payload/range chart.
+///
+/// This is the mission the MTOW band and payload-adjusted modes close the
+/// takeoff mass on. It is not a [`DesignMissionReference`]: it carries no
+/// profile or reserve mass, which a chart caption does not define. It is also
+/// separate from the FLOPS `DESRNG` input (`mass_model.flops_transport`),
+/// which is a mass-equation parameter and may differ from the charted range.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PayloadRangeDesignPoint {
+    /// Still-air range at the design payload, nautical miles (1 nmi = 1,852 m).
+    pub range_nmi: f64,
+    /// Payload carried at that range, kg, or `None` when the source selects
+    /// no payload and the planning cabin is the design payload.
+    pub payload_kg: Option<f64>,
+    /// Document, revision, figure and read uncertainty of the point.
+    pub source: &'static str,
+}

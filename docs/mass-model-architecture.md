@@ -117,18 +117,23 @@ for in every mode:
 | `fixed_requirement` | route, one pass | declared cap | declared cap | design-mode basis (above) |
 | `sized_by_mission` | route, ceiling = cap | closure | design-mode basis: declared `DG` (fixed aircraft) or the closure (clean sheet) | design-mode basis; clean sheet uses the fraction of the cap |
 | `unconstrained` | route, no ceiling | closure | design-mode basis | design-mode basis |
-| `mtow_band` | design mission, clamp `T (1 + p)` | closure | the closure, in every design mode | `max(scaled, ZFW + reserves)`: scaled is `(MLW / MTOW) x closure` from the preset reference weights for a registered aircraft in `BaselineSandbox`/`ReferenceAdaptation`, otherwise `mlw_fraction_mtow x closure`; ZFW + reserves is the sizing closure's zero-fuel mass plus contingency, alternate and final reserve |
-| `payload_adjusted` | route (or the design range when set), no ceiling | closure | the closure, in every design mode | as `mtow_band` |
+| `mtow_band` | design mission, clamp `T (1 + p)` | closure | the closure, in every design mode | `max(scaled, ZFW + reserves)`: scaled is `(MLW / MTOW) x closure` from the preset reference weights for a registered aircraft in `BaselineSandbox`/`ReferenceAdaptation`, otherwise `mlw_fraction_mtow x closure`; ZFW + reserves is the sizing closure's zero-fuel mass plus contingency, alternate, final reserve, additional and extra fuel (its own destination landing mass) |
+| `payload_adjusted` | design range (explicit, else the preset's charted range; the route only when neither exists), no ceiling | closure | the closure, in every design mode | as `mtow_band` |
 
 An explicit `flops_structure.design_gross_mass_kg` keeps the structure at
 that declared weight in every mode (a validation warning in the two design
 modes). `T` is `optimizer.objective.mtow_target_kg` (zero: the declared
 MTOW) and `p` is `mtow_band_fraction` (default 0.05). The design mission is
 `AlasConfig::design_mission()`: range `optimizer.objective.design_range_nmi`
-when positive, else the declared FLOPS `design_range_nmi`, else the route
-great-circle distance; payload the preset's `reference.planning_seats` x
-`passenger_mass_kg` plus `belly_cargo_kg` when declared, else the
-configured payload plus that freight. It is flown at the sizing cruise
+when positive, else the preset's charted design range
+(`reference.design_point`, below), else the declared FLOPS
+`design_range_nmi`, else the route great-circle distance; payload the
+charted payload when the design point carries one, else the preset's
+`reference.planning_seats` x `passenger_mass_kg` plus `belly_cargo_kg` when
+declared, else the configured payload plus that freight. The FLOPS
+`DESRNG` is a mass-equation input and is not the mission range of a preset
+that charts a point (A340-300: 7,200 nmi against 5,000 nmi charted). It is
+flown at the sizing cruise
 altitude; the selected route is then flown off-design at the closed mass
 (`SizedCandidate::offdesign`). `SizedCandidate::derived_design_mzfw_kg` =
 OEW + the payload the closure flew; it is derived, not a declared weight.
@@ -147,9 +152,38 @@ scaled from a long-range preset alone falls below it on a short closure
 mission: the A320-200 payload-adjusted closure on LEMD-LEPA is 63,699 kg,
 where the ratio gives 53,900 kg and ZFW + reserves 61,637 kg. With no
 additional or extra fuel the planned landing mass equals the floor, so the
-`landing_mass` residual sits on its limit; any additional or extra fuel
-shows as an honest excess. The gear is designed at the floored mass in the
-MDA passes (floor of the previous pass) and in the sized report.
+`landing_mass` residual sits on its limit. The floor is the plan's own
+destination landing mass (zero-fuel mass plus every fuel carried past the
+destination, additional and extra included), so the limit and the mission
+are on one fuel basis and one reserve policy. The gear is designed at the
+floored mass in the MDA passes (floor of the previous pass) and in the sized
+report. The route flown off-design lands below this mass on every registered
+preset (route payload at most the design payload, same reserve policy).
+
+### Charted design points
+
+`AircraftReferenceData::design_point` (`PayloadRangeDesignPoint`) is the
+range flown at the design payload, read from the manufacturer's
+payload/range chart; the source string carries document, figure and read
+uncertainty. A chart caption defines no profile or reserve mass, so it is
+not promoted to a `DesignMissionReference`.
+
+| Preset | Range, nmi | Payload, kg | Source |
+|---|---|---|---|
+| A320-200 | 2,120 | 19,700 | ACAP Jun 2024 Fig. 3-2-1-991-016-A01, 78 t curve, max payload (+-40 nmi) |
+| A220-300 | 2,150 | 18,643 | ACP Issue 013 p.239, MZFW corner; chart is a 156,300 lb MTOW variant, not this 149,000 lb preset |
+| A340-300 | 5,000 | 50,800 | ACAP Fig. 3-2-1-991-013-A01, CFM56-5C3, max payload (+-100 nmi) |
+| A380-800 | 6,535 | 83,800 | ACAP Fig. 3-2-1-991-001-A01, max payload (+-60 nmi) |
+| B787-9 | 5,300 | 52,586 | ACAP Rev Q 3.2.2, MZFW corner (+-60 nmi); payload is preset MZFW minus OEW |
+| DC-10 | 4,120 | 45,993 | ACAP 3.2.1 p.54, 572,000 lb curve, max payload (+-100 nmi) |
+| ATR72-600 | 758 | planning cabin | factsheet 2020 range with maximum passengers |
+| AVE | 7,600 | planning cabin | notional class default, no published chart |
+
+At a chart corner that is both MTOW- and MZFW-limited the takeoff fuel is
+`MTOW - MZFW`, independent of the model's OEW; the closure's takeoff fuel is
+compared with it to attribute a band failure to fuel burn rather than mass.
+The 777-9 ACAP (Rev G) prints no payload/range chart ("data to be provided
+at a later date"), so AVE keeps its declared requirement.
 
 The declared maximum landing mass the fixed-aircraft checks read
 (`AlasConfig::landing_mass_limit_kg`) is unchanged; the design landing mass
@@ -346,9 +380,39 @@ and the reconciliation used to abort the candidate with an opaque
 `structural_sizing` error, which made the fixed-aircraft mode unusable on
 them. It now publishes the empirical wing unchanged, carries the box beside
 it, and marks the inventory `ReferenceExceededBySizedBox` so the
-`structural_inventory_unverified` residual carries the finding. The
-structural model's loads, materials and gauges on those aircraft are a
-separate open item; nothing in the mass ledger depends on them.
+`structural_inventory_unverified` residual carries the finding. Nothing in
+the mass ledger depends on the box.
+
+Two sizing errors made the box heavier than the wing it belongs to:
+
+- The small-slope budget of the linear beam model (5 % curvature error) was
+  gated at the ultimate manoeuvre cases, and `size_for_linear_model` bought
+  cap area to meet it: on the A320-200 the caps went from 4.7 t to 13.4 t and
+  the FE box to 2.0 times the whole FLOPS wing. Ultimate deflection is not a
+  certification quantity (CS 25.305(b) asks for three seconds without
+  failure) and real wings leave the budget there: the Boeing 787 static-test
+  wing rose about 7.6 m on a 30 m semispan at ultimate load (Boeing news
+  release, 28 March 2010). The budget now gates the 1 g flight shape; the
+  ultimate-case error is reported as a warning on the ultimate deflection.
+- The caps were sized for the whole moment while the minimum-gauge cover
+  skin at the same lever arm was charged as dead mass, although the
+  section stiffness and the rib panel-buckling rule already loaded it. The
+  skin is now credited through the boom idealization (Megson, *Aircraft
+  Structures for Engineering Students*, ch. 20), -1.6 t on the A320 box.
+
+FE complete wing (accepted box plus the non-box inventory) against the FLOPS
+wing, before and after: A320-200 2.26 to 0.99, A340-300 2.12 to 1.11,
+A380-800 1.36 to 1.05, ATR 72-600 1.14 to 0.98, DC-10 1.50 to 1.04; the
+A320 FE wing group is 10.0 % of MTOW against the 9-11 % narrowbody class
+band (Roskam, Part V). The composite boxes were sized with a pristine
+`CFRP QI` allowable of 450 MPa (0.82 % strain) and came out at 0.71 (B787-9)
+and 0.60 (A220-300). The allowable is now the damage-tolerant design value,
+220 MPa at the unchanged 55 GPa (0.40 % ultimate strain; Niu, *Composite
+Airframe Structures*, 1992), which gives B787-9 1.09 and A220-300 0.90. AVE
+keeps the database default box (aluminium skin and webs, `CFRP UD` caps at
+the reference 900 MPa tension value, which the frozen fixtures pin) and sits
+at 0.71; an all-aluminium or all-`CFRP QI` box gives 1.13 or 1.12, but no
+source states AVE's wing material.
 
 ## Fixed-aircraft mission checks
 

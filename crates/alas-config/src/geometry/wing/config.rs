@@ -99,6 +99,10 @@ pub struct WingConfig {
     pub kink_span_fraction: Option<f64>,
 
     /// Historical outboard sweep decrement retained for reference replay.
+    ///
+    /// Read only when neither a side-of-body nor a kink station is declared;
+    /// a transport planform keeps one leading-edge sweep root to tip (see
+    /// [`WingConfig::transport_planform`]).
     #[config(
         label = "Outboard sweep reduction",
         unit = "deg",
@@ -292,6 +296,15 @@ impl WingConfig {
     /// therefore produce the historical root/kink/tip geometry exactly. New
     /// configurations can make the side-of-body and outboard sweep explicit
     /// without consumers duplicating sweep or trailing-edge calculations.
+    ///
+    /// Sweep convention: `design.sweep_deg` is a leading-edge angle, positive
+    /// aft. When a side-of-body or kink station is declared (every product
+    /// preset), that one angle runs straight from the centreline to the tip,
+    /// and `outboard_sweep_decrement_deg` and `outboard_le_sweep_deg` are not
+    /// read; they shape only the legacy root/kink/tip replay. A published
+    /// quarter-chord sweep is therefore converted to the leading edge through
+    /// the outboard panel's taper before it is entered, as
+    /// `tan(LE) = tan(c/4) + (c_kink - c_tip) / (4 (y_tip - y_kink))`.
     ///
     /// # Errors
     ///

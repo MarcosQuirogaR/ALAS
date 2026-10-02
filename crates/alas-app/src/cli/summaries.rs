@@ -5,6 +5,26 @@
 
 use alas_pipeline::PipelineResult;
 
+/// What the design search was and what it did. An infeasible delivered
+/// design prints "Optimization infeasible", never "Completed".
+pub(super) fn print_optimization_summary(result: &PipelineResult, quiet: bool) {
+    if quiet {
+        return;
+    }
+    let Some(summary) =
+        alas_pipeline::optimizer_summary::OptimizerRunSummary::from_pipeline(result)
+    else {
+        return;
+    };
+    println!(
+        "\n--- Design search: {} ---",
+        alas_pipeline::optimizer_summary::SCOPE_LABEL
+    );
+    for (label, value) in summary.label_lines() {
+        println!("  {label:<24}: {value}");
+    }
+}
+
 pub(super) fn print_cpacs_summary(result: &PipelineResult, quiet: bool) {
     if quiet {
         return;

@@ -157,13 +157,10 @@ mod tests {
 
     #[test]
     fn low_wing_fallback_aircraft_resolve_the_station_they_already_had() {
-        // DC-10 and AVE register no anchor and keep the wing-mounted
-        // fallback. The seam must return it unchanged, bit for bit.
-        // B787-9 moved to `source_scaled_aircraft_are_unaffected_by_the_gate`
-        // below: it registers `reference_nlg_x_fraction`/
-        // `reference_mlg_x_fractions`, so it is source-scaled rather than a
-        // wing-mounted fallback case.
-        for name in ["DC-10", "AVE"] {
+        // AVE registers no anchor and keeps the wing-mounted fallback. The
+        // seam must return it unchanged, bit for bit.
+        {
+            let name = "AVE";
             let (config, plane) = preset_case(name);
             let (x_nlg, x_mlg, start_x, length) = fallbacks(&config, &plane);
             let resolved = resolved_gear_stations(&config, &plane, x_nlg, x_mlg, start_x, length)
@@ -183,7 +180,9 @@ mod tests {
 
     #[test]
     fn source_scaled_aircraft_are_unaffected_by_the_gate() {
-        for name in ["A320-200", "A220-300", "A340-300", "A380-800", "B787-9"] {
+        for name in [
+            "A320-200", "A220-300", "A340-300", "A380-800", "B787-9", "DC-10",
+        ] {
             let (config, plane) = preset_case(name);
             let (x_nlg, x_mlg, start_x, length) = fallbacks(&config, &plane);
             let resolved = resolved_gear_stations(&config, &plane, x_nlg, x_mlg, start_x, length)

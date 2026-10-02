@@ -81,6 +81,10 @@ pub(super) fn localize_scene_text(text: &str) -> String {
         let key = format!("{prefix}: ");
         let translated = alas_i18n::t(Some(&key), None);
         if translated != key {
+            // A value that is itself a catalog phrase (an outcome or a
+            // termination reason) is translated; numbers and units pass
+            // through unchanged.
+            let value = alas_i18n::t(Some(value), None);
             return format!("{indent}{translated}{value}");
         }
     }

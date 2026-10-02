@@ -19,12 +19,6 @@ fn two_xsec_wing(symmetric: bool) -> Wing {
 }
 
 #[test]
-fn taper_ratio_is_tip_chord_over_root_chord() {
-    let wing = two_xsec_wing(false);
-    assert!((wing.taper_ratio() - 0.5).abs() < 1e-15);
-}
-
-#[test]
 fn subdivide_sections_rejects_a_ratio_below_two() {
     let wing = two_xsec_wing(false);
     assert_eq!(

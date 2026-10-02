@@ -9,12 +9,13 @@ use alas_config::{
     AlasConfig, ConstraintPolicy, DesignRequirements, ObjectiveConfig, PerformanceConfig,
 };
 use alas_perf::performance::{
-    assess_oei_climb, compute_v_speeds_at_masses, density_ratio, far25_oei_gradient,
+    assess_oei_climb, compute_v_speeds_at_masses, density_ratio, far25_oei_gradient, oei_cl_at_v2,
     tw_cruise_constraint, tw_takeoff_constraint, ws_landing_limit, OeiClimbStatus, OeiV2Condition,
 };
 use alas_units::KNOT;
 
 use super::sizing::SizingOutcome;
+use super::types::CandidateDrag;
 use super::types::ConstraintFamily::Performance;
 use super::types::ConstraintResidual;
 
@@ -59,9 +60,33 @@ pub(super) fn performance_residuals(
             windmilling_cd: perf.oei_windmilling_cd,
         }
     });
+    // The engine-out climb is flown at the V2 lift coefficient
+    // `CL_V2 = CLmax_TO / (V2/VS)^2` (14 CFR 25.107(c): V2 >= 1.13 VSR, so
+    // CL_V2 <= CLmax_TO / 1.13^2; the assessor uses the same relation,
+    // `oei_cl_at_v2`), at the airport elevation and the V2 Mach there. The
+    // drag table is read at exactly that point, not at the cruise design CL
+    // and reference altitude. Without a resolved departure the legacy
+    // `oei_climb_cl` is the lift coefficient and the field is sea level.
+    // The table is clean: the takeoff flap/slat increment enters through
+    // `oei_climb_delta_cd`, and the table's induced quadratic is
+    // extrapolated above its fitted lift range at these high lifts.
+    let drag = &sized.fuel_artifacts.drag;
+    let oei_cl = oei_condition
+        .and_then(|condition| oei_cl_at_v2(perf.cl_max_to, condition.v2_over_vstall))
+        .unwrap_or(perf.oei_climb_cl);
+    let (oei_altitude_m, oei_isa_deviation_c) = outcome.departure.map_or((0.0, 0.0), |airport| {
+        (airport.elevation_m, airport.isa_deviation_c)
+    });
+    let departure_atmosphere =
+        alas_atmo::Atmosphere::new(oei_altitude_m).with_temperature_deviation(oei_isa_deviation_c);
+    let oei_mach = (2.0 * sized.takeoff_mass_kg * req.gravity_m_s2
+        / (departure_atmosphere.density() * s_ref * oei_cl))
+        .sqrt()
+        / departure_atmosphere.speed_of_sound();
+    let (oei_cd0, oei_k) = departure_polar(drag, oei_cl, oei_mach, oei_altitude_m);
     let oei_assessment = assess_oei_climb(
-        outcome.cd0,
-        outcome.induced_factor_k,
+        oei_cd0,
+        oei_k,
         outcome.n_engines,
         certified_oei_gradient.unwrap_or(perf.oei_gradient),
         perf.oei_climb_cl,
@@ -119,10 +144,12 @@ pub(super) fn performance_residuals(
     }
 
     let cruise_ws_pa = sized.takeoff_mass_kg * req.gravity_m_s2 / s_ref;
+    // Tangent at the cruise Mach, so the cruise wave drag is included.
+    let (cruise_cd0, cruise_k) = drag.parabolic_equivalent(req.cruise_mach);
     let required_cruise_tw = tw_cruise_constraint(
         &[cruise_ws_pa],
-        outcome.cd0,
-        outcome.induced_factor_k,
+        cruise_cd0,
+        cruise_k,
         req.cruise_mach,
         req.cruise_altitude_m,
         perf.thrust_lapse,
@@ -186,17 +213,20 @@ pub(super) fn performance_residuals(
         ));
     }
 
+    // The field lengths a runway has to offer are certified at the maximum
+    // masses, not at the mass a short city pair happens to dispatch: takeoff
+    // at the design gross mass (MTOW) and landing at the design landing mass
+    // (MLW). Both are the sizing basis's own values
+    // (`alas_config::MassSizingBasis`): the declared weights of a fixed
+    // aircraft, the closure of a coupled design.
     if let Some(departure) = outcome.departure {
-        let sigma = density_ratio(departure.elevation_m, departure.isa_deviation_c);
-        let required_takeoff_tw =
-            tw_takeoff_constraint(&[cruise_ws_pa], departure.toda_m, sigma, perf.cl_max_to)[0];
-        residuals.push(ConstraintResidual::scaled(
-            "takeoff_field",
-            Performance,
-            available_tw,
-            required_takeoff_tw,
-            "T/W",
-            required_takeoff_tw - available_tw,
+        residuals.push(takeoff_field_residual(
+            sized.design_gross_mass_kg,
+            outcome.n_engines as f64 * outcome.static_thrust_kn * 1_000.0,
+            s_ref,
+            req.gravity_m_s2,
+            departure,
+            perf.cl_max_to,
             policy,
         ));
     }
@@ -210,8 +240,55 @@ pub(super) fn performance_residuals(
     residuals
 }
 
+/// The takeoff field-length residual at `mass_kg`, as a thrust-to-weight
+/// requirement.
+///
+/// Raymer's empirical takeoff relation (`alas_perf::performance::
+/// tw_takeoff_constraint`) gives the required `T/W` from the wing loading at
+/// `mass_kg`; the available `T/W` is the installed static thrust over the same
+/// weight. Both sides move with the mass, so a field that a light dispatch
+/// clears can be missed at the maximum takeoff mass.
+fn takeoff_field_residual(
+    mass_kg: f64,
+    static_thrust_n: f64,
+    s_ref: f64,
+    gravity_m_s2: f64,
+    departure: &Airport,
+    cl_max_to: f64,
+    policy: ConstraintPolicy,
+) -> ConstraintResidual {
+    let weight_n = mass_kg * gravity_m_s2;
+    let available_tw = static_thrust_n / weight_n;
+    let sigma = density_ratio(departure.elevation_m, departure.isa_deviation_c);
+    let required_tw =
+        tw_takeoff_constraint(&[weight_n / s_ref], departure.toda_m, sigma, cl_max_to)[0];
+    ConstraintResidual::scaled(
+        "takeoff_field",
+        Performance,
+        available_tw,
+        required_tw,
+        "T/W",
+        required_tw - available_tw,
+        policy,
+    )
+}
+
+/// The `(cd0, k)` of the parabola `cd0 + k CL^2` through the drag at
+/// `(cl, mach, altitude_m)` and at `CL = 0` of the same Mach and altitude:
+/// it reproduces the table's clean drag exactly at `cl`, which is the only
+/// lift the engine-out assessor evaluates it at, with the Reynolds-dependent
+/// parasite drag, the trimmed induced term and any wave drag of that point.
+/// `k` is floored at zero, and `cd0` then absorbs the difference.
+fn departure_polar(drag: &CandidateDrag, cl: f64, mach: f64, altitude_m: f64) -> (f64, f64) {
+    let cd = drag.cd(cl, mach, altitude_m);
+    let cd_at_zero_lift = drag.cd(0.0, mach, altitude_m);
+    let k = ((cd - cd_at_zero_lift) / (cl * cl)).max(0.0);
+    (cd - k * cl * cl, k)
+}
+
 /// The landing field-length residual, plus the approach-speed residual when
-/// a limit is configured.
+/// a limit is configured. Both are evaluated at the design landing mass
+/// (MLW), the mass the landing distance and approach speed are certified at.
 #[allow(clippy::too_many_arguments)] // one named physical input per residual; a struct would only rename them once
 fn landing_and_approach_residuals(
     outcome: &SizingOutcome,
@@ -225,7 +302,7 @@ fn landing_and_approach_residuals(
     let sized = &outcome.sized;
     let sigma = density_ratio(arrival.elevation_m, arrival.isa_deviation_c);
     let ws_land_limit_pa = ws_landing_limit(arrival.lda_m, sigma, perf.cl_max_land, perf.k_land);
-    let landing_ws_pa = sized.dispatch.destination_landing_mass_kg * req.gravity_m_s2 / s_ref;
+    let landing_ws_pa = sized.design_landing_mass_kg * req.gravity_m_s2 / s_ref;
 
     let mut residuals = vec![ConstraintResidual::scaled(
         "landing_field",
@@ -239,8 +316,8 @@ fn landing_and_approach_residuals(
 
     if objective.max_approach_speed_kt > 0.0 {
         let v_speeds = compute_v_speeds_at_masses(
-            sized.takeoff_mass_kg,
-            sized.dispatch.destination_landing_mass_kg,
+            sized.design_gross_mass_kg,
+            sized.design_landing_mass_kg,
             s_ref,
             arrival,
             perf.cl_max_to,
@@ -260,3 +337,6 @@ fn landing_and_approach_residuals(
     }
     residuals
 }
+
+#[cfg(test)]
+mod tests;

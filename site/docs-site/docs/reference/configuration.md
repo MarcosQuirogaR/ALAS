@@ -52,7 +52,6 @@ Fully covered in [Cabin & payload](../cabin-and-payload.md).
 | `thickness_floor` / `thickness_penalty_scale` | 0.90 / 20.0 | Airfoil thickness scaled too far below nominal |
 | `fuselage_floor_m` / `fuselage_penalty_scale` | 60.0 / 5.0 | Fuselage shrunk implausibly short |
 | `min_h/vstab_area_fraction`, `tail_area_penalty_scale` | 0.15 / 0.07 / 150.0 | Tail undersized relative to wing |
-| `min/max_h/vstab_volume_coef`, `tail_volume_penalty_scale` | see code / 200.0 | Tail volume coefficient outside a realistic band |
 | `max_break_root_chord_ratio`, `taper_realism_penalty_scale` | 0.65 / 250.0 | Implausible taper shape |
 | `te_root_angle_penalty_scale` | 100.0 | Unrealistic trailing-edge root angle |
 | `min_wing_position_fraction`, `wing_position_penalty_scale` | 0.27 / 300.0 | Wing shifted too far forward on the fuselage |

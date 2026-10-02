@@ -145,6 +145,7 @@ pub fn probe_report(airplane: Airplane) -> AnalysisReport {
         }),
         cg_envelope_ok: None,
         neutral_point_conditions: None,
+        fuel: Default::default(),
         airplane,
     }
 }

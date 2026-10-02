@@ -10,17 +10,14 @@
 //! is the claim a download actually makes: what the package directory
 //! contains, and whether its manifest describes that content honestly.
 //!
-//! Like the runtime matrix beside it, the tests run only when
-//! `ALAS_W55_PACKAGE_DIR` names a package assembled by `cargo xtask dist`.
-//! Without it there is nothing to accept, and a checkout must never be
-//! mistaken for a distribution.
+//! Like the runtime matrix beside it, the tests are `#[ignore]`d and need
+//! `ALAS_W55_PACKAGE_DIR` to name a package assembled by `cargo xtask dist`;
+//! run them with `--include-ignored`. Without it there is nothing to accept,
+//! and a checkout must never be mistaken for a distribution. An ignored test
+//! shows as skipped, and running it without the package fails loudly.
 
 // A failing unwrap or expect in a test binary is the assertion failing.
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
-// Each test reports on the console why it skipped when no assembled package
-// is named, so that a silent pass cannot be mistaken for a licence check that
-// actually ran.
-#![allow(clippy::print_stderr)]
 
 use std::env;
 use std::fs;
@@ -57,14 +54,16 @@ const NEVER_BUNDLED_TOOLS: &[&str] = &[
 /// The manifest field holding the external-tool inventory.
 const TOOL_INVENTORY: &str = "external_tools";
 
-fn package_dir() -> Option<PathBuf> {
-    let path = PathBuf::from(env::var_os(PACKAGE_ENV)?);
+fn package_dir() -> PathBuf {
+    let path = PathBuf::from(env::var_os(PACKAGE_ENV).unwrap_or_else(|| {
+        panic!("set {PACKAGE_ENV} to a package directory assembled by `cargo xtask dist`")
+    }));
     assert!(
         path.is_dir(),
         "{PACKAGE_ENV} does not name a directory: {}",
         path.display()
     );
-    Some(path)
+    path
 }
 
 fn release_manifest(package: &Path) -> Value {
@@ -113,11 +112,9 @@ fn is_executable(path: &Path) -> bool {
 }
 
 #[test]
+#[ignore = "needs ALAS_W55_PACKAGE_DIR: a package directory assembled by `cargo xtask dist`"]
 fn no_package_file_is_a_tool_this_project_may_not_redistribute() {
-    let Some(package) = package_dir() else {
-        eprintln!("skipped: {PACKAGE_ENV} is not set");
-        return;
-    };
+    let package = package_dir();
 
     let offenders: Vec<String> = files(&package)
         .into_iter()
@@ -133,11 +130,9 @@ fn no_package_file_is_a_tool_this_project_may_not_redistribute() {
 }
 
 #[test]
+#[ignore = "needs ALAS_W55_PACKAGE_DIR: a package directory assembled by `cargo xtask dist`"]
 fn the_manifest_records_every_never_bundled_tool_with_a_reason() {
-    let Some(package) = package_dir() else {
-        eprintln!("skipped: {PACKAGE_ENV} is not set");
-        return;
-    };
+    let package = package_dir();
 
     let manifest = release_manifest(&package);
     let tools = manifest
@@ -171,11 +166,9 @@ fn the_manifest_records_every_never_bundled_tool_with_a_reason() {
 /// source archive and licence text; NASTRAN-95 is only ever bundled with its
 /// complete reviewed staging, and is otherwise absent with a recorded reason.
 #[test]
+#[ignore = "needs ALAS_W55_PACKAGE_DIR: a package directory assembled by `cargo xtask dist`"]
 fn a_bundled_tool_carries_its_corresponding_source_and_licence() {
-    let Some(package) = package_dir() else {
-        eprintln!("skipped: {PACKAGE_ENV} is not set");
-        return;
-    };
+    let package = package_dir();
 
     let manifest = release_manifest(&package);
     let tools = manifest
@@ -231,11 +224,9 @@ fn a_bundled_tool_carries_its_corresponding_source_and_licence() {
 /// The AGPL obligation the package itself carries: the corresponding source
 /// snapshot and the notices a recipient audits it with.
 #[test]
+#[ignore = "needs ALAS_W55_PACKAGE_DIR: a package directory assembled by `cargo xtask dist`"]
 fn the_package_ships_its_own_source_and_notices() {
-    let Some(package) = package_dir() else {
-        eprintln!("skipped: {PACKAGE_ENV} is not set");
-        return;
-    };
+    let package = package_dir();
 
     for name in [
         "LICENSE",

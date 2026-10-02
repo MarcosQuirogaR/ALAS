@@ -39,8 +39,6 @@ pub struct CliArgs {
     pub aerodynamic_solver: AerodynamicSolverMode,
     /// Select the optimizer backend: vlm, avl, or both.
     pub optimization_solver: OptimizationSolverMode,
-    /// Override the product optimization algorithm.
-    pub optimization_method: Option<String>,
     /// Suppress verbose terminal outputs.
     pub quiet: bool,
     /// Write the effective configuration to this path and exit.
@@ -65,7 +63,6 @@ impl Default for CliArgs {
             seed: None,
             aerodynamic_solver: AerodynamicSolverMode::Both,
             optimization_solver: OptimizationSolverMode::Vlm,
-            optimization_method: None,
             quiet: false,
             save_config: None,
             download_navdata: false,
@@ -121,22 +118,6 @@ pub fn parse_args(args: &[String]) -> Result<Option<CliArgs>, String> {
                     .ok_or("missing argument for --optimization-solver")?;
                 cli.optimization_solver = val.parse()?;
             }
-            "--optimization-method" => {
-                let val = iter
-                    .next()
-                    .ok_or("missing argument for --optimization-method")?;
-                let accepted = alas_config::OptionSource::OptimizerMethod
-                    .options()
-                    .unwrap_or(&[]);
-                if !accepted.contains(&val.as_str()) {
-                    return Err(format!(
-                        "invalid optimization method '{}'; expected one of {}",
-                        val,
-                        accepted.join(", ")
-                    ));
-                }
-                cli.optimization_method = Some(val.to_owned());
-            }
             "--quiet" => cli.quiet = true,
             "--save-config" => {
                 let val = iter.next().ok_or("missing argument for --save-config")?;
@@ -171,9 +152,6 @@ fn print_help() {
     println!("      --seed <INT>          Random seed for optimization");
     println!("      --aero-solver <MODE>  Result model: vlm, avl, or both");
     println!("      --optimization-solver <MODE>  Optimizer: vlm, avl, or both");
-    println!(
-        "      --optimization-method <METHOD>  scipy_legacy (default) or differential_evolution"
-    );
     println!("      --quiet               Reduce console logging");
     println!("      --save-config <PATH>  Write effective configuration to YAML and exit");
     println!("      --download-navdata    Download missing navigation-data files and exit");
@@ -204,9 +182,6 @@ pub fn load_config(args: &CliArgs) -> Result<AlasConfig, String> {
             .solver
             .set_seed(seed)
             .map_err(|error| error.to_string())?;
-    }
-    if let Some(method) = &args.optimization_method {
-        config.optimizer.solver.method = method.clone();
     }
     if args.no_mission {
         config.mission.enabled = false;

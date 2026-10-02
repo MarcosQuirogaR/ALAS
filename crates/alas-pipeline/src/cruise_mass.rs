@@ -9,14 +9,8 @@
 //! solution, the body-attitude window and the optimizer residuals, and the
 //! trimmed design point (`trim_ih_deg`, `geometric_body_alpha_deg`) stays
 //! there. An aircraft nonetheless cruises lighter, so the reported cruise CL
-//! and L/D, and the L/D a Breguet payload-range corner flies at, are moved to
-//! the mid-cruise mass along the analysed polar.
-//!
-//! One mass basis serves both: the Breguet integral runs from the takeoff mass
-//! to the takeoff mass less the fuel, and the mid-cruise mass is the mean of
-//! those two endpoints. All of the fuel is treated as burned in cruise; no
-//! climb, taxi or reserve fraction is held back here. Reserves are deducted
-//! later by the payload-range solver, not by this module.
+//! and L/D are moved to the mid-cruise mass along the analysed polar: the
+//! mean of the takeoff mass and the takeoff mass less the cruise fuel.
 //!
 //! Units: masses kg, dynamic pressure Pa, area m^2, gravity m/s^2; lift and
 //! drag coefficients refer to the report's reference area.
@@ -24,11 +18,7 @@
 use std::collections::HashMap;
 
 use alas_aero::analysis::PolarSweep;
-use alas_atmo::Atmosphere;
-use alas_config::AlasConfig;
 use alas_mass::breakdown::{OEW_KEYS, PAYLOAD};
-
-use crate::full_analysis::AnalysisReport;
 
 /// Level-flight lift coefficient `CL = m g / (q S)` at an arbitrary mass, for
 /// gravity `gravity_m_s2` (m/s^2), dynamic pressure `q_pa` (Pa) and reference
@@ -215,123 +205,6 @@ pub fn cruise_point_at_cl(
 pub fn zero_fuel_mass_kg(component_masses: &HashMap<String, f64>) -> f64 {
     let mass = |key: &str| component_masses.get(key).copied().unwrap_or(0.0);
     OEW_KEYS.iter().map(|key| mass(key)).sum::<f64>() + mass(PAYLOAD)
-}
-
-/// The L/D a payload-range corner flies at, with the lift coefficient it was
-/// evaluated at and whether the polar had to be clamped.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct CornerLOverD {
-    /// Lift-to-drag ratio on the caller's basis.
-    pub l_over_d: f64,
-    /// Mid-cruise lift coefficient of the corner.
-    pub cruise_cl: f64,
-    /// Whether the corner's lift coefficient lay outside the polar.
-    pub clamped: bool,
-}
-
-/// The cruise condition a report is flown at: dynamic pressure, Pa.
-fn cruise_dynamic_pressure_pa(config: &AlasConfig) -> f64 {
-    let requirements = &config.requirements;
-    let atmosphere = Atmosphere::new(requirements.cruise_altitude_m);
-    let tas_m_s = requirements.cruise_mach * atmosphere.speed_of_sound();
-    0.5 * atmosphere.density() * tas_m_s * tas_m_s
-}
-
-/// [`corner_l_over_d`] on explicit inputs.
-///
-/// `anchor` is the reported `(cl, cd, l_over_d)` point, `q_pa` the cruise
-/// dynamic pressure, `gravity_m_s2` gravity and `wing_area_m2` the reference
-/// area. The corner's mid-cruise lift coefficient follows
-/// [`mid_cruise_mass_kg`] and the L/D there follows [`cruise_point_at_cl`];
-/// the ratio to the anchor L/D is applied to `reported_l_over_d`, so a caller
-/// on a different L/D basis keeps it. Any failure keeps `reported_l_over_d`.
-#[allow(clippy::too_many_arguments)]
-pub fn corner_l_over_d_on_polar(
-    polar: &PolarSweep,
-    anchor: (f64, f64, f64),
-    q_pa: f64,
-    gravity_m_s2: f64,
-    wing_area_m2: f64,
-    takeoff_mass_kg: f64,
-    fuel_kg: f64,
-    reported_l_over_d: f64,
-) -> CornerLOverD {
-    let (anchor_cl, anchor_cd, anchor_l_over_d) = anchor;
-    let mid_mass_kg = mid_cruise_mass_kg(takeoff_mass_kg, fuel_kg);
-    let cruise_cl = cruise_cl_at_mass(mid_mass_kg, gravity_m_s2, q_pa, wing_area_m2);
-    let unchanged = CornerLOverD {
-        l_over_d: reported_l_over_d,
-        cruise_cl,
-        clamped: false,
-    };
-    if !cruise_cl.is_finite() || cruise_cl <= 0.0 {
-        return unchanged;
-    }
-    let Some(point) = cruise_point_at_cl(polar, cruise_cl, anchor_cl, anchor_cd) else {
-        return unchanged;
-    };
-    if !(point.l_over_d.is_finite() && anchor_l_over_d.is_finite() && anchor_l_over_d > 0.0) {
-        return unchanged;
-    }
-    CornerLOverD {
-        // Keep the caller's L/D basis when it differs from the anchor.
-        l_over_d: reported_l_over_d * point.l_over_d / anchor_l_over_d,
-        cruise_cl,
-        clamped: point.clamped,
-    }
-}
-
-/// The report's reported cruise point `(cl, cd, l_over_d)`: the trimmed point
-/// when available, otherwise the untrimmed design point.
-fn reported_anchor(report: &AnalysisReport) -> (f64, f64, f64) {
-    report.trimmed_design_point.as_ref().map_or(
-        (
-            report.design_point.cl,
-            report.design_point.cd,
-            report.design_point.l_over_d,
-        ),
-        |point| (point.cl, point.cd, point.l_over_d),
-    )
-}
-
-/// [`corner_l_over_d`] with the lift coefficient and polar-clamp flag.
-pub fn corner_l_over_d_evaluation(
-    config: &AlasConfig,
-    report: &AnalysisReport,
-    takeoff_mass_kg: f64,
-    fuel_kg: f64,
-    reported_l_over_d: f64,
-) -> CornerLOverD {
-    corner_l_over_d_on_polar(
-        &report.polar,
-        reported_anchor(report),
-        cruise_dynamic_pressure_pa(config),
-        config.requirements.gravity_m_s2,
-        report.airplane.s_ref,
-        takeoff_mass_kg,
-        fuel_kg,
-        reported_l_over_d,
-    )
-}
-
-/// The L/D a payload-range corner flies at: the reported cruise point moved
-/// to the corner's mid-cruise lift coefficient along the analysed polar, with
-/// the reported point's trim-drag increment.
-///
-/// `takeoff_mass_kg` is the corner's takeoff mass and `fuel_kg` the fuel its
-/// Breguet integral burns, so the mid-cruise mass is `takeoff - fuel / 2`
-/// (see [`mid_cruise_mass_kg`]). The lift coefficient uses the report's cruise
-/// condition and reference area. A lift coefficient outside the polar is
-/// clamped to the polar's end values; [`corner_l_over_d_evaluation`] exposes
-/// that flag.
-pub fn corner_l_over_d(
-    config: &AlasConfig,
-    report: &AnalysisReport,
-    takeoff_mass_kg: f64,
-    fuel_kg: f64,
-    reported_l_over_d: f64,
-) -> f64 {
-    corner_l_over_d_evaluation(config, report, takeoff_mass_kg, fuel_kg, reported_l_over_d).l_over_d
 }
 
 #[cfg(test)]

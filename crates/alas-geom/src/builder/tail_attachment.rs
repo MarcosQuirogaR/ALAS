@@ -16,8 +16,9 @@ pub(super) fn root(g: &EmpennageConfig, dv: &DesignVector, contract: GeometryCon
             < 1e-8
         && (g.hstab_z_m - g.vstab_z_m - g.vstab_tip_le_m.2).abs() < 1e-8;
     if contract == GeometryContract::Product && attached {
-        x += g.vstab_tip_le_m.0 * (dv.tail_scale - 1.0);
-        z += g.vstab_tip_le_m.2 * (dv.tail_scale - 1.0);
+        let fin_scale = dv.tail_scale * g.vstab_scale_ratio;
+        x += g.vstab_tip_le_m.0 * (fin_scale - 1.0);
+        z += g.vstab_tip_le_m.2 * (fin_scale - 1.0);
     }
     [x, 0.0, z]
 }

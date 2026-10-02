@@ -48,8 +48,9 @@ pub(super) fn show(state: &AppState, ui: &mut Ui) {
         ));
     let Some(diagnostics) = current(state) else {
         let (status, help) = if search_ran(state) {
-            // The classic SciPy-compatible profile has no lifecycle record;
-            // saying so is not the same as reporting zero scan or poll work.
+            // A result with no lifecycle record (for example one saved by an
+            // earlier build) is not the same as a search that reported zero
+            // scan or poll work.
             (
                 tr("No diagnostics reported"),
                 tr("This run's search method reports no diagnostics."),

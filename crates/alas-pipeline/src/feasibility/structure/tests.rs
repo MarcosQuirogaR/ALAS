@@ -57,7 +57,7 @@ fn valid_optimization() -> alas_opt::OptimizationResult {
         history: Default::default(),
         wall_time_s: 0.0,
         method: "differential_evolution".to_owned(),
-        strategy: "best1bin".to_owned(),
+        strategy: "lshade_eps_de".to_owned(),
         termination: "converged".to_owned(),
         pareto_front: Vec::new(),
         search_diagnostics: None,

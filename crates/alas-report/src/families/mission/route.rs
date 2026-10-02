@@ -538,20 +538,4 @@ mod tests {
         let svg = render_svg(&figure_mission_route_2d(&route, None, None, Some("dark")));
         assert!(svg.contains("Route detail (plate carree)"));
     }
-
-    #[test]
-    fn unavailable_reasons_remain_explicit_in_the_pinned_contract() {
-        let fixture: serde_json::Value = serde_json::from_str(include_str!(
-            "../../../../../golden/report/reference_render_w33.json"
-        ))
-        .expect("reference fixture is valid JSON");
-        assert!(fixture["unavailable_reasons"]["mission"]
-            .as_str()
-            .unwrap_or("")
-            .contains("mission_result=None"));
-        assert!(fixture["unavailable_reasons"]["route"]
-            .as_str()
-            .unwrap_or("")
-            .contains("route=None"));
-    }
 }

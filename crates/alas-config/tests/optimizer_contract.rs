@@ -6,17 +6,14 @@
 use alas_config::{validate, AlasConfig, Severity};
 
 #[test]
-fn the_serialized_default_selects_the_python_compatible_profile_explicitly(
+fn the_serialized_default_selects_the_product_search_and_has_no_strategy(
 ) -> Result<(), serde_json::Error> {
     let value = serde_json::to_value(AlasConfig::default())?;
     assert_eq!(
         value["optimizer"]["solver"]["method"],
-        serde_json::json!("scipy_legacy")
+        serde_json::json!("differential_evolution")
     );
-    assert_eq!(
-        value["optimizer"]["solver"]["strategy"],
-        serde_json::json!("best1bin")
-    );
+    assert!(value["optimizer"]["solver"].get("strategy").is_none());
     Ok(())
 }
 
@@ -25,17 +22,14 @@ fn serialized_optimizer_typos_survive_loading_but_are_blocked_by_public_validati
 ) -> Result<(), serde_json::Error> {
     let mut value = serde_json::to_value(AlasConfig::default())?;
     value["optimizer"]["solver"]["method"] = serde_json::json!("differential_evoluton");
-    value["optimizer"]["solver"]["strategy"] = serde_json::json!("best1bni");
 
     let config: AlasConfig = serde_json::from_value(value)?;
     let issues = validate(&config);
-    for path in ["optimizer.solver.method", "optimizer.solver.strategy"] {
-        assert!(
-            issues
-                .iter()
-                .any(|issue| issue.field_path == path && issue.severity == Severity::Error),
-            "{path} must be a blocking validation issue: {issues:?}"
-        );
-    }
+    assert!(
+        issues.iter().any(|issue| {
+            issue.field_path == "optimizer.solver.method" && issue.severity == Severity::Error
+        }),
+        "the method typo must be a blocking validation issue: {issues:?}"
+    );
     Ok(())
 }

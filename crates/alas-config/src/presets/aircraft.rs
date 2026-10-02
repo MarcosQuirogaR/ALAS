@@ -5,7 +5,8 @@
 
 use super::speed_schedules::{apply_a320_200_speed_schedule, apply_atr72_600_speed_schedule};
 use super::{
-    CgEnvelopeEvidence, DesignMissionEvidence, PartialDesignMissionEvidence, PlanningCgEnvelope,
+    CgEnvelopeEvidence, DesignMissionEvidence, PartialDesignMissionEvidence,
+    PayloadRangeDesignPoint, PlanningCgEnvelope, PublishedAftCgNoseLoad,
 };
 use crate::{
     DesignRequirements, DesignVector, GeometryConfig, LandingGearConfig, MassModelConfig,
@@ -60,6 +61,10 @@ pub struct CertifiedExitLayout {
 /// Primary-source values against which one preset is validated.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct AircraftReferenceData {
+    /// ICAO Annex 14 aerodrome reference code letter of the type, from its
+    /// wingspan against Table 1-1. Bounds the span of a reference
+    /// adaptation.
+    pub aerodrome_reference_code: Option<crate::AerodromeReferenceCode>,
     /// Maximum ramp weight.
     pub mrw_kg: Option<f64>,
     /// Maximum takeoff weight.
@@ -88,6 +93,8 @@ pub struct AircraftReferenceData {
     pub design_mission_evidence: DesignMissionEvidence,
     /// Relevant public range/mission material that is not a complete mission.
     pub partial_design_mission_evidence: Vec<PartialDesignMissionEvidence>,
+    /// Charted design range and payload the takeoff-mass design modes close on.
+    pub design_point: Option<PayloadRangeDesignPoint>,
     /// What kind of CG evidence is publicly available.
     pub cg_evidence: CgEnvelopeEvidence,
     /// Published planning curve, when the source provides one.
@@ -95,6 +102,10 @@ pub struct AircraftReferenceData {
     /// This is deliberately absent for presets whose type-certificate source
     /// delegates the limits to the AFM/WBM.
     pub planning_cg_envelope: Option<PlanningCgEnvelope>,
+    /// Static gear-load split the airport-planning document tabulates at the
+    /// most-aft CG; it sets the ground minimum nose-gear load in place of the
+    /// class default (see [`PublishedAftCgNoseLoad`]).
+    pub aft_cg_nose_load: Option<PublishedAftCgNoseLoad>,
     /// Revision-locked primary documents supporting this record.
     pub sources: Vec<&'static str>,
 }

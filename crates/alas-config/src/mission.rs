@@ -18,7 +18,8 @@
 mod profile;
 
 pub use profile::{
-    resolve_true_airspeed_m_s, MissionProfileConfig, SpeedReference, CAS_SPEED_SUBDIVISIONS,
+    resolve_true_airspeed_m_s, CruiseAltitudePolicy, MissionProfileConfig, SpeedReference,
+    CAS_SPEED_SUBDIVISIONS,
 };
 
 use serde::{Deserialize, Serialize};

@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-use super::menus::ALAS_DOCUMENTATION_URL;
 use super::AlasApp;
 use crate::state::{AppState, Language};
 use crate::view_controls::{
@@ -67,11 +66,6 @@ fn explicit_state_constructor_activates_the_selected_walkthrough_language() {
 
     assert_eq!(alas_i18n::get_language(), "es");
     alas_i18n::set_language(Some("en"));
-}
-
-#[test]
-fn documentation_menu_target_is_the_official_alas_docs_url() {
-    assert_eq!(ALAS_DOCUMENTATION_URL, "https://alas.uvigo.es/docs/");
 }
 
 #[test]

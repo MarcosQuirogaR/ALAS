@@ -82,7 +82,9 @@ pub struct PhysicalCgLimitsInput {
     /// Tail-scrape angle at the main gear, degrees, when the fuselage
     /// lower-contour geometry could place one.
     pub scrape_angle_deg: Option<f64>,
-    /// Minimum nose-load fraction of current weight for steering authority.
+    /// Minimum nose-load fraction of this state's weight: the steering
+    /// minimum, raised near the tabulated weight by a published main-gear
+    /// load limit (`alas_config::PublishedAftCgNoseLoad`).
     pub pct_load_nlg_min: f64,
     /// Maximum nose-load fraction of current weight for handling.
     pub pct_load_nlg_max_handling: f64,

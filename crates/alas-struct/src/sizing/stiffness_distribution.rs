@@ -36,6 +36,16 @@ pub(super) fn allocate(
     target_slope: f64,
 ) -> bool {
     let count = floor.y_stations.len();
+    // The budget gates the 1 g flight shape (see `crate::feasibility`), so the
+    // compliance the stiffness is bought for is that case's, not the ultimate
+    // manoeuvre's.
+    let Some(flight_shape) = response
+        .load_cases
+        .iter()
+        .find(|case| case.name == crate::feasibility::FLIGHT_SHAPE_CASE)
+    else {
+        return false;
+    };
     let width_fractions: Vec<f64> = floor
         .spars
         .iter()
@@ -60,11 +70,7 @@ pub(super) fn allocate(
         .map(|i| super::arc_mass::spar_stretches(wsg, floor, i).0)
         .collect();
     for j in 0..count {
-        moment[j] = response
-            .load_cases
-            .iter()
-            .map(|case| case.moment_nm[j].abs())
-            .fold(0.0_f64, f64::max);
+        moment[j] = flight_shape.moment_nm.get(j).map_or(0.0, |m| m.abs());
         let current_cap_ei: f64 = sizing
             .spars
             .iter()

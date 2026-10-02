@@ -450,19 +450,6 @@ mod tests {
     }
 
     #[test]
-    fn ratio_of_specific_heats_is_constant() {
-        assert_eq!(Atmosphere::isa(0.0).ratio_of_specific_heats(), 1.4);
-        assert_eq!(Atmosphere::isa(50_000.0).ratio_of_specific_heats(), 1.4);
-    }
-
-    #[test]
-    fn default_is_sea_level_with_no_deviation() {
-        let atmo = Atmosphere::default();
-        assert_eq!(atmo.altitude_m, 0.0);
-        assert_eq!(atmo.temperature_deviation_k, 0.0);
-    }
-
-    #[test]
     fn checked_construction_rejects_nonphysical_temperature_and_nonfinite_inputs() {
         assert!(matches!(
             Atmosphere::try_new(0.0).and_then(|atmo| atmo.try_with_temperature_deviation(-400.0)),

@@ -10,9 +10,10 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use alas_config::{AlasConfig, DesignMode, FuelScheme};
+use alas_mass::dispatch::{solve_dispatch, DispatchLimits, DispatchStatus};
 use alas_pipeline::quick_analysis::band::{classify_band, design_mission_band_check, BandStatus};
-use alas_pipeline::quick_analysis::corners::{breguet_fallback, CornerMasses, RangeBasis};
-use alas_pipeline::quick_analysis::payload_range_corners;
+use alas_pipeline::quick_analysis::corners::RangeBasis;
+use alas_pipeline::quick_analysis::{payload_range_corners, report_oew_kg};
 use alas_pipeline::{DesignPipeline, PipelineOptions, PipelineResult, RunEnvironment};
 use alas_report::families::performance;
 
@@ -91,23 +92,45 @@ fn the_chart_and_quick_analysis_agree_and_reserves_shorten_the_range() {
     }
 }
 
+/// Along a line of constant payload the takeoff mass the fuel policy
+/// requires grows with range: every further metre burns fuel, and the fuel
+/// carried for it is itself carried, so dTOW/dR > 0 on the report's model.
 #[test]
-fn the_fallback_is_labelled_and_carries_no_reserves() {
+fn the_required_takeoff_mass_grows_with_range() {
     let result = a320();
     let report = result.baseline_analysis.as_ref().unwrap();
     let config = &result.config;
-    let chart = performance::payload_range_data(report, config).unwrap();
-    let masses = CornerMasses {
-        mtow_kg: chart.mtow_kg,
-        oew_kg: chart.oew_kg,
-        max_payload_kg: chart.points[0].payload_kg,
-        tank_capacity_kg: chart.fuel_capacity_kg,
+    let model = alas_pipeline::fuel_model::report_mission_model(config, report).unwrap();
+    let zero_fuel_mass_kg = report_oew_kg(report) + 15_000.0;
+    let limits = DispatchLimits {
+        mtow_kg: 2.0 * config.requirements.mtow_kg,
+        mzfw_kg: None,
+        mlw_kg: None,
+        usable_capacity_kg: None,
     };
-    let fallback = breguet_fallback(config, report, &masses, "test").unwrap();
-    assert_eq!(fallback.basis, RangeBasis::BreguetNoReserves);
-    assert!(fallback.note.starts_with("NO RESERVES"));
-    assert_eq!(fallback.reserve_fuel_kg, [0.0; 4]);
-    assert!(fallback.range_m[3] > chart.points[3].range_nm * NMI);
+    let mut previous_kg = zero_fuel_mass_kg;
+    for range_nmi in [300.0, 800.0, 1_300.0, 1_800.0, 2_300.0, 2_800.0] {
+        let solution = solve_dispatch(
+            zero_fuel_mass_kg,
+            range_nmi * NMI,
+            &config.fuel_policy,
+            &model,
+            &limits,
+            50,
+            0.01,
+        );
+        assert_eq!(
+            solution.status,
+            DispatchStatus::Converged,
+            "{range_nmi} nmi"
+        );
+        assert!(
+            solution.takeoff_mass_kg > previous_kg,
+            "{range_nmi} nmi: {} kg after {previous_kg} kg",
+            solution.takeoff_mass_kg
+        );
+        previous_kg = solution.takeoff_mass_kg;
+    }
 }
 
 #[test]

@@ -3,6 +3,19 @@
 
 use super::*;
 
+/// Active-limit label of a rating, identical to `format!("PW127M {rating:?}")`
+/// without formatting per call.
+pub(super) fn rating_limit_name(rating: Pw127mRating) -> &'static str {
+    match rating {
+        Pw127mRating::NormalTakeoff => "PW127M NormalTakeoff",
+        Pw127mRating::MaximumTakeoffReserve => "PW127M MaximumTakeoffReserve",
+        Pw127mRating::MaximumContinuous => "PW127M MaximumContinuous",
+        Pw127mRating::MaximumClimb => "PW127M MaximumClimb",
+        Pw127mRating::MaximumCruise => "PW127M MaximumCruise",
+        Pw127mRating::FlightIdleSurrogate => "PW127M FlightIdleSurrogate",
+    }
+}
+
 pub(super) const PROVENANCE: &str = "PW127M take-off/continuous ratings and flat-rating temperatures (take-off to 39 C, maximum continuous to 48 C): EASA TCDS IM.E.041 section 5; ATR 72-600 climb/cruise ratings and 568F-1 diameter: ATR manufacturer factsheet; rated shaft power is flat down to the density of sea-level pressure at the flat-rating temperature and lapses as (rho/rho_corner)^0.728 below it (Nita 2008 eq. 3.5.11, PW120 maximum-cruise chart fit), floored at 0.15, a class relation rather than an OEM engine deck; fuel flow is shaft power times a class PSFC of 0.2945 kg/kWh at 249.65 K (measured PW120A, Majeed 2009 Tab. 3.3) scaled as sqrt(T/T_ref), flat in power over the sourced 46-100 percent band and held flat below it as an unsourced assumption; ATR's 762 kg/h maximum-cruise flow is a validation point, not a calibration anchor; propeller coefficients: generic six-blade surrogate (not OEM 568F data), bounded by one-dimensional actuator-disk momentum theory evaluated on the blade-efficiency share of shaft power rather than on the whole of it, so no operating point sits on the loss-free ideal bound; blade efficiency blends the 0.70 static figure of merit (class preliminary-design value, 0.65-0.80 band) into a declared forward-flight 0.86, the conservative end of the 0.86-0.91 band that NASA TM-83458 p.8 interpolation and Nita 2008 Table 3.4 (Scholz chart read for the ATR 72) agree on; the blend shape between the two ends is a surrogate and the resulting cruise efficiency carries about -0/+6 percent; propulsive efficiency is additionally capped at 0.88 as a guard; flight-idle propeller force is the neutral zero-force hypothesis because no OEM idle/windmilling map is available";
 
 /// Technology-neutral adapter for the two-engine ATR 72 PW127M/568F installation.
@@ -128,59 +141,7 @@ impl Atr72TurbopropSystem {
         }
     }
 
-    fn solve_normalized_force_fraction(
-        unit_model: Pw127m568fModel,
-        condition: TurbopropCondition,
-        rating: Pw127mRating,
-        mode: TurbopropMode,
-        requested_force_fraction: f64,
-    ) -> Result<f64, PropulsionError> {
-        let output_at = |power_fraction| {
-            unit_model.evaluate(
-                condition,
-                TurbopropCommand {
-                    rating,
-                    power_fraction,
-                    mode,
-                    propeller_speed_rpm: unit_model.governed_propeller_speed_rpm,
-                },
-            )
-        };
-        let maximum = output_at(1.0).map_err(Self::map_error)?.total_thrust_n;
-        let target = requested_force_fraction * maximum;
-        let mut lower = None;
-        for step in 1..=1_000 {
-            let fraction = f64::from(step) / 1_000.0;
-            if let Ok(output) = output_at(fraction) {
-                lower = Some((fraction, output.total_thrust_n));
-                break;
-            }
-        }
-        let (mut low, minimum) = lower.ok_or_else(|| {
-            PropulsionError::OutsideModelDomain(
-                "no governed operating point exists below full rating".to_owned(),
-            )
-        })?;
-        if target < minimum {
-            return Err(PropulsionError::OutsideModelDomain(
-                "requested force is below the lowest governed point; no PW127M flight-idle schedule is available"
-                    .to_owned(),
-            ));
-        }
-        let mut high = 1.0;
-        for _ in 0..60 {
-            let middle = 0.5 * (low + high);
-            let thrust = output_at(middle).map_err(Self::map_error)?.total_thrust_n;
-            if thrust < target {
-                low = middle;
-            } else {
-                high = middle;
-            }
-        }
-        Ok(0.5 * (low + high))
-    }
-
-    fn map_error(error: TurbopropError) -> PropulsionError {
+    pub(super) fn map_error(error: TurbopropError) -> PropulsionError {
         match error {
             TurbopropError::NonFinite(field) => PropulsionError::InvalidInput {
                 field,
@@ -360,10 +321,12 @@ impl PropulsionSystemModel for Atr72TurbopropSystem {
         let mut shaft_power = 0.0;
         let mut torque = 0.0;
         let mut power_residual = 0.0;
+        // Active units share the unit model, flight condition and command, so
+        // one evaluation serves all of them; only their geometry differs.
+        let output = unit_model
+            .evaluate_at_temperature(condition, request.flight.temperature_k, command)
+            .map_err(Self::map_error)?;
         for index in active {
-            let output = unit_model
-                .evaluate_at_temperature(condition, request.flight.temperature_k, command)
-                .map_err(Self::map_error)?;
             let axis = self.installation.thrust_axes_body[index];
             let unit_force = [
                 axis[0] * output.total_thrust_n,
@@ -402,7 +365,7 @@ impl PropulsionSystemModel for Atr72TurbopropSystem {
             rotational_speed_rpm: Some(unit_model.governed_propeller_speed_rpm),
             achieved_demand: request.demand,
             active_limits: vec![ActiveLimit {
-                name: format!("PW127M {rating:?}"),
+                name: rating_limit_name(rating).to_owned(),
                 utilization: reported_utilization,
             }],
             residuals: vec![Residual {

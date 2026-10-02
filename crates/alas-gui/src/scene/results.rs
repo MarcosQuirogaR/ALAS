@@ -30,7 +30,7 @@ use alas_report::families::mission::{
     figure_mission_route_3d, figure_mission_velocities,
 };
 use alas_report::families::optimization::figure_airfoil_comparison;
-use alas_report::families::optimization::figure_optimization_history;
+use alas_report::families::optimization::figure_optimization_history_labelled;
 use alas_report::families::performance::{
     figure_lto_for_airport_at_masses, figure_matching_chart, figure_payload_range,
     figure_vn_diagram,
@@ -160,8 +160,13 @@ pub fn build_result_figure_with_camera(
     let scene = match id {
         "matching_chart" => figure_matching_chart(report, config, Some(theme)),
         "optimization_history" => {
-            let history = selected_optimization_result(state, result)?.history.clone();
-            figure_optimization_history(&history, Some(theme))
+            let optimization = selected_optimization_result(state, result)?;
+            let summary = alas_pipeline::optimizer_summary::OptimizerRunSummary::from_result(
+                optimization,
+                &result.config,
+                result.execution.seed_requested,
+            );
+            figure_optimization_history_labelled(&optimization.history, Some(&summary), Some(theme))
         }
         "design_evolution" => {
             let history = &selected_optimization_result(state, result)?.history;

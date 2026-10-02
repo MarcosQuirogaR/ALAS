@@ -1,476 +1,497 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! The one product search kernel: L-SHADE differential evolution under the
-//! epsilon-constrained restoration method, feasible elites, and an explicit
-//! convergence test.
+//! The refinement kernel: `current-to-pbest/1/bin` differential evolution
+//! with an external archive, midpoint bound repair, linear population size
+//! reduction, and Deb's feasibility rules with an epsilon-level comparison.
 //!
 //! # Basis and citations
 //!
-//! - **L-SHADE**: R. Tanabe and A. S. Fukunaga, "Improving the Search
-//!   Performance of SHADE Using Linear Population Size Reduction," IEEE
-//!   Congress on Evolutionary Computation (CEC) 2014, DOI
-//!   10.1109/CEC.2014.6900380. Supplies the success-history parameter
-//!   adaptation for the mutation factor `F` and crossover rate `CR`
-//!   (weighted Lehmer/arithmetic means into a circular memory of size `H`),
-//!   the `current-to-pbest/1` mutation with an external archive (itself from
-//!   J. Zhang and A. C. Sanderson, "JADE: Adaptive Differential Evolution
-//!   With Optional External Archive," IEEE Trans. Evol. Comput. 13(5), 2009,
-//!   DOI 10.1109/TEVC.2009.2014613), and linear population size reduction
-//!   (LPSR) from an initial population down to a small floor as the
-//!   generation budget is spent.
-//! - **Epsilon-constrained method**: T. Takahama and S. Sakai, "Constrained
-//!   Optimization by the epsilon Constrained Differential Evolution with
-//!   Gradient-Based Mutation and Feasible Elites," CEC 2006, DOI
-//!   10.1109/CEC.2006.1688283, and "Constrained Optimization by the epsilon
-//!   Constrained Differential Evolution with an Archive and Gradient-Based
-//!   Mutation," CEC 2010, DOI 10.1109/CEC.2010.5586484. Supplies the
-//!   epsilon-level comparison between infeasible candidates (two candidates
-//!   within `epsilon` are ranked by objective; otherwise less violation wins)
-//!   and the schedule that decays `epsilon` to exactly zero at a configured
-//!   fraction of the budget, after which the comparison is exactly Deb's
-//!   feasibility rule (K. Deb, "An Efficient Constraint Handling Method for
-//!   Genetic Algorithms," Computer Methods in Applied Mechanics and
-//!   Engineering 186(2-4), 2000).
+//! - **Operator, archive, population reduction**: R. Tanabe and A. S.
+//!   Fukunaga, "Improving the Search Performance of SHADE Using Linear
+//!   Population Size Reduction," IEEE CEC 2014, DOI 10.1109/CEC.2014.6900380
+//!   (L-SHADE): `current-to-pbest/1` with `p = 0.11`, archive `2.6 N`,
+//!   memory size `H = 6`, both memories updated by the weighted Lehmer mean,
+//!   the crossover-rate terminal value, and population reduction linear in
+//!   evaluations. The operator and archive are J. Zhang and A. C. Sanderson,
+//!   "JADE: Adaptive Differential Evolution With Optional External Archive,"
+//!   IEEE Trans. Evol. Comput. 13(5), 2009, DOI 10.1109/TEVC.2009.2014613.
+//! - **Static parameters by default**: R. Tanabe and A. S. Fukunaga,
+//!   "Reviewing and Benchmarking Parameter Control Methods in Differential
+//!   Evolution," IEEE Trans. Cybern. 50(3), 2020, DOI
+//!   10.1109/TCYB.2019.2892735 (arXiv 2010.01035): with `current-to-pbest/1/bin`,
+//!   static `F = 0.5, CR = 0.9` outperformed 24 parameter-control methods
+//!   within `800 D` evaluations. Every budget this product affords in minutes
+//!   is below that, so success-history adaptation is a switch
+//!   ([`Settings::adaptation`]) recommended only above `800 D`.
+//! - **Constraints**: K. Deb, "An Efficient Constraint Handling Method for
+//!   Genetic Algorithms," CMAME 186(2-4), 2000, DOI
+//!   10.1016/S0045-7825(99)00389-8, extended by the candidate tiers of
+//!   [`super::Tier`]; the epsilon-level comparison is T. Takahama and S. Sakai,
+//!   CEC 2006, DOI 10.1109/CEC.2006.1688283, and CEC 2010, DOI
+//!   10.1109/CEC.2010.5586484. No additive penalty enters the comparison.
 //!
-//! Fully feasible candidates always outrank infeasible candidates, even during
-//! epsilon restoration. The reference-conditioned population and finite-score
-//! barriers are product safeguards, not a literal benchmark reproduction.
+//! The epsilon schedule `epsilon(0)` = the 0.2 quantile of the initial
+//! violations, decaying as `(1 - n / Tc)^5` to exactly zero at `Tc = 0.2 B`
+//! evaluations, is an engineering choice for this product: the values the
+//! cited papers tabulate were not verified against the primary text.
 //!
-//! Population sizing, memory size, archive rate and the epsilon schedule's
-//! control fraction below are the values commonly reported for these methods
-//! in the cited literature; they are engineering defaults for this product,
-//! not a reproduction of either paper's own benchmark tuning, and are not
-//! independently re-derived here.
+//! Two deliberate deviations from Takahama and Sakai, both engineering
+//! choices:
 //!
-//! # What "unphysical results impossible" means in this module
+//! - In their comparison an epsilon-feasible candidate (violation within
+//!   epsilon) ranks with the feasible ones by objective alone. Here a
+//!   strictly feasible candidate always ranks ahead of an epsilon-feasible
+//!   one ([`ops::epsilon_key`]); epsilon only lets closed-infeasible
+//!   candidates compete with each other by objective. A design with any
+//!   violated hard constraint can therefore never displace a feasible parent.
+//! - `epsilon(0)` is taken from the closed-infeasible members of the initial
+//!   population only. Not-closed and pre-gate-rejected candidates carry
+//!   barrier violations that are not physical misses, and including them
+//!   would set epsilon from failure sentinels.
 //!
-//! [`ScoredPoint::valid`] and [`ScoredPoint::constraint_violation`] come from
-//! the caller's full coupled evaluation (see [`crate::mdo`]: geometry and
-//! mass build, mission sizing closure, trim/CG closure, then the typed
-//! residual table `mdo::residuals` folds into this scalar violation). The
-//! epsilon-relaxed comparison used while searching is deliberately never the
-//! authority on what the run reports: [`Outcome::winner`] is tracked as the
-//! strict [`ScoredPoint::feasibility_key`] minimum over every candidate this
-//! run ever evaluated (initial population and every trial), independent of
-//! which individuals epsilon-relaxation let survive inside the live
-//! population. So relaxing the constraint boundary to escape a local optimum
-//! can change what the search explores; it can never change what it reports
-//! as feasible. A caller that finds `winner.valid == false` has firm
-//! evidence that no evaluated candidate satisfied every hard constraint, not
-//! a candidate that merely stopped being tracked. This statement is conditional
-//! on the evaluator's validity policy and model: no search algorithm can prove
-//! physical validity beyond the constraints its evaluator actually checks.
+//! When adaptation is on, the success weights of the memory update are the
+//! relative improvement of each parent, with a tier change weighted 1
+//! ([`ops::selection_improvement`]), where L-SHADE uses the absolute
+//! objective change; the relative form lets a wholly infeasible population
+//! still learn. Adaptation is off by default.
 //!
-//! # Determinism and cancellation
+//! # What the run reports
 //!
-//! One generation is built as `population_size` trial vectors, in fixed
-//! index order, entirely from the seeded RNG stream, before any of them is
-//! evaluated; the whole generation is then evaluated as one batch through
-//! `evaluate_batch`. Nothing about which points are evaluated or in what
-//! order depends on `solver.workers`; only how the batch is spread across
-//! threads does (see `differential_evolution::optimizer::scan::BatchEvaluator`). A
-//! seeded run therefore replays bit-identically at any worker count.
+//! [`Outcome::winner`] is the strict [`ScoredPoint::feasibility_key`] minimum
+//! over every candidate evaluated, never the epsilon-relaxed survivor, so
+//! relaxing the comparison changes what is explored and never what is
+//! reported as feasible.
 //!
-//! The cancellation flag is checked before every block of
-//! [`Settings::block_size`] candidates (the resolved worker count), exactly
-//! like the staged scan's own blocks (`search::staged`): blocks are taken in
-//! index order and their scores concatenated in that order, so an
-//! uncancelled run is identical to evaluating the generation as one batch,
-//! and the bound on stopping is the one parallel block in flight rather than
-//! the rest of the generation. With one worker that is one candidate. A
-//! generation cut short by a request applies no selection; its completed
-//! trials are fully scored, so they still compete for the winner. Work
-//! already produced is never discarded: a cancelled run returns the best
-//! point analysed, exactly as an uncancelled one does.
+//! # Determinism, budget and time
+//!
+//! A generation's trials are built in index order from the seeded stream
+//! before any is evaluated, and the generation is evaluated as one batch
+//! whose scores come back in index order, so a seeded run that stops on its
+//! evaluation budget replays bit-identically at any worker count. Every
+//! score that passes the design-vector pre-gate counts against
+//! [`Settings::max_evaluations`], which also sets the population schedule; a
+//! generation never requests more trials than the budget has left, so the
+//! budget is never exceeded. Pre-gate rejections count against
+//! [`Settings::max_rejects`], checked between generations, so the cap is
+//! overrun by at most one generation. The wall-clock limit is checked only
+//! at generation boundaries, the first right after the initial population,
+//! by projecting the last batch's wall time; the initial population itself
+//! is never interrupted. A time-limited stop therefore depends on machine
+//! speed and worker count. Such a run records its evaluation count, and the
+//! same configuration with [`Settings::stop_after`] set to that count and no
+//! time limit replays it bit-identically at any worker count: the replay
+//! stops at the first generation boundary that reaches the count, and the
+//! schedule depends on the configured budget, never on the clock or on
+//! where the run stopped.
 
+use std::time::{Duration, Instant};
+
+use super::rng::SearchRng;
+use super::{latin_hypercube, EvaluateBatch, ScoredPoint, Tier};
 use crate::cancellation::{CancelPhase, CancelScope};
-use crate::python_rng::RandomState;
-
-use super::{EvaluateBatch, ScoredPoint};
 
 #[path = "lshade_de_ops.rs"]
 mod ops;
 use ops::{
-    choose_distinct, choose_from_union, choose_pbest, conditioned_population, epsilon_key,
-    epsilon_schedule, linear_reduced_size, min_by_feasibility, normalized_spread, push_archive,
-    quantile, reduce_population, relative_change, relative_change_signed, repair_midpoint,
-    sample_cr, sample_f, selection_improvement, trim_archive, unevaluated, update_memory,
+    choose_distinct, choose_from_union, choose_pbest, epsilon_key, epsilon_schedule, lehmer_mean,
+    linear_reduced_size, normalized_spread, push_archive, reduce_population, relative_change,
+    repair_midpoint, sample_cr, sample_f, selection_improvement, stagnation_stops, unevaluated,
 };
 
-/// Smallest population L-SHADE's linear reduction may shrink to. Below four,
-/// `current-to-pbest/1` cannot draw a pbest and two distinct difference
-/// vectors from the population without touching the target itself.
-const MIN_POPULATION: usize = 4;
-/// Success-history memory slots (`H` in the cited papers).
+/// Floor of the population reduction. The L-SHADE paper uses four; eight
+/// keeps late generations wide enough to occupy a multi-core batch.
+const MIN_POPULATION: usize = 8;
+/// Below four members `current-to-pbest/1` cannot draw a target, a pbest and
+/// two distinct difference vectors, so no generation runs.
+const OPERATOR_MIN_POPULATION: usize = 4;
+/// Success-history memory slots (`H`).
 const MEMORY_SIZE: usize = 6;
 /// Archive capacity as a multiple of the live population.
 const ARCHIVE_RATE: f64 = 2.6;
-/// Upper bound of the per-trial `pbest` pool fraction; the lower bound is
-/// `2 / population_size` each generation, so the pool is never smaller than
-/// two individuals.
-const P_BEST_MAX_FRACTION: f64 = 0.2;
-/// Quantile of the initial population's constraint violation used as
-/// `epsilon(0)`: the boundary starts at "about as tolerant as the worse four
-///-fifths of a fresh random sample," not at zero.
-const EPSILON_INITIAL_QUANTILE: f64 = 0.2;
-/// Fraction of the generation budget over which `epsilon` decays to zero.
-const EPSILON_CONTROL_FRACTION: f64 = 0.2;
-/// Exponent of the epsilon decay curve.
-const EPSILON_DECAY_EXPONENT: f64 = 5.0;
+/// Fraction of the population the pbest donor is drawn from.
+const P_BEST_FRACTION: f64 = 0.11;
+/// Static mutation factor and crossover rate.
+const STATIC_F: f64 = 0.5;
+const STATIC_CR: f64 = 0.9;
 /// Initial success-history memory value for both `F` and `CR`.
 const INITIAL_MEMORY: f64 = 0.5;
+/// Quantile of the initial violations used as `epsilon(0)`.
+const EPSILON_INITIAL_QUANTILE: f64 = 0.2;
+/// Fraction of the evaluation budget over which epsilon decays to zero.
+const EPSILON_CONTROL_FRACTION: f64 = 0.2;
+/// Relative improvement of the feasible best below which a generation does
+/// not count as progress (engineering estimate: well below the 0.1 % a
+/// conceptual fuel comparison can resolve, above round-off).
+pub(crate) const IMPROVEMENT_TOLERANCE: f64 = 1.0e-4;
 
-/// Resolved settings for one L-SHADE run.
+/// Resolved settings for one refinement run.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct Settings {
-    /// Initial population size, before linear reduction.
+    /// The evaluation budget `B`: sets the population and epsilon schedules.
+    pub(crate) max_evaluations: usize,
+    /// Evaluations after which the run stops; `max_evaluations` unless a
+    /// time-limited run is being replayed.
+    pub(crate) stop_after: usize,
+    /// Initial population `N_init`.
     pub(crate) population: usize,
-    /// Maximum number of generations.
-    pub(crate) generations: usize,
-    /// The seed the whole search replays from.
     pub(crate) seed: u64,
-    /// Normalized design-space spread, and relative improvement of the best
-    /// feasible cost, below which the population counts as converged.
+    /// Success-history adaptation of `F` and `CR` instead of the static pair.
+    pub(crate) adaptation: bool,
+    /// Normalized design-space spread below which a stagnated population
+    /// counts as converged.
     pub(crate) spread_tolerance: f64,
-    /// Consecutive generations the best feasible cost must fail to improve
-    /// by more than `spread_tolerance` before a converged spread is honoured.
+    /// Generations without an improvement above [`IMPROVEMENT_TOLERANCE`]
+    /// before the run stops as stagnated or converged; the effective window
+    /// and the budget share spent first are [`ops::stagnation_stops`].
     pub(crate) stagnation_generations: usize,
-    /// Candidates evaluated between two cancellation checks (at least one).
-    /// Never changes which points are evaluated or their order.
-    pub(crate) block_size: usize,
-    /// Initial local radius in bound-normalized coordinates; a quarter of
-    /// the population still explores the full envelope when this is enabled.
-    pub(crate) seed_radius: Option<f64>,
+    /// Wall-clock limit, checked between generations only.
+    pub(crate) time_limit: Option<Duration>,
+    /// Evaluations kept back for feasibility restoration while no feasible
+    /// design has been found.
+    pub(crate) infeasible_reserve: usize,
+    /// Pre-gate rejections after which no further generation starts.
+    pub(crate) max_rejects: usize,
 }
 
-/// Evaluate `points` in index order, one block of `block_size` at a time,
-/// checking the flag before every block after the first (the caller has
-/// just checked before the first). Returns the scores of the blocks that
-/// ran and whether a request cut the batch short.
-fn evaluate_in_blocks(
-    points: &[Vec<f64>],
-    block_size: usize,
-    scope: &CancelScope<'_>,
-    evaluate_batch: &mut EvaluateBatch<'_>,
-) -> (Vec<ScoredPoint>, bool) {
-    let mut scores = Vec::with_capacity(points.len());
-    for (index, block) in points.chunks(block_size.max(1)).enumerate() {
-        if index > 0 && scope.requested() {
-            scope.work_skipped(format!(
-                "{} of {} candidates in the batch left unanalysed",
-                points.len() - scores.len(),
-                points.len()
-            ));
-            return (scores, true);
+/// Why the run stopped.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Termination {
+    /// Stagnated with the population collapsed below the spread tolerance.
+    Converged,
+    /// The feasible best stopped improving; the population is still spread.
+    Stagnated,
+    EvaluationBudget,
+    TimeBudget,
+    /// The design-vector pre-gate rejected as many candidates as the stage
+    /// allows.
+    PregateExhausted,
+    Cancelled,
+}
+
+impl Termination {
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            Self::Converged => "converged",
+            Self::Stagnated => "stagnated",
+            Self::EvaluationBudget => "evaluation_budget",
+            Self::TimeBudget => "time_budget",
+            Self::PregateExhausted => "pregate_exhausted",
+            Self::Cancelled => crate::differential_evolution::CANCELLED,
         }
-        // The adapter times and counts actual analyses after exact-cache
-        // lookup. Counting requested scores here would inflate evaluation
-        // telemetry for repeated or fixed designs that require no solve.
-        let evaluated = evaluate_batch(block);
-        scores.extend(evaluated.into_iter().map(|mut point| {
-            if !point.cost.is_finite() || !point.constraint_violation.is_finite() {
-                point.valid = false;
-                point.constraint_violation = f64::INFINITY;
-            }
-            point
-        }));
     }
-    // A deep evaluation can acknowledge cancellation inside the final block.
-    // There may be no next block or generation to observe that request.
-    (scores, scope.requested())
 }
 
-/// What one run measured about itself, for [`crate::SearchDiagnostics`] and
-/// the caller's termination label.
+/// What one run measured about itself.
+#[derive(Debug, Clone)]
 pub(crate) struct Outcome {
     pub(crate) winner: ScoredPoint,
-    /// Whether the run stopped on the caller's cancellation flag.
-    pub(crate) cancelled: bool,
-    /// Whether the population's own convergence test fired. Never true
-    /// unless a feasible design was found: see the module documentation.
-    pub(crate) converged: bool,
-    /// Full generations evaluated (a generation cancelled before its batch
-    /// was dispatched is not counted).
+    /// The first initial member's score: the caller's baseline when it
+    /// passes one first.
+    pub(crate) first_scored: Option<ScoredPoint>,
+    pub(crate) termination: Termination,
     pub(crate) generations_completed: usize,
-    /// Coupled analyses executed (initial population plus every generation's
-    /// batch actually evaluated; the population shrinks, so this is not a
-    /// fixed multiple of the generation count).
+    /// Scores that passed the design-vector pre-gate, initial population
+    /// included: the count the budget bounds.
     pub(crate) evaluations: usize,
-    /// The epsilon-constraint boundary at the last generation evaluated, or
-    /// `epsilon(0)` when no generation ran.
+    /// Scores the pre-gate rejected ([`Tier::PreGateFailed`]).
+    pub(crate) rejected: usize,
+    pub(crate) population_initial: usize,
+    pub(crate) population_final: usize,
     pub(crate) epsilon_final: f64,
     /// Fraction of the final population that was strictly feasible.
     pub(crate) feasible_fraction: f64,
-    /// Objective of the first strictly feasible candidate this run evaluated,
-    /// in chronological order (initial population, then generation by
-    /// generation). `None` when no evaluated candidate was ever feasible.
+    /// Objective of the first feasible candidate, in evaluation order.
     pub(crate) first_feasible_cost: Option<f64>,
-    /// Relative improvement of [`Self::winner`] over
-    /// [`Self::first_feasible_cost`], positive for a cost reduction. `None`
-    /// unless the winner is itself feasible and a first feasible cost was
-    /// recorded.
-    pub(crate) relative_improvement: Option<f64>,
 }
 
-/// Run L-SHADE under the epsilon-constrained method. See the module
-/// documentation for the algorithm, the determinism contract and what
-/// `winner` may report.
+/// Success-history memory, used only when adaptation is enabled.
+struct Memory {
+    f: [f64; MEMORY_SIZE],
+    /// `None` is the terminal value: that slot draws `CR = 0` from then on.
+    cr: [Option<f64>; MEMORY_SIZE],
+    next: usize,
+}
+
+impl Memory {
+    fn draw(&self, rng: &mut SearchRng) -> (f64, f64) {
+        let slot = rng.below(MEMORY_SIZE);
+        (sample_f(self.f[slot], rng), sample_cr(self.cr[slot], rng))
+    }
+
+    /// Weighted Lehmer means of the successful `(F, CR, weight)` triples into
+    /// one slot; nothing changes when no trial succeeded.
+    fn update(&mut self, successes: &[(f64, f64, f64)]) {
+        let Some(f) = lehmer_mean(successes.iter().map(|&(f, _, w)| (f, w))) else {
+            return;
+        };
+        let slot = self.next;
+        self.f[slot] = f.clamp(0.0, 1.0);
+        let all_zero = successes.iter().all(|&(_, cr, _)| cr == 0.0);
+        self.cr[slot] = match self.cr[slot] {
+            Some(_) if !all_zero => lehmer_mean(successes.iter().map(|&(_, cr, w)| (cr, w)))
+                .map(|value| value.clamp(0.0, 1.0)),
+            _ => None,
+        };
+        self.next = (slot + 1) % MEMORY_SIZE;
+    }
+}
+
+/// Run the kernel from `seeds` (repaired into `bounds`, best-first, the
+/// caller's baseline first), topped up by a Latin hypercube to the initial
+/// population. `started` is the stage clock the time limit is measured on.
+///
+/// A trial the design-vector pre-gate rejects is not redrawn. Measured on
+/// the A320-200 box (seed 1, 140 refinement requests): redrawing up to
+/// eight times cut the analyses from 87 to 47, refilling the top-up as well
+/// to 25, with no gain in lane utilization (0.52 against 0.54 at 16
+/// workers), because a generation of at most `N_init` trials, not the
+/// rejects, is what bounds the lanes.
 pub(crate) fn run(
     bounds: &[(f64, f64)],
+    seeds: &[Vec<f64>],
     settings: Settings,
-    initial_design: Option<&[f64]>,
+    started: Instant,
     scope: &CancelScope<'_>,
     evaluate_batch: &mut EvaluateBatch<'_>,
 ) -> Outcome {
-    let dimension = bounds.len();
-    let population_initial = settings.population.max(MIN_POPULATION);
-    let mut rng = RandomState::seed(settings.seed);
+    let budget = settings.max_evaluations.max(1);
+    let stop_after = settings.stop_after.min(budget);
+    let population_initial = settings.population.min(budget);
+    let minimum = MIN_POPULATION.min(population_initial);
+    let mut rng = SearchRng::stream(settings.seed, 2);
+    let mut outcome = Outcome {
+        winner: unevaluated(seeds.first().map_or(&[], Vec::as_slice)),
+        first_scored: None,
+        termination: Termination::EvaluationBudget,
+        generations_completed: 0,
+        evaluations: 0,
+        population_initial,
+        population_final: population_initial,
+        epsilon_final: 0.0,
+        feasible_fraction: 0.0,
+        first_feasible_cost: None,
+        rejected: 0,
+    };
 
     scope.enter(CancelPhase::DeInitialPopulation, 0);
     if scope.requested() {
-        scope.work_skipped("initial population stopped before it started");
-        return Outcome {
-            winner: unevaluated(initial_design.unwrap_or(&[])),
-            cancelled: true,
-            converged: false,
-            generations_completed: 0,
-            evaluations: 0,
-            epsilon_final: 0.0,
-            feasible_fraction: 0.0,
-            first_feasible_cost: None,
-            relative_improvement: None,
-        };
+        scope.work_skipped("refinement stopped before its initial population");
+        outcome.termination = Termination::Cancelled;
+        return outcome;
     }
-
-    let active: Vec<usize> = bounds
-        .iter()
-        .enumerate()
-        .filter_map(|(index, &(lower, upper))| (upper > lower).then_some(index))
-        .collect();
-    let mut population = conditioned_population(
-        bounds,
-        population_initial,
-        initial_design,
-        settings.seed_radius,
-        &mut rng,
-    );
-    let (mut scored, initial_cut) =
-        evaluate_in_blocks(&population, settings.block_size, scope, evaluate_batch);
-    if initial_cut {
-        let first_feasible_cost = scored.iter().find(|p| p.valid).map(|p| p.cost);
-        return Outcome {
-            winner: scored
-                .iter()
-                .min_by_key(|point| point.feasibility_key())
-                .cloned()
-                .unwrap_or_else(|| unevaluated(&population[0])),
-            cancelled: true,
-            converged: false,
-            generations_completed: 0,
-            evaluations: scored.len(),
-            epsilon_final: 0.0,
-            feasible_fraction: 0.0,
-            first_feasible_cost,
-            relative_improvement: None,
-        };
+    if population_initial == 0 {
+        return outcome;
     }
-    debug_assert_eq!(scored.len(), population.len());
+    let mut population: Vec<Vec<f64>> = seeds.iter().take(population_initial).cloned().collect();
+    for point in &mut population {
+        super::clamp_to_bounds(point, bounds);
+    }
+    let top_up = population_initial - population.len();
+    population.extend(latin_hypercube(bounds, top_up, &mut rng));
 
-    let mut best_ever = scored
-        .iter()
-        .min_by_key(|point| point.feasibility_key())
-        .cloned()
-        .unwrap_or_else(|| unevaluated(&population[0]));
-    let mut evaluations = population.len();
-    // The first strictly feasible candidate this run ever evaluated, in
-    // chronological (candidate-index, then generation) order, independent of
-    // the epsilon-relaxed dynamics that decide which candidates stay in the
-    // live population.
-    let mut first_feasible_cost = scored
-        .iter()
-        .find(|point| point.valid)
-        .map(|point| point.cost);
+    let initial_started = Instant::now();
+    let mut scored = evaluate(&population, evaluate_batch);
+    tally(&mut outcome, &scored);
+    outcome.first_scored = scored.first().cloned();
+    for point in &scored {
+        record(&mut outcome, point);
+    }
+    if scope.requested() {
+        outcome.termination = Termination::Cancelled;
+        return outcome;
+    }
 
     let mut violations: Vec<f64> = scored
         .iter()
+        .filter(|point| point.tier == Tier::ClosedInfeasible)
         .map(|point| point.constraint_violation)
-        .filter(|value| value.is_finite() && *value >= 0.0)
         .collect();
     violations.sort_by(f64::total_cmp);
-    let epsilon0 = quantile(&violations, EPSILON_INITIAL_QUANTILE);
-    let control_generations =
-        ((settings.generations as f64) * EPSILON_CONTROL_FRACTION).floor() as usize;
+    let epsilon0 = ops::quantile(&violations, EPSILON_INITIAL_QUANTILE);
+    let control_evaluations = (budget as f64 * EPSILON_CONTROL_FRACTION).floor() as usize;
+    outcome.epsilon_final = epsilon_schedule(epsilon0, outcome.evaluations, control_evaluations);
 
-    let mut memory_f = [INITIAL_MEMORY; MEMORY_SIZE];
-    let mut memory_cr = [INITIAL_MEMORY; MEMORY_SIZE];
-    let mut memory_index = 0usize;
+    let active: Vec<usize> = (0..bounds.len())
+        .filter(|&index| bounds[index].1 > bounds[index].0)
+        .collect();
+    let mut memory = Memory {
+        f: [INITIAL_MEMORY; MEMORY_SIZE],
+        cr: [Some(INITIAL_MEMORY); MEMORY_SIZE],
+        next: 0,
+    };
     let mut archive: Vec<Vec<f64>> = Vec::new();
+    let mut size = population_initial;
+    let mut reference_cost: Option<f64> = outcome.winner.valid().then_some(outcome.winner.cost);
+    let mut stalled = 0usize;
+    // The guard projects the next generation's wall time from the last
+    // batch; before the first generation that batch is the initial
+    // population, at least as large as any generation.
+    let mut last_generation = initial_started.elapsed();
 
-    let mut last_feasible_cost: Option<f64> = best_ever.valid.then_some(best_ever.cost);
-    let mut last_improved_generation: usize = 0;
-    let mut generations_completed = 0usize;
-    let mut cancelled = false;
-    let mut converged = false;
-    let mut epsilon_final = epsilon0;
-    let mut population_size = population_initial;
-
-    for generation in 0..if active.is_empty() {
-        0
-    } else {
-        settings.generations
-    } {
-        scope.enter(CancelPhase::DeGeneration, generation as u64);
-        if scope.requested() {
-            cancelled = true;
-            scope.work_skipped(format!(
-                "generation {generation} stopped before its batch was dispatched"
-            ));
+    while !active.is_empty() && size >= OPERATOR_MIN_POPULATION {
+        if outcome.evaluations >= stop_after {
             break;
         }
+        if outcome.rejected >= settings.max_rejects {
+            outcome.termination = Termination::PregateExhausted;
+            break;
+        }
+        let limit = if outcome.winner.valid() {
+            budget
+        } else {
+            budget.saturating_sub(settings.infeasible_reserve)
+        };
+        let count = size.min(limit.saturating_sub(outcome.evaluations));
+        if count == 0 {
+            break;
+        }
+        if settings
+            .time_limit
+            .is_some_and(|limit| started.elapsed() + last_generation > limit)
+        {
+            outcome.termination = Termination::TimeBudget;
+            break;
+        }
+        let generation = outcome.generations_completed;
+        scope.enter(CancelPhase::DeGeneration, generation as u64);
+        if scope.requested() {
+            scope.work_skipped(format!("generation {generation} stopped before dispatch"));
+            outcome.termination = Termination::Cancelled;
+            break;
+        }
+        let generation_started = Instant::now();
+        let epsilon = epsilon_schedule(epsilon0, outcome.evaluations, control_evaluations);
+        outcome.epsilon_final = epsilon;
 
-        let epsilon_t = epsilon_schedule(epsilon0, generation, control_generations);
-        epsilon_final = epsilon_t;
-
-        let mut trials = Vec::with_capacity(population_size);
-        let mut trial_f = Vec::with_capacity(population_size);
-        let mut trial_cr = Vec::with_capacity(population_size);
-        for target in 0..population_size {
-            let slot = rng.randint(MEMORY_SIZE);
-            let f = sample_f(memory_f[slot], &mut rng);
-            let cr = sample_cr(memory_cr[slot], &mut rng);
-            trial_f.push(f);
-            trial_cr.push(cr);
-
-            let p_min = 2.0 / population_size as f64;
-            let p = rng.uniform(
-                p_min.min(P_BEST_MAX_FRACTION),
-                P_BEST_MAX_FRACTION.max(p_min),
-            );
-            let pbest = choose_pbest(&scored[..population_size], epsilon_t, p, &mut rng);
-            let r1 = choose_distinct(population_size, &[target], &mut rng);
-            let r2 = choose_from_union(population_size, archive.len(), &[target, r1], &mut rng);
-
-            let base = &population[target];
-            let pbest_vec = &population[pbest];
-            let r1_vec = &population[r1];
-            let r2_vec: &[f64] = if r2 < population_size {
-                &population[r2]
+        let mut trials = Vec::with_capacity(count);
+        let mut parameters = Vec::with_capacity(count);
+        for target in 0..count {
+            let (f, cr) = if settings.adaptation {
+                memory.draw(&mut rng)
             } else {
-                &archive[r2 - population_size]
+                (STATIC_F, STATIC_CR)
             };
-
-            let mut mutant = vec![0.0; dimension];
-            for j in 0..dimension {
-                let value = base[j] + f * (pbest_vec[j] - base[j]) + f * (r1_vec[j] - r2_vec[j]);
-                mutant[j] = repair_midpoint(value, base[j], bounds[j]);
-            }
-
-            // A locked coordinate cannot supply binomial crossover's forced
-            // mutation; drawing from it spends a full coupled analysis on
-            // an unchanged parent in reference/adaptation studies.
-            let forced = active[rng.randint(active.len())];
+            parameters.push((f, cr));
+            let pbest = choose_pbest(&scored[..size], epsilon, P_BEST_FRACTION, &mut rng);
+            let r1 = choose_distinct(size, &[target], &mut rng);
+            let r2 = choose_from_union(size, archive.len(), &[target, r1], &mut rng);
+            let r2_vec = population.get(r2).unwrap_or_else(|| &archive[r2 - size]);
+            let base = &population[target];
+            let forced = active[rng.below(active.len())];
             let mut trial = base.clone();
-            for j in 0..dimension {
-                if j == forced || rng.uniform(0.0, 1.0) < cr {
-                    trial[j] = mutant[j];
+            for j in 0..bounds.len() {
+                if j == forced || rng.unit() < cr {
+                    let value = base[j]
+                        + f * (population[pbest][j] - base[j])
+                        + f * (population[r1][j] - r2_vec[j]);
+                    trial[j] = repair_midpoint(value, base[j], bounds[j]);
                 }
             }
             trials.push(trial);
         }
 
-        let (trial_scores, cut) =
-            evaluate_in_blocks(&trials, settings.block_size, scope, evaluate_batch);
-        evaluations += trial_scores.len();
-        if cut {
-            for trial_point in trial_scores {
-                if first_feasible_cost.is_none() && trial_point.valid {
-                    first_feasible_cost = Some(trial_point.cost);
-                }
-                best_ever = min_by_feasibility(best_ever, trial_point);
-            }
-            cancelled = true;
+        let trial_scores = evaluate(&trials, evaluate_batch);
+        tally(&mut outcome, &trial_scores);
+        for point in &trial_scores {
+            record(&mut outcome, point);
+        }
+        if scope.requested() {
+            outcome.termination = Termination::Cancelled;
             break;
         }
-        generations_completed += 1;
+        outcome.generations_completed += 1;
 
-        let mut successes: Vec<(f64, f64, f64)> = Vec::new();
-        for target in 0..population_size {
-            let trial_point = &trial_scores[target];
-            best_ever = min_by_feasibility(best_ever, trial_point.clone());
-            if first_feasible_cost.is_none() && trial_point.valid {
-                first_feasible_cost = Some(trial_point.cost);
+        let mut successes = Vec::new();
+        for (target, trial) in trial_scores.into_iter().enumerate() {
+            let trial_key = epsilon_key(&trial, epsilon);
+            let parent_key = epsilon_key(&scored[target], epsilon);
+            if trial_key < parent_key {
+                let (f, cr) = parameters[target];
+                successes.push((f, cr, selection_improvement(&scored[target], &trial)));
+                let parent = std::mem::take(&mut population[target]);
+                push_archive(&mut archive, parent, size, ARCHIVE_RATE, &mut rng);
             }
-            if epsilon_key(trial_point, epsilon_t) < epsilon_key(&scored[target], epsilon_t) {
-                let improvement = selection_improvement(&scored[target], trial_point);
-                successes.push((trial_f[target], trial_cr[target], improvement));
-                push_archive(
-                    &mut archive,
-                    population[target].clone(),
-                    population_size,
-                    &mut rng,
-                );
+            if trial_key <= parent_key {
                 population[target] = trials[target].clone();
-                scored[target] = trial_point.clone();
+                scored[target] = trial;
             }
         }
-        update_memory(&mut memory_f, &mut memory_cr, &mut memory_index, &successes);
-
-        let fraction =
-            ((generation + 1) as f64 / settings.generations.max(1) as f64).clamp(0.0, 1.0);
-        let next_size = linear_reduced_size(population_initial, fraction);
-        if next_size < population_size {
-            reduce_population(&mut population, &mut scored, next_size, epsilon_t);
-            population_size = next_size;
-            trim_archive(&mut archive, population_size, &mut rng);
+        if settings.adaptation {
+            memory.update(&successes);
         }
 
-        if best_ever.valid {
-            let improved = last_feasible_cost.is_none_or(|previous| {
-                relative_change(previous, best_ever.cost) > settings.spread_tolerance
+        let next = linear_reduced_size(population_initial, minimum, outcome.evaluations, budget);
+        if next < size {
+            reduce_population(&mut population, &mut scored, next, epsilon);
+            size = next;
+            ops::trim_archive(&mut archive, size, ARCHIVE_RATE, &mut rng);
+        }
+
+        if outcome.winner.valid() {
+            let improved = reference_cost.is_none_or(|previous| {
+                relative_change(previous, outcome.winner.cost) > IMPROVEMENT_TOLERANCE
             });
             if improved {
-                last_improved_generation = generation;
-                last_feasible_cost = Some(best_ever.cost);
+                reference_cost = Some(outcome.winner.cost);
+                stalled = 0;
+            } else {
+                stalled += 1;
+            }
+            let window = (settings.stagnation_generations, population_initial, minimum);
+            if epsilon == 0.0 && stagnation_stops(stalled, window, outcome.evaluations, budget) {
+                let spread = normalized_spread(&population[..size], bounds);
+                outcome.termination = if spread <= settings.spread_tolerance {
+                    Termination::Converged
+                } else {
+                    Termination::Stagnated
+                };
+                break;
             }
         }
-
-        let spread = normalized_spread(&population[..population_size], bounds);
-        let stagnated =
-            generation.saturating_sub(last_improved_generation) >= settings.stagnation_generations;
-        if best_ever.valid && epsilon_t == 0.0 && spread <= settings.spread_tolerance && stagnated {
-            converged = true;
-            break;
-        }
+        last_generation = generation_started.elapsed();
     }
 
-    let feasible_fraction = if population_size == 0 {
+    outcome.population_final = size.min(scored.len());
+    let live = &scored[..outcome.population_final];
+    outcome.feasible_fraction = if live.is_empty() {
         0.0
     } else {
-        scored[..population_size]
-            .iter()
-            .filter(|point| point.valid)
-            .count() as f64
-            / population_size as f64
+        live.iter().filter(|point| point.valid()).count() as f64 / live.len() as f64
     };
+    outcome
+}
 
-    let relative_improvement = if best_ever.valid {
-        first_feasible_cost.map(|start| relative_change_signed(start, best_ever.cost))
-    } else {
-        None
-    };
-
-    Outcome {
-        winner: best_ever,
-        cancelled,
-        converged,
-        generations_completed,
-        evaluations,
-        first_feasible_cost,
-        relative_improvement,
-        epsilon_final,
-        feasible_fraction,
+fn evaluate(points: &[Vec<f64>], evaluate_batch: &mut EvaluateBatch<'_>) -> Vec<ScoredPoint> {
+    let mut scores: Vec<ScoredPoint> = evaluate_batch(points)
+        .into_iter()
+        .map(ScoredPoint::sanitized)
+        .collect();
+    scores.truncate(points.len());
+    while scores.len() < points.len() {
+        scores.push(unevaluated(&points[scores.len()]));
     }
+    scores
+}
+
+fn record(outcome: &mut Outcome, point: &ScoredPoint) {
+    if outcome.first_feasible_cost.is_none() && point.valid() {
+        outcome.first_feasible_cost = Some(point.cost);
+    }
+    if point.feasibility_key() < outcome.winner.feasibility_key() {
+        outcome.winner = point.clone();
+    }
+}
+
+/// Count `scores` against the budget or, rejected by the pre-gate, against
+/// the rejection cap.
+fn tally(outcome: &mut Outcome, scores: &[ScoredPoint]) {
+    let rejected = scores
+        .iter()
+        .filter(|point| point.tier == Tier::PreGateFailed)
+        .count();
+    outcome.rejected += rejected;
+    outcome.evaluations += scores.len() - rejected;
 }
 
 #[cfg(test)]

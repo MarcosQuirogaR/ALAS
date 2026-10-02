@@ -36,8 +36,19 @@ pub fn ave() -> AircraftPreset {
             tank_configuration: "conceptual integral wing tanks",
         },
         reference: AircraftReferenceData {
+            // ICAO Annex 14 Vol. I Table 1-1 (aerodrome reference code) applied to the
+            // notional 777X-class wingspan of 71.75 m with the wingtips extended:
+            // 65 m <= b < 80 m is code F. A folded-tip gate span is not modeled.
+            aerodrome_reference_code: Some(crate::AerodromeReferenceCode::F),
             // Declared notional-cabin requirement (DesignRequirements default); not a published aircraft datum.
             planning_seats: Some(350),
+            // Notional long-range widebody class default: the declared AVE
+            // design range, flown at the planning cabin. Not a chart read.
+            design_point: Some(crate::PayloadRangeDesignPoint {
+                range_nmi: 7_600.0,
+                payload_kg: None,
+                source: "AVE-v1 design requirements (notional); class default, no published payload/range chart",
+            }),
             cg_evidence: CgEnvelopeEvidence::DesignRequirement,
             sources: vec!["notional design requirement; no published aircraft data"],
             ..AircraftReferenceData::default()

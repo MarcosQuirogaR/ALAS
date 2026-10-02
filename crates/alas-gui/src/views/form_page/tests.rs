@@ -270,7 +270,7 @@ fn propulsion_preview_title_tracks_the_configured_engine_name() {
 }
 
 #[test]
-fn optimizer_page_exposes_both_profiles_and_their_settings() {
+fn optimizer_page_exposes_the_search_settings() {
     let config = alas_config::AlasConfig::default();
     let fields = config
         .schema()
@@ -287,17 +287,12 @@ fn optimizer_page_exposes_both_profiles_and_their_settings() {
     let solver = filtered
         .iter()
         .find(|field| field.name == "solver")
-        .expect("optimizer profile and solver settings group");
+        .expect("solver settings group");
     let alas_config::Entry::Node(solver) = &solver.entry else {
         panic!("solver must be a group");
     };
-    for shown in [
-        "method",
-        "strategy",
-        "seed_near_initial_design",
-        "seed_perturbation_fraction",
-        "display_progress",
-    ] {
+    assert!(solver.fields.iter().all(|field| field.name != "method"));
+    for shown in ["seed", "workers", "stop_on_evaluations_only"] {
         assert!(
             solver.fields.iter().any(|field| field.name == shown),
             "{shown} must be available to configure the selected profile"
@@ -308,8 +303,8 @@ fn optimizer_page_exposes_both_profiles_and_their_settings() {
         "finite_difference_step" | "constraint_tolerance"
     )));
     for shown in [
-        "max_iterations",
-        "population_size",
+        "screening",
+        "refinement",
         "seed",
         "workers",
         "tolerance",
@@ -319,12 +314,5 @@ fn optimizer_page_exposes_both_profiles_and_their_settings() {
             solver.fields.iter().any(|field| field.name == shown),
             "{shown} must be shown on the optimizer settings page"
         );
-    }
-    if let Some(iterations) = solver
-        .fields
-        .iter()
-        .find(|field| field.name == "max_iterations")
-    {
-        assert_eq!(iterations.label, "Max generations");
     }
 }

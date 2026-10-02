@@ -456,36 +456,34 @@ impl Pw127m568fModel {
 
 /// Ideal positive-thrust limit from one-dimensional actuator-disk theory.
 ///
-/// The disk velocity `u` obeys `P = 2 rho A u^2 (u - V)` and thrust is
-/// `T = P / u`. The physical root is unique for `u >= V`; bisection avoids a
-/// poorly conditioned closed-form cubic near the static limit.
+/// With disk velocity `u = V + v_i` the momentum and energy balances give
+/// thrust `T = 2 rho A u (u - V)` and ideal power `P = T u` (McCormick,
+/// "Aerodynamics of V/STOL Flight", 1967, sec. 3.1; Glauert, "Airplane
+/// Propellers", in Durand (ed.), Aerodynamic Theory vol. IV, 1935). Hence
+/// `u^2 (u - V) = q` with `q = P / (2 rho A)`, i.e. `u^3 - V u^2 - q = 0`.
+/// Substituting `u = y + V/3` gives `y^3 + p y + r = 0` with `p = -V^2/3` and
+/// `r = -2 V^3/27 - q`. For `V > 0` and `q > 0` the Cardano discriminant
+/// `(r/2)^2 + (p/3)^3 = q V^3/27 + q^2/4` is positive, so there is exactly
+/// one real root, the physical one (`u >= V`). The second cube root follows
+/// from `cbrt(A) cbrt(B) = -p/3 = V^2/9` instead of a subtraction, so no
+/// cancellation occurs. The static limit (`V = 0`) is
+/// `T = (2 rho A P^2)^(1/3)`; `P <= 0` at forward speed gives no thrust.
 pub(super) fn actuator_disk_thrust_bound_n(
     shaft_power_w: f64,
     density_kg_m3: f64,
     disk_area_m2: f64,
     true_airspeed_m_s: f64,
 ) -> f64 {
-    let ideal_static_thrust_n = (2.0 * density_kg_m3 * disk_area_m2 * shaft_power_w.powi(2)).cbrt();
     if true_airspeed_m_s == 0.0 {
-        return ideal_static_thrust_n;
+        return (2.0 * density_kg_m3 * disk_area_m2 * shaft_power_w.powi(2)).cbrt();
     }
-
-    let ideal_power_for_thrust = |thrust_n: f64| {
-        let induced_velocity_m_s = 0.5
-            * ((true_airspeed_m_s.powi(2) + 2.0 * thrust_n / (density_kg_m3 * disk_area_m2))
-                .sqrt()
-                - true_airspeed_m_s);
-        thrust_n * (true_airspeed_m_s + induced_velocity_m_s)
-    };
-    let mut lower_thrust_n = 0.0;
-    let mut upper_thrust_n = ideal_static_thrust_n;
-    for _ in 0..60 {
-        let middle_thrust_n = 0.5 * (lower_thrust_n + upper_thrust_n);
-        if ideal_power_for_thrust(middle_thrust_n) > shaft_power_w {
-            upper_thrust_n = middle_thrust_n;
-        } else {
-            lower_thrust_n = middle_thrust_n;
-        }
+    if shaft_power_w <= 0.0 {
+        return 0.0;
     }
-    0.5 * (lower_thrust_n + upper_thrust_n)
+    let speed = true_airspeed_m_s;
+    let q = shaft_power_w / (2.0 * density_kg_m3 * disk_area_m2);
+    let cube = speed.powi(3) / 27.0;
+    let cube_root_a = (cube + 0.5 * q + (q * cube + 0.25 * q * q).sqrt()).cbrt();
+    let disk_velocity_m_s = cube_root_a + speed * speed / (9.0 * cube_root_a) + speed / 3.0;
+    shaft_power_w / disk_velocity_m_s
 }

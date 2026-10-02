@@ -13,11 +13,12 @@
 
 use alas_config::{
     AuxiliaryTankConfig, CenterTankConfig, FuelPolicyConfig, FuelTankLayoutConfig, FuselageConfig,
-    GeometryConfig, StructuresConfig, TrimTankConfig, WingConfig, WingTankConfig,
+    GeometryConfig, StructuresConfig, TrimTankConfig, WingConfig,
 };
 use alas_geom::aircraft::airplane::Airplane;
 use alas_geom::aircraft::wing::Wing;
 
+use super::bays::{wing_bays, WingBay};
 use super::geometry::{
     fuselage_station, horizontal_stabilizer, integrate_wing_box, section_box, section_box_at_y,
     semispan_bounds, side_of_body_y_m, spar_box_limits, SectionBox, M3_PER_LITRE,
@@ -77,7 +78,9 @@ impl FuelTankLayout {
             if !cell.enabled {
                 continue;
             }
-            tanks.extend(wing_tank_pair(wing, kind, cell, &pricing)?);
+            for bay in wing_bays(kind, cell) {
+                tanks.extend(wing_tank_pair(wing, &bay, &pricing)?);
+            }
         }
 
         if config.center.enabled {
@@ -147,19 +150,18 @@ fn usable_volume(
     }
 }
 
-/// One or two [`FuelTank`]s (mirrored, for a symmetric wing) for an integral
-/// wing cell.
+/// One or two [`FuelTank`]s (mirrored, for a symmetric wing) for one wing
+/// bay.
 fn wing_tank_pair(
     wing: &Wing,
-    kind: TankKind,
-    cell: &WingTankConfig,
+    bay: &WingBay,
     pricing: &TankPricing,
 ) -> Result<Vec<FuelTank>, TankLayoutError> {
     let (front, rear) = (pricing.front, pricing.rear);
     let (root_y, _tip_y, semispan) =
         semispan_bounds(wing).ok_or(TankLayoutError::DegenerateWingSpan)?;
-    let start_y = root_y + cell.span_start_fraction * semispan;
-    let end_y = root_y + cell.span_end_fraction * semispan;
+    let start_y = root_y + bay.span_start_fraction * semispan;
+    let end_y = root_y + bay.span_end_fraction * semispan;
     let integral = integrate_wing_box(wing, front, rear, start_y, end_y)
         .ok_or(TankLayoutError::DegenerateWingSpan)?;
     if integral.is_degenerate() {
@@ -196,12 +198,10 @@ fn wing_tank_pair(
 
     // A published wing-tank volume is both sides together; each side gets
     // half, since the two are geometrically mirrored and fed independently.
-    let published_each_side_l = cell
-        .published_usable_volume_l
-        .map(|volume_l| volume_l / 2.0);
+    let published_each_side_l = bay.published_usable_volume_l.map(|volume_l| volume_l / 2.0);
     let (usable_volume_each_m3, capacity_source) = usable_volume(
         integral.volume_m3,
-        cell.usable_fraction,
+        bay.usable_fraction,
         pricing.expansion_space_fraction,
         published_each_side_l,
     );
@@ -215,8 +215,8 @@ fn wing_tank_pair(
     Ok(sides
         .iter()
         .map(|&(side, sign)| FuelTank {
-            id: format!("{}_{}", kind.id_prefix(), side.suffix()),
-            kind,
+            id: format!("{}_{}", bay.id_stem, side.suffix()),
+            kind: bay.kind,
             side,
             geometric_volume_m3: integral.volume_m3,
             usable_volume_m3: usable_volume_each_m3,
@@ -225,7 +225,7 @@ fn wing_tank_pair(
             centroid_m: [x_centroid, sign * y_centroid, z_centroid],
             low_point_m: [low_point_m[0], sign * low_point_m[1], low_point_m[2]],
             extent_m,
-            burn_priority: cell.burn_priority,
+            burn_priority: bay.burn_priority,
             capacity_source,
         })
         .collect())

@@ -108,6 +108,21 @@ far below (A340-300 17.5 against 20.0, A380-800 14.5 against 20.1, B787-9 14.6 a
 references are estimates or secondary sources, so the rows stay diagnostic, but the widebody gap
 is too large to attribute to them and no coefficient was tuned to close it.
 
+A380-800 wing sections. Airbus publishes neither the A380 twist nor its sections. The preset twist
+(4.5 / 2.0 / -2.5 deg at centreline root, kink and tip; positive leading edge up, rotated about the
+section leading edge, relative to the body x axis) is kept: its 4.5 deg kink-to-tip washout matches
+the 4.6 deg of the NASA Common Research Model (Vassberg et al., AIAA 2008-6919; NASA CRM geometry
+page, twist figure: 6.72 deg root, 0.94 deg at eta 0.35, -3.75 deg tip). The sections were the
+inverse of that wing's camber, which rises from about 0 % at the root to 1.6 % outboard (CRM
+max-camber figure; the eta 0.65 section `crm.eta65.unswept31.5deg` has a -4.4 deg streamwise
+thin-airfoil zero-lift angle). The design-lift-0.7 root (SC(2)-0714, -5.5 deg) and design-lift-0.4
+tip (SC(2)-0410, -2.3 deg) added 3.2 deg of camber washout to the twist. Exchanging the SC(2) design
+lift at fixed thickness (root SC(2)-0414, -3.0 deg; tip SC(2)-0610, -4.1 deg) moves the polar
+lattice's inviscid aircraft span efficiency at the design point from 0.66 to 0.75 and the cruise
+L/D from 14.8 to 15.9. The payload-range corners move from B 5,900 / C 7,554 / D 8,636 nmi to
+B 6,488 / C 8,253 / D 9,342 nmi, against the Airbus AC Figure 3-2-1-991-001-A01 reading of
+6,535 / 8,770 / 9,480 nmi. The CRM is a comparable wing, not the A380, so this is a sourced analogy.
+
 None of these rows is certification, weighed-aircraft or flight-test evidence.
 
 ### 2026-09-09 run

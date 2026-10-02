@@ -40,10 +40,12 @@
 //!   attribution from product-facing prose. Their corrected text and the
 //!   frozen reference text are both compared exactly below; no tolerance is
 //!   widened and no schema/value contract is relaxed.
-//! * `strategy`, `seed_near_initial_design` and `seed_perturbation_fraction`
-//!   also changed *label*, not only help, to say which profile reads them now
-//!   that both SciPy-compatible and L-SHADE search kernels are available; see
-//!   [`solver_agnostic_label_correction`].
+//! * `SolverSettings.strategy`, `display_progress`,
+//!   `seed_near_initial_design`, `seed_perturbation_fraction` and the
+//!   `ObjectiveWeights` fields only the retired
+//!   weighted lift-to-drag objective read are absent from the product schema;
+//!   the reference keeps them, and [`is_retired_reference_field`] names exactly
+//!   the ones the load boundary drops.
 //! * The active transport planform adds four explicit side-of-body/kink
 //!   fields to `WingConfig`. The frozen Python schema has none of them, so the
 //!   absent upstream fields and the source-corrected Rust values/schema are
@@ -353,11 +355,20 @@ fn compare_values(comparison: &mut Comparison, path: &str, actual: &Value, expec
                 {
                     continue;
                 }
+                if is_retired_reference_field(path, key) {
+                    comparison.exact(
+                        &format!("{path}.{key}: retired from the product schema"),
+                        &actual.contains_key(key),
+                        &false,
+                    );
+                    continue;
+                }
                 let child = format!("{path}.{key}");
                 match actual.get(key) {
                     Some(actual_value) => {
                         compare_values(comparison, &child, actual_value, expected_value);
                     }
+                    None if is_retired_upstream_field(path, key) => {}
                     None => {
                         comparison.exact(&child, &Value::Null, expected_value);
                     }
@@ -409,6 +420,18 @@ fn product_default_correction(path: &str) -> Option<(Value, Value)> {
     } else if path.ends_with(".n_modes") {
         Some((serde_json::json!(30), serde_json::json!(16)))
     }
+    // The widebody default profile held the takeoff configuration to
+    // 10,000 ft and started the landing configuration at 6,500 ft; the
+    // product ends it at 1,500 ft (ICAO PANS-OPS noise-abatement departure)
+    // and starts it at 3,000 ft (glide-path interception).
+    else if path.ends_with(".takeoff_altitude_gain_m") {
+        Some((
+            serde_json::json!(3048.0),
+            serde_json::json!(1_500.0 * 0.3048),
+        ))
+    } else if path.ends_with(".descent_4_altitude_ft") {
+        Some((serde_json::json!(6500.0), serde_json::json!(3000.0)))
+    }
     // The vortex-lattice mesh. Upstream evaluates the optimizer loop at one
     // chordwise panel, which samples the mean camber line only at the leading
     // and trailing edges (where it is zero) so every section is a flat
@@ -436,13 +459,20 @@ fn product_default_correction(path: &str) -> Option<(Value, Value)> {
     else if path.ends_with(".wing.n_subdivisions") || path == "WingConfig.n_subdivisions" {
         Some((serde_json::json!(8), serde_json::json!(24)))
     }
-    // The SciPy-compatible profile preserves its upstream serial default.
-    // Parallel workers remain selectable, with SciPy's deferred generation
-    // update semantics.
+    // The product search evaluates whole generations as seed-deterministic
+    // batches, so the worker count changes runtime only and defaults to
+    // every thread the machine reports.
     else if path.ends_with(".optimizer.solver.workers")
         || path == "OptimizerConfig.solver.workers"
     {
-        Some((serde_json::json!(1), serde_json::json!(1)))
+        Some((serde_json::json!(1), serde_json::json!(0)))
+    }
+    // The product tolerance is a normalized design-space spread for the
+    // stagnation test, not SciPy's relative energy spread.
+    else if path.ends_with(".optimizer.solver.tolerance")
+        || path == "OptimizerConfig.solver.tolerance"
+    {
+        Some((serde_json::json!(0.01), serde_json::json!(0.02)))
     }
     // Standard gravity. The frozen value is a two-decimal figure; the
     // product default is `alas_units::STANDARD_GRAVITY`, the CODATA/exact
@@ -529,7 +559,9 @@ fn compare_node(
         .filter(|field| {
             let name = field.get("name").and_then(Value::as_str);
             !matches!(name, Some("suave_venv_dir" | "suave_runner_dir"))
+                && !name.is_some_and(|name| is_retired_reference_field(node.type_name, name))
                 && !(node.type_name == "EngineConfig" && name == Some("thrust_kn"))
+                && !name.is_some_and(|name| is_retired_upstream_field(node.type_name, name))
                 && !name.is_some_and(|name| product_hidden_cabin_field(node.type_name, name))
         })
         .collect();
@@ -552,6 +584,16 @@ fn compare_node(
             declared,
         );
     }
+}
+
+/// A field the frozen reference carries that the product schema removed: the
+/// solver `strategy` and the objective weights only the retired weighted
+/// lift-to-drag objective read. `path` is a type name or a dotted path.
+fn is_retired_reference_field(path: &str, key: &str) -> bool {
+    (path.ends_with("SolverSettings") || path.ends_with(".solver"))
+        && alas_config::RETIRED_SOLVER_KEYS.contains(&key)
+        || (path.ends_with("ObjectiveWeights") || path.ends_with(".weights"))
+            && alas_config::RETIRED_WEIGHT_KEYS.contains(&key)
 }
 
 fn transport_planform_field(path: &str, key: &str) -> Option<&'static TransportPlanformField> {
@@ -795,6 +837,10 @@ fn is_native_config_field(path: &str, key: &str) -> bool {
         // and the frozen default tree round-trip unchanged.
         || (key == "climb_descent_speed_reference"
             && (path.ends_with("MissionProfileConfig") || path.ends_with(".profile")))
+        // Native cruise-level policy; its default skips serialization, and
+        // its behaviour is checked by the mission-model tests.
+        || (key == "cruise_altitude_policy"
+            && (path.ends_with("MissionProfileConfig") || path.ends_with(".profile")))
         || (matches!(
             key,
             "turbofan"
@@ -846,6 +892,16 @@ fn is_native_config_field(path: &str, key: &str) -> bool {
                 | "finite_difference_step"
                 | "constraint_tolerance"
                 | "convergence_stagnation_generations"
+                // The two stage budgets and the adaptation switch replace the
+                // generation-count budget; their defaults, bounds and the
+                // load-time migration of the retired keys are checked by the
+                // solver and load-note unit tests.
+                | "screening"
+                | "refinement"
+                | "parameter_adaptation"
+                // The evaluation-only stopping rule is checked by the solver
+                // unit tests and the replay test of the product search.
+                | "stop_on_evaluations_only"
         ) && (path.ends_with("SolverSettings") || path.ends_with(".solver")))
         // The external-solver resource limits are native product additions;
         // the frozen Python schema predates them. Their defaults, bounds and
@@ -888,6 +944,15 @@ fn is_native_config_field(path: &str, key: &str) -> bool {
         ) && (path.ends_with("ObjectiveWeights") || path.ends_with(".weights")))
 }
 
+/// Upstream fields the product removed, each with a load-time migration
+/// that is tested where it lives: the generation-count budget
+/// (`max_iterations`, `population_size`) becomes the refinement evaluation
+/// budget (`settings_load_notes::without_legacy_solver_budget`).
+fn is_retired_upstream_field(path: &str, key: &str) -> bool {
+    matches!(key, "max_iterations" | "population_size")
+        && (path.ends_with("SolverSettings") || path.ends_with(".solver"))
+}
+
 fn compare_field(
     comparison: &mut Comparison,
     label: &str,
@@ -898,13 +963,7 @@ fn compare_field(
 ) {
     let declaration = declared.get(path);
 
-    if label.ends_with(".fuel_volume_penalty_scale") {
-        assert_eq!(
-            expected["label"],
-            "Insufficient wing fuel-volume penalty weight"
-        );
-        assert_eq!(field.label, "Legacy fuel-volume penalty weight (unused)");
-    } else if label.ends_with(".share_pct") {
+    if label.ends_with(".share_pct") {
         comparison.exact(
             &format!("{label}.label: product seat-share semantics"),
             &field.label,
@@ -988,10 +1047,7 @@ fn compare_field(
     // Where upstream declared no explanation it emits an empty string, and
     // this port supplies one. Comparing those would fail on prose the port is
     // required to add, so what is checked instead is that it was added.
-    if label.ends_with(".fuel_volume_penalty_scale") {
-        assert_eq!(field.help, "Deprecated compatibility field. MTOW minus zero-fuel mass is a mass allowance, not mission-required fuel, so it is no longer used by the optimizer. Tank capacity will be constrained against mission fuel plus the selected reserve policy.");
-        assert_eq!(expected["help"], "Penalizes the wing's physical usable fuel-tank volume (physics.performance.wing_fuel_volume_m3, Torenbeek geometric estimate) being too small to hold the fuel mass the weight & balance analysis says this design actually needs: a wing that's too thin/small/tapered to carry its own required fuel is not a buildable aircraft, independent of whether the MTOW fuel-mass budget itself closes. Quadratic on the fractional shortfall (required_fuel - tank_capacity) / required_fuel.");
-    } else if label.ends_with(".wave_drag_coefficient") {
+    if label.ends_with(".wave_drag_coefficient") {
         comparison.exact(
             &format!("{label}.help: corrected Lock/Korn law"),
             &field.help,
@@ -1277,54 +1333,22 @@ fn wing_centroid_help_correction(label: &str) -> Option<(&'static str, &'static 
 /// alongside [`solver_agnostic_help_correction`] for that field.
 fn solver_agnostic_label_correction(label: &str) -> Option<(&'static str, &'static str)> {
     match label {
-        "OptimizerConfig.solver.strategy" | "ALASConfig.optimizer.solver.strategy" => Some((
-            "SciPy DE mutation/crossover strategy",
-            "DE mutation/crossover strategy",
-        )),
         "OptimizerConfig.solver.workers" | "ALASConfig.optimizer.solver.workers" => {
             Some(("Native compute worker threads", "Parallel worker processes"))
         }
-        "OptimizerConfig.solver.seed_near_initial_design"
-        | "ALASConfig.optimizer.solver.seed_near_initial_design" => Some((
-            "Seed search near the initial design",
-            "Seed search near the initial design",
-        )),
-        "OptimizerConfig.solver.seed_perturbation_fraction"
-        | "ALASConfig.optimizer.solver.seed_perturbation_fraction" => Some((
-            "Seed cluster perturbation size",
-            "Seed cluster perturbation size",
-        )),
+        "OptimizerConfig.solver.tolerance" | "ALASConfig.optimizer.solver.tolerance" => {
+            Some(("Convergence spread tolerance", "Convergence tolerance"))
+        }
         _ => None,
     }
 }
 
 fn solver_agnostic_help_correction(label: &str) -> Option<(&'static str, &'static str)> {
     match label {
-        // `strategy`, `tolerance`, `seed_near_initial_design` and
-        // `seed_perturbation_fraction` changed prose to identify the profile
-        // that reads them; the frozen Python text remains unchanged.
-        "OptimizerConfig.solver.strategy" | "ALASConfig.optimizer.solver.strategy" => Some((
-            "Used by scipy_legacy. SciPy differential_evolution strategy name (e.g. best1bin, rand1bin, best2bin). The product L-SHADE profile always uses current-to-pbest/1/bin.",
-            "SciPy differential_evolution strategy name (e.g. 'best1bin', 'rand1bin', 'best2bin'): controls how new candidate designs are generated from the population each generation.",
-        )),
-        "OptimizerConfig.solver.population_size"
-        | "ALASConfig.optimizer.solver.population_size" => Some((
-            "Population size as a multiplier on the number of free design variables. Locked coordinates do not consume search population. More candidates explore more broadly but cost more evaluations.",
-            "Population size as a multiplier on the number of design variables: more candidates per generation explores more broadly but costs more evaluations.",
-        )),
+        // `tolerance` changed prose; the frozen Python text remains unchanged.
         "OptimizerConfig.solver.tolerance" | "ALASConfig.optimizer.solver.tolerance" => Some((
-            "For scipy_legacy, stops when the population energy standard deviation is at most tolerance times abs(mean energy), matching SciPy's default test. The product profile uses normalized design-space spread and its stagnation window.",
+            "Normalized design-space spread (mean population range over bound width) below which a refinement that has stopped improving is reported as converged rather than stagnated.",
             "Relative tolerance for convergence; the solver stops early once the population's cost spread falls below this.",
-        )),
-        "OptimizerConfig.solver.seed_near_initial_design"
-        | "ALASConfig.optimizer.solver.seed_near_initial_design" => Some((
-            "For scipy_legacy, keep the supplied initial design and seed the population with nearby perturbations; if disabled or unavailable, use Latin-hypercube sampling. The product profile also mixes global samples with its scan seed.",
-            "Initialize the population as a tight cluster of small perturbations around the initial/preset design (plus the design itself, unperturbed) instead of SciPy's default uniform latin-hypercube coverage of the whole bounds space. Guarantees at least one known-valid, physically-balanced design is in generation 0, and lets the solver refine from there instead of having to rediscover CG/stability balance from scratch across the full 16-D space. Disable to fall back to the old full-space exploration (e.g. if you specifically want to explore far from the initial design).",
-        )),
-        "OptimizerConfig.solver.seed_perturbation_fraction"
-        | "ALASConfig.optimizer.solver.seed_perturbation_fraction" => Some((
-            "Size of local initial perturbations as a fraction of each free variable's bound range. Applies when seed_near_initial_design is enabled; fixed coordinates remain unchanged.",
-            "Size of the initial random perturbation around the initial design, as a fraction of each design variable's (upper - lower) bound range. Only used when seed_near_initial_design is enabled. Small values (e.g. 0.05) start with a tight, mostly-valid cluster; larger values explore more broadly from the start at the cost of more of the population starting off invalid.",
         )),
         "MSESConfig.alpha_sweep_n_points" | "ALASConfig.mses.alpha_sweep_n_points" => Some((
             "Number of alpha points in the MSES polar sweep. Kept small relative to the native VLM sweep (analysis.sweep_n_points) since each MSES point is a real viscous-compressible solve (~1-2s) rather than a linear-algebra VLM solve.",
@@ -1384,10 +1408,10 @@ fn solver_agnostic_help_correction(label: &str) -> Option<(&'static str, &'stati
             "Total pressure ratio through the core compressors (LPC x HPC combined, NOT including the fan). Feeds mission compressor sizing (split into a fixed LPC ratio + a solved HPC ratio) and the Propulsion Analysis cycle's compressor_pressure_ratio.",
             "Total pressure ratio through the core compressors (LPC x HPC combined, NOT including the fan). Feeds SUAVE's compressor sizing (split into a fixed LPC ratio + a solved HPC ratio) and the Propulsion Analysis cycle's compressor_pressure_ratio.",
         )),
-        // Worker counts above one select SciPy's deferred generation-update
-        // semantics for the legacy profile and therefore change the path.
+        // The product batches are seed-deterministic; the worker count
+        // changes the result only through a time-limit stop.
         "OptimizerConfig.solver.workers" | "ALASConfig.optimizer.solver.workers" => Some((
-            "Total native compute worker threads shared by candidate batches and nested VLM analyses. The scipy_legacy profile defaults to one worker, matching Python's immediate-update mode; multiple workers use deferred generations and can change the trajectory, as in SciPy. The product profile evaluates deterministic whole-generation batches, so worker count changes runtime only. External evaluator adapters remain serial because they own mutable process/session state.",
+            "Threads a generation's candidates are spread across; 0 uses every thread the machine reports. Each candidate runs on one thread. The product search evaluates deterministic whole-generation batches: with evaluation-budget stops or replay counts the result is bit-identical at any worker count. Time-limited: the stopping point depends on machine speed and worker count; replay with the recorded evaluation counts for a bit-identical result at any worker count. External evaluator adapters remain serial because they own mutable process/session state.",
             "Number of worker processes for parallel evaluation (>1 uses multiprocessing). Requires a picklable objective, already the case for ALAS's optimizer.",
         )),
         _ => None,
@@ -1411,13 +1435,13 @@ fn static_margin_gate_help_correction(label: &str) -> Option<(&'static str, &'st
     match label {
         "DesignRequirements.target_static_margin" | "ALASConfig.requirements.target_static_margin" => {
             Some((
-            "Preferred static margin at the aerodynamic aft CG limit: Aft CG Limit (%MAC) = Neutral Point (%MAC) - target_static_margin*100. This is a design preference used by the scipy_legacy objective, frozen reference CG-envelope path and report figures; the product feasibility gate enforces the (typically smaller) min_physical_static_margin below, measured at the actual mass-model CG, not this aerodynamic-reference target. The two boundaries can differ by (target_static_margin - min_physical_static_margin)*100 %MAC.",
+            "Preferred static margin at the aerodynamic aft CG limit: Aft CG Limit (%MAC) = Neutral Point (%MAC) - target_static_margin*100. This is a design preference used by the frozen reference CG-envelope path and report figures; the product feasibility gate enforces the (typically smaller) min_physical_static_margin below, measured at the actual mass-model CG, not this aerodynamic-reference target. The two boundaries can differ by (target_static_margin - min_physical_static_margin)*100 %MAC.",
                 "Static margin at the Aft CG Limit: Aft CG Limit (%MAC) = Neutral Point (%MAC) - target_static_margin*100. A positive value ensures positive static stability when the CG is at the aft limit.",
             ))
         }
         "DesignRequirements.min_physical_static_margin"
         | "ALASConfig.requirements.min_physical_static_margin" => Some((
-            "Minimum static margin measured using the actual mass-model (physical) CG, not the aerodynamic reference point. Designs below this are hard-rejected as inherently unstable. 0.0 = bare stability; 0.05 = 5% MAC buffer (recommended). This is the boundary the product feasibility gate enforces at every loading state; target_static_margin above is a separate, larger design preference used by the scipy_legacy objective, frozen reference path and report figures.",
+            "Minimum static margin measured using the actual mass-model (physical) CG, not the aerodynamic reference point. Designs below this are hard-rejected as inherently unstable. 0.0 = bare stability; 0.05 = 5% MAC buffer (recommended). This is the boundary the product feasibility gate enforces at every loading state; target_static_margin above is a separate, larger design preference used by the frozen reference path and report figures.",
             "Minimum static margin measured using the actual mass-model (physical) CG, not the aerodynamic reference point. Designs below this are hard-rejected as inherently unstable. 0.0 = bare stability; 0.05 = 5% MAC buffer (recommended).",
         )),
         _ => None,

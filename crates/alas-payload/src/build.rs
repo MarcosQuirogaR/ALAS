@@ -722,8 +722,8 @@ mod product_tests {
 
     #[test]
     fn a_seat_ceiling_is_reached_when_the_floor_allows_it() {
-        let config = AlasConfig::from_value(&serde_json::json!({ "preset": "B787-9" })).unwrap();
-        let preset = presets::get("B787-9").unwrap();
+        let config = AlasConfig::from_value(&serde_json::json!({ "preset": "A380-800" })).unwrap();
+        let preset = presets::get("A380-800").unwrap();
         let plane = AircraftBuilder::new(Some(config.geometry.clone()))
             .build(Some(&preset.design_vector), true)
             .unwrap();
@@ -737,14 +737,14 @@ mod product_tests {
         let mix = pax.length_share_mix();
         let seats =
             |cap| simulate_passenger_counts_for_seat_mix_with_source_cap(&g, pax, &mix, cap, None);
-        // The floor holds 303 seats; a ceiling below that must be filled to
+        // The floor holds 663 seats; a ceiling below that must be filled to
         // the seat rather than left a whole business row short of it, and a
         // ceiling above the floor must not change the uncapped answer.
-        assert_eq!(seats(None).total(), 303);
-        assert_eq!(seats(Some(420)), seats(None));
-        assert_eq!(seats(Some(290)).total(), 290);
-        assert_eq!(seats(Some(300)).total(), 300);
-        assert_eq!(seats(Some(290)).business, 42);
+        assert_eq!(seats(None).total(), 663);
+        assert_eq!(seats(Some(868)), seats(None));
+        assert_eq!(seats(Some(555)).total(), 555);
+        assert_eq!(seats(Some(600)).total(), 600);
+        assert_eq!(seats(Some(555)).business, 85);
     }
 
     #[test]

@@ -48,7 +48,7 @@ fn converged_result() -> OptimizationResult {
         history,
         wall_time_s: 48.0,
         method: "differential_evolution".to_owned(),
-        strategy: "lshade_eps_de".to_owned(),
+        strategy: "current_to_pbest_1_bin".to_owned(),
         termination: "converged".to_owned(),
         pareto_front: Vec::new(),
         search_diagnostics: Some(SearchDiagnostics {
@@ -68,6 +68,13 @@ fn converged_result() -> OptimizationResult {
             relative_improvement: Some(0.5),
             feasible_fraction: 0.9,
             epsilon_level: 0.0,
+            stages: Vec::new(),
+            rejections: Vec::new(),
+            seed: Some(7),
+            scope: alas_opt::SEARCH_SCOPE.to_owned(),
+            baseline: None,
+            winner_history_row: None,
+            baseline_clamped: false,
         }),
         delivered_acceptance: None,
     }
@@ -94,6 +101,8 @@ fn acceptance(verified: bool, delivered_is_search_finalist: bool) -> DeliveredAc
         candidates_evaluated: 1,
         delivered_is_search_finalist,
         wall_time_s: 1.2,
+        analyses: 2,
+        baseline: None,
     }
 }
 

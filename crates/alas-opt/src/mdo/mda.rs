@@ -11,13 +11,14 @@
 //! Gauss-Seidel fixed point on the takeoff mass, accelerated here with
 //! Aitken's delta-squared extrapolation because the map contracts by a
 //! roughly constant factor per pass. The expensive discipline, the
-//! vortex-lattice trim, is re-run only when the polar's own inputs have
-//! moved: the centre of gravity by more than `retrim_cg_tolerance_pct_mac`
-//! percent of the mean aerodynamic chord, or the takeoff mass (and with it
-//! the required cruise lift coefficient, which is proportional to it at fixed
-//! altitude, Mach and reference area) by more than the same percentage. A
-//! zero tolerance re-trims on any change at all. The shift that was accepted
-//! without a re-trim is reported as `MdaClosure::cg_shift_pct_mac`.
+//! vortex-lattice trim and its drag table, is re-run only when the centre of
+//! gravity has moved by more than `retrim_cg_tolerance_pct_mac` percent of
+//! the mean aerodynamic chord; the table spans the lift range, so a mass
+//! change alone needs no new trim. A zero tolerance re-trims on any centre
+//! of gravity change. The shift that was accepted without a re-trim is
+//! reported as `MdaClosure::cg_shift_pct_mac`. Each pass flies its trips on
+//! a plan frozen at the pass's takeoff mass, and the dispatch iteration
+//! starts from that mass.
 //!
 //! `MtowSizing::FixedRequirement` takes one pass: the takeoff mass is the
 //! requirement and the mission must fit under it. `MtowSizing::SizedByMission`
@@ -36,12 +37,18 @@ use alas_config::design_variables::DesignVector;
 use alas_config::{AlasConfig, MtowPlan};
 use alas_geom::aircraft::airplane::Airplane;
 use alas_mass::breakdown::{MassBreakdown, MassCoordinates, PayloadLayoutSummary};
-use alas_mass::dispatch::{solve_dispatch, DispatchLimits, DispatchSolution, DispatchStatus};
+use alas_mass::dispatch::{
+    solve_dispatch_with_initial_guess, DispatchLimits, DispatchSolution, DispatchStatus,
+};
+use alas_mass::fuel_plan::FuelModelError;
 use alas_payload::build::build_payload_layout;
 use alas_payload::oew::oew_and_cg;
 
 use super::build::mass_analysis_with_structural_feedback;
-use super::mission_model::SegmentMissionModel;
+use super::mission_model::{
+    FreezeError, FrozenMissionPlan, SegmentMissionModel, MISSION_STEP_UNCONVERGED,
+    SIZING_BUDGET_EXHAUSTED,
+};
 use super::trim::{trim_and_polar, TrimmedPolar};
 use super::types::CandidateFailure;
 use alas_mass::wingbox_feedback::ReferenceWingMass;
@@ -98,6 +105,10 @@ pub(crate) struct MdaClosure {
     pub sizing_closed: bool,
     /// Structural wing reconciliation at the final mass pass.
     pub structural_feedback: alas_mass::wingbox_feedback::WingboxFeedback,
+    /// Trip plan in force on the last pass, after any re-freeze.
+    pub frozen_plan: Option<FrozenMissionPlan>,
+    /// Trip plans frozen, one per pass that could make one.
+    pub plan_freezes: u32,
 }
 
 /// A failure with the `mass_coordinates` reason, for the one arm of
@@ -148,7 +159,6 @@ fn evaluate_state_at_tow(
     model: &mut SegmentMissionModel,
     structural_feedback: &mut alas_mass::wingbox_feedback::WingboxFeedback,
     cg_at_trim: &mut f64,
-    mass_at_trim: &mut f64,
     retrim_count: &mut usize,
 ) -> Result<(), CandidateFailure> {
     let config = context.config;
@@ -191,20 +201,16 @@ fn evaluate_state_at_tow(
     state.masses = masses;
     state.coords = coords;
     state.cg = cg;
-    // The mission model is coupled to the trimmed polar, and the trim is the
-    // expensive discipline in this loop: a vortex-lattice solve per call. The
-    // polar is a function of the two things a pass can change, the centre of
-    // gravity and the lift coefficient the mass demands, so the loop re-trims
-    // when either has moved by more than the configured tolerance and reuses
-    // the standing polar when neither has.
-    //
-    // `retrim_cg_tolerance_pct_mac` is that tolerance, read as a percentage
-    // of the mean aerodynamic chord for the centre of gravity and as the same
-    // percentage of the lift coefficient for the mass. At fixed altitude,
-    // Mach and reference area the required cruise lift coefficient is
-    // proportional to mass, so one number bounds both couplings. A tolerance
-    // of zero re-trims on any change at all, which is the behaviour before
-    // this criterion existed.
+    // The mission model is coupled to the trimmed drag, and the trim is the
+    // expensive discipline in this loop: vortex-lattice solves plus the drag
+    // table. The table spans the clean lift range at the trim's centre of
+    // gravity (`drag_table`), so a mass change, which only moves the lift
+    // coefficient along it, needs no new trim; the attitude follows it
+    // through the trim Jacobian (`TrimmedPolar::at_cruise_cl`). The centre
+    // of gravity changes the tail load and with it the trimmed induced drag,
+    // so the loop re-trims when it has moved by more than
+    // `retrim_cg_tolerance_pct_mac` percent of the mean aerodynamic chord. A
+    // tolerance of zero re-trims on any change.
     //
     // The residual shift that was accepted is reported through
     // `MdaClosure::cg_shift_pct_mac`, so a candidate never claims a polar it
@@ -217,22 +223,13 @@ fn evaluate_state_at_tow(
             .max(0.0);
         let mac = plane.c_ref.max(1e-9);
         let cg_shift_pct_mac = (cg[0] - *cg_at_trim).abs() / mac * 100.0;
-        let mass_shift_pct = if *mass_at_trim > 0.0 {
-            (tow_k - *mass_at_trim).abs() / *mass_at_trim * 100.0
-        } else {
-            f64::INFINITY
-        };
-        if cg_shift_pct_mac > tolerance_pct || mass_shift_pct > tolerance_pct {
+        if cg_shift_pct_mac > tolerance_pct {
             state.polar = trim_and_polar(config, plane, cg[0], context.dv, tow_k)?;
             *cg_at_trim = cg[0];
-            *mass_at_trim = tow_k;
             *retrim_count += 1;
-            model.cd0 = state.polar.cd0;
-            model.induced_factor_k = state.polar.induced_factor_k;
-            model.wave_drag_cd = state.polar.wave_drag_cd;
-            model.validate().map_err(|_| CandidateFailure {
-                reason: "trim_solve",
-            })?;
+            *model = model
+                .clone()
+                .with_cruise_drag(state.polar.drag.cruise_drag());
         }
     }
     Ok(())
@@ -286,9 +283,6 @@ pub(crate) fn converge(
 
     let mut state = initial;
     let mut cg_at_trim = state.cg[0];
-    // The initial state was trimmed at the seed mass, so that is the mass
-    // the standing polar belongs to.
-    let mut mass_at_trim = seed;
     let mut tow_k = seed;
     let mut iterates: Vec<f64> = vec![tow_k];
     let mut model = context.model.clone();
@@ -299,11 +293,36 @@ pub(crate) fn converge(
     // The reserve-covering landing floor of the last dispatch solution, which
     // the next pass designs the gear to (`AlasConfig::design_landing_mass_with_reserve_floor`).
     let mut landing_floor_kg: Option<f64> = None;
+    // Every pass flies its trips on one plan frozen at the pass's takeoff
+    // mass (`SegmentMissionModel::freeze_plan`): the cruise levels, climb
+    // revisions, step climbs and step count are discrete, so letting each
+    // Picard mass re-choose them made the closure depend on where the
+    // dispatch iteration started and on the integration step count. With
+    // the plan a function of the pass mass alone, the fixed point is a
+    // property of the aircraft. A plan the aircraft cannot fly at a later
+    // mass of the same pass is re-frozen there and the dispatch restarted
+    // on it, at most `frozen_plan::MAX_REFREEZES` times.
+    let policy = model.profile.cruise_altitude_policy;
+    let mut plan_freezes = 0_u32;
+    let mut frozen_plan = None;
+    let budget_exhausted = || CandidateFailure {
+        reason: SIZING_BUDGET_EXHAUSTED,
+    };
+    let budget_spent = |model: &SegmentMissionModel| match (model.budget(), model.work()) {
+        (Some(budget), Some((flights, deck_evals))) => {
+            flights > u64::from(budget.max_trip_flights) || deck_evals > budget.max_deck_evals
+        }
+        _ => false,
+    };
+    let max_outer_passes = model.budget().map(|budget| budget.max_outer_passes);
 
     for pass in 0..max_passes {
         model.check_cancelled().map_err(|_| CandidateFailure {
             reason: "cancelled",
         })?;
+        if max_outer_passes.is_some_and(|limit| u32::try_from(pass).map_or(true, |p| p >= limit)) {
+            return Err(budget_exhausted());
+        }
         sizing_iterations = pass + 1;
         if pass > 0 {
             evaluate_state_at_tow(
@@ -315,7 +334,6 @@ pub(crate) fn converge(
                 &mut model,
                 &mut structural_feedback,
                 &mut cg_at_trim,
-                &mut mass_at_trim,
                 &mut retrim_count,
             )?;
         }
@@ -327,20 +345,53 @@ pub(crate) fn converge(
             usable_capacity_kg: context.tank_capacity_kg,
         };
         let payload_kg = context.dispatch_payload_kg.unwrap_or(state.masses.payload);
-        let solution = solve_dispatch(
-            oew_k + payload_kg,
-            context.range_m,
-            &config.fuel_policy,
-            &model,
-            &limits,
-            max_passes.max(objective.sizing_max_iterations.max(1) as usize),
-            tolerance_kg,
-        );
+        // Warm start: the dispatch iteration starts from this pass's mass,
+        // the previous pass's solution (or its Aitken extrapolation).
+        let solve = |pass_model: &SegmentMissionModel| {
+            solve_dispatch_with_initial_guess(
+                oew_k + payload_kg,
+                tow_k,
+                context.range_m,
+                &config.fuel_policy,
+                pass_model,
+                &limits,
+                max_passes.max(objective.sizing_max_iterations.max(1) as usize),
+                tolerance_kg,
+            )
+        };
+        let (pass_model, solution) =
+            match model.solve_on_frozen_plans(tow_k, context.range_m, &policy, &solve) {
+                Ok(frozen) => {
+                    plan_freezes += 1;
+                    frozen
+                }
+                Err(FreezeError::Fuel(FuelModelError::Cancelled)) => {
+                    return Err(CandidateFailure {
+                        reason: "cancelled",
+                    })
+                }
+                // An under-resolved trip is a numerical failure of the
+                // candidate, not a reason to fly the dispatch unfrozen.
+                Err(FreezeError::StepUnconverged { .. }) => {
+                    return Err(CandidateFailure {
+                        reason: MISSION_STEP_UNCONVERGED,
+                    })
+                }
+                Err(_) if budget_spent(&model) => return Err(budget_exhausted()),
+                // No plan can be made at this mass (the trip is not flyable
+                // there even with level and climb adaptation): the dispatch
+                // brackets its own way to a flyable mass, adapting per flight.
+                Err(_) => (model.clone(), solve(&model)),
+            };
         if matches!(solution.status, DispatchStatus::Cancelled) {
             return Err(CandidateFailure {
                 reason: "cancelled",
             });
         }
+        if budget_spent(&model) {
+            return Err(budget_exhausted());
+        }
+        frozen_plan = pass_model.frozen_plan();
         let dispatch_converged = matches!(solution.status, DispatchStatus::Converged);
         landing_floor_kg = super::mtow_modes::landing_floor_kg(&solution);
         if !sizing_iterates {
@@ -356,6 +407,15 @@ pub(crate) fn converge(
             // returning, so every component and station is quoted from the
             // same pure-FLOPS evaluation even when the configured tolerance
             // is intentionally looser than floating-point report roundoff.
+            //
+            // The refresh is a mass-ledger sync only. `solution` was priced
+            // on `pass_model`'s drag, and that drag is what the candidate
+            // carries into its report (`CandidateFuelArtifacts::drag`), so a
+            // re-trim here would hand the report a polar the closure never
+            // flew and break report trip = closure trip. A re-trim the sync
+            // would take is undone; the centre-of-gravity shift it saw is
+            // reported through `MdaClosure::cg_shift_pct_mac`.
+            let trimmed = (state.polar.clone(), cg_at_trim, retrim_count, plane.xyz_ref);
             evaluate_state_at_tow(
                 context,
                 plane,
@@ -365,9 +425,11 @@ pub(crate) fn converge(
                 &mut model,
                 &mut structural_feedback,
                 &mut cg_at_trim,
-                &mut mass_at_trim,
                 &mut retrim_count,
             )?;
+            if retrim_count != trimmed.2 {
+                (state.polar, cg_at_trim, retrim_count, plane.xyz_ref) = trimmed;
+            }
         }
         outcome = Some((solution, configured_done && dispatch_converged));
         if configured_done {
@@ -399,6 +461,8 @@ pub(crate) fn converge(
         cg_shift_pct_mac,
         sizing_closed,
         structural_feedback,
+        frozen_plan,
+        plan_freezes,
     })
 }
 

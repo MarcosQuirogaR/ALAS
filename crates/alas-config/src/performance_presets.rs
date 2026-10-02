@@ -245,17 +245,4 @@ mod tests {
         assert!(error.available.contains(&"standard_narrowbody".to_owned()));
         assert!(error.to_string().contains("standard_narrowbody"));
     }
-
-    #[test]
-    fn the_dropdown_lists_the_presets_in_registration_order() {
-        assert_eq!(
-            available(),
-            vec![
-                "conservative_simple_flaps",
-                "standard_narrowbody",
-                "modern_narrowbody",
-                "advanced_highlift_widebody",
-            ]
-        );
-    }
 }

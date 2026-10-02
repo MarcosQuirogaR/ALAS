@@ -67,8 +67,13 @@ const CANCELLED_SEARCH_RECORD: &str = "cancelled_search.json";
 pub enum SolverOptimizationStatus {
     /// This backend was not selected for the run.
     NotRequested,
-    /// The backend produced a design and a full report.
+    /// The backend produced a design and a full report, and the delivered
+    /// design is feasible at reporting fidelity.
     Completed,
+    /// The backend produced a design and a full report, but the delivered
+    /// design is not feasible at reporting fidelity. The design is retained
+    /// so its findings can be read; it is never an optimization success.
+    Infeasible,
     /// The selected backend could not produce a usable result.
     Failed,
 }
@@ -79,7 +84,37 @@ impl SolverOptimizationStatus {
         match self {
             Self::NotRequested => "not_requested",
             Self::Completed => "completed",
+            Self::Infeasible => "optimization_infeasible",
             Self::Failed => "failed",
+        }
+    }
+
+    /// Status of a branch that produced `optimization`: `Completed` only when
+    /// the delivered design is feasible.
+    #[must_use]
+    pub fn for_delivered(optimization: &OptimizationResult) -> Self {
+        if optimization.is_delivered_feasible() {
+            Self::Completed
+        } else {
+            Self::Infeasible
+        }
+    }
+
+    /// Whether the branch carries a design and report a caller may read,
+    /// feasible or not.
+    #[must_use]
+    pub const fn has_design(self) -> bool {
+        matches!(self, Self::Completed | Self::Infeasible)
+    }
+
+    /// Human-readable label for run logs and summaries.
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::NotRequested => "Not requested",
+            Self::Completed => "Completed",
+            Self::Infeasible => "Optimization infeasible",
+            Self::Failed => "Failed",
         }
     }
 }
@@ -152,8 +187,12 @@ impl SolverOptimizationSet {
         match mode {
             OptimizationSolverMode::Vlm => self.completed_or_error(&self.vlm),
             OptimizationSolverMode::Avl => self.completed_or_error(&self.avl),
+            // A feasible design wins over an infeasible one; between equals
+            // the native branch is the reference.
             OptimizationSolverMode::Both => {
-                if self.vlm.status == SolverOptimizationStatus::Completed {
+                let completed = SolverOptimizationStatus::Completed;
+                let native_first = self.vlm.status == completed || self.avl.status != completed;
+                if native_first && self.vlm.status.has_design() {
                     Ok(&self.vlm)
                 } else {
                     self.completed_or_error(&self.avl)
@@ -166,7 +205,7 @@ impl SolverOptimizationSet {
         &self,
         result: &'a SolverOptimizationResult,
     ) -> Result<&'a SolverOptimizationResult, String> {
-        if result.status == SolverOptimizationStatus::Completed {
+        if result.status.has_design() {
             Ok(result)
         } else {
             Err(result.error.clone().unwrap_or_else(|| {

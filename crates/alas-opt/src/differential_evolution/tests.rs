@@ -6,14 +6,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use alas_config::design_variables::DesignVector;
 use alas_config::AlasConfig;
 
-use super::trial::select_samples;
 use super::{
-    candidate_is_at_least_as_good, candidate_is_better, converged, latin_hypercube_population,
     scored_point_at, DesignObjective, DesignOptimizer, OptimizationError, SearchObjective,
 };
 use crate::evaluator::ObjectiveEvaluation;
 use crate::history::OptimizationHistory;
-use crate::python_rng::RandomState;
 
 /// A cheap synthetic product objective: every candidate is accepted, and the
 /// cost is a smooth function of the whole vector, so no design or seed makes
@@ -30,12 +27,6 @@ fn synthetic_objective(design: &DesignVector) -> ObjectiveEvaluation {
         trim_ih_deg: 0.0,
         reject_reason: String::new(),
     }
-}
-
-#[test]
-fn convergence_uses_population_standard_deviation() {
-    assert!(converged(&[1.0, 2.0, 3.0], 0.6));
-    assert!(!converged(&[1.0, 2.0, 3.0], 0.2));
 }
 
 #[test]
@@ -64,15 +55,26 @@ fn a_solver_failure_is_worse_than_a_recoverable_constraint_violation() {
 }
 
 #[test]
-fn default_de_never_prefers_a_lower_cost_invalid_candidate_over_a_valid_one() {
-    assert!(!candidate_is_better(-100.0, false, 10.0, true, true));
-    assert!(candidate_is_better(10.0, true, -100.0, false, true));
-    assert!(candidate_is_at_least_as_good(10.0, true, 10.0, true, true));
-    assert!(!candidate_is_at_least_as_good(
-        -100.0, false, 10.0, true, true
-    ));
-    // The compatibility replay intentionally retains scalar-only ordering.
-    assert!(candidate_is_better(-100.0, false, 10.0, true, false));
+fn a_candidate_that_exhausts_its_work_cap_ranks_as_not_closed() {
+    use crate::mdo::mission_model::{SizingBudget, SIZING_BUDGET_EXHAUSTED};
+    use crate::search_methods::Tier;
+    let values = DesignVector::default().to_array();
+    let mut objective = DesignObjective::new(AlasConfig::default());
+    let uncapped = crate::mdo::evaluate_mission_sized(&mut objective, &values);
+    let sized = scored_point_at(&values, uncapped, &objective.history, 0);
+    assert_ne!(sized.tier, Tier::NotClosed);
+    assert!(objective.history.trip_flights[0] > 1);
+    objective.sizing_controls.budget = Some(SizingBudget {
+        max_trip_flights: 1,
+        max_deck_evals: u64::MAX,
+        max_outer_passes: u32::MAX,
+    });
+    let capped = crate::mdo::evaluate_mission_sized(&mut objective, &values);
+    assert_eq!(objective.history.reject_reason[1], SIZING_BUDGET_EXHAUSTED);
+    assert_eq!(objective.history.trip_flights[1], 0);
+    let point = scored_point_at(&values, capped, &objective.history, 1);
+    assert_eq!(point.tier, Tier::NotClosed);
+    assert!(point.feasibility_key() > sized.feasibility_key());
 }
 
 #[test]
@@ -92,10 +94,9 @@ fn default_de_returns_the_valid_candidate_when_invalid_is_cheaper() {
     // never a competing invalid candidate to prefer the valid one over.
     // One iteration also runs the search-phase sampling that actually
     // exercises multiple candidates across the free span coordinate.
-    config.optimizer.solver.max_iterations = 1;
-    config.optimizer.solver.population_size = 1;
+    config.optimizer.solver.refinement.max_evaluations = 16;
+    config.optimizer.solver.screening.max_evaluations = 8;
     config.optimizer.solver.seed = Some(42);
-    config.optimizer.solver.seed_near_initial_design = false;
     let mut optimizer = DesignOptimizer::new(config);
     let nominal = DesignVector::default();
     let span_bounds = DesignVector::bounds()[0];
@@ -133,8 +134,8 @@ fn default_de_returns_the_valid_candidate_when_invalid_is_cheaper() {
 fn default_de_reports_no_feasible_design_instead_of_returning_an_invalid_one() {
     let mut config = AlasConfig::default();
     config.optimizer.solver.method = alas_config::optimizer::PRODUCT_DE_METHOD.to_owned();
-    config.optimizer.solver.max_iterations = 1;
-    config.optimizer.solver.population_size = 1;
+    config.optimizer.solver.refinement.max_evaluations = 16;
+    config.optimizer.solver.screening.max_evaluations = 8;
     config.optimizer.solver.seed = Some(7);
     let mut optimizer = DesignOptimizer::new(config);
     let mut evaluator = |_design: &DesignVector| {
@@ -176,7 +177,8 @@ fn cancelled_native_diagnostics_preserve_cancellation_instead_of_infeasibility()
 fn failed_native_search_diagnostics_preserve_the_strict_rejection_and_candidate() {
     let mut config = AlasConfig::default();
     config.optimizer.solver.method = alas_config::optimizer::PRODUCT_DE_METHOD.to_owned();
-    config.optimizer.solver.max_iterations = 0;
+    config.optimizer.solver.refinement.max_evaluations = 8;
+    config.optimizer.solver.screening.max_evaluations = 8;
     config.optimizer.solver.workers = 1;
     config.optimizer.solver.seed = Some(7);
     config.requirements.min_passenger_capacity = i64::MAX;
@@ -207,68 +209,6 @@ fn failed_native_search_diagnostics_preserve_the_strict_rejection_and_candidate(
 }
 
 #[test]
-fn default_de_accepts_exact_and_near_bound_designs_for_every_seeded_strategy() {
-    let nominal = DesignVector::default();
-    let exact_bounds: Vec<(f64, f64)> = nominal
-        .to_array()
-        .into_iter()
-        .map(|value| (value, value))
-        .collect();
-    let near_bounds: Vec<(f64, f64)> = nominal
-        .to_array()
-        .into_iter()
-        .map(|value| (value - 1.0e-12, value + 1.0e-12))
-        .collect();
-
-    for strategy in [
-        "best1bin",
-        "best1exp",
-        "rand1bin",
-        "rand1exp",
-        "best2bin",
-        "best2exp",
-        "rand2bin",
-        "rand2exp",
-        "randtobest1bin",
-        "randtobest1exp",
-        "currenttobest1bin",
-        "currenttobest1exp",
-    ] {
-        for (seed, bounds) in [
-            (0_i64, exact_bounds.as_slice()),
-            (42, near_bounds.as_slice()),
-        ] {
-            let mut config = AlasConfig::default();
-            config.optimizer.solver.max_iterations = 1;
-            config.optimizer.solver.population_size = 1;
-            config.optimizer.solver.seed = Some(seed);
-            config.optimizer.solver.strategy = strategy.to_owned();
-            let mut optimizer = DesignOptimizer::new(config);
-            let mut evaluator = |design: &DesignVector| ObjectiveEvaluation {
-                cost: design.to_array().iter().map(|value| value * value).sum(),
-                valid: true,
-                l_over_d: 10.0,
-                span_m: design.span_m,
-                alpha_deg: 3.0,
-                area_m2: 20.0,
-                trim_ih_deg: 0.0,
-                reject_reason: String::new(),
-            };
-            let result = optimizer
-                .run_with_evaluator(Some(bounds), Some(&nominal), &mut evaluator, None)
-                .unwrap_or_else(|error| panic!("strategy={strategy} seed={seed}: {error}"));
-            assert!(result.best_valid, "strategy={strategy} seed={seed}");
-            assert!(result
-                .best_design
-                .to_array()
-                .iter()
-                .zip(bounds)
-                .all(|(value, &(lower, upper))| *value >= lower && *value <= upper));
-        }
-    }
-}
-
-#[test]
 fn configured_methods_and_seeds_keep_boundary_results_typed_and_feasible() {
     let nominal = DesignVector::default();
     let exact_bounds: Vec<(f64, f64)> = nominal
@@ -287,10 +227,9 @@ fn configured_methods_and_seeds_keep_boundary_results_typed_and_feasible() {
             for bounds in [exact_bounds.as_slice(), near_bounds.as_slice()] {
                 let mut config = AlasConfig::default();
                 config.optimizer.solver.method = method.to_owned();
-                config.optimizer.solver.max_iterations = 0;
-                config.optimizer.solver.population_size = 1;
+                config.optimizer.solver.refinement.max_evaluations = 8;
+                config.optimizer.solver.screening.max_evaluations = 8;
                 config.optimizer.solver.seed = Some(seed);
-                config.optimizer.solver.strategy = "best1bin".to_owned();
                 let mut optimizer = DesignOptimizer::new(config);
                 let mut evaluator = |design: &DesignVector| ObjectiveEvaluation {
                     cost: design.to_array().iter().map(|value| value * value).sum(),
@@ -318,8 +257,8 @@ fn configured_methods_and_seeds_keep_boundary_results_typed_and_feasible() {
 
             let mut config = AlasConfig::default();
             config.optimizer.solver.method = method.to_owned();
-            config.optimizer.solver.max_iterations = 0;
-            config.optimizer.solver.population_size = 1;
+            config.optimizer.solver.refinement.max_evaluations = 8;
+            config.optimizer.solver.screening.max_evaluations = 8;
             config.optimizer.solver.seed = Some(seed);
             let mut optimizer = DesignOptimizer::new(config);
             let mut evaluator = |_design: &DesignVector| {
@@ -337,53 +276,6 @@ fn configured_methods_and_seeds_keep_boundary_results_typed_and_feasible() {
             );
         }
     }
-}
-
-#[test]
-fn default_scipy_profile_ranks_the_scalar_cost_without_a_feasibility_gate() {
-    let initial = DesignVector::default();
-    let mut config = AlasConfig::default();
-    assert_eq!(
-        config.optimizer.solver.method,
-        alas_config::optimizer::SCIPY_LEGACY_METHOD
-    );
-    config.optimizer.solver.max_iterations = 0;
-    config.optimizer.solver.seed = Some(42);
-    config.optimizer.solver.seed_near_initial_design = true;
-    config.optimizer.solver.population_size = 1;
-    let mut bounds: Vec<(f64, f64)> = initial
-        .to_array()
-        .into_iter()
-        .map(|value| (value, value))
-        .collect();
-    bounds[0] = DesignVector::bounds()[0];
-
-    let mut evaluator = |design: &DesignVector| {
-        if design.span_m == initial.span_m {
-            ObjectiveEvaluation {
-                cost: 10.0,
-                valid: true,
-                l_over_d: 18.0,
-                span_m: design.span_m,
-                alpha_deg: 3.0,
-                area_m2: 20.0,
-                trim_ih_deg: 0.0,
-                reject_reason: String::new(),
-            }
-        } else {
-            ObjectiveEvaluation::rejected(-10.0, "static_margin")
-        }
-    };
-
-    let result = DesignOptimizer::new(config)
-        .run_with_evaluator(Some(&bounds), Some(&initial), &mut evaluator, None)
-        .expect("the scipy_legacy profile returns its lowest scalar-cost candidate");
-
-    assert!(!result.best_valid);
-    assert_eq!(result.best_cost, -10.0);
-    assert_eq!(result.history.n_evaluations(), 5);
-    assert_eq!(result.history.n_valid(), 1);
-    assert_eq!(result.termination, "iteration_limit");
 }
 
 #[test]
@@ -407,66 +299,11 @@ fn unknown_optimizer_tokens_do_not_start_a_fallback_search() {
 }
 
 #[test]
-fn unknown_strategy_does_not_fall_back_to_best1() {
-    let mut config = AlasConfig::default();
-    config.optimizer.solver.strategy = "best1bni".to_owned();
-    let mut optimizer = DesignOptimizer::new(config);
-    let mut calls = 0;
-    let mut evaluator = |_design: &DesignVector| {
-        calls += 1;
-        ObjectiveEvaluation::rejected(0.0, "should_not_run")
-    };
-    let error = optimizer
-        .run_with_evaluator(None, None, &mut evaluator, None)
-        .expect_err("an unknown strategy must fail before evaluating candidates");
-    assert_eq!(calls, 0);
-    assert!(matches!(
-        error,
-        OptimizationError::InvalidConfiguration(reason) if reason.contains("unknown optimizer strategy")
-    ));
-}
-
-#[test]
-fn sample_selection_excludes_the_candidate_and_has_distinct_indices() {
-    let mut rng = RandomState::seed(42);
-    let mut indices: Vec<usize> = (0..16).collect();
-    let samples = select_samples(3, 5, &mut indices, &mut rng);
-
-    assert_eq!(samples.len(), 5);
-    assert!(samples.iter().all(|&sample| sample != 3));
-    assert!(samples
-        .iter()
-        .enumerate()
-        .all(|(index, sample)| !samples[index + 1..].contains(sample)));
-}
-
-#[test]
-fn latin_hypercube_initialization_uses_each_stratum_once_per_dimension() {
-    let bounds = [(0.0, 1.0), (10.0, 20.0)];
-    let mut rng = RandomState::seed(42);
-    let population = latin_hypercube_population(&bounds, 4, &mut rng);
-
-    for dimension in 0..bounds.len() {
-        let mut strata: Vec<usize> = population
-            .iter()
-            .map(|candidate| {
-                let normalized = (candidate[dimension] - bounds[dimension].0)
-                    / (bounds[dimension].1 - bounds[dimension].0);
-                (normalized * 4.0).floor() as usize
-            })
-            .collect();
-        strata.sort_unstable();
-        assert_eq!(strata, vec![0, 1, 2, 3]);
-    }
-}
-
-#[test]
 fn delegated_objective_keeps_the_optimizer_history_contract() {
     let mut config = AlasConfig::default();
-    config.optimizer.solver.max_iterations = 0;
-    config.optimizer.solver.population_size = 1;
+    config.optimizer.solver.refinement.max_evaluations = 8;
+    config.optimizer.solver.screening.max_evaluations = 8;
     config.optimizer.solver.seed = Some(42);
-    config.optimizer.solver.seed_near_initial_design = true;
     let mut optimizer = DesignOptimizer::new(config);
     let mut calls = 0usize;
     let mut evaluator = |design: &DesignVector| {
@@ -495,8 +332,8 @@ fn delegated_objective_keeps_the_optimizer_history_contract() {
 fn a_fully_fixed_design_costs_one_analysis_and_never_claims_search_convergence() {
     let mut config = AlasConfig::default();
     config.optimizer.solver.method = alas_config::optimizer::PRODUCT_DE_METHOD.to_owned();
-    config.optimizer.solver.max_iterations = 100;
-    config.optimizer.solver.population_size = 6;
+    config.optimizer.solver.refinement.max_evaluations = 808;
+    config.optimizer.solver.screening.max_evaluations = 8;
     config.optimizer.solver.workers = 4;
     let initial = DesignVector::default();
     let bounds: Vec<(f64, f64)> = initial
@@ -535,8 +372,8 @@ fn a_fully_fixed_design_costs_one_analysis_and_never_claims_search_convergence()
 fn clean_sheet_optimizer_publishes_the_cabin_sized_fuselage() {
     let mut config = AlasConfig::default();
     config.optimizer.solver.method = alas_config::optimizer::PRODUCT_DE_METHOD.to_owned();
-    config.optimizer.solver.max_iterations = 0;
-    config.optimizer.solver.population_size = 1;
+    config.optimizer.solver.refinement.max_evaluations = 8;
+    config.optimizer.solver.screening.max_evaluations = 8;
     config.optimizer.solver.seed = Some(42);
     let expected = crate::mdo::canonicalize_design(&config, DesignVector::default())
         .expect("the default clean-sheet load case has a sized fuselage");
@@ -571,55 +408,16 @@ fn native_worker_batches_merge_history_in_candidate_order() {
 
     assert_eq!(evaluations.len(), candidates.len());
     assert_eq!(objective.history.n_evaluations(), candidates.len());
-    // `DesignObjective::new` builds a product (non-reference) objective, so
-    // `evaluate` (`objective_evaluate.rs:41`) routes straight to
-    // `crate::mdo::evaluate_mission_sized` rather than the frozen-replay
-    // path below it that records "geometry_build". The mission-sized path
+    // `evaluate` routes to `crate::mdo::evaluate_mission_sized`, which
     // validates the design-vector shape first
-    // (`DesignObjective::validate_design_space`,
-    // `objective_model.rs:252-286`) and records the earlier, more precise
-    // "design_space" reason before ever reaching geometry construction, so
-    // an empty (wrong-length) candidate now fails at that shape check.
+    // (`DesignObjective::validate_design_space`) and records "design_space"
+    // before any geometry is built, so an empty (wrong-length) candidate
+    // fails at that shape check.
     assert!(objective
         .history
         .reject_reason
         .iter()
         .all(|reason| reason == "design_space"));
-}
-
-#[test]
-fn the_product_profile_dispatches_to_the_lshade_kernel() {
-    // The product profile is selectable alongside the default
-    // `scipy_legacy` profile and must reach the mission-sized L-SHADE driver.
-    let mut config = AlasConfig::default();
-    config.optimizer.solver.method = "differential_evolution".to_owned();
-    config.optimizer.solver.max_iterations = 1;
-    config.optimizer.solver.population_size = 1;
-    config.optimizer.solver.seed = Some(42);
-    let mut optimizer = DesignOptimizer::new(config);
-    let mut evaluator = |design: &DesignVector| {
-        let values = design.to_array();
-        let cost = values.iter().map(|value| value * value).sum();
-        ObjectiveEvaluation {
-            cost,
-            valid: true,
-            l_over_d: 1.0 / (1.0 + cost),
-            span_m: design.span_m,
-            alpha_deg: 3.0,
-            area_m2: design.span_m * design.root_chord_m,
-            trim_ih_deg: 0.0,
-            reject_reason: String::new(),
-        }
-    };
-
-    let result = optimizer
-        .run_with_evaluator(None, Some(&DesignVector::default()), &mut evaluator, None)
-        .expect("the test objective accepts every candidate");
-
-    assert_eq!(result.method, "differential_evolution");
-    assert_eq!(result.strategy, "lshade_eps_de");
-    assert!(result.best_cost.is_finite());
-    assert!(result.history.n_evaluations() > 0);
 }
 
 #[test]
@@ -631,7 +429,14 @@ fn an_unsupported_method_token_set_directly_is_rejected_rather_than_silently_run
     // `SolverSettings` directly, bypassing that boundary, gets a clear
     // validation error instead of the token silently running a different
     // algorithm.
-    for method in ["sqp", "nsga2", "turbo_1", "cma_es", "feasibility_first_de"] {
+    for method in [
+        "sqp",
+        "nsga2",
+        "turbo_1",
+        "cma_es",
+        "feasibility_first_de",
+        "scipy_legacy",
+    ] {
         let mut config = AlasConfig::default();
         config.optimizer.solver.method = method.to_owned();
         let mut optimizer = DesignOptimizer::new(config);
@@ -655,47 +460,34 @@ fn an_unsupported_method_token_set_directly_is_rejected_rather_than_silently_run
     }
 }
 
-fn cancellable_de_config(max_iterations: i64) -> AlasConfig {
+/// A product configuration whose refinement budget is `budget` evaluations.
+/// Below 250 evaluations the initial population is the 24-member floor
+/// (`product_de::initial_population`), so the batch sizes below are known.
+fn cancellable_de_config(budget: i64) -> AlasConfig {
     let mut config = AlasConfig::default();
     config.optimizer.solver.method = "differential_evolution".to_owned();
-    config.optimizer.solver.population_size = 1;
-    config.optimizer.solver.max_iterations = max_iterations;
+    config.optimizer.solver.refinement.max_evaluations = budget;
+    config.optimizer.solver.screening.max_evaluations = 8;
     config.optimizer.solver.seed = Some(11);
     config
 }
 
-#[test]
-fn a_cancellation_requested_after_one_generation_stops_before_the_generation_budget() {
-    // Measured, not assumed: a zero-generation run only ever evaluates the
-    // initial population, so its evaluation count is that population's size
-    // for this exact config.
-    let mut optimizer = DesignOptimizer::new(cancellable_de_config(0));
-    let baseline = optimizer
-        .run_with_evaluator(
-            None,
-            Some(&DesignVector::default()),
-            &mut synthetic_objective,
-            None,
-        )
-        .expect("the synthetic objective accepts every candidate");
-    let population = baseline.history.n_evaluations();
-    assert!(population > 0);
+/// The refinement's initial population for [`cancellable_de_config`].
+const INITIAL_POPULATION: usize = 24;
 
-    let max_iterations = 40;
-    let mut optimizer = DesignOptimizer::new(cancellable_de_config(max_iterations));
+#[test]
+fn a_cancellation_requested_after_one_generation_stops_before_the_budget() {
+    let mut optimizer = DesignOptimizer::new(cancellable_de_config(240));
     let cancel = AtomicBool::new(false);
     let mut calls = 0usize;
     let mut evaluator = |design: &DesignVector| {
         calls += 1;
-        // The initial population plus the first generation's trials have
-        // all been scored by this point; request cancellation right at that
-        // generation boundary, not mid-generation.
-        if calls == population * 2 {
+        // The initial population and the first generation have been scored.
+        if calls == 2 * INITIAL_POPULATION {
             cancel.store(true, Ordering::Relaxed);
         }
         synthetic_objective(design)
     };
-
     let result = optimizer
         .run_with_evaluator_cancellable(
             None,
@@ -711,54 +503,27 @@ fn a_cancellation_requested_after_one_generation_stops_before_the_generation_bud
         result.best_valid,
         "the returned candidate must be a fully scored one, not a partial trial"
     );
-    let full_budget = population * (1 + max_iterations as usize);
-    assert!(
-        result.history.n_evaluations() < full_budget,
-        "cancellation must stop well short of the {max_iterations}-generation budget: \
-         {} of {full_budget} evaluations",
-        result.history.n_evaluations()
-    );
+    assert_eq!(result.history.n_evaluations(), 2 * INITIAL_POPULATION);
 }
 
-/// A cancelled search must report the analyses it ran, not the budget it was
-/// given.
-///
-/// Reporting `de.evaluation_budget()` verbatim would make a run stopped after
-/// 94 coupled analyses claim 576 of them - a cost figure five times the truth
-/// in the one place a reader looks to size the next run.
+/// A cancelled search reports the analyses it ran, not the budget it was
+/// given, and the generation the request landed in does not count as
+/// completed.
 #[test]
 fn a_cancelled_de_run_reports_the_analyses_it_executed_and_not_its_budget() {
-    let mut optimizer = DesignOptimizer::new(cancellable_de_config(0));
-    let baseline = optimizer
-        .run_with_evaluator(
-            None,
-            Some(&DesignVector::default()),
-            &mut synthetic_objective,
-            None,
-        )
-        .expect("the synthetic objective accepts every candidate");
-    let population = baseline.history.n_evaluations();
-
-    let max_iterations = 40;
-    let mut config = cancellable_de_config(max_iterations);
-    // One worker makes the kernel's evaluation block one candidate, so the
-    // bound asserted below does not depend on the machine's core count.
-    config.optimizer.solver.workers = 1;
-    let mut optimizer = DesignOptimizer::new(config);
+    let mut optimizer = DesignOptimizer::new(cancellable_de_config(240));
     let cancel = AtomicBool::new(false);
     let mut calls = 0usize;
     let mut evaluator = |design: &DesignVector| {
         calls += 1;
-        // Mid-batch, in the second generation: the L-SHADE kernel checks the
-        // flag before every evaluation block (see `search_methods::lshade_de`'s
-        // cancellation contract), so the rest of the second generation is
-        // never dispatched and it does not count as completed.
-        if calls == population * 2 + population / 2 {
+        // Inside the second generation. The delegated evaluator is serial and
+        // does not poll the flag, so that whole generation is scored; the
+        // kernel observes the request at its end.
+        if calls == 2 * INITIAL_POPULATION + 5 {
             cancel.store(true, Ordering::Relaxed);
         }
         synthetic_objective(design)
     };
-
     let result = optimizer
         .run_with_evaluator_cancellable(
             None,
@@ -773,39 +538,23 @@ fn a_cancelled_de_run_reports_the_analyses_it_executed_and_not_its_budget() {
         .search_diagnostics
         .as_ref()
         .expect("the DE path always reports diagnostics");
-    let budget = population * (1 + max_iterations as usize);
-    assert!(
-        diagnostics.analysis_evaluations < budget,
-        "a cancelled run may not report its full {budget}-analysis budget: {}",
-        diagnostics.analysis_evaluations
-    );
     assert_eq!(
-        diagnostics.analysis_evaluations + diagnostics.verification_evaluations,
+        diagnostics.analysis_evaluations,
         result.history.n_evaluations(),
-        "every analysis in the history is either a finalist verification or a search evaluation"
+        "every analysis in the history belongs to the refinement"
     );
-    assert!(
-        diagnostics.poll_iterations < max_iterations as usize,
-        "a cancelled run may not report its full {max_iterations}-generation budget: {}",
-        diagnostics.poll_iterations
-    );
-    // The request landed mid-batch in generation two and was observed at the
-    // next one-candidate block, so only the first generation completed.
-    assert_eq!(
-        diagnostics.poll_iterations, 1,
-        "the generation the request landed in must not count as completed"
-    );
-    assert!(
-        diagnostics.analysis_evaluations < population * 3,
-        "the rest of generation two must not have been analysed: {}",
-        diagnostics.analysis_evaluations
-    );
+    assert!(diagnostics.analysis_evaluations < 3 * INITIAL_POPULATION);
+    assert!(diagnostics.analysis_evaluations > 2 * INITIAL_POPULATION);
+    assert_eq!(diagnostics.poll_iterations, 1);
+    let refinement = diagnostics.stages.last().expect("a refinement stage");
+    assert_eq!(refinement.termination, "cancelled");
+    assert_eq!(refinement.evaluations, diagnostics.analysis_evaluations);
 }
 
 #[test]
-fn the_same_seed_without_cancellation_still_replays_deterministically() {
+fn the_same_seed_replays_deterministically_and_stops_on_its_budget() {
     let run = || {
-        let mut optimizer = DesignOptimizer::new(cancellable_de_config(3));
+        let mut optimizer = DesignOptimizer::new(cancellable_de_config(96));
         optimizer
             .run_with_evaluator_cancellable(
                 None,
@@ -816,65 +565,54 @@ fn the_same_seed_without_cancellation_still_replays_deterministically() {
             )
             .expect("the synthetic objective accepts every candidate")
     };
-
     let first = run();
     let second = run();
-
-    assert_eq!(first.termination, "iteration_limit");
-    assert_eq!(second.termination, "iteration_limit");
+    assert_eq!(first.termination, "evaluation_budget");
     assert_eq!(first.best_design, second.best_design);
     assert_eq!(first.best_cost, second.best_cost);
-    assert_eq!(
-        first.history.n_evaluations(),
-        second.history.n_evaluations()
-    );
+    // The refinement stops on its budget less the verification reserve.
+    let reserve = crate::verification_reserve(&cancellable_de_config(96).optimizer.solver);
+    assert_eq!(first.history.n_evaluations(), 96 - reserve.evaluations);
+    assert_eq!(second.history.n_evaluations(), 96 - reserve.evaluations);
+    let diagnostics = first.search_diagnostics.expect("diagnostics");
+    assert_eq!(diagnostics.seed, Some(11));
+    assert_eq!(diagnostics.scope, crate::SEARCH_SCOPE);
+    // The baseline was the first initial member, so the same-model delta is
+    // recorded and the winner is no worse than it.
+    let baseline = diagnostics.baseline.expect("baseline comparison");
+    assert!(baseline.winner_objective_value <= baseline.baseline_objective_value);
 }
 
 #[test]
-fn a_flag_already_set_stops_the_run_before_the_search_stage_and_reports_it_as_cancelled() {
-    // The A320 measurement case in miniature: the guard's flag is set while
-    // the run is still in Stage A, so no generation boundary has been reached
-    // yet. The run must still return - joinably, with a verdict - rather than
-    // carry on to the search stage that the flag was set to stop.
-    let mut optimizer = DesignOptimizer::new(cancellable_de_config(40));
+fn a_flag_already_set_stops_the_run_before_any_analysis_and_reports_it_as_cancelled() {
+    let mut optimizer = DesignOptimizer::new(cancellable_de_config(240));
     let cancel = AtomicBool::new(true);
-
+    let mut calls = 0usize;
     let result = optimizer
         .run_with_evaluator_cancellable(
             None,
             Some(&DesignVector::default()),
-            &mut synthetic_objective,
+            &mut |design: &DesignVector| {
+                calls += 1;
+                synthetic_objective(design)
+            },
             None,
             Some(&cancel),
         )
         .expect("a cancelled run returns a cancelled result, not a no-feasible-design error");
 
+    assert_eq!(calls, 0);
     assert_eq!(result.termination, crate::CANCELLED);
-    assert!(result.was_cancelled());
-    assert!(
-        !result.converged(),
-        "a run stopped from outside reached no convergence criterion of its own"
-    );
-    assert!(
-        !result.is_delivered_feasible(),
-        "a cancelled search must never present its candidate as a delivered feasible design"
-    );
-    assert!(
-        result
-            .search_diagnostics
-            .as_ref()
-            .is_some_and(|diagnostics| !diagnostics.converged),
-        "the diagnostics must agree with the termination label"
-    );
+    assert!(!result.converged());
+    assert!(!result.is_delivered_feasible());
 }
 
 #[test]
 fn a_cancelled_run_is_never_feasible_even_when_its_winner_scored_valid() {
     // `best_valid` says the winner satisfied the constraints it was scored
-    // against. It is *not* a licence to deliver that winner: the search was
-    // stopped before it finished comparing candidates, so the feasibility
-    // verdict the reports read must refuse it on the cancellation alone.
-    let mut optimizer = DesignOptimizer::new(cancellable_de_config(40));
+    // against; it is not a licence to deliver a design from a search that
+    // was stopped before it finished comparing candidates.
+    let mut optimizer = DesignOptimizer::new(cancellable_de_config(240));
     let cancel = AtomicBool::new(false);
     let mut calls = 0usize;
     let mut evaluator = |design: &DesignVector| {
@@ -884,7 +622,6 @@ fn a_cancelled_run_is_never_feasible_even_when_its_winner_scored_valid() {
         }
         synthetic_objective(design)
     };
-
     let result = optimizer
         .run_with_evaluator_cancellable(
             None,
@@ -896,18 +633,14 @@ fn a_cancelled_run_is_never_feasible_even_when_its_winner_scored_valid() {
         .expect("a cancelled search still returns a scored candidate");
 
     assert!(result.was_cancelled());
-    assert!(
-        result.best_valid,
-        "this objective accepts every candidate, so the winner is valid; \
-         the point of the test is that validity alone is not feasibility"
-    );
+    assert!(result.best_valid);
     assert!(!result.is_delivered_feasible());
     assert!(!result.converged());
 }
 
 #[test]
 fn a_reporting_fidelity_rejection_also_refuses_the_delivered_feasibility_verdict() {
-    let mut optimizer = DesignOptimizer::new(cancellable_de_config(1));
+    let mut optimizer = DesignOptimizer::new(cancellable_de_config(48));
     let mut result = optimizer
         .run_with_evaluator(
             None,
@@ -929,26 +662,12 @@ fn a_reporting_fidelity_rejection_also_refuses_the_delivered_feasibility_verdict
         candidates_evaluated: 1,
         delivered_is_search_finalist: true,
         wall_time_s: 0.0,
+        analyses: 1,
+        baseline: None,
     });
 
     assert_eq!(result.termination, crate::REPORTING_FIDELITY_REJECTED);
     assert!(!result.best_valid);
     assert!(!result.is_delivered_feasible());
     assert!(!result.converged());
-}
-
-#[test]
-fn the_differential_evolution_token_runs_the_lshade_kernel() {
-    let mut optimizer = DesignOptimizer::new(cancellable_de_config(1));
-    let result = optimizer
-        .run_with_evaluator(
-            None,
-            Some(&DesignVector::default()),
-            &mut synthetic_objective,
-            None,
-        )
-        .expect("the synthetic objective accepts every candidate");
-
-    assert_eq!(result.method, "differential_evolution");
-    assert_eq!(result.strategy, "lshade_eps_de");
 }

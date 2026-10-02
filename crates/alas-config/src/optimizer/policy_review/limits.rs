@@ -58,6 +58,11 @@ const CAPACITY_IDENTITY: &str = "A capacity identity, not a requirement with an 
 margin: the planned fuel does not fit, or the aircraft cannot be dispatched with it. Admitting \
 the miss would publish a mission this aircraft cannot fly.";
 
+/// A balance or ground-clearance limit anchored on the registered aircraft.
+const RELATIVE_TO_REGISTERED: &str = "No worse than the registered aircraft; the absolute \
+requirement remains diagnostic because of known model limits, so this is the only guard against \
+trading balance or ground clearance for mass or cost.";
+
 /// The requested brief, which relaxation does not get to rewrite.
 const THE_BRIEF: &str = "The value is the mission brief the user asked for. An aircraft that \
 carries less or flies less far is a different requirement, not the same requirement within a \
@@ -128,6 +133,9 @@ measure a miss against.",
     ineligible_mass("dispatch_mtow_limited", CAPACITY_IDENTITY),
     ineligible_mass("dispatch_tank_limited", CAPACITY_IDENTITY),
     ineligible_mass("fuel_capacity", CAPACITY_IDENTITY),
+    ineligible_mass("fuel_capacity_declared", CAPACITY_IDENTITY),
+    ineligible_mass("fuel_capacity_published", CAPACITY_IDENTITY),
+    ineligible_mass("fuel_volume_published", CAPACITY_IDENTITY),
     ReviewedLimit {
         id: "fuel_capacity_unavailable",
         family: "Mass",
@@ -154,6 +162,12 @@ with an independent empirical mass estimate alone is not this failure.",
         id: "cg_model_error",
         family: "Balance",
         review: RelaxationReview::NeverRelaxable,
+        rationale: BOOLEAN_FLAG,
+    },
+    ReviewedLimit {
+        id: "relative_balance_nominal_unavailable",
+        family: "Balance",
+        review: RelaxationReview::Ineligible,
         rationale: BOOLEAN_FLAG,
     },
     ReviewedLimit {
@@ -198,6 +212,18 @@ negative reaction, so widening it is the wrong direction.",
 physical limit: the physical forward/aft boundaries themselves are \
 unaffected by it, so there is nothing to size a tolerance against beyond the declared preference \
 itself.",
+    },
+    ReviewedLimit {
+        id: "usable_cg_range_vs_nominal",
+        family: "Balance",
+        review: RelaxationReview::Ineligible,
+        rationale: RELATIVE_TO_REGISTERED,
+    },
+    ReviewedLimit {
+        id: "tail_scrape_vs_nominal",
+        family: "Balance",
+        review: RelaxationReview::Ineligible,
+        rationale: RELATIVE_TO_REGISTERED,
     },
     ReviewedLimit {
         id: "nose_gear_strength",
@@ -361,6 +387,12 @@ attitude the run itself declared, and no primary source states a fraction of a d
 that may be exceeded.",
     },
     ReviewedLimit {
+        id: "panel_washout_max",
+        family: "Geometry",
+        review: RelaxationReview::Ineligible,
+        rationale: VALIDITY_DOMAIN,
+    },
+    ReviewedLimit {
         id: "passenger_shortfall",
         family: "Geometry",
         review: RelaxationReview::Ineligible,
@@ -424,22 +456,6 @@ a bounded miss of the same requirement.",
         family: "Geometry",
         review: RelaxationReview::Ineligible,
         rationale: VALIDITY_DOMAIN,
-    },
-    ReviewedLimit {
-        id: "tail_volume_h",
-        family: "Geometry",
-        review: RelaxationReview::Ineligible,
-        rationale: "A statistical plausibility band, already ranked soft under a hard geometry \
-family. A tolerance on a band that is itself the spread of historical practice adds nothing a \
-reviewer could check.",
-    },
-    ReviewedLimit {
-        id: "tail_volume_v",
-        family: "Geometry",
-        review: RelaxationReview::Ineligible,
-        rationale: "A statistical plausibility band, already ranked soft under a hard geometry \
-family. A tolerance on a band that is itself the spread of historical practice adds nothing a \
-reviewer could check.",
     },
     ReviewedLimit {
         id: "tip_root_chord_ratio_max",

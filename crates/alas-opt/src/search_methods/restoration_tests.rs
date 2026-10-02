@@ -2,7 +2,17 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 use super::*;
+use crate::search_methods::Tier;
 use std::sync::atomic::{AtomicBool, Ordering};
+
+fn limits(max_scores: usize) -> Limits {
+    Limits {
+        max_scores,
+        stop_after: usize::MAX,
+        started: Instant::now(),
+        time_limit: None,
+    }
+}
 
 fn coupled(values: &[f64]) -> ScoredPoint {
     let x = values[0];
@@ -12,7 +22,11 @@ fn coupled(values: &[f64]) -> ScoredPoint {
     ScoredPoint {
         values: values.to_vec(),
         cost: if valid { 100.0 } else { -1e9 },
-        valid,
+        tier: if valid {
+            Tier::Feasible
+        } else {
+            Tier::ClosedInfeasible
+        },
         constraint_violation: violation,
         objectives: [0.0; 3],
     }
@@ -23,19 +37,19 @@ fn evaluated_gradient_repairs_coupled_constraints_without_changing_original_boun
     let bounds = [(0.0, 1.0), (1000.0, 2000.0), (7.0, 7.0)];
     let initial = coupled(&[0.5, 1500.0, 7.0]);
     let mut trajectories = Vec::new();
-    for workers in [1, 4] {
+    for _ in 0..2 {
         let mut visited = Vec::new();
         let result = run(
             &bounds,
             initial.clone(),
-            workers,
+            limits(usize::MAX),
             &CancelScope::attach(None),
             &mut |points| {
                 visited.extend_from_slice(points);
                 points.iter().map(|values| coupled(values)).collect()
             },
         );
-        assert!(result.winner.valid);
+        assert!(result.winner.valid());
         assert_eq!(
             result.winner.cost, 100.0,
             "infeasible negative objective cannot win"
@@ -61,14 +75,14 @@ fn restoration_budget_is_explicit_and_unreachable_feasibility_is_not_success() {
     let initial = ScoredPoint {
         values: vec![0.5, 0.5],
         cost: 0.0,
-        valid: false,
+        tier: Tier::ClosedInfeasible,
         constraint_violation: 1.0,
         objectives: [0.0; 3],
     };
     let result = run(
         &[(0.0, 1.0); 2],
         initial.clone(),
-        3,
+        limits(usize::MAX),
         &CancelScope::attach(None),
         &mut |points| {
             points
@@ -83,7 +97,7 @@ fn restoration_budget_is_explicit_and_unreachable_feasibility_is_not_success() {
     assert_eq!(result.budget, 4 * (2 * 2 + 1));
     assert_eq!(result.iterations, 4);
     assert_eq!(result.requested_scores, 16);
-    assert!(!result.winner.valid);
+    assert!(!result.winner.valid());
     assert_eq!(result.winner.constraint_violation, 1.0);
     assert!(result.radius < MIN_RADIUS);
 }
@@ -95,7 +109,7 @@ fn cancellation_in_a_final_poll_block_is_retained_with_completed_scores() {
     let result = run(
         &[(0.0, 1.0), (1000.0, 2000.0), (7.0, 7.0)],
         initial,
-        4,
+        limits(usize::MAX),
         &CancelScope::attach(Some(&cancel)),
         &mut |points| {
             cancel.store(true, Ordering::Release);
@@ -105,7 +119,7 @@ fn cancellation_in_a_final_poll_block_is_retained_with_completed_scores() {
     assert!(result.cancelled);
     assert_eq!(result.requested_scores, 4);
     assert_eq!(result.iterations, 0);
-    assert!(!result.winner.valid);
+    assert!(!result.winner.valid());
 }
 
 #[test]
@@ -130,9 +144,13 @@ fn already_feasible_locked_or_cancelled_requests_do_no_restoration_work() {
             Some(&cancel),
         ),
     ] {
-        let result = run(&bounds, initial, 1, &CancelScope::attach(flag), &mut |_| {
-            panic!("a short-circuited request must not evaluate")
-        });
+        let result = run(
+            &bounds,
+            initial,
+            limits(usize::MAX),
+            &CancelScope::attach(flag),
+            &mut |_| panic!("a short-circuited request must not evaluate"),
+        );
         assert_eq!(result.requested_scores, 0);
         assert_eq!(result.budget, 0);
     }
@@ -144,14 +162,14 @@ fn a_nonfinite_analysis_cannot_become_a_restored_feasible_candidate() {
     let result = run(
         &[(0.0, 1.0), (1000.0, 2000.0), (7.0, 7.0)],
         initial.clone(),
-        2,
+        limits(usize::MAX),
         &CancelScope::attach(None),
         &mut |points| {
             points
                 .iter()
                 .map(|values| ScoredPoint {
                     values: values.clone(),
-                    valid: true,
+                    tier: Tier::Feasible,
                     cost: f64::NAN,
                     constraint_violation: 0.0,
                     objectives: [0.0; 3],
@@ -159,6 +177,41 @@ fn a_nonfinite_analysis_cannot_become_a_restored_feasible_candidate() {
                 .collect()
         },
     );
-    assert!(!result.winner.valid);
+    assert!(!result.winner.valid());
     assert_eq!(result.winner, initial);
+}
+
+#[test]
+fn restoration_never_exceeds_its_score_budget_and_never_starts_a_wave_that_would_not_fit() {
+    let initial = ScoredPoint {
+        values: vec![0.5, 0.5],
+        cost: 0.0,
+        tier: Tier::ClosedInfeasible,
+        constraint_violation: 1.0,
+        objectives: [0.0; 3],
+    };
+    for max_scores in [0, 3, 4, 5, 9, 12] {
+        let mut requested = 0;
+        let result = run(
+            &[(0.0, 1.0); 2],
+            initial.clone(),
+            limits(max_scores),
+            &CancelScope::attach(None),
+            &mut |points| {
+                requested += points.len();
+                points
+                    .iter()
+                    .map(|values| ScoredPoint {
+                        values: values.clone(),
+                        constraint_violation: 1.0 - 0.1 * values[0],
+                        ..initial.clone()
+                    })
+                    .collect()
+            },
+        );
+        assert!(requested <= max_scores, "{requested} > {max_scores}");
+        assert_eq!(result.requested_scores, requested);
+        // A wave is four points; fewer than four remaining never starts one.
+        assert_eq!(result.iterations == 0, max_scores < 4, "{max_scores}");
+    }
 }

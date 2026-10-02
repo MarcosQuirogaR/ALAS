@@ -96,22 +96,37 @@ fn beam(level_tip_m: f64, semispan_m: f64) -> (WingboxSizing, StructuralAnalysis
 fn a_small_deflection_uniform_beam_passes_with_the_expected_slope() {
     let (sizing, report) = beam(0.1, 10.0);
     let result = assess(&sizing, &report, LinearModelLimits::default());
-    // Uniform cantilever: tip slope = (4/3) tip deflection / L.
-    let expected_slope = (4.0 / 3.0) * 3.75 * 0.1 / 10.0;
+    // Uniform cantilever: tip slope = (4/3) tip deflection / L, gated on the
+    // 1 g flight shape.
+    let expected_slope = (4.0 / 3.0) * 0.1 / 10.0;
     assert!(result.passes());
     assert!((result.max_abs_slope / expected_slope - 1.0).abs() < 6.0e-5);
-    assert_eq!(result.governing_load_case, "pull-up");
-    assert_eq!(result.governing_load_factor, 3.75);
+    assert_eq!(result.governing_load_case, "level");
+    assert_eq!(result.governing_load_factor, 1.0);
 }
 
 #[test]
-fn twenty_metre_ultimate_deflection_is_outside_the_linear_domain() {
+fn a_flight_shape_outside_the_budget_fails_and_its_ultimate_error_is_reported() {
+    // 5.3 m at 1 g on a 33 m semispan: a 1 g tip slope of 0.215 rad.
     let (sizing, report) = beam(20.0 / 3.75, 33.0);
     let result = assess(&sizing, &report, LinearModelLimits::default());
     assert!(result.input_valid);
     assert!(!result.passes());
-    assert!(result.max_linear_curvature_relative_error > 1.0);
+    assert!(result.max_linear_curvature_relative_error > 0.05);
+    assert!(result.manoeuvre_curvature_relative_error > 1.0);
     assert!((result.max_tip_deflection_ratio - 20.0 / 33.0).abs() < 1.0e-12);
+}
+
+#[test]
+fn an_ultimate_deflection_like_the_787_static_test_is_reported_but_does_not_gate() {
+    // Boeing 787 ultimate-load wing test (news release, 28 March 2010): about
+    // 7.6 m of tip rise on a 30 m semispan. A certified wing does this, so the
+    // linear small-slope budget cannot be a requirement on it.
+    let (sizing, report) = beam(7.6 / 3.75, 30.0);
+    let result = assess(&sizing, &report, LinearModelLimits::default());
+    assert!(result.passes(), "{result:#?}");
+    assert!(result.manoeuvre_curvature_relative_error > 0.05);
+    assert!((result.max_tip_deflection_ratio - 7.6 / 30.0).abs() < 1.0e-12);
 }
 
 #[test]

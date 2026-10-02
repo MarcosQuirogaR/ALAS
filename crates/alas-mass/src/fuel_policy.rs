@@ -109,10 +109,12 @@ pub fn plan_fuel(
     let holding_altitude_m = policy.holding_altitude_ft * FOOT;
     let alternate_distance_m = policy.alternate_distance_nmi * NAUTICAL_MILE;
 
+    let idle_fuel_flow_kg_s = model.taxi_fuel_flow_kg_s()?;
     let taxi = FuelQuantity {
-        kg: model.taxi_fuel_flow_kg_s()? * policy.taxi_time_min * SECONDS_PER_MINUTE,
+        kg: idle_fuel_flow_kg_s * policy.taxi_time_min * SECONDS_PER_MINUTE,
         rule: FuelRule::TaxiTime {
             minutes: policy.taxi_time_min,
+            idle_fuel_flow_kg_s,
         },
     };
 
@@ -517,7 +519,8 @@ mod tests {
                 + plan.alternate.kg
                 + plan.final_reserve.kg
                 + plan.additional.kg
-                + plan.extra.kg,
+                + plan.extra.kg
+                + plan.taxi_in_fuel_kg(),
             Tier::Closed
         ));
         assert!(agrees(
@@ -525,9 +528,29 @@ mod tests {
             plan.takeoff_fuel_kg() + plan.taxi.kg,
             Tier::Closed
         ));
+        // Gate-to-gate block: taxi-out at the policy time, trip, and taxi-in
+        // at the ICAO Doc 9889 7 min, both at the model's ground-idle flow.
+        let idle_flow_kg_s = model.taxi_fuel_flow_kg_s().unwrap();
+        assert!(agrees(
+            plan.taxi.kg,
+            idle_flow_kg_s * policy.taxi_time_min * 60.0,
+            Tier::Closed
+        ));
+        assert!(agrees(
+            plan.taxi_in_fuel_kg(),
+            idle_flow_kg_s * 7.0 * 60.0,
+            Tier::Closed
+        ));
         assert!(agrees(
             plan.block_fuel_kg(),
-            plan.taxi.kg + plan.trip.kg,
+            plan.taxi.kg + plan.trip.kg + plan.taxi_in_fuel_kg(),
+            Tier::Closed
+        ));
+        // Taxi-in is carried in the takeoff fuel and no reserve quantity is
+        // sized from it.
+        assert!(agrees(
+            plan.reserve_fuel_kg(),
+            plan.contingency.kg + plan.alternate.kg + plan.final_reserve.kg + plan.additional.kg,
             Tier::Closed
         ));
         assert!(agrees(
@@ -541,6 +564,48 @@ mod tests {
             Tier::Closed
         ));
         assert!(plan.is_finite_and_nonnegative());
+    }
+
+    #[test]
+    fn block_fuel_never_exceeds_the_ramp_fuel_under_any_scheme() {
+        let model = toy_model();
+        let taxi_in_kg = model.taxi_flow_kg_s * 7.0 * 60.0;
+        assert!(taxi_in_kg > 0.0);
+        for scheme in [
+            FuelScheme::EasaBasic,
+            FuelScheme::FaaDomestic,
+            FuelScheme::FaaFlagSupplemental,
+            FuelScheme::StudyConvention,
+            FuelScheme::TripFuelOnly,
+        ] {
+            let policy = FuelPolicyConfig {
+                scheme,
+                ..Default::default()
+            };
+            let plan = plan_fuel(&policy, &model, TOW_KG, RANGE_M).unwrap();
+            assert!(
+                plan.block_fuel_kg() <= plan.ramp_fuel_kg() + 1e-9,
+                "{scheme:?}"
+            );
+            // Ramp = taxi-out + takeoff fuel, which carries the taxi-in
+            // budget to the destination beside the reserves.
+            assert!(agrees(
+                plan.ramp_fuel_kg(),
+                plan.taxi.kg + plan.takeoff_fuel_kg(),
+                Tier::Closed
+            ));
+            assert!(agrees(
+                plan.destination_landing_fuel_kg(),
+                plan.reserve_fuel_kg() + plan.extra.kg + taxi_in_kg,
+                Tier::Closed
+            ));
+            // What is loaded and not burned is exactly the reserves.
+            assert!(agrees(
+                plan.ramp_fuel_kg() - plan.block_fuel_kg(),
+                plan.reserve_fuel_kg() + plan.extra.kg,
+                Tier::Closed
+            ));
+        }
     }
 
     #[test]

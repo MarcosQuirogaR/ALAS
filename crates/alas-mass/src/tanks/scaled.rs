@@ -120,6 +120,7 @@ fn geometric_only(config: &FuelTankLayoutConfig) -> FuelTankLayoutConfig {
         &mut geometric.outer_wing,
     ] {
         cell.published_usable_volume_l = None;
+        cell.feed.published_usable_volume_l = None;
     }
     geometric.center.published_usable_volume_l = None;
     geometric.trim.published_usable_volume_l = None;

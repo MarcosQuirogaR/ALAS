@@ -37,7 +37,15 @@ pub fn atr72_600() -> AircraftPreset {
     // separation; half of that is the single-engine spanwise station.
     engine.spanwise_positions_m = vec![4.05, -4.05];
     engine.z_m = -0.70;
-    engine.inlet_x_offset_m = 1.2;
+    // ATR 72-600 factsheet 2020 p.22 side view: the spinner tip sits
+    // 8.45 +/- 0.15 m aft of the nose (read against both the printed
+    // 27.166 m length and the 10.77 m wheelbase, which disagree by 3 %),
+    // 2.70 m ahead of the wing leading edge at the 4.05 m nacelle station.
+    // Independent check: JCAB TCDS No. 75 Rev 3, ATR 72-212A item (17)(a),
+    // engine oil H-arm 12.190 m, i.e. 9.828 m aft of the nose with the
+    // 2.362 m datum of item (9); the nacelle mid-length mass station lands
+    // 0.10 m aft of it.
+    engine.inlet_x_offset_m = 2.70;
 
     AircraftPreset {
         name: "ATR72-600",
@@ -59,6 +67,9 @@ pub fn atr72_600() -> AircraftPreset {
             tank_configuration: "standard integral wing tanks",
         },
         reference: AircraftReferenceData {
+            // ICAO Annex 14 Vol. I Table 1-1 (aerodrome reference code) applied to the
+            // preset wingspan of 27.05 m (ATR 72-600): 24 m <= b < 36 m is code C.
+            aerodrome_reference_code: Some(crate::AerodromeReferenceCode::C),
             // EASA TCDS A.084, Issue 14 (23 Feb 2026), section III.13.b
             // "ATR 72-212A models", Mod 6219 column: MRW 23,170 kg, MTOW
             // 23,000 kg, MLW 22,350 kg, MZFW 21,000 kg. The MTOW/MLW/MZFW
@@ -73,6 +84,11 @@ pub fn atr72_600() -> AircraftPreset {
             usable_fuel_mass_kg: Some(5_000.0),
             reference_wing_area_m2: Some(61.0),
             planning_seats: Some(72),
+            design_point: Some(crate::PayloadRangeDesignPoint {
+                range_nmi: 758.0,
+                payload_kg: None,
+                source: "ATR 72-600 Factsheet (PW127M/N edition, 2020-07) p.2: range with maximum passengers (72 seats) 758 nmi; reserves and payload mass not stated, so the planning cabin is the payload",
+            }),
             certified_max_seats: Some(78),
             partial_design_mission_evidence: vec![PartialDesignMissionEvidence {
                 kind: PartialMissionEvidenceKind::AdvertisedRange,
@@ -169,13 +185,18 @@ pub fn atr72_600() -> AircraftPreset {
         },
         design_vector: DesignVector {
             span_m: 27.05,
-            // ATR 72-600 Factsheets (2020), three-view: S_ref = 61 m^2.
-            // Scale the estimated chords together to close the active
-            // side-of-body planform area. Chords and MAC remain estimates;
-            // the unverified training-manual MAC is not a fitting target.
-            root_chord_m: 4.015_779_489_708_101,
-            break_chord_m: 2.805_544_575_001_549_7,
-            tip_chord_m: 0.935_181_525_000_516_7,
+            // The factsheet 2020 p.22 plan view draws a constant-chord centre
+            // section out past the nacelles and a straight-tapered outer
+            // panel. With the kink at the 0.32 semispan station, these two
+            // chords close the factsheet's 61 m^2 and the 2.303 m MAC of JCAB
+            // TCDS No. 75 Rev 3, ATR 72-212A item (10), exactly.
+            root_chord_m: 2.590_444,
+            break_chord_m: 2.590_444,
+            tip_chord_m: 1.604_089,
+            // Leading-edge sweep, an engineering estimate: no value is
+            // published, and the factsheet three-view shows a nearly unswept
+            // inboard leading edge and about 4 deg outboard of the nacelle,
+            // which one straight leading edge cannot carry.
             sweep_deg: 3.0,
             tip_twist_deg: -2.0,
             wing_x_shift_m: 0.0,
@@ -189,24 +210,12 @@ pub fn atr72_600() -> AircraftPreset {
         geometry: GeometryConfig {
             wing: WingConfig {
                 // ATR Weight and Balance Manual, LIMITATIONS LIM.1 p.03 (15
-                // JAN 2021): reference-chord leading edge 11.242 m aft of the
-                // nose (station 0 is 2.362 m forward of the nose; station 0
-                // to reference-chord LE is 13.604 m; 13.604 - 2.362 =
-                // 11.242). The built wing's own area-weighted MAC leading
-                // edge (`Wing::aerodynamic_center(0.0)`) sat at 10.488 m at
-                // the previous 10.2 m datum -- 0.754 m forward of the WBM
-                // reference chord -- which is what drove the model's
-                // static margin to roughly -46% and the ZFW nose-gear
-                // reaction negative.
-                // Moving the datum aft by that same 0.754 m places the
-                // built LEMAC on the WBM station; it does not change the
-                // built wing's own MAC length (2.498 m against the WBM's
-                // 2.303 m reference chord, an 8% difference the review
-                // separately notes and this fix does not close, since doing
-                // so would need a planform-shape change, not a translation).
-                // 10.2 + (11.242 - 10.488069716279679) = 10.953930283720321,
-                // rounded to the WBM source's own three-decimal precision.
-                root_datum_x_m: 10.954,
+                // JAN 2021) and JCAB TCDS No. 75 Rev 3 items (9)-(10): the
+                // reference-chord leading edge is 13.604 m aft of station 0,
+                // which is 2.362 m forward of the nose, so 11.242 m aft of the
+                // nose. This datum puts the built wing's MAC leading edge
+                // (`Wing::aerodynamic_center(0.0)`) on that station.
+                root_datum_x_m: 10.916,
                 root_z_m: 1.85,
                 break_z_m: 1.85,
                 tip_z_m: 1.85,
@@ -214,31 +223,13 @@ pub fn atr72_600() -> AircraftPreset {
                 break_twist_deg: 0.0,
                 break_span_fraction: 0.32,
                 kink_span_fraction: None,
-                // 2.9615 m over the 4.0158 m centreline chord: model
-                // geometry, not a measured manufacturer station. This is the
-                // side-of-body chord `WingConfig::transport_planform` already
-                // derives for these chords: the straight-trailing-edge clip
-                // `min(interpolated_root_to_kink_chord, kink_trailing_edge_x
-                // - side_of_body_leading_edge_x)`, which on this planform is
-                // narrower than a plain linear root-to-kink interpolation
-                // (~0.906 root-chord ratio) would give. Left derived (the
-                // WingConfig default), the station is computed by
-                // `transport_planform` but never meshed into the production
-                // wing, only an explicit ratio drives `build_main_wing`'s
-                // side-of-body xsec (see
-                // `crates/alas-geom/src/builder.rs`). Leaving
-                // it unset (as this preset originally did) skips the clip
-                // that the chords above were fit to close: the built wing
-                // came out at 63.926 m^2 against the published 61 m^2
-                // three-view area. Pinning the exact ratio the closure test
-                // in `preset_dimension_corrections.rs` already assumes (as
-                // A320-200/A380-800/DC-10 already do for their own
-                // side-of-body clips) makes the production `s_ref` close
-                // the published area instead of silently skipping the clip.
-                // `transport_planform`/the closure test remain the
-                // authoritative computation of this value; the literal below
-                // is that computation's output, not an independent estimate.
-                side_of_body_chord_ratio: Some(0.737_461_787_891_521_7),
+                // The fuselage-side station carries the constant centre-section
+                // chord. Meshing it as an explicit section keeps the lattice of
+                // the neutral-point condition probes resolvable: without it
+                // the high-lift probe's influence matrix reports a pivot ratio
+                // of 1.2e4 and the critical neutral point silently falls back
+                // to the clean one.
+                side_of_body_chord_ratio: Some(1.0),
                 outboard_sweep_decrement_deg: 0.0,
                 root_airfoil: "naca23018".to_owned(),
                 tip_airfoil: "naca23012".to_owned(),

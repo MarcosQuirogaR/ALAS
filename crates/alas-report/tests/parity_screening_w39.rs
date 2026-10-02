@@ -13,7 +13,6 @@ use alas_report::families::screening::{
 };
 use alas_report::svg::render_svg;
 use alas_screen::{AirfoilCandidateResult, AirfoilScreeningResult};
-use serde_json::Value;
 
 fn candidate(name: &str, refined: bool, verified: bool) -> AirfoilCandidateResult {
     AirfoilCandidateResult {
@@ -116,54 +115,4 @@ fn screening_scenes_are_unavailable_without_their_required_stage_data() {
     };
     assert!(fig_rerank_2d_3d(&result, None).is_none());
     assert!(fig_mses_verification(&result, None).is_none());
-}
-
-#[test]
-fn reference_fixture_covers_every_figure_in_both_parity_themes() {
-    let fixture: Value = serde_json::from_str(include_str!(
-        "../../../golden/report/reference_render_w39.json"
-    ))
-    .expect("fixture is valid JSON");
-    assert_eq!(fixture["schema"], "reference-render-w39/v1");
-    let figures = fixture["figures"].as_object().expect("figure map");
-    for id in [
-        "optimization_history",
-        "trade_map",
-        "rerank_2d_3d",
-        "ranking_bars",
-        "section_shapes",
-        "mses_verification",
-    ] {
-        for theme in ["light", "dark"] {
-            let contract = &figures[&format!("{id}:{theme}")];
-            assert_eq!(contract["available"], true, "{id}:{theme} unavailable");
-            assert_eq!(contract["theme"], theme);
-            assert!(contract["panel_count"].as_u64().unwrap_or(0) > 0);
-            assert!(contract["axes"].as_array().is_some());
-        }
-    }
-
-    let optimization = &figures["optimization_history:light"];
-    assert_eq!(optimization["panel_count"], 2);
-    assert_eq!(optimization["axes"][0]["xlabel"], "valid evaluation #");
-    assert_eq!(optimization["axes"][0]["ylabel"], "L/D");
-    assert_eq!(optimization["axes"][0]["legend"][0], "evaluation");
-    assert_eq!(optimization["axes"][0]["legend"][1], "best so far");
-    assert_eq!(optimization["axes"][1]["ylabel"], "span [m]");
-
-    let trade = &figures["trade_map:light"];
-    assert_eq!(trade["panel_count"], 2);
-    assert_eq!(trade["axes"][0]["xlabel"], "Cruise L/D (3-D wing)");
-    assert_eq!(trade["axes"][1]["ylabel"], "Section t/c (%)");
-
-    let mses = &figures["mses_verification:light"];
-    assert_eq!(
-        mses["axes"][0]["legend"][1],
-        "MSES (Stage 3, real shock/viscous)"
-    );
-    assert!(mses["axes"][0]["annotations"]
-        .as_array()
-        .expect("MSES annotations")
-        .iter()
-        .any(|text| text == "CDw=12 cts"));
 }

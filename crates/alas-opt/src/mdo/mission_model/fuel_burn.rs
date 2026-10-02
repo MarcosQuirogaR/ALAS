@@ -42,7 +42,7 @@ impl FuelBurnModel for SegmentMissionModel {
                 FuelModelError::InvalidModel(format!("holding atmosphere: {error}"))
             })?;
         // Hold at the minimum-drag lift coefficient of the low-speed polar.
-        let cl_best = (self.cd0 / self.induced_factor_k).sqrt();
+        let cl_best = self.min_drag_cl(0.0, altitude_m);
         let dynamic_pressure_pa = mass_kg * self.gravity_m_s2 / (self.wing_area_m2 * cl_best);
         let speed_m_s = (2.0 * dynamic_pressure_pa / atmosphere.density_kg_m3).sqrt();
         self.level_fuel_flow_kg_s(mass_kg, altitude_m, speed_m_s)

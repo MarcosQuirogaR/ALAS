@@ -38,10 +38,11 @@ pub(super) fn append(
     for case in &curves.cases {
         match curvature_lower_bound(case) {
             Some(value) if value <= config.structures.max_linear_curvature_relative_error => {}
-            Some(value) => findings.push(error(
+            Some(value) => findings.push(super::curvature_finding(
+                case.name,
                 FindingCode::StructuralFemModelDomain,
                 format!("{solver} {} sampled front-spar slope exceeds the linear curvature error budget", case.name),
-                Some(value), Some(config.structures.max_linear_curvature_relative_error), "fraction",
+                value, config.structures.max_linear_curvature_relative_error,
             )),
             None => findings.push(error(
                 FindingCode::StructuralSolverFailed,

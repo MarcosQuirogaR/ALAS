@@ -392,10 +392,14 @@ mod tests {
     fn the_nose_and_the_tailcone_leave_a_cabin_between_them() {
         // The two tapers are measured from opposite ends of a length the
         // design vector owns, so together they have to be shorter than the
-        // shortest fuselage the search will accept without penalizing it.
+        // shortest fuselage the search will accept.
         let fuselage = FuselageConfig::default();
         let tapers = fuselage.cabin_start_x_m + fuselage.tailcone_length_m;
-        let floor = crate::ObjectiveWeights::default().fuselage_floor_m;
+        let floor = crate::DESIGN_VARIABLE_SPECS
+            .iter()
+            .find(|spec| spec.name == "fuselage_length_m")
+            .map(|spec| spec.lower)
+            .unwrap();
         assert!(
             tapers < floor,
             "{tapers} m of taper in a {floor} m fuselage"

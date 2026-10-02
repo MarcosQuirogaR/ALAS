@@ -152,12 +152,14 @@ package directory contains. Point them at the directory, not the archive:
 
 ```powershell
 $env:ALAS_W55_PACKAGE_DIR = "dist/alas-v1.2.0-windows-x86_64"
-cargo test -p alas-acceptance --test distribution_license_boundary
-cargo test -p alas-acceptance --test distribution_acceptance
+cargo test -p alas-acceptance --test distribution_license_boundary -- --include-ignored
+cargo test -p alas-acceptance --test distribution_acceptance -- --include-ignored
 ```
 
 (On Linux, `export ALAS_W55_PACKAGE_DIR=dist/alas-v1.2.0-linux-x86_64` and the
-same two `cargo test` commands; both suites read whatever package directory
+same two `cargo test` commands. Both suites are ignored by default, so that an
+ordinary test run reports them as skipped rather than passing them without a
+package; `--include-ignored` runs them. Both read whatever package directory
 the variable names, on either platform.)
 
 `distribution_license_boundary` is the redistribution check: no packaged file

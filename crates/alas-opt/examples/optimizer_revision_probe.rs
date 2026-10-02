@@ -2,7 +2,7 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 //! Reproducible coupled-search measurement with complete residual evidence.
-//! Usage: optimizer_revision_probe CONFIG_JSON OUTPUT_JSON [WORKERS] [GENERATIONS]
+//! Usage: optimizer_revision_probe CONFIG_JSON OUTPUT_JSON [WORKERS] [REFINEMENT_EVALUATIONS]
 //! A zero generation argument measures the nominal only.
 
 use alas_config::{AlasConfig, DesignVector};
@@ -78,8 +78,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         config.optimizer.solver.workers = workers.parse()?;
     }
     let generations = args.get(4).map(|s| s.parse::<i64>()).transpose()?;
-    if let Some(count) = generations {
-        config.optimizer.solver.max_iterations = count;
+    if let Some(count) = generations.filter(|&count| count > 0) {
+        config.optimizer.solver.refinement.max_evaluations = count;
     }
     config.optimizer.solver.seed = Some(7);
     let mut evidence = json!({

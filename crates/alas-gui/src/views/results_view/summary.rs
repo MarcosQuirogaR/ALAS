@@ -6,6 +6,7 @@
 mod findings;
 mod findings_card;
 mod metrics;
+mod optimizer_card;
 mod propulsion;
 #[cfg(test)]
 mod tests;
@@ -23,6 +24,7 @@ use widgets::*;
 pub(super) fn show_summary(state: &AppState, ui: &mut Ui, result: &alas_pipeline::PipelineResult) {
     show_status_banner(ui, result, state.pipeline_result_complete);
     ui.add_space(10.0);
+    optimizer_card::show(ui, result);
     if state.pipeline_result_complete {
         findings_card::show_findings_card(ui, &result.feasibility.findings);
     }

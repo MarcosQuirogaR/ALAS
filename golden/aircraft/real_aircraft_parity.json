@@ -3444,6 +3444,34 @@
           "tolerance": "geometry_length"
         },
         {
+          "id": "cg.full_fuel_arm_from_nose_m",
+          "category": "cg",
+          "model_path": "cg.full_fuel_arm_from_nose_m",
+          "source_value": 12.068,
+          "unit": "m",
+          "evidence": "primary",
+          "condition": "Both wing tanks full (5,000 kg): H-arm 14.430 m minus the 2.362 m datum offset",
+          "condition_match": true,
+          "cite": "jcab_tcds_atr72_rev3",
+          "locator": "p.9, item (16) Fuel capacity (WBM 1-20-03), and p.8 item (9)",
+          "tolerance": "geometry_length",
+          "note": "Derived by subtracting two TCDS values."
+        },
+        {
+          "id": "propulsion.engine_oil_arm_from_nose_m",
+          "category": "propulsion",
+          "model_path": "propulsion.engine_station_from_nose_m",
+          "source_value": 9.828,
+          "unit": "m",
+          "evidence": "primary",
+          "condition": "Engine oil (both engines): H-arm 12.190 m minus the 2.362 m datum offset; locates the PW127 engine body, not its mass centroid",
+          "condition_match": false,
+          "cite": "jcab_tcds_atr72_rev3",
+          "locator": "p.9, item (17)(a) Engine oil, and p.8 item (9)",
+          "tolerance": "geometry_length",
+          "note": "The preset nacelle front is read from the factsheet p.22 side view (spinner 8.45 m aft of the nose); the nacelle mid-length mass station then sits 0.10 m aft of this arm."
+        },
+        {
           "id": "mass.usable_fuel_l_jcab_tcds",
           "category": "mass",
           "model_path": "payload_range.fuel_capacity_l",

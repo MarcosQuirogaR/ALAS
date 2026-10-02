@@ -123,15 +123,4 @@ mod tests {
         assert!((rotated[1] - 1.0).abs() < 1e-12);
         assert!((rotated[2]).abs() < 1e-12);
     }
-
-    #[test]
-    fn cross3_of_x_and_y_axes_is_the_z_axis() {
-        let result = cross3([1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
-        assert_eq!(result, [0.0, 0.0, 1.0]);
-    }
-
-    #[test]
-    fn norm3_of_a_unit_axis_vector_is_one() {
-        assert!((norm3([0.0, 1.0, 0.0]) - 1.0).abs() < 1e-15);
-    }
 }

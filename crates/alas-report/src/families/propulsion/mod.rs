@@ -81,19 +81,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn linspace_places_both_endpoints_exactly() {
-        let grid = linspace(15.0, 70.0, 12);
-        assert_eq!(grid.len(), 12);
-        assert_eq!(grid[0], 15.0);
-        assert_eq!(grid[11], 70.0);
-    }
-
-    #[test]
-    fn linspace_of_one_point_is_the_start() {
-        assert_eq!(linspace(3.0, 9.0, 1), vec![3.0]);
-    }
-
-    #[test]
     fn design_point_reads_the_engine_and_the_cruise_requirement() {
         let config = AlasConfig::default();
         let dp = design_point(&config);

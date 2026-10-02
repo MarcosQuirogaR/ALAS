@@ -146,7 +146,7 @@ fn public_pipeline_reports_complete_or_explicitly_partial_preset_missions() {
                 .iter()
                 .all(|solution| solution.converged && !solution.throttle_limited));
             assert_eq!(
-                result.feasibility.fuel_loading.mission.status,
+                result.feasibility.fuel_loading.mission.native.status,
                 alas_pipeline::MissionFuelStatus::Completed
             );
         } else {
@@ -155,7 +155,7 @@ fn public_pipeline_reports_complete_or_explicitly_partial_preset_missions() {
                 "partial mission {name} must not publish figure telemetry"
             );
             assert_ne!(
-                result.feasibility.fuel_loading.mission.status,
+                result.feasibility.fuel_loading.mission.native.status,
                 alas_pipeline::MissionFuelStatus::Completed
             );
             assert!(

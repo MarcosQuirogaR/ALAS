@@ -196,7 +196,6 @@ fn every_declared_option_source_resolves_to_a_nonempty_form_list() {
         "tire_class",
         "strut_material",
         "skin_material",
-        "strategy",
         "aircraft_type",
         "cabin_preset",
         "main_deck_uld",
@@ -511,10 +510,6 @@ fn fixed_option_values_are_capitalized_without_changing_their_data_value() {
     assert_eq!(
         display_option("fuel_per_seat_kilometre"),
         "Fuel per seat-kilometre"
-    );
-    assert_eq!(
-        display_option("currenttobest1bin"),
-        "DE/current-to-best/1/bin"
     );
     // Catalogue names are not identifiers and are never rewritten.
     assert_eq!(display_option("LD3-45"), "LD3-45");

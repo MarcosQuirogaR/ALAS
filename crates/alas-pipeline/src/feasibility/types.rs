@@ -409,6 +409,10 @@ pub struct FeasibilityReport {
     /// `None` when the payload layout or fuel-tank arrangement could not be
     /// resolved (already reported by [`Self::mass_balance`]'s own findings).
     pub operational_envelope: Option<super::operational_envelope::OperationalEnvelopeAssessment>,
+    /// Why the native pseudospectral mission could not be flown, when it
+    /// failed. Telemetry only: the route is judged on the segment mission
+    /// model ([`FuelLoadingAssessment::mission`]).
+    pub native_mission_error: Option<String>,
 }
 
 impl FeasibilityReport {

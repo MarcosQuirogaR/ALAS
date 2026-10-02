@@ -8,8 +8,8 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use alas_config::{
-    AlasConfig, CenterTankConfig, DesignVector, FuelPolicyConfig, FuelTankLayoutConfig,
-    GeometryConfig, StructuresConfig, WingTankConfig,
+    AlasConfig, CenterTankConfig, DesignVector, FeedTankConfig, FuelPolicyConfig,
+    FuelTankLayoutConfig, GeometryConfig, StructuresConfig, WingTankConfig,
 };
 use alas_geom::aircraft::airfoil::Airfoil;
 use alas_geom::aircraft::airplane::Airplane;
@@ -93,6 +93,7 @@ fn a_rectangular_wing_yields_the_analytic_wingbox_volume_and_mirrored_centroids(
             usable_fraction: 1.0,
             burn_priority: 2,
             published_usable_volume_l: None,
+            feed: FeedTankConfig::default(),
         },
         center: CenterTankConfig {
             enabled: false,
@@ -295,6 +296,7 @@ fn calibration_reproduces_the_published_total_and_leaves_published_tanks_alone()
             usable_fraction: 1.0,
             burn_priority: 2,
             published_usable_volume_l: Some(2_000.0),
+            feed: FeedTankConfig::default(),
         },
         outer_wing: WingTankConfig {
             enabled: true,
@@ -303,6 +305,7 @@ fn calibration_reproduces_the_published_total_and_leaves_published_tanks_alone()
             usable_fraction: 1.0,
             burn_priority: 4,
             published_usable_volume_l: None,
+            feed: FeedTankConfig::default(),
         },
         center: CenterTankConfig {
             enabled: false,
@@ -360,6 +363,7 @@ fn a_layout_of_published_cells_calibrates_to_the_identity() {
             usable_fraction: 1.0,
             burn_priority: 2,
             published_usable_volume_l: Some(2_000.0),
+            feed: FeedTankConfig::default(),
         },
         outer_wing: WingTankConfig {
             enabled: true,
@@ -368,6 +372,7 @@ fn a_layout_of_published_cells_calibrates_to_the_identity() {
             usable_fraction: 1.0,
             burn_priority: 4,
             published_usable_volume_l: Some(500.0),
+            feed: FeedTankConfig::default(),
         },
         center: CenterTankConfig {
             enabled: false,
@@ -416,6 +421,7 @@ fn a_scaled_resolution_grows_a_published_cell_with_the_candidate_spar_box() {
             usable_fraction: 1.0,
             burn_priority: 2,
             published_usable_volume_l: Some(2_000.0),
+            feed: FeedTankConfig::default(),
         },
         outer_wing: WingTankConfig {
             enabled: false,
@@ -625,16 +631,20 @@ fn the_default_aircraft_resolves_a_finite_layout_with_positive_capacity() {
     }
 }
 
-/// At a mission-representative partial load, the approximate A380 ground
-/// distribution must supply both feed-containing model groups on each side
-/// and remain balanced. Each group also includes nonfeed volume, so the test
-/// cannot establish individual real feed-tank fuel or dispatchability.
-/// EASA.A.110 Issue 17 section 3.3 supplies capacities, Airbus Training
-/// Center A380 ATA 28 p.0012 motivates outer <=50% when possible, and Airbus
-/// Flight Deck and Systems Briefing Issue 2 section 10.10 describes a CG
-/// target that cannot be reproduced without zero-fuel weight and CG inputs.
+fn fill_fraction(layout: &FuelTankLayout, state: &FuelState, tank: &FuelTank) -> f64 {
+    fill_of(layout, state, &tank.id) / tank.usable_capacity_kg
+}
+
+/// The registered A380 ground fill against the only published A380 fuel
+/// distribution in the corpus: the example load on the refuel/defuel panel,
+/// Airbus A380 Aircraft Characteristics, Dec 01/25, FIGURE-5-4-6-991-001-A01.
+/// At 180,800 kg on board the panel shows the outer tanks full (8,320 kg
+/// each), the mid tanks at 28,040 kg (95.6 %), the inner tanks at 8,840 kg
+/// (23.8 %, the least-filled wing tanks), and 11,140 kg of CG-targeting trim
+/// fuel this model does not compute. Burning back down from the takeoff load
+/// must then leave the landing fuel in the feed tanks the engines draw from.
 #[test]
-fn a_partial_a380_load_supplies_feed_containing_groups_and_balances_pairs() {
+fn the_a380_fill_reproduces_the_published_refuel_panel_load_and_lands_on_the_feed_tanks() {
     let config = AlasConfig::from_value(&serde_json::json!({ "preset": "A380-800" }))
         .expect("the registered A380 preset loads");
     let preset = alas_config::presets::get("A380-800").expect("the A380 preset resolves");
@@ -653,145 +663,56 @@ fn a_partial_a380_load_supplies_feed_containing_groups_and_balances_pairs() {
         published_total_l,
     )
     .expect("the A380 tank arrangement resolves on its own geometry");
-
-    let capacity_kg = layout.usable_capacity_kg();
-    assert!(capacity_kg > 0.0);
-
-    // Every A380 cell carries its own certified volume, so `calibrate` has no
-    // geometric cell to absorb anything and is the identity: the resolved
-    // layout holds the certified *tank* total of 323,546 L, not the 324,339 L
-    // aeroplane total the preset declares (EASA TCDS EASA.A.110 Issue 17,
-    // section 3.3, p.14 of 20). The 793 L difference is that
-    // table's "Systems" row - usable fuel in lines and engines, which has no
-    // tank station and is not modelled here.
+    // EASA TCDS EASA.A.110 Issue 17, section 3.3: 323,546 L of tanks.
     let certified_tank_kg = 323_546.0 * 1.0e-3 * density_kg_m3;
-    assert!(
-        (capacity_kg - certified_tank_kg).abs() < 1.0e-6 * certified_tank_kg,
-        "resolved {capacity_kg} kg against certified {certified_tank_kg} kg"
+    assert!((layout.usable_capacity_kg() - certified_tank_kg).abs() < 1.0e-6 * certified_tank_kg);
+    assert_eq!(
+        layout
+            .tanks()
+            .iter()
+            .filter(|tank| tank.kind == TankKind::WingFeed)
+            .count(),
+        4
     );
 
-    // Until every nonouter wing cell is full, the outer cells stay at half;
-    // the trim tank fills last, after the outers (`super::order`).
-    let capacity_of = |kind: TankKind| -> f64 {
+    let panel = layout.distribute(180_800.0).expect("the panel load fits");
+    let fractions = |kind: TankKind| -> Vec<f64> {
         layout
             .tanks()
             .iter()
             .filter(|tank| tank.kind == kind)
-            .map(|tank| tank.usable_capacity_kg)
-            .sum()
+            .map(|tank| fill_fraction(&layout, &panel, tank))
+            .collect()
     };
-    let outer_capacity_kg = capacity_of(TankKind::WingOuter);
-    let trim_capacity_kg = capacity_of(TankKind::Trim);
-    assert!(trim_capacity_kg > 0.0);
-    let outer_half_break_kg = capacity_kg - trim_capacity_kg - 0.5 * outer_capacity_kg;
-    let wings_full_kg = capacity_kg - trim_capacity_kg;
-
-    // A former loading rule left the inner feed-containing model cells empty.
-    let partial_kg = 0.3735 * capacity_kg;
-    for fraction in [0.0001, 0.3735, 0.8, 0.95, 1.0] {
-        let requested_kg = fraction * capacity_kg;
-        let state = layout.distribute(requested_kg).expect("load fits");
-        let items = state.mass_items(&layout);
-        assert!((state.total_kg() - requested_kg).abs() < 1.0e-8 * capacity_kg);
-        for tank in layout.tanks() {
-            let fill_kg = items
-                .iter()
-                .find(|item| item.id == tank.id)
-                .map_or(0.0, |item| item.mass_kg);
-            assert!(fill_kg >= 0.0 && fill_kg <= tank.usable_capacity_kg + 1.0e-8 * capacity_kg);
-            if matches!(tank.kind, TankKind::WingInner | TankKind::WingMid) {
-                assert!(
-                    fill_kg > 0.0,
-                    "{} feed-containing group empty at {fraction}",
-                    tank.id
-                );
-            }
-            if tank.kind == TankKind::WingOuter && requested_kg <= outer_half_break_kg {
-                assert!(
-                    fill_kg <= 0.5 * tank.usable_capacity_kg + 1.0e-8 * capacity_kg,
-                    "{} exceeds half capacity at {fraction}",
-                    tank.id
-                );
-            }
-            if tank.kind == TankKind::Trim {
-                let expected_kg = (requested_kg - wings_full_kg).max(0.0);
-                assert!(
-                    (fill_kg - expected_kg).abs() < 1.0e-6,
-                    "trim holds {fill_kg} kg at {fraction}, expected {expected_kg} kg"
-                );
-            }
-        }
-        for kind in [TankKind::WingInner, TankKind::WingMid, TankKind::WingOuter] {
-            let pair: Vec<_> = layout
-                .tanks()
-                .iter()
-                .filter(|tank| tank.kind == kind)
-                .collect();
-            let left = items
-                .iter()
-                .find(|item| item.id == pair[0].id)
-                .map_or(0.0, |item| item.mass_kg);
-            let right = items
-                .iter()
-                .find(|item| item.id == pair[1].id)
-                .map_or(0.0, |item| item.mass_kg);
-            assert!((left - right).abs() < 1.0e-8 * capacity_kg);
-        }
-        assert!(state.properties(&layout).cg_m[1].abs() < 1.0e-8);
-    }
-    let partial = layout.distribute(partial_kg).expect("load fits");
-    assert!(partial
-        .mass_items(&layout)
+    assert!(fractions(TankKind::WingOuter).iter().all(|f| *f > 0.999));
+    assert!(fractions(TankKind::WingMid)
         .iter()
-        .all(|item| item.id != "trim"));
-    let outer: Vec<_> = layout
+        .all(|f| *f > 0.956 - 0.02));
+    for inner in fractions(TankKind::WingInner) {
+        assert!((inner - 0.238).abs() < 0.10, "inner tank {inner:.3} full");
+        for kind in [TankKind::WingMid, TankKind::WingOuter, TankKind::WingFeed] {
+            assert!(fractions(kind).iter().all(|f| *f > inner));
+        }
+    }
+    assert!(panel.properties(&layout).cg_m[1].abs() < 1.0e-8);
+
+    let takeoff_fuel_kg = 0.95 * layout.usable_capacity_kg();
+    let landing_fuel_kg = 25_000.0;
+    let takeoff = layout.distribute(takeoff_fuel_kg).expect("load fits");
+    let landing = takeoff
+        .burned(&layout, takeoff_fuel_kg - landing_fuel_kg)
+        .expect("burn fits");
+    let feed_kg: f64 = layout
         .tanks()
         .iter()
-        .filter(|tank| tank.kind == TankKind::WingOuter)
-        .collect();
-    for tank in outer {
-        let fill = partial
-            .mass_items(&layout)
-            .iter()
-            .find(|item| item.id == tank.id)
-            .map_or(0.0, |item| item.mass_kg);
-        assert!(fill <= 0.5 * tank.usable_capacity_kg + 1.0e-8 * capacity_kg);
-    }
-
-    // A kilogram across the half-outer breakpoint must go to the outer
-    // cells, while zero and full loads remain exact endpoints of the same
-    // allocation.
-    for (requested_kg, expected_outer_kg) in [
-        (outer_half_break_kg - 1.0, 0.5 * outer_capacity_kg),
-        (outer_half_break_kg, 0.5 * outer_capacity_kg),
-        (outer_half_break_kg + 1.0, 0.5 * outer_capacity_kg + 1.0),
-    ] {
-        let state = layout.distribute(requested_kg).expect("load fits");
-        let actual_outer_kg: f64 = state
-            .mass_items(&layout)
-            .iter()
-            .filter(|item| item.id.starts_with("wing_outer"))
-            .map(|item| item.mass_kg)
-            .sum();
-        assert!((actual_outer_kg - expected_outer_kg).abs() < 1.0e-6);
-        assert!((state.total_kg() - requested_kg).abs() < 1.0e-6);
-    }
-    assert_eq!(layout.distribute(0.0).expect("zero fits").total_kg(), 0.0);
-    let full = layout.distribute(capacity_kg).expect("full fits");
-    assert!((full.total_kg() - capacity_kg).abs() < 1.0e-6);
-    for tank in layout.tanks() {
-        let fill = full
-            .mass_items(&layout)
-            .iter()
-            .find(|item| item.id == tank.id)
-            .map_or(0.0, |item| item.mass_kg);
-        assert!((fill - tank.usable_capacity_kg).abs() < 1.0e-6);
-    }
+        .filter(|tank| tank.kind == TankKind::WingFeed)
+        .map(|tank| fill_of(&layout, &landing, &tank.id))
+        .sum();
+    assert!((feed_kg - landing_fuel_kg).abs() < 1.0e-6);
 }
 
 /// Wing cells burned 1, 2, 4 around a trim tank declared third and a wing
-/// cell that shares the trim tank's priority, the A380 burn order on a
-/// layout the A380 rule does not match.
+/// cell that shares the trim tank's priority, the A380 burn order.
 fn trim_layout() -> FuelTankLayout {
     let trim = FuelTank {
         kind: TankKind::Trim,

@@ -8,7 +8,9 @@ use std::path::Path;
 
 use super::args::{apply_cli_tool_preferences, load_config, parse_args};
 use super::plots::{plots_dir, save_result_plots};
-use super::summaries::{print_cpacs_summary, print_mses_summary, print_structural_summary};
+use super::summaries::{
+    print_cpacs_summary, print_mses_summary, print_optimization_summary, print_structural_summary,
+};
 use alas_exec::download::{download_files, DownloadSpec};
 use alas_exec::ToolLocator;
 use alas_pipeline::{read_cpacs_file, DesignPipeline, PipelineOptions};
@@ -202,6 +204,7 @@ pub fn run_cli(args: &[String]) -> i32 {
         }
     }
 
+    print_optimization_summary(&result, cli.quiet);
     print_mses_summary(&result, cli.quiet);
     print_structural_summary(&result, cli.quiet);
     print_cpacs_summary(&result, cli.quiet);

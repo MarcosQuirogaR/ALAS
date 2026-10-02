@@ -123,11 +123,6 @@ fn overlay_shell_strings_have_spanish_desktop_translations() {
 }
 
 #[test]
-fn walkthrough_scrim_and_later_window_use_the_foreground_layer() {
-    assert_eq!(WALKTHROUGH_ORDER, egui::Order::Foreground);
-}
-
-#[test]
 fn walkthrough_window_highlight_has_a_dedicated_foreground_layer() {
     let layer = egui::LayerId::new(
         WALKTHROUGH_ORDER,

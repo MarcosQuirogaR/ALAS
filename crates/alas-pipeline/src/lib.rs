@@ -42,6 +42,7 @@ pub mod full_analysis;
 pub mod gear_stations;
 mod mission_stage;
 pub mod openvsp;
+pub mod optimizer_summary;
 mod patran;
 pub mod payload_layout_export;
 pub mod pipeline;
@@ -105,7 +106,9 @@ pub use full_analysis::{
     AnalysisReport, DesignPoint, FullAnalysis, PolarFit, PolarFitStatus, TrimmedDesignPoint,
 };
 pub use gear_stations::{resolved_gear_stations, wing_mounted_gear_domain};
-pub use mission_stage::dispatch::{LoadCaseSelection, PolicyClosureCase, SelectedLoadCase};
+pub use mission_stage::dispatch::{
+    DesignMissionCase, LoadCaseSelection, PolicyClosureCase, SelectedLoadCase,
+};
 pub use openvsp::{
     export_openvsp_script, materialize_openvsp_project, OpenVspExportResult, OpenVspExportStatus,
 };

@@ -27,11 +27,27 @@ fn run_seeded_a220() -> PipelineResult {
     let mut config =
         AlasConfig::from_value(&serde_json::json!({ "preset": PRESET })).expect("A220 preset");
     config.optimizer.solver.method = alas_config::optimizer::PRODUCT_DE_METHOD.to_owned();
-    config.optimizer.solver.max_iterations = 1;
-    config.optimizer.solver.population_size = 4;
-    config.optimizer.solver.workers = 1;
+    config.optimizer.solver.refinement.max_evaluations = 128;
+    config.optimizer.solver.screening.max_evaluations = 8;
+    config.optimizer.solver.workers = std::thread::available_parallelism()
+        .map_or(1, |n| n.get().min(8))
+        .try_into()
+        .unwrap_or(1);
     config.structures.enabled = false;
-    config.optimizer.solver.display_progress = false;
+    // The checks are about numbers flowing consistently between stages, not
+    // about any aerodynamic value, so the run uses the draft analysis
+    // resolution (only its five resolution fields, leaving tuned assumptions
+    // alone) and a worker pool; the seeded search is independent of the
+    // worker count.
+    let draft = &alas_config::fidelity_presets::get("draft")
+        .expect("draft fidelity preset")
+        .analysis;
+    let analysis = &mut config.analysis;
+    analysis.sweep_n_points = draft.sweep_n_points;
+    analysis.spanwise_resolution = draft.spanwise_resolution;
+    analysis.chordwise_resolution = draft.chordwise_resolution;
+    analysis.fine_spanwise_resolution = draft.fine_spanwise_resolution;
+    analysis.fine_chordwise_resolution = draft.fine_chordwise_resolution;
     let design = alas_config::presets::get(PRESET)
         .expect("A220 preset")
         .design_vector;

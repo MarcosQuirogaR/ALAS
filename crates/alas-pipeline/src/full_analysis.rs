@@ -161,6 +161,10 @@ pub struct AnalysisReport {
     pub cg_envelope_ok: Option<bool>,
     /// Neutral-point conditions set beside `x_neutral_point` (`ac.md`).
     pub neutral_point_conditions: Option<NeutralPointConditions>,
+    /// The fuel model this report prices its fuel with: the sized
+    /// candidate's carried artifacts, or the baseline aircraft's built on
+    /// first use (`crate::fuel_model`).
+    pub fuel: crate::fuel_model::ReportFuel,
 }
 
 impl AnalysisReport {
@@ -235,6 +239,7 @@ use polar_point::design_point_nearest;
 pub mod cabin_sync;
 
 mod design_point;
+mod payload_pass;
 mod run;
 #[cfg(test)]
 // Failed expectations and unwraps here are failed test assertions.

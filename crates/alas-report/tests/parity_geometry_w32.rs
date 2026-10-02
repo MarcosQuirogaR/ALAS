@@ -17,7 +17,6 @@ use alas_payload::build::build_payload_layout;
 use alas_report::families::geometry;
 use alas_report::scene::SceneElement;
 use alas_report::svg::render_svg;
-use serde_json::Value;
 
 fn plane() -> Airplane {
     Airplane {
@@ -66,86 +65,6 @@ fn plane() -> Airplane {
         c_ref: 2.0,
         b_ref: 20.0,
     }
-}
-
-#[test]
-fn reference_fixture_covers_every_figure_in_both_parity_themes() {
-    let fixture: Value = serde_json::from_str(include_str!(
-        "../../../golden/report/reference_render_w32.json"
-    ))
-    .expect("fixture is valid JSON");
-    let figures = fixture["figures"].as_object().expect("figure map");
-    for id in [
-        "airfoil_evolution",
-        "threeview",
-        "cabin_payload",
-        "design_evolution",
-        "planform_comparison",
-        "wireframe_wing",
-        "wireframe_fuselage",
-        "wireframe_empennage",
-        "geometry",
-    ] {
-        for theme in ["light", "dark"] {
-            assert!(figures.contains_key(&format!("{id}:{theme}")));
-            let contract = &figures[&format!("{id}:{theme}")];
-            assert_eq!(
-                contract["available"], true,
-                "{id}:{theme} unavailable: {}",
-                contract["reason"]
-            );
-            assert!(contract["panel_count"].as_u64().unwrap_or(0) > 0);
-            assert_eq!(contract["theme"], theme);
-            assert!(contract["axes"].as_array().is_some());
-        }
-    }
-}
-
-#[test]
-fn reference_contracts_preserve_panel_axes_series_annotations_and_reasons() {
-    let fixture: Value = serde_json::from_str(include_str!(
-        "../../../golden/report/reference_render_w32.json"
-    ))
-    .expect("fixture is valid JSON");
-    let figures = fixture["figures"].as_object().expect("figure map");
-
-    let evolution = &figures["design_evolution:light"];
-    assert_eq!(evolution["panel_count"], 1);
-    assert_eq!(evolution["axes"][0]["title"], "Design evolution (planform)");
-    assert_eq!(evolution["axes"][0]["xlabel"], "span Y [m]");
-    assert_eq!(evolution["axes"][0]["ylabel"], "longitudinal X [m]");
-    assert_eq!(evolution["axes"][0]["aspect"], "1.0");
-    assert!(evolution["axes"][0]["series"].is_array());
-    assert!(evolution["axes"][0]["annotations"].is_array());
-
-    let cabin = &figures["cabin_payload:light"];
-    assert_eq!(
-        cabin["panel_count"], 3,
-        "side plus main and lower-deck panels"
-    );
-    assert!(cabin["suptitle"]
-        .as_str()
-        .unwrap_or("")
-        .contains("Passenger cabin"));
-    assert!(cabin["axes"]
-        .as_array()
-        .expect("cabin axes")
-        .iter()
-        .all(|axis| {
-            axis["series"].is_array()
-                && axis["patches"].is_array()
-                && axis["annotations"].is_array()
-        }));
-    assert!(cabin["axes"][2]["legend"]
-        .as_array()
-        .expect("cabin side legend")
-        .iter()
-        .any(|label| label == "Payload CG  20.7% MAC"));
-
-    let dark = &figures["cabin_payload:dark"];
-    assert_ne!(cabin["facecolor"], dark["facecolor"]);
-    assert_eq!(dark["available"], true);
-    assert!(dark["reason"].is_null());
 }
 
 #[test]

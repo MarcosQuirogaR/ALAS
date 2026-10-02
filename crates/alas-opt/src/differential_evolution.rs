@@ -6,18 +6,18 @@
 mod diagnostics;
 mod optimizer;
 mod result;
+mod stage_summary;
 #[cfg(test)]
 mod tests;
-mod trial;
-
-use trial::{
-    converged, latin_hypercube_population, promote_best, trial_vector, TrialInputs, TrialState,
-};
 
 pub use diagnostics::{DiagnosticSearchOutcome, NoFeasibleDesign, RestorationDiagnostics};
 pub use result::{
     DeliveredAcceptance, OptimizationError, OptimizationResult, ParetoCandidate, SearchDiagnostics,
     CANCELLED, REPORTING_FIDELITY_FALLBACK, REPORTING_FIDELITY_REJECTED,
+};
+pub use stage_summary::{
+    BaselineComparison, PreGateReasons, ReportingBaseline, SizingWorkSummary, StageRejections,
+    StageSummary, WorkDistribution, SEARCH_SCOPE,
 };
 
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
@@ -28,15 +28,13 @@ use alas_config::AlasConfig;
 use crate::evaluator::{ObjectiveEvaluation, ObjectiveEvaluator};
 use crate::history::OptimizationHistory;
 use crate::objective::{restore_winning_payload_load_case, DesignObjective};
-use crate::python_rng::{Pcg64, RandomState};
-use crate::search_methods::{MethodOutcome, ScoredPoint};
+use crate::search_methods::{MethodOutcome, ScoredPoint, Tier};
 
 /// Searches the aircraft design space to minimize the [`DesignObjective`].
 #[derive(Debug, Clone)]
 pub struct DesignOptimizer {
     /// Active aircraft configuration.
     pub config: AlasConfig,
-    reference_mass_coordinates: bool,
 }
 
 fn runtime_seed() -> u64 {
@@ -155,9 +153,36 @@ fn scored_point_at(
     ScoredPoint {
         values: values.to_vec(),
         cost,
-        valid,
+        tier: candidate_tier(valid, reason, hard_violation),
         constraint_violation,
         objectives: [objective_value, span_m, area_m2],
+    }
+}
+
+/// Residual identifiers that mean the mass/mission fixed point did not close,
+/// so the residual table describes an unconverged aircraft.
+const CLOSURE_FAILURE_IDS: [&str; 4] = [
+    "sizing_not_closed",
+    "sizing_budget_exhausted",
+    "dispatch_not_converged",
+    "dispatch_model_failed",
+];
+
+/// The ranking tier of an evaluated candidate: feasible; closed with a
+/// violated residual; not closed (closure failure or no residual table);
+/// or outside the design box, which the evaluator rejects before analysis.
+fn candidate_tier(valid: bool, reason: &str, hard_violation: f64) -> Tier {
+    let labels = || reason.split('+');
+    if valid {
+        Tier::Feasible
+    } else if labels().any(|label| label == "design_space") {
+        Tier::PreGateFailed
+    } else if labels().any(|label| CLOSURE_FAILURE_IDS.contains(&label))
+        || !(hard_violation.is_finite() && hard_violation > 0.0)
+    {
+        Tier::NotClosed
+    } else {
+        Tier::ClosedInfeasible
     }
 }
 
@@ -182,14 +207,14 @@ fn result_from_method(
                 objective_value: point.objectives[0],
                 span_m: point.objectives[1],
                 area_m2: point.objectives[2],
-                valid: point.valid,
+                valid: point.valid(),
             })
         })
         .collect();
     OptimizationResult {
         best_design,
         best_cost: winner.cost,
-        best_valid: winner.valid,
+        best_valid: winner.valid(),
         history: history.clone(),
         wall_time_s,
         method: method.to_owned(),
@@ -208,6 +233,20 @@ fn result_from_method(
 trait SearchObjective {
     fn evaluate(&mut self, design: &[f64]) -> f64;
     fn history(&self) -> &OptimizationHistory;
+
+    /// Whether a batch runs concurrently and stops taking candidates on
+    /// cancellation, reporting each candidate it ran through
+    /// [`Self::take_concurrent_telemetry`]. Otherwise a batch is one
+    /// uninterruptible block.
+    fn runs_concurrently(&self) -> bool {
+        false
+    }
+
+    /// Per-candidate `(duration, finished after the cancellation request)`
+    /// of the last batch of a concurrent objective.
+    fn take_concurrent_telemetry(&mut self) -> Option<Vec<(std::time::Duration, bool)>> {
+        None
+    }
 
     /// Evaluate a candidate batch and return `(cost, valid)` in input order.
     ///
@@ -357,30 +396,4 @@ impl<E: ObjectiveEvaluator + ?Sized> SearchObjective for DelegatedObjective<'_, 
     fn history(&self) -> &OptimizationHistory {
         &self.history
     }
-}
-
-fn candidate_is_better(
-    candidate_cost: f64,
-    candidate_valid: bool,
-    incumbent_cost: f64,
-    incumbent_valid: bool,
-    feasibility_first: bool,
-) -> bool {
-    if feasibility_first && candidate_valid != incumbent_valid {
-        return candidate_valid;
-    }
-    candidate_cost.total_cmp(&incumbent_cost).is_lt()
-}
-
-fn candidate_is_at_least_as_good(
-    candidate_cost: f64,
-    candidate_valid: bool,
-    incumbent_cost: f64,
-    incumbent_valid: bool,
-    feasibility_first: bool,
-) -> bool {
-    if feasibility_first && candidate_valid != incumbent_valid {
-        return candidate_valid;
-    }
-    candidate_cost <= incumbent_cost
 }

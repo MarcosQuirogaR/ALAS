@@ -18,6 +18,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::design_variables::DesignVector;
+
 use crate::ConfigNode;
 
 /// Horizontal and vertical stabilizer scaffold, at unit tail scale.
@@ -134,6 +136,49 @@ pub struct EmpennageConfig {
         help = "Position of the vertical-stabiliser tip leading edge relative to its root, as (x, y, z)."
     )]
     pub vstab_tip_le_m: (f64, f64, f64),
+
+    /// Fin scale relative to the design vector's tail scale.
+    ///
+    /// Derived by the tail auto-sizing step so the fin holds its nominal
+    /// volume coefficient while the tailplane holds its own; never read from
+    /// or written to a saved configuration. A value of one keeps the single
+    /// shared tail scale.
+    #[config(skip)]
+    #[serde(skip, default = "unit_vstab_scale_ratio")]
+    pub vstab_scale_ratio: f64,
+}
+
+/// The solved scales of an auto-sized empennage: the design vector's
+/// `tail_scale`, which sizes the tailplane, and the fin scale over it.
+///
+/// Every rebuild of a sized candidate applies the same value, so the
+/// optimizer, the reported aircraft and any mission replay see one tail.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TailSizing {
+    /// The design vector's `tail_scale`.
+    pub tail_scale: f64,
+    /// Fin scale divided by `tail_scale`.
+    pub vstab_scale_ratio: f64,
+}
+
+impl TailSizing {
+    /// The sizing a design vector and empennage already carry.
+    pub fn of(empennage: &EmpennageConfig, dv: &DesignVector) -> Self {
+        Self {
+            tail_scale: dv.tail_scale,
+            vstab_scale_ratio: empennage.vstab_scale_ratio,
+        }
+    }
+
+    /// Write this sizing into a design vector and its empennage.
+    pub fn apply_to(&self, empennage: &mut EmpennageConfig, dv: &mut DesignVector) {
+        dv.tail_scale = self.tail_scale;
+        empennage.vstab_scale_ratio = self.vstab_scale_ratio;
+    }
+}
+
+fn unit_vstab_scale_ratio() -> f64 {
+    1.0
 }
 
 impl Default for EmpennageConfig {
@@ -155,6 +200,7 @@ impl Default for EmpennageConfig {
             vstab_root_chord_m: 9.5,
             vstab_tip_chord_m: 3.2,
             vstab_tip_le_m: (9.0, 0.0, 9.8),
+            vstab_scale_ratio: 1.0,
         }
     }
 }

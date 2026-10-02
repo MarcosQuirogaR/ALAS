@@ -109,9 +109,10 @@ pub(super) fn run_avl_optimizer(
             ),
         );
     }
+    let status = SolverOptimizationStatus::for_delivered(&optimization);
     SolverOptimizationResult {
         solver: SolverKind::Avl,
-        status: SolverOptimizationStatus::Completed,
+        status,
         design: Some(design),
         optimization: Some(optimization),
         report: Some(report),
@@ -204,8 +205,15 @@ impl AvlObjective<'_> {
                 .work_skipped("AVL candidate not started on the cancellation request");
             return ObjectiveEvaluation::rejected(self.failure_cost(), "cancelled");
         }
-        let analysis = FullAnalysis::new(self.config.clone());
-        let report = match analysis.run(design, true) {
+        let Ok((sized_config, sized_design)) = sized_candidate(
+            &self.config,
+            design,
+            self.objective.preserves_explicit_fuselage_length(),
+        ) else {
+            return ObjectiveEvaluation::rejected(self.failure_cost(), "geometry_build");
+        };
+        let analysis = FullAnalysis::new(sized_config);
+        let report = match analysis.run(&sized_design, true) {
             Ok(report) => report,
             Err(_) => return ObjectiveEvaluation::rejected(self.failure_cost(), "full_analysis"),
         };
@@ -374,4 +382,20 @@ fn finite_avl_objective_point(point: &AvlPolarPoint) -> bool {
     ]
     .iter()
     .all(|value| value.is_finite())
+}
+
+/// The configuration and design vector an AVL candidate is drawn with: the
+/// tail the coupled assessment sizes, masses and trims, resolved before the
+/// geometry is built so the external aerodynamics and the mass model
+/// describe the same aircraft.
+pub(super) fn sized_candidate(
+    config: &AlasConfig,
+    design: &DesignVector,
+    preserve_explicit_fuselage_length: bool,
+) -> Result<(AlasConfig, DesignVector), String> {
+    let (mut sized_design, tail_sizing) =
+        alas_opt::resolve_tail_sizing(config, design, preserve_explicit_fuselage_length)?;
+    let mut sized_config = config.clone();
+    tail_sizing.apply_to(&mut sized_config.geometry.empennage, &mut sized_design);
+    Ok((sized_config, sized_design))
 }

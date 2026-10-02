@@ -16,9 +16,34 @@
 //! model applicability; it is neither a certified deflection limit nor a
 //! bound on total model error (sweep, torsion and aeroelastic loads remain
 //! unrepresented by the spanwise Euler-Bernoulli model).
+//!
+//! The budget gates the 1 g flight shape only. That is the case whose
+//! deflection the aircraft model uses; at the ultimate manoeuvre cases the
+//! quantities the sizing consumes are bending moments and stresses, which the
+//! beam model forms on the undeformed geometry and which therefore do not
+//! contain the small-slope approximation at all (engineering statement: the
+//! geometric nonlinearity it omits, lift following the rotated surface and
+//! span foreshortening, lowers the root moment, so the linear stress is the
+//! conservative one). Neither is ultimate deflection a certification quantity:
+//! EASA CS-25, CS 25.305(a) limits deformation at *limit* load to what does
+//! not interfere with safe operation, and CS 25.305(b) asks only that ultimate
+//! load be carried for three seconds without failure. Real certified wings
+//! leave the 5 % budget there by a wide margin: the Boeing 787 static-test
+//! wing flexed about 7.6 m (25 ft) upward on a 30 m semispan at ultimate load
+//! (Boeing news release, "787 Dreamliner completes ultimate-load wing test",
+//! 28 March 2010), a tip slope near 0.34 rad and a curvature error near 18 %.
+//! Gating the ultimate cases made [`crate::sizing::size_for_linear_model`]
+//! buy cap area to fit the aeroplane to the analysis rather than to a load,
+//! doubling the primary box on the A320-200. The ultimate-case error is still
+//! published, in
+//! [`StructuralFeasibility::manoeuvre_curvature_relative_error`], as the
+//! error bound on the ultimate deflection the report shows.
 
 use crate::analytical::StructuralAnalysisReport;
 use crate::sizing::WingboxSizing;
+
+/// The load case whose deflection the linear-model budget gates.
+pub const FLIGHT_SHAPE_CASE: &str = "level";
 
 /// Numerical applicability budget for the linear beam calculation.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -53,15 +78,23 @@ pub struct StructuralFeasibility {
     pub rib_spacing_ratio: f64,
     /// Largest cap width/available width ratio (adjacent caps and chord edges).
     pub cap_packaging_ratio: f64,
-    /// Largest relative curvature approximation error over *all* load cases.
+    /// Relative curvature approximation error of the 1 g flight shape: the
+    /// quantity the linear-model budget gates (see the module documentation).
     pub max_linear_curvature_relative_error: f64,
-    /// Largest absolute tip displacement divided by modelled semispan.
+    /// Largest relative curvature approximation error over the ultimate
+    /// manoeuvre cases. Reported as the error bound on the ultimate
+    /// deflection; it does not gate the section, whose ultimate stresses do
+    /// not depend on the small-slope approximation.
+    pub manoeuvre_curvature_relative_error: f64,
+    /// Largest absolute tip displacement divided by modelled semispan, over
+    /// every load case.
     pub max_tip_deflection_ratio: f64,
-    /// Largest absolute integral of M/EI, dimensionless dz/dy.
+    /// Largest absolute integral of M/EI of the 1 g flight shape,
+    /// dimensionless dz/dy.
     pub max_abs_slope: f64,
-    /// Case producing the largest curvature approximation error.
+    /// Case the gated curvature error belongs to: the 1 g level case.
     pub governing_load_case: &'static str,
-    /// The signed factor of that case; manoeuvre factors are ultimate.
+    /// The signed load factor of that case.
     pub governing_load_factor: f64,
     /// The explicit error budget used for this assessment.
     pub limits: LinearModelLimits,
@@ -92,6 +125,7 @@ impl StructuralFeasibility {
             rib_spacing_ratio: f64::INFINITY,
             cap_packaging_ratio: f64::INFINITY,
             max_linear_curvature_relative_error: f64::INFINITY,
+            manoeuvre_curvature_relative_error: f64::INFINITY,
             max_tip_deflection_ratio: f64::INFINITY,
             max_abs_slope: f64::INFINITY,
             governing_load_case: "unavailable",
@@ -108,8 +142,9 @@ fn finite(values: &[f64], count: usize) -> bool {
 /// Evaluate a strength-sized box and its response under the same load state.
 ///
 /// Stations and deflections are metres, stiffness N m^2 and moments N m.
-/// `y` runs root to tip; deflection/load signs are preserved, and the maximum
-/// absolute slope is checked for pull-up ultimate, push-down ultimate and 1g.
+/// `y` runs root to tip; deflection/load signs are preserved. The maximum
+/// absolute slope is evaluated for pull-up ultimate, push-down ultimate and
+/// 1 g; the 1 g value is gated and the ultimate values are reported.
 /// Invalid data fail closed; +infinite *strength margins* at zero demand are
 /// the sole intentional nonfinite input permitted.
 pub fn assess(
@@ -223,6 +258,7 @@ pub fn assess(
         rib_spacing_ratio: rib_ratio,
         cap_packaging_ratio,
         max_linear_curvature_relative_error: 0.0,
+        manoeuvre_curvature_relative_error: 0.0,
         max_tip_deflection_ratio: 0.0,
         max_abs_slope: 0.0,
         governing_load_case: "level",
@@ -293,11 +329,14 @@ pub fn assess(
         if !error.is_finite() {
             return invalid();
         }
-        if error > assessment.max_linear_curvature_relative_error {
+        if case.name == FLIGHT_SHAPE_CASE {
             assessment.max_linear_curvature_relative_error = error;
             assessment.max_abs_slope = max_slope;
             assessment.governing_load_case = case.name;
             assessment.governing_load_factor = case.load_factor;
+        } else {
+            assessment.manoeuvre_curvature_relative_error =
+                assessment.manoeuvre_curvature_relative_error.max(error);
         }
         assessment.max_tip_deflection_ratio = assessment
             .max_tip_deflection_ratio

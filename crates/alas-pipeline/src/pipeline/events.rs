@@ -63,16 +63,70 @@ pub(super) fn finish_stage(
     index: u8,
     stage: &str,
 ) {
+    finish_stage_with_status(
+        events,
+        run_clock,
+        stage_clock,
+        index,
+        stage,
+        "Completed",
+        RunEventSeverity::Info,
+    );
+}
+
+/// Status word and severity the optimization stage reports for its outcome.
+/// A design that is not feasible at reporting fidelity is never "Completed".
+pub(crate) fn optimization_stage_status(
+    optimization: Option<&alas_opt::OptimizationResult>,
+) -> (&'static str, RunEventSeverity) {
+    match optimization {
+        Some(result) if !result.is_delivered_feasible() => (
+            crate::SolverOptimizationStatus::Infeasible.label(),
+            RunEventSeverity::Warning,
+        ),
+        _ => ("Completed", RunEventSeverity::Info),
+    }
+}
+
+pub(super) fn finish_optimization_stage(
+    events: Option<&(dyn Fn(RunEvent) + Sync)>,
+    run_clock: Instant,
+    stage_clock: Instant,
+    optimization: Option<&alas_opt::OptimizationResult>,
+) {
+    let (status, severity) = optimization_stage_status(optimization);
+    finish_stage_with_status(
+        events,
+        run_clock,
+        stage_clock,
+        2,
+        "optimization",
+        status,
+        severity,
+    );
+}
+
+/// Finish a stage under an explicit status word, so a stage whose product is
+/// unusable never reads "Completed".
+pub(super) fn finish_stage_with_status(
+    events: Option<&(dyn Fn(RunEvent) + Sync)>,
+    run_clock: Instant,
+    stage_clock: Instant,
+    index: u8,
+    stage: &str,
+    status: &str,
+    severity: RunEventSeverity,
+) {
     let duration_ms = stage_clock.elapsed().as_millis() as u64;
     emit_event(
         events,
         run_clock,
         RunEvent {
             stage: stage.to_owned(),
-            message: format!("Completed in {:.3} s", duration_ms as f64 / 1_000.0),
+            message: format!("{status} in {:.3} s", duration_ms as f64 / 1_000.0),
             fraction: Some(1.0),
             kind: RunEventKind::StageCompleted,
-            severity: RunEventSeverity::Info,
+            severity,
             stage_index: Some(index),
             stage_count: Some(PIPELINE_STAGE_COUNT),
             elapsed_ms: 0,

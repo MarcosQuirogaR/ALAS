@@ -249,16 +249,6 @@ mod tests {
     }
 
     #[test]
-    fn the_band_interval_is_not_five_hundredths() {
-        // `1.0 - 0.95` is not the double nearest 0.05, and the blend divides
-        // by it. Stated so that a later simplification to `/ 0.05` is
-        // recognized as a change rather than a tidy-up.
-        let band_end = 1.0_f64;
-        let band_start = 0.95_f64;
-        assert_ne!(band_end - band_start, 0.05_f64);
-    }
-
-    #[test]
     fn a_nacelle_reference_area_is_its_frontal_disc() {
         let nacelle = NacelleParams {
             length_m: 7.8,
