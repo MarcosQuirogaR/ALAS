@@ -7,7 +7,7 @@
 
 use alas_config::{presets, AlasConfig};
 use alas_geom::builder::AircraftBuilder;
-use alas_mass::tanks::{resolve_product_layout, TankLayoutError};
+use alas_mass::tanks::{resolve_product_layout, FuelTankLayout, TankLayoutError};
 
 #[test]
 fn all_presets_resolve_scaled_inventory_and_reject_overfill() {
@@ -60,10 +60,21 @@ fn custom_auxiliary_disable_does_not_restore_the_reference_total() {
         .find(|t| t.id == "auxiliary")
         .unwrap()
         .usable_capacity_kg;
+    // The registered arrangement is reconciled onto the published inventory;
+    // a custom one keeps its own cells. Removing the auxiliary tank leaves
+    // exactly the remaining cells, never the reference total.
+    let cells = FuelTankLayout::resolve(
+        &plane,
+        &config.geometry,
+        &config.structures,
+        &config.fuel_tanks,
+        &config.fuel_policy,
+        installed.density_kg_m3,
+        preset.reference.usable_fuel_volume_l,
+    )
+    .unwrap();
     config.fuel_tanks.auxiliary.enabled = false;
     let removed = resolve_product_layout(&config, &preset.design_vector, &plane).unwrap();
-    assert!(
-        (installed.usable_capacity_kg() - removed.usable_capacity_kg() - auxiliary).abs() < 1e-7
-    );
+    assert!((cells.usable_capacity_kg() - removed.usable_capacity_kg() - auxiliary).abs() < 1e-7);
     assert!(removed.distribute(installed.usable_capacity_kg()).is_err());
 }

@@ -96,7 +96,7 @@ pub struct AlphaPoint {
     pub alpha_deg: f64,
     /// Lift coefficient.
     pub cl: f64,
-    /// Induced (vortex) drag coefficient; no viscous or wave contribution.
+    /// Trefftz-plane induced drag coefficient; no viscous or wave contribution.
     pub cd_induced: f64,
     /// Pitching-moment coefficient about the moment reference, nose-up
     /// positive.
@@ -158,7 +158,7 @@ pub struct WingAnalysisOutcome {
     pub modelled_surfaces: Vec<SurfaceShare>,
     /// Lift coefficient at the reported point.
     pub cl: f64,
-    /// Induced drag coefficient at the reported point.
+    /// Trefftz-plane induced drag coefficient at the reported point.
     pub cd_induced: f64,
     /// Pitching-moment coefficient about the moment reference.
     pub cm_pitch: f64,

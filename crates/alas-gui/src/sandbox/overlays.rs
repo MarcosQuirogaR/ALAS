@@ -148,7 +148,7 @@ fn show_launch_actions(state: &mut AppState, ui: &mut Ui) {
             false,
             quick,
         )
-            .on_hover_text(tr("Reduced in-process estimates for the drawn aircraft; first results within seconds, labelled as initial estimates."))
+            .on_hover_text(tr("In-process estimates for the drawn aircraft; first results within seconds, each labelled as the Full Analysis' value or an estimate."))
             .clicked()
         {
             start_quick_analysis(state);

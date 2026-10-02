@@ -9,24 +9,13 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use alas_config::design_variables::DesignVector;
-use alas_config::{AlasConfig, ConstraintPolicy, DesignMode, FuelScheme, MtowSizing};
+use alas_config::{AlasConfig, DesignMode, FuelScheme, MtowSizing};
 use alas_opt::mdo::structural_feasibility::structural_design_mass_kg;
 use alas_opt::objective::DesignObjective;
 use alas_opt::{assess_product_candidate, CandidateAssessment};
 
-/// The clean-sheet default with the balance family reported rather than
-/// ranked, as in `mission_sized.rs`: these tests are about the takeoff-mass
-/// closure, not a particular CG layout of the canonical vector.
-fn clean_sheet(sizing: MtowSizing) -> AlasConfig {
-    let mut config = AlasConfig::default();
-    config
-        .optimizer
-        .weights
-        .transport_planform_constraints_enabled = false;
-    config.optimizer.objective.balance_constraints = ConstraintPolicy::Diagnostic;
-    config.optimizer.objective.mtow_sizing = sizing;
-    config
-}
+mod support;
+use support::clean_sheet;
 
 fn a320_reference(sizing: MtowSizing) -> (AlasConfig, DesignVector) {
     let mut config = AlasConfig::from_value(&serde_json::json!({ "preset": "A320-200" })).unwrap();

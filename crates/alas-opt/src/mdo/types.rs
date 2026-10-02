@@ -113,7 +113,9 @@ pub struct SizedCandidate {
     pub takeoff_fuel_kg: f64,
     /// Fuel loaded at the ramp, kg.
     pub ramp_fuel_kg: f64,
-    /// Usable fuel-tank capacity, kg, or `NaN` when the configured tank
+    /// Usable fuel capacity the dispatch is bounded by, kg
+    /// ([`super::usable_fuel_capacity`]: published for an unchanged preset,
+    /// else the resolved tank layout), or `NaN` when the configured tank
     /// arrangement could not be resolved on the built geometry.
     pub usable_capacity_kg: f64,
     /// Still-air distance the mission was sized over, m.
@@ -151,6 +153,10 @@ pub struct SizedCandidate {
     pub sizing_iterations: usize,
     /// Whether the outer sizing loop closed within its iteration budget.
     pub sizing_closed: bool,
+    /// Whether the outer takeoff-mass iteration settled within tolerance,
+    /// whatever limit the dispatch met; [`Self::sizing_closed`] also
+    /// requires a converged dispatch.
+    pub takeoff_mass_settled: bool,
     /// Re-trims after the first, each triggered by a CG shift beyond the
     /// configured re-trim tolerance (a mass change alone never re-trims:
     /// the drag table spans the lift range).

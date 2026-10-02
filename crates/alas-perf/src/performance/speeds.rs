@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! The FAR-25 V-speed schedule and the estimated field-performance distances.
+//! Translated legacy V-speed schedule and field correlations for numerical replay.
 
 use alas_config::airports::Airport;
 use alas_config::PerformanceConfig;
@@ -29,13 +29,13 @@ pub struct VSpeeds {
     pub v_r_ms: f64,
     /// Take-off safety speed (FAR 25.107).
     pub v2_ms: f64,
-    /// Approach speed (FAR 25.125).
+    /// Reference approach speed; the selected method declares its stall multiple.
     pub v_app_ms: f64,
     /// Touchdown speed.
     pub v_td_ms: f64,
 }
 
-/// Compute the FAR-25 V-speed schedule at the given aerodrome conditions:
+/// Compute the configurable legacy V-speed schedule at the given aerodrome conditions:
 /// `compute_v_speeds`.
 ///
 /// The multiplicative factors come from `perf_config` rather than being fixed,
@@ -63,7 +63,7 @@ pub fn compute_v_speeds(
     )
 }
 
-/// Compute the certified speed schedule with separate take-off and landing
+/// Compute the configurable legacy speed schedule with separate take-off and landing
 /// masses. Take-off speeds remain tied to MTOW, while stall/approach/
 /// touchdown speeds use the arrival mass.
 #[allow(clippy::too_many_arguments)] // one per mass, configuration and field input
@@ -119,9 +119,9 @@ pub struct FieldPerformance {
     pub todr_m: f64,
     /// Balanced field length, m.
     pub bfl_m: f64,
-    /// Accelerate-stop distance, m.
+    /// Conceptual accelerate-stop proxy, m; not an independent certified calculation.
     pub asd_m: f64,
-    /// Landing distance required, m.
+    /// Actual landing distance from the 50 ft screen, m, before dispatch factors.
     pub ldr_m: f64,
     /// Landing mass used for the landing speeds and distance, kg.
     pub landing_mass_kg: f64,
@@ -143,7 +143,7 @@ impl FieldPerformance {
         self.toda_m() - self.todr_m
     }
 
-    /// Runway to spare on landing, m.
+    /// Runway to spare before applying the operational landing factor, m.
     pub fn land_margin_m(&self) -> f64 {
         self.lda_m() - self.ldr_m
     }
@@ -153,19 +153,20 @@ impl FieldPerformance {
         self.todr_m <= self.toda_m()
     }
 
-    /// Whether the landing fits the runway.
+    /// Whether the actual landing fits, before operational dispatch factors.
     pub fn land_feasible(&self) -> bool {
         self.ldr_m <= self.lda_m()
     }
 }
 
-/// Estimate take-off and landing distances: `compute_field_performance`.
+/// Replay the translated take-off and landing correlations: `compute_field_performance`.
 ///
 /// Uses the same empirical constants as the constraint curves so the distances
 /// are consistent with the design-space boundary. `tw_sl` is the sea-level
-/// static `T/W` at MTOW; `bfl_factor` turns take-off distance into balanced
-/// field length (Raymer Table 17.1). The take-off constant `37.7` and the
-/// landing factor are the reverse of the matching-chart constraints.
+/// static `T/W` at MTOW. The historical `bfl_factor` multiplies a TOP field
+/// estimate that already includes its field-length basis; production callers
+/// use [`super::field::compute_field_performance_for_propulsion`] to avoid
+/// that duplicate multiplier and select an appropriate propulsion method.
 #[allow(clippy::too_many_arguments)] // one argument per physical input
 pub fn compute_field_performance(
     mtow_kg: f64,
@@ -192,7 +193,7 @@ pub fn compute_field_performance(
     )
 }
 
-/// Estimate field performance with distinct take-off and landing masses.
+/// Replay translated field performance with distinct take-off and landing masses.
 ///
 /// Take-off sizing uses MTOW while the landing schedule uses the supplied
 /// landing mass (normally the mission arrival mass or, absent telemetry, the

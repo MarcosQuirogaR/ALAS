@@ -19,10 +19,10 @@ use super::WingReconciliationError;
 /// Where the non-box part of the reconciled wing comes from.
 ///
 /// Reference adaptation and the baseline sandbox freeze a measured empirical
-/// wing, so their non-box inventory is complete by construction and carries no
-/// item list; unless the strength-sized box alone outweighs that wing, which
-/// is reported rather than reconciled. Clean-sheet runs build the enumerated
-/// [`crate::wing_inventory`] list and are complete only when that list is.
+/// wing and carry no item list. This verifies a reference remainder, not a
+/// candidate's current inventory; product consumers additionally check the
+/// candidate box against their current complete-wing mass. Clean-sheet runs
+/// build the enumerated [`crate::wing_inventory`] list and check its status.
 #[derive(Debug, Clone)]
 pub enum StructuralInventory {
     /// Frozen empirical remainder of a registered reference aircraft.
@@ -36,6 +36,14 @@ pub enum StructuralInventory {
         /// Strength-sized complete-wing box mass, kg.
         sized_box_kg: f64,
     },
+    /// The candidate primary box leaves no positive secondary remainder in
+    /// the authoritative current complete-wing buildup.
+    CurrentWingIncomplete {
+        /// Current complete-wing mass, kg, independent of the frozen reference.
+        complete_wing_kg: f64,
+        /// Candidate complete-wing primary box mass, kg.
+        sized_box_kg: f64,
+    },
     /// Enumerated, sourced clean-sheet non-box inventory.
     CleanSheet(Box<WingNonBoxInventory>),
 }
@@ -45,8 +53,21 @@ impl StructuralInventory {
     pub fn is_complete(&self) -> bool {
         match self {
             Self::FrozenReference => true,
-            Self::ReferenceExceededBySizedBox { .. } => false,
+            Self::ReferenceExceededBySizedBox { .. } | Self::CurrentWingIncomplete { .. } => false,
             Self::CleanSheet(inventory) => inventory.status().is_complete(),
+        }
+    }
+
+    /// Check the candidate against the actual mass it is placed within.
+    /// A frozen reference remainder proves no inequality for a new candidate.
+    pub fn checked_against_current_wing(self, sized_box_kg: f64, complete_wing_kg: f64) -> Self {
+        if primary_fits_complete_wing(sized_box_kg, complete_wing_kg) {
+            self
+        } else {
+            Self::CurrentWingIncomplete {
+                complete_wing_kg,
+                sized_box_kg,
+            }
         }
     }
 }
@@ -66,11 +87,34 @@ pub fn design_gross_mass_kg(config: &AlasConfig) -> f64 {
         .unwrap_or(config.requirements.mtow_kg)
 }
 
+/// Governing structural mass, including the requirement in bounded modes.
+/// A lighter declared dispatch basis cannot unload a heavier design wing.
+pub fn structural_design_mass_kg(config: &AlasConfig) -> f64 {
+    let declared = design_gross_mass_kg(config);
+    if !declared.is_finite() || !config.requirements.mtow_kg.is_finite() {
+        return f64::NAN;
+    }
+    if config.optimizer.objective.mtow_sizing == alas_config::MtowSizing::Unconstrained {
+        declared
+    } else {
+        declared.max(config.requirements.mtow_kg)
+    }
+}
+
+/// A complete wing must contain its positive primary box and a positive
+/// secondary remainder (devices, controls and non-box structure).
+pub fn primary_fits_complete_wing(sized_box_kg: f64, complete_wing_kg: f64) -> bool {
+    sized_box_kg.is_finite()
+        && complete_wing_kg.is_finite()
+        && sized_box_kg > 0.0
+        && complete_wing_kg > sized_box_kg
+}
+
 /// The requirements with `mtow_kg` replaced by [`design_gross_mass_kg`], for
 /// the strength-sizing loads that read the takeoff mass as the design weight.
 pub(super) fn design_requirements(config: &AlasConfig) -> DesignRequirements {
     let mut requirements = config.requirements.clone();
-    requirements.mtow_kg = design_gross_mass_kg(config);
+    requirements.mtow_kg = structural_design_mass_kg(config);
     requirements
 }
 
@@ -201,5 +245,41 @@ mod tests {
         assert!(inventory.is_complete());
         assert!((feedback.total_wing_mass_kg - 8_000.0).abs() < 1.0e-9);
         assert!((feedback.secondary_mass_kg - 5_000.0).abs() < 1.0e-9);
+    }
+
+    #[test]
+    fn frozen_reference_does_not_verify_an_overweight_candidate_inventory() {
+        let reference = ReferenceWingMass {
+            total_mass_kg: 10_000.0,
+            centroid_m: [20.0, 0.0, 0.0],
+            sized_box: SizedWingboxMass::full_wing(7_000.0, [19.0, 0.0, 0.0]),
+        };
+        let candidate = SizedWingboxMass::full_wing(12_000.0, [21.0, 0.0, 0.0]);
+        let (feedback, _, inventory, _) = reconcile_against_reference(reference, candidate, None)
+            .unwrap_or_else(|error| panic!("{error}"));
+        // Additive frozen-secondary reconciliation is a diagnostic, not the
+        // current FLOPS total. Its 3 t remainder plus the new box is 15 t.
+        assert_eq!(feedback.total_wing_mass_kg, 15_000.0);
+        let inventory = inventory.checked_against_current_wing(feedback.primary_mass_kg, 10_000.0);
+        assert!(!inventory.is_complete());
+        assert!(matches!(
+            inventory,
+            StructuralInventory::CurrentWingIncomplete {
+                complete_wing_kg: 10_000.0,
+                sized_box_kg: 12_000.0,
+            }
+        ));
+    }
+
+    #[test]
+    fn current_inventory_requires_a_positive_secondary_remainder() {
+        for total in [7_000.0, 12_000.0, f64::NAN, f64::INFINITY] {
+            assert!(!StructuralInventory::FrozenReference
+                .checked_against_current_wing(12_000.0, total)
+                .is_complete());
+        }
+        assert!(StructuralInventory::FrozenReference
+            .checked_against_current_wing(12_000.0, 15_000.0)
+            .is_complete());
     }
 }

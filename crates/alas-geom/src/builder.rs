@@ -40,6 +40,7 @@
 mod custom_sections;
 mod empennage;
 mod error;
+mod fin_root;
 mod mesh;
 mod spacing;
 mod tail_attachment;
@@ -50,7 +51,7 @@ use crate::aircraft::spacing::linspace;
 pub use error::BuildError;
 use spacing::{n_subdivisions_usize, sinspace};
 
-use alas_config::{DesignVector, GeometryConfig, TransportPlanform};
+use alas_config::{DesignVector, GeometryConfig, TransportPlanform, WingHeights, WingShape};
 
 use crate::aircraft::airfoil::Airfoil;
 use crate::aircraft::airplane::Airplane;
@@ -109,6 +110,8 @@ impl AircraftBuilder {
         geometry.wing.side_of_body_chord_ratio = None;
         geometry.wing.kink_span_fraction = None;
         geometry.wing.outboard_le_sweep_deg = None;
+        // The frozen builder lofts one wing shape, the configured heights.
+        geometry.wing.flight_tip_rise_semispan_fraction = None;
         // And its spanwise mesh; see `mesh`.
         mesh::restore_reference_ratios(&mut geometry);
         Self {
@@ -117,12 +120,14 @@ impl AircraftBuilder {
         }
     }
 
-    /// Assemble the full aircraft for `dv`: `AircraftBuilder.build`.
+    /// Assemble the full aircraft for `dv`, its main wing in the 1 g flight
+    /// shape: `AircraftBuilder.build`.
     ///
     /// `dv = None` builds the nominal reference aircraft
     /// ([`DesignVector::default`]). `include_engines` controls whether the
     /// nacelles from [`Self::build_engines`] are appended to the fuselage
-    /// list.
+    /// list. The flight shape is the one every aerodynamic, stability and
+    /// layout consumer reads; see [`WingShape`].
     ///
     /// # Errors
     ///
@@ -131,6 +136,22 @@ impl AircraftBuilder {
         &self,
         dv: Option<&DesignVector>,
         include_engines: bool,
+    ) -> Result<Airplane, BuildError> {
+        self.build_shape(dv, include_engines, WingShape::Flight)
+    }
+
+    /// [`Self::build`] with the main wing and its nacelles in `shape`: the
+    /// static ground shape is the one ground clearance and nacelle strike
+    /// are measured on.
+    ///
+    /// # Errors
+    ///
+    /// See [`BuildError`].
+    pub fn build_shape(
+        &self,
+        dv: Option<&DesignVector>,
+        include_engines: bool,
+        shape: WingShape,
     ) -> Result<Airplane, BuildError> {
         let default_dv = DesignVector::default();
         let dv = dv.unwrap_or(&default_dv);
@@ -141,16 +162,21 @@ impl AircraftBuilder {
         let tip_airfoil = Self::resolve(&g.wing.tip_airfoil)?;
         let tail_airfoil = Self::resolve(&g.empennage.tail_airfoil)?;
         let planform = g.wing.transport_planform(dv)?;
+        let heights = g.wing.heights(shape, &planform)?;
 
+        let main_wing =
+            self.build_main_wing(dv, &planform, &heights, &root_section, &tip_airfoil)?;
+        let fuselage = self.build_fuselage(dv)?;
+        let seat = self.fin_seat(dv, &fuselage)?;
         let wings = vec![
-            self.build_main_wing(dv, &planform, &root_section, &tip_airfoil)?,
+            main_wing,
             self.build_hstab(dv, &tail_airfoil, true)?,
-            self.build_vstab(dv, &tail_airfoil, true)?,
+            self.build_vstab(dv, &tail_airfoil, true, &seat)?,
         ];
 
-        let mut fuselages = vec![self.build_fuselage(dv)?];
+        let mut fuselages = vec![fuselage];
         if include_engines {
-            fuselages.extend(self.build_engines(dv)?);
+            fuselages.extend(self.build_engines(dv, shape)?);
         }
 
         let main_wing = &wings[0];
@@ -196,6 +222,7 @@ impl AircraftBuilder {
         &self,
         dv: &DesignVector,
         planform: &TransportPlanform,
+        heights: &WingHeights,
         root_section: &Airfoil,
         tip_airfoil: &Airfoil,
     ) -> Result<Wing, BuildError> {
@@ -205,7 +232,7 @@ impl AircraftBuilder {
             [
                 planform.root.leading_edge_x_m,
                 planform.root.y_m,
-                g.root_z_m,
+                heights.root_z_m,
             ],
             planform.root.chord_m,
             g.root_twist_deg,
@@ -222,7 +249,8 @@ impl AircraftBuilder {
             .filter(|_| g.side_of_body_chord_ratio.is_some())
         {
             let root_to_kink_fraction = side_of_body.y_m / planform.kink.y_m;
-            let side_of_body_z_m = g.root_z_m + root_to_kink_fraction * (g.break_z_m - g.root_z_m);
+            let side_of_body_z_m =
+                heights.root_z_m + root_to_kink_fraction * (heights.break_z_m - heights.root_z_m);
             let side_of_body_twist_deg =
                 g.root_twist_deg + root_to_kink_fraction * (g.break_twist_deg - g.root_twist_deg);
             xsecs.push(WingXSec::new(
@@ -240,19 +268,23 @@ impl AircraftBuilder {
             [
                 planform.kink.leading_edge_x_m,
                 planform.kink.y_m,
-                g.break_z_m,
+                heights.break_z_m,
             ],
             planform.kink.chord_m,
             g.break_twist_deg,
             root_section.clone(),
         ));
         xsecs.push(WingXSec::new(
-            [planform.tip.leading_edge_x_m, planform.tip.y_m, g.tip_z_m],
+            [
+                planform.tip.leading_edge_x_m,
+                planform.tip.y_m,
+                heights.tip_z_m,
+            ],
             planform.tip.chord_m,
             dv.tip_twist_deg,
             tip_airfoil.clone(),
         ));
-        self.append_custom_wing_sections(planform, &mut xsecs)?;
+        self.append_custom_wing_sections(planform, heights, &mut xsecs)?;
 
         let wing = Wing::new("Main Wing", xsecs, true);
         let wing = mesh::for_contract(
@@ -352,11 +384,16 @@ impl AircraftBuilder {
 
     /// The podded engines, one small [`Fuselage`] per spanwise position:
     /// `_build_engines`. See the module doc for the two placement branches.
-    fn build_engines(&self, dv: &DesignVector) -> Result<Vec<Fuselage>, BuildError> {
+    fn build_engines(
+        &self,
+        dv: &DesignVector,
+        shape: WingShape,
+    ) -> Result<Vec<Fuselage>, BuildError> {
         let g = &self.geometry.engine;
         let x_wing_global = self.geometry.wing.root_datum_x_m + dv.wing_x_shift_m;
         let wing = &self.geometry.wing;
         let planform = wing.transport_planform(dv)?;
+        let heights = wing.heights(shape, &planform)?;
 
         let mut nacelles = Vec::with_capacity(g.spanwise_positions_m.len());
         for &y_pos in &g.spanwise_positions_m {
@@ -382,21 +419,10 @@ impl AircraftBuilder {
                 };
                 let x_inlet = x_wing_global + leading_edge_offset - g.inlet_x_offset_m;
 
-                // Interpolate the local wing Z-height for dihedral-aware
-                // placement, then apply the local Z offset relative to the
-                // wing LE. The `1e-9` denominators guard a zero-length root-
-                // or tip-side interval (`y_break == 0` or
-                // `semi_span == y_break`), not an incidental epsilon.
-                let semi_span = planform.tip.y_m;
-                let y_break = planform.kink.y_m;
-                let y_abs = y_pos.abs();
-                let z_wing = if y_abs <= y_break {
-                    wing.root_z_m + (wing.break_z_m - wing.root_z_m) * (y_abs / (y_break + 1e-9))
-                } else {
-                    wing.break_z_m
-                        + (wing.tip_z_m - wing.break_z_m)
-                            * ((y_abs - y_break) / (semi_span - y_break + 1e-9))
-                };
+                // The local leading-edge height of the wing shape being
+                // built, so the nacelle hangs under the wing its pylon is
+                // on; then the local Z offset relative to that leading edge.
+                let z_wing = heights.at(&planform, y_pos);
                 (name, x_inlet, z_wing + g.z_m)
             };
 

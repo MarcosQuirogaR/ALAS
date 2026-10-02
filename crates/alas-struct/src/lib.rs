@@ -30,6 +30,7 @@
 // controls, so a failed unwrap there is the assertion failing.
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
+pub mod allowables;
 pub mod analytical;
 pub mod feasibility;
 pub mod loads;

@@ -13,6 +13,9 @@ use alas_config::design_variables::DesignVector;
 use alas_config::{AerodromeReferenceCode, AlasConfig};
 use alas_opt::{assess_product_candidate, CandidateAssessment};
 
+mod support;
+use support::{nominal, violates};
+
 /// Assess `design` against `preset`'s configuration in the **clean-sheet**
 /// design mode, so the envelope is the global box widened to contain the
 /// design: the point of these tests is what the *residuals* say about a shape,
@@ -42,20 +45,6 @@ fn assess_under_code(
     config.optimizer.design_space.mode = alas_config::optimizer::DesignMode::CleanSheet;
     config.optimizer.objective.aerodrome_reference_code = code;
     assess_product_candidate(&config, &design)
-}
-
-fn nominal(preset: &str) -> DesignVector {
-    alas_config::presets::get(preset)
-        .expect("registered preset")
-        .design_vector
-}
-
-/// Whether `id` appears among the assessment's violated hard residuals.
-fn violates(assessment: &CandidateAssessment, id: &str) -> bool {
-    assessment
-        .violated_hard_ids()
-        .into_iter()
-        .any(|name| name == id)
 }
 
 /// Every plausibility residual identifier, so a test can assert that none of

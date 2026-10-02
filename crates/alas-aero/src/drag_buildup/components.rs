@@ -68,7 +68,7 @@ pub fn induced_drag_aircraft(
     }
 }
 
-/// Compressibility drag of one wing.
+/// Frozen SUAVE-parity-only compressibility drag of one wing.
 ///
 /// The crest-critical Mach number is a six-term quadratic fit in the
 /// sweep-corrected thickness and lift coefficient; the drag rise past it is a

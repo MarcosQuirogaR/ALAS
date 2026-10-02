@@ -202,29 +202,36 @@ fn the_rejection_cap_stops_the_run_within_one_generation() {
 
 #[test]
 fn the_time_limit_is_checked_between_generations_only() {
+    // How many generations fit depends on machine load, so the test checks
+    // the guard's rule, not a count: a generation only starts before the
+    // limit, and every generation that starts is evaluated whole.
+    let limit = std::time::Duration::from_millis(160);
+    let started = Instant::now();
     let mut batches = Vec::new();
+    let mut batch_starts = Vec::new();
     let outcome = run(
         &[(-2.0, 2.0), (-2.0, 2.0)],
         &[],
         Settings {
-            time_limit: Some(std::time::Duration::from_millis(160)),
+            time_limit: Some(limit),
             ..settings(1, 100_000)
         },
-        Instant::now(),
+        started,
         &CancelScope::attach(None),
         &mut |points: &[Vec<f64>]| {
+            batch_starts.push(started.elapsed());
             batches.push(points.len());
-            // Each batch sleeps well above the coarsest OS timer tick (about
-            // 15.6 ms on Windows), so two or three generations fit the limit
-            // for any sleep between 50 and about 80 ms.
             std::thread::sleep(std::time::Duration::from_millis(50));
             points.iter().map(|p| bowl_behind_a_halfplane(p)).collect()
         },
     );
     assert_eq!(outcome.termination, Termination::TimeBudget);
-    // Every generation that started was evaluated whole.
+    assert!(!batches.is_empty());
     assert_eq!(outcome.evaluations, batches.iter().sum::<usize>());
-    assert!((2..=3).contains(&batches.len()), "{batches:?}");
+    assert!(
+        batch_starts.iter().all(|start| *start < limit),
+        "a generation started after the limit: {batch_starts:?}"
+    );
 }
 
 #[test]

@@ -11,8 +11,8 @@ use super::*;
 use crate::search::planform_projection::PlanformProjection;
 use crate::search::{elite, screening};
 use crate::search_methods::product_de::Termination;
-use crate::search_methods::ScoredPoint;
-use crate::{BaselineComparison, SizingWorkSummary, StageRejections, StageSummary, SEARCH_SCOPE};
+use crate::search_methods::{restoration, ScoredPoint};
+use crate::{BaselineComparison, StageRejections, StageSummary, SEARCH_SCOPE};
 
 mod screen;
 
@@ -152,14 +152,13 @@ impl DesignOptimizer {
                     SearchDiagnostics {
                         stages,
                         rejections,
-                        ..empty_diagnostics()
+                        ..SearchDiagnostics::default()
                     },
                 );
             }
-            let summary = stages.last().map_or((0, 0.0, 0.0), |s: &StageSummary| {
-                (s.analysis_evaluations, s.wall_time_s, s.lane_utilization)
-            });
-            screening_throughput = Some(summary);
+            screening_throughput = stages
+                .last()
+                .map(|s| (s.analysis_evaluations, s.wall_time_s, s.lane_utilization));
             elite_members = screened.elite;
             cache = screened.cache;
         }
@@ -236,70 +235,46 @@ impl DesignOptimizer {
             &mut |points: &[Vec<f64>]| evaluator.evaluate_block(points),
         );
         let kernel_evaluations = outcome.evaluations;
-        let remaining = (
-            (refinement
+        let limits = restoration::Limits {
+            max_scores: (refinement
                 .max_evaluations
                 .saturating_sub(outcome.evaluations))
             .min(refinement.max_rejects.saturating_sub(outcome.rejected)),
-            product_de::restoration_replay(&solver.refinement)
+            stop_after: product_de::restoration_replay(&solver.refinement)
                 .unwrap_or_else(|| refinement.stop_after.saturating_sub(outcome.evaluations)),
-        );
-        let restoration = feasibility_restoration::run(
-            bounds,
-            &mut outcome,
-            remaining,
-            (
-                stage_started,
-                refinement.time_limit.unwrap_or(Duration::MAX),
-            ),
-            &scope,
-            &mut evaluator,
-        );
+            started: stage_started,
+            time_limit: refinement.time_limit,
+        };
+        let restoration =
+            feasibility_restoration::run(bounds, &mut outcome, limits, &scope, &mut evaluator);
         let wall = stage_started.elapsed().as_secs_f64();
-        let analysis_evaluations = evaluator.analyses() - before;
         let termination = if outcome.termination == Termination::Cancelled || dimension > 0 {
             outcome.termination.label()
         } else {
             "fixed_bounds"
         };
-        let (candidate_time_s, lane_utilization) =
-            evaluator.lane_statistics(analysis_evaluations, wall);
-        stages.push(StageSummary {
+        let stage = StageSummary {
             stage: "refinement".to_owned(),
-            max_evaluations: usize::try_from(solver.refinement.max_evaluations.max(1))
-                .unwrap_or(usize::MAX),
+            max_evaluations: ceiling,
             planned_evaluations: planned,
             reserved_evaluations: planned.saturating_sub(search_budget),
             time_limit_s: solver.refinement.time_limit_s,
             time_limited: refinement.time_limit.is_some(),
             evaluations: outcome.evaluations,
             restoration_evaluations: outcome.evaluations - kernel_evaluations,
-            pre_gate_rejects: evaluator.pre_gate_rejects,
-            analysis_evaluations,
-            cancelled_unstarted: evaluator.cancelled_unstarted,
             generations: outcome.generations_completed,
-            feasible: evaluator.feasible,
             elite_size: outcome.population_initial,
-            wall_time_s: wall,
-            candidate_time_s,
-            lane_utilization,
             termination: termination.to_owned(),
-            sizing_work: SizingWorkSummary::of_history(evaluator.objective.history(), before),
-        });
+            ..StageSummary::default()
+        };
+        let (summary, stage_rejections) =
+            evaluator.close_stage(stage, before, wall, refinement.max_rejects);
+        let analysis_evaluations = summary.analysis_evaluations;
+        stages.push(summary);
+        rejections.push(stage_rejections);
         report(&format!(
             "refinement | evaluations {} | rejected {} | generations {} | termination {termination} | wall_s {wall:.3}",
             outcome.evaluations, evaluator.pre_gate_rejects, outcome.generations_completed
-        ));
-        rejections.push(StageRejections::new(
-            "refinement",
-            refinement.max_rejects,
-            evaluator.reasons,
-            evaluator
-                .objective
-                .history()
-                .reject_reason
-                .get(before..)
-                .unwrap_or_default(),
         ));
         scope.search_finished(termination);
 
@@ -346,7 +321,7 @@ impl DesignOptimizer {
             rejections,
             baseline: baseline_comparison,
             winner_history_row: winner_row,
-            ..empty_diagnostics()
+            ..SearchDiagnostics::default()
         };
         let winner = MethodOutcome {
             winner: outcome.winner,
@@ -391,34 +366,6 @@ impl DesignOptimizer {
 /// beside the baseline ([`ELITE_POPULATION_FRACTION`]).
 fn elite_members_kept(population: usize) -> usize {
     (population.saturating_sub(1) as f64 * ELITE_POPULATION_FRACTION) as usize
-}
-
-fn empty_diagnostics() -> SearchDiagnostics {
-    SearchDiagnostics {
-        restoration: None,
-        converged: false,
-        analysis_evaluations: 0,
-        cache_hits: 0,
-        poll_iterations: 0,
-        screening_evaluations: 0,
-        screening_feasible: 0,
-        verification_evaluations: 0,
-        scan_wall_time_s: 0.0,
-        search_wall_time_s: 0.0,
-        workers: 0,
-        poll_block_size: 0,
-        first_feasible_cost: None,
-        relative_improvement: None,
-        feasible_fraction: 0.0,
-        epsilon_level: 0.0,
-        stages: Vec::new(),
-        rejections: Vec::new(),
-        seed: None,
-        scope: String::new(),
-        baseline: None,
-        winner_history_row: None,
-        baseline_clamped: false,
-    }
 }
 
 // A test asserts on values it built here, so a failed expect is the
@@ -467,25 +414,12 @@ mod tests {
         config.optimizer.solver.refinement.max_evaluations = 60;
         config.optimizer.solver.seed = Some(3);
         config.optimizer.solver.stop_on_evaluations_only = true;
-        let nominal = DesignVector::default();
-        let mut bounds: Vec<(f64, f64)> = nominal
-            .to_array()
-            .iter()
-            .map(|&value| (value, value))
-            .collect();
-        bounds[0] = (0.95 * nominal.span_m, nominal.span_m);
+        let (nominal, bounds) = span_box(0.95, 1.0);
         let mut objective = Resizing(OptimizationHistory::new());
-        let result = DesignOptimizer::new(config).run_product_search(
-            &bounds,
-            Some(&nominal),
-            &mut objective,
-            ScreeningModel::Same,
-            None,
-            None,
-        );
+        let result = search(config, &bounds, &mut objective, ScreeningModel::Same);
         let history = &result.history;
         assert!(!history.design_vectors.contains(&result.best_design));
-        let diagnostics = result.search_diagnostics.as_ref().expect("diagnostics");
+        let diagnostics = diagnostics_of(&result);
         let comparison = diagnostics.baseline.as_ref().expect("baseline evaluated");
         assert_eq!(
             comparison.baseline_block_fuel_kg,
@@ -545,25 +479,60 @@ mod tests {
         }
     }
 
-    fn timed_run(config: &AlasConfig, workers: i64, span_upper: f64) -> OptimizationResult {
-        let mut config = config.clone();
-        config.optimizer.solver.workers = workers;
+    /// The nominal design and a box pinning it but for the span, free from
+    /// `lower` to `upper` times the nominal span.
+    fn span_box(lower: f64, upper: f64) -> (DesignVector, Vec<(f64, f64)>) {
         let nominal = DesignVector::default();
-        let mut bounds: Vec<(f64, f64)> = nominal
-            .to_array()
-            .iter()
-            .map(|&value| (value, value))
-            .collect();
-        bounds[0] = (0.9 * nominal.span_m, span_upper * nominal.span_m);
-        let mut objective = Timed(OptimizationHistory::new(), 2);
+        let mut bounds: Vec<(f64, f64)> = nominal.to_array().iter().map(|&v| (v, v)).collect();
+        bounds[0] = (lower * nominal.span_m, upper * nominal.span_m);
+        (nominal, bounds)
+    }
+
+    /// The product search from the nominal design, silent and uncancelled.
+    fn search<E: SearchObjective>(
+        config: AlasConfig,
+        bounds: &[(f64, f64)],
+        objective: &mut E,
+        model: ScreeningModel<'_>,
+    ) -> OptimizationResult {
+        let nominal = DesignVector::default();
         DesignOptimizer::new(config).run_product_search(
-            &bounds,
+            bounds,
             Some(&nominal),
-            &mut objective,
-            ScreeningModel::Same,
+            objective,
+            model,
             None,
             None,
         )
+    }
+
+    fn diagnostics_of(result: &OptimizationResult) -> &SearchDiagnostics {
+        result.search_diagnostics.as_ref().expect("diagnostics")
+    }
+
+    /// `config` replaying the recorded counts of a screening and a
+    /// refinement stage.
+    fn replay_of(config: &AlasConfig, stages: &[StageSummary]) -> AlasConfig {
+        let count = |value: usize| i64::try_from(value).ok();
+        let mut replay = config.clone();
+        let solver = &mut replay.optimizer.solver;
+        solver.screening.replay_evaluations = count(stages[0].evaluations);
+        solver.refinement.replay_evaluations = count(stages[1].evaluations);
+        solver.refinement.replay_planned_evaluations = count(stages[1].planned_evaluations);
+        replay
+    }
+
+    fn with_workers(config: &AlasConfig, workers: i64) -> AlasConfig {
+        let mut config = config.clone();
+        config.optimizer.solver.workers = workers;
+        config
+    }
+
+    fn timed_run(config: &AlasConfig, workers: i64, span_upper: f64) -> OptimizationResult {
+        let (_, bounds) = span_box(0.9, span_upper);
+        let mut objective = Timed(OptimizationHistory::new(), 2);
+        let config = with_workers(config, workers);
+        search(config, &bounds, &mut objective, ScreeningModel::Same)
     }
 
     #[test]
@@ -578,7 +547,7 @@ mod tests {
         config.optimizer.solver.convergence_stagnation_generations = 1_000_000;
         // Spans above the code F limit fail the pre-gate in both stages.
         let limited = timed_run(&config, 1, 1.4);
-        let diagnostics = limited.search_diagnostics.as_ref().expect("diagnostics");
+        let diagnostics = diagnostics_of(&limited);
         let stages = &diagnostics.stages;
         assert!(stages.iter().all(|stage| stage.pre_gate_rejects > 0));
         for (stage, rejections) in stages.iter().zip(&diagnostics.rejections) {
@@ -590,12 +559,6 @@ mod tests {
             assert!(stage.time_limited);
             assert!(stage.evaluations < stage.max_evaluations);
         }
-        let count = |name: &str| {
-            stages
-                .iter()
-                .find(|stage| stage.stage == name)
-                .and_then(|stage| i64::try_from(stage.evaluations).ok())
-        };
         // The refinement planned its budget from the screening throughput,
         // about 500 analyses per second of one 2 ms lane: far below the
         // ceiling, so the floor applies.
@@ -607,22 +570,11 @@ mod tests {
             refinement.elite_size,
             product_de::initial_population(planned - refinement.reserved_evaluations, 1)
         );
-        let mut replay = config.clone();
-        replay.optimizer.solver.screening.replay_evaluations = count("screening");
-        replay.optimizer.solver.refinement.replay_evaluations = count("refinement");
-        replay
-            .optimizer
-            .solver
-            .refinement
-            .replay_planned_evaluations = Some(planned as i64);
+        let replay = replay_of(&config, stages);
         for workers in [1, 8] {
             let replayed = timed_run(&replay, workers, 1.4);
             assert_eq!(bits(&replayed), bits(&limited), "{workers} workers");
-            let replayed_stages = &replayed
-                .search_diagnostics
-                .as_ref()
-                .expect("diagnostics")
-                .stages;
+            let replayed_stages = &diagnostics_of(&replayed).stages;
             assert!(replayed_stages.iter().all(|stage| !stage.time_limited));
             // Both recorded numbers come back: analysed and rejected.
             let counts = |stages: &[StageSummary]| -> Vec<(usize, usize)> {
@@ -637,20 +589,15 @@ mod tests {
 
     /// A run with a 2 ms screening model and an 8 ms refinement model.
     fn separate_run(config: &AlasConfig, workers: i64) -> OptimizationResult {
-        let mut config = config.clone();
-        config.optimizer.solver.workers = workers;
-        let nominal = DesignVector::default();
-        let mut bounds: Vec<(f64, f64)> = nominal.to_array().iter().map(|&v| (v, v)).collect();
-        bounds[0] = (0.9 * nominal.span_m, nominal.span_m);
+        let (_, bounds) = span_box(0.9, 1.0);
         let mut screening = Timed(OptimizationHistory::new(), 2);
         let mut refinement = Timed(OptimizationHistory::new(), 8);
-        DesignOptimizer::new(config).run_product_search(
+        let model = ScreeningModel::Separate(&mut screening);
+        search(
+            with_workers(config, workers),
             &bounds,
-            Some(&nominal),
             &mut refinement,
-            ScreeningModel::Separate(&mut screening),
-            None,
-            None,
+            model,
         )
     }
 
@@ -663,12 +610,7 @@ mod tests {
         config.optimizer.solver.screening.time_limit_s = 0.2;
         config.optimizer.solver.refinement.time_limit_s = 4.0;
         let result = separate_run(&config, 1);
-        let nominal = DesignVector::default();
-        let stages = &result
-            .search_diagnostics
-            .as_ref()
-            .expect("diagnostics")
-            .stages;
+        let stages = &diagnostics_of(&result).stages;
         let planned = stages[1].planned_evaluations;
         let solver = &config.optimizer.solver;
         let expected = product_de::planned_refinement_budget(solver, Some(125.0));
@@ -682,18 +624,10 @@ mod tests {
             "{planned} vs {screening_rate}"
         );
         // The piloted seeds lead the refinement history, the baseline first.
-        assert_eq!(result.history.design_vectors[0], nominal);
+        assert_eq!(result.history.design_vectors[0], DesignVector::default());
         // The replay count and the planned budget reproduce the run, pilot
         // included, at any worker count.
-        let count = |stage: &StageSummary| i64::try_from(stage.evaluations).ok();
-        let mut replay = config.clone();
-        replay.optimizer.solver.screening.replay_evaluations = count(&stages[0]);
-        replay.optimizer.solver.refinement.replay_evaluations = count(&stages[1]);
-        replay
-            .optimizer
-            .solver
-            .refinement
-            .replay_planned_evaluations = i64::try_from(planned).ok();
+        let replay = replay_of(&config, stages);
         for workers in [1, 8] {
             let replayed = separate_run(&replay, workers);
             assert_eq!(bits(&replayed), bits(&result), "{workers}");
@@ -725,11 +659,7 @@ mod tests {
         // Spans above the code F limit (79.99 m) fail the pre-gate: about a
         // third of the box.
         let reference = timed_run(&config, 1, 1.4);
-        let stages = &reference
-            .search_diagnostics
-            .as_ref()
-            .expect("diagnostics")
-            .stages;
+        let stages = &diagnostics_of(&reference).stages;
         let screening = stages
             .iter()
             .find(|stage| stage.stage == "screening")
@@ -750,22 +680,14 @@ mod tests {
         }
     }
 
-    /// The nominal and a box of `free` coordinates `+-1 %` around it.
-    fn box_around(free: usize) -> (DesignVector, Vec<(f64, f64)>) {
-        let nominal = DesignVector::default();
-        let bounds = nominal
-            .to_array()
-            .iter()
-            .enumerate()
-            .map(|(index, &v)| {
-                if index < free {
-                    (0.99 * v.min(1.01 * v), 1.01 * v.max(0.99 * v))
-                } else {
-                    (v, v)
-                }
-            })
-            .collect();
-        (nominal, bounds)
+    /// A box of the first `free` nominal coordinates `+-1 %` around it.
+    fn box_around(free: usize) -> Vec<(f64, f64)> {
+        let nominal = DesignVector::default().to_array();
+        let free_box = |(index, &v): (usize, &f64)| match index < free {
+            true => (0.99 * v.min(1.01 * v), 1.01 * v.max(0.99 * v)),
+            false => (v, v),
+        };
+        nominal.iter().enumerate().map(free_box).collect()
     }
 
     /// The audit case: 13 free coordinates, the 20 000 ceiling and a planned
@@ -785,22 +707,11 @@ mod tests {
             .refinement
             .replay_planned_evaluations = Some(240);
         config.optimizer.solver.convergence_stagnation_generations = 1_000_000;
-        let (nominal, bounds) = box_around(13);
         let mut screening = Timed(OptimizationHistory::new(), 0);
         let mut refinement = Timed(OptimizationHistory::new(), 0);
-        let result = DesignOptimizer::new(config).run_product_search(
-            &bounds,
-            Some(&nominal),
-            &mut refinement,
-            ScreeningModel::Separate(&mut screening),
-            None,
-            None,
-        );
-        let stages = &result
-            .search_diagnostics
-            .as_ref()
-            .expect("diagnostics")
-            .stages;
+        let model = ScreeningModel::Separate(&mut screening);
+        let result = search(config, &box_around(13), &mut refinement, model);
+        let stages = &diagnostics_of(&result).stages;
         let (screened, refined) = (&stages[0], &stages[1]);
         assert_eq!(refined.planned_evaluations, 240);
         let search_budget = refined.planned_evaluations - refined.reserved_evaluations;
@@ -861,20 +772,10 @@ mod tests {
     }
 
     fn infeasible_run(config: &AlasConfig, workers: i64) -> OptimizationResult {
-        let mut config = config.clone();
-        config.optimizer.solver.workers = workers;
-        let nominal = DesignVector::default();
-        let mut bounds: Vec<(f64, f64)> = nominal.to_array().iter().map(|&v| (v, v)).collect();
-        bounds[0] = (0.9 * nominal.span_m, nominal.span_m);
+        let (_, bounds) = span_box(0.9, 1.0);
         let mut objective = Infeasible(OptimizationHistory::new(), 100);
-        DesignOptimizer::new(config).run_product_search(
-            &bounds,
-            Some(&nominal),
-            &mut objective,
-            ScreeningModel::Same,
-            None,
-            None,
-        )
+        let config = with_workers(config, workers);
+        search(config, &bounds, &mut objective, ScreeningModel::Same)
     }
 
     #[test]
@@ -885,7 +786,7 @@ mod tests {
         config.optimizer.solver.refinement.time_limit_s = 0.3;
         config.optimizer.solver.convergence_stagnation_generations = 1_000_000;
         let limited = infeasible_run(&config, 1);
-        let diagnostics = limited.search_diagnostics.as_ref().expect("diagnostics");
+        let diagnostics = diagnostics_of(&limited);
         let refined = &diagnostics.stages[1];
         assert_eq!(refined.termination, "time_budget");
         assert!(
@@ -899,28 +800,17 @@ mod tests {
                 .as_ref()
                 .map(|restoration| restoration.analysis_evaluations)
         );
-        let count = |value: usize| i64::try_from(value).ok();
-        let mut replay = config.clone();
-        let solver = &mut replay.optimizer.solver;
-        solver.screening.replay_evaluations = count(diagnostics.stages[0].evaluations);
-        solver.refinement.replay_evaluations = count(refined.evaluations);
-        solver.refinement.replay_planned_evaluations = count(refined.planned_evaluations);
+        let mut replay = replay_of(&config, &diagnostics.stages);
         // The combined count alone lets the kernel run on into the
         // restoration's share: a different run.
         assert_ne!(bits(&infeasible_run(&replay, 1)), bits(&limited));
-        replay
-            .optimizer
-            .solver
-            .refinement
-            .replay_restoration_evaluations = count(refined.restoration_evaluations);
+        let refinement = &mut replay.optimizer.solver.refinement;
+        refinement.replay_restoration_evaluations =
+            i64::try_from(refined.restoration_evaluations).ok();
         for workers in [1, 8] {
             let replayed = infeasible_run(&replay, workers);
             assert_eq!(bits(&replayed), bits(&limited), "{workers} workers");
-            let stages = &replayed
-                .search_diagnostics
-                .as_ref()
-                .expect("diagnostics")
-                .stages;
+            let stages = &diagnostics_of(&replayed).stages;
             assert_eq!(stages[1].evaluations, refined.evaluations);
             assert_eq!(
                 stages[1].restoration_evaluations,
@@ -936,23 +826,16 @@ mod tests {
         config.optimizer.solver.stop_on_evaluations_only = true;
         config.optimizer.solver.screening.max_evaluations = 16;
         config.optimizer.solver.refinement.max_evaluations = 60;
-        let nominal = DesignVector::default();
         let clamped = |upper: f64| {
-            let mut bounds: Vec<(f64, f64)> = nominal.to_array().iter().map(|&v| (v, v)).collect();
-            bounds[0] = (0.9 * nominal.span_m, upper * nominal.span_m);
+            let (_, bounds) = span_box(0.9, upper);
             let mut objective = Timed(OptimizationHistory::new(), 0);
-            DesignOptimizer::new(config.clone())
-                .run_product_search(
-                    &bounds,
-                    Some(&nominal),
-                    &mut objective,
-                    ScreeningModel::Same,
-                    None,
-                    None,
-                )
-                .search_diagnostics
-                .expect("diagnostics")
-                .baseline_clamped
+            let result = search(
+                config.clone(),
+                &bounds,
+                &mut objective,
+                ScreeningModel::Same,
+            );
+            diagnostics_of(&result).baseline_clamped
         };
         assert!(!clamped(1.0));
         assert!(clamped(0.95));

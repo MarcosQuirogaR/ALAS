@@ -26,7 +26,8 @@
 //! nacelle group can be dropped or added twice.
 
 use alas_config::{
-    CabinConfig, ControlSurfacesConfig, DesignRequirements, GeometryConfig, MassModelConfig,
+    CabinConfig, ControlSurfacesConfig, DesignRequirements, GeometryConfig, LandingGearConfig,
+    MassModelConfig,
 };
 use alas_geom::aircraft::airplane::Airplane;
 
@@ -114,6 +115,7 @@ pub(super) fn build_pure_flops(
     controls: &ControlSurfacesConfig,
     cabin: &CabinConfig,
     mass_model: &MassModelConfig,
+    landing_gear: &LandingGearConfig,
 ) -> Result<FlopsMassBuildup, ComponentMassError> {
     // The systems group reads the same design gross mass as the airframe:
     // a declared `flops_structure.design_gross_mass_kg` pins both, otherwise
@@ -151,6 +153,7 @@ pub(super) fn build_pure_flops(
         controls,
         mass_model,
         systems: Some(&groups.systems),
+        landing_gear,
         selection: FlopsAirframeSelection {
             structure: true,
             propulsion: true,
@@ -320,6 +323,7 @@ mod tests {
             &ControlSurfacesConfig::default(),
             &CabinConfig::default(),
             mass_model,
+            &LandingGearConfig::default(),
         )
         .unwrap_or_else(|error| panic!("the declared fixture must evaluate: {error}"))
     }
@@ -490,6 +494,7 @@ mod tests {
             &ControlSurfacesConfig::default(),
             &CabinConfig::default(),
             &mass_model,
+            &LandingGearConfig::default(),
         )
         .expect_err("a missing maximum Mach must block the buildup");
         match error {

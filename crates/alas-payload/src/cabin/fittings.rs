@@ -16,9 +16,9 @@
 
 use super::seating::Seating;
 use super::{
-    cabin_deck_segments, ceil_div, effective_pair_capacity, min_exit_pairs, monument_fill_order,
-    select_exit_type, spread_bay_indices, stack_y, Bay, ExitSpec, MonumentSide, EXIT_TYPES,
-    MONUMENT_LEN, SEAT_BOX_H,
+    cabin_deck_segments, ceil_div, effective_pair_capacity, exit_spec, largest_pair_rating,
+    min_exit_pairs, monument_fill_order, pair_rating, select_exit_type, spread_bay_indices,
+    stack_y, Bay, DoorStation, ExitSpec, MonumentKind, MonumentSide, MONUMENT_LEN, SEAT_BOX_H,
 };
 use crate::cargo::{CargoLoadManager, CargoMassSemantics};
 use crate::geometry::CabinGeometry;
@@ -27,6 +27,8 @@ use crate::layout::{
 };
 use alas_config::{CargoDeckConfig, CertifiedExitLayout, DesignRequirements, PassengerCabinConfig};
 
+mod exits;
+pub(super) use exits::*;
 mod monuments;
 pub(super) use monuments::*;
 mod baggage;

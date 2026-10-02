@@ -136,6 +136,7 @@ mod large_single_aisle_2 {
             rated_thrust_per_engine_n: lbf(THRUST_LBF),
             paint_area_density_kg_m2: lbm(0.07) / (FOOT * FOOT),
             nacelle_mass_override_kg: None,
+            pressurized_fuselage: None,
             painted_wetted_area_m2: ft2(8_319.07),
         }
     }
@@ -493,6 +494,7 @@ mod large_single_aisle_1 {
             rated_thrust_per_engine_n: lbf(THRUST_LBF),
             paint_area_density_kg_m2: lbm(0.037) / (FOOT * FOOT),
             nacelle_mass_override_kg: None,
+            pressurized_fuselage: None,
             painted_wetted_area_m2: ft2(8_275.86),
         });
         check(

@@ -524,6 +524,8 @@ mod tests {
             nastran95: None,
             patran: None,
             torenbeek_wing_mass_kg: 15000.0,
+            wing_mass: None,
+            evaluation_inputs: None,
         }
     }
 

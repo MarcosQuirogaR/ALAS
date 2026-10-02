@@ -48,7 +48,6 @@ crates/alas-pipeline/src/export.rs	670	Exporting design databases to JSON, Selig
 crates/alas-pipeline/src/feasibility.rs	785	Explicit physical-feasibility findings for a completed design run. Pending decomposition into modules with interfaces.
 crates/alas-pipeline/src/mission_stage.rs	593	Native mission orchestration for the design pipeline. Pending decomposition into modules with interfaces.
 crates/alas-pipeline/src/pipeline.rs	2386	Complete multi-stage aircraft design, analysis, optimization and export pipeline. Pending decomposition into modules with interfaces.
-crates/alas-pipeline/src/structural.rs	527	Structural wingbox sizing, mesh generation, analytical response, and solver execution. Pending decomposition into modules with interfaces.
 crates/alas-report/src/families/geometry/sandbox_scene.rs	539	The sandbox workspace's central aircraft scene. Pending decomposition into modules with interfaces.
 crates/alas-report/src/families/structures_dynamics/modes.rs	744	Rayleigh-versus-MSC/NASTRAN-95 normal-mode frequencies and spanwise shapes. Pending decomposition into modules with interfaces.
 xtask/src/dist.rs	1804	Packaging and distribution assembly task for xtask. Pending decomposition into modules with interfaces.

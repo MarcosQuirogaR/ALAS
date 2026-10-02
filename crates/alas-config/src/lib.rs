@@ -60,6 +60,7 @@ pub mod preset_policy;
 pub mod preset_structures;
 pub mod presets;
 pub mod propulsion;
+pub mod pylon_mass;
 pub mod requirements;
 pub mod settings;
 pub mod sizing_basis;
@@ -101,7 +102,7 @@ pub use engines::{
 pub use fidelity_presets::{FidelityPreset, UnknownFidelityPreset};
 pub use flops_structure::{
     FlopsNozzleScope, FlopsStarterScope, FlopsStructureConfig, FlopsWingBendingMethod,
-    PropulsionMassMethod, PylonMassMethod, StructuralMassMethod,
+    PropulsionMassMethod, StructuralMassMethod,
 };
 pub use fuel_policy::{FuelPolicyConfig, FuelScheme};
 pub use fuel_tanks::{
@@ -109,11 +110,11 @@ pub use fuel_tanks::{
     WingTankConfig,
 };
 pub use geometry::{
-    ActiveEngineModel, BodyFuselageExtent, EmpennageConfig, EngineBindingError, EngineConfig,
-    FuselageConfig, FuselageSection, FuselageSectionError, GeometryConfig,
+    ActiveEngineModel, AirfoilClass, BodyFuselageExtent, EmpennageConfig, EngineBindingError,
+    EngineConfig, FuselageConfig, FuselageSection, FuselageSectionError, GeometryConfig,
     InboardAerodynamicStation, LongitudinalStationFrame, MacFrame, MainWingPanel, MainWingStation,
     MainWingStationKind, TailSizing, TransportPlanform, TransportPlanformError, WingConfig,
-    WingSection, WingSectionError,
+    WingHeights, WingSection, WingSectionError, WingShape, MAX_FLIGHT_TIP_RISE_SEMISPAN_FRACTION,
 };
 pub use landing_gear::{
     effective_main_gear_station, EffectiveGearStationExt, EffectiveMainGearStation,
@@ -148,13 +149,15 @@ pub use presets::{
     MissionDatumProvenance, MissionEvidenceApplicability, MissionEvidenceTier,
     MissionPromotionRefusal, PartialDesignMissionEvidence, PartialMissionEvidenceKind,
     PayloadRangeDesignPoint, PlanningCgEnvelope, PlanningMacReference, PublishedAftCgNoseLoad,
-    PublishedMissionLoadCase, PublishedRange, PublishedReserveContract, UnknownAircraftPreset,
+    PublishedMissionLoadCase, PublishedRange, PublishedReserveContract, SourcedPlanningCabin,
+    SourcedSeatClass, UnknownAircraftPreset,
 };
 pub use propulsion::PropulsionCycleConfig;
+pub use pylon_mass::PylonMassMethod;
 pub use requirements::{DesignRequirements, RequirementsError};
 pub use retired_keys::{
-    LegacySolverBudget, RetiredKeysDropped, RETIRED_BUDGET_KEYS, RETIRED_OBJECTIVE_KEYS,
-    RETIRED_SOLVER_KEYS, RETIRED_WEIGHT_KEYS,
+    LegacySolverBudget, RetiredKeysDropped, RETIRED_BUDGET_KEYS, RETIRED_DRAG_MODEL_KEYS,
+    RETIRED_OBJECTIVE_KEYS, RETIRED_SOLVER_KEYS, RETIRED_WEIGHT_KEYS,
 };
 pub use settings::{legacy_mission_disabled, AlasConfig, ConfigLoadNotes, WORKSPACE_ENVELOPE_KEY};
 pub use solver_presets::{SolverPreset, UnknownSolverPreset};

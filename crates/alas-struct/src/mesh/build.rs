@@ -225,7 +225,16 @@ fn build_with_caps(
     });
 
     let engine_nids = elements::add_engine_masses(
-        &mut deck, &mut eid, &stations, &nodes, &regions, wsg, engine_cfg, mass_cfg, req,
+        &mut deck,
+        &mut eid,
+        &stations,
+        &nodes,
+        &regions,
+        wsg,
+        engine_cfg,
+        mass_cfg,
+        req,
+        product_caps,
     );
 
     for (key, value) in [

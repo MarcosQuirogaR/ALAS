@@ -9,6 +9,7 @@
 //! limits, V-speeds, field distances, then runway/bar inputs. A failure is
 //! local to the first differing stage.
 
+// Frozen evidence has a fixed schema; an invalid fixture must fail this test.
 #![cfg_attr(test, allow(clippy::expect_used, clippy::unwrap_used))]
 
 use alas_config::airports::get;
@@ -162,7 +163,8 @@ fn speed_kt(speeds: &SpeedEvidence, name: &str) -> f64 {
 fn w62_lto_matches_the_reference_intermediates_in_renderer_order() {
     let root: Fixture = serde_json::from_value(load_json("w62_lto", "lto"))
         .expect("LTO fixture has its recorded schema");
-    let config = AlasConfig::default();
+    let mut config = AlasConfig::default();
+    config.performance.legacy_field_correlations = true;
 
     assert_eq!(root.config.departure_airport, config.departure_airport);
     assert_eq!(root.config.arrival_airport, config.arrival_airport);

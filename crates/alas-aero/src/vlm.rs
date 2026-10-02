@@ -80,6 +80,7 @@ use crate::operating_point::OperatingPoint;
 pub mod stability_derivatives;
 pub mod streamlines;
 pub mod system;
+pub mod trefftz;
 
 pub use stability_derivatives::{
     run_with_stability_derivatives, run_with_stability_derivatives_reference_compatibility,
@@ -87,6 +88,7 @@ pub use stability_derivatives::{
 };
 pub use streamlines::{calculate_streamlines, PanelSample};
 pub use system::VlmSystem;
+pub use trefftz::trefftz_induced_drag_coefficient;
 
 /// The Kaufmann vortex core smoothing radius `VortexLatticeMethod`'s
 /// constructor defaults to and every call site in this program's inputs
@@ -195,7 +197,9 @@ pub struct VlmResult {
     pub yaw_moment: f64,
     /// Lift coefficient: `CL`.
     pub cl_lift: f64,
-    /// Drag coefficient: `CD`.
+    /// Drag coefficient: `CD`, the near-field force sum. On a swept,
+    /// cambered or dihedralled lattice it carries a spurious streamwise
+    /// force; [`trefftz_induced_drag_coefficient`] is the induced drag.
     pub cd_drag: f64,
     /// Side-force coefficient: `CY`.
     pub cy_side: f64,

@@ -218,6 +218,7 @@ dependencies = [
 name = "alas-mass"
 version = "1.2.0"
 dependencies = [
+ "alas-atmo",
  "alas-config",
  "alas-geom",
  "alas-struct",

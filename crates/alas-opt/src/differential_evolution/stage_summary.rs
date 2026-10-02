@@ -13,20 +13,17 @@ use serde::{Deserialize, Serialize};
 pub const SEARCH_SCOPE: &str = "local refinement around the preset";
 
 /// What one search stage did, measured rather than configured.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct StageSummary {
     /// `screening` or `refinement`.
     pub stage: String,
     /// Configured evaluation budget: the ceiling.
     pub max_evaluations: usize,
-    /// The budget `B` the stage planned its schedule on, reserve included.
-    /// For a time-limited refinement it follows the measured throughput
-    /// (`alas_opt::planned_refinement_budget`); otherwise it is
-    /// `max_evaluations`. Replaying the refinement sets its
-    /// `replay_planned_evaluations` to this value beside
-    /// `replay_evaluations`, so the initial population and the population
-    /// reduction are those of the recorded run. Zero on a record written
-    /// before the field existed, meaning `max_evaluations`.
+    /// The budget `B` the stage planned its schedule on, reserve included:
+    /// the measured-throughput plan of a time-limited refinement
+    /// (`alas_opt::planned_refinement_budget`), else `max_evaluations`. A
+    /// refinement replay sets `replay_planned_evaluations` to it. Zero on an
+    /// older record, meaning `max_evaluations`.
     #[serde(default)]
     pub planned_evaluations: usize,
     /// Evaluations of `max_evaluations` kept back for the reporting-fidelity
@@ -40,20 +37,14 @@ pub struct StageSummary {
     /// evaluation budgets only or the stage replayed a recorded count.
     #[serde(default)]
     pub time_limited: bool,
-    /// The replay count: pre-gate-passed candidates, including repeats
-    /// (exact repeats of an analysed design and, in the refinement, the
-    /// reused screening elite and baseline), the count the budget bounds.
-    /// It is not the number of coupled analyses
-    /// ([`Self::analysis_evaluations`]). Replaying the stage with
-    /// `replay_evaluations` set to this count (and, for the refinement,
-    /// `replay_planned_evaluations` set to [`Self::planned_evaluations`]) reproduces
-    /// the stage bit-identically at any worker count, whatever stopped it.
+    /// The replay count the budget bounds: pre-gate-passed candidates,
+    /// repeats and the reused screening elite and baseline included, so not
+    /// [`Self::analysis_evaluations`]. Replaying it as `replay_evaluations`
+    /// reproduces the stage bit-identically at any worker count.
     pub evaluations: usize,
-    /// The feasibility-restoration share of [`Self::evaluations`]; the
-    /// search kernel's share is the rest. Replaying the refinement sets
-    /// `replay_restoration_evaluations` to this count beside
-    /// `replay_evaluations`, so each phase stops where it did. Zero for the
-    /// screening stage and for a refinement that did not enter restoration.
+    /// The feasibility-restoration share of [`Self::evaluations`], replayed
+    /// as `replay_restoration_evaluations` so each phase stops where it did;
+    /// zero when restoration did not run.
     #[serde(default)]
     pub restoration_evaluations: usize,
     /// Candidates rejected by the design-vector pre-gate without analysis;
@@ -231,17 +222,6 @@ impl PreGateReasons {
     #[must_use]
     pub fn total(&self) -> usize {
         self.design_box + self.planform + self.trailing_edge_angle + self.span_code
-    }
-
-    /// `(reason, count)` in the gate's order.
-    #[must_use]
-    pub fn entries(&self) -> [(&'static str, usize); 4] {
-        [
-            ("design_box", self.design_box),
-            ("planform", self.planform),
-            ("trailing_edge_angle", self.trailing_edge_angle),
-            ("span_code", self.span_code),
-        ]
     }
 }
 

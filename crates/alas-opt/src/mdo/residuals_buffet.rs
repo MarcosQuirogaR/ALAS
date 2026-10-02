@@ -47,8 +47,14 @@ pub(crate) const BUFFET_LOAD_FACTOR: f64 = 1.3;
 /// engineering estimate. On a transport wing shock-induced separation, and
 /// with it buffet, sets in at or beyond drag divergence at a given Mach
 /// (Obert, *Aerodynamic Design of Transport Aircraft*, IOS Press, 2009,
-/// transonic drag-rise and buffet discussion), so the estimate leans
-/// conservative. It is the relation, sweep basis and thickness basis the
+/// transonic drag-rise and buffet discussion). The estimate is not a buffet
+/// boundary and is not conservative-biased: against the Fokker 100 flight-test
+/// 1 g buffet-onset boundary (Obert, Fokker report, 1991, tabulated in
+/// M. van Eijndhoven, MSc thesis, TU Delft, 2012, table 4.6) it is off by
+/// about 0.3 to 0.65 in CL at M 0.70 to 0.75 depending on `kappa`, and its
+/// Mach slope is about 2.3 times the measured one. It therefore acts only
+/// through the reference-adaptation floor `min(1.3, nominal)`; the absolute
+/// reading is diagnostic. It is the relation, sweep basis and thickness basis the
 /// wave-drag build-up uses (`AeroAnalysis::wave_drag`), so the margin and
 /// the cruise drag see one transonic model.
 ///
@@ -63,7 +69,7 @@ pub(crate) fn buffet_onset_cl(
     10.0 * cos_sweep.powi(3) * (kappa / cos_sweep - thickness / cos_sweep.powi(2) - mach)
 }
 
-/// The wing quantities the buffet estimate reads: area-weighted
+/// The wing quantities the buffet estimate reads: reference-trapezoid
 /// quarter-chord sweep, deg; area-weighted thickness ratio; reference area,
 /// m^2.
 fn wing_basis(plane: &Airplane, fallback_sweep_deg: f64) -> Option<(f64, f64, f64)> {
@@ -106,9 +112,9 @@ pub(super) static REFERENCE_WING_BASIS: super::nominal_cache::NominalCache<(f64,
 /// closed takeoff mass. The takeoff mass bounds the start-of-cruise mass from
 /// above by the climb fuel, which the fuel plan does not separate, so the
 /// check is conservative by that fraction. Sweep and thickness are the
-/// area-weighted quarter-chord sweep and thickness ratio, not the
-/// leading-edge sweep and root thickness, because the Korn relation is
-/// written for a representative section of a swept wing.
+/// reference-trapezoid quarter-chord sweep and area-weighted thickness
+/// ratio, not the leading-edge sweep and root thickness, because the Korn
+/// relation is written for a representative section of a swept wing.
 ///
 /// # Floor
 ///
@@ -135,7 +141,7 @@ pub(super) fn buffet_residuals(
     if policy == ConstraintPolicy::Off || mach < config.drag_model.wave_drag_onset_mach {
         return Vec::new();
     }
-    let kappa = config.drag_model.korn_technology_factor;
+    let kappa = config.geometry.wing.airfoil_class.korn_technology_factor();
     let Some((sweep_deg, thickness, s_ref)) =
         wing_basis(&outcome.plane, outcome.history.dv.sweep_deg)
     else {

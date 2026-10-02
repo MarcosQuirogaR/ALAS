@@ -246,10 +246,15 @@ pub(super) fn run_vlm_optimizer(request: VlmOptimizerRequest<'_>) -> SolverOptim
     });
 
     let status = SolverOptimizationStatus::for_delivered(&optimization);
+    // Publish the vector the delivered report describes. The replay resolves
+    // the search vector into the assessed aircraft, with a reference
+    // adaptation's solved tail scale, and the report, mission and feasibility
+    // are built on that aircraft; the vector it was handed is the search's.
+    let delivered_design = delivered.report.design;
     SolverOptimizationResult {
         solver: SolverKind::Vlm,
         status,
-        design: Some(delivered.design),
+        design: Some(delivered_design),
         optimization: Some(optimization),
         report: Some(delivered.report),
         avl_result: None,

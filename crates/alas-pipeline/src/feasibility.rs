@@ -16,9 +16,7 @@ use alas_config::{AlasConfig, DesignVector};
 use alas_mass::breakdown::{FUEL, PROPULSION};
 use alas_mission::MissionResult;
 use alas_perf::performance::{
-    assess_oei_climb, compute_field_performance_at_masses, compute_v_speeds_at_masses,
-    density_ratio, far25_oei_gradient, tw_cruise_constraint, tw_takeoff_constraint,
-    ws_landing_limit, OeiClimbStatus, OeiV2Condition,
+    compute_v_speeds_at_masses, density_ratio, OeiClimbAssessment, OeiClimbStatus,
 };
 
 use crate::full_analysis::AnalysisReport;
@@ -28,10 +26,12 @@ mod acceptance;
 mod cruise_equilibrium;
 mod design_mass;
 mod dispatch;
+mod field;
 mod fuel;
 mod mass_balance;
 mod mission_fuel;
 mod model_cg;
+mod oei_drag;
 mod operational_envelope;
 mod payload_findings;
 mod phase_limits;
@@ -54,8 +54,8 @@ pub use design_mass::{
 pub use dispatch::{DispatchAssessment, DispatchOutcome};
 pub(crate) use fuel::plan_fuel_loading;
 pub use fuel::{
-    assess_fuel_capacity, CarriedFuelBasis, FuelCapacityAssessment, FuelCapacityEvidence,
-    FuelLoadingAssessment,
+    assess_airplane_fuel_capacity, assess_fuel_capacity, CarriedFuelBasis, FuelCapacityAssessment,
+    FuelCapacityEvidence, FuelLoadingAssessment,
 };
 pub use mass_balance::{
     takeoff_mass_properties, LedgerItemSummary, MassBalanceAssessment, MassStateSummary,
@@ -408,10 +408,6 @@ pub fn assess_physical_feasibility_with_load_case(
     let wing_loading_pa = takeoff_mass_kg * gravity_m_s2 / wing_area_m2;
     let matching_inputs_are_finite = wing_loading_pa.is_finite()
         && wing_loading_pa > 0.0
-        && report.polar_fit.cd0.is_finite()
-        && report.polar_fit.k.is_finite()
-        && report.polar_fit.cd0 >= 0.0
-        && report.polar_fit.k >= 0.0
         && config.requirements.cruise_mach.is_finite()
         && config.requirements.cruise_mach > 0.0
         && config.requirements.cruise_altitude_m.is_finite()
@@ -433,56 +429,27 @@ pub fn assess_physical_feasibility_with_load_case(
         ));
     }
     if matching_inputs_are_finite && static_tw.is_finite() && static_tw > 0.0 {
-        let cruise_required_tw = tw_cruise_constraint(
-            &[wing_loading_pa],
-            report.polar_fit.cd0,
-            report.polar_fit.k,
-            config.requirements.cruise_mach,
-            config.requirements.cruise_altitude_m,
-            config.performance.thrust_lapse,
-        )
-        .first()
-        .copied()
-        .unwrap_or(f64::NAN);
-        let n_engines_i64 = config.geometry.engine.spanwise_positions_m.len() as i64;
-        let certified_oei_gradient = far25_oei_gradient(n_engines_i64);
-        let oei_condition = alas_config::airports::get(&config.departure_airport)
-            .ok()
-            .map(|departure| {
-                let speeds = compute_v_speeds_at_masses(
-                    takeoff_mass_kg,
-                    takeoff_mass_kg,
-                    wing_area_m2,
-                    departure,
-                    config.performance.cl_max_to,
-                    config.performance.cl_max_land,
-                    &config.performance,
-                );
-                OeiV2Condition {
-                    departure_elevation_m: departure.elevation_m,
-                    departure_isa_deviation_c: departure.isa_deviation_c,
-                    v2_over_vstall: speeds.v2_ms / speeds.v_stall_to_ms,
-                    condition_to_sls_thrust_ratio: config
-                        .performance
-                        .oei_condition_to_sls_thrust_ratio,
-                    asymmetric_trim_cd: config.performance.oei_asymmetric_trim_cd,
-                    windmilling_cd: config.performance.oei_windmilling_cd,
+        let oei_assessment = oei_drag::assess(config, report, takeoff_mass_kg, wing_area_m2)
+            .unwrap_or_else(|reason| {
+                findings.push(error(
+                    FindingCode::FieldPerformanceUnavailable,
+                    format!("OEI drag could not be assessed: {reason}"),
+                    None,
+                    None,
+                    "",
+                ));
+                OeiClimbAssessment {
+                    status: OeiClimbStatus::EvidenceGap,
+                    required_inflight_tw: None,
+                    required_sls_tw: None,
+                    diagnostic: "OEI shared candidate drag is unavailable; no SLS floor is scored.",
                 }
             });
-        let oei_assessment = assess_oei_climb(
-            report.polar_fit.cd0,
-            report.polar_fit.k,
-            n_engines_i64,
-            certified_oei_gradient.unwrap_or(config.performance.oei_gradient),
-            config.performance.oei_climb_cl,
-            config.performance.oei_climb_delta_cd,
-            config.performance.cl_max_to,
-            oei_condition,
-        );
         findings.extend(static_thrust::cruise_thrust_margin(
             config,
+            report,
             static_tw,
-            cruise_required_tw,
+            wing_loading_pa,
             takeoff_mass_kg * gravity_m_s2,
         ));
         // An in-flight OEI estimate is useful as a diagnostic, but it is not
@@ -517,160 +484,16 @@ pub fn assess_physical_feasibility_with_load_case(
             });
         }
     }
-    for (airport_name, role) in [
-        (&config.departure_airport, "departure"),
-        (&config.arrival_airport, "arrival"),
-    ] {
-        let airport = match alas_config::airports::get(airport_name) {
-            Ok(airport) => airport,
-            Err(airport_error) => {
-                findings.push(error(
-                    FindingCode::FieldPerformanceUnavailable,
-                    format!("{role} airport cannot be resolved: {airport_error}"),
-                    None,
-                    None,
-                    "",
-                ));
-                continue;
-            }
-        };
-        // Report the input that actually failed. This guard covers three
-        // different quantities, so publishing `wing_area_m2` as the finding's
-        // `actual` whichever one was at fault would mislead: the ATR
-        // 72-600 - whose wing area is a perfectly healthy 61.0 m2 - would report
-        // "inputs are not finite and positive (actual 61.000 m^2, limit
-        // 0.000 m^2)". A reader cannot act on that, and the quantity really
-        // at fault there is the static thrust-to-weight ratio.
-        let unusable = |value: f64| !value.is_finite() || value <= 0.0;
-        let failure = if unusable(wing_area_m2) {
-            Some(("wing reference area", wing_area_m2, "m^2"))
-        } else if unusable(takeoff_mass_kg) {
-            Some(("analyzed take-off mass", takeoff_mass_kg, "kg"))
-        } else if role == "departure" && unusable(static_tw) {
-            Some((
-                "static thrust-to-weight ratio",
-                static_tw,
-                "fraction weight",
-            ))
-        } else {
-            None
-        };
-        if let Some((quantity, value, unit)) = failure {
-            // When it is the thrust that is missing, the propulsion model
-            // already said why in its own terms; repeat that rather than
-            // implying the geometry is malformed. A turboprop does not reach
-            // this on a zero jet rating, because the propeller deck supplies
-            // the static thrust, so an unavailable thrust here means the deck
-            // itself could not be built or evaluated.
-            let thrust_reason = match &sea_level_static_thrust.source {
-                static_thrust::StaticThrustSource::Unavailable { reason }
-                    if quantity == "static thrust-to-weight ratio" =>
-                {
-                    format!("; {reason}")
-                }
-                _ => String::new(),
-            };
-            findings.push(error(
-                FindingCode::FieldPerformanceUnavailable,
-                format!(
-                    "{role} field performance could not be evaluated: \
-                     {quantity} is not finite and positive{thrust_reason}"
-                ),
-                Some(value),
-                Some(0.0),
-                unit,
-            ));
-            continue;
-        }
-        let field = compute_field_performance_at_masses(
-            takeoff_mass_kg,
-            landing_mass_kg,
-            wing_area_m2,
-            airport,
-            config.performance.cl_max_to,
-            config.performance.cl_max_land,
-            static_tw.max(1.0e-6),
-            config.performance.k_land,
-            config.performance.bfl_factor,
-            &config.performance,
-        );
-        let sigma = density_ratio(airport.elevation_m, airport.isa_deviation_c);
-        let takeoff_required_tw = tw_takeoff_constraint(
-            &[wing_loading_pa],
-            airport.toda_m,
-            sigma,
-            config.performance.cl_max_to,
-        )
-        .first()
-        .copied()
-        .unwrap_or(f64::NAN);
-        let mut landing_constraint_violation = false;
-        if role == "departure" {
-            if !field.to_feasible() {
-                findings.push(error(
-                    FindingCode::FieldTakeoffDistanceViolation,
-                    format!(
-                        "departure TODR {:.1} m exceeds TODA {:.1} m",
-                        field.todr_m,
-                        field.toda_m()
-                    ),
-                    Some(field.todr_m),
-                    Some(field.toda_m()),
-                    "m",
-                ));
-            }
-            if takeoff_required_tw.is_finite() && static_tw < takeoff_required_tw {
-                findings.push(error(
-                    FindingCode::ThrustMarginViolation,
-                    format!(
-                        "departure static T/W {:.4} is below field requirement {:.4}",
-                        static_tw, takeoff_required_tw
-                    ),
-                    Some(static_tw),
-                    Some(takeoff_required_tw),
-                    "T/W",
-                ));
-            }
-        } else {
-            let landing_wing_loading_pa = landing_mass_kg * gravity_m_s2 / wing_area_m2;
-            let landing_limit_pa = ws_landing_limit(
-                airport.lda_m,
-                sigma,
-                config.performance.cl_max_land,
-                config.performance.k_land,
-            );
-            if landing_wing_loading_pa.is_finite()
-                && landing_limit_pa.is_finite()
-                && landing_wing_loading_pa > landing_limit_pa
-            {
-                landing_constraint_violation = true;
-                findings.push(error(
-                    FindingCode::FieldLandingDistanceViolation,
-                    format!(
-                        "arrival wing loading {:.1} Pa exceeds landing limit {:.1} Pa",
-                        landing_wing_loading_pa, landing_limit_pa
-                    ),
-                    Some(landing_wing_loading_pa),
-                    Some(landing_limit_pa),
-                    "Pa",
-                ));
-            }
-        }
-        if role == "arrival" && !landing_constraint_violation && !field.land_feasible() {
-            findings.push(error(
-                FindingCode::FieldLandingDistanceViolation,
-                format!(
-                    "arrival LDR {:.1} m exceeds LDA {:.1} m at landing mass {:.1} kg",
-                    field.ldr_m,
-                    field.lda_m(),
-                    field.landing_mass_kg
-                ),
-                Some(field.ldr_m),
-                Some(field.lda_m()),
-                "m",
-            ));
-        }
-    }
+    field::assess_airports(
+        config,
+        report,
+        &mut findings,
+        wing_area_m2,
+        takeoff_mass_kg,
+        landing_mass_kg,
+        static_tw,
+        &sea_level_static_thrust,
+    );
 
     // The route is judged on the unified segment mission model, on the plan
     // frozen for it: the dispatch already reports an unpriced policy

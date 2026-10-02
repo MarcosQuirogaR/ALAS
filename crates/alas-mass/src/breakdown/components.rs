@@ -380,6 +380,7 @@ pub fn calculate_flops_mass_buildup(
             control_surfaces,
             cabin_config,
             mm,
+            landing_gear,
         )
         .map(|built| ProductMassBuildup::PureFlops(Box::new(built)));
     }

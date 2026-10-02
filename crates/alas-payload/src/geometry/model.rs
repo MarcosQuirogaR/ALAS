@@ -117,6 +117,10 @@ pub struct CabinGeometry {
     /// Whether product analyses enforce the physical inner-envelope contract.
     /// Frozen Python parity construction leaves this false deliberately.
     pub(super) strict_envelope: bool,
+    /// The main deck's declared door pairs on this body, forward to aft, or
+    /// empty when the cabin is bounded by the generic nose and tail-cone
+    /// lengths instead.
+    pub door_stations: Vec<crate::cabin::DoorStation>,
     /// Station coordinates, ascending. The three sampled series below are in
     /// this same order, which is what lets one interpolation index serve all.
     pub(super) x_stations: Vec<f64>,
@@ -129,6 +133,21 @@ impl CabinGeometry {
     /// Whether this frame enforces the product physical-envelope contract.
     pub const fn enforces_physical_envelope(&self) -> bool {
         self.strict_envelope
+    }
+
+    /// Bound the main deck by the door stations `layout` declares, placed on
+    /// this body (see [`crate::cabin`]'s station rules). A layout without
+    /// usable stations, or none, leaves the generic frame in place, as does
+    /// the frozen reference frame, whose fixtures predate declared doors.
+    pub fn with_declared_doors(
+        mut self,
+        layout: Option<&alas_config::CertifiedExitLayout>,
+    ) -> Self {
+        self.door_stations = layout
+            .filter(|_| self.strict_envelope)
+            .and_then(|layout| crate::cabin::resolve_door_stations(&self, layout))
+            .unwrap_or_default();
+        self
     }
 
     /// Sample `plane`'s first fuselage into a cabin frame.
@@ -236,6 +255,7 @@ impl CabinGeometry {
             passenger_decks,
             lower_deck,
             strict_envelope,
+            door_stations: Vec::new(),
             x_stations,
             widths,
             heights,

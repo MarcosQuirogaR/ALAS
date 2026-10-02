@@ -444,6 +444,7 @@ fn a_scaled_resolution_grows_a_published_cell_with_the_candidate_spar_box() {
         &policy,
         DENSITY_KG_M3,
         Some(2_000.0),
+        None,
     )
     .expect("the published cell scales with the candidate spar box");
     let wing_m3: f64 = scaled
@@ -473,6 +474,7 @@ fn a_scaled_resolution_grows_a_published_cell_with_the_candidate_spar_box() {
         &policy,
         DENSITY_KG_M3,
         Some(2_000.0),
+        None,
     )
     .expect("the reference reproduces itself");
     let same_wing_m3: f64 = same

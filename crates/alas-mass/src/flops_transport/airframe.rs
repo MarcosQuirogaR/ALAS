@@ -14,24 +14,28 @@
 
 use alas_config::{
     ActiveEngineModel, ControlSurfacesConfig, DesignRequirements, FlopsWingBendingMethod,
-    GeometryConfig, MassModelConfig,
+    GeometryConfig, LandingGearConfig, MassModelConfig,
 };
 use alas_geom::aircraft::airplane::Airplane;
 use alas_geom::aircraft::fuselage::{Fuselage, FuselageXSec, DEFAULT_SHAPE};
 
 use super::airframe_geometry::{
-    average_thickness, detailed_stations, dihedral_deg, find_surface, nacelle_dimensions,
-    surface_wetted_area,
+    average_thickness, detailed_stations, find_surface, nacelle_dimensions, surface_wetted_area,
+    BuiltFuselage,
 };
 use super::movable_area::movable_surface_area;
-use super::product::{main_wing, max_fuselage_width_depth, primary_fuselage};
+use super::product::{main_wing, primary_fuselage};
 use super::propulsion::{
     distributed_scaling, estimate_flops_propulsion, pod_mass_kg, total_nacelles,
     FlopsPropulsionBreakdown, FlopsPropulsionInputs,
 };
+use super::structure::gear_length::gear_leg_lengths;
+use super::structure::pressurized_fuselage::{
+    regional_turboprop_inputs, wing_mounted_turboprop_kg,
+};
 use super::structure::{
-    estimate_flops_structure, main_gear_oleo_length_m, nacelle_kg, nose_gear_oleo_length_m,
-    FlopsStructureBreakdown, FlopsStructureInputs, FlopsWingInputs, WingBendingFactor,
+    estimate_flops_structure, nacelle_kg, FlopsStructureBreakdown, FlopsStructureInputs,
+    FlopsWingInputs, WingBendingFactor,
 };
 use super::turboprop::{
     estimate_turboprop_propulsion, TurbopropMassUnverifiedReason, TurbopropPropulsionBreakdown,
@@ -54,7 +58,7 @@ pub struct FlopsAirframeSelection {
 pub struct FlopsAirframeSources {
     /// `declared` or `mlw_fraction_of_mtow`.
     pub landing_mass: &'static str,
-    /// `declared` or `flops_equation_66`.
+    /// `declared`, `fuselage_mounted_ground_datum` or `flops_equation_66`.
     pub main_gear_length: &'static str,
     /// `declared` or `flops_equation_67`.
     pub nose_gear_length: &'static str,
@@ -118,6 +122,8 @@ pub struct FlopsAirframeRequest<'a> {
     pub mass_model: &'a MassModelConfig,
     /// The verified FLOPS systems group, needed by the detailed wing method.
     pub systems: Option<&'a FlopsSystemsBreakdown>,
+    /// Gear track and ground clearance, for the fuselage-mounted main leg.
+    pub landing_gear: &'a LandingGearConfig,
     /// Which groups to evaluate.
     pub selection: FlopsAirframeSelection,
 }
@@ -217,6 +223,7 @@ pub fn evaluate_airframe_product(request: &FlopsAirframeRequest<'_>) -> FlopsAir
         controls,
         mass_model,
         systems,
+        landing_gear,
         selection,
     } = request;
     let flops = &mass_model.flops_transport;
@@ -253,9 +260,8 @@ pub fn evaluate_airframe_product(request: &FlopsAirframeRequest<'_>) -> FlopsAir
     if !wing_thickness.is_finite() || wing_thickness <= 0.0 {
         reasons.push(Reason::WingThickness);
     }
-    let (width, depth) = max_fuselage_width_depth(fuselage);
-    let fuselage_length = fuselage.xsecs.last().map_or(0.0, |x| x.xyz_c[0])
-        - fuselage.xsecs.first().map_or(0.0, |x| x.xyz_c[0]);
+    let built = BuiltFuselage::of(wing, fuselage);
+    let (width, depth, fuselage_length) = (built.width_m, built.depth_m, built.length_m);
     if fuselage_length <= 0.0 || width <= 0.0 || depth <= 0.0 {
         reasons.push(Reason::FuselageGeometry);
     }
@@ -440,23 +446,14 @@ pub fn evaluate_airframe_product(request: &FlopsAirframeRequest<'_>) -> FlopsAir
                 .fold(0.0, f64::max)
         })
         .filter(|y| *y > 0.0);
-    let (main_gear_oleo, main_source) = match technology.main_gear_oleo_length_m {
-        Some(value) => (value, "declared"),
-        None => (
-            main_gear_oleo_length_m(
-                scaling.nacelle_diameter_m,
-                dihedral_deg(wing),
-                outboard_engine_y,
-                width,
-                fuselage_length,
-            ),
-            "flops_equation_66",
-        ),
-    };
-    let (nose_gear_oleo, nose_source) = match technology.nose_gear_oleo_length_m {
-        Some(value) => (value, "declared"),
-        None => (nose_gear_oleo_length_m(main_gear_oleo), "flops_equation_67"),
-    };
+    let legs = gear_leg_lengths(
+        technology,
+        &built,
+        geometry,
+        landing_gear,
+        scaling.nacelle_diameter_m,
+        outboard_engine_y,
+    );
 
     let nacelles = total_nacelles(engine_count);
     let nacelle_total_kg = nacelle_kg(
@@ -543,8 +540,8 @@ pub fn evaluate_airframe_product(request: &FlopsAirframeRequest<'_>) -> FlopsAir
         scaled_fuselage_engines: scaling.fuselage_engines,
         military_cargo_floor: technology.military_cargo_floor,
         design_landing_mass_kg,
-        main_gear_oleo_length_m: main_gear_oleo,
-        nose_gear_oleo_length_m: nose_gear_oleo,
+        main_gear_oleo_length_m: legs.main_m,
+        nose_gear_oleo_length_m: legs.nose_m,
         total_nacelles: nacelles,
         nacelle_diameter_m,
         nacelle_length_m,
@@ -555,6 +552,13 @@ pub fn evaluate_airframe_product(request: &FlopsAirframeRequest<'_>) -> FlopsAir
         // takes the NASA GASP area-density nacelle instead. Either way the
         // nacelle reaches the structural total once, from one method.
         nacelle_mass_override_kg: turboprop.map(|group| group.nacelles_kg),
+        pressurized_fuselage: regional_turboprop_inputs(
+            mass_model,
+            requirements,
+            &built,
+            design_gross_mass_kg,
+            wing_mounted_turboprop_kg(turboprop.as_ref(), wing_engines, engine_count),
+        ),
     };
     let structure = selection
         .structure
@@ -571,8 +575,8 @@ pub fn evaluate_airframe_product(request: &FlopsAirframeRequest<'_>) -> FlopsAir
         detailed_bending,
         sources: FlopsAirframeSources {
             landing_mass: landing_source,
-            main_gear_length: main_source,
-            nose_gear_length: nose_source,
+            main_gear_length: legs.main_source,
+            nose_gear_length: legs.nose_source,
             baseline_engine_mass: if technology.baseline_engine_mass_kg.is_some() {
                 "declared"
             } else {
@@ -684,6 +688,7 @@ mod tests {
             controls: &controls,
             mass_model,
             systems,
+            landing_gear: &LandingGearConfig::default(),
             selection: FlopsAirframeSelection {
                 structure: true,
                 propulsion: true,
@@ -776,6 +781,7 @@ mod tests {
             controls: &controls,
             mass_model: &mass_model,
             systems: None,
+            landing_gear: &LandingGearConfig::default(),
             selection: FlopsAirframeSelection {
                 structure: true,
                 propulsion: true,
@@ -906,6 +912,7 @@ mod tests {
                 controls: &controls,
                 mass_model,
                 systems: None,
+                landing_gear: &LandingGearConfig::default(),
                 selection: FlopsAirframeSelection {
                     structure: true,
                     propulsion: true,

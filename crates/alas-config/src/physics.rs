@@ -16,6 +16,10 @@
 //! D. P. Raymer, *Aircraft Design: A Conceptual Approach*, for the form and
 //! interference factors, and the Korn equation as it is usually given for the
 //! wave-drag rise.
+//!
+//! The Korn technology factor is not one of these coefficients: it follows
+//! from the section technology the wing is declared with,
+//! [`crate::AirfoilClass`] on `geometry.wing.airfoil_class`.
 
 use serde::{Deserialize, Serialize};
 
@@ -69,13 +73,6 @@ pub struct DragModelConfig {
     )]
     pub interference_factor_nacelle: f64,
 
-    /// Airfoil-technology factor in the Korn wave-drag equation.
-    #[config(
-        label = "Korn technology factor (kappa)",
-        help = "Airfoil-technology factor in the Korn wave-drag equation; ~0.95 for modern supercritical sections, lower for older/less efficient sections."
-    )]
-    pub korn_technology_factor: f64,
-
     /// Below this Mach number, wave drag is taken as zero.
     #[config(
         label = "Wave-drag onset Mach",
@@ -100,7 +97,6 @@ impl Default for DragModelConfig {
             interference_factor_fuselage: 1.25,
             viscous_margin: 1.10,
             interference_factor_nacelle: 1.3,
-            korn_technology_factor: 0.95,
             wave_drag_onset_mach: 0.6,
             wave_drag_coefficient: 20.0,
         }
@@ -132,7 +128,6 @@ mod tests {
                 "interference_factor_fuselage",
                 "viscous_margin",
                 "interference_factor_nacelle",
-                "korn_technology_factor",
                 "wave_drag_onset_mach",
                 "wave_drag_coefficient",
             ]

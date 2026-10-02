@@ -57,22 +57,30 @@
 
 mod aircraft;
 mod atr72_600_schedule_fix;
+mod cabin_sources;
 mod cg_envelope;
 mod evidence;
 mod gear_load;
+mod landing_reference;
 mod mission_evidence;
 mod narrowbody;
 mod reference;
 mod regional;
 mod registry;
 mod speed_schedules;
+mod takeoff_reference;
 #[cfg(test)]
 mod tests;
 mod widebody;
 
 pub use aircraft::{
     AircraftPreset, AircraftReferenceData, AircraftVariantIdentity, CertifiedExitLayout,
-    CertifiedExitPair, OperationalMissionDefaults, UnknownAircraftPreset,
+    CertifiedExitPair, OperationalMissionDefaults, SourcedPlanningCabin, SourcedSeatClass,
+    UnknownAircraftPreset,
+};
+pub use cabin_sources::{
+    ATR72_600_BAGGAGE_COMPARTMENTS, ATR72_600_EXIT_LAYOUT, ATR72_600_PLANNING_CABIN,
+    B777_9_EXIT_LAYOUT, B777_9_PLANNING_CABIN, B787_9_EXIT_LAYOUT, B787_9_PLANNING_CABIN,
 };
 pub use cg_envelope::{
     CgEnvelopeCondition, CgEnvelopeSource, CgEnvelopeVertex, CgLimits, PlanningCgEnvelope,
@@ -84,6 +92,9 @@ pub use evidence::{
     PayloadRangeDesignPoint, PublishedMissionLoadCase, PublishedRange, PublishedReserveContract,
 };
 pub use gear_load::PublishedAftCgNoseLoad;
+pub use landing_reference::{
+    published_landing_reference, published_landing_references, PublishedLandingReference,
+};
 pub use mission_evidence::{
     applicability_label, datum_label, DesignMissionProvenanceSet, MissionDatumProvenance,
     MissionEvidenceTier, MissionPromotionRefusal,
@@ -91,3 +102,6 @@ pub use mission_evidence::{
 use registry::high_lift;
 pub use registry::{available, display_names, get, registry};
 pub use speed_schedules::atr72_600_takeoff_speed_m_s;
+pub use takeoff_reference::{
+    published_takeoff_reference, published_takeoff_references, PublishedTakeoffReference,
+};

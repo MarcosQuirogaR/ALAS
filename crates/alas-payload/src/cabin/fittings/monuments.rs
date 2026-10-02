@@ -48,6 +48,34 @@ pub(in super::super) struct MonumentCounts {
     pub wheelchair_stowages: i64,
 }
 
+/// The galleys and lavatories a cabin of `total_pax` carries: the configured
+/// counts, or the provisioning ratios above where a count is zero.
+pub(in super::super) fn provisioned_monuments(
+    pax: &PassengerCabinConfig,
+    total_pax: i64,
+) -> (i64, i64) {
+    let lavatories = if pax.lavatory_count != 0 {
+        pax.lavatory_count
+    } else {
+        ceil_div(total_pax, PAX_PER_LAV).max(1)
+    };
+    let galleys = if pax.galley_count != 0 {
+        pax.galley_count
+    } else {
+        (ceil_div(total_pax, PAX_PER_GALLEY) + 1).max(1)
+    };
+    (galleys, lavatories)
+}
+
+/// How many monuments stand side by side across one bay of floor
+/// `usable_width_m` wide that has to leave `n_aisles` aisles open; at least
+/// one, so a narrow cabin still stacks its monuments rather than losing them.
+pub(in super::super) fn monuments_per_bay(usable_width_m: f64, n_aisles: i64, aisle_w: f64) -> i64 {
+    let across = usable_width_m - n_aisles.max(1) as f64 * aisle_w;
+    let widest = GALLEY_WIDTH_M.max(LAV_WIDTH_M);
+    ((across / widest).floor() as i64).max(1)
+}
+
 /// Distribute the galleys and lavatories across every bay.
 ///
 /// A bay that receives more than one stacks them laterally inward from the
@@ -62,15 +90,16 @@ pub(in super::super) fn place_monuments(
     max_aisles: i64,
     enable_accessibility: bool,
 ) -> (Vec<DeckItem>, MonumentCounts) {
-    let lavatories = if pax.lavatory_count != 0 {
-        pax.lavatory_count
-    } else {
-        ceil_div(total_pax, PAX_PER_LAV).max(1)
-    };
-    let galleys = if pax.galley_count != 0 {
-        pax.galley_count
-    } else {
-        (ceil_div(total_pax, PAX_PER_GALLEY) + 1).max(1)
+    let (galleys, lavatories) = provisioned_monuments(pax, total_pax);
+    // A cabin bounded by declared doors draws each monument at its sourced
+    // length; the generic cabin keeps its single bay length.
+    let declared = !g.door_stations.is_empty();
+    let length_of = |kind: MonumentKind| {
+        if declared {
+            kind.length_m()
+        } else {
+            MONUMENT_LEN
+        }
     };
 
     let mut items = Vec::new();
@@ -87,13 +116,14 @@ pub(in super::super) fn place_monuments(
     }
     let fill_order = monument_fill_order(bays.len());
 
-    for (side, count, width, label, kind) in [
+    for (side, count, width, label, kind, monument) in [
         (
             MonumentSide::Galley,
             galleys,
             GALLEY_WIDTH_M,
             "Galley",
             ItemKind::Galley,
+            MonumentKind::Galley,
         ),
         (
             MonumentSide::Lav,
@@ -101,6 +131,7 @@ pub(in super::super) fn place_monuments(
             LAV_WIDTH_M,
             "Lav",
             ItemKind::Lav,
+            MonumentKind::Lavatory,
         ),
     ] {
         for i in 0..count.max(0) {
@@ -124,7 +155,7 @@ pub(in super::super) fn place_monuments(
                 x: bay_x,
                 y,
                 z: g.item_z(deck, bay_x, SEAT_BOX_H),
-                length: MONUMENT_LEN,
+                length: length_of(monument),
                 width: drawn_width,
                 mass: 0.0,
                 height: g.clamp_height(deck, bay_x, SEAT_BOX_H),
@@ -272,178 +303,6 @@ pub(in super::super) fn place_overhead_bins(
         }
     }
     bins
-}
-
-/// The emergency exits, and how many pairs were installed.
-pub(in super::super) struct Exits {
-    /// The door cutouts, in placement order.
-    pub items: Vec<DeckItem>,
-    /// The type every door was drawn at.
-    pub exit_type: &'static str,
-    /// Pairs installed, summed over the passenger decks.
-    pub pairs: i64,
-    /// Sum of the ratings of the installed complete exit pairs.
-    pub capacity_total: i64,
-}
-
-/// Size and place one exit-pair set per passenger deck.
-///
-/// A double-decker's upper deck needs its own evacuation route, so this runs
-/// per deck rather than once for the aircraft, and each deck is sized from the
-/// passengers actually seated on it after the capacity cap, never from the
-/// raw requested total, which is what a deck that could not seat them all would
-/// otherwise be given doors for.
-pub(in super::super) fn place_exits(
-    g: &CabinGeometry,
-    pax: &PassengerCabinConfig,
-    seating: &Seating,
-    product_exit_capacity: bool,
-    source_exit_layout: Option<CertifiedExitLayout>,
-) -> Exits {
-    let default_spec = select_exit_type(g.diameter_m);
-    let default_capacity_per_pair = if product_exit_capacity {
-        effective_pair_capacity(default_spec, pax)
-    } else {
-        // Frozen Python compatibility treated the pair table as a side
-        // quantity.  Keep that historical branch isolated from the product
-        // path's corrected complete-pair unit.
-        default_spec.capacity_per_pair
-    };
-    let mut items = Vec::new();
-    let mut pairs = 0i64;
-    let mut capacity_total = 0i64;
-
-    for segment in cabin_deck_segments(g) {
-        let deck = segment.deck;
-        let deck_pax = seating.on_deck(deck.name);
-        if deck_pax <= 0 {
-            continue;
-        }
-        let n_pairs = if let Some(source_exit_layout) = source_exit_layout {
-            let max_source_pair_capacity = source_exit_layout
-                .pairs
-                .iter()
-                .map(|pair| pair.capacity_per_pair.max(1))
-                .max()
-                .unwrap_or(default_capacity_per_pair.max(1));
-            ceil_div(deck_pax, max_source_pair_capacity)
-                .max(min_exit_pairs(deck_pax))
-                .clamp(1, source_exit_layout.pairs.len().max(1) as i64)
-        } else {
-            min_exit_pairs(deck_pax).max(ceil_div(deck_pax, default_capacity_per_pair.max(1)))
-        };
-
-        let mut deck_bays: Vec<&Bay> = seating
-            .bays
-            .iter()
-            .filter(|bay| bay.deck == deck.name)
-            .collect();
-        deck_bays.sort_by(|a, b| a.x.total_cmp(&b.x));
-        // A source arrangement has a fixed pair order.  Use the lower bay at
-        // an exact midpoint instead of the generic banker's rounding: for
-        // four model bays and three source pairs, rounding 1.5 upward would
-        // select stations [0, 2, 3] and leave an avoidable over-spacing gap,
-        // while [0, 1, 3] preserves the same physical bay candidates.
-        let bay_indices = if source_exit_layout.is_some() {
-            source_spread_bay_indices(n_pairs, deck_bays.len())
-        } else {
-            spread_bay_indices(n_pairs, deck_bays.len())
-        };
-        let mut exit_xs: Vec<f64> = bay_indices.into_iter().map(|i| deck_bays[i].x).collect();
-
-        // More pairs than there are bays to hang them on: the remainder is
-        // spread along the whole segment instead, a metre in from each end.
-        if n_pairs > exit_xs.len() as i64 {
-            let extra = n_pairs - exit_xs.len() as i64;
-            let ex0 = segment.x0 - MONUMENT_LEN + 1.0;
-            let ex1 = segment.x1 + MONUMENT_LEN - 1.0;
-            exit_xs.extend((0..extra).map(|i| ex0 + (ex1 - ex0) * (i as f64 + 0.5) / extra as f64));
-        }
-
-        for (pair_index, xe) in exit_xs.into_iter().enumerate() {
-            let pair_spec = source_exit_layout
-                .and_then(|layout| layout.pairs.get(pair_index))
-                .and_then(|pair| find_exit_spec(pair.exit_type))
-                .unwrap_or(default_spec);
-            let pair_capacity = source_exit_layout
-                .and_then(|layout| layout.pairs.get(pair_index))
-                .map_or(
-                    if product_exit_capacity {
-                        default_capacity_per_pair
-                    } else {
-                        // The frozen summary recorded two side ratings per
-                        // pair; this conversion is deliberately confined to
-                        // the compatibility branch.
-                        default_capacity_per_pair * 2
-                    },
-                    |pair| pair.capacity_per_pair.max(0),
-                );
-            capacity_total += pair_capacity;
-            let half = g.usable_width(deck, xe) / 2.0 + g.wall;
-            for side in [-1.0, 1.0] {
-                items.push(DeckItem {
-                    kind: ItemKind::Exit,
-                    deck: deck.name,
-                    x: xe,
-                    y: side * half,
-                    z: g.item_z(deck, xe, pair_spec.height_m),
-                    length: pair_spec.width_m,
-                    width: 0.25,
-                    mass: 0.0,
-                    height: g.clamp_height(deck, xe, pair_spec.height_m),
-                    label: format!("Type {}", pair_spec.name),
-                    meta: ItemMeta::Exit(ExitMeta {
-                        exit_type: pair_spec.name,
-                        door_w: pair_spec.width_m,
-                        door_h: pair_spec.height_m,
-                    }),
-                });
-            }
-        }
-        pairs += n_pairs;
-    }
-
-    Exits {
-        items,
-        exit_type: source_exit_layout.map_or(default_spec.name, |layout| layout.label),
-        pairs,
-        capacity_total,
-    }
-}
-
-/// Look up a source arrangement's class in the generic drawing dimensions.
-fn find_exit_spec(name: &str) -> Option<&'static ExitSpec> {
-    EXIT_TYPES.iter().find(|spec| spec.name == name)
-}
-
-/// Spread a registered source arrangement across existing bay stations.
-///
-/// The source sequence fixes the number and order of exit pairs, while the
-/// model's monument/seat pass supplies the available stations.  Choosing the
-/// lower integer at an exact midpoint keeps a source pair away from the aft
-/// endpoint when the candidate count is even; the registered A220/A320
-/// layouts then satisfy CS-25's 18.3 m adjacent-exit spacing check without
-/// inventing a longitudinal station.  The final spacing assertion belongs in
-/// the source-specific acceptance test because this helper has no fuselage
-/// frame or regulatory applicability context.
-fn source_spread_bay_indices(n_items: i64, n_bays: usize) -> Vec<usize> {
-    if n_bays == 0 || n_items <= 0 {
-        return Vec::new();
-    }
-    let n_items = (n_items as usize).min(n_bays);
-    if n_items == 1 {
-        return vec![0];
-    }
-    let mut out: Vec<usize> = Vec::with_capacity(n_items);
-    for i in 0..n_items {
-        let exact = (i * (n_bays - 1)) as f64 / (n_items - 1) as f64;
-        let mut idx = exact.floor() as usize;
-        while out.contains(&idx) && idx < n_bays - 1 {
-            idx += 1;
-        }
-        out.push(idx);
-    }
-    out
 }
 
 /// What went into the holds.

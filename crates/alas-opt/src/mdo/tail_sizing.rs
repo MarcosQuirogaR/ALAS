@@ -212,8 +212,14 @@ pub(crate) fn apply(
     Ok(())
 }
 
-/// The fin scale ratio a built aircraft carries, recovered from its fin root
-/// chord, for carrying a derived geometry into a replay.
+/// The fin scale ratio a built aircraft carries, recovered from its fin
+/// chord on the configured root line, for carrying a derived geometry into a
+/// replay.
+///
+/// The builder scales the configured fin about its root line
+/// (`vstab_z_m`) and then carries its straight edges to the body under the
+/// root, so the built root chord is not the scaled configured one; the
+/// chord of the built edges at the root line is.
 ///
 /// Returns one when the aircraft has no fin or the tail scale is not
 /// positive.
@@ -222,11 +228,14 @@ pub(crate) fn fin_scale_ratio(
     empennage: &EmpennageConfig,
     dv: &DesignVector,
 ) -> f64 {
-    let fin_root_chord = plane
-        .wings
-        .get(2)
-        .and_then(|fin| fin.xsecs.first())
-        .map(|section| section.chord);
+    let fin_root_chord = plane.wings.get(2).and_then(|fin| {
+        let (root, tip) = (fin.xsecs.first()?, fin.xsecs.last()?);
+        let height = tip.xyz_le[2] - root.xyz_le[2];
+        (height > 0.0).then(|| {
+            let s = (empennage.vstab_z_m - root.xyz_le[2]) / height;
+            root.chord + s * (tip.chord - root.chord)
+        })
+    });
     match fin_root_chord {
         Some(chord)
             if chord > 0.0

@@ -14,15 +14,7 @@ use super::types::{ConstraintFamily, ConstraintResidual};
 
 /// Governing structural gross mass, kg, shared by search and final reporting.
 pub fn structural_design_mass_kg(config: &AlasConfig) -> f64 {
-    let declared = alas_mass::wing_reconciliation::design_gross_mass_kg(config);
-    if !declared.is_finite() || !config.requirements.mtow_kg.is_finite() {
-        return f64::NAN;
-    }
-    if config.optimizer.objective.mtow_sizing == alas_config::MtowSizing::Unconstrained {
-        declared
-    } else {
-        declared.max(config.requirements.mtow_kg)
-    }
+    alas_mass::wing_reconciliation::structural_design_mass_kg(config)
 }
 
 /// Size and check one candidate under a single, consistent structural state.
@@ -269,6 +261,34 @@ pub(crate) fn residuals(
         )
     })
     .collect();
+    // CS 25.305 has no universal ultimate tip-displacement limit. Publish the
+    // actual ratio and the local curvature diagnostic without buying material
+    // to match a transport benchmark. Zero is the undeformed reference for
+    // the tip telemetry, not an acceptance threshold. The 1 g domain remains
+    // hard; ultimate load redistribution requires separate substantiation.
+    for (id, actual, reference) in [
+        (
+            "structural_ultimate_tip_deflection_ratio",
+            assessment.max_tip_deflection_ratio,
+            0.0,
+        ),
+        (
+            "structural_ultimate_curvature",
+            assessment.manoeuvre_curvature_relative_error,
+            assessment.limits.max_curvature_relative_error,
+        ),
+    ] {
+        rows.push(ConstraintResidual::direct(
+            id,
+            ConstraintFamily::Structure,
+            actual,
+            reference,
+            "-",
+            actual - reference,
+            0.0,
+            ConstraintPolicy::Diagnostic,
+        ));
+    }
     // FLOPS and explicit primary inventories have different model scopes.
     // Keep the signed differences inspectable, with no rejection or penalty.
     for (id, actual) in [
@@ -341,8 +361,18 @@ mod tests {
         assert_eq!(comparison.normalized_violation, 0.0);
         assert!(rows
             .iter()
-            .filter(|r| !r.id.ends_with("_mass_discrepancy"))
+            .filter(|r| !r.id.ends_with("_mass_discrepancy")
+                && !r.id.starts_with("structural_ultimate_"))
             .all(|r| r.policy == ConstraintPolicy::Hard));
+        for id in [
+            "structural_ultimate_tip_deflection_ratio",
+            "structural_ultimate_curvature",
+        ] {
+            let metric = rows.iter().find(|row| row.id == id).unwrap();
+            assert!(metric.actual.is_finite() && metric.actual > 0.0);
+            assert_eq!(metric.policy, ConstraintPolicy::Diagnostic);
+            assert_eq!(metric.normalized_violation, 0.0);
+        }
         let other_estimate = residuals(&config, &design, &plane, 1.0e9);
         assert_eq!(
             rows.iter()

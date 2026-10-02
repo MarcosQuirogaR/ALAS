@@ -2,6 +2,7 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 use super::*;
+use alas_exec::ToolLocator;
 
 #[test]
 fn enabled_native_mission_is_present_in_a_normal_pipeline_result() {
@@ -248,13 +249,18 @@ fn enabled_mses_without_a_tool_retains_the_corrected_section_condition() {
         .map_or(report.design_point.alpha_deg, |trim| {
             trim.geometric_body_alpha_deg
         });
-    let expected_induced_angle_deg = mean_induced_angle_deg(
-        report
-            .trimmed_design_point
-            .map_or(report.design_point.cl, |trim| trim.cl),
-        report.polar_fit.aspect_ratio,
-        report.polar_fit.oswald_e,
-    );
+    let cl = report
+        .trimmed_design_point
+        .map_or(report.design_point.cl, |trim| trim.cl);
+    let artifacts = report
+        .fuel
+        .artifacts(&pipeline.config, &report.design)
+        .unwrap_or_else(|error| panic!("MSES candidate drag: {error}"));
+    let table = artifacts
+        .drag
+        .table()
+        .unwrap_or_else(|| panic!("native MSES condition has a candidate table"));
+    let expected_induced_angle_deg = mean_induced_angle_deg(cl, table.induced_cd(cl));
     let expected_alpha = body_alpha_deg + inboard_twist_deg - expected_induced_angle_deg;
 
     assert_eq!(mses.status, alas_aero::mses::MsesStatus::Absent);
@@ -264,15 +270,26 @@ fn enabled_mses_without_a_tool_retains_the_corrected_section_condition() {
         .is_some_and(|error| error.contains("not configured")));
     assert!((mses.mach - expected_mach).abs() < 1e-12);
     assert!((pressure.alpha_deg - expected_alpha).abs() < 1e-12);
+    // Wave curvature and the shifted minimum of a fitted total polar must
+    // not alter the wake-power angle sent to the section proxy.
+    let mut poisoned_report = report.clone();
+    poisoned_report.polar_fit.cd0 = f64::NAN;
+    poisoned_report.polar_fit.c1 = f64::NAN;
+    poisoned_report.polar_fit.k = f64::NAN;
+    poisoned_report.polar_fit.oswald_e = f64::NAN;
+    let condition = mses_section_condition(&pipeline.config, &poisoned_report);
+    assert!((condition.alpha_deg - expected_alpha).abs() < 1e-12);
 }
 
 #[test]
 fn the_section_incidence_proxy_removes_finite_wing_downwash() {
-    let angle = mean_induced_angle_deg(0.5, 9.0, 0.85);
+    let induced_cd = 0.5_f64.powi(2) / (std::f64::consts::PI * 9.0 * 0.85);
+    let angle = mean_induced_angle_deg(0.5, induced_cd);
 
     assert!(angle > 0.0);
     assert!(angle < 2.0, "angle={angle}");
-    assert_eq!(mean_induced_angle_deg(0.5, 0.0, 0.85), 0.0);
+    assert_eq!(mean_induced_angle_deg(0.0, induced_cd), 0.0);
+    assert_eq!(mean_induced_angle_deg(0.5, f64::NAN), 0.0);
 }
 
 // User-path regression for the storage ownership sentinel: the real

@@ -10,7 +10,7 @@ use alas_config::{
 };
 use alas_perf::performance::{
     assess_oei_climb, compute_v_speeds_at_masses, density_ratio, far25_oei_gradient, oei_cl_at_v2,
-    tw_cruise_constraint, tw_takeoff_constraint, ws_landing_limit, OeiClimbStatus, OeiV2Condition,
+    tw_takeoff_constraint, ws_landing_limit, OeiClimbStatus, OeiV2Condition,
 };
 use alas_units::KNOT;
 
@@ -41,8 +41,8 @@ pub(super) fn performance_residuals(
     let mut residuals = Vec::new();
 
     let certified_oei_gradient = far25_oei_gradient(outcome.n_engines);
-    let oei_condition = outcome.departure.map(|departure| {
-        let speeds = compute_v_speeds_at_masses(
+    let departure_speeds = outcome.departure.map(|departure| {
+        compute_v_speeds_at_masses(
             sized.takeoff_mass_kg,
             sized.takeoff_mass_kg,
             s_ref,
@@ -50,16 +50,19 @@ pub(super) fn performance_residuals(
             perf.cl_max_to,
             perf.cl_max_land,
             perf,
-        );
-        OeiV2Condition {
+        )
+    });
+    let oei_condition = outcome
+        .departure
+        .zip(departure_speeds)
+        .map(|(departure, speeds)| OeiV2Condition {
             departure_elevation_m: departure.elevation_m,
             departure_isa_deviation_c: departure.isa_deviation_c,
             v2_over_vstall: speeds.v2_ms / speeds.v_stall_to_ms,
             condition_to_sls_thrust_ratio: perf.oei_condition_to_sls_thrust_ratio,
             asymmetric_trim_cd: perf.oei_asymmetric_trim_cd,
             windmilling_cd: perf.oei_windmilling_cd,
-        }
-    });
+        });
     // The engine-out climb is flown at the V2 lift coefficient
     // `CL_V2 = CLmax_TO / (V2/VS)^2` (14 CFR 25.107(c): V2 >= 1.13 VSR, so
     // CL_V2 <= CLmax_TO / 1.13^2; the assessor uses the same relation,
@@ -68,8 +71,7 @@ pub(super) fn performance_residuals(
     // and reference altitude. Without a resolved departure the legacy
     // `oei_climb_cl` is the lift coefficient and the field is sea level.
     // The table is clean: the takeoff flap/slat increment enters through
-    // `oei_climb_delta_cd`, and the table's induced quadratic is
-    // extrapolated above its fitted lift range at these high lifts.
+    // `oei_climb_delta_cd`. The projection is used only at this selected CL.
     let drag = &sized.fuel_artifacts.drag;
     let oei_cl = oei_condition
         .and_then(|condition| oei_cl_at_v2(perf.cl_max_to, condition.v2_over_vstall))
@@ -78,18 +80,24 @@ pub(super) fn performance_residuals(
         (airport.elevation_m, airport.isa_deviation_c)
     });
     let departure_atmosphere =
-        alas_atmo::Atmosphere::new(oei_altitude_m).with_temperature_deviation(oei_isa_deviation_c);
-    let oei_mach = (2.0 * sized.takeoff_mass_kg * req.gravity_m_s2
-        / (departure_atmosphere.density() * s_ref * oei_cl))
-        .sqrt()
-        / departure_atmosphere.speed_of_sound();
-    let (oei_cd0, oei_k) = departure_polar(drag, oei_cl, oei_mach, oei_altitude_m);
+        alas_atmo::us1976_compute_values(oei_altitude_m, oei_isa_deviation_c);
+    let oei_speed_m_s = departure_speeds.map_or_else(
+        || {
+            (2.0 * sized.takeoff_mass_kg * req.gravity_m_s2
+                / (departure_atmosphere.density_kg_m3 * s_ref * oei_cl))
+                .sqrt()
+        },
+        |speeds| speeds.v2_ms,
+    );
+    let oei_mach = oei_speed_m_s / departure_atmosphere.speed_of_sound_m_s;
+    let (oei_cd0, oei_k) =
+        departure_polar(drag, oei_cl, oei_mach, oei_altitude_m, oei_isa_deviation_c);
     let oei_assessment = assess_oei_climb(
         oei_cd0,
         oei_k,
         outcome.n_engines,
         certified_oei_gradient.unwrap_or(perf.oei_gradient),
-        perf.oei_climb_cl,
+        oei_cl,
         perf.oei_climb_delta_cd,
         perf.cl_max_to,
         oei_condition,
@@ -144,16 +152,15 @@ pub(super) fn performance_residuals(
     }
 
     let cruise_ws_pa = sized.takeoff_mass_kg * req.gravity_m_s2 / s_ref;
-    // Tangent at the cruise Mach, so the cruise wave drag is included.
-    let (cruise_cd0, cruise_k) = drag.parabolic_equivalent(req.cruise_mach);
-    let required_cruise_tw = tw_cruise_constraint(
-        &[cruise_ws_pa],
-        cruise_cd0,
-        cruise_k,
-        req.cruise_mach,
-        req.cruise_altitude_m,
-        perf.thrust_lapse,
-    )[0];
+    let cruise_atmosphere = alas_atmo::Atmosphere::new(req.cruise_altitude_m);
+    let cruise_speed_m_s = req.cruise_mach * cruise_atmosphere.speed_of_sound();
+    let cruise_q_pa = 0.5 * cruise_atmosphere.density() * cruise_speed_m_s * cruise_speed_m_s;
+    let cruise_cl = cruise_ws_pa / cruise_q_pa;
+    // Mass closure changes CL without rebuilding a CG-compatible table.
+    // Evaluate its drag at that CL; a tangent at the original design lift
+    // does not retain a shifted induced polar or nonlinear wave drag.
+    let required_cruise_tw =
+        drag.cd(cruise_cl, req.cruise_mach, req.cruise_altitude_m) / cruise_cl / perf.thrust_lapse;
     residuals.push(ConstraintResidual::scaled(
         "cruise_thrust",
         Performance,
@@ -273,17 +280,20 @@ fn takeoff_field_residual(
     )
 }
 
-/// The `(cd0, k)` of the parabola `cd0 + k CL^2` through the drag at
-/// `(cl, mach, altitude_m)` and at `CL = 0` of the same Mach and altitude:
-/// it reproduces the table's clean drag exactly at `cl`, which is the only
-/// lift the engine-out assessor evaluates it at, with the Reynolds-dependent
-/// parasite drag, the trimmed induced term and any wave drag of that point.
-/// `k` is floored at zero, and `cd0` then absorbs the difference.
-fn departure_polar(drag: &CandidateDrag, cl: f64, mach: f64, altitude_m: f64) -> (f64, f64) {
-    let cd = drag.cd(cl, mach, altitude_m);
-    let cd_at_zero_lift = drag.cd(0.0, mach, altitude_m);
-    let k = ((cd - cd_at_zero_lift) / (cl * cl)).max(0.0);
-    (cd - k * cl * cl, k)
+/// Single-point clean-drag projection for the engine-out assessor. Both
+/// scoring branches evaluate this selected CL; `(CD_at_CL, 0)` preserves
+/// the drag with its actual atmospheric Reynolds number exactly.
+fn departure_polar(
+    drag: &CandidateDrag,
+    cl: f64,
+    mach: f64,
+    altitude_m: f64,
+    isa_deviation_c: f64,
+) -> (f64, f64) {
+    (
+        drag.cd_at_atmosphere(cl, mach, altitude_m, isa_deviation_c),
+        0.0,
+    )
 }
 
 /// The landing field-length residual, plus the approach-speed residual when

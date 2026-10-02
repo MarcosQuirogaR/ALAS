@@ -156,6 +156,7 @@ pub fn a380_800() -> AircraftPreset {
             airfoil_camber_scale: 1.0,
             ..DesignVector::default()
         },
+        airfoil_class_source: "Design-era declaration: the A380-800 (EIS 2007) wing is of the supercritical-section generation; manufacturer section data are not public. Drawn with NASA SC(2)-0414 root and SC(2)-0610 tip sections (Harris, NASA TP-2969, 1990).",
         geometry: GeometryConfig {
             wing: WingConfig {
                 // Quarter-MAC: joint fit of 30 section 7 pavement-load rows gives
@@ -163,14 +164,20 @@ pub fn a380_800() -> AircraftPreset {
                 // planform now reproduces; this datum puts its quarter-MAC
                 // point on the manufacturer's 31.839 m.
                 root_datum_x_m: 24.930,
-                // Estimated flight-shape dihedral. The static MRW clearances
-                // of Figure 2-3-0-991-001-A01 (wing tip W2 5.21 m) describe
-                // the drooped ground shape, which would leave 2.3 deg, below
-                // the layout dihedral floor; this tip stands 9.09 m above the
-                // ground.
+                // Ground shape fitted to the Figure 2-3-0-991-001-A01 static
+                // clearances (MRW, aft CG): the wing tip lower surface 5.21 m
+                // above the ground (W2) and a flat inboard panel; the exact
+                // fit to the engine clearances N1/N2 would put the kink 0.3 m
+                // lower still. This drooped shape has 2.3 deg of dihedral.
                 root_z_m: -2.5,
-                break_z_m: -0.4,
-                tip_z_m: 3.0,
+                break_z_m: -2.5,
+                tip_z_m: -0.876,
+                // Airbus A380 Facts and Figures (February 2022): "During
+                // take-off the wing will flex upwards by over 4m". That 4 m
+                // static-to-1 g tip rise over the 39.875 m semispan gives the
+                // flight shape 8.0 deg of dihedral; "over" makes it a lower
+                // bound.
+                flight_tip_rise_semispan_fraction: Some(4.0 / 39.875),
                 root_twist_deg: 4.5,
                 break_twist_deg: 2.0,
                 break_span_fraction: 0.33,
@@ -199,6 +206,7 @@ pub fn a380_800() -> AircraftPreset {
                 // zero-lift angles of -3.0 deg root and -4.1 deg tip.
                 root_airfoil: "sc20414".to_owned(),
                 tip_airfoil: "sc20610".to_owned(),
+                airfoil_class: crate::AirfoilClass::Supercritical,
                 ..WingConfig::default()
             },
             empennage: EmpennageConfig {
@@ -231,14 +239,16 @@ pub fn a380_800() -> AircraftPreset {
                 // leading edge 53.94 m aft of the nose, a 14.08 m root chord
                 // (role read off the drawing), tip leading edge 12.06 m aft
                 // of the root and 14.59 m above it, tip trailing edge at
-                // 70.4 m. The root stays at its estimated height, inside the body
-                // contour, and the span puts the tip at the 24.12 m of
-                // Figure 2-3-0-991-001-A01 (VT, MRW, aft CG).
+                // 70.4 m. The root height puts the fin tip at the 24.12 m of
+                // Figure 2-3-0-991-001-A01 (VT, MRW, aft CG); the root line
+                // then sits 1.26 m below the upper-deck crown, as the drawn
+                // tail top line runs below it, and the builder carries the
+                // edges on down to the tail cone under the root.
                 vstab_offset_from_tail_m: 18.79,
-                vstab_z_m: 2.5,
+                vstab_z_m: 3.245,
                 vstab_root_chord_m: 14.08,
                 vstab_tip_chord_m: 4.40,
-                vstab_tip_le_m: (12.06, 0.0, 15.335),
+                vstab_tip_le_m: (12.06, 0.0, 14.59),
                 ..EmpennageConfig::default()
             },
             fuselage: FuselageConfig {
@@ -259,10 +269,10 @@ pub fn a380_800() -> AircraftPreset {
                 spanwise_positions_m: vec![14.8, -14.8, 25.7, -25.7],
                 // Figure 2-3-0-991-001-A01 (MRW, aft CG): nacelle low points
                 // 1.08 m (N1) and 1.90 m (N2) above the ground under the
-                // 1.8 m nacelle radius. Under the flight-shape wing above one
-                // offset cannot meet both: the mean of the two offsets puts
-                // them at 0.76 m and 2.22 m.
-                z_m: -3.384,
+                // 1.8 m nacelle radius, on the ground-shape wing above. One
+                // offset serves both pairs, so they land at 1.14 m and
+                // 1.84 m.
+                z_m: -0.872,
                 // Sheet 2 inlets 22.23 m and 29.94 m aft of the nose; the mean
                 // of the two offsets from the leading edge leaves each inlet
                 // within 0.17 m.

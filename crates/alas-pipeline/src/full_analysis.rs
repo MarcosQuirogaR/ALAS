@@ -105,19 +105,31 @@ impl PolarFitStatus {
     }
 }
 
-/// Least-squares parabolic fit of the clean polar: `CD = CD0 + k * CL^2`.
+/// Least-squares clean polar: `CD = CD0 + c1 CL + k CL^2`.
+/// Camber and fixed tail incidence can shift the minimum away from zero lift.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct PolarFit {
-    /// Zero-lift parasitic drag coefficient.
+    /// Zero-lift total drag intercept, including zero-lift wake and wave drag.
     pub cd0: f64,
-    /// Induced drag factor `k`.
+    /// Linear lift term of the shifted polar; zero on frozen parity fits.
+    #[serde(default)]
+    pub c1: f64,
+    /// Quadratic total-drag curvature `k`, including wave curvature.
     pub k: f64,
-    /// Oswald efficiency factor `e = 1 / (pi * AR * k)`.
+    /// Effective total-polar curvature factor `e = 1 / (pi AR k)`.
+    /// Wave curvature is included; this is distinct from wake span efficiency.
     pub oswald_e: f64,
     /// Wing aspect ratio.
     pub aspect_ratio: f64,
     /// Provenance of the fit coefficients, including any retained fallback.
     pub status: PolarFitStatus,
+}
+
+impl PolarFit {
+    /// Fitted total drag at a lift coefficient, including the shifted minimum.
+    pub fn cd(&self, cl: f64) -> f64 {
+        self.cd0 + cl * (self.c1 + self.k * cl)
+    }
 }
 
 /// Complete aerodynamic, mass, and stability report of an aircraft design.
@@ -240,10 +252,12 @@ pub mod cabin_sync;
 
 mod design_point;
 mod payload_pass;
+mod route_payload_cap;
 mod run;
 #[cfg(test)]
 // Failed expectations and unwraps here are failed test assertions.
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests;
 
+pub(crate) use route_payload_cap::ROUTE_PAYLOAD_OFFLOADED_KEY;
 pub(crate) use run::effective_structural_payload_limit_kg;

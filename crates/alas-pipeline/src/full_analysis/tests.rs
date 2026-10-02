@@ -157,11 +157,36 @@ fn successful_fits_identify_their_window_provenance() {
     assert_eq!(primary.status, PolarFitStatus::Fitted);
 
     let fallback_window = FullAnalysis::fit_polar_values(
-        &sweep(vec![0.2, 0.4], vec![0.0216, 0.0264]),
+        &sweep(vec![0.2, 0.4, 0.7], vec![0.0216, 0.0264, 0.0396]),
         10.0,
         &AnalysisConfig::default(),
     );
     assert_eq!(fallback_window.status, PolarFitStatus::FittedFallbackWindow);
+}
+
+#[test]
+fn shifted_wake_polar_preserves_linear_term_and_induced_curvature() {
+    // An elliptic planar wake has k=1/(pi AR). A cambered, fixed-incidence
+    // tail can add a zero-lift term and shift the minimum; discarding c1
+    // changes k and can falsely report a span efficiency above one.
+    let ar = 10.0;
+    let k = 1.0 / (std::f64::consts::PI * ar);
+    let cl = vec![0.2, 0.3, 0.4, 0.5, 0.6, 0.7];
+    let cd = cl
+        .iter()
+        .map(|cl| 0.02 - 0.004 * cl + k * cl * cl)
+        .collect();
+    let config = AnalysisConfig {
+        polar_fit_cl_min: 0.1,
+        polar_fit_cl_max: 0.8,
+        ..AnalysisConfig::default()
+    };
+    let fit = FullAnalysis::fit_polar_values(&sweep(cl, cd), ar, &config);
+    assert_eq!(fit.status, PolarFitStatus::Fitted);
+    assert!((fit.cd0 - 0.02).abs() < 1e-12);
+    assert!((fit.c1 + 0.004).abs() < 1e-12);
+    assert!((fit.k - k).abs() < 1e-12);
+    assert!((fit.oswald_e - 1.0).abs() < 1e-12);
 }
 
 #[test]

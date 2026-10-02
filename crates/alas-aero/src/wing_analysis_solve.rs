@@ -14,7 +14,7 @@ use alas_geom::aircraft::wing::Wing;
 use alas_geom::builder::AircraftBuilder;
 
 use crate::operating_point::{AxisFrame, OperatingPoint};
-use crate::vlm::{run_with_stability_derivatives, VlmResult, VlmSystem};
+use crate::vlm::{run_with_stability_derivatives, VlmError, VlmResult, VlmSystem};
 
 use super::types::{
     AlphaPoint, ResolvedCondition, SpanStation, StabilityOutcome, SurfaceShare, WingAnalysisError,
@@ -223,6 +223,9 @@ pub fn analyse(
     }
     let (result, point, condition) = solve_at(alpha_deg)?;
     let dynamic_force = condition.dynamic_pressure_pa * reference.area_m2;
+    let cd_induced = system
+        .trefftz_induced_drag_coefficient(&result, &point)
+        .ok_or(VlmError::NonFiniteResult)?;
     let span_load = span_load(&result, &point, &condition, &reference);
     let modelled_surfaces = surface_shares(&result, &point, &model.surface_names());
 
@@ -231,11 +234,13 @@ pub fn analyse(
         if cancelled() {
             return Err(WingAnalysisError::Cancelled);
         }
-        let (swept, _, _) = solve_at(angle)?;
+        let (swept, swept_point, _) = solve_at(angle)?;
         sweep.push(AlphaPoint {
             alpha_deg: angle,
             cl: swept.cl_lift,
-            cd_induced: swept.cd_drag,
+            cd_induced: system
+                .trefftz_induced_drag_coefficient(&swept, &swept_point)
+                .ok_or(VlmError::NonFiniteResult)?,
             cm_pitch: swept.cm_pitch,
         });
     }
@@ -255,12 +260,12 @@ pub fn analyse(
         condition,
         modelled_surfaces,
         cl: result.cl_lift,
-        cd_induced: result.cd_drag,
+        cd_induced,
         cm_pitch: result.cm_pitch,
         lift_n: result.lift,
-        induced_drag_n: result.drag,
+        induced_drag_n: cd_induced * dynamic_force,
         pitch_moment_n_m: result.cm_pitch * dynamic_force * reference.chord_m,
-        span_efficiency: span_efficiency(result.cl_lift, result.cd_drag, reference.aspect_ratio()),
+        span_efficiency: span_efficiency(result.cl_lift, cd_induced, reference.aspect_ratio()),
         span_load,
         sweep,
         stability,

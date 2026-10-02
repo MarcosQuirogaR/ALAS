@@ -462,6 +462,7 @@ fn cabin_geometry(
             &builder.geometry,
             config.cabin.passenger.wall_thickness_m,
         )?
+        .with_declared_doors(registered_source_exit_layout(config, false).as_ref())
     })
 }
 

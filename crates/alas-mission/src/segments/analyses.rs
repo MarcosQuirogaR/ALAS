@@ -9,6 +9,8 @@
 // LGPL-2.1 section 3; compatible with this program's AGPL-3.0-or-later).
 
 //! The analysis stack a mission segment evaluates against.
+//! Product missions receive the sizing pipeline's candidate drag table.
+//! The vehicle-based Fidelity_Zero buildup below is frozen parity only.
 //!
 //! `base_analysis` attaches six analyses to every configuration: weights,
 //! aerodynamics, stability, energy, a planet and an atmosphere. Four of them
@@ -18,9 +20,9 @@
 //! force or any exported column reads, and the weights analysis is reached
 //! for exactly one number, the takeoff mass the first segment starts at.
 //!
-//! # Why the vehicle arrives as data
+//! # Frozen parity vehicle inputs
 //!
-//! Every field here is read off the *built* mission analysis model vehicle after
+//! Frozen parity fields come from the *built* mission analysis model vehicle after
 //! `simple_sizing` and `finalize` have run, and the fixture records it. There
 //! is no port of `vehicle_builder.py`: it is the reference's own external
 //! runner rather than a module of the program under translation, and
@@ -53,6 +55,8 @@ use alas_prop::system::{
     TechnologyTrace,
 };
 
+use super::drag::MissionDragSource;
+
 /// The name every propulsion technology gives the active limit it raises when
 /// a normalized-force command would deliver less than flight-idle thrust.
 ///
@@ -72,7 +76,8 @@ pub struct AeroSolution {
     pub drag: DragBreakdown,
     /// Each wing's lift coefficient, in the vehicle's wing order.
     pub wing_lift_coefficient: Vec<f64>,
-    /// Each wing's inviscid induced drag coefficient, likewise.
+    /// Each wing's inviscid induced drag coefficient for frozen parity only.
+    /// Empty for shared candidate drag, which includes whole-aircraft trim.
     pub wing_induced_drag_coefficient: Vec<f64>,
     /// Whether the surrogate query was inside its trained rectangle.
     ///
@@ -110,12 +115,8 @@ pub struct MissionAnalyses {
     /// `settings.fuselage_lift_correction`, the 1.14 the wings-only lift is
     /// multiplied by.
     pub fuselage_lift_correction: f64,
-    /// Scale applied to per-wing VLM lift and induced-drag coefficients before
-    /// the drag buildup. The product currently leaves this at `1.0`: the
-    /// SUAVE Fidelity-Zero fuselage correction belongs to the aircraft lift
-    /// balance, and must not be squared into VLM induced drag without a
-    /// separately calibrated load model. Frozen compatibility also sets this
-    /// to `1.0`.
+    /// Frozen parity scale applied to per-wing lift and induced drag.
+    /// Ignored by the shared candidate drag source.
     pub induced_drag_lift_correction: f64,
     /// Whether the product solver uses the signed longitudinal force residual
     /// for cruise. The frozen compatibility path retains SUAVE's historical
@@ -129,18 +130,18 @@ pub struct MissionAnalyses {
     /// the reference solver's converged flag even where its historical engine
     /// sizing produces throttle above one.
     pub enforce_throttle_envelope: bool,
-    /// The drag chain's settings.
+    /// The authoritative candidate drag source, or an explicit parity fixture.
+    pub drag_source: MissionDragSource,
+    /// Frozen SUAVE-parity drag settings; ignored by shared candidate drag.
     pub drag_settings: DragSettings,
-    /// The wings. The two lift fields of each are placeholders: they are
-    /// overwritten from the surrogate at every evaluation, because that is
-    /// where `induced_drag_aircraft` and `compressibility_drag_wing` read
-    /// them from upstream.
+    /// Frozen parity wings; surrogate lift and induced drag replace the two
+    /// placeholders before each parity-only buildup evaluation.
     pub wings: Vec<WingParams>,
-    /// The fuselages.
+    /// Frozen parity fuselages.
     pub fuselages: Vec<FuselageParams>,
-    /// The nacelles.
+    /// Frozen parity nacelles.
     pub nacelles: Vec<NacelleParams>,
-    /// How many propulsion networks the vehicle carries.
+    /// Frozen parity propulsion-network count for the drag buildup.
     pub network_count: usize,
     /// The trained vortex-lattice surrogate.
     pub surrogate: LiftSurrogate,
@@ -160,12 +161,10 @@ impl MissionAnalyses {
         us1976_compute_values(altitude_m, temperature_deviation_k)
     }
 
-    /// `Fidelity_Zero`'s whole `compute` chain at one flight condition.
+    /// Lift and the supplied candidate drag at one flight condition.
     ///
-    /// Lift first, because the drag chain reads it. Aircraft lift and induced
-    /// drag use separate policy inputs: frozen SUAVE evidence corrects the
-    /// aircraft lift but consumes VLM induced drag unchanged, while product
-    /// callers can opt into a corrected induced load.
+    /// The shared drag source reads the aircraft lift coefficient. Only the
+    /// explicitly selected frozen SUAVE-parity source reads surrogate drag.
     pub fn aerodynamics(
         &self,
         angle_of_attack_rad: f64,
@@ -184,6 +183,22 @@ impl MissionAnalyses {
         temperature_k: f64,
         reynolds_number_per_m: f64,
     ) -> AeroSolution {
+        let lift_coefficient = aircraft_lift_coefficient(
+            lift.inviscid_lift_coefficient,
+            self.fuselage_lift_correction,
+        );
+        if let MissionDragSource::SharedCandidate(model) = &self.drag_source {
+            return AeroSolution {
+                lift_coefficient,
+                drag: model
+                    .coefficients(lift_coefficient, mach, reynolds_number_per_m)
+                    .breakdown(),
+                wing_lift_coefficient: lift.wing_lift_coefficient,
+                wing_induced_drag_coefficient: Vec::new(),
+                surrogate_domain: lift.domain,
+            };
+        }
+        // The following Fidelity_Zero buildup is frozen SUAVE parity only.
         let lift_scale = self.fuselage_lift_correction;
         let drag_lift_scale = self.induced_drag_lift_correction;
         let induced_drag_scale = drag_lift_scale * drag_lift_scale;

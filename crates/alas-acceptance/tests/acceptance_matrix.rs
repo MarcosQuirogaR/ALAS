@@ -352,11 +352,87 @@ fn a380_soft_static_margin_target_does_not_become_a_hard_model_constraint() {
 
     assert!(result.execution_passed);
     assert!(result.model_cg_minimum_loading_static_margin >= result.model_cg_static_margin_floor);
-    // The A380's 7.10 deg tail-scrape angle (vs 10 deg required) is reported
-    // as a warning, not an error, until the preset aft-fuselage contour is
-    // validated (`ModelCgConstraint::is_diagnostic`); no hard model-CG error
-    // remains.
-    assert!(result.model_cg_envelope_ok);
+    // The corrected A380 now clears its default preference. Raise only the
+    // test preference above the measured takeoff margin to exercise a
+    // shortfall without changing the geometry, loading or hard floor.
+    let mut config =
+        AlasConfig::from_value(&serde_json::json!({ "preset": "A380-800" })).expect("A380 config");
+    config.requirements.target_static_margin =
+        result.model_cg_analyzed_takeoff_static_margin + result.model_cg_static_margin_floor;
+    let options = PipelineOptions {
+        optimize: false,
+        compare_baseline: true,
+        parallel: true,
+        aerodynamic_solver: Default::default(),
+        optimization_solver: Default::default(),
+        output_dir: None,
+        save_plots: false,
+        seed: Some(42),
+        quiet: true,
+    };
+    let raised_preference = DesignPipeline::new(config)
+        .run(&options, &RunEnvironment::default())
+        .expect("A380 with raised soft preference");
+    let assessment = raised_preference
+        .feasibility
+        .model_cg
+        .as_ref()
+        .expect("A380 model CG assessment");
+    assert!(!assessment.target_static_margin.met_or_exceeded());
+    assert_eq!(
+        assessment.minimum_physical_static_margin,
+        result.model_cg_static_margin_floor
+    );
+    assert_eq!(
+        assessment.target_static_margin.actual,
+        result.model_cg_analyzed_takeoff_static_margin
+    );
+    let stability_constraints: Vec<_> = assessment
+        .loading_states
+        .iter()
+        .flat_map(|state| &state.constraints)
+        .filter(|constraint| {
+            constraint.constraint == alas_opt::ModelCgConstraint::StaticStabilityFloor
+        })
+        .collect();
+    assert!(!stability_constraints.is_empty());
+    for constraint in stability_constraints {
+        assert_eq!(constraint.limit, result.model_cg_static_margin_floor);
+        assert!(
+            !constraint.violated,
+            "soft preference changed {constraint:?}"
+        );
+    }
+    assert!(!raised_preference
+        .feasibility
+        .findings
+        .iter()
+        .any(|finding| finding.code == FindingCode::InsufficientStaticMargin));
+    // The drawn planform/engine stations and separate ground/flight wing
+    // shapes changed the mass ledger and CG. The analyzed zero-fuel state
+    // now lies aft of the minimum-nose-load boundary derived from Airbus
+    // AC Rev 20 Figure 7-3-0-991-006-A01 (WV000, MRW):
+    // 1 - (2 * 106920 + 2 * 160380) / 562000. This is a real model ground
+    // constraint, independent of the soft static-margin target; retaining
+    // the old whole-envelope PASS would hide it.
+    assert!(
+        !result.model_cg_envelope_ok,
+        "the zero-fuel nose-load shortfall must remain visible: {:?}",
+        result.physical_findings
+    );
+    let nose_load = result
+        .physical_findings
+        .iter()
+        .find(|finding| finding.code == FindingCode::MinimumNoseGearLoadViolation)
+        .expect("the zero-fuel state violates the sourced minimum nose load");
+    assert_eq!(nose_load.severity, alas_pipeline::FindingSeverity::Error);
+    assert!(nose_load.message.contains("analyzed ZFW"));
+    assert!(
+        nose_load.actual.expect("measured nose-load fraction")
+            < nose_load.limit.expect("sourced minimum nose-load fraction")
+    );
+    // The unvalidated aft-fuselage contour still makes tail scrape a
+    // diagnostic warning (`ModelCgConstraint::is_diagnostic`).
     assert!(result
         .physical_findings
         .iter()
@@ -370,28 +446,35 @@ fn a380_soft_static_margin_target_does_not_become_a_hard_model_constraint() {
             | FindingCode::NoseGearStrengthViolation
             | FindingCode::MainGearStrengthViolation
     )));
-    // The two `ModelCgForwardRangeViolation` warnings are the
-    // operational-envelope findings (usable CG-range shortfall and a
-    // potato-boundary excursion this preset's default loading produces), not
-    // a leak of the soft static-margin target into a hard constraint.
-    assert_eq!(
-        result
-            .physical_findings
-            .iter()
-            .filter(|finding| finding.code == FindingCode::ModelCgForwardRangeViolation)
-            .count(),
-        2
-    );
+    // The same zero-fuel point starts the fuel vector, so its aft excursion
+    // appears there as well as on the loading potato. These and the usable
+    // CG-range shortfall remain warnings, not hard static-margin findings.
+    let forward_findings: Vec<_> = result
+        .physical_findings
+        .iter()
+        .filter(|finding| finding.code == FindingCode::ModelCgForwardRangeViolation)
+        .collect();
+    assert!(forward_findings
+        .iter()
+        .all(|finding| finding.severity == alas_pipeline::FindingSeverity::Warning));
+    for mechanism in ["usable CG range", "potato extreme", "fuel-vector"] {
+        assert!(
+            forward_findings
+                .iter()
+                .any(|finding| finding.message.contains(mechanism)),
+            "missing {mechanism} diagnostic: {forward_findings:?}"
+        );
+    }
 
     let matrix = alas_acceptance::matrix::AcceptanceMatrixReport {
         presets: vec![result.clone()],
         all_executed: true,
         all_passed: false,
-        all_physical_passed: true,
+        all_physical_passed: result.physical_passed,
         all_design_missions_verified: false,
     };
     let text = format_matrix_report(&matrix);
-    assert!(text.contains("A380-800: hard constraints PASS"));
+    assert!(text.contains("A380-800: hard constraints FAIL"));
     assert!(text.contains("hard floor 5.000%"));
     assert!(text.contains("target preference 10.000%"));
     assert!(!text.to_ascii_lowercase().contains("certif"));
@@ -434,10 +517,12 @@ fn acceptance_narrowbody_and_widebody_mass_calibrations() {
     // diagnostic rather than an independently sourced operational flight
     // plan, so retain the source-backed capacity and test the resulting
     // contract instead of pinning one product-state fuel value.
-    assert_eq!(a320.usable_fuel_capacity_kg, Some(19_334.0));
+    // The inventory is the published 24,167 L at 0.8 kg/L; the published
+    // 19,334 kg is that figure rounded to the kilogram at source.
     let usable_capacity_kg = a320
         .usable_fuel_capacity_kg
         .expect("A320 source-backed usable fuel capacity");
+    assert!((usable_capacity_kg - 19_334.0).abs() <= 0.5);
     assert!(a320.analyzed_carried_fuel_kg.is_finite() && a320.analyzed_carried_fuel_kg > 0.0);
     assert!(a320.analyzed_carried_fuel_kg <= usable_capacity_kg + 1.0e-6);
     assert!(a320.analyzed_carried_fuel_kg <= a320.mtow_closure_fuel_kg + 1.0e-6);

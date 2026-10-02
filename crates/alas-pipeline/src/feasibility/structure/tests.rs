@@ -3,10 +3,55 @@
 
 use super::*;
 
+pub(super) fn structural_fixture() -> (
+    AlasConfig,
+    DesignVector,
+    AnalysisReport,
+    StructuralAnalysisResult,
+) {
+    static FIXTURE: std::sync::OnceLock<(
+        AlasConfig,
+        DesignVector,
+        AnalysisReport,
+        StructuralAnalysisResult,
+    )> = std::sync::OnceLock::new();
+    FIXTURE
+        .get_or_init(|| {
+            let mut config =
+                AlasConfig::from_value(&serde_json::json!({"preset": "A320-200"})).unwrap();
+            config.structures.run_nastran = false;
+            config.structures.run_patran_export = false;
+            let design = alas_config::presets::get("A320-200").unwrap().design_vector;
+            let report = crate::FullAnalysis::new(config.clone())
+                .run(&design, false)
+                .unwrap();
+            let evaluated = design_config(&config, &report);
+            let result = crate::structural::run_structural_analysis(
+                &evaluated,
+                &report,
+                None,
+                &alas_exec::RunEnvironment::default(),
+            );
+            assert_eq!(result.status, "ok", "{result:?}");
+            (config, design, report, result)
+        })
+        .clone()
+}
+
+fn compare(
+    native: Option<f64>,
+    fe: Option<f64>,
+    flops: Option<f64>,
+    findings: &mut Vec<PhysicalFinding>,
+) {
+    let masses = WingMassComparison::new(native.unwrap_or(f64::NAN), fe, flops.unwrap_or(f64::NAN));
+    append_mass_comparisons(&masses, findings);
+}
+
 #[test]
 fn empirical_mass_discrepancies_are_quantitative_warnings_and_do_not_revoke_delivery() {
     let mut findings = Vec::new();
-    append_mass_comparisons(Some(30000.0), Some(36000.0), Some(20000.0), &mut findings);
+    compare(Some(30000.0), Some(36000.0), Some(20000.0), &mut findings);
     assert_eq!(findings.len(), 2);
     assert!(findings
         .iter()
@@ -22,6 +67,34 @@ fn empirical_mass_discrepancies_are_quantitative_warnings_and_do_not_revoke_deli
 }
 
 #[test]
+fn overweight_candidate_box_revokes_delivery_despite_reference_inventory() {
+    let (_, _, _, result) = structural_fixture();
+    let mut assessment = alas_struct::feasibility::assess(
+        result.sizing.as_ref().expect("sized fixture"),
+        result.analysis.as_ref().expect("response fixture"),
+        alas_struct::feasibility::LinearModelLimits::default(),
+    );
+    assessment.primary_mass_kg = 12_000.0;
+    let masses = WingMassComparison::new(12_000.0, None, 10_000.0);
+    let mut findings = Vec::new();
+    append_assessment(&assessment, &masses, &mut findings);
+    assert!(findings.iter().any(|finding| {
+        finding.code == FindingCode::StructuralInventoryUnverified
+            && finding.severity == crate::feasibility::FindingSeverity::Error
+            && finding.actual == Some(12_000.0)
+            && finding.limit == Some(10_000.0)
+    }));
+    let mut delivered = valid_optimization();
+    assert!(revoke_delivery(&findings, Some(&mut delivered)).is_some());
+    assert!(
+        !delivered
+            .delivered_acceptance
+            .expect("delivery record")
+            .verified
+    );
+}
+
+#[test]
 fn invalid_material_inventory_or_ledger_still_fails() {
     for invalid in [
         None,
@@ -31,18 +104,18 @@ fn invalid_material_inventory_or_ledger_still_fails() {
         Some(-1.0),
     ] {
         let mut findings = Vec::new();
-        append_mass_comparisons(invalid, Some(20.0), Some(10.0), &mut findings);
+        compare(invalid, Some(20.0), Some(10.0), &mut findings);
         assert!(findings
             .iter()
             .any(|f| f.code == FindingCode::StructuralResponseUnavailable
                 && f.severity == crate::feasibility::FindingSeverity::Error));
         findings.clear();
-        append_mass_comparisons(Some(20.0), invalid, Some(10.0), &mut findings);
+        compare(Some(20.0), invalid, Some(10.0), &mut findings);
         assert!(findings
             .iter()
             .any(|f| f.code == FindingCode::StructuralResponseUnavailable));
         findings.clear();
-        append_mass_comparisons(Some(20.0), Some(30.0), invalid, &mut findings);
+        compare(Some(20.0), Some(30.0), invalid, &mut findings);
         assert!(findings
             .iter()
             .any(|f| f.code == FindingCode::MassLedgerUnavailable));
@@ -127,6 +200,8 @@ fn solved_static() -> StructuralAnalysisResult {
         nastran95: None,
         patran: None,
         torenbeek_wing_mass_kg: 0.0,
+        wing_mass: None,
+        evaluation_inputs: None,
     }
 }
 

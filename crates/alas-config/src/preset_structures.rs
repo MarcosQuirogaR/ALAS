@@ -7,13 +7,30 @@
 //! which is held at its reviewed size, does not grow a field for every new
 //! discipline. [`config_for`] is the one seam the configuration loader reads.
 //!
-//! Only the material family travels here: metallic vs composite wing box.
+//! Material family and the declared longitudinal cap proxy travel here.
 //! Spar stations and structural gauges remain with the study/defaults, because
 //! no manufacturer document on file establishes them and the spars bound the
 //! fuel tank box (which is already calibrated against
 //! published usable volumes in [`crate::preset_fuel_tanks`]).
 
 use crate::StructuresConfig;
+
+/// Declared transport cap assumption, not an aircraft-specific ply schedule.
+/// The source accompanies both composite presets without changing their
+/// manufacturer material-family evidence tier.
+pub const TRANSPORT_CAP_SOURCE: &str =
+    "Declared symmetric balanced 60/30/10 (0/+45/-45/90=60/15/15/10%) cap laminate; \
+         AS4/3501-6 lamina E1=135 GPa, E2=11 GPa, G12=5.8 GPa, nu12=0.301: \
+         NASA-TM-104055 (1991), Table 1; NASA-RP-1351 (1994), Sec. V-B, CLT. \
+         CLT Ex=A11-A12^2/A22=91.595391044 GPa (A normalized by thickness). \
+         Ultimate design strain 0.004 is a declared damage-tolerance assumption: \
+         Niu, Composite Airframe Structures (1992), design allowables; \
+         CMH-17-3G (2012), damage tolerance. No manufacturer ply schedule is claimed.";
+
+/// Source of the declared cap material for each composite transport preset.
+pub fn cap_material_source(preset_name: &str) -> Option<&'static str> {
+    matches!(preset_name, "B787-9" | "A220-300").then_some(TRANSPORT_CAP_SOURCE)
+}
 
 /// The structural configuration registered for the named preset, if it has one.
 ///
@@ -63,36 +80,28 @@ pub fn config_for(preset_name: &str) -> Option<StructuresConfig> {
             ..StructuresConfig::default()
         }),
 
-        // Open source gap: the real wing box is composite, but no manufacturer
-        // document on file states it.
+        // Composite family: Boeing 787 ARFF composite-content diagram (2013,
+        // current 2025 file), p. 3. Aircraft ply schedule remains unavailable.
         // Assigned as an effective isotropic proxy, not a verified material.
-        // ACAP D6-58333 Rev Q contains ZERO occurrences of composite/carbon fibre/CFRP/laminate.
-        // Note on the composite caps: CFRP QI (220 MPa design allowable), NOT CFRP UD (900 MPa). The 900 MPa single
-        // allowable is a tension figure; real laminate caps in compression are limited far below it by
-        // fibre micro-buckling and compression-after-impact. Using CFRP UD there would buy a 4.2x cap
-        // mass reduction from a number that does not hold in compression, which is exactly the
-        // residual fitting. QI carries the damage-tolerant design strain (see `crate::materials`).
+        // Caps are 0-dominated, covers and webs QI. CLT modulus and the 0.004
+        // strain assumption are declared in cap_material_source(), not fitted
+        // to the empirical wing weight. No separate stringers are declared.
         "B787-9" => Some(StructuresConfig {
             skin_material: "CFRP QI".to_owned(),
             spar_web_material: "CFRP QI".to_owned(),
-            spar_cap_material: "CFRP QI".to_owned(),
+            spar_cap_material: "CFRP 60/30/10".to_owned(),
             ..StructuresConfig::default()
         }),
 
-        // Open source gap: the real wing box is composite, but no manufacturer
-        // document on file states it.
+        // Composite family: Airbus FAST 63 (2019), Flying the A220, and
+        // Airbus A220 airframe features (July 2025). Ply schedule unavailable.
         // Assigned as an effective isotropic proxy, not a verified material.
-        // A220 ACP Issue 013's 34 composite mentions are all maintenance-facility text (composite clean
-        // room, refinishing shop). It carries no composite-materials figure in any of its 650 pages.
-        // Note on the composite caps: CFRP QI (220 MPa design allowable), NOT CFRP UD (900 MPa). The 900 MPa single
-        // allowable is a tension figure; real laminate caps in compression are limited far below it by
-        // fibre micro-buckling and compression-after-impact. Using CFRP UD there would buy a 4.2x cap
-        // mass reduction from a number that does not hold in compression, which is exactly the
-        // residual fitting. QI carries the damage-tolerant design strain (see `crate::materials`).
+        // Same declared 0-dominated transport cap as B787; see
+        // cap_material_source(). Webs/covers retain the QI proxy.
         "A220-300" => Some(StructuresConfig {
             skin_material: "CFRP QI".to_owned(),
             spar_web_material: "CFRP QI".to_owned(),
-            spar_cap_material: "CFRP QI".to_owned(),
+            spar_cap_material: "CFRP 60/30/10".to_owned(),
             ..StructuresConfig::default()
         }),
 
@@ -141,12 +150,15 @@ mod tests {
     }
 
     #[test]
-    fn composite_presets_assign_conservative_cfrp_qi_and_keep_gauges_at_default() {
+    fn composite_presets_assign_strain_limited_longitudinal_caps_and_qi_panels() {
         for name in &["B787-9", "A220-300"] {
             let cfg = config_for(name).unwrap_or_else(|| panic!("{name} should be registered"));
             assert_eq!(cfg.skin_material, "CFRP QI");
             assert_eq!(cfg.spar_web_material, "CFRP QI");
-            assert_eq!(cfg.spar_cap_material, "CFRP QI");
+            assert_eq!(cfg.spar_cap_material, "CFRP 60/30/10");
+            assert!(cap_material_source(name)
+                .unwrap()
+                .contains("NASA-TM-104055"));
             assert_eq!(cfg.rib_material, "Al 7075-T6");
             assert_eq!(cfg.t_skin_min_m, StructuresConfig::default().t_skin_min_m);
             assert_eq!(

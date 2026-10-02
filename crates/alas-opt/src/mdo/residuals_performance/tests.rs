@@ -93,9 +93,9 @@ mod departure_polar {
 
         let cl_v2 = oei_cl_at_v2(config.performance.cl_max_to, 1.13).unwrap();
         let (mach, field_m) = (0.22, 1_500.0);
-        let (cd0, k) = departure_polar(drag, cl_v2, mach, field_m);
+        let (cd0, k) = departure_polar(drag, cl_v2, mach, field_m, 0.0);
         assert!(k >= 0.0 && cd0 > 0.0);
-        let expected = drag.cd(cl_v2, mach, field_m);
+        let expected = drag.cd_at_atmosphere(cl_v2, mach, field_m, 0.0);
         assert!((cd0 + k * cl_v2 * cl_v2 - expected).abs() < 1e-12 * expected);
 
         // Skin friction falls with Reynolds number and the denser field air
@@ -108,5 +108,128 @@ mod departure_polar {
             (tangent_cd - expected).abs() > 1e-6,
             "the cruise tangent must not coincide with the departure drag"
         );
+    }
+}
+
+#[test]
+fn cruise_thrust_follows_mass_changes_without_rebuilding_the_table() {
+    let config = AlasConfig::from_value(&serde_json::json!({
+        "preset": "A320-200",
+        "optimizer": {"design_space": {"mode": "reference_adaptation"}}
+    }))
+    .unwrap();
+    let design = alas_config::presets::get("A320-200").unwrap().design_vector;
+    let mut outcome = run_candidate(&config, &design.to_array()).unwrap();
+    let table = outcome.sized.fuel_artifacts.drag.table().unwrap().clone();
+    let original_mass_kg = outcome.sized.takeoff_mass_kg;
+    let atmosphere = alas_atmo::Atmosphere::new(config.requirements.cruise_altitude_m);
+    let speed_m_s = config.requirements.cruise_mach * atmosphere.speed_of_sound();
+    let q_pa = 0.5 * atmosphere.density() * speed_m_s * speed_m_s;
+    let (tangent_cd0, tangent_k) = table.parabolic_equivalent(config.requirements.cruise_mach);
+    for mass_ratio in [0.8, 1.2] {
+        // A retained CG-compatible table remains a function of lift, even
+        // when the closure's mass changes without another trim solve.
+        outcome.sized.takeoff_mass_kg = original_mass_kg * mass_ratio;
+        let cl = outcome.sized.takeoff_mass_kg * config.requirements.gravity_m_s2
+            / outcome.plane.s_ref
+            / q_pa;
+        assert!((cl - table.design_cl()).abs() > 0.05);
+        let expected = table.cd(
+            cl,
+            config.requirements.cruise_mach,
+            config.requirements.cruise_altitude_m,
+        ) / cl
+            / config.performance.thrust_lapse;
+        let residuals = performance_residuals(&outcome, &config, ConstraintPolicy::Hard);
+        let actual = residuals
+            .iter()
+            .find(|residual| residual.id == "cruise_thrust")
+            .unwrap()
+            .limit;
+        assert_eq!(actual.to_bits(), expected.to_bits());
+        let former_requirement =
+            (tangent_cd0 + tangent_k * cl * cl) / cl / config.performance.thrust_lapse;
+        assert!(
+            (former_requirement - expected).abs() > 1e-8,
+            "mass ratio {mass_ratio} must expose the design-CL tangent error"
+        );
+        assert!(std::sync::Arc::ptr_eq(
+            &table,
+            outcome.sized.fuel_artifacts.drag.table().unwrap()
+        ));
+    }
+}
+
+#[test]
+fn each_oei_evidence_gap_uses_the_v2_lift_coefficient() {
+    let mut config = AlasConfig::from_value(&serde_json::json!({
+        "preset": "A320-200",
+        "optimizer": {"design_space": {"mode": "reference_adaptation"}}
+    }))
+    .unwrap();
+    let design = alas_config::presets::get("A320-200").unwrap().design_vector;
+    let mut outcome = run_candidate(&config, &design.to_array()).unwrap();
+    static DEPARTURE: std::sync::LazyLock<Airport> = std::sync::LazyLock::new(|| {
+        Airport::custom("OEI hot field", 2_100.0, 4_000.0, 4_000.0, 25.0, 0.0, 0.0)
+    });
+    outcome.departure = Some(&DEPARTURE);
+    config.performance.oei_climb_cl = 0.4;
+    let speeds = compute_v_speeds_at_masses(
+        outcome.sized.takeoff_mass_kg,
+        outcome.sized.takeoff_mass_kg,
+        outcome.plane.s_ref,
+        &DEPARTURE,
+        config.performance.cl_max_to,
+        config.performance.cl_max_land,
+        &config.performance,
+    );
+    let cl = oei_cl_at_v2(
+        config.performance.cl_max_to,
+        speeds.v2_ms / speeds.v_stall_to_ms,
+    )
+    .unwrap();
+    assert!((cl - config.performance.oei_climb_cl).abs() > 0.5);
+    let atmosphere =
+        alas_atmo::us1976_compute_values(DEPARTURE.elevation_m, DEPARTURE.isa_deviation_c);
+    let mach = speeds.v2_ms / atmosphere.speed_of_sound_m_s;
+    let table = outcome.sized.fuel_artifacts.drag.table().unwrap();
+    let reynolds_per_m =
+        atmosphere.density_kg_m3 * speeds.v2_ms / atmosphere.dynamic_viscosity_pa_s;
+    let cd = table.cd0_at_reynolds_per_m(mach, reynolds_per_m)
+        + table.induced_cd(cl)
+        + table.wave_cd(cl, mach);
+    let n = outcome.n_engines as f64;
+    let expected = n / (n - 1.0)
+        * (far25_oei_gradient(outcome.n_engines).unwrap()
+            + (cd + config.performance.oei_climb_delta_cd) / cl);
+    for missing in 0..3 {
+        config.performance.oei_condition_to_sls_thrust_ratio = (missing != 0).then_some(0.8);
+        config.performance.oei_asymmetric_trim_cd = (missing != 1).then_some(0.003);
+        config.performance.oei_windmilling_cd = (missing != 2).then_some(0.002);
+        let residuals = performance_residuals(&outcome, &config, ConstraintPolicy::Hard);
+        let requirement = residuals
+            .iter()
+            .find(|residual| residual.id == "oei_second_segment")
+            .unwrap();
+        assert_eq!(requirement.policy, ConstraintPolicy::Soft);
+        assert!(
+            (requirement.limit - expected).abs() < 1e-14,
+            "gap {missing}"
+        );
+        assert!(residuals.iter().any(|residual| {
+            residual.id == "oei_second_segment_evidence_gap"
+                && residual.policy == ConstraintPolicy::Diagnostic
+        }));
+    }
+}
+
+#[test]
+fn an_external_polar_has_no_unmeasured_reynolds_correction() {
+    let polar = crate::mdo::mission_model::ParabolicPolar::new(0.02, 0.04, 0.003, 0.82);
+    let drag = CandidateDrag::External(std::sync::Arc::new(polar));
+    for deviation_c in [-20.0, 0.0, 25.0] {
+        let (cd, k) = departure_polar(&drag, 1.1, 0.22, 2_100.0, deviation_c);
+        assert_eq!(k, 0.0);
+        assert_eq!(cd.to_bits(), drag.cd(1.1, 0.22, 2_100.0).to_bits());
     }
 }

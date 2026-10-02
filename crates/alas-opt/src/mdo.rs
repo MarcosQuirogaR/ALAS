@@ -45,8 +45,11 @@ pub use mtow_modes::MtowPlanOutcome;
 pub use offdesign::OffDesignFlight;
 pub use residuals::reporting_relative_balance;
 pub(crate) use residuals_layout::TE_ANGLE_LIMIT_DEG;
-pub use sizing::candidate_model::{baseline_fuel_artifacts, candidate_mission_model};
+pub use sizing::candidate_model::{
+    baseline_closure_config, baseline_fuel_artifacts, candidate_mission_model,
+};
 pub use sizing::planned_mission::{plan_for_mission, solve_planned_dispatch, PlannedTrips};
+pub use tanks::{usable_fuel_capacity, UsableCapacityBasis, UsableFuelCapacity};
 pub use types::{
     CandidateAssessment, CandidateDrag, CandidateFuelArtifacts, ConstraintFamily,
     ConstraintResidual, DeckKey, ExternalPolar, PolarConditionTolerance, ProductStateProvenance,

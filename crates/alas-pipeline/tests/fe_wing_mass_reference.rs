@@ -14,9 +14,10 @@
 //! Estimation*, DARcorporation). Masses are kg.
 //!
 //! The composite presets (A220-300, B787-9) size their box with the
-//! damage-tolerant `CFRP QI` design allowable (see `alas_config::materials`).
+//! longitudinal `CFRP 60/30/10` caps with a 0.004 design strain and QI panels
+//! (see `alas_config::preset_structures::cap_material_source`).
 //! AVE is not asserted: no source states its wing material, and the database
-//! default box it keeps carries `CFRP UD` caps at a pristine tension value.
+//! default box keeps `CFRP UD` caps, limited to 0.004 strain in product sizing.
 
 // A test asserts on values it constructed, so a failed unwrap is the assertion
 // failing.

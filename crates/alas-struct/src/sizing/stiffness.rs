@@ -40,14 +40,15 @@ pub struct StiffnessSizingResult {
 /// manoeuvre deflection is reported there but never bought down here.
 ///
 /// All inputs are SI. `initial` must be a converged strength-sized box at the
-/// same requirements, fuel and mounted-mass state. Only cap sections increase;
+/// same requirements, fuel and mounted-mass state. Cap sections and any
+/// required web gauges increase;
 /// existing local geometric limits (half chord, one fifth of spar depth) and
 /// manufacturing floors apply. Each iteration evaluates *its own* structural
 /// weight, so this solve has no hidden self-weight fixed point. Rib capacity
 /// is retained conservatively only while its original root bending envelope
 /// is not exceeded. A clipped or unachievable layout remains explicitly
 /// infeasible with its last graded assessment.
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments)] // Explicit geometry, material, load-state and model-domain inputs.
 pub fn size_for_linear_model(
     wsg: &WingStructureGeometry,
     initial: WingboxSizing,
@@ -68,6 +69,7 @@ pub fn size_for_linear_model(
     let mut initial_root_moment = None;
     let mut relative_allocation_change = f64::INFINITY;
     for pass in 1..=MAX_PASSES {
+        super::section::update_moment_fractions(&mut sizing, skin, web, cap);
         let running_mass = super::arc_mass::update(wsg, &mut sizing, web, cap);
         let response = analyze_structure_with_running_mass(
             wsg,
@@ -83,6 +85,33 @@ pub fn size_for_linear_model(
             point_masses,
             Some(&running_mass),
         );
+        // Added caps change both the clear web panel and its bending stress.
+        // Any required web addition must enter mass, relief and EI before a
+        // final response can be accepted.
+        let count = sizing.y_stations.len();
+        let moments: Vec<_> = (0..count)
+            .map(|station| {
+                response
+                    .load_cases
+                    .iter()
+                    .map(|case| case.moment_nm[station].abs())
+                    .fold(0.0_f64, f64::max)
+            })
+            .collect();
+        let shears: Vec<_> = (0..count)
+            .map(|station| {
+                response
+                    .load_cases
+                    .iter()
+                    .map(|case| case.shear_n[station].abs())
+                    .fold(0.0_f64, f64::max)
+            })
+            .collect();
+        if pass < MAX_PASSES
+            && super::web::ensure_thickness(&mut sizing, &moments, &shears, skin, web, cap)
+        {
+            continue;
+        }
         // Publish the final response margins on the final section rather
         // than stale margins belonging to its strength-only predecessor.
         for (spar_index, spar) in sizing.spars.iter_mut().enumerate() {

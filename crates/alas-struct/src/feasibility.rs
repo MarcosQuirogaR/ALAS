@@ -19,25 +19,23 @@
 //!
 //! The budget gates the 1 g flight shape only. That is the case whose
 //! deflection the aircraft model uses; at the ultimate manoeuvre cases the
-//! quantities the sizing consumes are bending moments and stresses, which the
-//! beam model forms on the undeformed geometry and which therefore do not
-//! contain the small-slope approximation at all (engineering statement: the
-//! geometric nonlinearity it omits, lift following the rotated surface and
-//! span foreshortening, lowers the root moment, so the linear stress is the
-//! conservative one). Neither is ultimate deflection a certification quantity:
-//! EASA CS-25, CS 25.305(a) limits deformation at *limit* load to what does
-//! not interfere with safe operation, and CS 25.305(b) asks only that ultimate
-//! load be carried for three seconds without failure. Real certified wings
+//! quantities the sizing consumes are bending moments and stresses on the
+//! undeformed geometry. Their conservatism is not guaranteed when deformation
+//! redistributes loads. EASA CS-25, CS 25.301(c) and CS 25.305(b) require those
+//! effects to be accounted for or shown insignificant. CS 25.305 specifies no
+//! universal ultimate tip-displacement ratio. Real certified wings
 //! leave the 5 % budget there by a wide margin: the Boeing 787 static-test
-//! wing flexed about 7.6 m (25 ft) upward on a 30 m semispan at ultimate load
-//! (Boeing news release, "787 Dreamliner completes ultimate-load wing test",
-//! 28 March 2010), a tip slope near 0.34 rad and a curvature error near 18 %.
+//! wing flexed about 7.6 m (25 ft) upward at ultimate load (Boeing news release,
+//! "Boeing Completes Ultimate-Load Wing Test on 787", 28 March 2010,
+//! <https://boeing.mediaroom.com/2010-03-28-Boeing-Completes-Ultimate-Load-Wing-Test-on-787>).
+//! That displacement alone does not determine the local tip slope.
 //! Gating the ultimate cases made [`crate::sizing::size_for_linear_model`]
 //! buy cap area to fit the aeroplane to the analysis rather than to a load,
 //! doubling the primary box on the A320-200. The ultimate-case error is still
 //! published, in
 //! [`StructuralFeasibility::manoeuvre_curvature_relative_error`], as the
-//! error bound on the ultimate deflection the report shows.
+//! local curvature-kinematics diagnostic, not an error bound on displacement
+//! or on the omitted aeroelastic load redistribution.
 
 use crate::analytical::StructuralAnalysisReport;
 use crate::sizing::WingboxSizing;
@@ -82,9 +80,9 @@ pub struct StructuralFeasibility {
     /// quantity the linear-model budget gates (see the module documentation).
     pub max_linear_curvature_relative_error: f64,
     /// Largest relative curvature approximation error over the ultimate
-    /// manoeuvre cases. Reported as the error bound on the ultimate
-    /// deflection; it does not gate the section, whose ultimate stresses do
-    /// not depend on the small-slope approximation.
+    /// manoeuvre cases. This is a local kinematic diagnostic, not an error
+    /// bound on deflection or stress under redistributed loads. It does not
+    /// impose a universal ultimate displacement limit.
     pub manoeuvre_curvature_relative_error: f64,
     /// Largest absolute tip displacement divided by modelled semispan, over
     /// every load case.

@@ -27,6 +27,8 @@ use alas_geom::aircraft::wing::Wing;
 
 mod ribs;
 mod sections;
+mod sized;
+pub use sized::sized_wingbox_centroid;
 #[cfg(test)]
 mod tests;
 

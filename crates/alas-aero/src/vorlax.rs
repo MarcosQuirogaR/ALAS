@@ -22,9 +22,9 @@
 //! Nothing in the mission calls this directly either. `Fidelity_Zero` owns a
 //! `Vortex_Lattice` sub-analysis whose `sample_training` runs [`run`] exactly
 //! once, on a grid of ten angles of attack against eight Mach numbers, and
-//! every lift and induced-drag number the mission then sees is a spline
-//! through that grid. `alas-aero::lift_surrogate` is that spline; this row is
-//! what it is a spline *of*.
+//! native mission lift is a spline through that grid.
+//! `alas-aero::lift_surrogate` is that spline; its induced-drag outputs are
+//! parity-only. Product mission drag comes from the shared trimmed table.
 //!
 //! # How a solve goes
 //!

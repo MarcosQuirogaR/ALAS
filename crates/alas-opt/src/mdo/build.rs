@@ -21,7 +21,6 @@ use alas_mass::breakdown::{
     run_mass_analysis_with_model_checked_product_with_gear, ComponentMassError, MassBreakdown,
     MassCoordinateModel, MassCoordinates, PayloadLayoutSummary,
 };
-use alas_mass::product_stations::product_mass_coordinates;
 use alas_mass::wingbox_feedback::{ReferenceWingMass, WingboxFeedback};
 use alas_payload::build::build_payload_layout;
 use alas_payload::layout::LayoutSummary;
@@ -258,8 +257,10 @@ pub(crate) fn first_mass_pass(
     dv: &DesignVector,
     plane: &Airplane,
 ) -> Result<FirstMassPassOutput, CandidateFailure> {
+    // Both passes see one configuration, design and aircraft: one box.
+    let mut design_box = None;
     let (m1, c1, _cg1, _initial_feedback, reference, inventory) =
-        mass_analysis_with_structural_feedback(config, dv, plane, None, None)?;
+        mass_analysis_with_structural_feedback(config, dv, plane, None, None, &mut design_box)?;
     let (oew, x_oew) = oew_and_cg(&m1, &c1);
     let payload_layout =
         build_payload_layout(plane, config, oew, x_oew).map_err(|_| CandidateFailure {
@@ -284,8 +285,14 @@ pub(crate) fn first_mass_pass(
             carried_cargo_payload_kg: cargo.loaded_net_payload_t * 1_000.0,
         },
     };
-    let (masses, coords, cg, feedback, _, _) =
-        mass_analysis_with_structural_feedback(config, dv, plane, Some(&summary), reference)?;
+    let (masses, coords, cg, feedback, _, _) = mass_analysis_with_structural_feedback(
+        config,
+        dv,
+        plane,
+        Some(&summary),
+        reference,
+        &mut design_box,
+    )?;
     Ok((
         masses,
         coords,

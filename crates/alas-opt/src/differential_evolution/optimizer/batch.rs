@@ -24,7 +24,7 @@
 use super::*;
 use crate::mdo::TE_ANGLE_LIMIT_DEG;
 use crate::search_methods::Tier;
-use crate::PreGateReasons;
+use crate::{PreGateReasons, SizingWorkSummary, StageRejections, StageSummary};
 
 /// The first design-vector check a candidate failed, in the gate's order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -163,25 +163,41 @@ impl<'a, E: SearchObjective + ?Sized> BatchEvaluator<'a, E> {
         }
     }
 
-    /// `(busy lane time per analysed candidate in s, lane utilization)` of
-    /// a stage that ran `analysed` analyses in `wall_s` seconds. The time is
-    /// the candidate's wall clock on its single-thread lane, which is its
-    /// CPU time when the lane is not contended. Utilization is the busy time
-    /// over lanes times the stage wall time.
-    pub(super) fn lane_statistics(&self, analysed: usize, wall_s: f64) -> (f64, f64) {
+    /// `stage` completed with what this evaluator measured over the history
+    /// rows from `before` in `wall_s` seconds, and the stage's rejections
+    /// under the cap `max_rejects`.
+    pub(super) fn close_stage(
+        &self,
+        stage: StageSummary,
+        before: usize,
+        wall_s: f64,
+        max_rejects: usize,
+    ) -> (StageSummary, StageRejections) {
+        let analysed = self.analyses() - before;
         let busy = self.busy.as_secs_f64();
-        let lanes = self.lanes();
-        let per_candidate = if analysed > 0 {
-            busy / analysed as f64
-        } else {
-            0.0
+        let history = self.objective.history();
+        let rows = history.reject_reason.get(before..).unwrap_or_default();
+        let rejections = StageRejections::new(&stage.stage, max_rejects, self.reasons, rows);
+        let summary = StageSummary {
+            pre_gate_rejects: self.pre_gate_rejects,
+            analysis_evaluations: analysed,
+            cancelled_unstarted: self.cancelled_unstarted,
+            feasible: self.feasible,
+            wall_time_s: wall_s,
+            candidate_time_s: if analysed > 0 {
+                busy / analysed as f64
+            } else {
+                0.0
+            },
+            lane_utilization: if wall_s > 0.0 {
+                busy / (self.lanes() as f64 * wall_s)
+            } else {
+                0.0
+            },
+            sizing_work: SizingWorkSummary::of_history(history, before),
+            ..stage
         };
-        let utilization = if wall_s > 0.0 {
-            busy / (lanes as f64 * wall_s)
-        } else {
-            0.0
-        };
-        (per_candidate, utilization)
+        (summary, rejections)
     }
 
     /// Lanes a batch runs on: the workers for a concurrent objective, else

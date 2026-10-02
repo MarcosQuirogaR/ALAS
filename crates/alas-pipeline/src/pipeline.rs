@@ -26,13 +26,10 @@ use alas_config::design_variables::DesignVector;
 use alas_config::presets;
 use alas_config::{AlasConfig, Severity};
 use alas_exec::storage::{mark_storage_root, StorageCategoryId};
-use alas_exec::{RunEnvironment, ToolLocator};
+use alas_exec::RunEnvironment;
 use alas_geom::aircraft::airplane::Airplane;
 use alas_mission::MissionResult;
 use alas_opt::OptimizationResult;
-use alas_route::planner::{
-    load_navdata_with_airway_coordinates, plan_route_with_max_stretch, RouteSources,
-};
 use alas_route::route::{Route, RouteSource};
 use alas_route::{fetch_route_with_status, SimbriefFetchStatus};
 use serde::{Deserialize, Serialize};
@@ -56,6 +53,7 @@ use crate::feasibility::{
 };
 use crate::flowunsteady::{run_flowunsteady_analysis, FlowUnsteadyAnalysisResult};
 use crate::full_analysis::{AnalysisReport, FullAnalysis};
+use crate::mission_route::{plan_mission_route, route_endpoints};
 use crate::mission_stage::{self, SelectedLoadCase};
 use crate::openvsp::{export_openvsp_script, materialize_openvsp_project, OpenVspExportResult};
 use crate::payload_layout_export::export_payload_layout_artifact;
@@ -76,27 +74,17 @@ use events::{
 };
 mod helpers;
 mod mission_payload_override;
+mod mses_condition;
 mod sized_finalist;
 mod snapshots;
 use helpers::{
     add_manifest_artifact, add_manifest_artifact_if_exists, check_preset_policy, finite_range_text,
     persist_mses_polar_diagnostics, persist_mses_raw_exports, validate_bounds,
 };
+#[cfg(test)]
+use mses_condition::mean_induced_angle_deg;
+use mses_condition::mses_section_condition;
 use snapshots::SnapshotPublisher;
-
-/// The 2-D section condition sent to MSES for a 3-D swept-wing cruise case.
-///
-/// Reynolds number remains based on the freestream speed, while MSES receives
-/// the normal component of Mach. The incidence is a finite-wing exposed-root
-/// proxy: geometric body alpha plus the physical fuselage-edge setting, less
-/// the mean induced angle. It is not a substitute for a resolved spanwise
-/// viscous analysis.
-#[derive(Debug, Clone, Copy)]
-struct MsesSectionCondition {
-    mach: f64,
-    reynolds: f64,
-    alpha_deg: f64,
-}
 
 fn check_cancelled(cancel: Option<&AtomicBool>) -> Result<(), String> {
     if cancel.is_some_and(|flag| flag.load(Ordering::Relaxed)) {
@@ -143,64 +131,6 @@ fn prepare_analysis_workspace(output_dir: Option<PathBuf>) -> Result<PathBuf, St
         }
     }
     Ok(analysis_dir)
-}
-
-fn mses_section_condition(config: &AlasConfig, report: &AnalysisReport) -> MsesSectionCondition {
-    let freestream_mach = config.requirements.cruise_mach;
-    let atmo = alas_atmo::Atmosphere::new(config.requirements.cruise_altitude_m);
-    let velocity = freestream_mach * atmo.speed_of_sound();
-    let inboard_section = config
-        .geometry
-        .wing
-        .inboard_aerodynamic_station(&report.design)
-        .ok();
-    let section_chord_m =
-        inboard_section.map_or(report.design.root_chord_m, |section| section.chord_m);
-    let section_twist_deg = inboard_section
-        .map_or(config.geometry.wing.root_twist_deg, |section| {
-            section.twist_deg
-        });
-    let reynolds =
-        (atmo.density() * velocity * section_chord_m) / atmo.dynamic_viscosity().max(1e-9);
-    // Section Mach normal to the quarter-chord line, with the same sweep
-    // definition as the AVL reference: the built wing's root-to-tip mean
-    // quarter-chord sweep, not the design-vector inboard leading-edge sweep.
-    let quarter_chord_sweep_deg = alas_aero::analysis::AeroAnalysis::quarter_chord_sweep_deg(
-        &report.airplane,
-        report.design.sweep_deg,
-    );
-    let mach = freestream_mach * quarter_chord_sweep_deg.to_radians().cos();
-    let body_alpha_deg = report
-        .trimmed_design_point
-        .map_or(report.design_point.alpha_deg, |trim| {
-            trim.geometric_body_alpha_deg
-        });
-    let induced_angle_deg = mean_induced_angle_deg(
-        report
-            .trimmed_design_point
-            .map_or(report.design_point.cl, |trim| trim.cl),
-        report.polar_fit.aspect_ratio,
-        report.polar_fit.oswald_e,
-    );
-    let alpha_deg = body_alpha_deg + section_twist_deg - induced_angle_deg;
-
-    MsesSectionCondition {
-        mach,
-        reynolds,
-        alpha_deg,
-    }
-}
-
-/// Mean finite-wing downwash angle used only to map a trimmed 3-D state onto
-/// the root-section MSES proxy. The lifting-line relation is deliberately
-/// bounded so malformed report data cannot manufacture an arbitrary section
-/// incidence.
-fn mean_induced_angle_deg(cl: f64, aspect_ratio: f64, oswald_e: f64) -> f64 {
-    let denominator = std::f64::consts::PI * aspect_ratio * oswald_e;
-    if !cl.is_finite() || !denominator.is_finite() || denominator <= 1e-9 {
-        return 0.0;
-    }
-    (cl / denominator).atan().to_degrees()
 }
 
 /// Controls which stages of the pipeline to run and execution parameters.
@@ -1427,8 +1357,10 @@ impl DesignPipeline {
             mission_result.as_ref(),
             mission_load_case.as_ref(),
         );
-        crate::feasibility::structure::append_downstream(
+        crate::feasibility::structure::append_delivery(
             &self.config,
+            &optimized_design,
+            &optimized_report,
             structural_result.as_ref(),
             &mut feasibility.findings,
         );
@@ -1880,20 +1812,7 @@ impl DesignPipeline {
         let planned = planned_route
             .cloned()
             .ok_or_else(|| "mission is enabled but route planning produced no route".to_owned())?;
-        let selected_origin = get_airport(&self.config.departure_airport)
-            .map_err(|error| format!("mission departure airport could not be resolved: {error}"))?;
-        let selected_destination = get_airport(&self.config.arrival_airport)
-            .map_err(|error| format!("mission arrival airport could not be resolved: {error}"))?;
-        let origin = planned
-            .route
-            .origin_airport
-            .as_ref()
-            .unwrap_or(selected_origin);
-        let destination = planned
-            .route
-            .dest_airport
-            .as_ref()
-            .unwrap_or(selected_destination);
+        let (origin, destination) = route_endpoints(&self.config, &planned.route)?;
         let overridden = self
             .mission_payload_override_kg
             .map(|kg| mission_payload_override::report_with_payload_override(report, kg));
@@ -1912,6 +1831,7 @@ impl DesignPipeline {
     fn plan_active_route(&self, dispatched_route: Option<Route>) -> Option<PlannedRoute> {
         let origin = get_airport(&self.config.departure_airport).ok()?;
         let dest = get_airport(&self.config.arrival_airport).ok()?;
+        // The dispatch service is the one tier the sandbox never queries.
         let (dispatched_route, simbrief) = if let Some(route) = dispatched_route {
             (Some(route), SimbriefFetchStatus::SuppliedByCaller)
         } else {
@@ -1925,25 +1845,7 @@ impl DesignPipeline {
             );
             (outcome.route, outcome.status)
         };
-        let locator = ToolLocator::for_current_process();
-        let routes_dir = locator.resolve_data_path(Path::new(&self.config.mission.routes_dir));
-        let navdata_dir = locator.resolve_data_path(Path::new(&self.config.mission.navdata_dir));
-        let navdata = load_navdata_with_airway_coordinates(
-            &navdata_dir,
-            self.config.mission.use_airway_endpoint_coordinates,
-        );
-        let sources = RouteSources {
-            dispatched: dispatched_route,
-            routes_dir: Some(routes_dir.as_path()),
-            navdata: navdata.as_ref(),
-            great_circle_points: self.config.mission.great_circle_points.max(1) as usize,
-        };
-        let route = plan_route_with_max_stretch(
-            origin,
-            dest,
-            sources,
-            self.config.mission.max_airway_stretch,
-        );
+        let route = plan_mission_route(&self.config, dispatched_route)?;
         Some(PlannedRoute {
             status: RoutePlanningStatus {
                 selected_source: route.source,

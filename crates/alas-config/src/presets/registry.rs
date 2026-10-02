@@ -5,7 +5,10 @@
 
 use std::sync::OnceLock;
 
-use super::{narrowbody, reference, regional, widebody, AircraftPreset, UnknownAircraftPreset};
+use super::{
+    landing_reference, narrowbody, reference, regional, takeoff_reference, widebody,
+    AircraftPreset, UnknownAircraftPreset,
+};
 use crate::PerformanceConfig;
 
 /// Every registered aircraft, in the order the interface lists them.
@@ -98,6 +101,8 @@ fn build() -> Vec<AircraftPreset> {
     for preset in &mut presets {
         preset.geometry.engine.engine_name = preset.engine_name.to_owned();
         preset.geometry.engine.apply_engine_spec_if_uninitialized();
+        landing_reference::apply(preset);
+        takeoff_reference::apply(preset);
     }
     presets
 }

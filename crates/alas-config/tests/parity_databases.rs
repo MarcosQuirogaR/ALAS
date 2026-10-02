@@ -58,7 +58,12 @@ fn every_material_matches_the_reference() {
     let fixture: MaterialsFixture = alas_testkit::load("config", "materials");
     let mut comparison = Comparison::new("alas-config::materials", Tier::Exact);
 
-    let embedded = materials::database();
+    // Product-only declared laminate; the historical materials remain exact.
+    // Its sourced CLT/strain invariants are tested in materials::tests.
+    let embedded: Vec<_> = materials::database()
+        .iter()
+        .filter(|material| material.name != "CFRP 60/30/10")
+        .collect();
     comparison.exact(
         "registration order",
         &embedded.iter().map(|m| m.name.as_str()).collect::<Vec<_>>(),
@@ -99,6 +104,7 @@ fn every_material_matches_the_reference() {
         "available()",
         &materials::available()
             .iter()
+            .filter(|&&name| name != "CFRP 60/30/10")
             .map(|&name| name.to_owned())
             .collect::<Vec<_>>(),
         &fixture.available,

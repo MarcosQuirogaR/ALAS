@@ -108,6 +108,17 @@ impl CabinEquipmentMethod {
         }
     }
 
+    /// Whether this selection declares the regional turboprop class: a
+    /// shaft-power transport below the 40 t LTH mass figure.
+    ///
+    /// The class is decided once, by [`Self::for_civil_transport_size`], and
+    /// other methods of the same class (the pressurized fuselage of the FLOPS
+    /// structural group) read it here, so one discriminator selects them all
+    /// and none switches while a search moves the takeoff mass.
+    pub const fn is_regional_turboprop_class(self) -> bool {
+        matches!(self, Self::RegionalTurbopropV1)
+    }
+
     /// The LTH relations' own stated validity domain, applied as a method
     /// selection: MTOM **at least** 40 t **or at least** 70 passenger seats.
     ///

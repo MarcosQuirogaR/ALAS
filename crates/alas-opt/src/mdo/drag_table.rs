@@ -17,15 +17,15 @@
 //!   with no interpolation in altitude.
 //! - **Induced and trim** `CDi_trim(CL)`: the vortex lattice is linear in
 //!   circulation, so the trimmed induced drag (wing plus tail load) is a
-//!   quadratic `c0 + c1 CL + c2 CL^2`. It is fitted exactly through three
-//!   trimmed solves at [`INDUCED_NODE_FRACTIONS`] of the cruise lift
-//!   coefficient; the two nodes other than the cruise trim are placed with
-//!   the cruise trim Jacobian (`alas_stab` `StabilityTrimResult::{cl_alpha,
-//!   cm_alpha, cl_ih, cm_ih}`), so they cost one solve each rather than one
-//!   trim each. A fourth trimmed solve at [`INDUCED_CHECK_FRACTION`] must
-//!   agree within [`INDUCED_CHECK_RELATIVE_TOLERANCE`], or the table is not
-//!   built. The lattice is incompressible, so this term has no Mach
-//!   dependence.
+//!   quadratic `c0 + c1 CL + c2 CL^2` in linear theory. Three trimmed solves
+//!   at [`INDUCED_NODE_FRACTIONS`] seed this fit. The cruise trim Jacobian
+//!   places and converges each additional solve. Independent fourth-point
+//!   and full-range checks retain this parabola when it meets
+//!   [`INDUCED_CHECK_RELATIVE_TOLERANCE`]; otherwise checked quadratic cells
+//!   are subdivided over zero to clean CLmax. Independent quarter points
+//!   bound their error, and the cruise point remains an interior fit node.
+//!   This resolves finite-angle geometry without relaxing the bound. The
+//!   lattice is incompressible, so this term has no Mach dependence.
 //! - **Wave** `CDw(CL, M)`: the Lock/Korn law of [`AeroAnalysis::wave_drag`]
 //!   (quarter-chord sweep, area-weighted t/c), tabulated on the (CL, M) grid,
 //!   cubic Hermite in CL with the law's own analytic CL slope and linear in
@@ -45,7 +45,7 @@
 //! error. The largest remaining error is [`TrimmedDragTable::max_abs_error_cd`].
 //!
 //! Outside the grid, CL and Mach are clamped for the tabulated factors only
-//! (form factor and wave drag); the induced quadratic and the skin friction
+//! (form factor and wave drag); the nearest induced cell and the skin friction
 //! are evaluated at the queried values.
 //!
 //! # Units
@@ -54,15 +54,15 @@
 //! altitudes m (ISA geometric, standard day); angles degrees.
 
 use alas_aero::analysis::AeroAnalysis;
-use alas_atmo::Atmosphere;
 
 mod grid;
 mod induced;
+mod parasite;
 
 use grid::{cell, cl_grid, hermite, lerp, mach_grid};
-use induced::induced_quadratic;
 pub(crate) use induced::DesignTrim;
 pub use induced::InducedCheck;
+use induced::{induced_curve, InducedCurve};
 
 /// Cruise-CL fractions of the three trimmed induced-drag nodes: from a
 /// light, low-lift descent (0.35) to a heavy, near-buffet cruise (1.4), so
@@ -73,11 +73,10 @@ pub const INDUCED_NODE_FRACTIONS: [f64; 3] = [0.35, 1.0, 1.4];
 /// lower node interval, where most climb, descent and light cruise is flown.
 pub const INDUCED_CHECK_FRACTION: f64 = 0.7;
 
-/// Largest relative disagreement between the fitted quadratic and the
-/// fourth trimmed solve. Induced drag is about a third of cruise drag, so
-/// 0.3 % of CDi is 0.1 % of total drag, below the build-up's resolution.
-/// The lattice's geometric nonlinearity in angle and stabilizer incidence
-/// leaves 0.12-0.20 % on the transport presets.
+/// Largest relative disagreement at an independent trimmed checking point.
+/// Induced drag is about a third of cruise drag, so 0.3 % of CDi is 0.1 %
+/// of total drag, below the build-up's resolution. Refine the representation
+/// when finite-angle geometry exceeds this bound.
 pub const INDUCED_CHECK_RELATIVE_TOLERANCE: f64 = 3.0e-3;
 
 /// Largest total-CD interpolation error accepted at a cell centre: a tenth
@@ -129,7 +128,7 @@ pub enum DragTableError {
         /// Pitching moment left after the last correction.
         cm_residual: f64,
     },
-    /// The fourth trimmed point disagrees with the fitted quadratic.
+    /// An independent trimmed point disagrees with the fitted quadratic cell.
     InducedCheck(InducedCheck),
     /// A term came out non-finite or with a non-physical sign.
     NonPhysical(&'static str),
@@ -154,7 +153,7 @@ impl std::fmt::Display for DragTableError {
             ),
             Self::InducedCheck(check) => write!(
                 f,
-                "fourth trimmed point at CL {:.4}: VLM CDi {:.6e}, quadratic {:.6e} ({:.3} %)",
+                "independent trimmed point at CL {:.4}: VLM CDi {:.6e}, quadratic {:.6e} ({:.3} %)",
                 check.cl,
                 check.vlm_cd_induced,
                 check.quadratic_cd_induced,
@@ -185,8 +184,8 @@ pub struct TrimmedDragTable {
     design_cl: f64,
     design_mach: f64,
     reference_altitude_m: f64,
-    /// `[c0, c1, c2]` of `CDi_trim = c0 + c1 CL + c2 CL^2`.
-    induced: [f64; 3],
+    /// Checked quadratic cells of the trimmed wake energy.
+    induced: InducedCurve,
     induced_check: InducedCheck,
     mach: Vec<f64>,
     cl: Vec<f64>,
@@ -216,7 +215,7 @@ impl TrimmedDragTable {
         if !aspect_ratio.is_finite() || aspect_ratio <= 0.0 {
             return Err(DragTableError::NonPhysical("aspect ratio"));
         }
-        let (induced, induced_check) = induced_quadratic(aero, design)?;
+        let (induced, induced_check) = induced_curve(aero, design)?;
         let mcrit_at_zero_cl = aero.korn_mach_numbers(0.0, None).1;
         let mcrit_per_cl = aero.korn_mach_numbers(1.0, None).1 - mcrit_at_zero_cl;
         let cl = cl_grid(design.cl_max_clean)?;
@@ -258,38 +257,9 @@ impl TrimmedDragTable {
         self.cd0(mach, altitude_m) + self.induced_cd(cl) + self.wave_cd(cl, mach)
     }
 
-    /// Zero-lift parasite drag `CD0(M, h)`.
-    pub fn cd0(&self, mach: f64, altitude_m: f64) -> f64 {
-        self.parasite_components(mach, altitude_m)
-            .map(|(_, cd)| cd)
-            .sum()
-    }
-
-    /// Each parasite component's drag at `mach` and `altitude_m`, in
-    /// build-up order, labelled with the wing or body name.
-    pub fn parasite_components(
-        &self,
-        mach: f64,
-        altitude_m: f64,
-    ) -> impl Iterator<Item = (&str, f64)> + '_ {
-        let atmosphere = Atmosphere::new(altitude_m);
-        let velocity = mach * atmosphere.speed_of_sound();
-        let (density, viscosity) = (atmosphere.density(), atmosphere.dynamic_viscosity());
-        let (index, weight) = self.mach_cell(mach);
-        self.parasite.iter().map(move |component| {
-            let factor = lerp(component.factor[index], component.factor[index + 1], weight);
-            let reynolds = density * velocity * component.reynolds_length_m / viscosity;
-            (
-                component.label.as_str(),
-                factor * AeroAnalysis::turbulent_cf(reynolds, mach),
-            )
-        })
-    }
-
-    /// Trimmed induced drag, trim drag included: `c0 + c1 CL + c2 CL^2`.
+    /// Trimmed induced drag, trim drag included, from its checked CL cell.
     pub fn induced_cd(&self, cl: f64) -> f64 {
-        let [c0, c1, c2] = self.induced;
-        c0 + cl * (c1 + cl * c2)
+        self.induced.value_and_slope(cl).0
     }
 
     /// Span efficiency the trimmed induced drag implies at `cl`:
@@ -313,10 +283,14 @@ impl TrimmedDragTable {
     /// coefficient, Mach `mach` and the reference altitude: it reproduces
     /// the drag and its CL slope there, wave drag included.
     pub fn parabolic_equivalent(&self, mach: f64) -> (f64, f64) {
-        let cl = self.design_cl;
-        let cd = self.cd(cl, mach, self.reference_altitude_m);
-        let [_, c1, c2] = self.induced;
-        let slope = c1 + 2.0 * c2 * cl + self.wave_value_and_slope(cl, mach).1;
+        self.parabolic_equivalent_at(self.design_cl, mach, self.reference_altitude_m)
+    }
+
+    /// The parabola `cd0 + k CL^2` tangent to the shared table at positive
+    /// `cl`, `mach` and `altitude_m`, retaining trim and wave drag's local slope.
+    pub fn parabolic_equivalent_at(&self, cl: f64, mach: f64, altitude_m: f64) -> (f64, f64) {
+        let cd = self.cd(cl, mach, altitude_m);
+        let slope = self.induced.value_and_slope(cl).1 + self.wave_value_and_slope(cl, mach).1;
         let k = slope / (2.0 * cl);
         (cd - k * cl * cl, k)
     }
@@ -326,18 +300,29 @@ impl TrimmedDragTable {
     pub fn min_drag_cl(&self, mach: f64, altitude_m: f64) -> f64 {
         let ratio = |cl: f64| cl / self.cd(cl, mach, altitude_m);
         let golden = 0.5 * (5.0_f64.sqrt() - 1.0);
-        let (mut low, mut high) = (self.cl[0], self.cl[self.cl.len() - 1]);
-        // 60 contractions by 0.618 shrink the bracket below 1e-12 of its size.
-        for _ in 0..60 {
-            let a = high - golden * (high - low);
-            let b = low + golden * (high - low);
-            if ratio(a) < ratio(b) {
-                low = a;
-            } else {
-                high = b;
-            }
-        }
-        0.5 * (low + high)
+        let cl_min = self.cl[0];
+        let cl_max = self.cl[self.cl.len() - 1];
+        self.induced
+            .ranges()
+            .filter_map(|(low, high)| {
+                let (mut low, mut high) = (low.max(cl_min), high.min(cl_max));
+                if low >= high {
+                    return None;
+                }
+                // 60 contractions by 0.618 shrink the bracket below 1e-12 of its size.
+                for _ in 0..60 {
+                    let a = high - golden * (high - low);
+                    let b = low + golden * (high - low);
+                    if ratio(a) < ratio(b) {
+                        low = a;
+                    } else {
+                        high = b;
+                    }
+                }
+                Some(0.5 * (low + high))
+            })
+            .max_by(|left, right| ratio(*left).total_cmp(&ratio(*right)))
+            .unwrap_or(cl_min)
     }
 
     /// Largest total-CD error measured at the cell centres of the final grid.

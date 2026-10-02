@@ -14,7 +14,7 @@ use alas_config::presets::AircraftPreset;
 use alas_geom::aircraft::airplane::Airplane;
 use alas_mass::flops_transport::propulsion::scaled_engine_kg;
 use alas_mission::MissionResult;
-use alas_pipeline::field_reference::isa_sea_level_field_reference;
+use alas_pipeline::field_reference::report_isa_sea_level_field_reference;
 use alas_pipeline::full_analysis::AnalysisReport;
 
 /// A finite value as JSON, else null (JSON has no NaN).
@@ -114,8 +114,8 @@ fn critical_mach(
     sweep_le_deg: f64,
 ) -> serde_json::Map<String, Value> {
     let cl = report.design_point.cl;
-    // Same sweep the design point and the cruise polar use: the area-weighted
-    // quarter-chord sweep, not the design vector's leading-edge sweep.
+    // Same sweep the design point and the cruise polar use: the
+    // reference-trapezoid quarter-chord sweep, not the design vector's leading-edge sweep.
     let aero = AeroAnalysis::new(
         &report.airplane,
         AeroAnalysis::quarter_chord_sweep_deg(&report.airplane, sweep_le_deg),
@@ -130,7 +130,7 @@ fn critical_mach(
     out.insert("critical_mach_cl".to_owned(), finite(cl));
     out.insert(
         "critical_mach_basis".to_owned(),
-        json!("Korn/Lock relations of AeroAnalysis::wave_drag at the design-point CL and the area-weighted c/4 sweep; M_crit = M_dd - (0.1/(4C))^(1/3)"),
+        json!("Korn/Lock relations of AeroAnalysis::wave_drag at the design-point CL and the reference-trapezoid (outboard-panel) c/4 sweep; M_crit = M_dd - (0.1/(4C))^(1/3)"),
     );
     out
 }
@@ -177,11 +177,10 @@ fn field_performance(config: &AlasConfig, report: &AnalysisReport, mlw_kg: f64) 
         .get("wing_area_m2")
         .copied()
         .unwrap_or(report.airplane.s_ref);
-    match isa_sea_level_field_reference(
+    match report_isa_sea_level_field_reference(
         config,
+        report,
         wing_area,
-        report.polar_fit.cd0,
-        report.polar_fit.k,
         config.requirements.mtow_kg,
         mlw_kg,
     ) {
@@ -259,8 +258,8 @@ fn tail_volumes(plane: &Airplane) -> Value {
 }
 
 /// The mission deck's drag buildup at mid-cruise of the last cruise segment:
-/// parasite by component, induced, compressibility (wave), ESDU
-/// miscellaneous, trim and total, all on the vehicle reference area.
+/// parasite, trimmed induced, Korn wave and total on the vehicle reference
+/// area. The candidate table carries trim inside its induced term.
 pub(super) fn cruise_drag_breakdown(mission: &MissionResult, plane: &Airplane) -> Value {
     let Some(segment) = mission.segments.iter().rev().find(|segment| {
         format!("{:?}", segment.spec.kind)
@@ -299,7 +298,7 @@ pub(super) fn cruise_drag_breakdown(mission: &MissionResult, plane: &Airplane) -
         .collect();
     json!({
         "status": "computed",
-        "basis": "mission drag buildup (alas_aero::drag_buildup) at mid-point of the last cruise segment; coefficients on the vehicle reference area",
+        "basis": "shared candidate trimmed drag table at mid-point of the last cruise segment; coefficients on the vehicle reference area; trim included in induced drag",
         "altitude_m": conditions.altitude_m.get(mid),
         "mach": conditions.mach.get(mid),
         "cl": conditions.lift_coefficient.get(mid),

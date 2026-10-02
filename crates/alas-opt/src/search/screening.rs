@@ -368,16 +368,33 @@ mod tests {
         }
     }
 
+    /// [`run`] started now, with no cancellation flag.
+    fn screen(
+        bounds: &[(f64, f64)],
+        baseline: Option<&[f64]>,
+        settings: Settings,
+        admit: &dyn Fn(&[f64]) -> bool,
+        evaluate: &mut EvaluateBatch<'_>,
+    ) -> Outcome {
+        let scope = CancelScope::attach(None);
+        run(
+            bounds,
+            baseline,
+            settings,
+            Instant::now(),
+            &scope,
+            admit,
+            evaluate,
+        )
+    }
+
     #[test]
     fn the_budget_is_respected_and_a_shorter_run_is_a_prefix_of_a_longer_one() {
         let bounds = [(-1.0, 1.0), (0.0, 2.0), (3.0, 3.0)];
-        let scope = CancelScope::attach(None);
-        let long = run(
+        let long = screen(
             &bounds,
             Some(&[0.1, 0.2, 3.0]),
             settings(150, 150),
-            Instant::now(),
-            &scope,
             &|_| true,
             &mut bowl,
         );
@@ -387,12 +404,10 @@ mod tests {
         // A replay stopped at 70 evaluations with the same budget evaluates
         // exactly the first 70 points, which is what makes a time-limited
         // run replayable.
-        let replay = run(
+        let replay = screen(
             &bounds,
             Some(&[0.1, 0.2, 3.0]),
             settings(150, 70),
-            Instant::now(),
-            &scope,
             &|_| true,
             &mut bowl,
         );
@@ -405,15 +420,13 @@ mod tests {
     fn the_time_limit_stops_only_between_batches() {
         let bounds = [(0.0, 1.0); 2];
         let mut calls = Vec::new();
-        let outcome = run(
+        let outcome = screen(
             &bounds,
             None,
             Settings {
                 time_limit: Some(Duration::from_millis(30)),
                 ..settings(10_000, 10_000)
             },
-            Instant::now(),
-            &CancelScope::attach(None),
             &|_| true,
             &mut |points: &[Vec<f64>]| {
                 calls.push(points.len());
@@ -481,12 +494,10 @@ mod tests {
         assert!(limit.saturating_sub(wall) < 3 * wave, "{wall:?}");
         // The clock changes the partition only: replaying the analysed count
         // without a time limit evaluates the same points.
-        let replay = run(
+        let replay = screen(
             &[(0.0, 1.0); 2],
             None,
             settings(10_000, outcome.analysed),
-            Instant::now(),
-            &CancelScope::attach(None),
             &|_| true,
             &mut bowl,
         );
@@ -513,12 +524,10 @@ mod tests {
         for reject_rate in [0.0, 0.5, 0.9] {
             let admit = move |point: &[f64]| point[0] >= reject_rate;
             let mut batches: Vec<Vec<Vec<f64>>> = Vec::new();
-            let outcome = run(
+            let outcome = screen(
                 &bounds,
                 None,
                 settings(1_000, 1_000),
-                Instant::now(),
-                &CancelScope::attach(None),
                 &admit,
                 &mut |points: &[Vec<f64>]| {
                     batches.push(points.to_vec());
@@ -553,15 +562,13 @@ mod tests {
         let bounds = [(0.0, 1.0); 3];
         let admit = |point: &[f64]| point[0] >= 0.9;
         let mut drawn: Vec<Vec<f64>> = Vec::new();
-        let outcome = run(
+        let outcome = screen(
             &bounds,
             None,
             Settings {
                 max_rejects: 300,
                 ..settings(1_000, 1_000)
             },
-            Instant::now(),
-            &CancelScope::attach(None),
             &admit,
             &mut |points: &[Vec<f64>]| {
                 drawn.extend_from_slice(points);

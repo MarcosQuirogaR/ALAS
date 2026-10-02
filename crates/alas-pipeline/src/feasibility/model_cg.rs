@@ -157,12 +157,31 @@ pub(super) fn model_cg_assessment(
     .map_err(|error| error.to_string())
 }
 
+/// The finding code that reports a violated model CG constraint.
+///
+/// Matched exhaustively, so a new constraint cannot reach a report under
+/// another failure mode's code: ground-clearance geometry (`TipBack`,
+/// `TailScrape`) has its own codes and is never a nose-gear finding.
+pub(super) const fn finding_code(constraint: ModelCgConstraint) -> FindingCode {
+    match constraint {
+        ModelCgConstraint::StaticStabilityFloor => FindingCode::InsufficientStaticMargin,
+        ModelCgConstraint::PhysicalForwardCgLimit | ModelCgConstraint::MinimumUsableCgRange => {
+            FindingCode::ModelCgForwardRangeViolation
+        }
+        ModelCgConstraint::NoseGearStrength | ModelCgConstraint::MaximumNoseGearLoadFraction => {
+            FindingCode::NoseGearStrengthViolation
+        }
+        ModelCgConstraint::MainGearStrength => FindingCode::MainGearStrengthViolation,
+        ModelCgConstraint::MinimumNoseGearLoad => FindingCode::MinimumNoseGearLoadViolation,
+        ModelCgConstraint::TipBack => FindingCode::TipBackViolation,
+        ModelCgConstraint::TailScrape => FindingCode::TailScrapeViolation,
+    }
+}
+
 pub(super) fn append_model_cg_findings(
     findings: &mut Vec<PhysicalFinding>,
     assessment: &ModelCgEnvelopeAssessment,
 ) {
-    // Every new constraint maps to the closest existing `FindingCode`
-    // (exhaustively matched by `alas-gui`, which must not gain a variant).
     let constraints = [
         ModelCgConstraint::StaticStabilityFloor,
         ModelCgConstraint::PhysicalForwardCgLimit,
@@ -196,40 +215,15 @@ pub(super) fn append_model_cg_findings(
         let limits = &loading_state.physical_limits;
         let forward_mechanism = forward_mechanism_label(limits.fwd_limit_governance);
         let aft_mechanism = aft_mechanism_label(limits.aft_limit_governance);
-        let code = match constraint {
-            ModelCgConstraint::StaticStabilityFloor => FindingCode::InsufficientStaticMargin,
-            ModelCgConstraint::PhysicalForwardCgLimit | ModelCgConstraint::MinimumUsableCgRange => {
-                FindingCode::ModelCgForwardRangeViolation
-            }
-            ModelCgConstraint::NoseGearStrength
-            | ModelCgConstraint::MaximumNoseGearLoadFraction => {
-                FindingCode::NoseGearStrengthViolation
-            }
-            ModelCgConstraint::MainGearStrength => FindingCode::MainGearStrengthViolation,
-            // `TipBack` and `TailScrape` are ground-clearance/rotation
-            // geometry failures at the aft CG limit, not a nose-load
-            // steering-authority shortfall: a physically distinct failure
-            // mode from `MinimumNoseGearLoad`. `alas-gui`'s
-            // `views/results_view/summary/findings.rs` matches
-            // `FindingCode` exhaustively (a finding the pipeline can raise
-            // but this page cannot explain is a compile error), so this
-            // lane may not add a dedicated variant; `MinimumNoseGearLoadViolation`
-            // is reused as the closest existing code (both are aft-CG-limit
-            // gear findings), with the message below naming the actual
-            // mechanism so a reader is never told "nose load" when the
-            // failure is tail-scrape or tip-back clearance.
-            ModelCgConstraint::MinimumNoseGearLoad
-            | ModelCgConstraint::TipBack
-            | ModelCgConstraint::TailScrape => FindingCode::MinimumNoseGearLoadViolation,
-        };
+        let code = finding_code(constraint);
         let message = match constraint {
             ModelCgConstraint::TipBack | ModelCgConstraint::TailScrape => format!(
-                "{} loading state violates the model {} constraint (a ground-clearance/\
-                 rotation geometry limit, reported under the minimum-nose-gear-load finding \
-                 code because alas-gui's FindingCode match has no dedicated tip-back/tail-\
-                 scrape variant; this is not a nose-load steering-authority shortfall)",
+                "{} loading state violates the model {} constraint ({:.2} deg against \
+                 {:.2} deg; a ground-clearance geometry limit, not a nose-load shortfall)",
                 state.label(),
-                constraint.label()
+                constraint.label(),
+                result.actual,
+                result.limit
             ),
             // `cg_range_pct_mac` is a configured/assumed requirement (a
             // load-and-trim-sheet convention, default 30 %MAC), not a
@@ -325,6 +319,29 @@ mod tests {
                 && other.message.contains("usable CG range")
                 && other.severity == FindingSeverity::Error
         }));
+    }
+
+    /// Ground-clearance constraints report under their own finding codes, and
+    /// no code is shared between a clearance and a nose-gear constraint.
+    #[test]
+    fn ground_clearance_constraints_never_map_to_a_nose_gear_code() {
+        assert_eq!(
+            finding_code(ModelCgConstraint::TailScrape),
+            FindingCode::TailScrapeViolation
+        );
+        assert_eq!(
+            finding_code(ModelCgConstraint::TipBack),
+            FindingCode::TipBackViolation
+        );
+        for clearance in [ModelCgConstraint::TipBack, ModelCgConstraint::TailScrape] {
+            for nose in [
+                ModelCgConstraint::NoseGearStrength,
+                ModelCgConstraint::MinimumNoseGearLoad,
+                ModelCgConstraint::MaximumNoseGearLoadFraction,
+            ] {
+                assert_ne!(finding_code(clearance), finding_code(nose));
+            }
+        }
     }
 
     /// The ledger's flown landing state enters the gate as the analyzed

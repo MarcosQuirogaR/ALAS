@@ -206,13 +206,8 @@ fn side_json(result: &PipelineResult) -> Option<Value> {
             .map(|m| m / s_ref)
     };
     let field = mlw_kg.and_then(|mlw| {
-        alas_pipeline::field_reference::isa_sea_level_field_reference(
-            config,
-            s_ref,
-            report.polar_fit.cd0,
-            report.polar_fit.k,
-            mtow_kg,
-            mlw,
+        alas_pipeline::field_reference::report_isa_sea_level_field_reference(
+            config, report, s_ref, mtow_kg, mlw,
         )
         .ok()
     });

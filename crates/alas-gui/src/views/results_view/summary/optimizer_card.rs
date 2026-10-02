@@ -169,6 +169,8 @@ mod tests {
             alas_pipeline::optimizer_summary::EVALUATIONS_ONLY_TEXT,
             "Aeroelastic caveat",
             alas_pipeline::optimizer_summary::AEROELASTIC_CAVEAT_TEXT,
+            "Buffet margin basis",
+            alas_pipeline::optimizer_summary::BUFFET_BASIS_TEXT,
             "The search moves the design inside a bounded envelope around the preset. It does not look for the best aircraft of its class.",
         ];
         keys.extend(

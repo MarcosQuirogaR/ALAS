@@ -37,7 +37,10 @@ mod types;
 mod tests;
 
 pub use distribute::{fuel_vector, FuelState};
-pub use product::{resolve_product_layout, uses_registered_tank_layout};
+pub use product::{
+    inventory_density_kg_m3, resolve_product_layout, uses_preset_fuel, uses_registered_tank_layout,
+    PUBLISHED_INVENTORY_TOLERANCE,
+};
 pub use types::{
     CapacitySource, FuelCgPoint, FuelTank, FuelTankLayout, FuelVectorPoint, TankKind,
     TankLayoutError, TankSide,

@@ -22,6 +22,9 @@
 //! explicitly audited defaults.
 //! `optimize_passenger_capacity` is a native load-case switch with no Python
 //! field; requirements and preset unit tests pin it instead.
+//! Native field-method inputs are covered by sourced physical tests. Published
+//! landing inputs are checked against their source records after file loading,
+//! while the frozen landing coefficients and speed factors remain checked here.
 //!
 //! Compared at `exact`: nothing on this path computes anything. A value is
 //! copied from a default, from a preset, or from the file.
@@ -183,6 +186,21 @@ fn compare_values(
     actual: &Value,
     expected: &Value,
 ) {
+    if let Some((frozen, sourced)) = product_corrections::published_landing_change(path) {
+        compare_correction_value(
+            comparison,
+            &format!("{path}: frozen landing input"),
+            expected,
+            &frozen,
+        );
+        compare_correction_value(
+            comparison,
+            &format!("{path}: published landing input"),
+            actual,
+            &sourced,
+        );
+        return;
+    }
     if let Some((old, new)) = product_corrections::dimensions(path) {
         compare_correction_value(
             comparison,
@@ -307,6 +325,7 @@ fn compare_values(
                     let child = format!("{path}.{key}");
                     if let Some(new) = product_corrections::engine_copy(&child)
                         .or_else(|| product_corrections::added_planform(&child))
+                        .or_else(|| product_corrections::declared_airfoil_class(&child))
                     {
                         corrections.remove(&child);
                         compare_correction_value(comparison, &child, &actual[key], &new);
@@ -459,7 +478,7 @@ fn preset_source_corrections() -> BTreeMap<String, SourceCorrection> {
         correction(
             "A220-300.structures.spar_cap_material",
             "CFRP UD",
-            "CFRP QI",
+            "CFRP 60/30/10",
         ),
         correction(
             "A220-300.structures.spar_web_material",
@@ -482,7 +501,11 @@ fn preset_source_corrections() -> BTreeMap<String, SourceCorrection> {
             "Al 7075-T6",
         ),
         correction("B787-9.structures.skin_material", "Al 7075-T6", "CFRP QI"),
-        correction("B787-9.structures.spar_cap_material", "CFRP UD", "CFRP QI"),
+        correction(
+            "B787-9.structures.spar_cap_material",
+            "CFRP UD",
+            "CFRP 60/30/10",
+        ),
         correction(
             "B787-9.structures.spar_web_material",
             "Al 7075-T6",
@@ -593,6 +616,8 @@ fn preset_source_corrections() -> BTreeMap<String, SourceCorrection> {
         ],
     );
     add_planning_cabin_corrections(&mut corrections, &["A220-300", "A320-200", "A340-300"]);
+    add_b787_9_typical_cabin_corrections(&mut corrections, &["B787-9"]);
+    add_ave_777_9_cabin_corrections(&mut corrections);
     for (case, kink_fraction) in [
         ("A340-300", 9.5 / 30.15),
         ("A380-800", 0.359_236_516_064_625_5),
@@ -689,7 +714,7 @@ fn saved_file_source_corrections() -> BTreeMap<String, SourceCorrection> {
         correction(
             "preset_only.structures.spar_cap_material",
             "CFRP UD",
-            "CFRP QI",
+            "CFRP 60/30/10",
         ),
         correction(
             "preset_only.structures.spar_web_material",
@@ -704,7 +729,7 @@ fn saved_file_source_corrections() -> BTreeMap<String, SourceCorrection> {
         correction(
             "preset_then_field.structures.spar_cap_material",
             "CFRP UD",
-            "CFRP QI",
+            "CFRP 60/30/10",
         ),
         correction(
             "preset_then_field.structures.spar_web_material",
@@ -809,6 +834,7 @@ fn saved_file_source_corrections() -> BTreeMap<String, SourceCorrection> {
         ],
     );
     add_planning_cabin_corrections(&mut corrections, &["preset_only"]);
+    add_b787_9_typical_cabin_corrections(&mut corrections, &["preset_then_field"]);
     corrections.insert(
         "preset_then_field.geometry.wing.kink_span_fraction".to_owned(),
         SourceCorrection {
@@ -923,6 +949,77 @@ fn add_default_landing_ratio_corrections(
 /// planning cabin instead of inheriting the old widebody business block. The
 /// saved Python fixture remains frozen; these leaves document the deliberate
 /// source correction rather than making the parity test silently accept drift.
+/// The 787-9 cabin is seeded with Boeing's typical two-class seat shares
+/// (D6-58333 Rev Q section 2.1.2: 28 business, 262 economy) instead of the
+/// generic 15/85 mix.
+fn add_b787_9_typical_cabin_corrections(
+    corrections: &mut BTreeMap<String, SourceCorrection>,
+    cases: &[&str],
+) {
+    for case in cases {
+        for (class, upstream, seats) in [("business", 15.0, 28.0), ("economy", 85.0, 262.0)] {
+            corrections.insert(
+                format!("{case}.cabin.passenger.{class}.share_pct"),
+                SourceCorrection {
+                    upstream: Value::from(upstream),
+                    corrected: Value::from(seats / 290.0 * 100.0),
+                },
+            );
+        }
+    }
+}
+
+/// AVE flies the 777-9 standard two-class cabin (D6-86073 Rev G Table 2-1
+/// and Figures 2-3 and 2-5: 42 business at 85 in, 384 economy at 32 in, 10
+/// abreast on 18 in seats) in place of the all-economy airline profile.
+fn add_ave_777_9_cabin_corrections(corrections: &mut BTreeMap<String, SourceCorrection>) {
+    const INCH_M: f64 = 0.0254;
+    let mut insert = |path: &str, upstream: Value, corrected: Value| {
+        corrections.insert(
+            format!("AVE.{path}"),
+            SourceCorrection {
+                upstream,
+                corrected,
+            },
+        );
+    };
+    insert(
+        "requirements.cabin_preset",
+        Value::from("Ryanair"),
+        Value::from("Custom"),
+    );
+    insert(
+        "cabin.passenger.business.share_pct",
+        Value::from(15.0),
+        Value::from(42.0 / 426.0 * 100.0),
+    );
+    insert(
+        "cabin.passenger.economy.share_pct",
+        Value::from(85.0),
+        Value::from(384.0 / 426.0 * 100.0),
+    );
+    insert(
+        "cabin.passenger.business.pitch_m",
+        Value::from(1.55),
+        Value::from(85.0 * INCH_M),
+    );
+    insert(
+        "cabin.passenger.economy.pitch_m",
+        Value::from(0.79),
+        Value::from(32.0 * INCH_M),
+    );
+    insert(
+        "cabin.passenger.economy.width_m",
+        Value::from(0.46),
+        Value::from(18.0 * INCH_M),
+    );
+    insert(
+        "cabin.passenger.economy.abreast",
+        Value::from(0),
+        Value::from(10),
+    );
+}
+
 fn add_planning_cabin_corrections(
     corrections: &mut BTreeMap<String, SourceCorrection>,
     cases: &[&str],

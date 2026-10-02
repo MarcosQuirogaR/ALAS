@@ -174,6 +174,7 @@ pub fn a320_200() -> AircraftPreset {
             airfoil_camber_scale: 1.0,
             ..DesignVector::default()
         },
+        airfoil_class_source: "Design-era declaration: the A320 wing (EIS 1988) is of the supercritical-section generation; manufacturer section data are not public. Drawn with NASA SC(2)-0610 root and SC(2)-0410 tip sections (Harris, NASA TP-2969, 1990).",
         geometry: GeometryConfig {
             wing: WingConfig {
                 // Places the leading edge of MAC 15.26 m aft of the nose, inside
@@ -215,6 +216,7 @@ pub fn a320_200() -> AircraftPreset {
                 outboard_sweep_decrement_deg: 1.5,
                 root_airfoil: "sc20610".to_owned(),
                 tip_airfoil: "sc20410".to_owned(),
+                airfoil_class: crate::AirfoilClass::Supercritical,
                 ..WingConfig::default()
             },
             // Both surfaces are sized to their published span and area: a
@@ -237,15 +239,15 @@ pub fn a320_200() -> AircraftPreset {
                 hstab_tip_le_m: (3.31, 6.225, 0.5),
                 vstab_offset_from_tail_m: 6.5,
                 // The 5.87 m fin height of sheet 1 is measured from the
-                // fuselage top line. The root keeps its estimated height and
-                // the span holds the tip 5.87 m above the crown, 11.80 m above
-                // the ground in the Figure 2-3-0-991-029-A01 state (VT
-                // 11.805 m; TCDS 11.76 m). The panel from the root is then
-                // 25.1 m^2, against the 21.5 m^2 the chords close over 5.87 m.
-                vstab_z_m: 1.2,
+                // fuselage top line, so the root line is the crown and the
+                // tip stands 11.80 m above the ground in the Figure
+                // 2-3-0-991-029-A01 state (VT 11.805 m; TCDS 11.76 m). The
+                // chords close the 21.5 m^2 over those 5.87 m; the builder
+                // carries the edges on down to the tail cone under the root.
+                vstab_z_m: 2.17,
                 vstab_root_chord_m: 5.444,
                 vstab_tip_chord_m: 1.884,
-                vstab_tip_le_m: (5.060, 0.0, 6.84),
+                vstab_tip_le_m: (5.060, 0.0, 5.87),
                 ..EmpennageConfig::default()
             },
             fuselage: FuselageConfig {

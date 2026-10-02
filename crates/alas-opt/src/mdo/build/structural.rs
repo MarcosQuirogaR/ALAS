@@ -66,7 +66,7 @@ fn product_mass_failure(error: &ComponentMassError) -> CandidateFailure {
 
 /// Name the typed cause of a failed product station placement.
 ///
-/// [`product_mass_coordinates`] reports a message, so the cause a search log
+/// [`alas_mass::product_stations::product_mass_coordinates`] reports a message, so the cause a search log
 /// needs, a *missing* main-gear datum against a *degenerate* geometry, is
 /// already flattened by the time it arrives here. Re-resolving the same
 /// stations recovers the typed [`alas_mass::stations::StationError`] without
@@ -107,16 +107,25 @@ fn mass_coordinate_failure(config: &AlasConfig, plane: &Airplane) -> CandidateFa
 /// estimate.
 ///
 /// The lumped group points are then placed by
-/// [`alas_mass::product_stations::product_mass_coordinates`], the same
-/// authoritative product placement `alas-pipeline`'s final report uses.  The
-/// product mass path is evaluated with the structural-wingbox coordinate
+/// [`alas_mass::product_stations::product_mass_coordinates_with_box`], the
+/// same authoritative product placement `alas-pipeline`'s final report uses.
+/// The product mass path is evaluated with the structural-wingbox coordinate
 /// model, while the structural sizing result remains a separate diagnostic.
+///
+/// The reconciliation and the station placement read one primary box: the
+/// one held in `design_box`, or one sized into it when the slot is empty. The
+/// box depends on the configuration, the design and the built aircraft, never
+/// on the payload layout, so a caller may share one slot across calls with the
+/// same `config`, `dv` and `plane`, and must start a new slot whenever any of
+/// the three changes. It is sized after the mass buildup, so a candidate that
+/// fails both keeps its mass-buildup rejection reason.
 pub(crate) fn mass_analysis_with_structural_feedback(
     config: &AlasConfig,
     dv: &DesignVector,
     plane: &Airplane,
     payload_summary: Option<&PayloadLayoutSummary>,
     reference: Option<ReferenceWingMass>,
+    design_box: &mut Option<alas_mass::wing_reconciliation::DesignWingBox>,
 ) -> Result<StructuralMassAnalysis, CandidateFailure> {
     // The mission-sized optimizer is the production path.  The
     // reference-compatible mass architecture has a separate explicit
@@ -144,16 +153,40 @@ pub(crate) fn mass_analysis_with_structural_feedback(
     // Structural sizing is an independent feasibility/diagnostic check.  Its
     // empirical/Torenbeek reconciliation is deliberately not applied to the
     // pure FLOPS mass ledger.
-    let reconciliation = alas_mass::wing_reconciliation::reconcile(config, dv, plane, reference)
-        .map_err(|_| structural_failure())?;
+    // The structural reconciliation and the complete-wing first moment of the
+    // product stations read one box, sized once from identical inputs.
+    let shared_box = match *design_box {
+        Some(shared) => shared,
+        None => {
+            let sized = alas_mass::wing_reconciliation::size_design_wing_box(config, dv, plane)
+                .map_err(|_| structural_failure())?;
+            *design_box = Some(sized);
+            sized
+        }
+    };
+    let reconciliation = alas_mass::wing_reconciliation::reconcile_with_design_box(
+        config,
+        plane,
+        reference,
+        masses.wing,
+        shared_box,
+    )
+    .map_err(|_| structural_failure())?;
     let feedback = reconciliation.feedback;
     let reference = reconciliation.reference;
     let inventory = reconciliation.inventory;
     // The FLOPS buildup already closed payload and fuel against its own
     // component groups.  Keep those values untouched so the search and final
     // report share one authoritative ledger.
-    let (coords, cg) = product_mass_coordinates(config, dv, plane, &masses, coords)
-        .map_err(|_| mass_coordinate_failure(config, plane))?;
+    let (coords, cg) = alas_mass::product_stations::product_mass_coordinates_with_box(
+        config,
+        dv,
+        plane,
+        &masses,
+        coords,
+        &shared_box,
+    )
+    .map_err(|_| mass_coordinate_failure(config, plane))?;
     Ok((masses, coords, cg, feedback, reference, inventory))
 }
 
@@ -200,8 +233,9 @@ mod structural_tests {
             .build(Some(&dv), true)
             .expect("the ATR builds");
 
-        let failure = mass_analysis_with_structural_feedback(&config, &dv, &plane, None, None)
-            .expect_err("an aircraft with no measured main-gear station is not evaluable");
+        let failure =
+            mass_analysis_with_structural_feedback(&config, &dv, &plane, None, None, &mut None)
+                .expect_err("an aircraft with no measured main-gear station is not evaluable");
         assert_eq!(failure.reason, "main_gear_station_not_measured");
     }
 
@@ -224,12 +258,15 @@ mod structural_tests {
         let (mut config, dv, plane) = clean_sheet_candidate();
         // The unmodified candidate is evaluable, so the only difference the
         // assertion below can be reading is the cleared declaration.
-        mass_analysis_with_structural_feedback(&config, &dv, &plane, None, None)
+        mass_analysis_with_structural_feedback(&config, &dv, &plane, None, None, &mut None)
             .unwrap_or_else(|failure| panic!("{}", failure.reason));
 
         config.mass_model.flops_transport.hydraulic_pressure_pa = None;
-        let failure = mass_analysis_with_structural_feedback(&config, &dv, &plane, None, None)
-            .expect_err("an undeclared hydraulic working pressure is not an evaluable aircraft");
+        let failure =
+            mass_analysis_with_structural_feedback(&config, &dv, &plane, None, None, &mut None)
+                .expect_err(
+                    "an undeclared hydraulic working pressure is not an evaluable aircraft",
+                );
         assert_eq!(
             failure.reason, "hydraulic_pressure",
             "the rejection names the FLOPS invariant that failed"
@@ -241,7 +278,7 @@ mod structural_tests {
     #[test]
     fn a_resolvable_candidate_is_not_labelled_a_missing_gear_datum() {
         let (config, dv, plane) = clean_sheet_candidate();
-        mass_analysis_with_structural_feedback(&config, &dv, &plane, None, None)
+        mass_analysis_with_structural_feedback(&config, &dv, &plane, None, None, &mut None)
             .unwrap_or_else(|failure| panic!("{}", failure.reason));
         assert_eq!(
             mass_coordinate_failure(&config, &plane).reason,
@@ -285,7 +322,7 @@ mod structural_tests {
             .unwrap_or_else(|failure| panic!("{failure}"));
 
         let (masses, _coords, _, feedback, reference, structural) =
-            mass_analysis_with_structural_feedback(&config, &dv, &plane, None, None)
+            mass_analysis_with_structural_feedback(&config, &dv, &plane, None, None, &mut None)
                 .unwrap_or_else(|failure| panic!("{}", failure.reason));
         assert!(
             reference.is_none(),
@@ -354,11 +391,13 @@ mod structural_tests {
         // stage). The mass/CG input this module computes must be identical
         // whether or not that flag is set.
         let (mut config, dv, plane) = clean_sheet_candidate();
-        let enabled = mass_analysis_with_structural_feedback(&config, &dv, &plane, None, None)
-            .unwrap_or_else(|failure| panic!("{}", failure.reason));
+        let enabled =
+            mass_analysis_with_structural_feedback(&config, &dv, &plane, None, None, &mut None)
+                .unwrap_or_else(|failure| panic!("{}", failure.reason));
         config.structures.enabled = false;
-        let disabled = mass_analysis_with_structural_feedback(&config, &dv, &plane, None, None)
-            .unwrap_or_else(|failure| panic!("{}", failure.reason));
+        let disabled =
+            mass_analysis_with_structural_feedback(&config, &dv, &plane, None, None, &mut None)
+                .unwrap_or_else(|failure| panic!("{}", failure.reason));
 
         let (enabled_masses, enabled_coords, _, enabled_feedback, ..) = enabled;
         let (disabled_masses, disabled_coords, _, disabled_feedback, ..) = disabled;

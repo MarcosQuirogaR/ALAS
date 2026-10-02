@@ -6,6 +6,14 @@
 
 use crate::AnalysisReport;
 
+/// The model omits aeroelastic weight and stiffness penalties, so a gain
+/// bought with span or aspect ratio is an upper bound.
+pub const AEROELASTIC_CAVEAT_TEXT: &str = "Span and aspect-ratio gains exclude aeroelastic penalties (flutter, aileron reversal); treat aspect-ratio increases above the reference aircraft as optimistic";
+
+/// The buffet margin's basis: a drag-divergence estimate, not a measured
+/// buffet boundary, so it only holds a design to its registered aircraft.
+pub const BUFFET_BASIS_TEXT: &str = "Korn-inverse estimate, not a buffet boundary; validated error against Fokker 100 flight test about 0.3-0.65 CL; it only holds the design to the registered aircraft's own margin";
+
 /// Label of the aspect-ratio plausibility flag; its value is
 /// `result / reference`.
 pub const ASPECT_RATIO_FLAG_LABEL: &str = "Aspect ratio above reference";

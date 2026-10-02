@@ -18,6 +18,10 @@ alas-struct = { path = "../alas-struct" }
 # The FLOPS equations and fuel policy are written in US customary units and
 # convert through these ratios at every formula.
 alas-units = { path = "../alas-units" }
+# The pressurized fuselage of the regional turboprop class reads the ISA cabin
+# and ambient pressures; `alas-atmo` depends only on `alas-math`, so this is
+# acyclic.
+alas-atmo = { path = "../alas-atmo" }
 thiserror = { workspace = true }
 
 [dev-dependencies]

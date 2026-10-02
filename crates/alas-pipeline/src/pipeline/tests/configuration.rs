@@ -128,13 +128,20 @@ fn a_named_preset_is_the_public_nominal_design() {
             .is_some_and(|report| report.component_masses["Fuel"] > 0.0),
         "the A220 carries positive fuel after its selected engine reaches mass analysis"
     );
+    // The published usable volume at the published density (21,504.92 L at
+    // 0.8089 kg/L) defines the inventory; the published 17,395.27 kg is the
+    // same figure rounded at source.
+    let capacity = result.feasibility.fuel_loading.usable_capacity;
     assert_eq!(
-        result.feasibility.fuel_loading.usable_capacity,
-        crate::feasibility::FuelCapacityAssessment {
-            capacity_kg: preset.reference.usable_fuel_mass_kg,
-            evidence: crate::feasibility::FuelCapacityEvidence::PublishedPreset,
-        }
+        capacity.evidence,
+        crate::feasibility::FuelCapacityEvidence::PublishedPreset
     );
+    let published_kg = preset.reference.usable_fuel_volume_l.unwrap_or(f64::NAN)
+        * preset.reference.fuel_density_kg_l.unwrap_or(f64::NAN);
+    let capacity_kg = capacity.capacity_kg.unwrap_or(f64::NAN);
+    assert!((capacity_kg - published_kg).abs() < 1.0e-9 * published_kg);
+    let quoted_kg = preset.reference.usable_fuel_mass_kg.unwrap_or(f64::NAN);
+    assert!((capacity_kg - quoted_kg).abs() < 1.0e-5 * quoted_kg);
 }
 
 /// A fixed-design run with the native physical review enabled.
@@ -378,18 +385,44 @@ fn diagnostic_policies_deliver_a_bounded_baseline_when_requirements_are_missed()
         quiet: true,
     };
 
-    let result = DesignPipeline::new(config)
+    let result = DesignPipeline::new(config.clone())
         .run_with_design_space(&options, &RunEnvironment::default(), &design, &bounds)
         .unwrap_or_else(|error| panic!("diagnostic bounded finalist run: {error}"));
 
     let optimized = result
         .optimized_design
         .expect("a diagnostic-policy optimization publishes the baseline finalist");
-    assert!(optimized
-        .to_array()
+    // The registered preset runs as a reference adaptation, which derives the
+    // tail scale from the wing (automatic tail sizing to the registered tail
+    // volume coefficients) instead of searching it. The published design is
+    // the one the report describes, so that component is the solver's value,
+    // not the bound it was handed; every other component is the search's and
+    // stays inside its bounds.
+    assert_eq!(
+        config.optimizer.design_space.mode,
+        alas_config::optimizer::DesignMode::ReferenceAdaptation
+    );
+    let tail_index = alas_config::design_variables::SPECS
         .iter()
-        .zip(&bounds)
-        .all(|(value, &(lower, upper))| *value >= lower && *value <= upper));
+        .position(|spec| spec.name == "tail_scale")
+        .expect("tail_scale is a design variable");
+    let published = optimized.to_array();
+    for (index, (value, &(lower, upper))) in published.iter().zip(&bounds).enumerate() {
+        if index != tail_index {
+            assert!(
+                *value >= lower && *value <= upper,
+                "{} = {value} is outside its bounds [{lower}, {upper}]",
+                alas_config::design_variables::SPECS[index].name
+            );
+        }
+    }
+    let mut searched = published.clone();
+    searched[tail_index] = bounds[tail_index].0;
+    let searched = DesignVector::from_array(&searched).expect("a complete design vector");
+    // The fuselage length is pinned by its bounds, so the search preserves it.
+    let (resolved, _) = alas_opt::resolve_tail_sizing(&config, &searched, true)
+        .expect("the searched vector resolves");
+    assert_eq!(resolved, optimized);
     assert!(result
         .optimization_result
         .as_ref()

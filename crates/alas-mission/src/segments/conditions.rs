@@ -147,12 +147,12 @@ pub struct Conditions {
     pub lift_coefficient: Vec<f64>,
     /// Aircraft drag coefficient: `drag_breakdown.total`.
     pub drag_coefficient: Vec<f64>,
-    /// The whole drag buildup at each point, so a mission that disagrees can
-    /// be read back to the component that caused it.
+    /// Shared candidate drag terms, or the frozen parity buildup, per point.
     pub drag_breakdown: Vec<DragBreakdown>,
     /// Each wing's lift coefficient from the surrogate, per control point.
     pub wing_lift_coefficient: Vec<Vec<f64>>,
-    /// Each wing's inviscid induced drag coefficient, likewise.
+    /// Per-wing inviscid induced drag for frozen parity only; empty when the
+    /// mission shares the candidate's whole-aircraft trimmed drag table.
     pub wing_induced_drag_coefficient: Vec<Vec<f64>>,
     /// Surrogate training-domain status for each aerodynamic evaluation.
     ///

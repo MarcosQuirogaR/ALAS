@@ -82,7 +82,7 @@ pub struct OptimizationResult {
 /// it carries the termination verdict, the analyses that verdict was paid for
 /// with, and the wall-clock split between the screening and refinement
 /// stages ([`Self::stages`] has the full per-stage accounting).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct SearchDiagnostics {
     /// Bounded feasibility restoration, inside the refinement budget.
     #[serde(default)]

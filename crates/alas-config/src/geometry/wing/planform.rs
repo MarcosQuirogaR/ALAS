@@ -138,6 +138,15 @@ pub enum TransportPlanformError {
         /// Outboard chord, in metres.
         outboard: f64,
     },
+    /// The static-to-1 g tip rise lies outside the small-deflection range.
+    #[error(
+        "flight tip rise must lie between 0 and {} of the semispan, got {value}",
+        super::MAX_FLIGHT_TIP_RISE_SEMISPAN_FRACTION
+    )]
+    FlightTipRiseOutOfRange {
+        /// Invalid semispan fraction.
+        value: f64,
+    },
     /// A sweep approaches a spanwise leading or trailing edge.
     #[error("{field} must lie strictly between -89 and 89 deg, got {value} deg")]
     InvalidSweep {
@@ -308,4 +317,40 @@ pub enum WingSectionError {
     /// The airfoil lookup key is empty.
     #[error("custom wing section {0} needs a non-empty airfoil name")]
     EmptyAirfoil(usize),
+}
+
+/// Reject a non-finite planform input.
+pub(super) fn validate_finite(
+    field: &'static str,
+    value: f64,
+) -> Result<(), TransportPlanformError> {
+    if value.is_finite() {
+        Ok(())
+    } else {
+        Err(TransportPlanformError::NonFinite { field, value })
+    }
+}
+
+/// Reject a non-positive planform input.
+pub(super) fn validate_positive(
+    field: &'static str,
+    value: f64,
+) -> Result<(), TransportPlanformError> {
+    if value > 0.0 {
+        Ok(())
+    } else {
+        Err(TransportPlanformError::NonPositive { field, value })
+    }
+}
+
+/// Reject a leading-edge sweep at or beyond 89 degrees.
+pub(super) fn validate_sweep(
+    field: &'static str,
+    value: f64,
+) -> Result<(), TransportPlanformError> {
+    if value.abs() < 89.0 {
+        Ok(())
+    } else {
+        Err(TransportPlanformError::InvalidSweep { field, value })
+    }
 }

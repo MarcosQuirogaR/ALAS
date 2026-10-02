@@ -6,12 +6,12 @@
 //! Named high-lift and propulsion technology levels for the field-performance
 //! model.
 //!
-//! What a wing can be made to do on approach is a property of its flaps and
-//! slats, not of its planform, and the vortex-lattice analysis cannot see a
-//! deployed high-lift system at all. So the maximum lift coefficients, the
-//! thrust lapse, the engine-out climb factors and the balanced-field factor
-//! are assumptions, and these presets bundle each set of them under the
-//! technology level it describes.
+//! The vortex-lattice analysis cannot see a deployed high-lift system.
+//! These generic lift coefficients therefore remain engineering selections
+//! guided by textbook high-lift trends, with their source and applicability
+//! stated explicitly. Published aircraft landing speeds supersede these class
+//! inputs in the aircraft registry. Other field parameters retain their
+//! conceptual assumptions under the named technology level.
 //!
 //! Getting that bundle right matters more than it looks: a widebody scored
 //! against a regional jet's high-lift system overestimates its takeoff and
@@ -105,6 +105,7 @@ fn build() -> Vec<PerformancePreset> {
             settings: PerformanceConfig {
                 cl_max_to: 1.60,
                 cl_max_land: 2.20,
+                cl_max_land_source: "Mattingly et al., Aircraft Engine Design, 2nd ed., Table 2.1 p.36 (credits Torenbeek 1976): double-slotted flaps without slats, CLmax/cos(quarter-chord sweep)=2.3-2.7 in landing; retained CLmax_land=2.20 engineering selection at nominal 20 deg sweep (normalized value 2.34); conceptual class default, not an aircraft coefficient; https://doczz.net/doc/8595015/2-constraint-analysis".to_owned(),
                 thrust_lapse: 0.20,
                 oei_gradient: 0.024,
                 k_land: 0.58,
@@ -133,6 +134,7 @@ fn build() -> Vec<PerformancePreset> {
             settings: PerformanceConfig {
                 cl_max_to: 2.10,
                 cl_max_land: 2.90,
+                cl_max_land_source: "Mattingly et al., Aircraft Engine Design, 2nd ed., Table 2.1 p.36 (credits Torenbeek 1976): double-slotted flaps and slats, CLmax/cos(quarter-chord sweep)=2.8-3.2 in landing; retained CLmax_land=2.90 engineering selection at nominal 25 deg sweep (normalized value 3.20); conceptual class default, not an aircraft coefficient; https://doczz.net/doc/8595015/2-constraint-analysis".to_owned(),
                 ..PerformanceConfig::default()
             },
         },
@@ -145,6 +147,7 @@ fn build() -> Vec<PerformancePreset> {
             settings: PerformanceConfig {
                 cl_max_to: 2.10,
                 cl_max_land: 2.95,
+                cl_max_land_source: "Mattingly et al., Aircraft Engine Design, 2nd ed., Table 2.1 p.36 (credits Torenbeek 1976): triple-slotted flaps and slats, CLmax/cos(quarter-chord sweep)=3.2-3.5 in landing; retained CLmax_land=2.95 engineering selection at nominal 30 deg sweep (normalized value 3.41); conceptual class default, not an aircraft coefficient; https://doczz.net/doc/8595015/2-constraint-analysis".to_owned(),
                 thrust_lapse: 0.26,
                 oei_gradient: 0.027,
                 k_land: 0.63,
@@ -189,6 +192,23 @@ mod tests {
         assert!(simple.settings.cl_max_land < standard.settings.cl_max_land);
         assert!(standard.settings.cl_max_land < modern.settings.cl_max_land);
         assert!(modern.settings.cl_max_land < widebody.settings.cl_max_land);
+    }
+
+    #[test]
+    fn generic_landing_lift_selections_fit_the_sourced_high_lift_ranges() {
+        // Mattingly Table 2.1 (Torenbeek data) states CLmax/cos(sweep),
+        // rather than a class constant independent of wing sweep.
+        for (name, nominal_sweep_deg, normalized_min, normalized_max) in [
+            ("conservative_simple_flaps", 20.0_f64, 2.3, 2.7),
+            ("standard_narrowbody", 25.0_f64, 2.5, 2.9),
+            ("modern_narrowbody", 25.0_f64, 2.8, 3.2),
+            ("advanced_highlift_widebody", 30.0_f64, 3.2, 3.5),
+        ] {
+            let settings = &get(name).unwrap().settings;
+            let normalized_lift = settings.cl_max_land / nominal_sweep_deg.to_radians().cos();
+            assert!((normalized_min..=normalized_max).contains(&normalized_lift));
+            assert!(settings.cl_max_land_source.contains("Table 2.1"));
+        }
     }
 
     #[test]

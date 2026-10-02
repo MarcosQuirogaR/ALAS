@@ -4,26 +4,30 @@
 use super::{AircraftBuilder, BuildError};
 use crate::aircraft::fuselage::FuselageXSec;
 use crate::aircraft::wing::WingXSec;
-use alas_config::{FuselageSectionError, TransportPlanform};
+use alas_config::{FuselageSectionError, TransportPlanform, WingHeights, WingShape};
 
 impl AircraftBuilder {
     /// Append validated user-controlled wing sections before the common mesh
     /// builder interpolates them into the surrounding planform.
+    ///
+    /// A section's height is a ground-shape height like the configured root,
+    /// break and tip heights, so it is raised by what `heights` adds to them
+    /// at its station.
     pub(super) fn append_custom_wing_sections(
         &self,
         planform: &TransportPlanform,
+        heights: &WingHeights,
         xsecs: &mut Vec<WingXSec>,
     ) -> Result<(), BuildError> {
         let wing = &self.geometry.wing;
         wing.validate_custom_sections_against_planform(planform)?;
+        let ground = wing.heights(WingShape::Ground, planform)?;
         for section in wing.custom_sections_sorted()? {
             let airfoil = Self::resolve(&section.airfoil)?;
+            let y_m = section.span_fraction * planform.tip.y_m;
+            let rise_m = heights.at(planform, y_m) - ground.at(planform, y_m);
             xsecs.push(WingXSec::new(
-                [
-                    section.leading_edge_x_m,
-                    section.span_fraction * planform.tip.y_m,
-                    section.z_m,
-                ],
+                [section.leading_edge_x_m, y_m, section.z_m + rise_m],
                 section.chord_m,
                 section.twist_deg,
                 airfoil,

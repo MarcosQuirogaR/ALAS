@@ -15,13 +15,17 @@
 //! are named fields rather than the constants the original scripts buried
 //! inside their geometry builders.
 
+mod airfoil_class;
 mod config;
 mod planform;
+mod shape;
 #[cfg(test)]
 mod tests;
 
+pub use airfoil_class::AirfoilClass;
 pub use config::WingConfig;
 pub use planform::{
     InboardAerodynamicStation, MainWingPanel, MainWingStation, MainWingStationKind,
     TransportPlanform, TransportPlanformError, WingSection, WingSectionError,
 };
+pub use shape::{WingHeights, WingShape, MAX_FLIGHT_TIP_RISE_SEMISPAN_FRACTION};

@@ -18,11 +18,10 @@
 //!   This is a secondary source. The wing-mounted-propeller band (38 % to
 //!   40 %) is not asserted: the ATR 72-600 sits at 37.0 %, just forward of
 //!   it, and that residual is reported rather than tuned away.
-//! - The operating-empty centre of gravity clears the minimum nose-gear load
-//!   and the tip-back angle on every aircraft except the ATR 72-600, whose
-//!   empty aircraft is a known ground-limit failure of this model (no
-//!   sourced station rule moves it inside). The ATR is asserted to fail so
-//!   that fixing it is a visible change to this file, not a silent one.
+//! - The operating-empty gear reactions satisfy Currey's two-support static
+//!   equilibrium, and violated ground limits remain visible in delivery.
+//!   Component-station estimates are not measured aircraft OEW centroids;
+//!   a registered aircraft name cannot establish that those estimates pass.
 
 // A test asserts on registered presets it loads, so a failed unwrap is the
 // assertion failing.
@@ -30,13 +29,10 @@
 
 use alas_config::{presets, AlasConfig, DesignMode, PropulsionTechnology};
 use alas_opt::{ModelCgConstraint, ModelCgLoadingState};
-use alas_pipeline::{assess_physical_feasibility, FullAnalysis};
-
-/// The registered aircraft whose empty aircraft fails its ground limits.
-const KNOWN_OEW_GROUND_LIMIT_FAILURE: &str = "ATR72-600";
+use alas_pipeline::{assess_physical_feasibility, FindingCode, FindingSeverity, FullAnalysis};
 
 #[test]
-fn empty_aircraft_stations_respect_the_systems_band_and_the_ground_limits() {
+fn empty_aircraft_stations_respect_the_systems_band_and_ground_equilibrium() {
     for name in presets::available() {
         let mut config = AlasConfig::from_value(&serde_json::json!({ "preset": name })).unwrap();
         config.optimizer.design_space.mode = DesignMode::BaselineSandbox;
@@ -84,22 +80,49 @@ fn empty_aircraft_stations_respect_the_systems_band_and_the_ground_limits() {
             .iter()
             .find(|state| state.state == ModelCgLoadingState::OperatingEmpty)
             .unwrap_or_else(|| panic!("{name}: OEW state"));
-        let violated = |kind: ModelCgConstraint| {
-            empty
+        let stations = alas_mass::stations::component_stations_with_gear(
+            &report.airplane,
+            &config.geometry,
+            &config.requirements,
+            &config.mass_model,
+            &config.structures,
+            &config.landing_gear,
+        )
+        .unwrap();
+        let nose_x = stations.nose_gear.position_m[0];
+        // The envelope reports its contact support in the airplane MAC
+        // frame; a gear mass centroid is not the reaction reference point.
+        let frame = report.airplane.mac_frame().expect("airplane MAC frame");
+        let main_x =
+            frame.x_lemac_m + report.airplane.c_ref * envelope.main_gear_station_pct_mac / 100.0;
+        // Currey (1988), static load distribution: moments about the main
+        // support give R_n/W = (x_main-x_cg)/(x_main-x_nose).
+        let expected_nose_fraction = (main_x - empty.cg_x_m) / (main_x - nose_x);
+        assert!(
+            (empty.nose_gear_load_fraction - expected_nose_fraction).abs() < 1.0e-12,
+            "{name}: nose reaction {}, expected {expected_nose_fraction}, CG {}, nose {nose_x}, main {main_x}", empty.nose_gear_load_fraction, empty.cg_x_m
+        );
+        for (kind, code) in [
+            (
+                ModelCgConstraint::MinimumNoseGearLoad,
+                FindingCode::MinimumNoseGearLoadViolation,
+            ),
+            (ModelCgConstraint::TipBack, FindingCode::TipBackViolation),
+        ] {
+            let constraint = empty
                 .constraints
                 .iter()
-                .find(|constraint| constraint.constraint == kind)
-                .unwrap_or_else(|| panic!("{name}: {kind:?} not assessed"))
-                .violated
-        };
-        let fails = violated(ModelCgConstraint::MinimumNoseGearLoad)
-            || violated(ModelCgConstraint::TipBack);
-        assert_eq!(
-            fails,
-            name == KNOWN_OEW_GROUND_LIMIT_FAILURE,
-            "{name}: OEW CG {:.2} %MAC, nose-load fraction {:.3}",
-            empty.cg_pct_mac,
-            empty.nose_gear_load_fraction
-        );
+                .find(|item| item.constraint == kind)
+                .unwrap_or_else(|| panic!("{name}: {kind:?} not assessed"));
+            assert!(constraint.actual.is_finite() && constraint.limit.is_finite());
+            assert_eq!(constraint.violated, constraint.actual < constraint.limit);
+            if constraint.violated {
+                assert!(
+                    physical.findings.iter().any(|finding| finding.code == code
+                        && finding.severity == FindingSeverity::Error),
+                    "{name}: hidden {kind:?}"
+                );
+            }
+        }
     }
 }

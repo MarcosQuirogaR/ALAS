@@ -115,6 +115,29 @@ audit.
 Compiled by the author from published sources, each cited next to its entry.
 Not a redistribution of any third-party database.
 
+### CADO airplane database v1.3: ODbL-1.0
+
+Nicolas Monrolin, Thierry Druot, Nicolas Peteilh, Pascal Roches and
+Yri-Amandine Kambiri, ENAC (École Nationale de l'Aviation Civile).
+*CADO airplane database*, Version 1.3, Recherche Data Gouv, 2024.
+DOI [10.57745/LLRJO0](https://doi.org/10.57745/LLRJO0).
+
+Contains information from the CADO airplane database, which is made available
+under the Open Data Commons Open Database License (ODbL) 1.0:
+<https://opendatacommons.org/licenses/odbl/1-0/>.
+
+The database is stored unmodified in `docs/data/cado/` as a separately licensed
+database, with the complete ODbL text in `docs/data/cado/DATABASE_LICENSE.txt`
+and its provenance and digests in `docs/data/cado/README.md`. It is **not**
+relicensed under this program's AGPL-3.0-or-later licence, and no production
+code reads or embeds it. It is a secondary compilation that its authors state
+is not intended for operational use. A small number of individual values are
+cited from it as secondary corroboration anchors in
+`golden/aircraft/real_aircraft_parity.json` (`cite: "cado_enac_v1_3"`); that
+file does not reproduce the database. Anyone who distributes the database, or
+a database derived from it, must keep this attribution and offer that database
+under the ODbL (share-alike).
+
 ### NASA Blue Marble
 
 Public domain NASA raster. `assets/textures/earth_blue_marble.png` is checked

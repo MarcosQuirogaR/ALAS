@@ -179,7 +179,7 @@ pub const CHAPTERS: &[Chapter] = &[
                 heading: "The wingbox",
                 body: &[
                     "The structural solve sizes a generic wingbox (skin, spars, ribs) from strength requirements, then computes deflections, stresses and natural frequencies analytically. NASTRAN is optional: without it you still get every analytical result.",
-                    "It is a downstream analysis. It does not feed the mass model, so a heavy wingbox will not change the optimizer's answer; compare it against the Torenbeek estimate shown beside it as an accuracy check.",
+                    "The empty-weight wing mass is the FLOPS estimate, so the wingbox mass does not change the empty weight. The wingbox does decide feasibility: its strength, rib-spacing, cap-packaging and 1 g deflection checks are hard optimizer constraints and can block delivery, and its spanwise mass distribution places the wing CG. Compare its primary-structure mass with the FLOPS complete-wing estimate shown beside it, keeping the different scopes in mind.",
                 ],
             },
         ],

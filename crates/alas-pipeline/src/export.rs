@@ -51,6 +51,8 @@ pub struct CpacsReference {
     pub engine_uid: String,
 }
 
+mod aerodynamics;
+
 /// Convert an [`AnalysisReport`] and [`AlasConfig`] into the standard [`DesignDatabase`].
 pub fn report_to_database(report: &AnalysisReport, config: &AlasConfig) -> DesignDatabase {
     let req = &config.requirements;
@@ -59,18 +61,7 @@ pub fn report_to_database(report: &AnalysisReport, config: &AlasConfig) -> Desig
     meta.insert("source".to_owned(), "alas.pipeline".to_owned());
     meta.insert("tool".to_owned(), "ALAS".to_owned());
 
-    let aero = serde_json::json!({
-        "cruise_mach": req.cruise_mach,
-        "cruise_altitude_m": req.cruise_altitude_m,
-        "cd0_cruise": report.polar_fit.cd0,
-        "k_factor": report.polar_fit.k,
-        "oswald_efficiency": report.polar_fit.oswald_e,
-        "aspect_ratio": report.polar_fit.aspect_ratio,
-        "polar_fit_status": report.polar_fit.status.as_str(),
-        "design_point": report.design_point,
-        "static_margin": report.static_margin,
-        "trimmed_design_point": report.trimmed_design_point,
-    });
+    let aero = aerodynamics::database(report, config);
 
     let weights = serde_json::json!({
         "mtow_kg": req.mtow_kg,
@@ -761,6 +752,7 @@ mod tests {
             },
             polar_fit: PolarFit {
                 cd0: 0.02,
+                c1: 0.0,
                 k: 0.04,
                 oswald_e: 1.0 / (std::f64::consts::PI * 10.0 * 0.04),
                 aspect_ratio: 10.0,

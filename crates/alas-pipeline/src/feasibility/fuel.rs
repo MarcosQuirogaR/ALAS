@@ -23,8 +23,10 @@
 //! remainder is usable fuel and nothing is reserved a second time; only a
 //! mass model that leaves unusable fuel out of OEW has it reserved here.
 
-use alas_config::{presets, AlasConfig, DesignVector};
-use alas_mass::tanks::{resolve_product_layout, uses_registered_tank_layout};
+use alas_config::{AlasConfig, DesignVector};
+use alas_geom::aircraft::airplane::Airplane;
+use alas_mass::tanks::resolve_product_layout;
+use alas_opt::mdo::UsableCapacityBasis;
 
 use crate::full_analysis::AnalysisReport;
 
@@ -275,47 +277,33 @@ pub fn assess_fuel_capacity(
     design: &DesignVector,
     report: &AnalysisReport,
 ) -> FuelCapacityAssessment {
-    // Resolve first even for a reference: invalid installation evidence must
-    // not be hidden by its aircraft-name lookup.
-    let capacity_kg = resolve_product_layout(config, design, &report.airplane)
-        .ok()
-        .and_then(|layout| valid_positive_capacity(layout.usable_capacity_kg()));
-    if let Ok(preset) = presets::get(&config.preset) {
-        let reference_density = preset.mass_model.as_ref().map_or_else(
-            || alas_config::MassModelConfig::default().fuel_density_kg_m3,
-            |mass| mass.fuel_density_kg_m3,
-        );
-        if *design == preset.design_vector
-            && uses_registered_tank_layout(config)
-            && config.mass_model.fuel_density_kg_m3 == reference_density
-            && capacity_kg.is_some()
-        {
-            if let Some(capacity_kg) = preset.reference.usable_fuel_mass_kg {
-                return FuelCapacityAssessment {
-                    capacity_kg: Some(capacity_kg),
-                    evidence: FuelCapacityEvidence::PublishedPreset,
-                };
-            }
-        }
-    }
-
-    // The same inventory drives search, dispatch, fuel centroids and the
-    // item ledger. A wing-only approximation loses centre/auxiliary tanks.
-    // Resolution failure is missing evidence, not permission to invent fuel.
-    FuelCapacityAssessment {
-        capacity_kg,
-        evidence: if capacity_kg.is_some() {
-            FuelCapacityEvidence::GeometryEstimate
-        } else {
-            FuelCapacityEvidence::Unavailable
-        },
-    }
+    assess_airplane_fuel_capacity(config, design, &report.airplane)
 }
 
-/// Reject malformed derived evidence rather than allowing NaN, infinity, zero,
-/// or negative tank masses to masquerade as a geometric capacity.
-fn valid_positive_capacity(capacity_kg: f64) -> Option<f64> {
-    (capacity_kg.is_finite() && capacity_kg > 0.0).then_some(capacity_kg)
+/// [`assess_fuel_capacity`] for an aircraft that has been built but not yet
+/// analysed: the capacity depends only on the configuration, the design
+/// vector and the built geometry.
+pub fn assess_airplane_fuel_capacity(
+    config: &AlasConfig,
+    design: &DesignVector,
+    airplane: &Airplane,
+) -> FuelCapacityAssessment {
+    // The one capacity rule the sizing closure's dispatch applies too.
+    match alas_opt::mdo::usable_fuel_capacity(config, design, airplane) {
+        Some(capacity) => FuelCapacityAssessment {
+            capacity_kg: Some(capacity.kg),
+            evidence: match capacity.basis {
+                UsableCapacityBasis::PublishedPreset => FuelCapacityEvidence::PublishedPreset,
+                UsableCapacityBasis::ResolvedLayout => FuelCapacityEvidence::GeometryEstimate,
+            },
+        },
+        // Resolution failure is missing evidence, not permission to invent
+        // fuel.
+        None => FuelCapacityAssessment {
+            capacity_kg: None,
+            evidence: FuelCapacityEvidence::Unavailable,
+        },
+    }
 }
 
 pub(super) fn findings(mtow_kg: f64, fuel_loading: &FuelLoadingAssessment) -> Vec<PhysicalFinding> {
@@ -407,6 +395,7 @@ pub(super) fn findings(mtow_kg: f64, fuel_loading: &FuelLoadingAssessment) -> Ve
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alas_config::presets;
 
     #[test]
     fn a_tank_limit_reduces_takeoff_mass_without_relabeling_the_mtow_remainder() {
@@ -459,14 +448,6 @@ mod tests {
         assert_eq!(loading.analyzed_carried_fuel_kg, 240.0);
         assert_eq!(loading.analyzed_takeoff_mass_kg, 940.0);
         assert_eq!(loading.mtow_shortfall_kg, 60.0);
-    }
-
-    #[test]
-    fn malformed_derived_capacities_are_unavailable() {
-        for capacity_kg in [0.0, -1.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
-            assert_eq!(valid_positive_capacity(capacity_kg), None);
-        }
-        assert_eq!(valid_positive_capacity(1.0), Some(1.0));
     }
 
     #[test]

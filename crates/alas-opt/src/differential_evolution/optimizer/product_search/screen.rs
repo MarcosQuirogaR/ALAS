@@ -45,10 +45,7 @@ impl DesignOptimizer {
             &|values: &[f64]| run.admits(values),
             &mut |points: &[Vec<f64>]| evaluator.evaluate_block(points),
         );
-        let (analysed, wall) = (
-            evaluator.analyses() - before,
-            started.elapsed().as_secs_f64(),
-        );
+        let wall = started.elapsed().as_secs_f64();
         let cancelled = outcome.termination == Termination::Cancelled;
         let excluded: Vec<Vec<f64>> = run.baseline.iter().cloned().collect();
         let mut elite = if cancelled {
@@ -73,41 +70,22 @@ impl DesignOptimizer {
             elite.insert(0, best.clone());
             elite.truncate(elite_size);
         }
-        let (candidate_time_s, lane_utilization) = evaluator.lane_statistics(analysed, wall);
-        let summary = StageSummary {
+        let stage = StageSummary {
             stage: "screening".to_owned(),
             max_evaluations: budget,
             planned_evaluations: budget,
-            reserved_evaluations: 0,
             time_limit_s: solver.screening.time_limit_s,
             time_limited: limit.is_some(),
             evaluations: outcome.analysed,
-            restoration_evaluations: 0,
-            pre_gate_rejects: evaluator.pre_gate_rejects,
-            analysis_evaluations: analysed,
-            cancelled_unstarted: evaluator.cancelled_unstarted,
             generations: outcome.batches,
-            feasible: evaluator.feasible,
             elite_size: elite.len(),
-            wall_time_s: wall,
-            candidate_time_s,
-            lane_utilization,
             termination: outcome.termination.label().to_owned(),
-            sizing_work: SizingWorkSummary::of_history(evaluator.objective.history(), before),
+            ..StageSummary::default()
         };
+        let (summary, rejections) = evaluator.close_stage(stage, before, wall, max_rejects);
         Screened {
             summary,
-            rejections: StageRejections::new(
-                "screening",
-                max_rejects,
-                evaluator.reasons,
-                evaluator
-                    .objective
-                    .history()
-                    .reject_reason
-                    .get(before..)
-                    .unwrap_or_default(),
-            ),
+            rejections,
             elite,
             cancelled,
             cache: keep_cache.then_some(evaluator.cache),

@@ -29,13 +29,14 @@
 //! routes after the fuel model unification: A320 +2.2 %, A220 +6.9 %, A340
 //! +11.5 %, A380 +4.0 %, B787 +12.0 %, DC-10 +2.1 %, ATR +5.1 %.
 
+use alas_config::airports::Airport;
 use alas_config::AlasConfig;
 use alas_mass::dispatch::{DispatchLimits, DispatchSolution, DispatchStatus};
 use alas_mass::fuel_plan::{FuelBurnModel, FuelPlan};
-use alas_mission::MissionRequest;
+use alas_mission::{build_mission_request, MissionRequest};
 use alas_opt::mdo::solve_planned_dispatch;
 
-use crate::feasibility::FuelLoadingAssessment;
+use crate::feasibility::{plan_fuel_loading, FuelLoadingAssessment};
 use crate::fuel_model::report_mission_model;
 use crate::full_analysis::AnalysisReport;
 
@@ -121,6 +122,16 @@ pub struct SelectedLoadCase {
 }
 
 impl SelectedLoadCase {
+    /// The route's policy case, whichever load is flown: the flown policy
+    /// closure, or the route check priced beside a maximum-available-fuel
+    /// flight. `None` when the route could not be priced.
+    pub fn route_case(&self) -> Option<&PolicyClosureCase> {
+        match &self.selection {
+            LoadCaseSelection::PolicyClosure(case) => Some(case),
+            LoadCaseSelection::MaximumAvailableFuel { route_check, .. } => route_check.as_deref(),
+        }
+    }
+
     /// Record the native trip flown at this load case.
     pub(super) fn record_native_trip(&mut self, native_trip_fuel_kg: f64) {
         // Only a policy closure flies the mass its case was priced at; a
@@ -131,6 +142,26 @@ impl SelectedLoadCase {
             });
         }
     }
+}
+
+/// The mission request for the route between `origin` and `destination`
+/// over `route_distance_m` of still air, and the load case it is flown at
+/// ([`select_load_case`] on the report's own fuel loading).
+///
+/// This is the whole route pricing of the full analysis' mission stage, and
+/// the sandbox prices the route by the same call on the same report, so the
+/// two report one route fuel.
+pub(crate) fn select_route_load_case(
+    config: &AlasConfig,
+    report: &AnalysisReport,
+    origin: &Airport,
+    destination: &Airport,
+    route_distance_m: f64,
+) -> Result<(MissionRequest, SelectedLoadCase), String> {
+    let request = build_mission_request(config, origin, destination, route_distance_m);
+    let fuel_loading = plan_fuel_loading(config, &report.design, report);
+    let load_case = select_load_case(config, report, &fuel_loading, &request)?;
+    Ok((request, load_case))
 }
 
 /// Select the load case for a route.
@@ -315,10 +346,8 @@ fn admissible_takeoff_mass_ceiling(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::feasibility::plan_fuel_loading;
     use crate::full_analysis::FullAnalysis;
     use alas_config::airports::get as get_airport;
-    use alas_mission::build_mission_request;
 
     use alas_mass::payload_range::max_range_with_reserves;
     use alas_opt::mdo::PlannedTrips;

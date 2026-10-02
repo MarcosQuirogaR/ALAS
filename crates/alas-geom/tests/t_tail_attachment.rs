@@ -69,6 +69,16 @@ fn t_tail_root_follows_the_fin_scale_when_the_fin_is_resized() {
     }
 }
 
+/// Chord and area of a built fin's straight-edged trapezoid at and above the
+/// configured root line `z_m`: the drawn fin the scale ratio resizes, before
+/// the builder carries its edges to the body under the root.
+fn at_root_line(fin: &alas_geom::aircraft::wing::Wing, z_m: f64) -> (f64, f64) {
+    let (root, tip) = (&fin.xsecs[0], fin.xsecs.last().expect("fin tip"));
+    let s = (z_m - root.xyz_le[2]) / (tip.xyz_le[2] - root.xyz_le[2]);
+    let chord = root.chord + s * (tip.chord - root.chord);
+    (chord, 0.5 * (chord + tip.chord) * (tip.xyz_le[2] - z_m))
+}
+
 #[test]
 fn the_fin_ratio_scales_only_the_fin_area_quadratically() {
     let preset = presets::get("A320-200").expect("A320 preset");
@@ -81,7 +91,8 @@ fn the_fin_ratio_scales_only_the_fin_area_quadratically() {
     let resized = AircraftBuilder::new(Some(geometry));
     let (h1, v1) = resized.build_empennage(&dv).expect("empennage");
     assert!((h1.unfolded_area() - h0.unfolded_area()).abs() < 1e-12);
-    assert!((v1.unfolded_area() / v0.unfolded_area() - 1.44).abs() < 1e-9);
+    let z_m = preset.geometry.empennage.vstab_z_m;
+    assert!((at_root_line(&v1, z_m).1 / at_root_line(&v0, z_m).1 - 1.44).abs() < 1e-9);
 }
 
 #[test]
@@ -126,8 +137,9 @@ fn fin_scale_ratio_scales_only_the_fin_and_keeps_the_t_tail_attached() {
         let sized = AircraftBuilder::new(Some(geometry))
             .build(Some(&dv), false)
             .expect("sized geometry");
+        let z_m = preset.geometry.empennage.vstab_z_m;
         let fin_chord =
-            |plane: &alas_geom::aircraft::airplane::Airplane| plane.wings[2].xsecs[0].chord;
+            |plane: &alas_geom::aircraft::airplane::Airplane| at_root_line(&plane.wings[2], z_m).0;
         assert!(
             (fin_chord(&sized) / fin_chord(&base) - 1.25).abs() < 1e-9,
             "{}",

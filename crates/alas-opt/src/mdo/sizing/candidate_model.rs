@@ -16,14 +16,13 @@
 use std::sync::Arc;
 
 use alas_config::design_variables::DesignVector;
-use alas_config::{AlasConfig, TailSizing};
+use alas_config::{AlasConfig, DesignMode, MtowSizing};
+use alas_mass::dispatch::DispatchStatus;
 
 use super::route::{self, Route};
-use crate::mdo::build::{build_geometry_with_fuselage_policy, first_mass_pass};
 use crate::mdo::mission_model::{CruiseDrag, PhaseAeroLimits, SegmentMissionModel};
 use crate::mdo::mtow_modes::closure_mission;
 use crate::mdo::propulsion::{max_climb_rate_ft_min, PropulsionDeck};
-use crate::mdo::trim::trim_and_polar;
 use crate::mdo::types::{CandidateFuelArtifacts, DeckKey};
 
 /// The propulsion deck of `config`'s engine at the sizing cruise point, and
@@ -151,39 +150,71 @@ pub fn candidate_mission_model(
     Ok(model)
 }
 
+/// The configuration a baseline analysis of the aircraft `config` declares
+/// is closed under: the drawn aircraft at its declared design weights
+/// ([`DesignMode::BaselineSandbox`], the fixed-aircraft mass basis, so the
+/// geometry, tail and structure are the declared ones), flying its route at
+/// the takeoff mass the route's fuel closes on, bounded by the declared MTOW
+/// ([`MtowSizing::SizedByMission`]). A baseline analysis ignores the
+/// optimizer's takeoff-mass sizing mode, so this closure does too.
+pub fn baseline_closure_config(config: &AlasConfig) -> AlasConfig {
+    let mut baseline = config.clone();
+    baseline.optimizer.design_space.mode = DesignMode::BaselineSandbox;
+    baseline.optimizer.objective.mtow_sizing = MtowSizing::SizedByMission;
+    baseline
+}
+
 /// The fuel artifacts of the aircraft `design` describes under `config`,
-/// for an analysis that has no sized candidate: the geometry, the first mass
-/// pass and the cruise trim of the sizing closure's first pass
-/// ([`super::run_candidate_cancellable`]), with the declared fuselage length
-/// kept, and no frozen plan.
+/// for an analysis that has no sized candidate: those its sizing closure
+/// under [`baseline_closure_config`] carries, with the declared fuselage
+/// length kept.
+///
+/// The drag table is the one the closure flew, trimmed at its converged
+/// takeoff mass and centre of gravity (to within the closure's re-trim
+/// tolerance, `retrim_cg_tolerance_pct_mac`), and the frozen plan is the
+/// one its dispatch closed on. The route is flown near that mass, so that
+/// is where the trimmed tail load and induced drag belong; a table trimmed
+/// at the declared MTOW instead carried the heavier aircraft's trim drag
+/// into every trip (DC-10: design CL 0.669 against 0.535 at the closed
+/// mass, 0.4 % more route fuel). The baseline analysis and the closure
+/// therefore price the route on one trim state.
+///
+/// Only a numerically closed state carries artifacts: the takeoff mass
+/// settled within the sizing tolerance and the dispatch converged or met a
+/// physical limit (MTOW or tank), which the report's own dispatch reports.
+/// An unsettled closure would hand the report a table trimmed at an
+/// arbitrary iterate.
 ///
 /// # Errors
 ///
-/// The geometry, mass, trim or engine failure, as a description.
+/// The sizing-closure failure (geometry, mass, trim, engine or mission), an
+/// unsettled takeoff mass, or a dispatch that did not converge, as a
+/// description.
 pub fn baseline_fuel_artifacts(
     config: &AlasConfig,
     design: &DesignVector,
 ) -> Result<CandidateFuelArtifacts, String> {
-    let failed = |stage: &str, reason: &str| format!("{stage} failed: {reason}");
-    let (candidate_config, dv, mut plane) =
-        build_geometry_with_fuselage_policy(config, &design.to_array(), true)
-            .map_err(|failure| failed("geometry build", failure.reason))?;
-    let plan = candidate_config.mtow_plan();
-    let seeded = plan
-        .requires_mission_sized_evaluation()
-        .then(|| candidate_config.at_sized_closure_mass(plan.seed_kg));
-    let (_, _, cg, ..) = first_mass_pass(seeded.as_ref().unwrap_or(&candidate_config), &dv, &plane)
-        .map_err(|failure| failed("mass analysis", failure.reason))?;
-    let polar = trim_and_polar(&candidate_config, &mut plane, cg[0], &dv, plan.seed_kg)
-        .map_err(|failure| failed("cruise trim", failure.reason))?;
-    let (_, deck) = sizing_deck(&candidate_config)?;
-    Ok(CandidateFuelArtifacts {
-        drag: polar.drag,
-        reference_area_m2: plane.s_ref,
-        deck,
-        frozen_plan: None,
-        tail_sizing: TailSizing::of(&candidate_config.geometry.empennage, &dv),
-    })
+    let outcome = super::run_candidate_with_fuselage_policy(
+        &baseline_closure_config(config),
+        &design.to_array(),
+        true,
+    )
+    .map_err(|failure| format!("sizing closure failed: {}", failure.reason))?;
+    let sized = outcome.sized;
+    if !sized.takeoff_mass_settled {
+        return Err(format!(
+            "sizing closure did not settle: the takeoff mass still moved by more than {} kg after {} passes",
+            config.optimizer.objective.sizing_tolerance_kg, sized.sizing_iterations
+        ));
+    }
+    match &sized.dispatch.status {
+        DispatchStatus::Converged
+        | DispatchStatus::MtowLimited { .. }
+        | DispatchStatus::TankLimited { .. } => Ok(Arc::unwrap_or_clone(sized.fuel_artifacts)),
+        status => Err(format!(
+            "sizing closure dispatch did not converge: {status:?}"
+        )),
+    }
 }
 
 // A test asserts on values it constructed, so a failed unwrap is the
@@ -233,5 +264,27 @@ mod tests {
             "flown level against the design level; the route level is {} m",
             route.flown_cruise_altitude_m
         );
+    }
+
+    /// A one-pass sizing budget is legal, but the A320-200 baseline needs
+    /// two passes to settle its takeoff mass: its artifacts must be refused,
+    /// not cached as converged. The same aircraft with the default budget
+    /// settles and carries them, and the ATR 72-600, whose route meets its
+    /// MTOW (a physical limit its report's dispatch states), carries them too.
+    #[test]
+    fn an_unsettled_baseline_closure_carries_no_artifacts() {
+        let design = alas_config::presets::get("A320-200").unwrap().design_vector;
+        let mut config =
+            AlasConfig::from_value(&serde_json::json!({ "preset": "A320-200" })).unwrap();
+        assert!(baseline_fuel_artifacts(&config, &design).is_ok());
+        config.optimizer.objective.sizing_max_iterations = 1;
+        let error = baseline_fuel_artifacts(&config, &design).unwrap_err();
+        assert!(error.contains("did not settle"), "{error}");
+
+        let atr = alas_config::presets::get("ATR72-600")
+            .unwrap()
+            .design_vector;
+        let config = AlasConfig::from_value(&serde_json::json!({ "preset": "ATR72-600" })).unwrap();
+        assert!(baseline_fuel_artifacts(&config, &atr).is_ok());
     }
 }
