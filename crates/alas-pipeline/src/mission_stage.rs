@@ -66,20 +66,24 @@ pub(crate) fn evaluate(
     origin: &Airport,
     destination: &Airport,
     route_distance_m: f64,
-) -> Result<(MissionResult, SelectedLoadCase), String> {
+) -> Result<(Option<MissionResult>, SelectedLoadCase), String> {
     let request = build_mission_request(config, origin, destination, route_distance_m);
-    let schedule = build_schedule(&request)?;
-    let mut analyses = build_analyses(config, report)?;
     let fuel_loading = plan_fuel_loading(config, &report.design, report);
-    let load_case = dispatch::select_load_case(
-        config,
-        report,
-        &fuel_loading,
-        &mut analyses,
-        &request,
-        &schedule,
-    )?;
-    let result = flight::fly_with_guidance(schedule, &request, &analyses)?;
+    let mut load_case = dispatch::select_load_case(config, report, &fuel_loading, &request)?;
+    // The one native flight, at the selected mass: telemetry beside the
+    // route the segment model priced; its failure never stops the stage.
+    let native = (|| {
+        let mut analyses = build_analyses(config, report)?;
+        analyses.takeoff_mass_kg = load_case.takeoff_mass_kg;
+        analyses.minimum_mass_kg = Some(load_case.zero_fuel_mass_kg);
+        flight::fly_with_guidance(build_schedule(&request)?, &request, &analyses)
+    })();
+    let result = native
+        .map_err(|error| load_case.native_error = Some(error))
+        .ok();
+    if let Some(summary) = result.as_ref().and_then(MissionResult::completed_summary) {
+        load_case.record_native_trip(summary.trip_fuel_kg);
+    }
     Ok((result, load_case))
 }
 
@@ -1064,6 +1068,8 @@ mod tests {
 
         let (result, load_case) = evaluate(&config, &report, origin, destination, 5_000_000.0)
             .unwrap_or_else(|error| panic!("default report flies: {error}"));
+        let result =
+            result.unwrap_or_else(|| panic!("native flight: {:?}", load_case.native_error));
         assert!((result.initial_mass_kg() - load_case.takeoff_mass_kg).abs() < 1.0e-6);
         assert_eq!(result.solutions.len(), result.scheduled_segment_count);
         assert!(result

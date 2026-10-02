@@ -210,6 +210,27 @@ fn compare_values(
         );
         return;
     }
+    // The widebody default profile's configuration heights, only where a
+    // file inherits the frozen default (a preset schedule sets its own).
+    if let Some((upstream, corrected)) =
+        mission_profile_default_correction(path).filter(|(upstream, _)| {
+            expected.as_f64().is_some() && expected.as_f64() == upstream.as_f64()
+        })
+    {
+        compare_correction_value(
+            comparison,
+            &format!("{path}: frozen Python value"),
+            expected,
+            &upstream,
+        );
+        compare_correction_value(
+            comparison,
+            &format!("{path}: source-corrected Rust value"),
+            actual,
+            &corrected,
+        );
+        return;
+    }
     if let Some((upstream, corrected)) = vibration_performance_default_correction(path) {
         compare_correction_value(
             comparison,
@@ -243,6 +264,9 @@ fn compare_values(
     match (actual, expected) {
         (Value::Object(actual), Value::Object(expected)) => {
             for (key, expected_value) in expected {
+                if product_corrections::retired_reference_key(path, key) {
+                    continue;
+                }
                 // Historical Python fixtures include runtime paths that the
                 // native mission deliberately no longer serializes.
                 if (path.ends_with("MissionConfig") || path.ends_with(".mission"))
@@ -261,6 +285,7 @@ fn compare_values(
                             expected_value,
                         );
                     }
+                    None if is_retired_solver_field(path, key) => {}
                     None => {
                         comparison.exact(&child, &Value::Null, expected_value);
                     }
@@ -365,6 +390,23 @@ fn vibration_performance_default_correction(path: &str) -> Option<(Value, Value)
         Some((serde_json::json!(2), serde_json::json!(1)))
     } else if path.ends_with(".geometry.wing.n_subdivisions") {
         Some((serde_json::json!(8), serde_json::json!(24)))
+    } else {
+        None
+    }
+}
+
+/// The default profile ends the takeoff configuration at 1,500 ft (ICAO
+/// PANS-OPS noise-abatement departure) instead of 10,000 ft and starts the
+/// landing configuration at 3,000 ft (glide-path interception) instead of
+/// 6,500 ft.
+fn mission_profile_default_correction(path: &str) -> Option<(Value, Value)> {
+    if path.ends_with(".mission.profile.takeoff_altitude_gain_m") {
+        Some((
+            serde_json::json!(3048.0),
+            serde_json::json!(1_500.0 * 0.3048),
+        ))
+    } else if path.ends_with(".mission.profile.descent_4_altitude_ft") {
+        Some((serde_json::json!(6500.0), serde_json::json!(3000.0)))
     } else {
         None
     }
@@ -511,12 +553,18 @@ fn preset_source_corrections() -> BTreeMap<String, SourceCorrection> {
             14.34 / 7.14,
         ),
         correction("A380-800.requirements.max_wing_area_m2", 855.0, 845.0),
+        // NASA Common Research Model camber distribution; see the matching
+        // entries in `parity_aircraft_presets`.
+        correction("A380-800.geometry.wing.root_airfoil", "SC2-0714", "sc20414"),
+        correction("A380-800.geometry.wing.tip_airfoil", "sc20410", "sc20610"),
         correction("B787-9.landing_gear.n_mlg_struts", 0, 2),
         correction("B787-9.landing_gear.n_nlg_wheels", 0, 2),
+        // D6-58333 Rev Q section 2.2.2: 9.80 m track over the 18 ft 11 in
+        // (5.77 m) body width.
         correction(
             "B787-9.landing_gear.track_diameter_factor",
             1.85,
-            9.8 / 5.94,
+            9.8 / 5.77,
         ),
         correction("B787-9.landing_gear.wheels_per_mlg_strut", 0, 4),
         correction(
@@ -546,7 +594,7 @@ fn preset_source_corrections() -> BTreeMap<String, SourceCorrection> {
     );
     add_planning_cabin_corrections(&mut corrections, &["A220-300", "A320-200", "A340-300"]);
     for (case, kink_fraction) in [
-        ("A340-300", 0.362_094_754_983_253_8),
+        ("A340-300", 9.5 / 30.15),
         ("A380-800", 0.359_236_516_064_625_5),
         ("AVE", 0.35),
         ("B787-9", 0.353_771_245_388_011_8),
@@ -683,11 +731,35 @@ fn saved_file_source_corrections() -> BTreeMap<String, SourceCorrection> {
         ),
         // Wing roots re-anchored to the manufacturer quarter-MAC point
         // (see support/product_corrections.rs).
-        correction("preset_only.geometry.wing.root_datum_x_m", 13.3, 13.424),
+        correction("preset_only.geometry.wing.root_datum_x_m", 13.3, 12.760),
         correction(
             "preset_then_field.geometry.wing.root_datum_x_m",
             21.0,
-            22.227,
+            21.552,
+        ),
+        // B787-9 root section matched to the CRM thickness distribution
+        // (see support/product_corrections.rs).
+        correction(
+            "preset_then_field.geometry.wing.root_airfoil",
+            "sc20614",
+            "sc20612",
+        ),
+        // B787-9 engine installation from the D6-58333 Rev Q section 2.2.2
+        // plan view (see support/product_corrections.rs).
+        correction(
+            "preset_then_field.geometry.engine.spanwise_positions_m[0]",
+            9.5,
+            9.91,
+        ),
+        correction(
+            "preset_then_field.geometry.engine.spanwise_positions_m[1]",
+            -9.5,
+            -9.91,
+        ),
+        correction(
+            "preset_then_field.geometry.engine.inlet_x_offset_m",
+            3.5,
+            6.118,
         ),
         correction("preset_only.landing_gear.n_mlg_struts", 0, 2),
         correction("preset_only.landing_gear.n_nlg_wheels", 0, 2),
@@ -708,7 +780,7 @@ fn saved_file_source_corrections() -> BTreeMap<String, SourceCorrection> {
         correction(
             "preset_then_field.landing_gear.track_diameter_factor",
             1.85,
-            9.8 / 5.94,
+            9.8 / 5.77,
         ),
         correction("preset_then_field.landing_gear.wheels_per_mlg_strut", 0, 4),
         correction(
@@ -873,23 +945,51 @@ fn add_planning_cabin_corrections(
     }
 }
 
-/// The native worker count.
-///
-/// The v1.1.0 profile keeps SciPy's upstream serial default. A caller can
-/// select multiple workers, which chooses the matching deferred-update mode.
+/// The product search budget: every thread by default (whole-generation
+/// batches are worker-count independent), a normalized design-space spread
+/// tolerance, and the two stage budgets that replace the retired
+/// generation-count keys (see [`is_retired_solver_field`]).
 fn add_native_worker_corrections(
     corrections: &mut BTreeMap<String, SourceCorrection>,
     cases: &[&str],
 ) {
+    let product = alas_config::SolverSettings::default();
     for case in cases {
         corrections.insert(
             format!("{case}.optimizer.solver.workers"),
             SourceCorrection {
                 upstream: Value::from(1.0),
-                corrected: Value::from(1.0),
+                corrected: Value::from(0.0),
             },
         );
+        corrections.insert(
+            format!("{case}.optimizer.solver.tolerance"),
+            SourceCorrection {
+                upstream: Value::from(0.01),
+                corrected: Value::from(product.tolerance),
+            },
+        );
+        for (stage, budget) in [
+            ("screening", &product.screening),
+            ("refinement", &product.refinement),
+        ] {
+            corrections.insert(
+                format!("{case}.optimizer.solver.{stage}"),
+                SourceCorrection {
+                    upstream: Value::String("absent upstream".to_owned()),
+                    corrected: serde_json::to_value(budget).unwrap(),
+                },
+            );
+        }
     }
+}
+
+/// The generation-count budget keys the product retired. A saved file that
+/// states them is migrated to the refinement evaluation budget at load time
+/// (tested by the load-note unit tests), so the loaded configuration has no
+/// such field to compare.
+fn is_retired_solver_field(path: &str, key: &str) -> bool {
+    matches!(key, "max_iterations" | "population_size") && path.ends_with(".solver")
 }
 
 fn add_optimizer_method_corrections(
@@ -901,7 +1001,7 @@ fn add_optimizer_method_corrections(
             format!("{case}.optimizer.solver.method"),
             SourceCorrection {
                 upstream: Value::String("absent upstream".to_owned()),
-                corrected: Value::String("scipy_legacy".to_owned()),
+                corrected: Value::String("differential_evolution".to_owned()),
             },
         );
     }

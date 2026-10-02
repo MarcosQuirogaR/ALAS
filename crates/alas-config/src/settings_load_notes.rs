@@ -8,8 +8,11 @@
 //! The flag stays an in-memory diagnostic knob for library and
 //! command-line callers (`--no-mission`).
 
+use std::borrow::Cow;
+
 use super::AlasConfig;
 use crate::overlay::OverlayError;
+use crate::retired_keys::{LegacySolverBudget, RetiredKeysDropped};
 use crate::{MassArchitectureMigration, LEGACY_METHOD_TOKENS};
 
 /// What loading a configuration document changed about its meaning.
@@ -24,6 +27,11 @@ pub struct ConfigLoadNotes {
     /// this build no longer implements as a separate kernel and the loaded
     /// configuration was migrated to `differential_evolution` instead.
     pub legacy_solver_method: Option<&'static str>,
+    /// The generation-count budget a saved file stated, converted to the
+    /// refinement evaluation budget.
+    pub legacy_solver_budget: Option<LegacySolverBudget>,
+    /// Retired optimizer keys the document carried and the load dropped.
+    pub retired_keys: RetiredKeysDropped,
 }
 
 impl ConfigLoadNotes {
@@ -34,6 +42,14 @@ impl ConfigLoadNotes {
     pub fn legacy_solver_method_message(token: &str) -> String {
         format!(
             "The saved optimizer method '{token}' is no longer a separate algorithm; this configuration now runs differential evolution (L-SHADE, epsilon-constrained) instead."
+        )
+    }
+
+    /// The sentence shown when a saved file stated the budget in generations.
+    pub fn legacy_solver_budget_message(budget: &LegacySolverBudget) -> String {
+        format!(
+            "The saved optimizer budget of {} generations with population multiplier {} was converted to a refinement budget of {} evaluations.",
+            budget.max_iterations, budget.population_size, budget.refinement_max_evaluations
         )
     }
 
@@ -49,6 +65,10 @@ impl ConfigLoadNotes {
         if let Some(token) = self.legacy_solver_method {
             messages.push(Self::legacy_solver_method_message(token));
         }
+        if let Some(budget) = &self.legacy_solver_budget {
+            messages.push(Self::legacy_solver_budget_message(budget));
+        }
+        messages.extend(self.retired_keys.messages().into_iter().map(str::to_owned));
         messages
     }
 }
@@ -76,13 +96,44 @@ pub fn legacy_solver_method(data: &serde_json::Value) -> Option<&'static str> {
         .find(|&token| token == method)
 }
 
+/// `data` as the strict overlay should see it: without the desktop session
+/// envelope a workspace file carries next to the aircraft configuration, which
+/// is not aircraft data, and without the optimizer keys this build retired.
+/// A document with neither is borrowed unchanged. A retired generation-count
+/// budget is converted to the refinement evaluation budget and returned for
+/// the load note.
+pub(super) fn aircraft_document(
+    data: &serde_json::Value,
+) -> (Cow<'_, serde_json::Value>, Option<LegacySolverBudget>) {
+    let (migrated, budget) = crate::retired_keys::with_migrated_solver_budget(data);
+    let mut document = match migrated {
+        Cow::Borrowed(data) => crate::retired_keys::without_retired_optimizer_keys(data),
+        Cow::Owned(value) => {
+            Cow::Owned(crate::retired_keys::without_retired_optimizer_keys(&value).into_owned())
+        }
+    };
+    if document
+        .as_object()
+        .is_some_and(|map| map.contains_key(super::WORKSPACE_ENVELOPE_KEY))
+    {
+        if let Some(map) = document.to_mut().as_object_mut() {
+            map.remove(super::WORKSPACE_ENVELOPE_KEY);
+        }
+    }
+    (document, budget)
+}
+
 /// Apply the loading-boundary rules to an overlaid configuration and
 /// assemble its notes.
 pub(super) fn finish(
     mut loaded: AlasConfig,
     mass_architecture: MassArchitectureMigration,
     data: &serde_json::Value,
+    legacy_solver_budget: Option<LegacySolverBudget>,
 ) -> (AlasConfig, ConfigLoadNotes) {
+    if let Some(budget) = &legacy_solver_budget {
+        tracing::warn!("{}", ConfigLoadNotes::legacy_solver_budget_message(budget));
+    }
     let mission_forced_on = legacy_mission_disabled(data);
     if mission_forced_on {
         loaded.mission.enabled = true;
@@ -99,6 +150,8 @@ pub(super) fn finish(
             mass_architecture,
             mission_forced_on,
             legacy_solver_method,
+            legacy_solver_budget,
+            retired_keys: RetiredKeysDropped::default(),
         },
     )
 }
@@ -165,6 +218,35 @@ mod load_notes_tests {
     }
 
     #[test]
+    fn a_saved_generation_budget_becomes_a_refinement_evaluation_budget() {
+        let variables = crate::DESIGN_VARIABLE_SPECS.len() as i64;
+        let data = serde_json::json!({
+            "optimizer": { "solver": { "max_iterations": 4, "population_size": 2 } }
+        });
+        let (config, notes) = AlasConfig::from_value_with_notes(&data).unwrap();
+        let budget = notes.legacy_solver_budget.unwrap();
+        assert_eq!(budget.refinement_max_evaluations, 5 * 2 * variables);
+        assert_eq!(
+            config.optimizer.solver.refinement.max_evaluations,
+            5 * 2 * variables
+        );
+        assert_eq!(
+            notes.messages(),
+            vec![ConfigLoadNotes::legacy_solver_budget_message(&budget)]
+        );
+
+        // An explicit new budget wins over the converted one, and a document
+        // without the retired keys carries no note.
+        let explicit = serde_json::json!({
+            "optimizer": { "solver": { "max_iterations": 4, "refinement": { "max_evaluations": 77 } } }
+        });
+        let (config, _) = AlasConfig::from_value_with_notes(&explicit).unwrap();
+        assert_eq!(config.optimizer.solver.refinement.max_evaluations, 77);
+        let (_, notes) = AlasConfig::from_value_with_notes(&serde_json::json!({})).unwrap();
+        assert!(notes.legacy_solver_budget.is_none());
+    }
+
+    #[test]
     fn a_saved_legacy_solver_method_is_migrated_and_reported() {
         for token in LEGACY_METHOD_TOKENS {
             let data = serde_json::json!({ "optimizer": { "solver": { "method": token } } });
@@ -184,16 +266,40 @@ mod load_notes_tests {
     }
 
     #[test]
-    fn a_supported_profile_or_omitted_method_carries_no_note() {
+    fn an_old_file_with_the_retired_default_method_and_its_keys_loads_and_migrates() {
+        let mut value = serde_json::to_value(AlasConfig::default()).unwrap();
+        value["optimizer"]["solver"]["method"] = serde_json::json!("scipy_legacy");
+        value["optimizer"]["solver"]["strategy"] = serde_json::json!("best1bin");
+        value["optimizer"]["weights"]["cg_penalty_scale"] = serde_json::json!(200.0);
+        value["optimizer"]["weights"]["ld_weight"] = serde_json::json!(1.0);
+
+        let (config, notes) = AlasConfig::from_value_with_notes(&value).unwrap();
+
+        assert_eq!(config.optimizer.solver.method, "differential_evolution");
+        assert_eq!(notes.legacy_solver_method, Some("scipy_legacy"));
+        assert!(notes.retired_keys.solver && notes.retired_keys.weights);
+        assert!(!notes.retired_keys.span);
+        let messages = notes.messages();
+        assert_eq!(messages.len(), 3, "{messages:?}");
+        assert_eq!(
+            messages[0],
+            ConfigLoadNotes::legacy_solver_method_message("scipy_legacy")
+        );
+        // What the retired keys carried is dropped, not reinterpreted.
+        let saved = serde_json::to_value(&config).unwrap();
+        assert!(saved["optimizer"]["solver"].get("strategy").is_none());
+        assert!(saved["optimizer"]["weights"]
+            .get("cg_penalty_scale")
+            .is_none());
+    }
+
+    #[test]
+    fn the_supported_method_or_an_omitted_method_carries_no_note() {
         for (data, expected_method) in [
-            (serde_json::json!({}), "scipy_legacy"),
+            (serde_json::json!({}), "differential_evolution"),
             (
                 serde_json::json!({ "optimizer": { "solver": { "method": "differential_evolution" } } }),
                 "differential_evolution",
-            ),
-            (
-                serde_json::json!({ "optimizer": { "solver": { "method": "scipy_legacy" } } }),
-                "scipy_legacy",
             ),
         ] {
             assert_eq!(legacy_solver_method(&data), None);

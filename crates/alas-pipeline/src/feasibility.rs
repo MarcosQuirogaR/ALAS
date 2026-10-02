@@ -30,6 +30,7 @@ mod design_mass;
 mod dispatch;
 mod fuel;
 mod mass_balance;
+mod mission_fuel;
 mod model_cg;
 mod operational_envelope;
 mod payload_findings;
@@ -54,12 +55,13 @@ pub use dispatch::{DispatchAssessment, DispatchOutcome};
 pub(crate) use fuel::plan_fuel_loading;
 pub use fuel::{
     assess_fuel_capacity, CarriedFuelBasis, FuelCapacityAssessment, FuelCapacityEvidence,
-    FuelLoadingAssessment, MissionFuelAssessment, MissionFuelStatus,
+    FuelLoadingAssessment,
 };
 pub use mass_balance::{
     takeoff_mass_properties, LedgerItemSummary, MassBalanceAssessment, MassStateSummary,
     TankSummary,
 };
+pub use mission_fuel::{MissionFuelAssessment, MissionFuelStatus, NativeMissionTelemetry};
 pub use operational_envelope::{
     append_envelope_findings, assess_operational_envelope, balance_index, CheckedPoint,
     OperationalEnvelopeAssessment,
@@ -161,22 +163,32 @@ pub fn assess_physical_feasibility_with_load_case(
 
     let mut fuel_loading = plan_fuel_loading(config, design, report);
     dispatch::apply_load_case(&mut fuel_loading, load_case, &mut findings);
-    fuel_loading.analyzed_landing_mass_kg = mission
-        .and_then(MissionResult::completed_summary)
-        .map(|summary| summary.landing_mass_kg);
+    // The arrival mass is the route's on the unified model's frozen plan:
+    // takeoff mass less trip, which for a settled dispatch is the zero-fuel
+    // mass plus reserves, extra and the taxi-in budget. The native flight is
+    // telemetry and never sets it.
+    fuel_loading.analyzed_landing_mass_kg = fuel_loading.dispatch.and_then(|dispatch| {
+        dispatch
+            .plan
+            .map(|plan| dispatch.takeoff_mass_kg - plan.trip.kg)
+    });
     let cruise_equilibrium = mission.map(assess_cruise_equilibrium);
     if let Some(assessment) = &cruise_equilibrium {
         if !assessment.is_finite() {
-            findings.push(error(
+            findings.push(warning(
                 FindingCode::InvalidCruiseForceBalance,
-                "cruise force-balance record contains no finite solved control point",
+                "native mission cruise force-balance record contains no finite solved control point (telemetry only)",
                 None,
                 None,
                 "",
             ));
         }
     }
-    fuel_loading.mission = fuel::assess_mission_fuel(config.mission.enabled, mission);
+    fuel_loading.mission = mission_fuel::assess_mission_fuel(
+        config.mission.enabled,
+        fuel_loading.dispatch.as_ref(),
+        mission,
+    );
     findings.extend(fuel::findings(config.requirements.mtow_kg, &fuel_loading));
     structural_mass::append_structural_mass_findings(
         config,
@@ -660,76 +672,45 @@ pub fn assess_physical_feasibility_with_load_case(
         }
     }
 
+    // The route is judged on the unified segment mission model, on the plan
+    // frozen for it: the dispatch already reports an unpriced policy
+    // (`FuelPolicyUnavailable`), an unsettled closure (`DispatchNotConverged`)
+    // and trip plus reserves above the loadable fuel (`ReserveFuelShortfall`).
+    // What is added here is a requested mission with no route result at all,
+    // a trip that does not fit in the loadable fuel, and a non-physical trip.
+    // The native pseudospectral flight is telemetry
+    // (`fuel_loading.mission.native`) and never gates.
     if config.mission.enabled {
-        match mission {
-            None => findings.push(error(
+        let route = &fuel_loading.mission;
+        if fuel_loading.dispatch.is_none() {
+            findings.push(error(
                 FindingCode::MissionUnavailable,
-                "mission analysis was requested but produced no telemetry",
+                "mission analysis was requested but the route was not flown",
                 None,
                 None,
                 "",
-            )),
-            Some(result) => {
-                if let Some(exhaustion) = &result.fuel_exhaustion {
-                    findings.push(error(
-                        FindingCode::MissionFuelShortfall,
-                        format!(
-                            "usable fuel was exhausted during mission segment {}",
-                            exhaustion.segment_tag
-                        ),
-                        Some(exhaustion.burned_fuel_kg),
-                        Some(exhaustion.available_fuel_kg),
-                        "kg",
-                    ));
-                }
-                if result.solutions.is_empty()
-                    || result.solutions.iter().any(|solution| !solution.converged)
-                {
-                    findings.push(error(
-                        FindingCode::MissionNotConverged,
-                        "at least one native mission segment did not converge",
-                        None,
-                        None,
-                        "",
-                    ));
-                }
-                if result
-                    .solutions
-                    .iter()
-                    .any(|solution| solution.throttle_limited)
-                {
-                    findings.push(error(
-                        FindingCode::MissionThrottleLimitViolation,
-                        "mission reached the available 1.000 throttle boundary before force balance converged",
-                        Some(1.0),
-                        Some(1.0),
-                        "fraction",
-                    ));
-                }
-                let burned_kg = fuel_loading
-                    .mission
-                    .burned_fuel_kg
-                    .unwrap_or_else(|| result.fuel_burned_kg());
-                if !burned_kg.is_finite() || burned_kg <= 0.0 {
-                    findings.push(error(
-                        FindingCode::InvalidMissionFuelBurn,
-                        "mission fuel burn is not a positive finite quantity",
-                        Some(burned_kg),
-                        Some(0.0),
-                        "kg",
-                    ));
-                } else if result.fuel_exhaustion.is_none()
-                    && fuel_loading.analyzed_carried_fuel_kg.is_finite()
-                    && burned_kg > fuel_loading.analyzed_carried_fuel_kg
-                {
-                    findings.push(error(
-                        FindingCode::MissionFuelShortfall,
-                        "mission fuel burn exceeds the fuel carried in this load case",
-                        Some(burned_kg),
-                        Some(fuel_loading.analyzed_carried_fuel_kg),
-                        "kg",
-                    ));
-                }
+            ));
+        } else if route.status == MissionFuelStatus::Exhausted {
+            let required_kg = fuel_loading
+                .dispatch
+                .and_then(|dispatch| dispatch.plan)
+                .map(|plan| plan.trip.kg);
+            findings.push(error(
+                FindingCode::MissionFuelShortfall,
+                "the route's trip fuel on the segment mission model exceeds the loadable fuel",
+                required_kg,
+                route.burned_fuel_kg,
+                "kg",
+            ));
+        } else if let Some(trip_kg) = route.required_trip_fuel_kg {
+            if !trip_kg.is_finite() || trip_kg <= 0.0 {
+                findings.push(error(
+                    FindingCode::InvalidMissionFuelBurn,
+                    "route trip fuel on the segment mission model is not a positive finite quantity",
+                    Some(trip_kg),
+                    Some(0.0),
+                    "kg",
+                ));
             }
         }
     }
@@ -743,6 +724,7 @@ pub fn assess_physical_feasibility_with_load_case(
         mass_balance,
         propulsion_station_fallback: structural_mass::propulsion_fallback_station(config, report),
         operational_envelope,
+        native_mission_error: load_case.and_then(|case| case.native_error.clone()),
     }
 }
 

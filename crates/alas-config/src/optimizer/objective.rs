@@ -13,12 +13,11 @@
 //! soft (it ranks behind feasibility but ahead of the objective), diagnostic
 //! (reported, never ranked) or off.
 //!
-//! This group belongs to the mission-sized product profile. The default
-//! `scipy_legacy` profile instead uses the original weighted lift-to-drag
-//! objective and the penalty table in [`super::ObjectiveWeights`].
+//! This group defines the mission-sized objective the one search minimises.
 
 use serde::{Deserialize, Serialize};
 
+use super::aerodrome_code::AerodromeReferenceCode;
 use crate::{ConfigNode, Kind, Leaf};
 
 /// The scalar the search minimises.
@@ -179,7 +178,7 @@ pub struct ObjectiveConfig {
     #[config(
         options = ObjectiveKind,
         label = "Objective",
-        help = "Used by the mission-sized differential_evolution profile. That profile sizes each candidate by the design mission and ranks it feasibility first. scipy_legacy ignores this selector and minimizes the original weighted L/D cost plus its penalty table."
+        help = "Used by the mission-sized differential_evolution profile. That profile sizes each candidate by the design mission and ranks it feasibility first."
     )]
     pub kind: ObjectiveKind,
 
@@ -266,17 +265,17 @@ pub struct ObjectiveConfig {
     #[config(
         options = ConstraintPolicy,
         label = "Geometry constraints",
-        help = "How the span limit, the maximum wing area, the minimum wing loading, the tail volume window and the passenger-capacity requirement take part in the ranking."
+        help = "How the span limit, the maximum wing area, the minimum wing loading and the passenger-capacity requirement take part in the ranking."
     )]
     pub geometry_constraints: ConstraintPolicy,
 
-    /// Largest wingspan the aerodrome code admits.
+    /// Aerodrome reference code whose wingspan limit bounds a clean-sheet design.
     #[config(
-        label = "Maximum wingspan",
-        unit = "m",
-        help = "Largest wingspan allowed by the selected aerodrome reference-code case. The 36/52/65/80 m values are study inputs representing codes C/D/E/F; this configuration does not infer a code from an ICAO identifier or runway length. Zero disables the limit."
+        options = AerodromeReferenceCode,
+        label = "Aerodrome reference code",
+        help = "ICAO Annex 14 aerodrome reference code letter that caps the wingspan of a clean-sheet design, strictly below the band edge: A 15 m, B 24 m, C 36 m, D 52 m, E 65 m, F 80 m (Table 1-1). A reference adaptation of a registered aircraft uses that aircraft's own letter instead. Unrestricted disables the limit. The configuration does not infer a code from an ICAO identifier or runway length."
     )]
-    pub max_span_m: f64,
+    pub aerodrome_reference_code: AerodromeReferenceCode,
 
     /// Highest approach speed the design may have.
     #[config(
@@ -309,7 +308,7 @@ impl Default for ObjectiveConfig {
             balance_constraints: ConstraintPolicy::Hard,
             performance_constraints: ConstraintPolicy::Hard,
             geometry_constraints: ConstraintPolicy::Hard,
-            max_span_m: 80.0,
+            aerodrome_reference_code: AerodromeReferenceCode::F,
             max_approach_speed_kt: 0.0,
             soft_penalty_weight: 10.0,
         }
@@ -347,7 +346,6 @@ impl ObjectiveConfig {
             return Err("MTOW band fraction must lie strictly between zero and one".to_owned());
         }
         for (name, value) in [
-            ("max_span_m", self.max_span_m),
             ("max_approach_speed_kt", self.max_approach_speed_kt),
             ("soft_penalty_weight", self.soft_penalty_weight),
             (

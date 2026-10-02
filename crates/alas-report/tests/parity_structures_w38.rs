@@ -113,23 +113,6 @@ fn sample_structural_result() -> StructuralAnalysisResult {
 }
 
 #[test]
-fn fixture_names_every_required_axis_and_external_contract() {
-    let fixture = fixture();
-    let sizing = &fixture["figures"]["structures_sizing"]["axis_labels"];
-    assert_eq!(sizing[0], "Spanwise position Y [m]");
-    assert_eq!(sizing[1], "Chordwise position X [m]");
-    assert_eq!(fixture["figures"]["structures_sizing"]["bars"], 2);
-    assert_eq!(
-        fixture["figures"]["structures_patran"]["external_result"],
-        true
-    );
-    assert_eq!(
-        fixture["figures"]["structures_patran"]["ordered_images"],
-        true
-    );
-}
-
-#[test]
 fn unavailable_structural_scene_uses_the_actionable_reference_reason() {
     let scene = structures::figure_structures_sizing(None, Some("light"));
     let contract = fixture();

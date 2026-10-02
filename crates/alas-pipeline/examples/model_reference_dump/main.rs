@@ -471,9 +471,8 @@ fn dump(name: &str) -> Result<Value, String> {
     });
 
     // ---- payload / range -------------------------------------------------
-    // Mirrors `alas_report::families::performance::payload_range_data`, kept
-    // local so this instrument does not depend on the report crate compiling.
-    let mut pr = payload_range(&config, &report, oew, s_ref);
+    // The shared corner solver the report figure and the sandbox publish.
+    let mut pr = payload_range(&config, &report);
     if let Some(payload_range) = pr.as_mut().and_then(Value::as_object_mut) {
         let capacity_kg = payload_range
             .get("fuel_capacity_kg")

@@ -10,6 +10,15 @@
 //! the skin at its configured minimum, and derives the rib spacing from a
 //! panel-buckling criterion.
 //!
+//! The cover skin between the spars is bending material: the product law
+//! sizes each cap for the moment its share of the cover skin does not already
+//! carry (the boom idealization of `law::cover_skin_boom_areas_m2`). Sizing
+//! the caps for the whole moment while also charging the minimum-gauge skin
+//! counted the cover twice; the stiffness of the same section
+//! ([`crate::analytical`]) and the rib panel-buckling stress below already
+//! took the skin as loaded. On the A320-200 the double count was 1.6 t of
+//! the 7.3 t strength box.
+//!
 //! Loads come from [`crate::loads`]: an elliptic aerodynamic distribution less
 //! the inertia of the mass the wing carries itself, which is the wing-bending
 //! design case (see [`crate::loads::WingInertiaRelief`] for why the no-relief
@@ -59,7 +68,7 @@ pub use types::{
     MassBreakdown, SparSizing, WingboxSizing, MARGIN_NUMERICAL_ZERO,
 };
 
-pub(crate) use law::{gradient_unit, trapezoid};
+pub(crate) use law::{gradient_unit, sizing_cover_skin_boom_areas_m2, trapezoid};
 use law::{linspace, SizingLaw};
 use solve::size_wingbox_with_law;
 
@@ -282,6 +291,23 @@ mod tests {
         // Past the half-chord bound the area cannot be carried: reported short.
         let (w, t) = root_cap_dimensions(0.5, 6.0, 0.5);
         assert!((w - 3.0).abs() < 1e-12 && w * t < 0.5);
+    }
+
+    #[test]
+    fn the_cover_skin_is_lumped_once_and_a_spar_without_depth_is_not_a_boom() {
+        use super::law::cover_skin_boom_areas_m2;
+        // Three spars on a 4 m chord with a 6 mm skin: the whole 0.25-0.70
+        // cover, 1.8 m wide, is 0.0108 m^2, shared half-panel by half-panel.
+        let areas = cover_skin_boom_areas_m2(&[0.25, 0.5, 0.7], &[0.5, 0.45, 0.35], 4.0, 0.006);
+        assert!((areas.iter().sum::<f64>() - 0.006 * 0.45 * 4.0).abs() < 1e-15);
+        assert!((areas[0] - 0.5 * 0.006 * 1.0).abs() < 1e-15);
+        assert!((areas[1] - 0.5 * 0.006 * 1.8).abs() < 1e-15);
+        // Outboard of its break the centre spar has no depth: the panel runs
+        // front to rear and the total skin is unchanged.
+        let areas = cover_skin_boom_areas_m2(&[0.25, 0.5, 0.7], &[0.5, 0.0, 0.35], 4.0, 0.006);
+        assert_eq!(areas[1], 0.0);
+        assert!((areas[0] - areas[2]).abs() < 1e-15);
+        assert!((areas.iter().sum::<f64>() - 0.006 * 0.45 * 4.0).abs() < 1e-15);
     }
 
     #[test]

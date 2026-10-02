@@ -547,12 +547,4 @@ mod tests {
             Err(NeuralFoilError::Fit(_))
         ));
     }
-
-    #[test]
-    fn the_default_conditions_are_the_ones_this_program_never_overrides() {
-        let conditions = Conditions::new(2.0, 1e6);
-        assert_eq!(conditions.n_crit, 9.0);
-        assert_eq!(conditions.xtr_upper, 1.0);
-        assert_eq!(conditions.xtr_lower, 1.0);
-    }
 }

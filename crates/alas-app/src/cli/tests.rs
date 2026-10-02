@@ -32,54 +32,6 @@ fn solver_flags_reject_unknown_modes() {
 }
 
 #[test]
-fn optimization_method_accepts_each_configured_profile() {
-    for method in ["scipy_legacy", "differential_evolution"] {
-        let args = ["--optimization-method".to_owned(), method.to_owned()];
-        let parsed = parse_args(&args)
-            .unwrap_or_else(|error| panic!("optimization method parses: {error}"))
-            .unwrap_or_else(|| panic!("optimization method does not request help"));
-        assert_eq!(parsed.optimization_method.as_deref(), Some(method));
-    }
-}
-
-#[test]
-fn optimization_method_rejects_removed_search_names() {
-    // Search names that are no longer product profiles are rejected by
-    // the flag itself; saved configuration documents that still carry
-    // them are migrated by `alas_config::settings_load_notes`.
-    for method in ["feasibility_first_de", "nsga2", "turbo_1", "cma_es", "sqp"] {
-        let args = ["--optimization-method".to_owned(), method.to_owned()];
-        let error = parse_args(&args)
-            .err()
-            .unwrap_or_else(|| panic!("{method} must be rejected as a CLI flag value"));
-        assert!(error.contains("invalid optimization method"), "{error}");
-    }
-}
-
-#[test]
-fn optimization_method_rejects_unknown_strategy() {
-    let args = [
-        "--optimization-method".to_owned(),
-        "random_search".to_owned(),
-    ];
-    let error = parse_args(&args)
-        .err()
-        .unwrap_or_else(|| panic!("unknown optimization method must be rejected"));
-    assert!(error.contains("invalid optimization method"), "{error}");
-}
-
-#[test]
-fn optimization_method_overrides_the_effective_configuration() {
-    let args = CliArgs {
-        optimization_method: Some("differential_evolution".to_owned()),
-        ..CliArgs::default()
-    };
-    let config =
-        load_config(&args).unwrap_or_else(|error| panic!("effective configuration loads: {error}"));
-    assert_eq!(config.optimizer.solver.method, "differential_evolution");
-}
-
-#[test]
 fn cli_applies_nastran_solver_preference_without_overriding_explicit_config() {
     let preferences = ToolPreferences {
         nastran_solver: Some("C:/MSC/analysis.exe".to_owned()),

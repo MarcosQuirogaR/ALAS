@@ -502,6 +502,7 @@ mod preset_regression {
             route.total_distance_m(),
         )
         .unwrap_or_else(|error| panic!("ATR mission: {error}"));
+        let result = result.unwrap_or_else(|| panic!("ATR native flight"));
 
         let climb_time_s: f64 = result
             .segments

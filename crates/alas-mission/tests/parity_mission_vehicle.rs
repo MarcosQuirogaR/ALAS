@@ -269,17 +269,17 @@ fn request_corrections() -> BTreeMap<&'static str, RequestCorrection> {
         correction(
             "A320-200.geometry_config.empennage.hstab_root_chord_m",
             4.0,
-            3.831,
+            3.740,
         ),
         correction(
             "A320-200.geometry_config.empennage.hstab_tip_chord_m",
             1.2,
-            1.149,
+            1.24,
         ),
         correction(
             "A320-200.geometry_config.empennage.hstab_tip_le_m[0]",
             3.5,
-            3.631,
+            3.31,
         ),
         correction(
             "A320-200.geometry_config.empennage.hstab_tip_le_m[1]",
@@ -304,7 +304,7 @@ fn request_corrections() -> BTreeMap<&'static str, RequestCorrection> {
         correction(
             "A320-200.geometry_config.empennage.vstab_tip_le_m[2]",
             5.8,
-            5.87,
+            6.84,
         ),
         correction(
             "A320-200.geometry_config.engine.spanwise_positions_m[0]",
@@ -319,16 +319,98 @@ fn request_corrections() -> BTreeMap<&'static str, RequestCorrection> {
         correction(
             "A320-200.geometry_config.wing.break_span_fraction",
             0.37,
-            0.34,
+            0.379_3,
         ),
-        correction("A320-200.geometry_config.wing.root_datum_x_m", 12.9, 11.887),
+        correction("A320-200.geometry_config.wing.root_datum_x_m", 12.9, 11.891),
+        // The A320 planar wing and dihedral of the Airbus AC plan view and
+        // sharklet ground clearances; pinned by the alas-config preset ledger.
+        correction("A320-200.geometry_config.wing.break_z_m", -0.2, -0.62),
+        correction("A320-200.geometry_config.wing.tip_z_m", 1.5, 0.33),
+        correction("A320-200.geometry_config.engine.z_m", -1.71, -1.50),
+        correction(
+            "A320-200.geometry_config.engine.inlet_x_offset_m",
+            2.5,
+            3.646,
+        ),
         // Wing root anchored to the Airbus quarter-MAC point (gear-load statics).
-        correction("A340-300.geometry_config.wing.root_datum_x_m", 22.0, 23.111),
+        correction("A340-300.geometry_config.wing.root_datum_x_m", 22.0, 22.341),
         correction(
             "A340-300.geometry_config.empennage.hstab_tip_le_m[1]",
             9.0,
             9.7,
         ),
+        // Airbus A340-200/-300 AC Rev 33, Figure 2-2-0-991-007-A01 sheets 1-2
+        // (engine stations and inlets, fin and tailplane) and Figure
+        // 2-3-0-991-005-A01 (wing tip and nacelle ground clearances, aft CG),
+        // pinned two-sidedly by the alas-config preset ledger.
+        correction(
+            "A340-300.geometry_config.empennage.hstab_offset_from_tail_m",
+            9.0,
+            8.42,
+        ),
+        correction(
+            "A340-300.geometry_config.empennage.hstab_tip_chord_m",
+            1.8,
+            2.02,
+        ),
+        correction(
+            "A340-300.geometry_config.empennage.hstab_tip_le_m[0]",
+            6.0,
+            6.43,
+        ),
+        correction(
+            "A340-300.geometry_config.empennage.vstab_offset_from_tail_m",
+            10.5,
+            11.24,
+        ),
+        correction(
+            "A340-300.geometry_config.empennage.vstab_root_chord_m",
+            8.0,
+            7.78,
+        ),
+        correction(
+            "A340-300.geometry_config.empennage.vstab_tip_chord_m",
+            2.8,
+            2.28,
+        ),
+        correction(
+            "A340-300.geometry_config.empennage.vstab_tip_le_m[0]",
+            7.5,
+            8.14,
+        ),
+        correction(
+            "A340-300.geometry_config.empennage.vstab_tip_le_m[2]",
+            8.5,
+            9.52,
+        ),
+        correction(
+            "A340-300.geometry_config.engine.inlet_x_offset_m",
+            3.0,
+            4.227,
+        ),
+        correction(
+            "A340-300.geometry_config.engine.spanwise_positions_m[0]",
+            7.5,
+            9.37,
+        ),
+        correction(
+            "A340-300.geometry_config.engine.spanwise_positions_m[1]",
+            -7.5,
+            -9.37,
+        ),
+        correction(
+            "A340-300.geometry_config.engine.spanwise_positions_m[2]",
+            14.0,
+            19.27,
+        ),
+        correction(
+            "A340-300.geometry_config.engine.spanwise_positions_m[3]",
+            -14.0,
+            -19.27,
+        ),
+        correction("A340-300.geometry_config.engine.z_m", -1.94, -1.436),
+        correction("A340-300.geometry_config.wing.break_z_m", -0.3, -0.922),
+        correction("A340-300.geometry_config.wing.tip_z_m", 2.0, 1.315),
         correction(
             "A320-200.geometry_config.fuselage.height_m",
             Value::Null,
@@ -337,7 +419,7 @@ fn request_corrections() -> BTreeMap<&'static str, RequestCorrection> {
         correction(
             "A320-200.geometry_config.wing.side_of_body_chord_ratio",
             "<absent>",
-            0.827_405,
+            0.852_98,
         ),
         correction("A320-200.engine.bypass_ratio", 11.0, 5.5),
         correction("A320-200.engine.fan_pressure_ratio", 1.4, 1.6),

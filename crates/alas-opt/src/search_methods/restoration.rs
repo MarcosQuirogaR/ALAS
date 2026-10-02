@@ -1,11 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! Bounded derivative-free feasibility restoration in the original envelope.
-//! Four coordinate-poll waves cost at most 4 * (2 * free_dimensions + 1)
-//! requested scores beyond the DE budget. An optional normalized-gradient
-//! trial uses measured violations and must itself be evaluated before selection.
-//! No constraint, bound, or reference anchor changes during this phase.
+//! Bounded derivative-free feasibility restoration in the original envelope,
+//! run only when the refinement found no feasible design. Each coordinate
+//! poll wave (`2 d` points) is one batch; an optional normalized-gradient
+//! trial uses measured violations and is itself evaluated before selection.
+//! At most four waves, never more than the caller's score budget, and a wave
+//! that would not fit is not started. No constraint, bound or reference
+//! anchor changes during this phase.
+
+use std::time::{Duration, Instant};
 
 use super::{EvaluateBatch, ScoredPoint};
 use crate::cancellation::{CancelPhase, CancelScope};
@@ -18,6 +22,8 @@ const MAX_RADIUS: f64 = 0.10;
 pub(crate) struct Outcome {
     pub(crate) winner: ScoredPoint,
     pub(crate) requested_scores: usize,
+    /// Requested scores the design-vector pre-gate rejected.
+    pub(crate) rejected_scores: usize,
     pub(crate) budget: usize,
     pub(crate) iterations: usize,
     pub(crate) radius: f64,
@@ -25,10 +31,21 @@ pub(crate) struct Outcome {
     pub(crate) first_feasible_cost: Option<f64>,
 }
 
+/// Restoration's limits: at most `max_scores` requested scores, and no new
+/// wave once `stop_after` scores passed the pre-gate (a replay's stop) or
+/// `started.elapsed() >= time_limit`.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Limits {
+    pub(crate) max_scores: usize,
+    pub(crate) stop_after: usize,
+    pub(crate) started: Instant,
+    pub(crate) time_limit: Option<Duration>,
+}
+
 pub(crate) fn run(
     bounds: &[(f64, f64)],
     initial: ScoredPoint,
-    block_size: usize,
+    limits: Limits,
     scope: &CancelScope<'_>,
     evaluate: &mut EvaluateBatch<'_>,
 ) -> Outcome {
@@ -40,21 +57,33 @@ pub(crate) fn run(
     let mut result = Outcome {
         winner: initial,
         requested_scores: 0,
+        rejected_scores: 0,
         budget: 0,
         iterations: 0,
         radius: INITIAL_RADIUS,
         cancelled: scope.requested(),
         first_feasible_cost: None,
     };
-    if result.winner.valid
+    if result.winner.valid()
         || result.cancelled
         || active.is_empty()
         || !result.winner.constraint_violation.is_finite()
     {
         return result;
     }
-    result.budget = MAX_POLLS * (2 * active.len() + 1);
+    result.budget = (MAX_POLLS * (2 * active.len() + 1)).min(limits.max_scores);
+    let out_of_time = || {
+        limits
+            .time_limit
+            .is_some_and(|limit| limits.started.elapsed() >= limit)
+    };
     for iteration in 0..MAX_POLLS {
+        if result.requested_scores + 2 * active.len() > result.budget
+            || result.requested_scores - result.rejected_scores >= limits.stop_after
+            || out_of_time()
+        {
+            break;
+        }
         if scope.requested() {
             result.cancelled = true;
             break;
@@ -71,20 +100,22 @@ pub(crate) fn run(
                 points.push(values);
             }
         }
-        let samples = evaluate_wave(&points, block_size, scope, evaluate, &mut result);
+        let samples = evaluate_wave(&points, scope, evaluate, &mut result);
         if result.cancelled {
             break;
         }
         result.iterations += 1;
-        // Finish a deterministic full wave before stopping on feasibility:
-        // stopping at a worker block would change the winner with worker count.
-        if result.winner.valid {
+        // A full wave completes before stopping on feasibility, so the
+        // winner never depends on how the wave was spread across threads.
+        if result.winner.valid() {
             break;
         }
-        if let Some(trial) = gradient_trial(bounds, &active, &center, &samples, result.radius) {
-            evaluate_wave(&[trial], block_size, scope, evaluate, &mut result);
+        if result.requested_scores < result.budget {
+            if let Some(trial) = gradient_trial(bounds, &active, &center, &samples, result.radius) {
+                evaluate_wave(&[trial], scope, evaluate, &mut result);
+            }
         }
-        if result.cancelled || result.winner.valid {
+        if result.cancelled || result.winner.valid() {
             break;
         }
         result.radius = if result.winner.feasibility_key() < center.feasibility_key() {
@@ -102,37 +133,28 @@ pub(crate) fn run(
 
 fn evaluate_wave(
     points: &[Vec<f64>],
-    block_size: usize,
     scope: &CancelScope<'_>,
     evaluate: &mut EvaluateBatch<'_>,
     result: &mut Outcome,
 ) -> Vec<ScoredPoint> {
-    let mut samples = Vec::with_capacity(points.len());
-    for block in points.chunks(block_size.max(1)) {
-        if scope.requested() {
-            result.cancelled = true;
-            break;
+    let samples: Vec<ScoredPoint> = evaluate(points)
+        .into_iter()
+        .map(ScoredPoint::sanitized)
+        .collect();
+    result.requested_scores += points.len();
+    result.rejected_scores += samples
+        .iter()
+        .filter(|point| point.tier == super::Tier::PreGateFailed)
+        .count();
+    for point in &samples {
+        if point.valid() && result.first_feasible_cost.is_none() {
+            result.first_feasible_cost = Some(point.cost);
         }
-        let scored = evaluate(block);
-        result.requested_scores += scored.len();
-        for mut point in scored {
-            if !point.cost.is_finite() || !point.constraint_violation.is_finite() {
-                point.valid = false;
-                point.constraint_violation = f64::INFINITY;
-            }
-            if point.valid && result.first_feasible_cost.is_none() {
-                result.first_feasible_cost = Some(point.cost);
-            }
-            if point.feasibility_key() < result.winner.feasibility_key() {
-                result.winner = point.clone();
-            }
-            samples.push(point);
-        }
-        if scope.requested() {
-            result.cancelled = true;
-            break;
+        if point.feasibility_key() < result.winner.feasibility_key() {
+            result.winner = point.clone();
         }
     }
+    result.cancelled |= scope.requested();
     samples
 }
 

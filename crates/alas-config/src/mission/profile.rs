@@ -58,6 +58,42 @@ impl Leaf for SpeedReference {
     }
 }
 
+/// Which cruise flight level(s) a trip is flown at.
+///
+/// The configured cruise altitude is a ceiling a dispatcher works below, not
+/// a level every weight can hold: a heavy transport starts lower and steps up
+/// as fuel burns off.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CruiseAltitudePolicy {
+    /// Fly the route's declared cruise altitude (the preset's operational
+    /// level on its declared route, otherwise the design altitude), lowered
+    /// only as far as the route length or a level-flight thrust shortfall
+    /// forces.
+    Declared,
+    /// Fly the design cruise altitude, with the same route-fit and
+    /// level-flight lowering as `Declared`.
+    Design,
+    /// Start at the highest flight level at or below the declared altitude
+    /// with a maximum-climb residual rate of climb of at least 300 ft/min at
+    /// the estimated top-of-climb mass, and step up by the same-direction
+    /// level separation whenever the next level meets the same criterion and
+    /// improves the specific air range.
+    #[default]
+    OptimumStep,
+}
+
+impl Leaf for CruiseAltitudePolicy {
+    fn kind(&self, _name: &str) -> Kind {
+        Kind::Str
+    }
+}
+
+/// Whether `policy` is the default, for `#[serde(skip_serializing_if)]`.
+fn is_default_cruise_policy(policy: &CruiseAltitudePolicy) -> bool {
+    *policy == CruiseAltitudePolicy::default()
+}
+
 /// How many equal-altitude sub-rungs a [`SpeedReference::CalibratedAirspeed`]
 /// climb or descent leg is split into, in *both* the MDO mission model
 /// (`alas-opt::mdo::mission_model::profile`) and the native pseudospectral
@@ -125,6 +161,13 @@ pub struct MissionProfileConfig {
         help = "Whether the takeoff/climb/descent/landing air speeds below are true airspeeds (legacy default) or calibrated airspeeds resolved against the real ambient pressure and temperature at each leg's altitude. Cruise legs are never affected by this."
     )]
     pub climb_descent_speed_reference: SpeedReference,
+
+    /// Which cruise flight level(s) a trip is flown at.
+    #[serde(skip_serializing_if = "is_default_cruise_policy")]
+    #[config(
+        help = "Cruise level rule: the declared altitude, the design altitude, or the optimum initial level (300 ft/min residual climb at top-of-climb mass) with step climbs as the aircraft lightens."
+    )]
+    pub cruise_altitude_policy: CruiseAltitudePolicy,
 
     /// Height above the field the takeoff segment climbs to.
     #[config(
@@ -286,7 +329,13 @@ impl Default for MissionProfileConfig {
     fn default() -> Self {
         Self {
             climb_descent_speed_reference: SpeedReference::TrueAirspeed,
-            takeoff_altitude_gain_m: 3048.0,
+            cruise_altitude_policy: CruiseAltitudePolicy::OptimumStep,
+            // Takeoff configuration (TOGA, high-lift drag) to 1,500 ft above
+            // the field: the acceleration/flap-retraction height of the ICAO
+            // noise-abatement departure procedures, which start flap
+            // retraction between 800 ft (NADP 2) and 3,000 ft (NADP 1) AAL
+            // (ICAO Doc 8168 PANS-OPS Vol I, Part I, Sec. 7, Ch. 3).
+            takeoff_altitude_gain_m: 1_500.0 * 0.3048,
             takeoff_air_speed_m_s: 128.6,
             takeoff_climb_rate_m_s: 10.0,
             initial_climb_air_speed_m_s: 170.0,
@@ -312,7 +361,12 @@ impl Default for MissionProfileConfig {
             descent_3_altitude_ft: 10000.0,
             descent_3_air_speed_m_s: 170.0,
             descent_3_rate_m_s: 5.0,
-            descent_4_altitude_ft: 6500.0,
+            // Landing configuration from glide-path interception at 3,000 ft
+            // (a mean-sea-level rung, so above a sea-level field; about 10 NM on a 3 degree ILS; ICAO Doc 8168
+            // PANS-OPS Vol II final approach segment), which is also the
+            // ICAO LTO approach-mode ceiling (ICAO Annex 16 Vol II, 4 min
+            // below 3,000 ft).
+            descent_4_altitude_ft: 3_000.0,
             descent_4_air_speed_m_s: 150.0,
             descent_4_rate_m_s: 5.0,
             landing_air_speed_m_s: 83.6,

@@ -125,17 +125,22 @@ fn a_wing_root_moved_past_the_tailcone_is_rejected_by_the_fuselage_containment_r
     // configuration-scaffold edit (`geometry.wing.root_datum_x_m`,
     // `docs/optimizer-design-vector.md`'s "fixed" fields) this residual
     // exists to catch on an imported or hand-edited geometry document.
+    //
+    // The trimmed drag table may refuse such an aircraft first: with the
+    // wing behind the tail its fourth trimmed lattice solve leaves the
+    // induced-drag quadratic. Either route keeps it from being scored.
     let design = nominal("AVE");
-    let assessment = assess_clean_sheet("AVE", design, |config| {
+    match assess_clean_sheet("AVE", design, |config| {
         config.geometry.wing.root_datum_x_m = design.fuselage_length_m + 20.0;
-    })
-    .expect("a displaced wing root still sizes");
-    assert!(
-        violates(&assessment, "wing_root_te_on_fuselage")
-            || violates(&assessment, "wing_apex_fraction_max"),
-        "violated: {:?}",
-        assessment.violated_hard_ids()
-    );
+    }) {
+        Ok(assessment) => assert!(
+            violates(&assessment, "wing_root_te_on_fuselage")
+                || violates(&assessment, "wing_apex_fraction_max"),
+            "violated: {:?}",
+            assessment.violated_hard_ids()
+        ),
+        Err(reason) => assert_eq!(reason, "drag_table"),
+    }
 }
 
 #[test]

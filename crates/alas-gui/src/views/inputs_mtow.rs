@@ -228,6 +228,10 @@ fn show_design_range(state: &mut AppState, ui: &mut Ui) {
             .typed_config()
             .map(|config| config.design_mission().range)
         {
+            Some(DesignRange::ChartedPoint(nmi)) => tr_fields(
+                "Default: {range} nmi, the design point of the manufacturer's payload-range chart.",
+                &[("range", format!("{nmi:.0}"))],
+            ),
             Some(DesignRange::FlopsDesignRange(nmi)) => tr_fields(
                 "Default: {range} nmi, the declared design range of the aircraft.",
                 &[("range", format!("{nmi:.0}"))],

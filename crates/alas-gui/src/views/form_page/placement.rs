@@ -156,8 +156,10 @@ fn prune(
 
 /// Keep profile-specific scoring and search controls visible on the optimizer
 /// page. The dedicated Design Space page owns `design_space`; the two retired
-/// gradient-driver settings have no active profile and stay hidden.
+/// gradient-driver settings have no active profile and stay hidden, as does the
+/// method token, which has one value.
 const HIDDEN_OPTIMIZER_FIELDS: &[&str] = &[
+    "method",
     "design_space",
     "finite_difference_step",
     "constraint_tolerance",
@@ -183,20 +185,9 @@ pub(super) fn optimizer_ui_fields(fields: &[Field]) -> Vec<Field> {
                 .into_iter()
                 .filter(|child| !HIDDEN_OPTIMIZER_FIELDS.contains(&child.name))
                 .map(|mut child| {
-                    match child.name {
-                        "max_iterations" => {
-                            child.label = "Max generations";
-                            child.help = "Maximum generations before the run reports iteration_limit. scipy_legacy may stop earlier on SciPy's population-energy spread test; the product profile uses its own convergence test.";
-                        }
-                        "population_size" => {
-                            child.label = "Population size multiplier";
-                            child.help = "Initial population size is this multiplier times the number of free design variables. scipy_legacy keeps the population size fixed; the L-SHADE product profile shrinks it during the run.";
-                        }
-                        "seed" => {
-                            child.label = "Random seed";
-                            child.help = "Optional integer seed for reproducible candidate generation. scipy_legacy uses deferred generation updates with multiple workers, which can change its trajectory.";
-                        }
-                        _ => {}
+                    if child.name == "seed" {
+                        child.label = "Random seed";
+                        child.help = "Optional integer seed for reproducible candidate generation.";
                     }
                     child
                 })

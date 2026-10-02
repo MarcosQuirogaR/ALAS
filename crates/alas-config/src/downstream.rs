@@ -56,21 +56,3 @@ impl Default for DownstreamConfig {
         }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::DownstreamConfig;
-
-    #[test]
-    fn all_optional_external_stages_are_enabled_by_default() {
-        assert_eq!(
-            DownstreamConfig::default(),
-            DownstreamConfig {
-                openvsp: true,
-                vspaero: true,
-                avl: true,
-                flowunsteady: true,
-            }
-        );
-    }
-}

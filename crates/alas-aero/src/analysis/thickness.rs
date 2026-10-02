@@ -38,25 +38,15 @@ impl AeroAnalysis<'_> {
             self.plane
                 .wings
                 .iter()
-                .enumerate()
-                .map(|(index, wing)| {
-                    if index == 0 {
-                        Self::area_weighted_thickness(wing)
-                    } else {
-                        Self::wing_section_thickness(wing)
-                    }
-                })
+                .map(Self::area_weighted_thickness)
                 .collect()
         })
     }
 
-    /// The maximum thickness-to-chord of a surface's root section.
-    ///
-    /// Parasite drag is accumulated surface by surface. A tail can therefore
-    /// not inherit the main wing's section thickness merely because the
-    /// latter is the first surface in the airplane. Empty surfaces retain the
-    /// same observable fallback as [`Self::section_thickness`].
-    pub(super) fn wing_section_thickness(wing: &Wing) -> f64 {
+    /// The maximum thickness-to-chord of a surface's root section. Empty
+    /// surfaces retain the same observable fallback as
+    /// [`Self::section_thickness`].
+    fn wing_section_thickness(wing: &Wing) -> f64 {
         wing.xsecs
             .first()
             .map_or(SECTION_THICKNESS_FALLBACK, |xsec| {

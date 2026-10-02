@@ -655,23 +655,6 @@ mod tests {
         }
     }
 
-    /// Optional visual audit against a real native export, without invoking OpenVSP.
-    #[test]
-    #[ignore = "set ALAS_PREVIEW_MESH and ALAS_PREVIEW_SVG for a local visual audit"]
-    fn render_native_preview_for_visual_audit() {
-        let mesh =
-            std::path::PathBuf::from(std::env::var_os("ALAS_PREVIEW_MESH").expect("mesh path"));
-        let output = std::env::var_os("ALAS_PREVIEW_SVG").expect("SVG output path");
-        let mut result = export(
-            mesh.with_extension("vspscript"),
-            OpenVspExportStatus::Vsp3Materialized,
-        );
-        result.cad_preview_geometry_path = mesh;
-        result.cad_preview_geometry_available = true;
-        let scene = mesh_projection_scene(&result, Some("dark")).expect("valid native mesh");
-        fs::write(output, crate::svg::render_svg(&scene)).expect("write visual audit");
-    }
-
     /// Negative control for the reported bug. Even when the solver-only,
     /// wing-only mesh (`vspaero_geometry_path`) is present and structurally
     /// valid, it must never be substituted for a missing full-aircraft CAD

@@ -18,7 +18,11 @@ fn all_presets_resolve_scaled_inventory_and_reject_overfill() {
         let baseline = resolve_product_layout(&config, &preset.design_vector, &reference).unwrap();
         let mut design = preset.design_vector;
         design.span_m *= 0.95;
+        // Root and kink chords shrink together: the ATR 72-600 centre
+        // section is constant-chord, so a smaller root alone would taper
+        // the wing inward and is not a buildable planform.
         design.root_chord_m *= 0.96;
+        design.break_chord_m *= 0.96;
         let plane = builder.build(Some(&design), false).unwrap();
         let tanks = resolve_product_layout(&config, &design, &plane).unwrap();
         let capacity = tanks.usable_capacity_kg();

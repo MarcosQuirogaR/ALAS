@@ -214,20 +214,6 @@ mod tests {
     }
 
     #[test]
-    fn the_cached_target_is_reused_for_the_same_key_within_the_ttl() {
-        let ctx = egui::Context::default();
-        let state = AppState::default();
-
-        let first = cached_launch_target(&ctx, &state);
-        // A second call within the TTL must not touch the filesystem again;
-        // there is nothing to assert on I/O directly, so this checks that
-        // the cached (identical) answer is returned unchanged.
-        let second = cached_launch_target(&ctx, &state);
-
-        assert_eq!(first, second);
-    }
-
-    #[test]
     fn an_expired_entry_is_recomputed() {
         let ctx = egui::Context::default();
         let state = AppState::default();

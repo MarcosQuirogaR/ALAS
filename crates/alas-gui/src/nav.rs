@@ -289,11 +289,10 @@ pub const ADVANCED_SETTINGS_PAGES: &[Page] = &[
         ..Page::form("mission_advanced", "Mission Analysis", "mission")
     },
     Page {
-        description: Some("Choose the original scipy_legacy optimizer or the mission-sized L-SHADE product profile. Whether a run optimizes at all is chosen on Inputs; the selected catalogue engine remains fixed."),
+        description: Some("Search settings for the mission-sized L-SHADE optimizer. Whether a run optimizes at all is chosen on Inputs; the selected catalogue engine remains fixed."),
         detail: &[
-            "scipy_legacy is the default and restores ALAS v1.1.0: weighted lift-to-drag plus its scalar penalty table, legacy mass coordinates, SciPy-style best1bin differential evolution, and a local seeded population or Latin-hypercube fallback. It does not run the product scan or feasibility-restoration stage.",
-            "differential_evolution selects the mission-sized formulation: each candidate is mass-balanced, trimmed and closed by the design mission, then ranked against the selected fuel, mass or efficiency objective and requirement policies.",
-            "The product profile uses L-SHADE under epsilon constraints, including its broad scan and bounded feasibility restoration. Both profiles report convergence, iteration-budget exhaustion or cancellation; convergence is the algorithm's stopping test, not a proof of global optimality.",
+            "Each candidate is mass-balanced, trimmed and closed by the design mission, then ranked against the selected fuel, mass or efficiency objective and requirement policies.",
+            "The search uses L-SHADE under epsilon constraints, seeded by a screening sample of the design box, with bounded feasibility restoration. It reports convergence, stagnation, an evaluation-budget or time-limit stop, or cancellation; convergence is the algorithm's stopping test, not a proof of global optimality.",
         ],
         ..Page::form("optimizer", "Optimizer", "optimizer")
     },

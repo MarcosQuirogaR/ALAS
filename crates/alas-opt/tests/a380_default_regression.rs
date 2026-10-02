@@ -117,8 +117,8 @@ fn the_a380_default_search_reports_a_typed_ground_reaction_cause() {
     // evolution generation actually completes and the population's rejection
     // reasons are the search's own rather than a single seed point's.
     config.optimizer.solver.seed = Some(20_260_922);
-    config.optimizer.solver.max_iterations = 3;
-    config.optimizer.solver.population_size = 2;
+    config.optimizer.solver.screening.max_evaluations = 64;
+    config.optimizer.solver.refinement.max_evaluations = 96;
 
     let mut optimizer = DesignOptimizer::new(config);
     match optimizer.run(None, None, None) {

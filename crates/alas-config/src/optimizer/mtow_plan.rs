@@ -20,7 +20,11 @@
 //! | `SizedByMission` | cap | cap | cap | none | route | design-mode basis |
 //! | `Unconstrained` | cap | none | none | none | route | design-mode basis |
 //! | `MtowBand` | `T` | `T (1 + p)` | `T (1 + p)` | `T (1 - p)` | design mission | closure |
-//! | `PayloadAdjusted` | cap | none | none | none | route, or design range | closure |
+//! | `PayloadAdjusted` | cap | none | none | none | design range, or route | closure |
+//!
+//! The design range is the objective's explicit value, else the registered
+//! preset's charted payload/range point; `PayloadAdjusted` closes on the route
+//! only when neither exists.
 //!
 //! "cap" is `requirements.mtow_kg`; `T` is `mtow_target_kg` (zero means the
 //! cap) and `p` is `mtow_band_fraction`. An explicit
@@ -62,8 +66,12 @@ impl StructuralBasis {
 pub enum DesignRange {
     /// `optimizer.objective.design_range_nmi`, nmi.
     Objective(f64),
+    /// The registered preset's charted design range
+    /// (`reference.design_point`), nmi.
+    ChartedPoint(f64),
     /// The declared FLOPS design range `DESRNG`,
-    /// `mass_model.flops_transport.design_range_nmi`, nmi.
+    /// `mass_model.flops_transport.design_range_nmi`, nmi: a mass-equation
+    /// input, used as a mission only when the preset charts no design point.
     FlopsDesignRange(f64),
     /// Neither is declared: the great-circle distance between the selected
     /// aerodromes, which the evaluator resolves from their records.
@@ -74,7 +82,9 @@ impl DesignRange {
     /// The declared range, nmi, or `None` when it is the route distance.
     pub const fn declared_nmi(self) -> Option<f64> {
         match self {
-            Self::Objective(nmi) | Self::FlopsDesignRange(nmi) => Some(nmi),
+            Self::Objective(nmi) | Self::ChartedPoint(nmi) | Self::FlopsDesignRange(nmi) => {
+                Some(nmi)
+            }
             Self::Route => None,
         }
     }
@@ -83,6 +93,9 @@ impl DesignRange {
 /// Where the design payload comes from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DesignPayloadSource {
+    /// The payload charted with the preset's design range
+    /// (`reference.design_point`), carried as a mass.
+    ChartedPoint,
     /// The registered preset's planning cabin, seats.
     PlanningSeats(i64),
     /// The configured load case: passengers at the combined passenger and
@@ -164,25 +177,47 @@ impl MtowPlan {
 }
 
 impl AlasConfig {
+    /// The registered preset's charted design point, when it has one.
+    fn charted_design_point(&self) -> Option<crate::PayloadRangeDesignPoint> {
+        crate::presets::get(&self.preset)
+            .ok()
+            .and_then(|preset| preset.reference.design_point)
+            .filter(|point| point.range_nmi.is_finite() && point.range_nmi > 0.0)
+    }
+
+    /// The design range when the objective declares none: the preset's
+    /// charted range, otherwise the declared FLOPS range, otherwise the route.
+    fn design_range_default(&self) -> DesignRange {
+        if let Some(point) = self.charted_design_point() {
+            return DesignRange::ChartedPoint(point.range_nmi);
+        }
+        match self.mass_model.flops_transport.design_range_nmi {
+            Some(nmi) if nmi.is_finite() && nmi > 0.0 => DesignRange::FlopsDesignRange(nmi),
+            _ => DesignRange::Route,
+        }
+    }
+
     /// The design mission: design range at design payload.
     ///
     /// The range is `optimizer.objective.design_range_nmi` when positive,
-    /// otherwise the declared FLOPS design range, otherwise the route. The
-    /// payload is the preset's planning seats at the combined passenger and
-    /// baggage mass (`requirements.passenger_mass_kg`) plus the declared
-    /// revenue belly freight (`cabin.passenger.belly_cargo_kg`) when the
-    /// preset declares `reference.planning_seats`, otherwise the configured
-    /// payload plus that freight. A freighter carries its cargo payload.
+    /// otherwise the preset's charted design range
+    /// (`reference.design_point`, the range at maximum structural payload
+    /// read from the manufacturer's payload/range chart), otherwise the
+    /// declared FLOPS design range, otherwise the route. The FLOPS `DESRNG`
+    /// is a mass-equation input and stays separate from the mission range
+    /// whenever the preset charts one. The payload is the charted payload
+    /// when the design point carries one, otherwise the preset's planning
+    /// seats at the combined passenger and baggage mass
+    /// (`requirements.passenger_mass_kg`) plus the declared revenue belly
+    /// freight (`cabin.passenger.belly_cargo_kg`) when the preset declares
+    /// `reference.planning_seats`, otherwise the configured payload plus that
+    /// freight. A freighter carries its cargo payload.
     pub fn design_mission(&self) -> DesignMission {
         let objective_nmi = self.optimizer.objective.design_range_nmi;
-        let flops_nmi = self.mass_model.flops_transport.design_range_nmi;
         let range = if objective_nmi.is_finite() && objective_nmi > 0.0 {
             DesignRange::Objective(objective_nmi)
         } else {
-            match flops_nmi {
-                Some(nmi) if nmi.is_finite() && nmi > 0.0 => DesignRange::FlopsDesignRange(nmi),
-                _ => DesignRange::Route,
-            }
+            self.design_range_default()
         };
         let (payload_kg, payload_source) = self.design_payload_kg();
         DesignMission {
@@ -200,6 +235,13 @@ impl AlasConfig {
                 requirements.cargo_payload_kg.max(0.0),
                 DesignPayloadSource::ConfiguredPayload,
             );
+        }
+        if let Some(payload_kg) = self
+            .charted_design_point()
+            .and_then(|point| point.payload_kg)
+            .filter(|kg| kg.is_finite() && *kg > 0.0)
+        {
+            return (payload_kg, DesignPayloadSource::ChartedPoint);
         }
         let freight_kg = self.cabin.passenger.belly_cargo_kg.max(0.0);
         let planning_seats = crate::presets::get(&self.preset)
@@ -289,17 +331,21 @@ impl AlasConfig {
             }
             MtowSizing::PayloadAdjusted => {
                 let explicit_range = objective.design_range_nmi;
+                let range = if explicit_range.is_finite() && explicit_range > 0.0 {
+                    Some(DesignRange::Objective(explicit_range))
+                } else {
+                    self.charted_design_point()
+                        .map(|point| DesignRange::ChartedPoint(point.range_nmi))
+                };
                 MtowPlan {
                     dispatch_ceiling_kg: UNBOUNDED_DISPATCH_MTOW_KG,
                     aitken_ceiling_kg: f64::INFINITY,
                     upper_bound_kg: None,
-                    design_mission: (explicit_range.is_finite() && explicit_range > 0.0).then_some(
-                        DesignMission {
-                            range: DesignRange::Objective(explicit_range),
-                            payload_kg: None,
-                            payload_source: DesignPayloadSource::ConfiguredPayload,
-                        },
-                    ),
+                    design_mission: range.map(|range| DesignMission {
+                        range,
+                        payload_kg: None,
+                        payload_source: DesignPayloadSource::ConfiguredPayload,
+                    }),
                     structural_basis: design_structure,
                     ..base
                 }
@@ -428,10 +474,10 @@ mod tests {
 
     #[test]
     fn the_design_payload_uses_planning_seats_when_the_preset_declares_them() {
-        let config = AlasConfig::from_value(&json!({"preset": "A220-300"})).unwrap();
+        let config = AlasConfig::from_value(&json!({"preset": "ATR72-600"})).unwrap();
         let (payload_kg, source) = config.design_payload_kg();
-        assert_eq!(source, DesignPayloadSource::PlanningSeats(140));
-        let expected = 140.0 * config.requirements.passenger_mass_kg
+        assert_eq!(source, DesignPayloadSource::PlanningSeats(72));
+        let expected = 72.0 * config.requirements.passenger_mass_kg
             + config.cabin.passenger.belly_cargo_kg.max(0.0);
         assert!((payload_kg - expected).abs() < 1e-9);
 
@@ -439,5 +485,57 @@ mod tests {
         let (payload_kg, source) = clean.design_payload_kg();
         assert_eq!(source, DesignPayloadSource::ConfiguredPayload);
         assert!((payload_kg - clean.requirements.payload_kg()).abs() < 1e-9);
+    }
+
+    /// Every registered aircraft declares a sourced design point; its
+    /// payload is at most the declared maximum structural payload within the
+    /// chart read uncertainty (+-5 %), and the design mission flies exactly
+    /// that point.
+    #[test]
+    fn every_registered_aircraft_closes_the_design_modes_on_its_charted_point() {
+        for name in crate::presets::available() {
+            let preset = crate::presets::get(name).unwrap();
+            let point = preset.reference.design_point.expect(name);
+            assert!(point.range_nmi > 0.0 && !point.source.is_empty(), "{name}");
+            let config = AlasConfig::from_value(&json!({ "preset": name })).unwrap();
+            let mission = config.design_mission();
+            assert_eq!(mission.range, DesignRange::ChartedPoint(point.range_nmi));
+            let (payload_kg, _) = config.design_payload_kg();
+            if let Some(charted_kg) = point.payload_kg {
+                assert_eq!(payload_kg, charted_kg, "{name}");
+                assert!(
+                    charted_kg <= 1.05 * config.requirements.max_structural_payload_kg,
+                    "{name}: {charted_kg} kg"
+                );
+                assert_eq!(mission.payload_source, DesignPayloadSource::ChartedPoint);
+            }
+            let adjusted = with_mode(config, MtowSizing::PayloadAdjusted).mtow_plan();
+            assert_eq!(
+                adjusted.design_mission.map(|mission| mission.range),
+                Some(DesignRange::ChartedPoint(point.range_nmi)),
+                "{name}"
+            );
+        }
+    }
+
+    /// The FLOPS `DESRNG` is a mass-equation input: it stays what it was
+    /// declared as (A340-300, 7,200 nmi) and does not become the mission
+    /// range of a preset that charts 5,000 nmi at maximum payload.
+    #[test]
+    fn the_flops_design_range_stays_separate_from_the_charted_mission_range() {
+        let mut config = AlasConfig::from_value(&json!({"preset": "A340-300"})).unwrap();
+        assert_eq!(
+            config.mass_model.flops_transport.design_range_nmi,
+            Some(7_200.0)
+        );
+        assert_eq!(
+            config.design_mission().range,
+            DesignRange::ChartedPoint(5_000.0)
+        );
+        config.optimizer.objective.design_range_nmi = 4_000.0;
+        assert_eq!(
+            config.design_mission().range,
+            DesignRange::Objective(4_000.0)
+        );
     }
 }

@@ -203,6 +203,7 @@ mod tests {
             trimmed_design_point: None,
             cg_envelope_ok: None,
             neutral_point_conditions: None,
+            fuel: Default::default(),
         }
     }
 

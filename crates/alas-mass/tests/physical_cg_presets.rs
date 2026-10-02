@@ -80,7 +80,7 @@ fn every_preset_uses_a_finite_structural_wing_point_inside_its_wingbox() {
             let aerodynamic_center_x = reference_wing.aerodynamic_center(0.0)[0];
             let mean_aerodynamic_chord = reference_wing.mean_aerodynamic_chord();
             assert!(
-                (aerodynamic_center_x - 16.473_875_122_007_83).abs() < 1e-12,
+                (aerodynamic_center_x - 16.469_108_083_231_486).abs() < 1e-12,
                 "A220 frozen-reference aerodynamic-center x drifted: {aerodynamic_center_x:.15}"
             );
             assert!(

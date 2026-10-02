@@ -21,28 +21,26 @@ Update this file in the change that alters what it describes.
 
 - `cargo run --bin ALAS` launches the desktop GUI (`alas-gui`); `ALAS --gui` is
   equivalent. Headless flags (`--config`, `--save-config`, `--no-optimize`,
-  `--seed`, `--optimization-method`) drive the same pipeline; see
+  `--seed`) drive the same pipeline; see
   `docs/RUNNING.md`.
 - The design pipeline runs end to end: geometry, mass and CG, mission, drag
   build-up, trim and stability, optimisation, wingbox sizing, feasibility
   findings and figures, for hand-built and CPACS-imported aircraft.
 - Eight registered presets: A220-300, A320-200, A340-300, A380-800, ATR72-600,
   AVE (a synthetic ALAS design), B787-9 and DC-10.
-- **Optimisation.** Two profiles, selected by `optimizer.solver.method`
-  (`docs/OPTIMIZATION.md`, `docs/methods.md`). `scipy_legacy` is the current
-  default: it restores the v1.1.0 weighted lift-to-drag objective with
-  SciPy-style differential evolution and is a reference-compatible search, not
-  a mission-sized design. `differential_evolution` is the product profile:
-  L-SHADE under the epsilon-constrained method
+- **Optimisation.** One search, `differential_evolution`
+  (`docs/OPTIMIZATION.md`, `docs/methods.md`): L-SHADE under the epsilon-constrained method
   (`alas-opt::search_methods::lshade_de`) with a mission-sized objective (block
   fuel by default; takeoff mass, empty mass and fuel per seat-kilometre are the
   alternatives) and takeoff mass closed by the sizing mission. In the product
   profile a reported design satisfied every hard constraint at full coupled
   fidelity; if none is found the run returns `NoFeasibleDesign` with the
   least-violating candidate as diagnostics. Seeded runs replay identically at
-  any worker count. Termination is `converged`, `iteration_limit` or
-  `cancelled`. MADS, SQP, NSGA-II, TuRBO and CMA-ES were removed; saved
-  configurations naming those tokens are migrated to `differential_evolution`
+  any worker count. A screening stage and a refinement stage each have an
+  evaluation budget and a time limit; termination is `converged`,
+  `stagnated`, `evaluation_budget`, `time_budget` or `cancelled`. MADS, SQP, NSGA-II, TuRBO, CMA-ES and the weighted
+  lift-to-drag `scipy_legacy` profile were removed; saved configurations
+  naming those tokens are migrated to `differential_evolution`
   on load.
 - **Mass and fuel.** One item-level mass ledger with centroidal inertia tensors
   for every named state (operating empty, zero fuel, takeoff, landing, maximum
@@ -187,11 +185,6 @@ Ranked by what would most surprise someone using a result.
     agrees within max(5 kg, 1e-4 of the takeoff mass); otherwise the flown mass
     is refined separately and may differ by about that tolerance.
 
-    Known limitation, method dependence: under scipy_legacy, the default
-    (sized_by_mission) and unconstrained modes are not mass-closed; resolved
-    when the optimizer consolidates on one differential-evolution core.
-    MtowBand and PayloadAdjusted always use mass closure.
-
     Known limitation, open: the optimizer, the report and the flown mission
     use three fuel models and disagree on the sized takeoff mass. The MDO trip
     fuel is priced on the optimizer's polar; the dispatch flies the native
@@ -211,10 +204,8 @@ Ranked by what would most surprise someone using a result.
     | A380 | -1.5 % | 76,899 | 70,670 |
     | B787 | +5.5 % | 52,892 | 64,230 |
     | DC-10 | +8.6 % | 50,894 | 67,348 |
-11. **Mass sizing is bound to the product search.** Only the
-    `differential_evolution` profile replays its finalist at the sized takeoff
-    mass; the `scipy_legacy` default profile and the AVL branch report at the
-    configured MTOW.
+11. **Mass sizing is bound to the search.** The finalist is replayed at the
+    sized takeoff mass; the AVL branch reports at the configured MTOW.
 
 ## Related documents
 

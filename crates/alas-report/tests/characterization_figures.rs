@@ -71,6 +71,7 @@ fn sample_report() -> AnalysisReport {
         payload_layout: None,
         cg_envelope_ok: Some(true),
         neutral_point_conditions: None,
+        fuel: Default::default(),
     };
     report.component_masses.insert("Wing".to_owned(), 8500.0);
     report

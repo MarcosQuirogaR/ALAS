@@ -12,14 +12,17 @@
 use alas_config::AlasConfig;
 use alas_pipeline::{assess_physical_feasibility, FullAnalysis};
 
-/// KNOWN DEFECT: the flown takeoff CG is about 42.7 % MAC, aft of the 39.3 %
-/// ground aft limit. The trim-tank fill order is fixed (trim fuel fills last
-/// and burns first, `alas_mass::tanks::order`), but the zero-fuel CG is
-/// 37.2 % MAC and the landing fuel still sits in the outer cells because the
-/// feed and transfer cells are lumped in `alas_config::preset_fuel_tanks`.
-/// The physical requirement is kept: the takeoff CG must be inside the limits.
+/// KNOWN DEFECT: the flown takeoff CG is about 42.8 % MAC, aft of the 42.0 %
+/// ground aft limit. The feed tanks are split out and burned last, so the
+/// landing CG (37.2 %) is inside it. The ground limit already uses the
+/// A380's own 4.9 % nose share at its published 43 % MAC aft CG at 562 t
+/// (Airbus A380 AC Dec 01/25, Figure 7-3-0-991-006-A01, weight variant 000).
+/// The remaining term is the operating empty mass, about 7 % below the
+/// reference: the 560 t takeoff carries about 6 t more fuel than the wing
+/// tanks hold and the excess sits in the trim tank. The physical requirement
+/// is kept: the takeoff CG must be inside the limits.
 #[test]
-#[ignore = "known defect: A380 takeoff CG is aft of the ground limit because feed and transfer fuel cells are lumped"]
+#[ignore = "known defect: A380 takeoff CG is aft of the ground limit (trim fuel forced by the low OEW)"]
 fn the_a380_flown_takeoff_cg_is_inside_the_ground_aft_limit() {
     let config = AlasConfig::from_value(&serde_json::json!({ "preset": "A380-800" })).unwrap();
     let design = alas_config::presets::get("A380-800").unwrap().design_vector;

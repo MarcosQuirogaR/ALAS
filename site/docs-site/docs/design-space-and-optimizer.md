@@ -42,7 +42,9 @@ directly.
 
 **Placement** (`wing_x_shift_m`, `tail_scale`, `fuselage_length_m`,
 `tail_x_shift_m`): where the wing sits on the fuselage and how big the
-tail is relative to it. `wing_x_shift_m` in particular is doing CG-balancing
+tail is relative to it (in a reference adaptation `tail_scale` is derived
+from the wing so the tails keep the registered tail volume coefficients, not
+searched). `wing_x_shift_m` in particular is doing CG-balancing
 work, not aerodynamic work: moving the wing fore/aft to keep the loaded
 CG inside the stability envelope as everything else changes.
 
@@ -67,24 +69,23 @@ stumbles into mid-search.
 
 ## The search: differential evolution
 
-ALAS uses SciPy's `differential_evolution`: a population-based,
-gradient-free global optimizer, which matters because the objective here
+ALAS uses differential evolution (L-SHADE under epsilon constraints): a
+population-based, gradient-free global optimizer, which matters because the objective here
 (VLM aerodynamics → drag polar → weight closure → CG check, chained
 together) isn't smooth or convex enough to trust a gradient method not to
 get stuck. AVE's own solver settings:
 
 | Setting | Value | Meaning |
 |---|---|---|
-| `strategy` | `best1bin` | Mutation strategy: perturb the current best candidate |
-| `max_iterations` | 15 | Generations to run |
-| `population_size` | 6 | Multiplier: population = 6 × 16 variables = 96 candidates/generation |
-| `tolerance` | 0.01–0.05 | Convergence tolerance on the population's spread |
+| `screening` | 30 s, 2000 evaluations | Space-filling sample plus the baseline; its diverse elite seeds the refinement |
+| `refinement` | 120 s (at most 300 s), 600 evaluations | Differential evolution at full fidelity; the budget also sets the population |
+| `tolerance` | 0.02 | Normalised spread below which a stagnated run counts as converged |
 | `seed` | 42 | Fixed for reproducible runs (`null` = random) |
-| `workers` | 1 | Set >1 to parallelize (objective must be picklable) |
+| `workers` | 0 | Every thread; the result does not depend on it |
 
-Fifteen generations at a population of 96 is roughly 1,400 full pipeline
-evaluations for one optimization run: each one a VLM solve plus mass
-model plus penalty checks. It's small by global-optimization standards on
+Each evaluation is a full coupled analysis (VLM, mass, mission sizing), so
+the default two-and-a-half minutes buys a few hundred of them: a local
+refinement around the preset, not a global search. It's small by global-optimization standards on
 purpose: ALAS's objective function is expensive enough (a real VLM
 solve, not a surrogate) that the search has to be efficient about where it
 spends evaluations, which is exactly what the next setting is for.
@@ -97,7 +98,7 @@ seed_perturbation_fraction: 0.05
 ```
 
 Rather than seed differential evolution's initial population uniformly at
-random across the full 16-dimensional box (the SciPy default), ALAS
+random across the full 16-dimensional box, ALAS
 by default clusters the starting population within ±5% of the *initial
 design*, AVE's own baseline geometry. This is a meaningful choice: a
 random population in a 16-D box this large wastes many early generations
@@ -123,8 +124,8 @@ $$
 The primary term rewards cruise efficiency (`ld_weight`, default 1.0); the
 penalty terms cover everything from the obvious (exceed `max_wing_area_m2`,
 undershoot `min_wing_loading_kg_m2`) to the structural and geometric
-(taper realism, minimum wing position on the fuselage, tail-volume
-coefficients within a sane band, fuselage fineness ratio) to the physical
+(taper realism, minimum wing position on the fuselage, tail area
+fractions, fuselage fineness ratio) to the physical
 (CG inside the envelope at every loading condition, static margin above
 the hard floor, fuel physically fits in the wing). A design that fails a
 hard check (instability, a CG envelope violation) is assigned a large

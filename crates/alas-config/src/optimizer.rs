@@ -14,11 +14,10 @@
 //! solver settings are answering the same question; two that differ in the
 //! objective are not, and a comparison between them means nothing.
 //!
-//! [`ObjectiveWeights`] is the penalty table of the original Python objective.
-//! The default `scipy_legacy` profile reads that full table; the
-//! mission-sized product profile reads only its failure cost and tail-volume
-//! window.
+//! [`ObjectiveWeights`] holds the transport-planform thresholds and the failure
+//! cost the mission-sized search reads.
 
+mod aerodrome_code;
 pub mod design_space;
 pub mod mtow_plan;
 mod objective;
@@ -28,6 +27,7 @@ pub mod relaxation;
 mod solver;
 mod weights;
 
+pub use aerodrome_code::{AerodromeReferenceCode, SPAN_CODE_MARGIN_M};
 pub use design_space::{DesignMode, DesignSpaceConfig, VariableEnvelope};
 pub use mtow_plan::{
     DesignMission, DesignPayloadSource, DesignRange, MtowPlan, StructuralBasis,
@@ -40,7 +40,8 @@ pub use plausibility::PlausibilityLimits;
 pub use policy_review::{review_for, reviewed_limits, RelaxationReview, ReviewedLimit};
 pub use relaxation::{ConstraintRelaxation, RelaxableLimit, NON_RELAXABLE_RESIDUAL_IDS};
 pub use solver::{
-    SeedOutOfRange, SolverSettings, LEGACY_METHOD_TOKENS, PRODUCT_DE_METHOD, SCIPY_LEGACY_METHOD,
+    SeedOutOfRange, SolverSettings, StageBudget, LEGACY_METHOD_TOKENS, MAXIMUM_STAGE_TIME_LIMIT_S,
+    PRODUCT_DE_METHOD,
 };
 pub use weights::ObjectiveWeights;
 
@@ -55,7 +56,7 @@ pub struct OptimizerConfig {
     /// What the search rewards and what it penalizes.
     #[config(
         nested,
-        help = "Penalty table used by scipy_legacy for the original weighted lift-to-drag objective. The mission-sized differential_evolution profile reads only the failure cost and tail-volume window from this group."
+        help = "Transport-planform thresholds and the failure cost the mission-sized search reads."
     )]
     pub weights: ObjectiveWeights,
 
@@ -70,7 +71,7 @@ pub struct OptimizerConfig {
     #[serde(default, skip_serializing_if = "ObjectiveConfig::is_default")]
     #[config(
         nested,
-        help = "Used by the mission-sized differential_evolution profile: select block fuel, takeoff mass, empty mass or fuel per seat-kilometre over the design range, plus the takeoff-mass closure and each requirement family's hard, soft or diagnostic policy. scipy_legacy uses weighted L/D and the penalty table instead."
+        help = "Used by the mission-sized differential_evolution profile: select block fuel, takeoff mass, empty mass or fuel per seat-kilometre over the design range, plus the takeoff-mass closure and each requirement family's hard, soft or diagnostic policy."
     )]
     pub objective: ObjectiveConfig,
 

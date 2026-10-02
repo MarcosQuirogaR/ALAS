@@ -104,9 +104,11 @@ pub struct DesignSpaceConfig {
     pub engine_scale_upper: f64,
 
     /// Design variables held at their reference value in reference mode.
+    ///
+    /// The default is [`DEFAULT_REFERENCE_FIXED_VARIABLES`].
     #[config(
         label = "Fixed variables (reference mode)",
-        help = "Comma-separated design-variable names that reference adaptation holds at the registered aircraft's values, for example 'fuselage_length_m, tail_scale, tail_x_shift_m'. Every other variable moves inside the windows below."
+        help = "Comma-separated design-variable names that reference adaptation holds at the registered aircraft's values. The default holds the fuselage length, the tail position and every variable whose effect on block fuel is below 0.1 % per full window width on the A320-200, B787-9 and A380-800, which today is only the rear lower Hicks-Henne bump. Remove a name to let the search move it again. The tail scale is always derived from the wing in reference adaptation, so the tails keep the registered tail volume coefficients. Every other variable moves inside the windows below."
     )]
     pub reference_fixed_variables: String,
 
@@ -151,7 +153,7 @@ impl Default for DesignSpaceConfig {
             engine_scale_enabled: false,
             engine_scale_lower: 0.7,
             engine_scale_upper: 1.4,
-            reference_fixed_variables: "fuselage_length_m, tail_scale, tail_x_shift_m".to_owned(),
+            reference_fixed_variables: DEFAULT_REFERENCE_FIXED_VARIABLES.to_owned(),
             reference_fraction_half_width: 0.10,
             reference_angle_half_width_deg: 3.0,
             reference_shift_half_width_m: 1.0,
@@ -159,6 +161,27 @@ impl Default for DesignSpaceConfig {
         }
     }
 }
+
+/// The variables a reference adaptation holds at the registered aircraft's
+/// values unless the user lists otherwise.
+///
+/// The fuselage length and tail position belong to the registered fuselage
+/// and empennage layout. Every other variable is held only if its
+/// first-order effect on block fuel at the registered design is below 0.1 %
+/// of block fuel per full window width on all three of the A320-200, B787-9
+/// and A380-800, measured by central differences at +-5 % of the window.
+/// Only `bump_lower_rear` qualifies (0.06, 0.03, 0.09). The other three
+/// bumps read 0.19-0.83 on the wide-bodies, `sweep_deg` 0.08 on the A320-200
+/// but 1.7-8.7 on the wide-bodies and `break_chord_m` 0.12 on the B787-9 but
+/// 1.5-2.2 elsewhere, so they stay free. The full table is in
+/// `docs/optimizer-design-vector.md`. Removing a name re-enables it.
+pub const DEFAULT_REFERENCE_FIXED_VARIABLES: &str =
+    "fuselage_length_m, tail_x_shift_m, bump_lower_rear";
+
+/// The variable a reference adaptation derives from the wing instead of
+/// searching: the optimizer's tail auto-sizing sets it so the tails keep the
+/// registered aircraft's volume coefficients.
+const TAIL_SCALE_VARIABLE: &str = "tail_scale";
 
 /// How a variable's reference window is measured.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -270,7 +293,8 @@ impl DesignSpaceConfig {
                     self.clean_sheet_envelope(spec, value, fixed)
                 }
                 DesignMode::ReferenceAdaptation => {
-                    self.reference_envelope(spec, value, fixed.contains(&spec.name))
+                    let derived = spec.name == TAIL_SCALE_VARIABLE;
+                    self.reference_envelope(spec, value, derived || fixed.contains(&spec.name))
                 }
                 DesignMode::BaselineSandbox => VariableEnvelope {
                     name: spec.name,
@@ -377,6 +401,40 @@ mod tests {
     }
 
     #[test]
+    fn reference_mode_holds_only_the_flat_bump_by_default_and_frees_it_on_request() {
+        let nominal = DesignVector {
+            bump_upper_rear: 0.001,
+            bump_lower_rear: 0.001,
+            ..DesignVector::default()
+        };
+        let bump = |config: &DesignSpaceConfig, name: &str| {
+            config
+                .envelope(&nominal)
+                .into_iter()
+                .find(|v| v.name == name)
+                .unwrap()
+        };
+        let default = DesignSpaceConfig {
+            mode: DesignMode::ReferenceAdaptation,
+            ..Default::default()
+        };
+        let held = bump(&default, "bump_lower_rear");
+        assert!(held.fixed && held.lower == 0.001 && held.upper == 0.001);
+        let free = bump(&default, "bump_upper_rear");
+        assert!(!free.fixed && free.lower < 0.001 && free.upper > 0.001);
+        let freed = bump(
+            &DesignSpaceConfig {
+                mode: DesignMode::ReferenceAdaptation,
+                reference_fixed_variables: "fuselage_length_m, tail_x_shift_m".to_owned(),
+                ..Default::default()
+            },
+            "bump_lower_rear",
+        );
+        assert!(!freed.fixed && freed.lower < 0.001 && freed.upper > 0.001);
+        assert!(DesignSpaceConfig::default().validate().is_ok());
+    }
+
+    #[test]
     fn reference_mode_windows_the_planform_and_fixes_the_listed_variables() {
         let config = DesignSpaceConfig {
             mode: DesignMode::ReferenceAdaptation,
@@ -420,6 +478,26 @@ mod tests {
             .unwrap();
         assert!(fuselage.lower < 37.57 && fuselage.upper > 37.57);
         assert!(fuselage.lower >= 20.0);
+    }
+
+    #[test]
+    fn reference_mode_derives_the_tail_scale_and_clean_sheet_searches_it() {
+        let reference = DesignSpaceConfig {
+            mode: DesignMode::ReferenceAdaptation,
+            reference_fixed_variables: String::new(),
+            ..Default::default()
+        };
+        let tail = |config: &DesignSpaceConfig| {
+            config
+                .envelope(&DesignVector::default())
+                .into_iter()
+                .find(|v| v.name == "tail_scale")
+                .unwrap()
+        };
+        let fixed = tail(&reference);
+        assert!(fixed.fixed && fixed.lower == fixed.upper);
+        let clean = tail(&DesignSpaceConfig::default());
+        assert!(!clean.fixed && clean.lower < clean.upper);
     }
 
     #[test]

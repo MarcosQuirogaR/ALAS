@@ -27,6 +27,32 @@ pub(super) fn registered_mrw_kg(config: &AlasConfig) -> Option<f64> {
         .and_then(|preset| preset.reference.mrw_kg)
 }
 
+/// The minimum static nose-gear load fraction at `mass_kg`: the registered
+/// preset's published aft-CG gear-load split
+/// ([`alas_config::PublishedAftCgNoseLoad::minimum_nose_gear_fraction`]) when
+/// it has one, else the class default `mass_model.pct_load_nlg_min`. A
+/// clean-sheet preset has no published split and keeps the class default.
+pub(super) fn minimum_nose_gear_fraction(
+    config: &AlasConfig,
+    published: Option<alas_config::PublishedAftCgNoseLoad>,
+    mass_kg: f64,
+) -> f64 {
+    let class_minimum = config.mass_model.pct_load_nlg_min;
+    published.map_or(class_minimum, |split| {
+        split.minimum_nose_gear_fraction(class_minimum, mass_kg)
+    })
+}
+
+/// The registered preset's published aft-CG gear-load split, `None` for a
+/// clean-sheet or unregistered preset.
+pub(super) fn registered_aft_cg_nose_load(
+    config: &AlasConfig,
+) -> Option<alas_config::PublishedAftCgNoseLoad> {
+    alas_config::presets::get(&config.preset)
+        .ok()
+        .and_then(|preset| preset.reference.aft_cg_nose_load)
+}
+
 /// Shared body of `super::assess_model_cg_envelope` and
 /// [`super::assess_model_cg_envelope_with_ledger_and_landing`]: everything
 /// downstream of the named `(state, cg_x, cg_z, mass_kg)` tuples, whichever
@@ -175,6 +201,7 @@ pub(super) fn assess_model_cg_envelope_from_states(
     let cl_r_rotation = rotation_lift_coefficient(&config.performance);
     let thrust_model = RotationThrustModel::new(plane, config, ground_z_m, cl_r_rotation);
     let takeoff_thrust = thrust_model.at_mass(mtow_mass_kg);
+    let published_nose_load = registered_aft_cg_nose_load(config);
     let forward_mechanism_input = PhysicalCgLimitsInput {
         mac_frame,
         critical_np_x_m: critical_x_np,
@@ -188,7 +215,7 @@ pub(super) fn assess_model_cg_envelope_from_states(
         h_cg_m: mtow_h_cg_m,
         min_tip_back_deg: config.landing_gear.min_tip_back_deg,
         scrape_angle_deg: None,
-        pct_load_nlg_min: config.mass_model.pct_load_nlg_min,
+        pct_load_nlg_min: minimum_nose_gear_fraction(config, published_nose_load, mtow_mass_kg),
         pct_load_nlg_max_handling: config.mass_model.pct_load_nlg_max_handling,
         x_ac_wb_frac: SCISSOR_X_AC_WB_FRAC,
         cm_ac_wb_landing: SCISSOR_CM_AC_WB_LANDING,
@@ -247,10 +274,12 @@ pub(super) fn assess_model_cg_envelope_from_states(
         } else {
             thrust_model.at_mass(mass_kg)
         };
+        let min_nose_fraction = minimum_nose_gear_fraction(config, published_nose_load, mass_kg);
         let unscoped_limits = physical_cg_limits(&PhysicalCgLimitsInput {
             x_mlg_aft_axle_m: gear.x_mlg_aft_axle_m,
             h_cg_m,
             scrape_angle_deg,
+            pct_load_nlg_min: min_nose_fraction,
             rotation_thrust_to_weight: state_thrust.thrust_to_weight,
             rotation_thrust_line_height_m: state_thrust.thrust_line_height_m,
             ..forward_mechanism_input
@@ -301,7 +330,7 @@ pub(super) fn assess_model_cg_envelope_from_states(
             main_gear_load_kg,
             main_gear_capacity_kg,
             capacity_basis_declared: gear.capacity_basis_declared,
-            minimum_nose_gear_load_fraction: config.mass_model.pct_load_nlg_min,
+            minimum_nose_gear_load_fraction: min_nose_fraction,
             maximum_nose_gear_load_fraction: config.mass_model.pct_load_nlg_max_handling,
             tip_back_angle_deg,
             required_tip_back_deg,
@@ -354,6 +383,55 @@ pub(super) fn assess_model_cg_envelope_from_states(
 #[cfg(test)]
 mod tests {
     use super::super::LedgerLoadingBasis;
+    use super::{minimum_nose_gear_fraction, registered_aft_cg_nose_load};
+
+    /// Every preset whose airport-planning document prints the most-aft CG
+    /// of its tabulated gear split must land its model ground aft boundary,
+    /// at that mass, on that CG. The tolerance is the model-frame residual:
+    /// the model MAC and LEMAC are fitted, not the manufacturer's (A320
+    /// 36.8 [S] -> 36.9 [M], A340 38.0 -> 38.4, A380 43.0 -> 42.0).
+    #[test]
+    fn published_aft_cg_gear_splits_return_the_tabulated_aft_cg() {
+        use alas_config::{presets, AlasConfig};
+        use alas_geom::builder::AircraftBuilder;
+        let mut checked = 0;
+        for name in presets::available() {
+            let config = AlasConfig::from_value(&serde_json::json!({ "preset": name }))
+                .expect("a registered preset configures");
+            let Some(split) = registered_aft_cg_nose_load(&config) else {
+                continue;
+            };
+            let Some(published_pct_mac) = split.aft_cg_pct_mac else {
+                continue;
+            };
+            let registered = presets::get(name).expect("a registered preset");
+            let plane = AircraftBuilder::new(Some(config.geometry.clone()))
+                .build(Some(&registered.design_vector), true)
+                .expect("a registered preset builds");
+            let frame = plane.mac_frame().expect("a main wing");
+            let fuselage = &plane.fuselages[0];
+            let start = fuselage.xsecs[0].xyz_c[0];
+            let length = fuselage.xsecs[fuselage.xsecs.len() - 1].xyz_c[0] - start;
+            let stations = config.landing_gear.resolved_station_positions(
+                start + length * config.mass_model.nlg_x_fraction,
+                frame.x_lemac_m + config.mass_model.mlg_x_fraction_mac * frame.chord_m,
+                start,
+                length,
+            );
+            let fraction = minimum_nose_gear_fraction(&config, Some(split), split.mass_kg);
+            let wheelbase_m = stations.x_mlg_m - stations.x_nlg_m;
+            let aft_x_m = stations.x_mlg_m - fraction * wheelbase_m;
+            let model_pct_mac = frame.pct_mac(aft_x_m);
+            assert!(
+                (model_pct_mac - published_pct_mac).abs() < 1.5,
+                "{name}: model ground aft {model_pct_mac:.2} % MAC against the published \
+                 {published_pct_mac} % MAC at {} kg",
+                split.mass_kg
+            );
+            checked += 1;
+        }
+        assert!(checked >= 3, "presets checked: {checked}");
+    }
 
     /// Feeding `payload_and_fuel`'s back-solved deltas into the same
     /// mass-weighted mixing the shared loading-state builder uses must

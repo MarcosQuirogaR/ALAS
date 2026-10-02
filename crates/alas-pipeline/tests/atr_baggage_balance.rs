@@ -55,8 +55,11 @@ const A320_ACAP_CG_BAND_PCT_MAC: [f64; 2] = [17.0, 40.0];
 
 /// Tolerance of the ZFW-to-OEW CG equality, % MAC. The TargetCg baggage policy
 /// places the hold baggage so the zero-fuel CG follows the empty-aircraft CG;
-/// the residual is the discrete container positions [E].
-const TARGET_CG_TOLERANCE_PCT_MAC: f64 = 1.0;
+/// the residual is the discrete container positions and the forward reach of
+/// the forward hold relative to the wing [E]: the A220-300 wing datum sits
+/// 0.66 m further forward with its drawn 29.5 deg leading-edge sweep, so its
+/// empty-aircraft CG lies near the forward edge of what the holds can trim to.
+const TARGET_CG_TOLERANCE_PCT_MAC: f64 = 1.5;
 
 /// Under the default TargetCg baggage policy, aircraft whose holds have
 /// container positions stow the baggage so the zero-fuel CG stays at the

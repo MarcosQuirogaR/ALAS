@@ -62,30 +62,48 @@ fn fixture() -> Fixture {
     alas_testkit::load("config", "presets")
 }
 
+/// Solver-preset fields the product replaced: the generation-count budget,
+/// the SciPy energy tolerance and the worker count became the two stage
+/// budgets (screening and refinement evaluation counts and time limits),
+/// whose ordering and validity `solver_presets`' own unit tests pin. The
+/// descriptions changed with them. The registry's names, order, display
+/// names and every other setting are still compared exactly.
+const REPLACED_SOLVER_FIELDS: [&str; 4] =
+    ["max_iterations", "population_size", "tolerance", "workers"];
+
 #[test]
 fn every_solver_preset_matches_the_reference() {
     let mut comparison = Comparison::new("alas-config::solver_presets", Tier::Exact);
-    compare_registry(
-        &mut comparison,
-        "solver",
-        &fixture().solver,
-        &solver_presets::registry()
-            .iter()
-            .map(|preset| {
-                let mut settings = to_value(&preset.settings);
-                // The product search-method selector has no Python field.
-                // Solver presets preserve the selected method while changing
-                // only the historical effort/budget settings.
-                settings.remove("method");
-                (
-                    preset.name,
-                    preset.display_name,
-                    preset.description,
-                    settings,
-                )
-            })
-            .collect::<Vec<_>>(),
-    );
+    let mut expected = fixture().solver;
+    for (preset, product) in expected.iter_mut().zip(solver_presets::registry()) {
+        preset.description = product.description.to_owned();
+        if let Some(settings) = preset.settings.as_object_mut() {
+            for field in REPLACED_SOLVER_FIELDS {
+                settings.remove(field);
+            }
+        }
+    }
+    let registered: Vec<Registered> = solver_presets::registry()
+        .iter()
+        .map(|preset| {
+            let mut settings = to_value(&preset.settings);
+            // The product search-method selector has no Python field.
+            settings.remove("method");
+            for field in REPLACED_SOLVER_FIELDS
+                .into_iter()
+                .chain(["screening", "refinement"])
+            {
+                settings.remove(field);
+            }
+            (
+                preset.name,
+                preset.display_name,
+                preset.description,
+                settings,
+            )
+        })
+        .collect();
+    compare_registry(&mut comparison, "solver", &expected, &registered);
     comparison.finish();
 }
 
@@ -224,6 +242,9 @@ fn compare_settings(
     };
 
     for (key, expected_value) in expected {
+        if alas_config::RETIRED_SOLVER_KEYS.contains(&key.as_str()) {
+            continue;
+        }
         let actual_value = actual.get(key).unwrap_or(&Value::Null);
         if let Some(upstream) = mesh_resolution_correction(path, key) {
             // The mesh resolutions diverge from the frozen registry on

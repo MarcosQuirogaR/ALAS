@@ -45,6 +45,14 @@ struct AirportsFixture {
     airports: Vec<Airport>,
 }
 
+/// Allowables deliberately corrected away from the reference table:
+/// `(material, reference Pa, corrected Pa)`.
+///
+/// `CFRP QI`: the reference 450 MPa is a pristine laminate value; 220 MPa is
+/// the 0.40 % damage-tolerant design ultimate strain at the unchanged 55 GPa
+/// modulus. Source and scope in `alas_config::materials`.
+const ALLOWABLE_CORRECTIONS: [(&str, f64, f64); 1] = [("CFRP QI", 450.0e6, 220.0e6)];
+
 #[test]
 fn every_material_matches_the_reference() {
     let fixture: MaterialsFixture = alas_testkit::load("config", "materials");
@@ -67,12 +75,24 @@ fn every_material_matches_the_reference() {
             continue;
         };
         let at = |field: &str| format!("{}.{field}", expected.name);
+        // A declared correction replaces the reference value, and the
+        // reference must still read what the correction says it replaced.
+        let f_allow_pa = match ALLOWABLE_CORRECTIONS
+            .iter()
+            .find(|(name, _, _)| *name == expected.name)
+        {
+            Some(&(_, upstream_pa, corrected_pa)) => {
+                comparison.scalar(&at("f_allow_pa upstream"), expected.f_allow_pa, upstream_pa);
+                corrected_pa
+            }
+            None => expected.f_allow_pa,
+        };
         comparison
             .exact(&at("category"), &actual.category, &expected.category)
             .scalar(&at("e_pa"), actual.e_pa, expected.e_pa)
             .scalar(&at("nu"), actual.nu, expected.nu)
             .scalar(&at("rho_kg_m3"), actual.rho_kg_m3, expected.rho_kg_m3)
-            .scalar(&at("f_allow_pa"), actual.f_allow_pa, expected.f_allow_pa);
+            .scalar(&at("f_allow_pa"), actual.f_allow_pa, f_allow_pa);
     }
 
     comparison.exact(

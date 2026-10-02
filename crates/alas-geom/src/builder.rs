@@ -38,6 +38,7 @@
 //! module's `linspace`.
 
 mod custom_sections;
+mod empennage;
 mod error;
 mod mesh;
 mod spacing;
@@ -143,8 +144,8 @@ impl AircraftBuilder {
 
         let wings = vec![
             self.build_main_wing(dv, &planform, &root_section, &tip_airfoil)?,
-            self.build_hstab(dv, &tail_airfoil)?,
-            self.build_vstab(dv, &tail_airfoil)?,
+            self.build_hstab(dv, &tail_airfoil, true)?,
+            self.build_vstab(dv, &tail_airfoil, true)?,
         ];
 
         let mut fuselages = vec![self.build_fuselage(dv)?];
@@ -257,81 +258,6 @@ impl AircraftBuilder {
         let wing = mesh::for_contract(
             self.geometry_contract,
             &wing.translate([x_wing_global, 0.0, 0.0]),
-            g.n_subdivisions,
-        )?;
-        Ok(wing)
-    }
-
-    /// Build the scaled horizontal stabilizer with its attachment (`_build_hstab`).
-    fn build_hstab(&self, dv: &DesignVector, tail_airfoil: &Airfoil) -> Result<Wing, BuildError> {
-        let g = &self.geometry.empennage;
-        let ts = dv.tail_scale;
-        let [x_hstab, _, z_hstab] = tail_attachment::root(g, dv, self.geometry_contract);
-        let (tip_x, tip_y, tip_z) = g.hstab_tip_le_m;
-
-        let wing = Wing::new(
-            "Horizontal Stabilizer",
-            vec![
-                WingXSec::new(
-                    [0.0, 0.0, 0.0],
-                    g.hstab_root_chord_m * ts,
-                    g.hstab_root_twist_deg,
-                    tail_airfoil.clone(),
-                ),
-                // Only the in-plane (x, y) tip offset scales with the tail
-                // scale; the vertical placement does not: `tip_le[2]`
-                // reproduced unscaled from the Python source.
-                WingXSec::new(
-                    [tip_x * ts, tip_y * ts, tip_z],
-                    g.hstab_tip_chord_m * ts,
-                    g.hstab_tip_twist_deg,
-                    tail_airfoil.clone(),
-                ),
-            ],
-            true,
-        );
-        let wing = mesh::for_contract(
-            self.geometry_contract,
-            &wing.translate([x_hstab, 0.0, z_hstab]),
-            g.n_subdivisions,
-        )?;
-        Ok(wing)
-    }
-
-    /// The vertical stabilizer: root/tip cross-sections at the design
-    /// vector's tail scale, translated aft to the tail datum:
-    /// `_build_vstab`.
-    fn build_vstab(&self, dv: &DesignVector, tail_airfoil: &Airfoil) -> Result<Wing, BuildError> {
-        let g = &self.geometry.empennage;
-        let ts = dv.tail_scale;
-        let x_vstab = (dv.fuselage_length_m - g.vstab_offset_from_tail_m) + dv.tail_x_shift_m;
-        let (tip_x, tip_y, tip_z) = g.vstab_tip_le_m;
-
-        let wing = Wing::new(
-            "Vertical Stabilizer",
-            vec![
-                WingXSec::new(
-                    [0.0, 0.0, 0.0],
-                    g.vstab_root_chord_m * ts,
-                    0.0,
-                    tail_airfoil.clone(),
-                ),
-                // Only the in-plane (x, z) tip offset scales with the tail
-                // scale; the spanwise placement does not: `tip_le[1]`
-                // reproduced unscaled from the Python source (the fin grows
-                // in Z, not Y).
-                WingXSec::new(
-                    [tip_x * ts, tip_y, tip_z * ts],
-                    g.vstab_tip_chord_m * ts,
-                    0.0,
-                    tail_airfoil.clone(),
-                ),
-            ],
-            false,
-        );
-        let wing = mesh::for_contract(
-            self.geometry_contract,
-            &wing.translate([x_vstab, 0.0, g.vstab_z_m]),
             g.n_subdivisions,
         )?;
         Ok(wing)

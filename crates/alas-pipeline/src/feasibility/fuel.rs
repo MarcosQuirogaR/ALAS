@@ -25,10 +25,10 @@
 
 use alas_config::{presets, AlasConfig, DesignVector};
 use alas_mass::tanks::{resolve_product_layout, uses_registered_tank_layout};
-use alas_mission::MissionResult;
 
 use crate::full_analysis::AnalysisReport;
 
+use super::mission_fuel::MissionFuelAssessment;
 use super::{DispatchAssessment, FindingCode, FindingSeverity, PhysicalFinding};
 
 /// Provenance of the usable-fuel capacity applied to one design result.
@@ -73,36 +73,6 @@ pub enum CarriedFuelBasis {
     /// The fuel the policy requires for the flown route, bounded by the
     /// takeoff-mass limit and the tanks.
     ReservePolicyClosure,
-}
-
-/// Outcome of relating mission telemetry to the analyzed fuel load.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum MissionFuelStatus {
-    /// Mission analysis was disabled for this run.
-    #[default]
-    NotRequested,
-    /// Mission analysis was enabled but produced no result.
-    Unavailable,
-    /// Telemetry exists, but one or more segment solves did not converge.
-    NotConverged,
-    /// Every modeled segment completed without crossing the dry-mass floor.
-    Completed,
-    /// The load case crossed its dry-mass floor before completing the mission.
-    Exhausted,
-}
-
-/// Mission fuel burn and the trip-fuel requirement it establishes.
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
-pub struct MissionFuelAssessment {
-    /// Typed completeness state for the mission fuel result.
-    pub status: MissionFuelStatus,
-    /// Fuel consumed by the available telemetry, in kilograms.
-    pub burned_fuel_kg: Option<f64>,
-    /// Fuel required for the modeled trip, excluding unmodeled reserves.
-    ///
-    /// This is available only after a complete, converged mission. An
-    /// exhausted or non-converged trajectory establishes no total requirement.
-    pub required_trip_fuel_kg: Option<f64>,
 }
 
 /// Distinct fuel masses governing one analyzed aircraft load case.
@@ -184,14 +154,27 @@ pub(crate) fn plan_fuel_loading(
         unusable_fuel_kg,
         config.mass_model.mass_architecture.is_pure_flops(),
     );
-    FuelLoadingAssessment {
+    let mut loading = FuelLoadingAssessment {
         unusable_fuel_kg,
         ..plan_from_values(
             analysis_mass_basis_kg,
             usable_mtow_closure_fuel_kg,
             usable_capacity,
         )
+    };
+    // A report bound to a sized candidate carries the fuel its dispatch
+    // plan loads at brake release; that, not the mass-budget remainder, is
+    // the fuel the aircraft takes off with, at the report's own zero-fuel
+    // mass.
+    if let Some(sized) = report.fuel.sized_fuel() {
+        let carried_kg = sized.takeoff_fuel_kg;
+        if carried_kg.is_finite() && carried_kg > 0.0 {
+            loading.analyzed_carried_fuel_kg = carried_kg;
+            loading.analyzed_takeoff_mass_kg = loading.zero_fuel_mass_kg + carried_kg;
+            loading.carried_fuel_basis = CarriedFuelBasis::ReservePolicyClosure;
+        }
     }
+    loading
 }
 
 /// The tank-physical mass permanently unusable to the engines, from the same
@@ -282,43 +265,6 @@ pub(super) fn plan_from_values(
         mission: MissionFuelAssessment::default(),
         dispatch: None,
         unusable_fuel_kg: Some(0.0),
-    }
-}
-
-/// Attach the mission burn and any defensible trip-fuel requirement.
-pub(crate) fn assess_mission_fuel(
-    mission_requested: bool,
-    mission: Option<&MissionResult>,
-) -> MissionFuelAssessment {
-    if !mission_requested {
-        return MissionFuelAssessment::default();
-    }
-    let Some(result) = mission else {
-        return MissionFuelAssessment {
-            status: MissionFuelStatus::Unavailable,
-            ..MissionFuelAssessment::default()
-        };
-    };
-    if let Some(exhaustion) = &result.fuel_exhaustion {
-        return MissionFuelAssessment {
-            status: MissionFuelStatus::Exhausted,
-            burned_fuel_kg: Some(exhaustion.burned_fuel_kg),
-            required_trip_fuel_kg: None,
-        };
-    }
-
-    let burned_fuel_kg = result.fuel_burned_kg();
-    let Some(summary) = result.completed_summary() else {
-        return MissionFuelAssessment {
-            status: MissionFuelStatus::NotConverged,
-            burned_fuel_kg: burned_fuel_kg.is_finite().then_some(burned_fuel_kg),
-            required_trip_fuel_kg: None,
-        };
-    };
-    MissionFuelAssessment {
-        status: MissionFuelStatus::Completed,
-        burned_fuel_kg: Some(summary.trip_fuel_kg),
-        required_trip_fuel_kg: Some(summary.trip_fuel_kg),
     }
 }
 
@@ -668,20 +614,5 @@ mod tests {
                 |finding| finding.code == FindingCode::FuelTankLayoutUnavailable
                     && finding.severity == FindingSeverity::Warning
             ));
-    }
-
-    #[test]
-    fn partial_mission_telemetry_does_not_establish_required_trip_fuel() {
-        let mission = MissionResult {
-            segments: Vec::new(),
-            solutions: Vec::new(),
-            scheduled_segment_count: 1,
-            fuel_exhaustion: None,
-        };
-
-        let assessment = assess_mission_fuel(true, Some(&mission));
-
-        assert_eq!(assessment.status, MissionFuelStatus::NotConverged);
-        assert_eq!(assessment.required_trip_fuel_kg, None);
     }
 }

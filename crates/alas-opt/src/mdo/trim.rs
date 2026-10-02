@@ -35,6 +35,8 @@
 //! stations m in geometry axes (x positive aft). Mach and every coefficient
 //! are dimensionless; coefficients are referred to `Airplane::s_ref`.
 
+use std::sync::Arc;
+
 use alas_aero::analysis::{AeroAnalysis, TrimPoint, TrimmedPerformance};
 use alas_atmo::Atmosphere;
 use alas_config::design_variables::DesignVector;
@@ -42,7 +44,16 @@ use alas_config::AlasConfig;
 use alas_geom::aircraft::airplane::Airplane;
 use alas_stab::trim::stability_and_trim;
 
-use super::types::{CandidateFailure, ExternalPolar};
+use super::drag_table::{DesignTrim, TrimmedDragTable};
+use super::mission_model::ParabolicPolar;
+use super::types::{CandidateDrag, CandidateFailure, ExternalPolar};
+
+/// History label for a trimmed cruise point whose drag table could not be
+/// built: an untrimmed induced node, a fourth trimmed point that disagrees
+/// with the induced quadratic, or a grid that misses its error bound
+/// (`drag_table::DragTableError`). The candidate is rejected, never flown on
+/// a partial table.
+pub(crate) const DRAG_TABLE_FAILURE: &str = "drag_table";
 
 /// History label for a trim that failed numerically or did not converge.
 ///
@@ -91,22 +102,20 @@ const CL_TARGET_RELATIVE_TOLERANCE: f64 = 1.0e-3;
 /// `Cm = -2.5e-11`, eight orders inside this tolerance.
 const CM_RESIDUAL_TOLERANCE: f64 = 1.0e-3;
 
-/// The trimmed drag-polar terms a Breguet model is built from, alongside the
+/// The trimmed cruise point: the drag the missions are flown on, the
 /// history-facing angle labels and the condition the point is only valid at.
 ///
 /// Every field is an accepted measurement: the constructors reject rather
 /// than repair, so no consumer needs to re-check finiteness or sign.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct TrimmedPolar {
-    /// Zero-lift drag coefficient at the trimmed cruise point, positive.
-    pub cd0: f64,
-    /// Induced-drag factor `k = CDi / CL^2` implied by the trimmed point,
-    /// positive. Never floored: a degenerate value fails the candidate.
-    pub induced_factor_k: f64,
-    /// Wave-drag coefficient at the trimmed cruise Mach, non-negative, kept
-    /// separate from the induced term so low-speed mission phases do not pay
-    /// transonic drag.
-    pub wave_drag_cd: f64,
+    /// Clean cruise drag at this trim: the native `CD(CL, M, h)` table, or
+    /// the external solver's polar.
+    pub drag: CandidateDrag,
+    /// The cruise trim Jacobian, per degree, that moves the attitude with
+    /// the lift coefficient at fixed centre of gravity; `None` for an
+    /// external polar, whose attitude is held as supplied.
+    pub attitude: Option<TrimAttitude>,
     /// Trimmed lift-to-drag ratio, positive.
     pub lift_to_drag: f64,
     /// Compressibility-corrected reporting angle of attack, degrees.
@@ -140,7 +149,52 @@ pub(crate) struct TrimmedPolar {
     pub altitude_m: f64,
 }
 
+/// The cruise trim Jacobian of `alas_stab::trim::StabilityTrimResult`, per
+/// degree, and the compressibility factor of the reported angle of attack.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct TrimAttitude {
+    /// `dCL/dalpha`, `dCL/dih`, `dCm/dalpha`, `dCm/dih`, per degree.
+    pub cl_alpha: f64,
+    pub cl_ih: f64,
+    pub cm_alpha: f64,
+    pub cm_ih: f64,
+    /// `beta` of `alas_aero::analysis::compressible_report_alpha`, recovered
+    /// from the trimmed point: `alpha_report = alpha + (beta - 1) CL / CL_alpha`.
+    pub report_beta: f64,
+}
+
 impl TrimmedPolar {
+    /// This trim moved to cruise lift coefficient `cl` at the same centre of
+    /// gravity, Mach and altitude, without another lattice solve.
+    ///
+    /// The lift-to-drag ratio is read from [`Self::drag`] at `cl`. The
+    /// attitude moves by the trim Jacobian, `J [d alpha, d ih] = [d CL, 0]`:
+    /// the vortex lattice is linear in circulation, so the step is exact up
+    /// to the lattice's geometric nonlinearity in angle and incidence, which
+    /// is second order in `d CL` (`drag_table::induced` measures it through
+    /// the same Jacobian). An external polar keeps its supplied attitude.
+    pub(crate) fn at_cruise_cl(&self, cl: f64) -> Self {
+        let mut moved = self.clone();
+        moved.lift_to_drag = cl / self.drag.cd(cl, self.mach, self.altitude_m);
+        let Some(j) = self.attitude else {
+            return moved;
+        };
+        let det = j.cl_alpha * j.cm_ih - j.cl_ih * j.cm_alpha;
+        // `trim_and_polar` accepted this Jacobian, and the drag table
+        // inverted it to place its induced nodes, so it is regular.
+        if !det.is_finite() || det == 0.0 {
+            return moved;
+        }
+        let d_cl = cl - self.cl_trim;
+        let d_alpha = j.cm_ih * d_cl / det;
+        let d_ih = -j.cm_alpha * d_cl / det;
+        moved.geometric_body_alpha_deg += d_alpha;
+        moved.incidence_deg += d_ih;
+        moved.alpha_deg = moved.geometric_body_alpha_deg + (j.report_beta - 1.0) * cl / j.cl_alpha;
+        moved.cl_trim = cl;
+        moved
+    }
+
     /// Adopt an externally solved cruise polar without re-trimming.
     ///
     /// The caller must gate on [`ExternalPolar::is_valid`] and, once the
@@ -156,9 +210,8 @@ impl TrimmedPolar {
     /// state, so `cm_residual` is `None` rather than a fabricated zero.
     pub(crate) fn from_external(polar: &ExternalPolar) -> Self {
         Self {
-            cd0: polar.cd0,
-            induced_factor_k: polar.induced_factor_k,
-            wave_drag_cd: polar.wave_drag_cd,
+            drag: CandidateDrag::External(Arc::new(ParabolicPolar::from_external(polar))),
+            attitude: None,
             lift_to_drag: polar.lift_to_drag,
             alpha_deg: polar.alpha_deg,
             // An external polar's alpha is the angle at which its solver was
@@ -272,15 +325,8 @@ pub(crate) fn trim_and_polar(
     let perf = aero
         .trimmed_performance(&trim_point, req.cruise_mach, req.cruise_altitude_m)
         .map_err(|_| trim_solve_failure())?;
-    let cd0 = aero.parasite_drag(
-        req.cruise_mach,
-        req.cruise_altitude_m,
-        cl_target,
-        None,
-        None,
-    );
 
-    if !finite_and_physical(&perf, cd0) {
+    if !finite_and_physical(&perf) {
         return Err(trim_solve_failure());
     }
     if (perf.cl - cl_target).abs() > CL_TARGET_RELATIVE_TOLERANCE * cl_target {
@@ -290,20 +336,36 @@ pub(crate) fn trim_and_polar(
         return Err(trim_solve_failure());
     }
 
-    // `perf.cd` is the sum of parasite, induced and wave terms. Only the VLM
-    // induced component belongs in `k`; folding Korn wave drag into it makes
-    // cruise compressibility drag grow like CL^2 at takeoff and descent
-    // speeds. A non-finite or non-positive `k` is a failed analysis: there is
-    // no floor to fall back on.
-    let induced_factor_k = perf.cd_induced / (perf.cl * perf.cl);
-    if !induced_factor_k.is_finite() || induced_factor_k <= 0.0 {
-        return Err(trim_solve_failure());
-    }
+    let drag_table = TrimmedDragTable::build(
+        &aero,
+        &DesignTrim {
+            trim,
+            cl: perf.cl,
+            cd_induced: perf.cd_induced,
+            cm_residual: perf.cm_residual,
+            mach: req.cruise_mach,
+            altitude_m: req.cruise_altitude_m,
+            cl_max_clean: config.performance.cl_max_clean,
+            cm_tolerance: CM_RESIDUAL_TOLERANCE,
+        },
+    )
+    .map_err(|_| CandidateFailure {
+        reason: DRAG_TABLE_FAILURE,
+    })?;
 
+    // `alpha_report = alpha_0L + beta (alpha - alpha_0L)` with
+    // `alpha - alpha_0L = CL / CL_alpha` (`TrimmedPerformance::alpha_deg`).
+    let lift_angle_deg = perf.cl / trim.cl_alpha;
+    let attitude = TrimAttitude {
+        cl_alpha: trim.cl_alpha,
+        cl_ih: trim.cl_ih,
+        cm_alpha: trim.cm_alpha,
+        cm_ih: trim.cm_ih,
+        report_beta: 1.0 + (perf.alpha_deg - trim.trim_alpha_deg) / lift_angle_deg,
+    };
     Ok(TrimmedPolar {
-        cd0,
-        induced_factor_k,
-        wave_drag_cd: perf.cd_wave,
+        drag: CandidateDrag::Table(Arc::new(drag_table)),
+        attitude: Some(attitude),
         lift_to_drag: perf.l_over_d,
         alpha_deg: perf.alpha_deg,
         geometric_body_alpha_deg: trim.trim_alpha_deg,
@@ -319,9 +381,9 @@ pub(crate) fn trim_and_polar(
 }
 
 /// Whether every trimmed component is finite and carries a physically
-/// possible sign: positive parasite, induced and zero-lift drag, non-negative
-/// wave drag, and a positive lift coefficient and lift-to-drag ratio.
-fn finite_and_physical(perf: &TrimmedPerformance, cd0: f64) -> bool {
+/// possible sign: positive parasite and induced drag, non-negative wave
+/// drag, and a positive lift coefficient and lift-to-drag ratio.
+fn finite_and_physical(perf: &TrimmedPerformance) -> bool {
     [
         perf.alpha_deg,
         perf.incidence_deg,
@@ -330,8 +392,6 @@ fn finite_and_physical(perf: &TrimmedPerformance, cd0: f64) -> bool {
     ]
     .iter()
     .all(|value| value.is_finite())
-        && cd0.is_finite()
-        && cd0 > 0.0
         && perf.cd_parasite.is_finite()
         && perf.cd_parasite > 0.0
         && perf.cd_induced.is_finite()
@@ -394,9 +454,10 @@ mod tests {
             .unwrap_or_else(|f| panic!("{}", f.reason));
 
         assert!(polar.converged);
-        assert!(polar.cd0 > 0.0, "cd0={}", polar.cd0);
-        assert!(polar.induced_factor_k > 0.0, "k={}", polar.induced_factor_k);
-        assert!(polar.wave_drag_cd >= 0.0, "cd_wave={}", polar.wave_drag_cd);
+        assert!(
+            polar.drag.table().is_some(),
+            "a native trim carries its table"
+        );
         assert!(polar.lift_to_drag > 0.0, "l/d={}", polar.lift_to_drag);
         assert!(polar.cl_trim > 0.0, "cl={}", polar.cl_trim);
         for value in [
@@ -428,14 +489,66 @@ mod tests {
         );
         let cm = polar.cm_residual.expect("a native trim reports a residual");
         assert!(cm.abs() <= CM_RESIDUAL_TOLERANCE, "cm={cm}");
+    }
 
-        // `k` is the measured induced factor, not a floor: the removed
-        // fallback was 1.0e-4, three orders below any real transport polar.
+    /// The table the missions fly reproduces the trimmed solve's own total
+    /// drag at the trim point, within the table's interpolation bound.
+    #[test]
+    fn the_table_reproduces_the_direct_trimmed_drag_at_the_trim_point() {
+        let (config, dv, mut plane, cg_x) = default_candidate();
+        let polar = trim_and_polar(&config, &mut plane, cg_x, &dv, config.requirements.mtow_kg)
+            .unwrap_or_else(|f| panic!("{}", f.reason));
+        // `lift_to_drag` is the trimmed re-solve's `CL / CD`.
+        let direct_cd = polar.cl_trim / polar.lift_to_drag;
+        let table_cd = polar.drag.cd(polar.cl_trim, polar.mach, polar.altitude_m);
         assert!(
-            polar.induced_factor_k > 1.0e-3,
-            "k={} looks like a floored value",
-            polar.induced_factor_k
+            (table_cd - direct_cd).abs() <= crate::mdo::drag_table::CD_ERROR_BOUND,
+            "table {table_cd:.7} direct {direct_cd:.7}"
         );
+        // Moving the trim to its own lift coefficient changes nothing.
+        let same = polar.at_cruise_cl(polar.cl_trim);
+        assert_eq!(
+            same.geometric_body_alpha_deg,
+            polar.geometric_body_alpha_deg
+        );
+        assert_eq!(same.incidence_deg, polar.incidence_deg);
+        assert!((same.alpha_deg - polar.alpha_deg).abs() < 1.0e-9);
+    }
+
+    /// A mass change no longer re-trims: the attitude the trim Jacobian
+    /// moves to and the table's lift-to-drag ratio at the new lift agree with
+    /// a direct trim there. The Jacobian step's error is second order in the
+    /// lift change, so a 10 % mass change must stay inside the trim's own
+    /// acceptance: 0.1 % of the lift-to-drag ratio (the lift tolerance
+    /// `CL_TARGET_RELATIVE_TOLERANCE`) and a hundredth of a degree.
+    #[test]
+    fn a_mass_change_moves_the_trim_by_its_jacobian_without_a_resolve() {
+        let (config, dv, mut plane, cg_x) = default_candidate();
+        let mass = config.requirements.mtow_kg;
+        let heavy = trim_and_polar(&config, &mut plane, cg_x, &dv, mass)
+            .unwrap_or_else(|f| panic!("{}", f.reason));
+        let light = trim_and_polar(&config, &mut plane, cg_x, &dv, 0.9 * mass)
+            .unwrap_or_else(|f| panic!("{}", f.reason));
+        let moved = heavy.at_cruise_cl(light.cl_trim);
+        let ld_error = (moved.lift_to_drag - light.lift_to_drag).abs() / light.lift_to_drag;
+        assert!(
+            ld_error <= CL_TARGET_RELATIVE_TOLERANCE,
+            "L/D {ld_error:.3e}"
+        );
+        for (name, jacobian, direct) in [
+            (
+                "alpha",
+                moved.geometric_body_alpha_deg,
+                light.geometric_body_alpha_deg,
+            ),
+            ("ih", moved.incidence_deg, light.incidence_deg),
+            ("report alpha", moved.alpha_deg, light.alpha_deg),
+        ] {
+            assert!(
+                (jacobian - direct).abs() <= 1.0e-2,
+                "{name}: Jacobian {jacobian:.5} direct {direct:.5}"
+            );
+        }
     }
 
     #[test]
@@ -474,7 +587,15 @@ mod tests {
             )
             .is_ok());
         let polar = TrimmedPolar::from_external(&external);
-        assert_eq!(polar.induced_factor_k, external.induced_factor_k);
+        let cd = external.cd0
+            + external.induced_factor_k * external.target_cl * external.target_cl
+            + external.wave_drag_cd;
+        assert_eq!(
+            polar
+                .drag
+                .cd(external.target_cl, external.mach, external.altitude_m),
+            cd
+        );
         assert_eq!(polar.cl_trim, external.target_cl);
         assert_eq!(polar.mach, external.mach);
         assert_eq!(polar.reference_area_m2, plane.s_ref);

@@ -3,17 +3,17 @@
 
 //! Complete stage evidence, separate from optimizer and physical validation.
 use super::*;
+use alas_pipeline::MissionFuelStatus;
 
 /// Native analysis completion is independent of search convergence and of
 /// whether optional installed external tools succeeded. Both are reported.
+/// The mission is complete when the route's trip was flown on the unified
+/// segment mission model; the native pseudospectral flight is telemetry and
+/// does not decide completion.
 pub(super) fn full_analysis_completed(result: &PipelineResult) -> bool {
     result.optimized_report.is_some()
         && result.baseline_analysis.is_some()
-        && (!result.config.mission.enabled
-            || result
-                .mission_result
-                .as_ref()
-                .is_some_and(|m| m.completed_summary().is_some()))
+        && (!result.config.mission.enabled || route_flown(result))
         && (!result.config.structures.enabled
             || result
                 .structural_result
@@ -21,12 +21,18 @@ pub(super) fn full_analysis_completed(result: &PipelineResult) -> bool {
                 .is_some_and(|s| s.status == "ok" && s.sizing.is_some() && s.analysis.is_some()))
 }
 
+/// Whether the route's trip was flown on the fuel carried, on the unified
+/// segment mission model.
+fn route_flown(result: &PipelineResult) -> bool {
+    result.feasibility.fuel_loading.mission.status == MissionFuelStatus::Completed
+}
+
 pub(super) fn evidence(result: &PipelineResult) -> Value {
     let mission = result.mission_result.as_ref();
     let summary = mission.and_then(|m| m.completed_summary());
     let structures = result.structural_result.as_ref();
     json!({
-        "completion_definition": "full_analysis_completed requires optimized and baseline native reports, a completed mission when enabled, and successful analytical structural sizing when enabled; it does not assert optimizer convergence, physical validation, or external-solver completion",
+        "completion_definition": "full_analysis_completed requires optimized and baseline native reports, the route's trip flown on the unified segment mission model when the mission is enabled (the native mission is telemetry), and successful analytical structural sizing when enabled; it does not assert optimizer convergence, physical validation, or external-solver completion",
         "all_error_findings": all_error_findings(&result.feasibility.findings),
         "baseline_analysis_present": result.baseline_analysis.is_some(),
         "baseline_analysis_error": result.baseline_analysis_error,
@@ -34,7 +40,9 @@ pub(super) fn evidence(result: &PipelineResult) -> Value {
         "mission": {
             "requested": result.config.mission.enabled,
             "present": mission.is_some(),
-            "completed": summary.is_some(),
+            "route_flown": route_flown(result),
+            "route_trip_fuel_kg": result.feasibility.fuel_loading.mission.required_trip_fuel_kg,
+            "native_completed": summary.is_some(),
             "completion_refusal": mission.and_then(|m| m.completion_refusal()),
             "scheduled_segments": mission.map(|m| m.scheduled_segment_count),
             "returned_segments": mission.map(|m| m.segments.len()),
@@ -42,10 +50,11 @@ pub(super) fn evidence(result: &PipelineResult) -> Value {
             "fuel_exhaustion": mission.and_then(|m| m.fuel_exhaustion.as_ref()).map(|f| json!({
                 "segment": f.segment_tag, "available_fuel_kg": f.available_fuel_kg,
                 "burned_fuel_kg": f.burned_fuel_kg})),
-            "fuel_within_available": summary.is_some()
+            "fuel_within_available": route_flown(result)
                 && !result.feasibility.contains(FindingCode::MissionFuelShortfall)
-                && !result.feasibility.contains(FindingCode::InvalidMissionFuelBurn),
-            "trip_fuel_kg": summary.map(|s| s.trip_fuel_kg),
+                && !result.feasibility.contains(FindingCode::InvalidMissionFuelBurn)
+                && !result.feasibility.contains(FindingCode::ReserveFuelShortfall),
+            "native_trip_fuel_kg": summary.map(|s| s.trip_fuel_kg),
             "block_time_s": summary.map(|s| s.block_time_s),
             "distance_flown_m": summary.map(|s| s.distance_flown_m),
         },

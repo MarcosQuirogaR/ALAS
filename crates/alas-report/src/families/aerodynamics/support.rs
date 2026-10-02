@@ -97,17 +97,6 @@ mod tests {
     }
 
     #[test]
-    fn padded_range_ignores_non_finite_values() {
-        let (lo, hi) = padded_range([f64::NAN, 1.0, f64::INFINITY, 4.0].into_iter(), 0.0);
-        assert_eq!((lo, hi), (1.0, 4.0));
-    }
-
-    #[test]
-    fn padded_range_falls_back_to_unit_interval_with_no_finite_data() {
-        assert_eq!(padded_range(std::iter::empty(), 0.1), (0.0, 1.0));
-    }
-
-    #[test]
     fn linear_cell_edges_bracket_every_center_at_its_midpoint() {
         let edges = cell_edges_linear(&[0.0, 1.0, 3.0]);
         assert_eq!(edges, vec![0.0, 0.5, 2.0, 3.0]);

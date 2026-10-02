@@ -8,6 +8,8 @@
 //! [`crate::mesh`], which re-derives cap dimensions on its own station grid
 //! and has to apply the same law to do it.
 
+use super::types::WingboxSizing;
+
 /// NumPy `linspace(start, stop, n)` with `endpoint=True`: `n` evenly spaced
 /// points, the last pinned exactly to `stop`. The geometry crate's function is
 /// the one the wingbox geometry is sampled with, so the sizing grid shares its
@@ -118,6 +120,58 @@ pub(super) fn station_cap_dimensions(
     }
 }
 
+/// The cover skin area, m^2 per cover, that works with each spar's cap in
+/// bending at one station, in the order of `chord_fractions`.
+///
+/// The upper and lower covers between the spars sit at the same lever arm as
+/// the caps and carry the same bending stress, so their skin is bending
+/// material and not a passive fairing. The standard boom idealization lumps a
+/// skin panel of thickness `t` and width `b` between two booms into those
+/// booms as `t b / 6 (2 + sigma_2 / sigma_1)` each (T. H. G. Megson,
+/// *Aircraft Structures for Engineering Students*, 4th ed., Butterworth-
+/// Heinemann, 2007, ch. 20 "Structural idealization"). The strength law sizes
+/// every cap to the same allowable, so the two boom stresses are equal and
+/// each boom receives `t b / 2` of every panel beside it.
+///
+/// A spar with no depth at this station (a partial-span spar outboard of its
+/// break) is not a boom; the panel then runs between its neighbours.
+pub(crate) fn cover_skin_boom_areas_m2(
+    chord_fractions: &[f64],
+    heights_m: &[f64],
+    chord_m: f64,
+    t_skin_m: f64,
+) -> Vec<f64> {
+    let mut areas = vec![0.0; chord_fractions.len()];
+    let mut active: Vec<usize> = (0..chord_fractions.len().min(heights_m.len()))
+        .filter(|&i| heights_m[i] > 0.0)
+        .collect();
+    active.sort_by(|&a, &b| chord_fractions[a].total_cmp(&chord_fractions[b]));
+    let t = t_skin_m.max(0.0);
+    for pair in active.windows(2) {
+        let width = (chord_fractions[pair[1]] - chord_fractions[pair[0]]).max(0.0) * chord_m;
+        let half_panel = 0.5 * t * width;
+        areas[pair[0]] += half_panel;
+        areas[pair[1]] += half_panel;
+    }
+    areas
+}
+
+/// [`cover_skin_boom_areas_m2`] of a product-law box at one of its stations,
+/// in the order of [`WingboxSizing::spars`].
+///
+/// For the stress recovery of a box the product law sized; a frozen-law box
+/// credits no skin and must not be read through this.
+pub(crate) fn sizing_cover_skin_boom_areas_m2(sizing: &WingboxSizing, station: usize) -> Vec<f64> {
+    let fractions: Vec<f64> = sizing.spars.iter().map(|s| s.chord_fraction).collect();
+    let heights: Vec<f64> = sizing
+        .spars
+        .iter()
+        .map(|s| s.h.get(station).copied().unwrap_or(0.0))
+        .collect();
+    let chord = sizing.chord.get(station).copied().unwrap_or(0.0);
+    cover_skin_boom_areas_m2(&fractions, &heights, chord, sizing.t_skin)
+}
+
 /// Which cap-sizing law a solve applies.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum SizingLaw {
@@ -125,7 +179,8 @@ pub(super) enum SizingLaw {
     /// when its thickness clip binds and an outboard station whose tapered
     /// flange falls short of the local moment is sized up to it. The box is
     /// sized against the relieved load and its skin and ribs span the
-    /// structural box, not the whole chord.
+    /// structural box, not the whole chord. The cover skin carries bending
+    /// beside the caps.
     Product,
     /// The frozen reference law: the root cap alone is sized, its thickness
     /// clipped at a fifth of the spar height, and the outboard caps follow the
@@ -141,5 +196,13 @@ impl SizingLaw {
     /// chord instead of over the structural box between the outermost spars.
     pub(super) fn charges_the_whole_chord(self) -> bool {
         matches!(self, Self::Frozen)
+    }
+
+    /// Whether the cover skin between the spars is credited as bending
+    /// material beside the caps ([`cover_skin_boom_areas_m2`]). The frozen law
+    /// charges the skin as mass but sizes the caps for the whole moment, which
+    /// is what its fixtures record.
+    pub(super) fn credits_the_cover_skin(self) -> bool {
+        matches!(self, Self::Product)
     }
 }

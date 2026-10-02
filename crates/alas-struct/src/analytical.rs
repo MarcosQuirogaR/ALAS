@@ -185,6 +185,7 @@ pub fn analyze_structure(
         web_mat,
         cap_mat,
         true,
+        true,
         (rear - front).max(0.0),
         &[],
         None,
@@ -219,6 +220,7 @@ pub fn analyze_structure_reference_compatibility(
         skin_mat,
         web_mat,
         cap_mat,
+        false,
         false,
         1.0,
         &[],
@@ -330,6 +332,7 @@ pub(crate) fn analyze_structure_with_running_mass(
         web_mat,
         cap_mat,
         true,
+        true,
         rear - front,
         integral_fuel_kg_m,
         Some(wing_mounted_point_masses),
@@ -351,6 +354,7 @@ fn analyze_structure_with_rib_mass(
     web_mat: &MaterialSpec,
     cap_mat: &MaterialSpec,
     include_ribs: bool,
+    credit_cover_skin: bool,
     skin_cover_fraction: f64,
     integral_fuel_kg_m: &[f64],
     wing_mounted_point_masses: Option<&[(f64, f64)]>,
@@ -362,6 +366,17 @@ fn analyze_structure_with_rib_mass(
     let g = req.gravity_m_s2;
 
     let ei = ei_curve(sizing, cap_mat, skin_mat);
+    // The cover skin the product law credited beside each cap; the frozen law
+    // sized its caps for the whole moment and recovers stress on them alone.
+    let cover_skin: Vec<Vec<f64>> = (0..n)
+        .map(|j| {
+            if credit_cover_skin {
+                crate::sizing::sizing_cover_skin_boom_areas_m2(sizing, j)
+            } else {
+                Vec::new()
+            }
+        })
+        .collect();
     let mut m_y = structural_running_mass_kg_m.map_or_else(
         || {
             mass_per_length(
@@ -416,11 +431,13 @@ fn analyze_structure_with_rib_mass(
         let m_signed: Vec<f64> = m.iter().map(|&mj| mj * sign).collect();
 
         let mut spar_stress: Vec<SparStressResult> = Vec::with_capacity(sizing.spars.len());
-        for s in &sizing.spars {
+        for (i, s) in sizing.spars.iter().enumerate() {
             let stress_pa: Vec<f64> = (0..n)
                 .map(|j| {
                     let h_eff = s.h[j] * 0.85;
-                    (s.frac_moment[j] * m_signed[j]).abs() / (s.a_cap[j] * h_eff).max(1e-12)
+                    let skin = cover_skin[j].get(i).copied().unwrap_or(0.0);
+                    (s.frac_moment[j] * m_signed[j]).abs()
+                        / ((s.a_cap[j] + skin) * h_eff).max(1e-12)
                 })
                 .collect();
             let margin_of_safety: Vec<f64> = (0..n)

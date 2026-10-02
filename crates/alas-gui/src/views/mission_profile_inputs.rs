@@ -741,16 +741,4 @@ mod tests {
             Some("takeoff")
         );
     }
-
-    #[test]
-    fn inputs_overview_and_advanced_phase_launchers_stay_on_separate_surfaces() {
-        let inputs = include_str!("inputs_view.rs");
-        let advanced = include_str!("form_page.rs");
-
-        assert!(inputs.contains("show_mission_profile_inputs(state, ui)"));
-        assert!(!inputs.contains("show_mission_profile_advanced(state, ui)"));
-        assert!(advanced.contains("page.surface == Surface::Advanced"));
-        assert!(advanced.contains("show_mission_profile_advanced(state, ui)"));
-        assert!(!advanced.contains("show_mission_profile_inputs(state, ui)"));
-    }
 }

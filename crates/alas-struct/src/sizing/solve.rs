@@ -16,8 +16,8 @@ use alas_geom::wing_structure::WingStructureGeometry;
 use crate::loads::{self, LoadCase, WingInertiaRelief};
 
 use super::law::{
-    cap_taper, gradient_unit, linspace, rib_count_from_max_spacing, root_cap_dimensions,
-    station_cap_dimensions, trapezoid, SizingLaw,
+    cap_taper, cover_skin_boom_areas_m2, gradient_unit, linspace, rib_count_from_max_spacing,
+    root_cap_dimensions, station_cap_dimensions, trapezoid, SizingLaw,
 };
 use super::types::{CompositeProxyDeclaration, MassBreakdown, SparSizing, WingboxSizing};
 
@@ -125,6 +125,24 @@ pub(super) fn size_wingbox_with_law(
         .map(|h| (0..n).map(|j| h[j] / h_sum[j]).collect())
         .collect();
 
+    // Skin fixed at the configured minimum (no torsional shear-flow upsizing,
+    // the same fidelity the analytical model uses).
+    let t_skin = cfg.t_skin_min_m;
+
+    // The cover skin each cap works with (n_spars x n). The caps are sized for
+    // the moment the skin does not already carry, so the cover is charged once
+    // as bending material rather than once as caps and again as skin.
+    let mut skin_boom_all: Vec<Vec<f64>> = vec![vec![0.0; n]; wsg.spar_fracs.len()];
+    if law.credits_the_cover_skin() {
+        for j in 0..n {
+            let heights: Vec<f64> = h_all.iter().map(|h| h[j]).collect();
+            let areas = cover_skin_boom_areas_m2(&wsg.spar_fracs, &heights, chord[j], t_skin);
+            for (row, area) in skin_boom_all.iter_mut().zip(areas) {
+                row[j] = area;
+            }
+        }
+    }
+
     let tau_allow_web = web_mat.f_allow_pa / (2.0 * 3.0_f64.sqrt());
     let taper = cap_taper(&eta, cfg.cap_taper_eta_lock, cfg.cap_taper_tip_fraction);
 
@@ -135,6 +153,7 @@ pub(super) fn size_wingbox_with_law(
     for (i, &frac_c) in wsg.spar_fracs.iter().enumerate() {
         let h_i = &h_all[i];
         let frac_m = &frac_moment_all[i];
+        let skin_boom = &skin_boom_all[i];
         let h_eff: Vec<f64> = h_i.iter().map(|&h| h * 0.85).collect();
 
         // Root cap: MS = 0 by construction.
@@ -176,7 +195,7 @@ pub(super) fn size_wingbox_with_law(
             let (w, t) = match law {
                 SizingLaw::Product => {
                     let a_req = if demand > 1.0 {
-                        demand / (cap_mat.f_allow_pa * h_eff[j].max(1e-6))
+                        (demand / (cap_mat.f_allow_pa * h_eff[j].max(1e-6)) - skin_boom[j]).max(0.0)
                     } else {
                         0.0
                     };
@@ -201,7 +220,7 @@ pub(super) fn size_wingbox_with_law(
         // Margin of safety at every station.
         let margin_of_safety: Vec<f64> = (0..n)
             .map(|j| {
-                let m_adm = a_cap[j] * cap_mat.f_allow_pa * h_eff[j];
+                let m_adm = (a_cap[j] + skin_boom[j]) * cap_mat.f_allow_pa * h_eff[j];
                 let demand = (frac_m[j] * m_sizing[j]).abs();
                 if demand > 1.0 {
                     m_adm / demand - 1.0
@@ -222,10 +241,6 @@ pub(super) fn size_wingbox_with_law(
             margin_of_safety,
         });
     }
-
-    // Skin fixed at the configured minimum (no torsional shear-flow upsizing,
-    // the same fidelity the analytical model uses).
-    let t_skin = cfg.t_skin_min_m;
 
     // Rib spacing: Euler panel-buckling on the skin between the outermost two
     // spars.

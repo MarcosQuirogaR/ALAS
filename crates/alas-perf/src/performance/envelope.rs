@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! The Breguet range equation and the CS-25 V-n flight envelope.
+//! The CS-25 V-n flight envelope.
 
 use alas_atmo::Atmosphere;
 use alas_config::{DesignRequirements, PerformanceConfig};
@@ -73,28 +73,6 @@ pub fn assess_far25_positive_limit_load_factor(
     } else {
         Far25PositiveLoadFactorStatus::BelowMinimum
     }
-}
-
-/// Breguet range [m], SI throughout: `breguet_range_m`.
-///
-/// ```text
-/// R = (V / (tsfc_si * g)) * (L/D) * ln(W_start / W_end)
-/// ```
-///
-/// `tsfc_si` is thrust-specific fuel consumption in kg/(N*s). Any physically
-/// meaningless input (a non-positive weight or TSFC, or a burn that gains
-/// weight) returns `0.0` rather than a negative or NaN range.
-pub fn breguet_range_m(
-    tas_m_s: f64,
-    l_over_d: f64,
-    tsfc_si: f64,
-    w_start_kg: f64,
-    w_end_kg: f64,
-) -> f64 {
-    if w_end_kg <= 0.0 || w_start_kg <= 0.0 || w_end_kg > w_start_kg || tsfc_si <= 0.0 {
-        return 0.0;
-    }
-    (tas_m_s / (tsfc_si * G)) * l_over_d * (w_start_kg / w_end_kg).ln()
 }
 
 /// CS-25-style V-n (flight-envelope) diagram data: `VnDiagramData`. Speeds
@@ -233,24 +211,6 @@ pub fn build_vn_diagram(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn a_physically_impossible_leg_has_zero_range() {
-        // Each guard branch: end above start, non-positive weight, dead TSFC.
-        assert_eq!(
-            breguet_range_m(231.0, 18.5, 1.6e-5, 63_000.0, 79_000.0),
-            0.0
-        );
-        assert_eq!(breguet_range_m(231.0, 18.5, 1.6e-5, 79_000.0, 0.0), 0.0);
-        assert_eq!(breguet_range_m(231.0, 18.5, 0.0, 79_000.0, 63_000.0), 0.0);
-    }
-
-    #[test]
-    fn burning_more_fuel_flies_further() {
-        let less = breguet_range_m(231.0, 18.5, 1.6e-5, 79_000.0, 70_000.0);
-        let more = breguet_range_m(231.0, 18.5, 1.6e-5, 79_000.0, 63_000.0);
-        assert!(more > less && less > 0.0);
-    }
 
     #[test]
     fn the_maneuvering_speed_sits_above_the_stall() {

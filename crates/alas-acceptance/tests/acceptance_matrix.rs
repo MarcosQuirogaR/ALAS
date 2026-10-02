@@ -479,7 +479,7 @@ fn acceptance_narrowbody_and_widebody_mass_calibrations() {
         .iter()
         .any(|finding| finding.code == FindingCode::LandingMassLimitViolation));
     // What else this default A320 loading state raises:
-    // 1. The A320 preset's `root_datum_x_m` is anchored at 11.887 m to match
+    // 1. The A320 preset's `root_datum_x_m` is anchored at 11.891 m to match
     //    the Airbus LEMAC, so every %MAC value for a given physical CG
     //    station is larger by about a quarter of the 4.196 m MAC than under
     //    an aft datum.
@@ -508,7 +508,7 @@ fn acceptance_narrowbody_and_widebody_mass_calibrations() {
         a320_errors.is_empty(),
         "unexpected error findings: {a320_errors:?}"
     );
-    // Tail scrape (9.49 deg vs 10 deg) is a warning
+    // Tail scrape (8.19 deg vs 10 deg) is a warning
     // (`ModelCgConstraint::is_diagnostic`). The `ModelCgForwardRangeViolation`
     // warnings are the usable CG-range shortfall and the potato boundary
     // excursion. The full-fuel point of the fuel vector clears the aft limit
@@ -618,8 +618,11 @@ fn ave_usable_cg_range_and_tail_scrape_are_warnings() {
         .find(|finding| finding.message.contains("tail-scrape"))
         .expect("AVE still reports its tail-scrape shortfall as a warning");
     assert_eq!(ave_scrape.severity, alas_pipeline::FindingSeverity::Warning);
+    // The ground plane hangs below the lowest belly point, 0.70 m above the
+    // nose-tip-centreline datum used before (0.7 m nose droop on AVE), so the
+    // tail sits closer to the runway: 6.79 -> 5.18 deg.
     assert!(
-        (ave_scrape.actual.expect("AVE tail-scrape actual") - 6.794_701_892_067_438).abs() < 0.01
+        (ave_scrape.actual.expect("AVE tail-scrape actual") - 5.175_316_341_745_55).abs() < 0.01
     );
     assert!((ave_scrape.limit.expect("AVE tail-scrape limit") - 10.0).abs() < 0.01);
     assert_eq!(ave_forward_finding.unit, "% MAC");
@@ -658,7 +661,7 @@ fn a320_source_max_payload_case_separates_net_tare_gross_and_usable_fuel() {
     // not the bulk baseline's. Select that variant explicitly rather than
     // inheriting the preset's delivered-aircraft default.
     // With the A320 wing datum anchored to the Airbus LEMAC
-    // (`root_datum_x_m` 11.887 m), the lower forward hold, bounded by
+    // (`root_datum_x_m` 11.891 m), the lower forward hold, bounded by
     // `wing_box_x_range()`, has room for six LD3-45 rows: the net
     // freight/bag/belly-cargo demand (20,682 kg) is carried in six containers
     // with 492 kg combined tare, so total gross payload is 21,174 kg.

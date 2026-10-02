@@ -7,17 +7,33 @@
 
 use crate::chart_kit::{draw_colorbar, draw_legend, draw_title, LegendMarker};
 use crate::colormap::Colormap;
-use crate::scene::{Axes2D, Color, Fill, Scene, SceneElement, Stroke};
+use crate::scene::{Axes2D, Color, Fill, Scene, SceneElement, Stroke, TextAlign, TextBaseline};
 use crate::theme::{get_palette, BASELINE_COLOR, OPTIMIZED_COLOR};
 use alas_opt::history::OptimizationHistory;
+use alas_pipeline::optimizer_summary::{OptimizerRunSummary, SCOPE_LABEL};
 
 /// The objective value of every valid evaluation, colored by span, with
 /// the running best: the mission quantity the search minimises where the
 /// native objective recorded one, and the ranking cost otherwise (a
 /// delegated evaluator reports only that).
 pub fn figure_optimization_history(history: &OptimizationHistory, theme: Option<&str>) -> Scene {
+    figure_optimization_history_labelled(history, None, theme)
+}
+
+/// [`figure_optimization_history`] with the run's scope, outcome, budget,
+/// evaluations, termination, wall time, seed and same-model baseline delta
+/// written under the plot when `summary` is given.
+pub fn figure_optimization_history_labelled(
+    history: &OptimizationHistory,
+    summary: Option<&OptimizerRunSummary>,
+    theme: Option<&str>,
+) -> Scene {
     let pal = get_palette(theme);
-    let mut scene = Scene::new(720.0, 480.0, Some(Color::from_hex(pal.bg)));
+    let height = summary.map_or(480.0, labelled_height);
+    let mut scene = Scene::new(720.0, height, Some(Color::from_hex(pal.bg)));
+    if let Some(summary) = summary {
+        draw_run_label(&mut scene, summary, pal);
+    }
     let valid: Vec<usize> = (0..history.n_evaluations())
         .filter(|&index| history.valid.get(index).copied().unwrap_or(false))
         .collect();
@@ -117,6 +133,76 @@ pub fn figure_optimization_history(history: &OptimizationHistory, theme: Option<
     );
 
     scene
+}
+
+/// Top of the run label under the plot, px.
+const RUN_LABEL_TOP_Y: f64 = 445.0;
+/// Row pitch of the run label, px.
+const RUN_LABEL_ROW_PITCH: f64 = 14.0;
+
+/// Write the scope line and the run lines in two columns under the plot.
+fn draw_run_label(scene: &mut Scene, summary: &OptimizerRunSummary, pal: &crate::theme::Palette) {
+    const TOP_Y: f64 = RUN_LABEL_TOP_Y;
+    const ROW_PITCH: f64 = RUN_LABEL_ROW_PITCH;
+    scene.add(SceneElement::Text {
+        text: SCOPE_LABEL.to_owned(),
+        pos: [64.0, TOP_Y],
+        font_size: 11.0,
+        color: Color::from_hex(pal.title),
+        align: TextAlign::Left,
+        baseline: TextBaseline::Middle,
+        angle_deg: 0.0,
+        bold: true,
+    });
+    let (short, long) = run_label_lines(summary);
+    let per_column = short.len().div_ceil(2);
+    for (index, text) in short.into_iter().enumerate() {
+        let (column, row) = (index / per_column, index % per_column);
+        scene.add(SceneElement::Text {
+            text,
+            pos: [
+                64.0 + 320.0 * column as f64,
+                TOP_Y + ROW_PITCH * (row as f64 + 1.5),
+            ],
+            font_size: 10.0,
+            color: Color::from_hex(pal.tick),
+            align: TextAlign::Left,
+            baseline: TextBaseline::Middle,
+            angle_deg: 0.0,
+            bold: false,
+        });
+    }
+    for (index, text) in long.into_iter().enumerate() {
+        scene.add(SceneElement::TextBlock {
+            text,
+            pos: [
+                64.0,
+                TOP_Y + ROW_PITCH * (per_column as f64 + 1.0 + 2.0 * index as f64),
+            ],
+            width: 620.0,
+            font_size: 10.0,
+            color: Color::from_hex(pal.tick),
+            bold: false,
+        });
+    }
+}
+
+/// The run label's `label: value` lines: those that fit a half-width column,
+/// and the longer ones, each given a full-width two-row block.
+fn run_label_lines(summary: &OptimizerRunSummary) -> (Vec<String>, Vec<String>) {
+    const HALF_WIDTH_CHARACTERS: usize = 56;
+    summary
+        .label_lines()
+        .into_iter()
+        .map(|(label, value)| format!("{label}: {value}"))
+        .partition(|line| line.len() <= HALF_WIDTH_CHARACTERS)
+}
+
+/// Height of the labelled figure for `summary`, px.
+fn labelled_height(summary: &OptimizerRunSummary) -> f64 {
+    let (short, long) = run_label_lines(summary);
+    let rows = short.len().div_ceil(2) + 2 * long.len();
+    RUN_LABEL_TOP_Y + RUN_LABEL_ROW_PITCH * (rows as f64 + 2.5)
 }
 
 fn finite_range(values: &[f64]) -> (f64, f64) {
@@ -242,6 +328,86 @@ mod tests {
         assert!(labels.contains(&"objective"));
         assert!(labels.contains(&"Span [m]"));
         assert!(labels.contains(&"Best so far"));
+    }
+
+    #[test]
+    fn labelled_history_states_scope_outcome_budget_seed_and_baseline_delta() {
+        let mut history = OptimizationHistory::new();
+        let dv = DesignVector::default();
+        for fuel in [9_000.0, 8_500.0] {
+            history.record_mission_sized(
+                dv, true, fuel, 17.0, 30.0, 2.0, 400.0, 1.0, "", fuel, 80_000.0, fuel, 0.0, 0.0,
+            );
+        }
+        let result = alas_opt::OptimizationResult {
+            best_design: dv,
+            best_cost: 8_500.0,
+            best_valid: false,
+            history: history.clone(),
+            wall_time_s: 4.0,
+            method: "differential_evolution".to_owned(),
+            strategy: String::new(),
+            termination: "evaluation_budget".to_owned(),
+            pareto_front: Vec::new(),
+            search_diagnostics: None,
+            delivered_acceptance: None,
+        };
+        let mut config = alas_config::AlasConfig::default();
+        config.optimizer.solver.seed = Some(3);
+        let mut summary = OptimizerRunSummary::from_result(&result, &config, None);
+        summary.stages = ["screening", "refinement"]
+            .map(|stage| alas_opt::StageSummary {
+                stage: stage.to_owned(),
+                max_evaluations: 100,
+                planned_evaluations: 100,
+                reserved_evaluations: 0,
+                time_limit_s: 30.0,
+                time_limited: true,
+                evaluations: 64,
+                restoration_evaluations: 0,
+                cancelled_unstarted: 0,
+                pre_gate_rejects: 0,
+                analysis_evaluations: 64,
+                generations: 1,
+                feasible: 10,
+                elite_size: 4,
+                wall_time_s: 31.0,
+                candidate_time_s: 1.0,
+                lane_utilization: 0.5,
+                termination: "time_budget".to_owned(),
+                sizing_work: None,
+            })
+            .to_vec();
+        let scene = figure_optimization_history_labelled(&history, Some(&summary), Some("light"));
+        let labels: Vec<String> = scene
+            .elements
+            .iter()
+            .filter_map(|element| match element {
+                SceneElement::Text { text, .. } | SceneElement::TextBlock { text, .. } => {
+                    Some(text.clone())
+                }
+                _ => None,
+            })
+            .collect();
+        assert!(labels.iter().any(|label| label == SCOPE_LABEL));
+        for (label, value) in summary.label_lines() {
+            let line = format!("{label}: {value}");
+            assert!(labels.contains(&line), "missing {line}: {labels:?}");
+        }
+        assert!(labels.iter().any(|label| label == "Random seed: 3"));
+        assert!(!labels.iter().any(|label| label == "Outcome: Completed"));
+        // Every row sits inside the figure.
+        let bottom = scene
+            .elements
+            .iter()
+            .filter_map(|element| match element {
+                SceneElement::Text { pos, .. } | SceneElement::TextBlock { pos, .. } => {
+                    Some(pos[1])
+                }
+                _ => None,
+            })
+            .fold(0.0, f64::max);
+        assert!(bottom < scene.height, "{bottom} vs {}", scene.height);
     }
 
     #[test]

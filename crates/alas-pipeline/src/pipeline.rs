@@ -67,10 +67,12 @@ use crate::vspaero::{run_vspaero_analysis, VspaeroAnalysisResult};
 mod curl_transport;
 use curl_transport::SystemCurlTransport;
 mod events;
+#[cfg(test)]
+pub(crate) use events::optimization_stage_status;
 pub(crate) use events::{begin_component, finish_component};
 use events::{
     begin_stage, emit_diagnostic, emit_diagnostic_with_severity, emit_tool_diagnostics,
-    finish_stage, warn_artifact_failure,
+    finish_optimization_stage, finish_stage, warn_artifact_failure,
 };
 mod helpers;
 mod mission_payload_override;
@@ -853,12 +855,8 @@ impl DesignPipeline {
             };
             report(&message);
             emit_diagnostic_with_severity(events, run_clock, "optimization", &message, severity);
-        } else if optimization_result.is_some()
-            && self.config.optimizer.solver.method == alas_config::optimizer::SCIPY_LEGACY_METHOD
-        {
-            report(sized_finalist::legacy_winner_notice(&self.config));
         }
-        finish_stage(events, run_clock, stage_clock, 2, "optimization");
+        finish_optimization_stage(events, run_clock, stage_clock, optimization_result.as_ref());
         check_cancelled(cancel)?;
 
         // Stage 2: Full analysis on optimized design.
@@ -879,7 +877,6 @@ impl DesignPipeline {
             },
         };
         if options.optimize
-            && sized_finalist::binds_sized_finalist(&self.config)
             && optimization_result.is_some()
             && self.aircraft_override.is_none()
             && !optimized_report
@@ -1179,6 +1176,14 @@ impl DesignPipeline {
                     snapshot.mission_result = mission.clone();
                     snapshot.mission_load_case = load_case.clone();
                 });
+                if let Some(error) = load_case.as_ref().and_then(|l| l.native_error.as_ref()) {
+                    emit_diagnostic(
+                        events,
+                        run_clock,
+                        "downstream/mission",
+                        &format!("native mission telemetry unavailable: {error}"),
+                    );
+                }
             }
             finish_component(
                 events,
@@ -1899,9 +1904,9 @@ impl DesignPipeline {
             destination,
             planned.route.total_distance_m(),
         )
-        .map_err(|error| format!("native mission stage failed: {error}"))?;
+        .map_err(|error| format!("mission stage failed: {error}"))?;
         let (route, status) = (Some(planned.route), Some(planned.status));
-        Ok((route, status, Some(mission), Some(load)))
+        Ok((route, status, mission, Some(load)))
     }
 
     fn plan_active_route(&self, dispatched_route: Option<Route>) -> Option<PlannedRoute> {

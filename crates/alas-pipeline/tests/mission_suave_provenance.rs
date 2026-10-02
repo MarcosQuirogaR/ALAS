@@ -27,6 +27,18 @@ struct Fixture {
     solver: Solver,
     inputs: Inputs,
     geometry: Geometry,
+    segments: Vec<FixtureSegment>,
+}
+
+#[derive(Debug, Deserialize)]
+struct FixtureSegment {
+    tag: String,
+    selected_points: std::collections::BTreeMap<String, FixturePoint>,
+}
+
+#[derive(Debug, Deserialize)]
+struct FixturePoint {
+    altitude_m: f64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -145,6 +157,14 @@ fn public_native_mission_matches_pinned_provenance_checkpoints() {
     config.geometry.wing.side_of_body_chord_ratio = None;
     config.geometry.wing.kink_span_fraction = None;
     config.geometry.wing.outboard_le_sweep_deg = None;
+    // Likewise the fixture's mission profile: takeoff configuration to
+    // 3,048 m above the field and the landing configuration from 6,500 ft,
+    // the defaults it was generated with (its `initial_climb` starts at
+    // 3,658 m and its `final_landing` at 1,981.2 m). The product defaults
+    // since moved to 1,500 ft (NADP) and 3,000 ft (glide-path interception),
+    // which drops the 3,000 ft rung below the 1,624 m Nairobi field.
+    config.mission.profile.takeoff_altitude_gain_m = 3048.0;
+    config.mission.profile.descent_4_altitude_ft = 6500.0;
     let active_route = route(&config, fixture.inputs.route_distance_m);
     let result = DesignPipeline::new(config.clone())
         .run_with_environment_and_route(
@@ -225,11 +245,20 @@ fn public_native_mission_matches_pinned_provenance_checkpoints() {
     assert_eq!(mission.scheduled_segment_count, mission.segments.len());
     assert_eq!(mission.solutions.len(), mission.segments.len());
     let mut scheduled_tags: Vec<&str> = Vec::new();
+    let mut scheduled_start_m: Vec<f64> = Vec::new();
     for segment in &mission.segments {
         let tag = segment.spec.tag.as_str();
         let parent = tag.trim_end_matches(UPPER_CLIMB_TAG_SUFFIX);
         if parent.len() == tag.len() {
             scheduled_tags.push(tag);
+            scheduled_start_m.push(
+                segment
+                    .conditions
+                    .altitude_m
+                    .first()
+                    .copied()
+                    .unwrap_or(f64::NAN),
+            );
             continue;
         }
         assert!(
@@ -243,6 +272,19 @@ fn public_native_mission_matches_pinned_provenance_checkpoints() {
         );
     }
     assert_eq!(scheduled_tags.len(), fixture.solver.segment_count);
+    assert_eq!(fixture.segments.len(), fixture.solver.segment_count);
+    for ((tag, start_m), reference) in scheduled_tags
+        .iter()
+        .zip(&scheduled_start_m)
+        .zip(&fixture.segments)
+    {
+        assert_eq!(*tag, reference.tag, "scheduled segment order");
+        let reference_start_m = reference.selected_points["0"].altitude_m;
+        assert!(
+            (start_m - reference_start_m).abs() < 1.0e-6,
+            "{tag} starts at {start_m} m, the SUAVE reference at {reference_start_m} m"
+        );
+    }
     assert!(mission.solutions.iter().all(|solution| solution.converged));
     assert_eq!(
         mission.segments[0].conditions.len(),
