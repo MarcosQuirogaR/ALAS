@@ -256,6 +256,45 @@ pub(super) fn fuselage_crown_z_m(fuselage: &Fuselage, x_m: f64) -> Option<f64> {
     Some(crown(last))
 }
 
+/// The leg length of a fuselage-mounted main gear, m, or `None` when the
+/// main gear is carried by the wing or a wing nacelle.
+///
+/// The main gear is fuselage-mounted when two modeled facts agree:
+///
+/// * the wing root sits above the fuselage crown
+///   ([`wing_root_above_fuselage_crown`]), so there is no wing-root gear bay;
+/// * the main wheels are laterally closer to the fuselage side than to the
+///   outboard wing engine, so the leg is not housed in a wing nacelle (the
+///   nacelle-gear layout of other high-wing turboprops). The active half-track
+///   is `diameter x track_diameter_factor / 2`, the same track every gear
+///   consumer uses. With no wing engine there is no nacelle to carry it.
+///
+/// Such a leg hangs from the fuselage sponson to the ground, so its length is
+/// the strut length of the shared ground datum ([`gear_vertical_datum`]): the
+/// declared fuselage ground clearance, or the documented diameter fraction.
+/// That is an engineering estimate of the leg (the leg cannot reach further
+/// than the fuselage belly is above the ground), not a published oleo stroke,
+/// and it keeps one strut length in the model for the gear stations and the
+/// gear mass alike.
+pub(crate) fn fuselage_mounted_main_gear_leg_m(
+    main_wing: &Wing,
+    fuselage: &Fuselage,
+    geometry: &alas_config::GeometryConfig,
+    landing_gear: &LandingGearConfig,
+    outboard_wing_engine_y_m: Option<f64>,
+) -> Option<f64> {
+    wing_root_above_fuselage_crown(main_wing, fuselage)?;
+    let diameter_m = geometry.fuselage.diameter_m;
+    let half_track_m = diameter_m * landing_gear.track_diameter_factor / 2.0;
+    let nacelle_closer = outboard_wing_engine_y_m
+        .is_some_and(|engine_y_m| half_track_m >= (diameter_m / 2.0 + engine_y_m.abs()) / 2.0);
+    if !half_track_m.is_finite() || nacelle_closer {
+        return None;
+    }
+    let (strut_length_m, _) = gear_vertical_datum(fuselage, geometry, Some(landing_gear));
+    (strut_length_m.is_finite() && strut_length_m > 0.0).then_some(strut_length_m)
+}
+
 /// `Some((wing_root_z_m, fuselage_crown_z_m))` when the main wing's root
 /// leading edge sits strictly above the fuselage's outer surface at the same
 /// longitudinal station: a high-wing layout, whose main gear cannot be

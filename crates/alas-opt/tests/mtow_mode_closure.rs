@@ -16,22 +16,11 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use alas_config::design_variables::DesignVector;
-use alas_config::{AlasConfig, ConstraintPolicy, MtowSizing};
+use alas_config::{AlasConfig, MtowSizing};
 use alas_opt::{assess_product_candidate, CandidateAssessment, SizedCandidate};
 
-/// The clean-sheet default with the balance family reported rather than
-/// ranked, as in `mtow_modes.rs`: these tests are about the takeoff-mass
-/// closure, not a CG layout.
-fn clean_sheet(sizing: MtowSizing) -> AlasConfig {
-    let mut config = AlasConfig::default();
-    config
-        .optimizer
-        .weights
-        .transport_planform_constraints_enabled = false;
-    config.optimizer.objective.balance_constraints = ConstraintPolicy::Diagnostic;
-    config.optimizer.objective.mtow_sizing = sizing;
-    config
-}
+mod support;
+use support::clean_sheet;
 
 fn assess(config: &AlasConfig) -> CandidateAssessment {
     assess_product_candidate(config, &DesignVector::default())

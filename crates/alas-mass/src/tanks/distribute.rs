@@ -126,6 +126,29 @@ impl FuelTankLayout {
         Ok(FuelState { fills_kg })
     }
 
+    /// The usable fuel a ledger loads for a carried `fuel_kg`: the carried
+    /// fuel itself, never a clipped share of it. A load above capacity by
+    /// floating-point round-off only (1e-9 of capacity, far below any fuel
+    /// gauging resolution) is set to capacity.
+    ///
+    /// # Errors
+    ///
+    /// [`TankLayoutError::InvalidFuelMass`] for a negative or non-finite
+    /// load, [`TankLayoutError::Overflow`] for a load the tanks cannot hold.
+    pub fn loadable_fuel_kg(&self, fuel_kg: f64) -> Result<f64, TankLayoutError> {
+        const ROUND_OFF: f64 = 1.0e-9;
+        if !fuel_kg.is_finite() || fuel_kg < 0.0 {
+            return Err(TankLayoutError::InvalidFuelMass { fuel_kg });
+        }
+        let capacity_kg = self.usable_capacity_kg();
+        if fuel_kg > capacity_kg * (1.0 + ROUND_OFF) {
+            return Err(TankLayoutError::Overflow {
+                excess_kg: fuel_kg - capacity_kg,
+            });
+        }
+        Ok(fuel_kg.min(capacity_kg))
+    }
+
     /// Every tank's unusable fuel as a fixed [`MassItem`] at its centroid.
     pub fn unusable_items(&self) -> Vec<MassItem> {
         self.tanks
@@ -221,6 +244,13 @@ impl FuelState {
         if burned_kg > available_kg {
             return Err(TankLayoutError::InsufficientFuel {
                 shortfall_kg: burned_kg - available_kg,
+            });
+        }
+        if burned_kg == available_kg {
+            // Burning everything empties every tank exactly, whatever order
+            // the per-group subtractions would round in.
+            return Ok(Self {
+                fills_kg: vec![0.0; self.fills_kg.len()],
             });
         }
         let mut fills_kg = self.fills_kg.clone();

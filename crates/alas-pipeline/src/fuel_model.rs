@@ -10,8 +10,10 @@
 //! on, so its dispatch, payload-range corners and band check price exactly the
 //! trips the sizing closure priced; nothing here re-derives a polar from the
 //! report's sweep. A report with no sized candidate (a baseline analysis)
-//! builds the artifacts once, through the sizing closure's own first-pass trim
-//! ([`alas_opt::mdo::baseline_fuel_artifacts`]), so the physics is the same.
+//! builds the artifacts once, from the sizing closure of the declared aircraft
+//! over its route ([`alas_opt::mdo::baseline_fuel_artifacts`]), so the route is
+//! priced on the drag table that closure trimmed at its converged mass and
+//! centre of gravity.
 
 use std::sync::{Arc, OnceLock};
 

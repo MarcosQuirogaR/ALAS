@@ -105,11 +105,14 @@ pub struct EmpennageConfig {
     )]
     pub vstab_offset_from_tail_m: f64,
 
-    /// Where the fin root sits vertically.
+    /// Height of the fin's root line: the line its root chord and height
+    /// are measured from. The built fin's edges are carried down to (or
+    /// trimmed up to) the body under the root, so the tip stays where this
+    /// line and `vstab_tip_le_m` put it.
     #[config(
         label = "V-stab vertical offset",
         unit = "m",
-        help = "Vertical placement of the vertical-stabiliser root relative to the fuselage centerline, where the fin meets the top of the tailcone."
+        help = "Vertical placement of the vertical-stabiliser root line relative to the fuselage centerline: the line its root chord and height are measured from, usually the fuselage top line at the fin. The built fin's edges continue down, or are trimmed up, to the top of the tail cone (or of a centreline engine) under the root, so the tip stays where this line and the tip offset put it."
     )]
     pub vstab_z_m: f64,
 

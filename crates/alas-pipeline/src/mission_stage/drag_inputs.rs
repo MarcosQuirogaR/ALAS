@@ -13,23 +13,9 @@
 //! reference-compatibility path keeps its original constants.
 
 use alas_aero::analysis::AeroAnalysis;
-use alas_aero::drag_buildup::DragSettings;
 
 use super::MissionReferenceMode;
 use crate::full_analysis::AnalysisReport;
-
-/// Drag-buildup settings for the mission. Product mode holds the ESDU
-/// excrescence fit at its vertex so a very large aircraft keeps a
-/// non-negative excrescence drag; the frozen path keeps the raw fit.
-pub(super) fn drag_settings(reference_mode: MissionReferenceMode) -> DragSettings {
-    match reference_mode {
-        MissionReferenceMode::Product => DragSettings {
-            clamp_excrescence_fit: true,
-            ..DragSettings::default()
-        },
-        MissionReferenceMode::ReferenceCompatibility => DragSettings::reference_compatibility(),
-    }
-}
 
 /// Quarter-chord sweep of the main wing for the drag buildup and the VLM
 /// surrogate, rad.

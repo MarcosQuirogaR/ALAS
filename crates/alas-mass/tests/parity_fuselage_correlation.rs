@@ -440,6 +440,13 @@ fn fuselage_mass_evidence_matches_in_input_and_correlation_order() {
             assert!(case.geometry_config["engine"].get(key).is_none());
             geometry_view["engine"].as_object_mut().unwrap().remove(key);
         }
+        // The declared airfoil class is a native wing input the oracle
+        // predates; it does not enter the fuselage-mass correlation.
+        assert!(case.geometry_config["wing"].get("airfoil_class").is_none());
+        geometry_view["wing"]
+            .as_object_mut()
+            .unwrap()
+            .remove("airfoil_class");
         assert_eq!(
             geometry_view, case.geometry_config,
             "first W6.3 divergence in {} at geometry_config",

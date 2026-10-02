@@ -22,6 +22,11 @@ pub const RETIRED_SOLVER_KEYS: &[&str] = &[
 /// way to the aerodrome reference code, whose letter now sets the span limit.
 pub const RETIRED_OBJECTIVE_KEYS: &[&str] = &["max_span_m"];
 
+/// `drag_model` keys that nothing reads any more: the Korn technology factor
+/// follows the wing's declared section class, `geometry.wing.airfoil_class`,
+/// instead of being a free coefficient.
+pub const RETIRED_DRAG_MODEL_KEYS: &[&str] = &["korn_technology_factor"];
+
 /// `optimizer.weights` keys that only the retired weighted lift-to-drag
 /// objective or the retired tail-volume window read.
 pub const RETIRED_WEIGHT_KEYS: &[&str] = &[
@@ -148,6 +153,16 @@ fn carries(data: &serde_json::Value, group: &str, keys: &[&str]) -> bool {
         .is_some_and(|map| keys.iter().any(|key| map.contains_key(*key)))
 }
 
+fn carries_drag_model(data: &serde_json::Value) -> bool {
+    data.get("drag_model")
+        .and_then(serde_json::Value::as_object)
+        .is_some_and(|map| {
+            RETIRED_DRAG_MODEL_KEYS
+                .iter()
+                .any(|key| map.contains_key(*key))
+        })
+}
+
 /// Which groups of retired optimizer keys a loaded document carried, so the
 /// load can say what it dropped.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -158,6 +173,9 @@ pub struct RetiredKeysDropped {
     pub weights: bool,
     /// `optimizer.objective.max_span_m`, replaced by the aerodrome code.
     pub span: bool,
+    /// `drag_model.korn_technology_factor`, replaced by the declared airfoil
+    /// class.
+    pub korn_technology_factor: bool,
     /// A stage budget saved when pre-gate rejections counted against
     /// `max_evaluations`; the same number now counts analysed candidates.
     pub requested_count_budget: bool,
@@ -172,6 +190,7 @@ impl RetiredKeysDropped {
             solver: carries(data, "solver", RETIRED_SOLVER_KEYS),
             weights: carries(data, "weights", RETIRED_WEIGHT_KEYS),
             span: carries(data, "objective", RETIRED_OBJECTIVE_KEYS),
+            korn_technology_factor: carries_drag_model(data),
             requested_count_budget: requested_count_stages(data).next().is_some(),
             requested_count_replay: requested_count_stages(data)
                 .any(|stage| stage.contains_key(REPLAY_KEY)),
@@ -184,6 +203,7 @@ impl RetiredKeysDropped {
             (self.solver, "The saved solver options 'strategy', 'display_progress', 'seed_near_initial_design' and 'seed_perturbation_fraction' were dropped; the search does not read them."),
             (self.weights, "The saved optimizer weights of the retired weighted lift-to-drag objective were dropped; the mission objective does not read them."),
             (self.span, "The saved span limit 'max_span_m' was dropped; the aerodrome reference code letter now sets the span limit."),
+            (self.korn_technology_factor, "The saved Korn technology factor 'drag_model.korn_technology_factor' was dropped; it now follows the wing's declared airfoil class (0.87 conventional, 0.95 supercritical)."),
             (self.requested_count_budget, "The saved stage evaluation budgets counted design-vector pre-gate rejections; the same numbers now count analysed candidates only, and rejections have their own cap (20 times the budget unless set)."),
             (self.requested_count_replay, "The saved replay evaluation counts were recorded when pre-gate rejections counted as evaluations and were dropped; they would not reproduce that run."),
         ]
@@ -193,12 +213,14 @@ impl RetiredKeysDropped {
     }
 }
 
-/// `data` without the retired optimizer keys; borrowed when it carries none.
+/// `data` without the retired optimizer and drag-model keys; borrowed when it
+/// carries none.
 pub(crate) fn without_retired_optimizer_keys(
     data: &serde_json::Value,
 ) -> Cow<'_, serde_json::Value> {
     let stale_replay = requested_count_stages(data).any(|stage| stage.contains_key(REPLAY_KEY));
     if !stale_replay
+        && !carries_drag_model(data)
         && !GROUPS
             .iter()
             .any(|(group, keys)| carries(data, group, keys))
@@ -214,6 +236,14 @@ pub(crate) fn without_retired_optimizer_keys(
             for key in keys {
                 map.remove(*key);
             }
+        }
+    }
+    if let Some(map) = cleaned
+        .get_mut("drag_model")
+        .and_then(serde_json::Value::as_object_mut)
+    {
+        for key in RETIRED_DRAG_MODEL_KEYS {
+            map.remove(*key);
         }
     }
     for stage in SEARCH_STAGES {

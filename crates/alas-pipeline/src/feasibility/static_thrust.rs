@@ -38,6 +38,7 @@ use alas_opt::mdo::propulsion::turboprop_unit_model;
 use alas_prop::turboprop::{Pw127mRating, TurbopropCommand, TurbopropCondition, TurbopropMode};
 
 use super::{FindingCode, FindingSeverity, PhysicalFinding};
+use crate::full_analysis::AnalysisReport;
 
 /// ISA sea-level density, kg/m^3: the reference the matching chart's
 /// sea-level quantities and every equivalent airspeed are defined against.
@@ -114,7 +115,7 @@ impl SeaLevelStaticThrust {
                 residual_jet_thrust_per_engine_n,
                 model_uncertainty,
             } => Some(format!(
-                "take-off field performance for this propeller aircraft is scaled from the \
+                "the installed propeller roll-mean reference thrust is \
                  {identity} ground-roll MEAN thrust, {:.1} kN all engines at \
                  {mean_roll_speed_m_s:.1} m/s (V_LOF/sqrt(2), for a lift-off equivalent airspeed \
                  of {lift_off_eas_m_s:.1} m/s), not from a jet rating, which stays exactly zero \
@@ -122,7 +123,7 @@ impl SeaLevelStaticThrust {
                  would flatter the field length. Roll-mean band {:.1} to {:.1} kN \
                  ({uncertainty_basis}). Residual core exhaust thrust \
                  {residual_jet_thrust_per_engine_n:.1} N per engine. Propeller model evidence: \
-                 {model_uncertainty}. The resulting field length is preliminary-design evidence, \
+                 {model_uncertainty}. The field method evaluates the thrust curve separately at the actual airport density. The resulting field length is preliminary-design evidence, \
                  not a certificated distance.",
                 self.thrust_n / 1_000.0,
                 static_thrust_n / 1_000.0,
@@ -173,16 +174,29 @@ pub(crate) fn resolve(
 /// The cruise thrust-margin findings.
 ///
 /// A jet keeps the historical form: the sea-level static `T/W` against the
-/// matching-chart requirement `cruise_required_tw`, which divides the cruise
+/// requirement from the candidate's shared drag table, which divides cruise
 /// `D / W` by the configured lapse. A propeller compares the model's own
-/// cruise thrust ([`propeller_cruise_thrust_n`]) with the cruise drag, both in
-/// flight: the same polar and wing loading with a unit lapse give `D / W`.
+/// cruise thrust ([`propeller_cruise_thrust_n`]) with that same cruise drag,
+/// both in flight.
 pub(crate) fn cruise_thrust_margin(
     config: &AlasConfig,
+    report: &AnalysisReport,
     static_tw: f64,
-    cruise_required_tw: f64,
+    wing_loading_pa: f64,
     weight_n: f64,
 ) -> Vec<PhysicalFinding> {
+    let cruise_required_tw = match cruise_required_tw(config, report, wing_loading_pa) {
+        Ok(required) => required,
+        Err(reason) => {
+            return vec![super::error(
+                FindingCode::FieldPerformanceUnavailable,
+                format!("cruise drag could not be assessed: {reason}"),
+                None,
+                None,
+                "",
+            )];
+        }
+    };
     let (actual, limit, message) = match propeller_cruise_thrust_n(config) {
         None => (
             static_tw,
@@ -225,6 +239,37 @@ pub(crate) fn cruise_thrust_margin(
     } else {
         Vec::new()
     }
+}
+
+/// Required static T/W from the carried candidate drag at the checked wing
+/// loading (Pa). Level flight gives CL = (W/S)/q and D/W = CD/CL; only the
+/// configured lapse converts this in-flight demand to its static reference.
+fn cruise_required_tw(
+    config: &AlasConfig,
+    report: &AnalysisReport,
+    wing_loading_pa: f64,
+) -> Result<f64, String> {
+    let mach = config.requirements.cruise_mach;
+    let altitude_m = config.requirements.cruise_altitude_m;
+    let lapse = config.performance.thrust_lapse;
+    if ![mach, wing_loading_pa, lapse]
+        .iter()
+        .all(|value| value.is_finite() && *value > 0.0)
+        || !altitude_m.is_finite()
+    {
+        return Err("cruise Mach, wing loading or thrust lapse is invalid".to_owned());
+    }
+    let atmosphere = alas_atmo::Atmosphere::new(altitude_m);
+    let velocity_m_s = mach * atmosphere.speed_of_sound();
+    let dynamic_pressure_pa = 0.5 * atmosphere.density() * velocity_m_s * velocity_m_s;
+    let lift_coefficient = wing_loading_pa / dynamic_pressure_pa;
+    let artifacts = report.fuel.artifacts(config, &report.design)?;
+    let drag_coefficient = artifacts.drag.cd(lift_coefficient, mach, altitude_m);
+    let required_tw = drag_coefficient / lift_coefficient / lapse;
+    if !required_tw.is_finite() || required_tw <= 0.0 {
+        return Err("shared candidate drag returned an invalid cruise demand".to_owned());
+    }
+    Ok(required_tw)
 }
 
 /// All-engine propeller thrust available at the design cruise point, N, or
@@ -350,108 +395,4 @@ fn propeller_roll_mean_thrust(
 }
 
 #[cfg(test)]
-// Shipped presets are test preconditions: a missing one is the failure being
-// reported, not a recoverable library condition.
-#[allow(clippy::expect_used)]
-mod tests {
-    use super::*;
-
-    /// A representative sea-level lift-off speed, so the tests exercise the
-    /// contract rather than an airport.
-    const LIFT_OFF_M_S: f64 = 70.0;
-
-    fn preset_config(name: &str) -> AlasConfig {
-        let preset = alas_config::presets::get(name).expect("a shipped preset");
-        let mut config = AlasConfig {
-            preset: preset.name.to_owned(),
-            geometry: preset.geometry.clone(),
-            requirements: preset.requirements.clone(),
-            ..AlasConfig::default()
-        };
-        config.geometry.engine.apply_engine_spec();
-        config
-    }
-
-    #[test]
-    fn a_turbofan_keeps_the_certificated_rating_unchanged() {
-        let config = preset_config("A320-200");
-        let resolved = resolve(&config, LIFT_OFF_M_S, 1.0);
-        let expected_n = config.geometry.engine.spanwise_positions_m.len() as f64
-            * config.geometry.engine.thrust_kn()
-            * 1_000.0;
-        assert_eq!(resolved.source, StaticThrustSource::CertifiedJetRating);
-        assert_eq!(resolved.thrust_n, expected_n);
-        assert!(resolved.provenance_note().is_none());
-    }
-
-    #[test]
-    fn the_turboprop_uses_the_roll_mean_not_the_static_thrust() {
-        let config = preset_config("ATR72-600");
-        assert_eq!(
-            config.geometry.engine.thrust_kn(),
-            0.0,
-            "the jet rating must stay exactly zero for a shaft-power engine"
-        );
-        let resolved = resolve(&config, LIFT_OFF_M_S, 1.0);
-        let StaticThrustSource::PropellerRollMean {
-            static_thrust_n,
-            mean_roll_speed_m_s,
-            residual_jet_thrust_per_engine_n,
-            low_thrust_n,
-            high_thrust_n,
-            ..
-        } = &resolved.source
-        else {
-            panic!("expected a propeller roll mean, got {:?}", resolved.source);
-        };
-        // A propeller loses thrust with speed, so the roll mean is strictly
-        // below the static value. Taking the static one is the flattering
-        // error this replaced.
-        assert!(
-            resolved.thrust_n < *static_thrust_n,
-            "roll mean {} is not below static {static_thrust_n}",
-            resolved.thrust_n
-        );
-        assert!((mean_roll_speed_m_s - LIFT_OFF_M_S / std::f64::consts::SQRT_2).abs() < 1.0e-9);
-        assert_eq!(*residual_jet_thrust_per_engine_n, 0.0);
-        // The forward-flight band is one-sided by construction: the blade
-        // efficiency is declared at the conservative end of the 0.86-0.91
-        // range the three independent routes agree on, so the modelled thrust
-        // is its own lower bound and the band only opens upward.
-        assert!(*low_thrust_n <= resolved.thrust_n && resolved.thrust_n < *high_thrust_n);
-
-        let weight_n = config.requirements.mtow_kg * config.requirements.gravity_m_s2;
-        let roll_mean_tw = resolved.thrust_n / weight_n;
-        assert!(
-            (0.15..=0.45).contains(&roll_mean_tw),
-            "ground-roll mean T/W {roll_mean_tw} is outside the physical band for a twin turboprop"
-        );
-        let note = resolved
-            .provenance_note()
-            .expect("a propeller result must carry its provenance");
-        assert!(note.contains("ground-roll MEAN"));
-        assert!(note.contains("stays exactly zero"));
-    }
-
-    #[test]
-    fn an_aircraft_with_no_installed_engine_is_a_typed_absence() {
-        let mut config = preset_config("ATR72-600");
-        config.geometry.engine.spanwise_positions_m.clear();
-        let resolved = resolve(&config, LIFT_OFF_M_S, 1.0);
-        assert!(matches!(
-            resolved.source,
-            StaticThrustSource::Unavailable { .. }
-        ));
-        assert_eq!(resolved.thrust_n, 0.0);
-    }
-
-    #[test]
-    fn an_unusable_lift_off_speed_is_a_typed_absence_rather_than_a_guess() {
-        let config = preset_config("ATR72-600");
-        let resolved = resolve(&config, f64::NAN, 1.0);
-        assert!(matches!(
-            resolved.source,
-            StaticThrustSource::Unavailable { .. }
-        ));
-    }
-}
+mod tests;

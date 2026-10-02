@@ -167,7 +167,7 @@ with an independent empirical mass estimate alone is not this failure.",
     ReviewedLimit {
         id: "relative_balance_nominal_unavailable",
         family: "Balance",
-        review: RelaxationReview::Ineligible,
+        review: RelaxationReview::NeverRelaxable,
         rationale: BOOLEAN_FLAG,
     },
     ReviewedLimit {

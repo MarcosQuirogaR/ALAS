@@ -834,13 +834,22 @@ mod tests {
         assert_eq!(narrowbody.cabin.passenger.business.share_pct, 0.0);
         assert_eq!(narrowbody.cabin.passenger.economy.share_pct, 100.0);
 
+        // Boeing D6-58333 Rev Q section 2.1.2: 28 business and 262 economy
+        // of the 290-seat typical cabin, seeded as seat shares.
         let widebody = AlasConfig::from_value(&json!({"preset": "B787-9"})).unwrap();
-        assert_eq!(widebody.cabin.passenger.business.share_pct, 15.0);
-        assert_eq!(widebody.cabin.passenger.economy.share_pct, 85.0);
+        assert!((widebody.cabin.passenger.business.share_pct - 100.0 * 28.0 / 290.0).abs() < 1e-9);
+        assert!((widebody.cabin.passenger.economy.share_pct - 100.0 * 262.0 / 290.0).abs() < 1e-9);
 
+        // ATR 72-600 factsheet p.22: 72 seats at 29 in. The exit ceiling
+        // comes from the declared exit types, not from a pair spacing.
         let regional = AlasConfig::from_value(&json!({"preset": "ATR72-600"})).unwrap();
         assert_eq!(regional.requirements.num_passengers, 72);
-        assert_eq!(regional.cabin.passenger.min_exit_pair_spacing_m, 9.5);
+        assert_eq!(regional.cabin.passenger.economy.share_pct, 100.0);
+        assert!((regional.cabin.passenger.economy.pitch_m - 29.0 * 0.0254).abs() < 1e-12);
+        assert_eq!(
+            regional.cabin.passenger.min_exit_pair_spacing_m,
+            crate::PassengerCabinConfig::default().min_exit_pair_spacing_m
+        );
     }
 
     #[test]
@@ -1030,7 +1039,7 @@ mod tests {
         let b787 = AlasConfig::from_value(&json!({"preset": "B787-9"})).unwrap();
         assert_eq!(b787.structures.skin_material, "CFRP QI");
         assert_eq!(b787.structures.spar_web_material, "CFRP QI");
-        assert_eq!(b787.structures.spar_cap_material, "CFRP QI");
+        assert_eq!(b787.structures.spar_cap_material, "CFRP 60/30/10");
 
         let ave = AlasConfig::from_value(&json!({"preset": "AVE"})).unwrap();
         assert_eq!(ave.structures, StructuresConfig::default());

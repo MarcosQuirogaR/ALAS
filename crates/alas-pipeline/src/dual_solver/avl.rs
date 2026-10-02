@@ -256,20 +256,17 @@ impl AvlObjective<'_> {
         if !point.induced_drag_coefficient.is_finite() || point.induced_drag_coefficient <= 0.0 {
             return ObjectiveEvaluation::rejected(self.failure_cost(), "avl_induced_drag");
         }
-        let cd0 = report.polar_fit.cd0;
-        let wave_drag_cd = report
-            .polar
-            .cl
-            .iter()
-            .enumerate()
-            .min_by(|(_, left), (_, right)| {
-                (**left - required_cl)
-                    .abs()
-                    .total_cmp(&(**right - required_cl).abs())
-            })
-            .and_then(|(index, _)| report.polar.cd_wave.get(index).copied())
-            .filter(|value| value.is_finite() && *value >= 0.0)
-            .unwrap_or(0.0);
+        // AVL supplies induced drag only. The candidate table supplies its
+        // own parasite and Korn terms; a total-polar intercept also carries
+        // zero-lift wake and wave drag and cannot serve as parasite drag.
+        let Ok(artifacts) = report.fuel.artifacts(&self.config, &report.design) else {
+            return ObjectiveEvaluation::rejected(self.failure_cost(), "drag_table");
+        };
+        let Some(table) = artifacts.drag.table() else {
+            return ObjectiveEvaluation::rejected(self.failure_cost(), "drag_table");
+        };
+        let cd0 = table.cd0(point.mach, self.config.requirements.cruise_altitude_m);
+        let wave_drag_cd = table.wave_cd(required_cl, point.mach);
         let polar = ExternalPolar {
             cd0,
             induced_factor_k: point.induced_drag_coefficient / (required_cl * required_cl),

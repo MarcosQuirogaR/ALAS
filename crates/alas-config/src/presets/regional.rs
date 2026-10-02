@@ -90,6 +90,8 @@ pub fn atr72_600() -> AircraftPreset {
                 source: "ATR 72-600 Factsheet (PW127M/N edition, 2020-07) p.2: range with maximum passengers (72 seats) 758 nmi; reserves and payload mass not stated, so the planning cabin is the payload",
             }),
             certified_max_seats: Some(78),
+            certified_exit_layout: Some(crate::presets::ATR72_600_EXIT_LAYOUT),
+            planning_cabin: Some(crate::presets::ATR72_600_PLANNING_CABIN),
             partial_design_mission_evidence: vec![PartialDesignMissionEvidence {
                 kind: PartialMissionEvidenceKind::AdvertisedRange,
                 range: Some(PublishedRange::NauticalMiles(740.0)),
@@ -207,6 +209,7 @@ pub fn atr72_600() -> AircraftPreset {
             airfoil_camber_scale: 1.0,
             ..DesignVector::default()
         },
+        airfoil_class_source: "Not transonic: the 0.44 cruise Mach is below the wave-drag onset Mach, so the class does not enter its drag. Declared conventional, matching the drawn NACA 23018 root and 23012 tip sections.",
         geometry: GeometryConfig {
             wing: WingConfig {
                 // ATR Weight and Balance Manual, LIMITATIONS LIM.1 p.03 (15
@@ -233,6 +236,7 @@ pub fn atr72_600() -> AircraftPreset {
                 outboard_sweep_decrement_deg: 0.0,
                 root_airfoil: "naca23018".to_owned(),
                 tip_airfoil: "naca23012".to_owned(),
+                airfoil_class: crate::AirfoilClass::Conventional,
                 ..WingConfig::default()
             },
             empennage: EmpennageConfig {

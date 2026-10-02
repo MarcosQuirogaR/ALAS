@@ -5,6 +5,7 @@
     "Al 7050-T7451",
     "Al 7075-T6",
     "Al-Li 2195-T8",
+    "CFRP 60/30/10",
     "CFRP QI",
     "CFRP UD",
     "GLARE 3",
@@ -83,6 +84,14 @@
       "f_allow_pa": 220000000.0,
       "name": "CFRP QI",
       "nu": 0.31,
+      "rho_kg_m3": 1580.0
+    },
+    {
+      "category": "composite",
+      "e_pa": 91595391044.0,
+      "f_allow_pa": 366381564.176,
+      "name": "CFRP 60/30/10",
+      "nu": 0.361761911,
       "rho_kg_m3": 1580.0
     },
     {

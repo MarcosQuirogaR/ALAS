@@ -88,8 +88,9 @@ pub struct DragComponents {
     /// Viscous/parasite drag coefficient, Raymer buildup, viscous margin
     /// included.
     pub cd_parasite: f64,
-    /// Lift-induced drag coefficient, as the vortex-lattice solve reported
-    /// it.
+    /// Lift-induced drag coefficient of the vortex-lattice solve, as the
+    /// caller passed it: the product entry points pass the Trefftz-plane
+    /// value, the frozen reference path the near-field sum.
     pub cd_induced: f64,
     /// Transonic wave-drag coefficient, Korn equation.
     pub cd_wave: f64,
@@ -308,7 +309,7 @@ impl<'a> AeroAnalysis<'a> {
     }
 
     /// The three drag terms at one operating point, with `cd_induced` as the
-    /// vortex-lattice solve reported it: `drag_components`.
+    /// caller took it from the vortex-lattice solve: `drag_components`.
     ///
     /// Resolves the atmosphere and the section thickness once and passes both
     /// down, which is the whole reason the two arguments exist.
@@ -522,7 +523,7 @@ mod tests {
         let cl = 0.5;
         let thickness = analysis.section_thickness();
         let cos_sweep = analysis.sweep_deg.to_radians().cos();
-        let mach_dd = analysis.drag.korn_technology_factor / cos_sweep
+        let mach_dd = analysis.korn_technology_factor() / cos_sweep
             - thickness / cos_sweep.powi(2)
             - cl / (10.0 * cos_sweep.powi(3));
         for coefficient in [10.0, 20.0, 40.0] {

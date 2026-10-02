@@ -11,7 +11,7 @@ use alas_mass::breakdown::{OEW_KEYS, PAYLOAD};
 
 use crate::full_analysis::AnalysisReport;
 
-use super::{error, FindingCode, FuelLoadingAssessment, PhysicalFinding};
+use super::{error, warning, FindingCode, FuelLoadingAssessment, PhysicalFinding};
 
 /// Difference between the two operating-empty masses beyond which the mass
 /// closure is reported as not having closed on the modeled buildup, in kg.
@@ -113,6 +113,31 @@ pub(super) fn append_structural_mass_findings(
     let tolerance = config.requirements.mtow_kg.abs().max(1.0) * 1.0e-10;
 
     let payload_kg = report.component_masses.get(PAYLOAD).copied();
+    // The route payload was capped at the structural payload limit (the
+    // published MZFW less the modeled OEW): the analysis flies the capped
+    // load, and the requested load it could not carry is stated here.
+    if let (Some(&offloaded_kg), Some(&limit_kg)) = (
+        report
+            .geometry_summary
+            .get(crate::full_analysis::ROUTE_PAYLOAD_OFFLOADED_KEY),
+        report
+            .geometry_summary
+            .get("effective_structural_payload_limit_kg"),
+    ) {
+        if offloaded_kg.is_finite() && offloaded_kg > 0.0 {
+            findings.push(warning(
+                FindingCode::StructuralPayloadLimitViolation,
+                format!(
+                    "the laid-out payload exceeds the structural payload limit (published MZFW \
+                     less modeled OEW) by {offloaded_kg:.1} kg; the route carries the limit, with \
+                     every seat and hold position offloaded by the same fraction"
+                ),
+                Some(limit_kg + offloaded_kg),
+                Some(limit_kg),
+                "kg",
+            ));
+        }
+    }
     let structural_limit_kg = config.requirements.max_structural_payload_kg;
     if structural_limit_kg.is_finite() && structural_limit_kg > 0.0 {
         if let Some(payload_kg) = payload_kg {

@@ -8,3 +8,8 @@ crates/alas-geom/data/selig.txt -text
 # The perf_aero bit-identity baselines are compared against LF text emitted by
 # the generator; keep their bytes verbatim regardless of core.autocrlf.
 crates/alas-aero/tests/fixtures/perf_aero/*.txt -text
+
+# The CADO airplane database and its ODbL text are stored byte-for-byte so
+# their digests match the upstream Recherche Data Gouv files (docs/data/cado).
+docs/data/cado/*.csv -text
+docs/data/cado/DATABASE_LICENSE.txt -text

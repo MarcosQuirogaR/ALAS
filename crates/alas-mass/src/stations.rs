@@ -53,6 +53,7 @@ mod coordinates;
 mod landing_gear;
 mod propulsion;
 pub use coordinates::NOSE_GEAR_MASS_FRACTION;
+pub(crate) use landing_gear::fuselage_mounted_main_gear_leg_m;
 #[cfg(test)]
 use landing_gear::{
     fuselage_crown_z_m, weighted_main_gear_station, wing_root_above_fuselage_crown,

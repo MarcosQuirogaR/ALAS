@@ -97,6 +97,7 @@ fn test_report(masses: HashMap<String, f64>) -> AnalysisReport {
         },
         polar_fit: PolarFit {
             cd0: 0.02,
+            c1: 0.0,
             k: 0.04,
             oswald_e: 0.85,
             aspect_ratio: 8.5,

@@ -48,10 +48,12 @@
 pub mod analyses;
 pub mod common;
 pub mod conditions;
+pub mod drag;
 pub mod frames;
 
 pub use analyses::{AeroSolution, LegacyTurbofanCompatibility, MissionAnalyses};
 pub use conditions::{Conditions, Initials, Matrix3, Vector3};
+pub use drag::{MissionDragCoefficients, MissionDragModel, MissionDragSource};
 
 use crate::numerics::Numerics;
 use alas_config::mission::SpeedReference;

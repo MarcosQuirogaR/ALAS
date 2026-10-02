@@ -17,11 +17,7 @@ use alas_config::{materials::MaterialSpec, StructuresConfig};
 use alas_geom::wing_structure::WingStructureGeometry;
 
 fn cap_ei(height: f64, width: f64, thickness: f64, elastic_pa: f64) -> f64 {
-    if height <= 2.0 * thickness {
-        elastic_pa * width * height.powi(3) / 12.0
-    } else {
-        elastic_pa * 2.0 * width * thickness * ((height - thickness) / 2.0).powi(2)
-    }
+    elastic_pa * super::section::cap_inertia(height, width, thickness)
 }
 
 /// Returns whether a realizable cap area changed; never shrinks below the

@@ -11,16 +11,16 @@
 
 use std::f64::consts::PI;
 
-use alas_aero::drag_buildup::{FuselageParams, NacelleParams, WingParams};
+use alas_aero::drag_buildup::{DragSettings, FuselageParams, NacelleParams, WingParams};
 use alas_aero::vorlax::{VlmGeometry, VlmWing};
 use alas_config::airports::Airport;
 use alas_config::{ActiveEngineModel, AlasConfig};
 #[cfg(test)]
 use alas_mission::segments::SegmentKind;
-use alas_mission::segments::{LegacyTurbofanCompatibility, MissionAnalyses};
+use alas_mission::segments::{LegacyTurbofanCompatibility, MissionAnalyses, MissionDragSource};
+use alas_mission::MissionResult;
 #[cfg(test)]
-use alas_mission::Mission;
-use alas_mission::{build_mission_request, MissionResult};
+use alas_mission::{build_mission_request, Mission};
 #[cfg(test)]
 use alas_prop::mission_turbofan::PartPowerModel;
 use alas_prop::mission_turbofan::{size_turbofan, TurbofanInputs, VehicleBuilderParams};
@@ -36,20 +36,20 @@ use crate::full_analysis::AnalysisReport;
 
 pub mod dispatch;
 mod drag_inputs;
+mod drag_model;
 mod flight;
 mod guidance;
 mod schedule;
 mod tail_geometry;
-mod trefftz;
 
 pub(crate) use dispatch::{LoadCaseSelection, SelectedLoadCase};
-use drag_inputs::{drag_settings, main_quarter_chord_sweep, main_thickness, tail_thickness};
+use drag_inputs::{main_quarter_chord_sweep, main_thickness, tail_thickness};
+use drag_model::{candidate_drag_source, mission_lift_surrogate};
 use guidance::{adapt_failed_climb, adapt_failed_cruise, adapt_failed_descent};
 use schedule::build_schedule;
 #[cfg(test)]
 use schedule::schedule_horizontal_distance;
 use tail_geometry::{tail_span, tail_surfaces};
-use trefftz::mission_lift_surrogate;
 
 const METRES_PER_SECOND_TO_FEET_PER_MINUTE: f64 = 3.28084 * 60.0;
 
@@ -67,9 +67,8 @@ pub(crate) fn evaluate(
     destination: &Airport,
     route_distance_m: f64,
 ) -> Result<(Option<MissionResult>, SelectedLoadCase), String> {
-    let request = build_mission_request(config, origin, destination, route_distance_m);
-    let fuel_loading = plan_fuel_loading(config, &report.design, report);
-    let mut load_case = dispatch::select_load_case(config, report, &fuel_loading, &request)?;
+    let (request, mut load_case) =
+        dispatch::select_route_load_case(config, report, origin, destination, route_distance_m)?;
     // The one native flight, at the selected mass: telemetry beside the
     // route the segment model priced; its failure never stops the stage.
     let native = (|| {
@@ -123,7 +122,7 @@ fn build_analyses_with_mode(
     reference_mode: MissionReferenceMode,
 ) -> Result<MissionAnalyses, String> {
     let vlm_geometry = vlm_geometry(config, report, reference_mode)?;
-    let surrogate = mission_lift_surrogate(&vlm_geometry, reference_mode)?;
+    let surrogate = mission_lift_surrogate(&vlm_geometry)?;
     let engine = &config.geometry.engine;
     let n_engines = engine.spanwise_positions_m.len();
     if n_engines == 0 {
@@ -247,7 +246,10 @@ fn build_analyses_with_mode(
         MissionReferenceMode::Product => report.airplane.s_ref,
         MissionReferenceMode::ReferenceCompatibility => geometry_value(report, "wing_area_m2")?,
     };
-    let drag_settings = drag_settings(reference_mode);
+    let drag_source = match reference_mode {
+        MissionReferenceMode::Product => candidate_drag_source(config, report)?,
+        MissionReferenceMode::ReferenceCompatibility => MissionDragSource::FrozenSuaveParity,
+    };
     if !reference_area_m2.is_finite() || reference_area_m2 <= 0.0 {
         return Err("mission aircraft has no positive finite reference area".to_owned());
     }
@@ -258,19 +260,11 @@ fn build_analyses_with_mode(
         takeoff_mass_kg: fuel_loading.analyzed_takeoff_mass_kg,
         minimum_mass_kg: Some(fuel_loading.zero_fuel_mass_kg),
         fuselage_lift_correction: alas_aero::lift_surrogate::FUSELAGE_LIFT_CORRECTION,
-        induced_drag_lift_correction: match reference_mode {
-            // SUAVE's Fidelity_Zero `fuselage_lift_correction` multiplies the
-            // aircraft lift used for force balance. It does not say to scale
-            // each VLM wing's induced drag, and `MissionAnalyses` squares this
-            // field before the drag buildup. Keeping this at unity avoids an
-            // unsupported CDi bias; a future calibrated wing-load model can
-            // opt in explicitly at this boundary.
-            MissionReferenceMode::Product => 1.0,
-            MissionReferenceMode::ReferenceCompatibility => 1.0,
-        },
+        induced_drag_lift_correction: 1.0,
         signed_cruise_force_residual: matches!(reference_mode, MissionReferenceMode::Product),
         enforce_throttle_envelope: matches!(reference_mode, MissionReferenceMode::Product),
-        drag_settings,
+        drag_source,
+        drag_settings: DragSettings::reference_compatibility(),
         wings,
         fuselages: vec![fuselage],
         nacelles,
@@ -550,11 +544,9 @@ fn vlm_geometry(
         aspect_ratio: hstab_span * hstab_span / hstab_area,
         sweep_quarter_chord_rad: hstab_geo.sweep_rad,
         sweep_leading_edge_rad: None,
-        // The full analysis solves the cruise pitching-moment trim before the
-        // mission surrogate is trained. A fixed trimmed incidence is the
-        // closest available cruise surrogate; the point-mass mission itself
-        // has no elevator or Cm residual, so phase-specific trim remains a
-        // declared fidelity limit rather than being implied here.
+        // Fixed design incidence supplies the alpha-to-CL lift mapping.
+        // Product drag reads the candidate's separately trimmed CDi(CL)
+        // table; this point-mass trajectory has no elevator or Cm state.
         twist_root_rad: mission_hstab_incidence_deg.to_radians(),
         twist_tip_rad: mission_hstab_incidence_deg.to_radians(),
         dihedral_rad: 0.0,
@@ -891,7 +883,14 @@ mod tests {
             reference_legacy.params.part_power_model,
             PartPowerModel::LegacyLinear
         );
-        assert!(product.drag_settings.area_weighted_compressibility);
+        assert!(matches!(
+            product.drag_source,
+            MissionDragSource::SharedCandidate(_)
+        ));
+        assert!(matches!(
+            reference.drag_source,
+            MissionDragSource::FrozenSuaveParity
+        ));
         assert!(!reference.drag_settings.area_weighted_compressibility);
         assert!(product
             .wings

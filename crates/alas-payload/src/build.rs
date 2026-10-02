@@ -23,6 +23,7 @@
 //! reserves the same monument bays, applies the same exit-derived cap, and
 //! reads the same [`crate::cabin::cabin_deck_segments`].
 
+mod count;
 mod mix_solve;
 mod presets;
 
@@ -30,21 +31,21 @@ pub use presets::{
     apply_cabin_preset, apply_cabin_preset_reference_compatibility, CabinPresetError,
 };
 
-use alas_config::{AlasConfig, CertifiedExitLayout, PassengerCabinConfig, SeatClassConfig};
+use alas_config::{AlasConfig, CertifiedExitLayout, PassengerCabinConfig};
 use alas_geom::aircraft::airplane::Airplane;
 
+use self::count::{class_config, count_deck, Deck};
 use self::mix_solve::length_mix_for_seat_targets;
 use crate::cabin::{
-    abreast, build_passenger_layout_reference_compatibility,
-    build_passenger_layout_with_aircraft_cg_target, cabin_deck_segments, ceil_div,
-    effective_pair_capacity, max_certifiable_capacity_reference_compatibility,
+    build_passenger_layout_reference_compatibility, build_passenger_layout_with_aircraft_cg_target,
+    cabin_deck_segments, ceil_div, count_declared_deck, effective_pair_capacity,
+    largest_pair_rating, max_certifiable_capacity_reference_compatibility,
     max_certifiable_capacity_with_source_layout, min_exit_pairs, resolve_aisle_width,
-    select_exit_type, service_reserve_len, MIN_PITCH, MONUMENT_LEN,
+    select_exit_type,
 };
 use crate::cargo::{build_cargo_layout, build_cargo_layout_reference_compatibility};
 use crate::geometry::{CabinGeometry, CabinGeometryError};
 use crate::layout::{LayoutSummary, PayloadLayout};
-use crate::numeric::round_half_even;
 
 /// Resolve the passenger capacity ceiling for a registered aircraft.
 ///
@@ -113,6 +114,27 @@ fn label_planning_cap(layout: &mut PayloadLayout, planning_binds: bool) {
     }
 }
 
+/// The product cabin frame of `plane` under `config`: the sampled fuselage,
+/// with the main deck bounded by the registered aircraft's declared door
+/// stations where its source prints them.
+///
+/// # Errors
+///
+/// [`CabinGeometryError`], for an airplane the cabin frame cannot be sampled
+/// from.
+pub fn product_cabin_geometry(
+    plane: &Airplane,
+    config: &AlasConfig,
+) -> Result<CabinGeometry, CabinGeometryError> {
+    let layout = registered_source_exit_layout(config, false);
+    Ok(CabinGeometry::new(
+        plane,
+        &config.geometry,
+        config.cabin.passenger.wall_thickness_m,
+    )?
+    .with_declared_doors(layout.as_ref()))
+}
+
 /// Resolve the source-defined exit arrangement for a registered passenger
 /// preset.  Clean-sheet and frozen compatibility callers deliberately retain
 /// the generic diameter-based exit proxy.
@@ -140,10 +162,6 @@ const CLASS_ORDER: [&str; 4] = ["First", "Business", "Premium", "Economy"];
 /// than to the narrow-cabin minimum, and pinning it here keeps the width from
 /// depending on a seat count this function has not worked out yet.
 const TRANSPORT_CATEGORY_PAX: i64 = 20;
-
-/// Rounding slack on the row-length budget, so a class whose rows divide its
-/// share exactly is not denied its last row by a floating-point remainder.
-const BUDGET_EPSILON: f64 = 1e-9;
 
 /// Build the detailed payload layout for `plane` under `config`.
 ///
@@ -192,11 +210,7 @@ fn build_payload_layout_with_mass_semantics(
             config.cabin.passenger.wall_thickness_m,
         )?
     } else {
-        CabinGeometry::new(
-            plane,
-            &config.geometry,
-            config.cabin.passenger.wall_thickness_m,
-        )?
+        product_cabin_geometry(plane, config)?
     };
     let source_capacity_cap = registered_source_capacity_cap(config, reference_compatibility);
     let source_exit_layout = registered_source_exit_layout(config, reference_compatibility);
@@ -417,18 +431,14 @@ fn simulate_passenger_counts_with_exit_semantics(
     };
     let exit_spec = select_exit_type(g.diameter_m);
     let exit_cap = if let Some(source_exit_layout) = source_exit_layout {
-        source_exit_layout
-            .pairs
-            .iter()
-            .map(|pair| pair.capacity_per_pair.max(1))
-            .max()
-            .unwrap_or(1)
+        largest_pair_rating(&source_exit_layout)
     } else if product_exit_capacity {
         effective_pair_capacity(exit_spec, pax)
     } else {
         exit_spec.capacity_per_pair
     };
 
+    let first_deck = g.passenger_decks.first().map(|deck| deck.name);
     for segment in cabin_deck_segments(g) {
         let total_length = segment.x1 - segment.x0;
         let deck_cap = deck_caps.for_deck(segment.deck.name);
@@ -444,6 +454,23 @@ fn simulate_passenger_counts_with_exit_semantics(
             })
             .collect();
         if classes.is_empty() {
+            continue;
+        }
+        // A main deck bounded by declared doors is counted by walking its
+        // seats between the doors, the walk the detailed engine places with.
+        if product_exit_capacity
+            && !g.door_stations.is_empty()
+            && Some(segment.deck.name) == first_deck
+        {
+            let declared: Vec<_> = classes
+                .iter()
+                .map(|&(name, share)| (name, class_config(pax, name), share))
+                .collect();
+            let (x0, x1, deck) = (segment.x0, segment.x1, segment.deck);
+            let seats = count_declared_deck(g, deck, x0, x1, pax, &declared, aisle_w, deck_cap);
+            for (name, seats) in seats {
+                counts.add(name, seats);
+            }
             continue;
         }
 
@@ -502,83 +529,6 @@ pub(crate) fn simulate_passenger_counts_for_seat_mix_with_source_cap(
     let length_mix =
         length_mix_for_seat_targets(g, pax, target_mix, source_capacity_cap, source_exit_layout);
     simulate_passenger_counts_product(g, pax, &length_mix, source_capacity_cap, source_exit_layout)
-}
-
-/// One deck stretch, as the counting pass reads it.
-struct Deck<'a> {
-    geometry: &'a CabinGeometry,
-    spec: &'a crate::geometry::DeckSpec,
-    x0: f64,
-    total_length: f64,
-    cap: i64,
-}
-
-/// Seat one deck with `n_mid_bays` extra monument bays charged against it.
-///
-/// The row-length budget is shared across the whole deck rather than split
-/// into per-class sections. Splitting it and truncating each class
-/// independently throws away up to one row's worth of floor in *every* class,
-/// which compounds to several rows across a four-class cabin. Earlier classes
-/// take their share rounded to the nearest whole row, so the rounding averages
-/// out instead of always undershooting, and the last class absorbs whatever is
-/// left, which is how an airline actually sets an exact business row count
-/// and lets economy fill the rest.
-fn count_deck(
-    deck: &Deck<'_>,
-    pax: &PassengerCabinConfig,
-    classes: &[(&str, f64)],
-    mix: &[(&str, f64)],
-    aisle_w: f64,
-    n_mid_bays: i64,
-) -> (PassengerCounts, i64) {
-    let mut local = PassengerCounts::default();
-    let mut seated = 0i64;
-
-    let bays = classes.len() as i64 + 1 + n_mid_bays;
-    let l_seating = deck.total_length
-        - bays as f64 * MONUMENT_LEN
-        - service_reserve_len(deck.total_length, mix);
-    if l_seating <= 0.0 {
-        return (local, seated);
-    }
-
-    let mut x = deck.x0 + MONUMENT_LEN;
-    let mut remaining = l_seating;
-    for (i, &(name, share)) in classes.iter().enumerate() {
-        let class = class_config(pax, name);
-        let pitch = class.pitch_m.max(MIN_PITCH);
-        let is_last = i == classes.len() - 1;
-        let budget = if is_last {
-            remaining
-        } else {
-            let rows = (round_half_even(share * l_seating / pitch) as i64).max(0);
-            remaining.min(rows as f64 * pitch)
-        };
-
-        let mut n_rows = 0i64;
-        while n_rows as f64 * pitch + pitch <= budget + BUDGET_EPSILON && seated < deck.cap {
-            let row = abreast(class, deck.spec, deck.geometry, aisle_w, x).min(deck.cap - seated);
-            local.add(name, row);
-            seated += row;
-            x += pitch;
-            n_rows += 1;
-        }
-        remaining -= n_rows as f64 * pitch;
-        if !is_last {
-            x += MONUMENT_LEN;
-        }
-    }
-    (local, seated)
-}
-
-/// The class slot a mix name refers to.
-fn class_config<'a>(pax: &'a PassengerCabinConfig, name: &str) -> &'a SeatClassConfig {
-    match name {
-        "First" => &pax.first,
-        "Business" => &pax.business,
-        "Premium" => &pax.premium,
-        _ => &pax.economy,
-    }
 }
 
 // These are assertions over fixtures constructed in the test itself; a failed
@@ -649,8 +599,8 @@ mod product_tests {
                 summary.total_pax, summary.seated_pax,
                 "{name} preset reported a passenger shortfall"
             );
-            if matches!(name, "ATR72-600" | "DC-10") {
-                // These source records publish planning/typical seat counts
+            if name == "DC-10" {
+                // The DC-10 source record publishes a planning seat count
                 // without a revision-locked exit-pair arrangement and LOPA
                 // that this generic cabin can reproduce.  Keep the corrected
                 // complete-pair proxy visible as a source/layout gap instead
@@ -659,15 +609,10 @@ mod product_tests {
                 // above still require a physically consistent row pack: no
                 // passenger is reported seated without a mass-bearing row.
                 assert_eq!(summary.source_exit_layout, None);
-                // The DC-10 also carries a planning-seat ceiling below its
-                // geometric exit sum, which the summary reports as the cap
-                // even though this shell cannot seat that many.
-                let expected_binding = if name == "DC-10" {
-                    "planning_seat_cap"
-                } else {
-                    "geometry_exit_limit"
-                };
-                assert_eq!(summary.capacity_binding, expected_binding);
+                // Its planning-seat ceiling is below the geometric exit sum,
+                // which the summary reports as the cap even though this shell
+                // cannot seat that many.
+                assert_eq!(summary.capacity_binding, "planning_seat_cap");
                 assert!(
                     summary.total_pax < preset.requirements.num_passengers,
                     "{name} source/layout gap was hidden by a planning-count pin"

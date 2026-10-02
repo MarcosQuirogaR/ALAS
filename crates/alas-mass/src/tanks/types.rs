@@ -297,6 +297,14 @@ pub enum TankLayoutError {
         /// The requested total, kg.
         total_kg: f64,
     },
+    /// A registered layout's cell total disagrees with its preset's published
+    /// usable volume beyond the reconciliation tolerance.
+    PublishedInventoryMismatch {
+        /// Usable volume of the resolved cells, L.
+        cells_l: f64,
+        /// Published usable volume, L.
+        published_l: f64,
+    },
     /// A burn removed more fuel than the state held.
     InsufficientFuel {
         /// How far short of the request the state's fuel fell, kg.
@@ -365,6 +373,16 @@ impl fmt::Display for TankLayoutError {
                 write!(
                     formatter,
                     "unusable fuel total {total_kg} kg is invalid or cannot be distributed"
+                )
+            }
+            Self::PublishedInventoryMismatch {
+                cells_l,
+                published_l,
+            } => {
+                write!(
+                    formatter,
+                    "registered tank cells hold {cells_l} L against {published_l} L published, \
+                     beyond the reconciliation tolerance"
                 )
             }
             Self::InsufficientFuel { shortfall_kg } => {

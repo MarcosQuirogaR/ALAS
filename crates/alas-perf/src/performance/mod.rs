@@ -9,21 +9,22 @@
 //! climb ([`constraints::tw_oei_climb_constraint`]), take-off field length
 //! ([`constraints::tw_takeoff_constraint`]) and landing field length
 //! ([`constraints::ws_landing_limit`]). [`constraints::build_matching_chart`]
-//! assembles all four across a set of aerodromes. The FAR-25 V-speed schedule
-//! ([`speeds::compute_v_speeds`]) and the estimated field distances
-//! ([`speeds::compute_field_performance`]) are derived from the same empirical
-//! constants so the numbers a design reports agree with the boundary it was
-//! sized against. [`envelope::build_vn_diagram`] rounds out the surface with
-//! the flight envelope.
+//! assembles all four across a set of aerodromes. Production field estimates
+//! use [`field::compute_field_performance_for_propulsion`]: the jet takeoff
+//! parameter correlation or Torenbeek's propeller ground-motion, balanced-field
+//! and landing energy methods. The translated speed and distance APIs remain
+//! available for legacy replay. [`envelope::build_vn_diagram`] rounds out the
+//! surface with the flight envelope.
 //!
 //! Every formula is SI in and SI out unless a name says otherwise. The
-//! empirical constants (37.7, K = 0.60) are Raymer's regression coefficients
-//! for jet transports (*Aircraft Design: A Conceptual Approach*, 5th ed., Ch.
-//! 17 & 21), originally calibrated in US customary units; the unit-conversion
-//! factors below are applied inline where the formula reaches them.
+//! empirical constants (37.7, K = 0.60) belong to the retained jet transport
+//! correlations. The propeller method uses installed thrust as a function of
+//! speed and explicitly configured preliminary runway assumptions from
+//! Torenbeek, Secs. 5.4.5-5.4.6. No aircraft database distance fits are used.
 
 pub mod constraints;
 pub mod envelope;
+pub mod field;
 pub mod speeds;
 
 pub use constraints::{
@@ -34,6 +35,10 @@ pub use constraints::{
 pub use envelope::{
     assess_far25_positive_limit_load_factor, build_vn_diagram,
     far25_positive_limit_load_factor_min, Far25PositiveLoadFactorStatus, VnDiagramData,
+};
+pub use field::{
+    compute_field_performance_for_propulsion, compute_propeller_landing_distance, FieldInputs,
+    FieldPropulsion, VREF_OVER_VS1G,
 };
 pub use speeds::{
     compute_field_performance, compute_field_performance_at_masses, compute_v_speeds,

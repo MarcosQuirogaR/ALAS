@@ -105,10 +105,14 @@ fn report_figure_labels_translate_dynamic_prefixes_without_changing_values() {
         localize_scene_text("Wingbox planform  (39 ribs)"),
         "Planta del caj\u{f3}n alar  (39 ribs)"
     );
-    assert_eq!(
-        localize_scene_text("FEM vs Torenbeek wing mass  (delta = -3%)"),
-        "Masa alar: FEM frente a Torenbeek  (delta = -3%)"
-    );
+    for text in [
+        "Wing mass by model (different scopes)",
+        "FE (Nastran)\nprimary wingbox",
+        "Native beam\n(primary structure)",
+        "FLOPS estimate\ncomplete wing",
+    ] {
+        assert_ne!(localize_scene_text(text), text, "{text} has no Spanish");
+    }
     assert_eq!(
         localize_scene_text("Per-engine thrust, this cruise pt :   242.4 kN"),
         "Empuje por motor, en este punto de crucero :   242.4 kN"

@@ -29,6 +29,26 @@ fn find(outcome: &SizingOutcome, config: &AlasConfig, id: &str) -> Option<Constr
 }
 
 #[test]
+fn incomplete_structural_inventory_gates_every_design_mode() {
+    let mut config = config("B787-9", "reference_adaptation");
+    let mut outcome = sized(&config);
+    outcome.structural_inventory_complete = false;
+    for mode in [
+        alas_config::optimizer::DesignMode::ReferenceAdaptation,
+        alas_config::optimizer::DesignMode::BaselineSandbox,
+        alas_config::optimizer::DesignMode::CleanSheet,
+    ] {
+        config.optimizer.design_space.mode = mode;
+        let incomplete = find(&outcome, &config, "structural_inventory_unverified").unwrap();
+        assert_eq!(
+            incomplete.policy,
+            config.optimizer.objective.mass_constraints
+        );
+        assert!(incomplete.normalized_violation > 0.0, "{mode:?}");
+    }
+}
+
+#[test]
 fn the_nominal_passes_on_every_preset_with_the_published_figures_as_context() {
     for preset in alas_config::presets::registry() {
         let config = config(preset.name, "reference_adaptation");
@@ -90,9 +110,11 @@ fn a_design_mission_sets_the_requirement_and_the_nominal_capacity_is_the_fallbac
         } else {
             nominal_capacity = Some(declared.limit);
         }
+        // Both requirements are held against the dispatch capacity.
+        let capacity_kg = sized.usable_capacity_kg;
         assert_eq!(
             declared.normalized_violation > 0.0,
-            sized.usable_capacity_kg < declared.limit,
+            capacity_kg < declared.limit,
             "{sizing:?}"
         );
     }

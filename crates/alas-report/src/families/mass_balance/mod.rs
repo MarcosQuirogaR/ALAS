@@ -201,6 +201,7 @@ pub fn quick_preview_report(
         },
         polar_fit: PolarFit {
             cd0: 0.0,
+            c1: 0.0,
             k: 0.0,
             oswald_e: 0.0,
             aspect_ratio: 0.0,

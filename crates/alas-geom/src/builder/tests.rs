@@ -34,7 +34,7 @@ fn a_centerline_engine_is_named_and_placed_on_the_tailcone() {
     let dv = DesignVector::default();
 
     let nacelles = builder
-        .build_engines(&dv)
+        .build_engines(&dv, WingShape::Flight)
         .expect("a single centerline engine builds cleanly");
     assert_eq!(nacelles.len(), 1);
     assert_eq!(nacelles[0].name, "Nacelle Center");
@@ -51,7 +51,7 @@ fn wing_mounted_engines_are_named_by_which_side_they_are_on() {
     let builder = AircraftBuilder::new(Some(GeometryConfig::default()));
     let dv = DesignVector::default();
     let nacelles = builder
-        .build_engines(&dv)
+        .build_engines(&dv, WingShape::Flight)
         .expect("the default two wing-mounted engines build cleanly");
     assert_eq!(nacelles.len(), 2);
     assert_eq!(nacelles[0].name, "Nacelle R");
@@ -87,7 +87,7 @@ fn an_outboard_nacelle_follows_the_continuous_leading_edge_sweep() {
         .expect("the default planform is valid");
 
     let nacelles = builder
-        .build_engines(&dv)
+        .build_engines(&dv, WingShape::Flight)
         .expect("outboard nacelle placement is valid");
     let expected = builder.geometry.wing.root_datum_x_m
         + planform
@@ -210,7 +210,7 @@ fn reference_compatibility_retains_the_frozen_nacelle_station() {
     let reference = AircraftBuilder::new_reference_compatibility(Some(GeometryConfig::default()));
     let y_outboard = reference.geometry.engine.spanwise_positions_m[0].abs();
     let reference_inlet = reference
-        .build_engines(&dv)
+        .build_engines(&dv, WingShape::Flight)
         .expect("reference nacelles build")[0]
         .xsecs[0]
         .xyz_c[0];
@@ -317,6 +317,47 @@ fn reference_builder_still_resolves_the_named_database_engine() {
         builder.geometry.engine.nacelle_profile,
         spec.nacelle_profile()
     );
+}
+
+#[test]
+fn the_flight_shape_raises_the_tip_and_carries_the_nacelles_with_the_wing() {
+    // The configured heights are the static ground shape; the default build
+    // is the 1 g flight shape, the tip higher by the declared rise and each
+    // nacelle by the rise of the wing station its pylon hangs from.
+    let mut geometry = GeometryConfig::default();
+    geometry.wing.flight_tip_rise_semispan_fraction = Some(0.1);
+    let builder = AircraftBuilder::new(Some(geometry));
+    let dv = DesignVector::default();
+    let flight = builder.build(Some(&dv), true).expect("flight shape builds");
+    let ground = builder
+        .build_shape(Some(&dv), true, WingShape::Ground)
+        .expect("ground shape builds");
+    let wing = &builder.geometry.wing;
+    let planform = wing.transport_planform(&dv).expect("valid planform");
+    let flight_heights = wing.heights(WingShape::Flight, &planform).expect("valid");
+
+    let tip = |plane: &Airplane| plane.wings[0].xsecs.last().map(|x| x.xyz_le[2]);
+    let root = |plane: &Airplane| plane.wings[0].xsecs.first().map(|x| x.xyz_le[2]);
+    assert_eq!(tip(&ground), Some(wing.tip_z_m));
+    assert_eq!(root(&ground), root(&flight));
+    let rise = tip(&flight).zip(tip(&ground)).map(|(f, g)| f - g);
+    assert!(rise.is_some_and(|rise| (rise - 0.1 * planform.tip.y_m).abs() < 1e-9));
+
+    for (flown, parked) in flight.fuselages.iter().zip(&ground.fuselages).skip(1) {
+        let y = flown.xsecs[0].xyz_c[1];
+        let expected = flight_heights.at(&planform, y)
+            - wing
+                .heights(WingShape::Ground, &planform)
+                .expect("valid")
+                .at(&planform, y);
+        let moved = flown.xsecs[0].xyz_c[2] - parked.xsecs[0].xyz_c[2];
+        assert!(
+            (moved - expected).abs() < 1e-9,
+            "{}: {moved} vs {expected}",
+            flown.name
+        );
+        assert!(moved > 0.0);
+    }
 }
 
 #[test]

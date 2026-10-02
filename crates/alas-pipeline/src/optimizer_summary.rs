@@ -17,17 +17,13 @@ use crate::dual_solver::SolverOptimizationStatus;
 
 mod geometry;
 pub use geometry::{
-    GeometryComparison, ASPECT_RATIO_FLAG_FRACTION, ASPECT_RATIO_FLAG_LABEL, SWEEP_FLAG_DEG,
-    SWEEP_FLAG_LABEL,
+    GeometryComparison, AEROELASTIC_CAVEAT_TEXT, ASPECT_RATIO_FLAG_FRACTION,
+    ASPECT_RATIO_FLAG_LABEL, BUFFET_BASIS_TEXT, SWEEP_FLAG_DEG, SWEEP_FLAG_LABEL,
 };
 
 /// What the search is: a bounded local refinement of the preset, not a
 /// global search for the best aircraft of its class.
 pub const SCOPE_LABEL: &str = "Local refinement around the preset";
-
-/// The model omits aeroelastic weight and stiffness penalties, so a gain
-/// bought with span or aspect ratio is an upper bound.
-pub const AEROELASTIC_CAVEAT_TEXT: &str = "Span and aspect-ratio gains exclude aeroelastic penalties (flutter, aileron reversal); treat aspect-ratio increases above the reference aircraft as optimistic";
 
 /// The stopping rule of a run in which a stage may stop on its time limit.
 pub const TIME_LIMITED_TEXT: &str = "Time-limited: the stopping point depends on machine speed and worker count; replay with the recorded evaluation counts for a bit-identical result at any worker count";
@@ -345,6 +341,7 @@ impl OptimizerRunSummary {
             ));
         }
         lines.push(("Aeroelastic caveat", AEROELASTIC_CAVEAT_TEXT.to_owned()));
+        lines.push(("Buffet margin basis", BUFFET_BASIS_TEXT.to_owned()));
         lines.push(("Wall time", format!("{:.1} s", self.wall_time_s)));
         lines.push((
             "Random seed",

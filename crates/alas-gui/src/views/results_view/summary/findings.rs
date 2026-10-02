@@ -16,6 +16,9 @@ use crate::views::tr;
 pub(super) fn finding_title(code: FindingCode) -> String {
     tr(match code {
         FindingCode::StructuralMassModelDifference => "Structural mass estimates differ",
+        FindingCode::StructuralInventoryUnverified => {
+            "Primary wing box exceeds the complete-wing mass"
+        }
         FindingCode::StructuralResponseUnavailable => "Structural assessment unavailable",
         FindingCode::StructuralStrengthViolation => "Structural sizing constraint exceeded",
         FindingCode::StructuralLinearModelDomain => "Linear beam model validity exceeded",
@@ -31,6 +34,8 @@ pub(super) fn finding_title(code: FindingCode) -> String {
         FindingCode::NoseGearStrengthViolation => "Nose-gear load limit exceeded",
         FindingCode::MainGearStrengthViolation => "Main-gear load limit exceeded",
         FindingCode::MinimumNoseGearLoadViolation => "Insufficient nose-gear load",
+        FindingCode::TipBackViolation => "Tip-back angle below limit",
+        FindingCode::TailScrapeViolation => "Tail-scrape angle below limit",
         FindingCode::PublicPlanningCgEnvelopeViolation => "Public planning CG envelope exceeded",
         FindingCode::TrimUnavailable => "Cruise trim not demonstrated",
         FindingCode::InsufficientStaticMargin => "Static margin below the configured floor",
@@ -71,6 +76,7 @@ pub(super) fn finding_title(code: FindingCode) -> String {
 pub(super) fn finding_meaning(code: FindingCode) -> String {
     tr(match code {
         FindingCode::StructuralMassModelDifference => "The primary structural material inventory and empirical complete-wing estimate represent different model scopes. Their difference is diagnostic and does not reject a candidate or penalize its objective.",
+        FindingCode::StructuralInventoryUnverified => "The sized primary wing box is at least as heavy as the current complete-wing mass estimate, so no positive secondary-structure remainder is left. The structural inventory of this candidate cannot be verified.",
         FindingCode::StructuralResponseUnavailable => "The required structural response could not be evaluated from valid model inputs and results.",
         FindingCode::StructuralStrengthViolation => "The sized structure exceeds a strength, rib-spacing or cap-packaging constraint. The finding specifies which constraint governs.",
         FindingCode::StructuralLinearModelDomain => "The modeled deformation exceeds the configured linear beam curvature error budget. Linear analysis cannot establish this design's structural response.",
@@ -86,6 +92,8 @@ pub(super) fn finding_meaning(code: FindingCode) -> String {
         FindingCode::NoseGearStrengthViolation => "The modeled nose-gear vertical load exceeds the configured tire or gear capacity.",
         FindingCode::MainGearStrengthViolation => "The modeled main-gear vertical load exceeds the configured tire or gear capacity.",
         FindingCode::MinimumNoseGearLoadViolation => "The modeled nose load is below the configured minimum needed to retain preliminary steering authority.",
+        FindingCode::TipBackViolation => "The tip-back angle at the loaded CG height is below the required minimum, so an aft CG can tip the aircraft onto its tail on the ground.",
+        FindingCode::TailScrapeViolation => "The aft fuselage lower contour touches the ground at a pitch angle below the required rotation attitude. The contour is not yet validated against published tail-strike attitudes, so this finding is a diagnostic and does not reject the design.",
         FindingCode::PublicPlanningCgEnvelopeViolation => "The point lies outside a manufacturer public planning curve. That curve is preliminary evidence; the actual aircraft weight-and-balance manual controls operations.",
         FindingCode::TrimUnavailable => "ALAS did not retain a finite cruise point that simultaneously satisfies required lift and zero pitching moment. Any displayed untrimmed L/D is a fallback.",
         FindingCode::InsufficientStaticMargin => "The calculated longitudinal static margin is below the physical floor configured for this analysis.",
@@ -120,6 +128,7 @@ pub(super) fn finding_meaning(code: FindingCode) -> String {
 pub(super) fn finding_next_step(code: FindingCode) -> String {
     tr(match code {
         FindingCode::StructuralMassModelDifference => "Structures: compare the inventory scope and assumptions of the two mass estimates",
+        FindingCode::StructuralInventoryUnverified => "Structures: reduce the sized primary box mass or revise the complete-wing mass estimate",
         FindingCode::StructuralResponseUnavailable
         | FindingCode::StructuralStrengthViolation
         | FindingCode::StructuralLinearModelDomain
@@ -145,6 +154,8 @@ pub(super) fn finding_next_step(code: FindingCode) -> String {
         | FindingCode::NoseGearStrengthViolation
         | FindingCode::MainGearStrengthViolation
         | FindingCode::MinimumNoseGearLoadViolation
+        | FindingCode::TipBackViolation
+        | FindingCode::TailScrapeViolation
         | FindingCode::PublicPlanningCgEnvelopeViolation => "Weight & Balance",
         FindingCode::WingAreaLimit | FindingCode::InvalidEnvelopeSpeedOrder => {
             "Aerodynamics and Optimization"
@@ -174,6 +185,7 @@ pub(super) fn finding_next_step(code: FindingCode) -> String {
 pub(super) fn affected_disciplines(code: FindingCode) -> String {
     tr(match code {
         FindingCode::StructuralMassModelDifference => "Structures | Mass properties",
+        FindingCode::StructuralInventoryUnverified => "Structures | Mass properties",
         FindingCode::StructuralResponseUnavailable
         | FindingCode::StructuralStrengthViolation
         | FindingCode::StructuralLinearModelDomain
@@ -201,7 +213,9 @@ pub(super) fn affected_disciplines(code: FindingCode) -> String {
         }
         FindingCode::NoseGearStrengthViolation
         | FindingCode::MainGearStrengthViolation
-        | FindingCode::MinimumNoseGearLoadViolation => "Landing gear | Weight & balance",
+        | FindingCode::MinimumNoseGearLoadViolation
+        | FindingCode::TipBackViolation
+        | FindingCode::TailScrapeViolation => "Landing gear | Weight & balance",
         FindingCode::WingAreaLimit => "Geometry | Aerodynamics | Optimization",
         FindingCode::FieldPerformanceUnavailable
         | FindingCode::FieldTakeoffDistanceViolation
@@ -243,7 +257,9 @@ pub(super) fn actual_label(code: FindingCode) -> String {
         FindingCode::ReserveFuelShortfall => "Required takeoff fuel",
         FindingCode::MassModelDisagreement => "Ledger takeoff CG",
         FindingCode::StructuralMassModelDifference => "Primary structural material mass",
+        FindingCode::StructuralInventoryUnverified => "Sized primary box mass",
         FindingCode::StructuralPayloadLimitViolation => "Modeled payload",
+        FindingCode::TipBackViolation | FindingCode::TailScrapeViolation => "Calculated angle",
         _ => "Calculated",
     })
 }
@@ -261,7 +277,11 @@ pub(super) fn limit_label(code: FindingCode) -> String {
         FindingCode::ReserveFuelShortfall => "Admissible takeoff fuel",
         FindingCode::MassModelDisagreement => "Lumped takeoff CG",
         FindingCode::StructuralMassModelDifference => "Empirical complete-wing estimate",
+        FindingCode::StructuralInventoryUnverified => "Complete-wing mass",
         FindingCode::StructuralPayloadLimitViolation => "Structural payload limit",
+        FindingCode::TipBackViolation | FindingCode::TailScrapeViolation => {
+            "Minimum required angle"
+        }
         _ => "Limit",
     })
 }
@@ -272,6 +292,8 @@ pub(super) fn finding_margin(code: FindingCode, actual: f64, limit: f64) -> f64 
         | FindingCode::InsufficientStaticMargin
         | FindingCode::ThrustMarginViolation
         | FindingCode::MinimumNoseGearLoadViolation
+        | FindingCode::TipBackViolation
+        | FindingCode::TailScrapeViolation
         | FindingCode::PassengerCapacityShortfall
         | FindingCode::CargoCapacityShortfall
         | FindingCode::MaximumZeroFuelWeightViolation

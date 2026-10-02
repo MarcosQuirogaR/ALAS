@@ -34,9 +34,21 @@
 //! divergence is declared in `tests/parity_databases.rs`. No frozen parity
 //! fixture sizes with this material (they use `CFRP UD`), so no fixture moves.
 //!
-//! `CFRP UD` keeps the reference 900 MPa: the frozen sizing, analysis and mesh
-//! fixtures are sized with it. It is a tension figure; the A220-300 and
-//! B787-9 do not use it, the default caps (and so AVE) still do.
+//! `CFRP UD` keeps the reference 900 MPa for frozen sizing, analysis and mesh
+//! fixtures. It is a coupon tension figure. Product structural assessment
+//! caps all CFRP proxies at 0.40% ultimate strain in
+//! `alas_struct::allowables::bending_allowable_pa`, so the AVE/default cap
+//! selection uses 480 MPa while the database and reference fixtures stay fixed.
+//!
+//! `CFRP 60/30/10` is a declared balanced cap laminate: 60% 0, 30% +/-45,
+//! 10% 90 degree plies. Classical lamination theory gives longitudinal
+//! E = 91.595391044 GPa from the generic graphite/epoxy elastic constants in
+//! NASA-TM-104055 (1991), Table 1 (AS4/3501-6 lamina). See the declaration in
+//! `crate::preset_structures::cap_material_source`. The 0.004 design strain
+//! is a preliminary damage-tolerance assumption, not measured allowability.
+//! Density remains the 1580 kg/m^3 cover-proxy class assumption. Only axial
+//! and bending properties are represented: isotropic g() overstates this
+//! laminate's actual shear modulus and must not validate torsion or buckling.
 
 use std::sync::OnceLock;
 
@@ -64,7 +76,7 @@ pub struct UnknownMaterial {
 pub struct MaterialSpec {
     /// Display name, and the key the configuration selects it by.
     pub name: String,
-    /// `metallic` or `composite`. Informational: nothing branches on it.
+    /// `metallic` or `composite`; identifies composite proxy qualifications.
     pub category: String,
     /// Young's modulus, in pascals.
     pub e_pa: f64,
@@ -156,7 +168,7 @@ mod tests {
 
     #[test]
     fn the_embedded_table_parses_into_the_materials_the_reference_registers() {
-        assert_eq!(database().len(), 11);
+        assert_eq!(database().len(), 12);
         assert!(get("Al 7075-T6").is_ok());
     }
 
@@ -203,5 +215,30 @@ mod tests {
                 material.name
             );
         }
+    }
+
+    #[test]
+    fn longitudinal_cap_proxy_follows_sourced_clt_and_design_strain() {
+        // NASA-TM-104055 Table 1: AS4/3501-6 lamina. NASA-RP-1351
+        // Sec. V-B: Ny=0 extensional modulus of a balanced laminate.
+        let (e1, e2, g12, nu12) = (135.0e9, 11.0e9, 5.8e9, 0.301);
+        let denominator = 1.0 - nu12 * nu12 * e2 / e1;
+        let (q11, q22, q12, q66) = (
+            e1 / denominator,
+            e2 / denominator,
+            nu12 * e2 / denominator,
+            g12,
+        );
+        let q45 = 0.25 * (q11 + q22) + 0.5 * (q12 + 2.0 * q66);
+        let q45_12 = 0.25 * (q11 + q22 - 4.0 * q66) + 0.5 * q12;
+        let a11 = 0.6 * q11 + 0.3 * q45 + 0.1 * q22;
+        let a22 = 0.6 * q22 + 0.3 * q45 + 0.1 * q11;
+        let a12 = 0.7 * q12 + 0.3 * q45_12;
+        let ex = a11 - a12 * a12 / a22;
+        let cap = get("CFRP 60/30/10").unwrap();
+        assert!((cap.e_pa / ex - 1.0).abs() < 1.0e-10);
+        assert!((cap.nu - a12 / a22).abs() < 1.0e-9);
+        assert!((cap.f_allow_pa / cap.e_pa - 0.004).abs() < 1.0e-14);
+        assert!(cap.e_pa > get("CFRP QI").unwrap().e_pa);
     }
 }

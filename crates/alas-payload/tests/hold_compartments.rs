@@ -168,11 +168,27 @@ fn the_atr_has_two_main_deck_compartments_outside_the_seats_with_its_bags_inside
         summary.hold_capacity_t == 0.0,
         "the ATR has no under-floor hold"
     );
+    // The registered ATR declares the compartments of its factsheet p.22
+    // cabin plan (`alas_config::presets::ATR72_600_BAGGAGE_COMPARTMENTS`).
     let (forward, aft) = (&compartments[0], &compartments[1]);
-    assert!((forward.x_start_m - (g.x_min + 2.6)).abs() < 1e-9);
-    assert!(forward.x_end_m <= seat_start + 1e-9);
-    assert!(aft.x_start_m >= seat_end - 1e-9);
-    assert!((aft.x_end_m - (g.cabin_end_x + 0.5 * g.tailcone_len)).abs() < 1e-9);
+    assert_eq!((forward.x_start_m, forward.x_end_m), (3.47, 5.51));
+    assert_eq!((aft.x_start_m, aft.x_end_m), (20.72, 22.95));
+    // The rows clear both compartments; the generic monument bays at the
+    // two doors are not the ATR galley and lavatory arrangement and may stand
+    // on compartment floor (a layout-engine limitation for this aircraft).
+    let rows = layout
+        .items
+        .iter()
+        .filter(|item| item.kind == ItemKind::SeatRow)
+        .fold((f64::MAX, f64::MIN), |(lo, hi), item| {
+            (
+                lo.min(item.x - item.length / 2.0),
+                hi.max(item.x + item.length / 2.0),
+            )
+        });
+    assert!(seat_start <= rows.0 && rows.1 <= seat_end);
+    assert!(forward.x_end_m <= rows.0 + 1e-9);
+    assert!(aft.x_start_m >= rows.1 - 1e-9);
     for compartment in &compartments {
         assert!(compartment.length_m() >= 0.5);
         assert!(compartment.volume_m3 > 1.0, "{compartment:?}");
@@ -313,7 +329,7 @@ fn a_declared_compartment_list_replaces_the_derived_one() {
             name: "Nose".to_owned(),
             x_start_m: 2.6,
             x_end_m: 3.5,
-            volume_m3: 3.0,
+            volume_m3: Some(3.0),
             max_net_kg: Some(300.0),
             deck: HoldDeck::Main,
         },
@@ -321,7 +337,7 @@ fn a_declared_compartment_list_replaces_the_derived_one() {
             name: "Tail".to_owned(),
             x_start_m: 22.7,
             x_end_m: 24.1,
-            volume_m3: 6.0,
+            volume_m3: Some(6.0),
             max_net_kg: None,
             deck: HoldDeck::Main,
         },

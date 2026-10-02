@@ -20,8 +20,7 @@ use std::f64::consts::PI;
 mod types;
 pub use types::*;
 mod model;
-#[cfg(test)]
-use model::*;
+pub use model::actuator_disk_thrust_bound_n;
 mod evidence;
 mod inverse;
 mod ratings;

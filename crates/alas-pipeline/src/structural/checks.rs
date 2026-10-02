@@ -87,6 +87,8 @@ pub(super) fn structural_error(msg: String, torenbeek: f64) -> StructuralAnalysi
         nastran95: None,
         patran: None,
         torenbeek_wing_mass_kg: torenbeek,
+        wing_mass: None,
+        evaluation_inputs: None,
     }
 }
 

@@ -36,6 +36,7 @@
 use alas_config::design_variables::DesignVector;
 use alas_config::{AlasConfig, MtowPlan};
 use alas_geom::aircraft::airplane::Airplane;
+
 use alas_mass::breakdown::{MassBreakdown, MassCoordinates, PayloadLayoutSummary};
 use alas_mass::dispatch::{
     solve_dispatch_with_initial_guess, DispatchLimits, DispatchSolution, DispatchStatus,
@@ -51,7 +52,10 @@ use super::mission_model::{
 };
 use super::trim::{trim_and_polar, TrimmedPolar};
 use super::types::CandidateFailure;
+
+mod wing_box;
 use alas_mass::wingbox_feedback::ReferenceWingMass;
+pub(crate) use wing_box::PassWingBox;
 
 /// What the loop reads but never changes.
 pub(crate) struct MdaContext<'a> {
@@ -79,6 +83,11 @@ pub(crate) struct MdaContext<'a> {
     pub structural_reference: Option<ReferenceWingMass>,
     /// Structural wing reconciliation at the initial mass pass.
     pub structural_feedback: alas_mass::wingbox_feedback::WingboxFeedback,
+    /// Source and current-mass inventory completeness at the initial pass.
+    pub structural_inventory_complete: bool,
+    /// The primary box of the latest pass, reused by a pass whose sizing
+    /// inputs are unchanged.
+    pub wing_box: PassWingBox,
 }
 
 /// The coupled state at one pass.
@@ -103,8 +112,14 @@ pub(crate) struct MdaClosure {
     /// Whether the takeoff mass settled within tolerance and the dispatch
     /// model never failed.
     pub sizing_closed: bool,
+    /// Whether the outer takeoff-mass iteration settled within tolerance
+    /// (always, for a plan that does not iterate), whatever limit the
+    /// dispatch met: `sizing_closed` also requires a converged dispatch.
+    pub takeoff_mass_settled: bool,
     /// Structural wing reconciliation at the final mass pass.
     pub structural_feedback: alas_mass::wingbox_feedback::WingboxFeedback,
+    /// Source and current-mass inventory completeness at the final pass.
+    pub structural_inventory_complete: bool,
     /// Trip plan in force on the last pass, after any re-freeze.
     pub frozen_plan: Option<FrozenMissionPlan>,
     /// Trip plans frozen, one per pass that could make one.
@@ -160,7 +175,7 @@ fn evaluate_state_at_tow(
     structural_feedback: &mut alas_mass::wingbox_feedback::WingboxFeedback,
     cg_at_trim: &mut f64,
     retrim_count: &mut usize,
-) -> Result<(), CandidateFailure> {
+) -> Result<bool, CandidateFailure> {
     let config = context.config;
     // The closure mass is what the fuel remainder, the payload layout and
     // the trim read. Whether the *components* follow it is the design-mode
@@ -172,12 +187,17 @@ fn evaluate_state_at_tow(
     // payload-adjusted modes design every structure at the iterate
     // (`AlasConfig::at_sized_closure_mass`).
     let pass_config = config.at_sized_closure_mass_with_landing_floor(tow_k, landing_floor_kg);
+    // The lumped and the payload-placed buildups share this pass's configuration,
+    // design and aircraft, so they share one sized primary box; a pass whose
+    // structural inputs equal the previous pass's reuses that pass's box.
+    let mut design_box = context.wing_box.reusable(&pass_config, plane);
     let (lumped_masses, lumped_coords, ..) = mass_analysis_with_structural_feedback(
         &pass_config,
         context.dv,
         plane,
         None,
         context.structural_reference,
+        &mut design_box,
     )?;
     let (pass_oew, pass_x_oew) = oew_and_cg(&lumped_masses, &lumped_coords);
     let layout = build_payload_layout(plane, &pass_config, pass_oew, pass_x_oew).map_err(|_| {
@@ -190,13 +210,17 @@ fn evaluate_state_at_tow(
         cg_x: layout.cg_x,
         cg_y: layout.cg_y,
     };
-    let (masses, coords, cg, feedback, _, _) = mass_analysis_with_structural_feedback(
+    let (masses, coords, cg, feedback, _, inventory) = mass_analysis_with_structural_feedback(
         &pass_config,
         context.dv,
         plane,
         Some(&summary),
         context.structural_reference,
+        &mut design_box,
     )?;
+    if let Some(sized) = design_box {
+        context.wing_box.store(&pass_config, plane, sized);
+    }
     *structural_feedback = feedback;
     state.masses = masses;
     state.coords = coords;
@@ -232,7 +256,7 @@ fn evaluate_state_at_tow(
                 .with_cruise_drag(state.polar.drag.cruise_drag());
         }
     }
-    Ok(())
+    Ok(inventory.is_complete())
 }
 
 /// Run the loop from `initial`, which was evaluated at the takeoff-mass
@@ -290,6 +314,9 @@ pub(crate) fn converge(
     let mut sizing_iterations = 0;
     let mut retrim_count = 0;
     let mut structural_feedback = context.structural_feedback;
+    // A fixed requirement keeps the evaluated first-pass inventory. Every
+    // refreshed state replaces it with the inventory of that same mass pass.
+    let mut structural_inventory_complete = context.structural_inventory_complete;
     // The reserve-covering landing floor of the last dispatch solution, which
     // the next pass designs the gear to (`AlasConfig::design_landing_mass_with_reserve_floor`).
     let mut landing_floor_kg: Option<f64> = None;
@@ -325,7 +352,7 @@ pub(crate) fn converge(
         }
         sizing_iterations = pass + 1;
         if pass > 0 {
-            evaluate_state_at_tow(
+            structural_inventory_complete = evaluate_state_at_tow(
                 context,
                 plane,
                 tow_k,
@@ -392,10 +419,9 @@ pub(crate) fn converge(
             return Err(budget_exhausted());
         }
         frozen_plan = pass_model.frozen_plan();
-        let dispatch_converged = matches!(solution.status, DispatchStatus::Converged);
         landing_floor_kg = super::mtow_modes::landing_floor_kg(&solution);
         if !sizing_iterates {
-            outcome = Some((solution, dispatch_converged));
+            outcome = Some((solution, true));
             break;
         }
         let next_tow = solution.takeoff_mass_kg;
@@ -416,7 +442,7 @@ pub(crate) fn converge(
             // would take is undone; the centre-of-gravity shift it saw is
             // reported through `MdaClosure::cg_shift_pct_mac`.
             let trimmed = (state.polar.clone(), cg_at_trim, retrim_count, plane.xyz_ref);
-            evaluate_state_at_tow(
+            structural_inventory_complete = evaluate_state_at_tow(
                 context,
                 plane,
                 next_tow,
@@ -431,7 +457,7 @@ pub(crate) fn converge(
                 (state.polar, cg_at_trim, retrim_count, plane.xyz_ref) = trimmed;
             }
         }
-        outcome = Some((solution, configured_done && dispatch_converged));
+        outcome = Some((solution, configured_done));
         if configured_done {
             break;
         }
@@ -447,12 +473,14 @@ pub(crate) fn converge(
         };
     }
 
-    let Some((dispatch, sizing_closed)) = outcome else {
+    let Some((dispatch, takeoff_mass_settled)) = outcome else {
         // `max_passes` is at least one, so the loop always assigns
         // `outcome`; this arm only keeps the function panic-free.
         return Err(mass_coordinates_failure());
     };
     let cg_shift_pct_mac = (state.cg[0] - cg_at_trim).abs() / mac * 100.0;
+    let sizing_closed =
+        takeoff_mass_settled && matches!(dispatch.status, DispatchStatus::Converged);
     Ok(MdaClosure {
         dispatch,
         state,
@@ -460,7 +488,9 @@ pub(crate) fn converge(
         retrim_count,
         cg_shift_pct_mac,
         sizing_closed,
+        takeoff_mass_settled,
         structural_feedback,
+        structural_inventory_complete,
         frozen_plan,
         plan_freezes,
     })

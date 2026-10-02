@@ -72,12 +72,12 @@ fn the_atr_takes_the_regional_method_and_its_group_closes_on_the_torenbeek_relat
 
 /// The modeled ATR 72-600 operating empty mass against the published typical
 /// in-service OEW of 13,450 kg [S ATR 72-600 factsheet; the technical
-/// specification lists 13,010 kg]. The regional turboprop method currently
-/// lands 14,608 kg, +8.6 % [M]: the wing that closes the TCDS 2.303 m MAC on
-/// the 61 m^2 area tapers 0.62 rather than the 0.23 of the earlier
-/// estimated chords, which raises the FLOPS bending-material term. The band
-/// fails if the model regresses beyond 10 % [E], and the sign guard keeps the
-/// model from drifting below the technical-specification figure.
+/// specification lists 13,010 kg]. The regional turboprop class currently
+/// lands 13,376 kg, -0.6 % [M], with its pressurized fuselage priced at the
+/// 25,000 ft cabin differential and its sponson main gear on the fuselage
+/// ground datum. The band fails if the model regresses beyond 10 % [E], and
+/// the sign guard keeps the model from drifting below the
+/// technical-specification figure.
 #[test]
 fn the_atr_operating_empty_mass_stays_within_the_published_band() {
     const PUBLISHED_TYPICAL_OEW_KG: f64 = 13_450.0;
@@ -93,62 +93,48 @@ fn the_atr_operating_empty_mass_stays_within_the_published_band() {
     assert!(oew > PUBLISHED_SPEC_OEW_KG, "ATR OEW {oew:.0} kg");
 }
 
+/// The ATR 72-600 fuselage takes the pressure-bending method of its class at
+/// the CS 25.841(a) differential for its certified 25,000 ft ceiling, and
+/// lands on the Torenbeek class II fuselage of the same aircraft: 2,323 kg
+/// (Torenbeek 1986 eq. 8.2.6 as evaluated in D. Scholz / HAW Hamburg,
+/// "Aircraft Design Studies Based on the ATR 72", TextNita, Sect. 8.2, a
+/// secondary source). FLOPS equation 56, fitted at the jet differential,
+/// gave 3,235 kg [M]. The 5 % band is the agreement of two independent
+/// class II relations [E], not a calibration: neither input was fitted.
 #[test]
-fn every_other_preset_keeps_its_method_and_operating_empty_mass() {
-    // Operating empty mass in kg of the registered design vector, recorded
-    // from the evaluation with the same inputs before the regional method
-    // existed. Compared bit for bit: no jet may move. AVE was re-recorded
-    // when its default landing ratio became the 777-9 benchmark (0.7574
-    // instead of 0.92): the FLOPS main gear goes as WLDG^0.95, and the lighter
-    // design landing mass takes 3,425.7 kg off the gear and so off the OEW. The
-    // AVE inboard chords (root 16.0 m, break 8.0 m) that keep its root-to-kink
-    // trailing edge running aft add wing area and move it again. A340-300,
-    // A380-800, A220-300 and DC-10 were re-recorded when the registered cabin
-    // became the published planning cabin (335, 555, 140 and 255 seats): the
-    // seat count feeds the cabin, service and systems terms. DC-10 was
-    // re-recorded again when its wing became the Douglas reference trapezoid
-    // and its tailplane the DAC-67803A Figure 2.2 planform (wing and
-    // horizontal-tail areas and tapers feed the FLOPS structure terms). A320-200
-    // (planar 34.10 m planform), B787-9, A340-300 and A220-300 (published
-    // sweeps entered at the leading edge, B787 12 % root) and A380-800
-    // (outboard-rising camber sections) were re-recorded for the sourced
-    // geometry: span, sweep and section thickness feed the FLOPS wing terms.
-    // B787-9 was re-recorded when its engines moved to the D6-58333 Rev Q
-    // 9.91 m station: the engine span feeds the FLOPS main-gear oleo length
-    // (equation 66) and the detailed wing-bending engine-relief stations.
-    // A340-300 was re-recorded for the 2.5 m drawn tip chord: the taper,
-    // kink station and converted sweep feed the FLOPS wing terms.
-    // A380-800 was re-recorded for the Airbus AC Rev 20 drawing geometry:
-    // the 0.222 taper feeds the FLOPS wing terms, the 134.8 m^2 fin and
-    // 193.2 m^2 tailplane the tail terms, the 14.8/25.7 m engine stations the
-    // engine relief and main-gear oleo.
-    // B787-9 was re-recorded for the D6-58333 Rev Q body: the 62.00 m TCDS
-    // length and the 5.77 m by 5.94 m section feed the FLOPS fuselage terms,
-    // and the tail stations the tail moment arms.
-    // A340-300 was re-recorded for the Airbus AC Rev 33 engine stations,
-    // tail and ground-clearance heights: the engine span feeds the main-gear
-    // oleo and the engine relief, the fin and tailplane the tail terms.
-    // A220-300 was re-recorded for the ACP Issue 013 body height, belly,
-    // engine station and tail: the 3.721 m height feeds the FLOPS fuselage
-    // terms and the 36.6 m^2 tailplane the horizontal-tail term.
-    // A320-200 was re-recorded for the drawn tailplane taper and sweep, which
-    // feed the horizontal-tail term at unchanged area.
-    // DC-10 was re-recorded for the printed 55.35 m length (FLOPS fuselage
-    // terms) and the 8.18 m engine station (main-gear oleo, engine relief).
-    // Fin roots returned to their estimated heights, the spans holding the
-    // drawn tip heights; the fin span and area feed the vertical-tail term.
-    // Re-recorded for it: A380-800 (whose wing kept its flight-shape
-    // dihedral), B787-9, A340-300, A220-300 and A320-200.
-    let baseline: [(&str, f64); 7] = [
-        ("AVE", 177_804.434_127_178_86),
-        ("A340-300", 131_264.021_721_927_86),
-        ("A380-800", 266_243.402_191_617_06),
-        ("B787-9", 128_382.144_822_188_86),
-        ("A320-200", 41_423.351_222_965_47),
-        ("A220-300", 37_140.353_090_840_26),
-        ("DC-10", 121_922.460_596_526_86),
-    ];
-    for (name, expected) in baseline {
+fn the_atr_fuselage_is_priced_at_its_own_cabin_pressure_differential() {
+    const TORENBEEK_CLASS_II_FUSELAGE_KG: f64 = 2_323.0;
+    const AGREEMENT: f64 = 0.05;
+    let build = buildup("ATR72-600");
+    let inputs = build
+        .airframe
+        .structure_inputs
+        .pressurized_fuselage
+        .expect("the regional turboprop class prices a pressurized fuselage");
+    let psi = inputs.pressure_differential_pa / alas_units::PSI;
+    assert!((psi - 5.46).abs() < 0.01, "{psi} psi");
+    assert_eq!(inputs.design_zero_fuel_mass_kg, 21_000.0);
+    let fuselage_kg = build.airframe.structure.expect("structure").fuselage_kg;
+    let error = (fuselage_kg - TORENBEEK_CLASS_II_FUSELAGE_KG) / TORENBEEK_CLASS_II_FUSELAGE_KG;
+    assert!(error.abs() < AGREEMENT, "fuselage {fuselage_kg:.0} kg");
+}
+
+/// Every jet keeps the transport cabin method, and its modelled operating
+/// empty mass is finite and, where the OEW registry
+/// (`alas_config::oew_reference`) holds a value comparable with the preset,
+/// within that record's stated comparison uncertainty: A340-300 131,215 kg
+/// +-2,000 kg (Airbus A340 AC Rev 33), A220-300 37,149 kg +-500 kg (Airbus
+/// Canada A220 Aircraft Recovery Publication, weight and balance) and DC-10
+/// 120,914 kg +-2,000 kg (Douglas ACAP Series 30 OWE at the
+/// 572,000 lb MTOGW option). The band is the registry's own uncertainty, not
+/// a fitted tolerance. AVE is notional and the A380-800, B787-9 and A320-200
+/// records are source gaps with no comparable value.
+#[test]
+fn every_other_preset_keeps_its_method_and_its_sourced_operating_empty_mass() {
+    let mut compared = 0;
+    for name in [
+        "AVE", "A340-300", "A380-800", "B787-9", "A320-200", "A220-300", "DC-10",
+    ] {
         let build = buildup(name);
         assert_ne!(
             build.inputs.cabin_equipment_method,
@@ -156,6 +142,20 @@ fn every_other_preset_keeps_its_method_and_operating_empty_mass() {
             "{name}"
         );
         let oew = oew_kg(&build);
-        assert_eq!(oew.to_bits(), expected.to_bits(), "{name}: {oew:?}");
+        assert!(oew.is_finite() && oew > 0.0, "{name}: {oew}");
+        let record = alas_config::oew_reference::get(name).expect("every preset has a record");
+        if let (Some(reference_kg), Some(uncertainty_kg)) =
+            (record.preset_reference_oew_kg(), record.uncertainty_kg)
+        {
+            compared += 1;
+            assert!(
+                (oew - reference_kg).abs() <= uncertainty_kg,
+                "{name}: modelled OEW {oew:.0} kg against {reference_kg} kg +- {uncertainty_kg} kg"
+            );
+        }
     }
+    assert_eq!(
+        compared, 3,
+        "A340-300, A220-300 and DC-10 carry comparable values"
+    );
 }

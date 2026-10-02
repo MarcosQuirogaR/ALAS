@@ -15,6 +15,9 @@ use alas_config::design_variables::{DesignVector, SPECS};
 use alas_config::{AlasConfig, DesignMode};
 use alas_opt::{DesignOptimizer, OptimizationError};
 
+mod support;
+use support::nominal;
+
 /// A configuration for `preset` in reference-adaptation mode, with a small
 /// but honest search budget so the test measures behaviour rather than
 /// hardware.
@@ -30,12 +33,6 @@ fn reference_config(preset: &str, workers: i64) -> AlasConfig {
     config.optimizer.solver.screening.max_evaluations = 64;
     config.optimizer.solver.refinement.max_evaluations = 72;
     config
-}
-
-fn nominal(preset: &str) -> DesignVector {
-    alas_config::presets::get(preset)
-        .expect("registered preset")
-        .design_vector
 }
 
 /// The configuration the registered-aircraft envelope tests run: the shared

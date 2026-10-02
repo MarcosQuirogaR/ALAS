@@ -80,6 +80,9 @@ pub struct VlmSystem<'a> {
     /// Holds `None` above `kernel_cache::KERNEL_CACHE_MAX_PANELS`, where every
     /// solve evaluates the kernel directly. Both paths are bit-identical.
     kernel_cache: OnceLock<Option<Vec<[f64; 3]>>>,
+    /// The Trefftz-plane drag form of this lattice, built on the first
+    /// [`VlmSystem::trefftz_induced_drag_coefficient`]; geometry-only.
+    trefftz: OnceLock<Option<super::trefftz::TrefftzOperator>>,
     solves: AtomicUsize,
 }
 
@@ -132,6 +135,7 @@ impl<'a> VlmSystem<'a> {
             panels,
             factorization,
             kernel_cache: OnceLock::new(),
+            trefftz: OnceLock::new(),
             solves: AtomicUsize::new(0),
         })
     }
@@ -139,6 +143,20 @@ impl<'a> VlmSystem<'a> {
     /// The airplane this system was assembled from.
     pub fn airplane(&self) -> &'a Airplane {
         self.airplane
+    }
+
+    /// The Trefftz-plane induced-drag coefficient of `result`, a solve of
+    /// this system at `op_point`, referenced to `airplane.s_ref`. The drag
+    /// form is built once per system (see [`super::trefftz`]).
+    pub fn trefftz_induced_drag_coefficient(
+        &self,
+        result: &VlmResult,
+        op_point: &OperatingPoint,
+    ) -> Option<f64> {
+        self.trefftz
+            .get_or_init(|| super::trefftz::TrefftzOperator::from_panels(&result.panels))
+            .as_ref()?
+            .induced_drag_coefficient(result, op_point, self.airplane.s_ref)
     }
 
     /// The number of horseshoe panels, the order of the influence matrix.

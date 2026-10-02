@@ -47,10 +47,28 @@ pub(super) const STRUCTURE_LIMITS: &[ReviewedLimit] = &[
         rationale: "A signed difference between the FLOPS and finite-element mesh primary-structure masses, reported for inspection with no rejection or penalty. Its models have different scopes, so it is not a limit and grants no relaxation.",
     },
     ReviewedLimit {
+        id: "structural_ultimate_tip_deflection_ratio",
+        family: "Structure",
+        review: RelaxationReview::Ineligible,
+        rationale: "The ultimate-load tip deflection over the semispan, published as a diagnostic with no rejection or penalty. CS 25.305 states no universal ultimate tip-displacement limit and zero is only the undeformed reference, so it is not a limit and grants no relaxation.",
+    },
+    ReviewedLimit {
+        id: "structural_ultimate_curvature",
+        family: "Structure",
+        review: RelaxationReview::Ineligible,
+        rationale: "The ultimate-load linear-curvature error, published against the 1 g model-validity budget as a diagnostic with no rejection or penalty. The 1 g domain stays hard as structural_linear_model_domain; the ultimate value flags load redistribution needing separate substantiation, so it is not a limit and grants no relaxation.",
+    },
+    ReviewedLimit {
         id: "root_to_kink_te_angle",
         family: "Geometry",
         review: RelaxationReview::Ineligible,
         rationale: "The exposed trailing edge between side of body and kink may not run forward past 90 deg from the fuselage axis: design practice keeps the flap hinge line and the rear spar from running forward (Torenbeek, Synthesis of Subsonic Airplane Design, 1982; Obert, Aerodynamic Design of Transport Aircraft, 2009). A design-practice limit, not a bound of the models, and not relaxable.",
+    },
+    ReviewedLimit {
+        id: "root_to_kink_te_angle_unavailable",
+        family: "Geometry",
+        review: RelaxationReview::NeverRelaxable,
+        rationale: "The exposed trailing-edge angle could not be evaluated from the declared wing geometry. This boolean availability flag supplies no measured angle to compare with the limit; a fraction of a missing geometric assessment has no physical meaning.",
     },
     preference("transport_root_wingbox_depth"),
     preference("transport_kink_wingbox_depth"),

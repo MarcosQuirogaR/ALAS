@@ -42,6 +42,31 @@ impl CandidateDrag {
         }
     }
 
+    /// Clean trimmed drag at the actual US1976 atmosphere, including an ISA
+    /// temperature deviation (K or deg C). Native parasite drag uses
+    /// `rho V / mu` per metre with each component's own Reynolds length.
+    /// An external measured polar has no Reynolds-dependent buildup.
+    pub fn cd_at_atmosphere(
+        &self,
+        cl: f64,
+        mach: f64,
+        altitude_m: f64,
+        isa_deviation_c: f64,
+    ) -> f64 {
+        match self {
+            Self::Table(table) => {
+                let atmosphere = alas_atmo::us1976_compute_values(altitude_m, isa_deviation_c);
+                let reynolds_per_m =
+                    atmosphere.density_kg_m3 * mach * atmosphere.speed_of_sound_m_s
+                        / atmosphere.dynamic_viscosity_pa_s;
+                table.cd0_at_reynolds_per_m(mach, reynolds_per_m)
+                    + table.induced_cd(cl)
+                    + table.wave_cd(cl, mach)
+            }
+            Self::External(polar) => polar.cd(cl, mach, altitude_m),
+        }
+    }
+
     /// Wave drag coefficient at `cl` and `mach`.
     pub fn wave_cd(&self, cl: f64, mach: f64) -> f64 {
         match self {

@@ -28,18 +28,20 @@ pub struct AircraftVariantIdentity {
     pub tank_configuration: &'static str,
 }
 
-/// One source-defined emergency-exit pair and its CS-25 evacuation rating.
+/// One source-defined emergency-exit pair.
 ///
-/// The capacities in the regulation are ratings for the complete pair of
-/// exits.  Keeping that unit in the field name prevents a consumer from
-/// multiplying a pair rating by two when it emits the two physical door
-/// cut-outs.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// The pair carries its CS 25.807(a) type letter and nothing about how many
+/// passengers it may evacuate: the rating of a complete pair is a property
+/// of the type (CS 25.807(g)), and the payload crate derives it from the
+/// letter, so a preset cannot declare a rating that disagrees with the
+/// regulation it cites.
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct CertifiedExitPair {
     /// Exit class printed in the source cabin configuration.
     pub exit_type: &'static str,
-    /// Passengers assigned to this complete exit pair.
-    pub capacity_per_pair: i64,
+    /// Station of the door centre, m aft of the nose tip on the body the
+    /// source draws, when the source prints one.
+    pub station_m: Option<f64>,
 }
 
 /// A revision-locked exit arrangement for a registered aircraft variant.
@@ -48,14 +50,69 @@ pub struct CertifiedExitPair {
 /// separate from the generic diameter heuristic.  It is not a declaration
 /// that the layout engine has demonstrated the aircraft's certified
 /// evacuation performance.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct CertifiedExitLayout {
     /// Human-readable pair sequence, for example `C-III-C`.
     pub label: &'static str,
-    /// Exit pairs in source order, including each pair's rating.
+    /// Exit pairs in source order, forward to aft.
     pub pairs: &'static [CertifiedExitPair],
+    /// Overall body length of the drawing the pair stations are measured
+    /// on, m. Stations are only usable together with it, because a built
+    /// body of another length moves the aft doors with the tail.
+    pub station_body_length_m: Option<f64>,
     /// Exact source, revision and location for the arrangement.
     pub source: &'static str,
+}
+
+impl CertifiedExitLayout {
+    /// Whether every pair carries a station on a declared body length, which
+    /// is what lets the cabin be bounded by the doors rather than by the
+    /// generic nose and tail-cone lengths.
+    pub fn has_stations(&self) -> bool {
+        self.station_body_length_m
+            .is_some_and(|length| length > 0.0)
+            && self.pairs.len() >= 2
+            && self
+                .pairs
+                .iter()
+                .all(|pair| pair.station_m.is_some_and(f64::is_finite))
+    }
+}
+
+/// One class of a source's typical cabin.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SourcedSeatClass {
+    /// `"First"`, `"Business"` or `"Economy"`.
+    pub class: &'static str,
+    /// Seats of this class in the source arrangement.
+    pub seats: i64,
+    /// Seat pitch, m, when the source prints one.
+    pub pitch_m: Option<f64>,
+    /// Seats abreast, when the source prints them.
+    pub abreast: Option<i64>,
+    /// Seat width including armrests, m, when the source prints one.
+    pub width_m: Option<f64>,
+}
+
+/// The typical cabin a manufacturer publishes for a registered aircraft:
+/// seats per class and, where printed, their pitch, abreast and width.
+///
+/// Selecting the preset seeds the cabin with these seat shares and this seat
+/// geometry; every value the source does not print keeps the generic class
+/// default. It is a planning cabin, not an operator's approved LOPA.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SourcedPlanningCabin {
+    /// The classes, forward to aft.
+    pub classes: &'static [SourcedSeatClass],
+    /// Exact source, revision and location.
+    pub source: &'static str,
+}
+
+impl SourcedPlanningCabin {
+    /// Seats across every class.
+    pub fn total_seats(&self) -> i64 {
+        self.classes.iter().map(|class| class.seats.max(0)).sum()
+    }
 }
 
 /// Primary-source values against which one preset is validated.
@@ -89,6 +146,8 @@ pub struct AircraftReferenceData {
     pub certified_max_seats: Option<i64>,
     /// Source-defined exit-pair arrangement for the registered variant.
     pub certified_exit_layout: Option<CertifiedExitLayout>,
+    /// The manufacturer's typical cabin, seats and seat geometry per class.
+    pub planning_cabin: Option<SourcedPlanningCabin>,
     /// Whether a complete design-mission definition has source provenance.
     pub design_mission_evidence: DesignMissionEvidence,
     /// Relevant public range/mission material that is not a complete mission.
@@ -137,6 +196,10 @@ pub struct AircraftPreset {
     pub design_vector: DesignVector,
     /// Everything about its shape the design vector does not own.
     pub geometry: GeometryConfig,
+    /// Why `geometry.wing.airfoil_class` is what it is: the source or
+    /// design-era basis of the declared section technology, which fixes the
+    /// Korn technology factor.
+    pub airfoil_class_source: &'static str,
     /// The mission it is sized for.
     pub requirements: DesignRequirements,
     /// Which engine it is fitted with.
@@ -153,12 +216,13 @@ pub struct AircraftPreset {
     /// preset's source-backed FLOPS transport and structure inputs instead.
     /// `None` means the global compatibility values already land close enough.
     pub mass_model: Option<MassModelConfig>,
-    /// Field-performance assumptions calibrated for this type.
+    /// Field-performance assumptions and source-backed inputs for this type.
     ///
     /// The high-lift system is what decides the takeoff and landing speeds,
-    /// and the vortex-lattice analysis cannot see one. A widebody scored with
-    /// a regional jet's flaps comes out ten to twenty knots fast on every
-    /// V-speed. `None` means the global default fits.
+    /// and the vortex-lattice analysis cannot see one. Published landing-speed
+    /// inputs recover an effective CLmax on their stated mass and reference
+    /// area; other field inputs remain conceptual assumptions. `None` uses
+    /// the global defaults.
     pub performance: Option<PerformanceConfig>,
 }
 
@@ -186,6 +250,44 @@ pub struct OperationalMissionDefaults {
     pub provenance: &'static str,
 }
 
+/// Seed a cabin with a source's typical arrangement: its seat shares as the
+/// target passenger mix, and every seat dimension the source prints.
+///
+/// The shares are seat shares, which is what the product layout reads them
+/// as; the layout solves the floor allocation that reproduces them.
+fn apply_sourced_planning_cabin(
+    passenger: &mut crate::PassengerCabinConfig,
+    planning: &SourcedPlanningCabin,
+) {
+    let total = planning.total_seats();
+    if total <= 0 {
+        return;
+    }
+    let mix: Vec<(&str, f64)> = planning
+        .classes
+        .iter()
+        .filter(|class| class.seats > 0)
+        .map(|class| (class.class, class.seats as f64 / total as f64))
+        .collect();
+    passenger.set_length_share_mix(&mix);
+    for class in planning.classes {
+        let slot = match class.class {
+            "First" => &mut passenger.first,
+            "Business" => &mut passenger.business,
+            _ => &mut passenger.economy,
+        };
+        if let Some(pitch_m) = class.pitch_m {
+            slot.pitch_m = pitch_m;
+        }
+        if let Some(abreast) = class.abreast {
+            slot.abreast = abreast;
+        }
+        if let Some(width_m) = class.width_m {
+            slot.width_m = width_m;
+        }
+    }
+}
+
 impl AircraftPreset {
     /// Cabin seed used for the registered aircraft's generic planning load
     /// case.
@@ -211,7 +313,7 @@ impl AircraftPreset {
             cabin.cargo.lower_deck_uld = "BLK".to_owned();
         }
         match self.name {
-            "A220-300" | "A320-200" | "A340-300" | "ATR72-600" => {
+            "A220-300" | "A320-200" | "A340-300" => {
                 cabin.passenger.set_length_share_mix(&[("Economy", 1.0)]);
             }
             _ => {}
@@ -221,13 +323,21 @@ impl AircraftPreset {
             // single-class arrangement; the 28 in lower bound is used.
             cabin.passenger.economy.pitch_m = 0.7112;
         }
+        if let Some(planning) = self.reference.planning_cabin {
+            apply_sourced_planning_cabin(&mut cabin.passenger, &planning);
+        }
         if self.name == "ATR72-600" {
-            // The official ATR 72-600 72-seat layout uses two Type-III exit
-            // pairs. The generic spacing proxy otherwise floors the 19.166 m
-            // passenger stretch to one pair (70 seats). 9.5 m is the smallest
-            // transparent spacing that represents two pairs in this
-            // preliminary geometry model; it is not a certification value.
-            cabin.passenger.min_exit_pair_spacing_m = 9.5;
+            cabin.cargo.hold_compartments = super::ATR72_600_BAGGAGE_COMPARTMENTS
+                .iter()
+                .map(|&(name, x_start_m, x_end_m)| crate::HoldCompartmentConfig {
+                    name: name.to_owned(),
+                    x_start_m,
+                    x_end_m,
+                    volume_m3: None,
+                    max_net_kg: None,
+                    deck: crate::HoldDeck::Main,
+                })
+                .collect();
         }
         cabin
     }

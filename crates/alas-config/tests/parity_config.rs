@@ -45,7 +45,9 @@
 //!   `ObjectiveWeights` fields only the retired
 //!   weighted lift-to-drag objective read are absent from the product schema;
 //!   the reference keeps them, and [`is_retired_reference_field`] names exactly
-//!   the ones the load boundary drops.
+//!   the ones the load boundary drops. `DragModelConfig.korn_technology_factor`
+//!   is retired the same way: the Korn factor follows the declared
+//!   `WingConfig.airfoil_class`.
 //! * The active transport planform adds four explicit side-of-body/kink
 //!   fields to `WingConfig`. The frozen Python schema has none of them, so the
 //!   absent upstream fields and the source-corrected Rust values/schema are
@@ -111,6 +113,9 @@ use alas_config::{
 use alas_testkit::{Comparison, Tier};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+
+#[path = "support/performance_fields.rs"]
+mod performance_fields;
 
 /// Whether one field declared its own explanation, keyed by its dotted path
 /// from the configuration's root. A path is the same on both sides of the
@@ -317,6 +322,68 @@ fn the_native_turboprop_design_inputs_are_absent_upstream_and_pinned_here() {
         );
     }
     comparison.finish();
+}
+
+#[test]
+fn native_field_inputs_preserve_legacy_loading_and_declare_sourced_assumptions() {
+    let fixture = fixture();
+    let defaults = PerformanceConfig::default();
+    let serialized = serde_json::to_value(&defaults).expect("field configuration serializes");
+    let schema = ConfigNode::schema(&defaults);
+    for type_key in ["PerformanceConfig", "ALASConfig"] {
+        let frozen = &fixture
+            .types
+            .get(type_key)
+            .expect("frozen field configuration")
+            .defaults;
+        let frozen = if type_key == "ALASConfig" {
+            &frozen["performance"]
+        } else {
+            frozen
+        };
+        let migrated: PerformanceConfig =
+            serde_json::from_value(frozen.clone()).expect("legacy field inputs remain readable");
+        let migrated =
+            serde_json::to_value(migrated).expect("migrated field configuration serializes");
+        for key in performance_fields::NATIVE_FIELDS {
+            assert!(
+                frozen.get(key).is_none(),
+                "{type_key}.{key} unexpectedly exists upstream"
+            );
+            assert_eq!(migrated[key], serialized[key], "{type_key}.{key} migration");
+            let field = schema
+                .fields
+                .iter()
+                .find(|field| field.name == key)
+                .expect("native field appears in the form");
+            assert!(
+                !field.label.is_empty() && !field.help.is_empty(),
+                "undocumented {key}"
+            );
+            let Entry::Leaf(leaf) = &field.entry else {
+                panic!("{key} is a scalar field")
+            };
+            assert_eq!(leaf.value, serialized[key]);
+        }
+    }
+    assert!(!defaults.legacy_field_correlations);
+    assert!(
+        defaults.cl_max_to_source.contains("Raymer")
+            && defaults.cl_max_to_source.contains("conceptual")
+    );
+    assert!(
+        defaults.cl_max_land_source.contains("Table 2.1")
+            && defaults.cl_max_land_source.contains("Torenbeek")
+    );
+    // Torenbeek Sec. 5.4.5 pp.168-169: dry rolling, reject deceleration and Eq.5-89 inertia allowance.
+    assert_eq!(defaults.propeller_takeoff_rolling_friction, 0.02);
+    assert_eq!(defaults.propeller_takeoff_stop_deceleration_g, 0.37);
+    assert_eq!(defaults.propeller_takeoff_inertia_distance_m, 200.0);
+    // Torenbeek Sec. 5.4.6 p.170, Eq.5-93 and no-reverse turboprop braking range.
+    assert_eq!(defaults.propeller_landing_mean_drag_to_weight, 0.10);
+    assert!((0.35..=0.45).contains(&defaults.propeller_landing_deceleration_g));
+    // CAT.POL.A.230(a)(2): dry turboprop actual distance uses 70% of LDA.
+    assert_eq!(defaults.propeller_dry_landing_distance_share, 0.70);
 }
 
 #[test]
@@ -594,6 +661,8 @@ fn is_retired_reference_field(path: &str, key: &str) -> bool {
         && alas_config::RETIRED_SOLVER_KEYS.contains(&key)
         || (path.ends_with("ObjectiveWeights") || path.ends_with(".weights"))
             && alas_config::RETIRED_WEIGHT_KEYS.contains(&key)
+        || (path.ends_with("DragModelConfig") || path.ends_with(".drag_model"))
+            && alas_config::RETIRED_DRAG_MODEL_KEYS.contains(&key)
 }
 
 fn transport_planform_field(path: &str, key: &str) -> Option<&'static TransportPlanformField> {
@@ -782,7 +851,8 @@ fn compare_transport_planform_schema(
 }
 
 fn is_native_config_field(path: &str, key: &str) -> bool {
-    (matches!(key, "fuel_policy" | "fuel_tanks" | "downstream")
+    performance_fields::is_native_field(path, key)
+        || (matches!(key, "fuel_policy" | "fuel_tanks" | "downstream")
         && (path.ends_with("AlasConfig") || path.ends_with("ALASConfig") || path.is_empty()))
         // Source-backed landing-gear references and heterogeneous bogie
         // counts are native additions; the frozen Python schema predates
@@ -832,6 +902,12 @@ fn is_native_config_field(path: &str, key: &str) -> bool {
             key,
             "objective" | "design_space" | "plausibility" | "relaxation"
         ) && (path.ends_with("OptimizerConfig") || path.ends_with(".optimizer")))
+        // The declared section class that fixes the Korn technology factor
+        // replaced the frozen global `drag_model.korn_technology_factor`; its
+        // mapping and per-preset declarations are checked by the airfoil-class
+        // unit test and by `parity_aircraft_presets`.
+        || (key == "airfoil_class"
+            && (path.ends_with("WingConfig") || path.ends_with(".wing")))
         // Native speed-reference switch for the climb/descent legs. Its
         // serialization skips the `TrueAirspeed` default, so a legacy file
         // and the frozen default tree round-trip unchanged.
@@ -856,6 +932,11 @@ fn is_native_config_field(path: &str, key: &str) -> bool {
             && (path.ends_with("CargoDeckConfig") || path.ends_with(".cargo")))
         || (key == "exclude_buried_main_wing_area"
             && (path.ends_with("DragModelConfig") || path.ends_with(".drag_model")))
+        // The static-to-1 g tip rise separating the ground and flight wing
+        // shapes is a native addition, omitted from serialization when unset;
+        // its behaviour is checked by the wing-shape unit tests.
+        || (key == "flight_tip_rise_semispan_fraction"
+            && (path.ends_with("WingConfig") || path.ends_with(".wing")))
         || (matches!(
             key,
             "use_airway_endpoint_coordinates" | "max_airway_stretch"
@@ -996,7 +1077,9 @@ fn compare_field(
             &expected.get("label").and_then(Value::as_str).unwrap_or(""),
             &"Random vibration base PSD",
         );
-    } else if let Some((source_label, frozen_label, _, _)) = oei_documentation_correction(label) {
+    } else if let Some((source_label, frozen_label, _, _)) =
+        performance_documentation_correction(label)
+    {
         comparison.exact(
             &format!("{label}.label: source-corrected Rust value"),
             &field.label,
@@ -1174,7 +1257,9 @@ fn compare_field(
             &expected.get("help").and_then(Value::as_str).unwrap_or(""),
             &frozen_python,
         );
-    } else if let Some((_, _, source_help, frozen_help)) = oei_documentation_correction(label) {
+    } else if let Some((_, _, source_help, frozen_help)) =
+        performance_documentation_correction(label)
+    {
         comparison.exact(
             &format!("{label}.help: source-corrected Rust value"),
             &field.help,
@@ -1279,15 +1364,27 @@ fn mass_legacy_help_correction(label: &str) -> Option<(&'static str, &'static st
     }
 }
 
-/// The native OEI fields retain the frozen names and defaults, while their
-/// documentation was tightened to distinguish conceptual fallbacks and the
-/// gear-up, high-lift configuration used by the evidence-aware helpers. Keep
+/// The performance fields retain frozen names and generic defaults, while
+/// documentation distinguishes the conceptual OEI estimate, corrected field
+/// method and historical replay. Keep
 /// both texts checked explicitly so this remains a documented migration rather
 /// than silently dropping parity coverage.
-fn oei_documentation_correction(
+fn performance_documentation_correction(
     label: &str,
 ) -> Option<(&'static str, &'static str, &'static str, &'static str)> {
     match label {
+        "PerformanceConfig.bfl_factor" | "ALASConfig.performance.bfl_factor" => Some((
+            "Balanced field length factor",
+            "Balanced field length factor",
+            "Additional historical multiplier applied only by the legacy field path. The corrected jet TOP correlation already estimates field length and ignores this factor. Under 14 CFR 25.113, 1.15 applies to the all-engine distance candidate, not to every balanced field length.",
+            "BFL = bfl_factor x TODR (take-off distance required). Raymer Table 17.1: 1.15 for twin jets, ~1.18 for quads.",
+        )),
+        "PerformanceConfig.vapp_vstall_land_factor" | "ALASConfig.performance.vapp_vstall_land_factor" => Some((
+            "VAPP / VS_land",
+            "VAPP / VS_land",
+            "Approach-speed multiple retained for translated legacy results. The corrected method uses Vref = 1.23 VS1g, approximating the non-icing 14 CFR 25.125 VSR0 floor.",
+            "Approach speed as a multiple of landing stall speed (FAR 25.125).",
+        )),
         "PerformanceConfig.oei_gradient" | "ALASConfig.performance.oei_gradient" => Some((
             "OEI 2nd-segment climb gradient (fallback)",
             "OEI 2nd-segment climb gradient (fallback)",

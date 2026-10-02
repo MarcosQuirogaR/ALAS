@@ -27,7 +27,7 @@ use super::windows::{
     show_discipline_windows, show_exit_prompt, show_log_window, show_results_window,
 };
 
-/// Launch the reduced Quick Analysis for the current revision.
+/// Launch the Quick Analysis for the current revision.
 pub fn start_quick_analysis(state: &mut AppState) {
     let (Some(config), Some(design)) = (state.typed_config(), state.current_design()) else {
         state.status_message =

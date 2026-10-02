@@ -8,8 +8,6 @@
 //! [`crate::mesh`], which re-derives cap dimensions on its own station grid
 //! and has to apply the same law to do it.
 
-use super::types::WingboxSizing;
-
 /// NumPy `linspace(start, stop, n)` with `endpoint=True`: `n` evenly spaced
 /// points, the last pinned exactly to `stop`. The geometry crate's function is
 /// the one the wingbox geometry is sampled with, so the sizing grid shares its
@@ -131,10 +129,13 @@ pub(super) fn station_cap_dimensions(
 /// *Aircraft Structures for Engineering Students*, 4th ed., Butterworth-
 /// Heinemann, 2007, ch. 20 "Structural idealization"). The strength law sizes
 /// every cap to the same allowable, so the two boom stresses are equal and
-/// each boom receives `t b / 2` of every panel beside it.
+/// each boom receives `t b / 2` of every panel beside it. This test helper
+/// verifies that equal-stress special case; the product section uses the
+/// unequal-depth, compatible-strain expression in `super::section`.
 ///
 /// A spar with no depth at this station (a partial-span spar outboard of its
 /// break) is not a boom; the panel then runs between its neighbours.
+#[cfg(test)]
 pub(crate) fn cover_skin_boom_areas_m2(
     chord_fractions: &[f64],
     heights_m: &[f64],
@@ -156,31 +157,13 @@ pub(crate) fn cover_skin_boom_areas_m2(
     areas
 }
 
-/// [`cover_skin_boom_areas_m2`] of a product-law box at one of its stations,
-/// in the order of [`WingboxSizing::spars`].
-///
-/// For the stress recovery of a box the product law sized; a frozen-law box
-/// credits no skin and must not be read through this.
-pub(crate) fn sizing_cover_skin_boom_areas_m2(sizing: &WingboxSizing, station: usize) -> Vec<f64> {
-    let fractions: Vec<f64> = sizing.spars.iter().map(|s| s.chord_fraction).collect();
-    let heights: Vec<f64> = sizing
-        .spars
-        .iter()
-        .map(|s| s.h.get(station).copied().unwrap_or(0.0))
-        .collect();
-    let chord = sizing.chord.get(station).copied().unwrap_or(0.0);
-    cover_skin_boom_areas_m2(&fractions, &heights, chord, sizing.t_skin)
-}
-
 /// Which cap-sizing law a solve applies.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum SizingLaw {
-    /// Every station carries its own bending moment: the root flange widens
-    /// when its thickness clip binds and an outboard station whose tapered
-    /// flange falls short of the local moment is sized up to it. The box is
-    /// sized against the relieved load and its skin and ribs span the
-    /// structural box, not the whole chord. The cover skin carries bending
-    /// beside the caps.
+    /// Every station obeys compatible section strain under its relieved
+    /// resultants. Caps grow from their manufacturing floor within geometric
+    /// limits; covers and webs participate in the same EI and each material
+    /// obeys its own allowable. Skin and ribs span the structural box.
     Product,
     /// The frozen reference law: the root cap alone is sized, its thickness
     /// clipped at a fifth of the spar height, and the outboard caps follow the
@@ -196,13 +179,5 @@ impl SizingLaw {
     /// chord instead of over the structural box between the outermost spars.
     pub(super) fn charges_the_whole_chord(self) -> bool {
         matches!(self, Self::Frozen)
-    }
-
-    /// Whether the cover skin between the spars is credited as bending
-    /// material beside the caps ([`cover_skin_boom_areas_m2`]). The frozen law
-    /// charges the skin as mass but sizes the caps for the whole moment, which
-    /// is what its fixtures record.
-    pub(super) fn credits_the_cover_skin(self) -> bool {
-        matches!(self, Self::Product)
     }
 }

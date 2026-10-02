@@ -73,11 +73,7 @@ pub(in crate::views::form_page) fn page_sections(
         },
         PageSection {
             title: "Wave drag",
-            names: &[
-                "korn_technology_factor",
-                "wave_drag_onset_mach",
-                "wave_drag_coefficient",
-            ],
+            names: &["wave_drag_onset_mach", "wave_drag_coefficient"],
             default_open: true,
         },
     ];

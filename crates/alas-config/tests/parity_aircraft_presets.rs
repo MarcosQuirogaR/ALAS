@@ -8,6 +8,8 @@
 //! explicit two-sided ledger pins independently audited corrections while all
 //! other translated fields compare directly with Python. Numbers compare by
 //! value so an upstream integer and an equivalent Rust float agree.
+//! Published landing inputs are compared to their source-derived values;
+//! their frozen legacy values remain checked separately from the source ledger.
 
 // This file is itself a test binary, so an unwrap that fails is the
 // assertion failing.
@@ -30,9 +32,10 @@ mod product_corrections;
 /// Pinned so a correction cannot be added without someone noticing. The count
 /// includes the absolute panel counts (see [`add_spanwise_panel_corrections`]),
 /// the four registered planning-cabin seat counts, the two AVE inboard chords
-/// that keep its root-to-kink trailing edge running aft, and the default
+/// that keep its root-to-kink trailing edge running aft, the AVE cabin
+/// preset that seats its declared 777-9 cabin, and the default
 /// landing ratio the A220 calibration inherits.
-const SOURCE_CORRECTION_COUNT: usize = 80;
+const SOURCE_CORRECTION_COUNT: usize = 81;
 const DC_10_UPSTREAM_DISPLAY_NAME: &str = "McDonnell Douglas DC-10";
 const DC_10_CORRECTED_DISPLAY_NAME: &str = "McDonnell Douglas DC-10-30 (572k option)";
 
@@ -482,6 +485,9 @@ fn source_corrections() -> BTreeMap<String, SourceCorrection> {
         source_correction("A320-200.requirements.cabin_preset", "Ryanair", "Custom"),
         source_correction("A220-300.requirements.cabin_preset", "Ryanair", "Custom"),
         source_correction("DC-10.requirements.cabin_preset", "Ryanair", "Custom"),
+        // AVE flies the 777-9 standard two-class cabin its reference data
+        // declares (Boeing D6-86073 Rev G Table 2-1), not an airline profile.
+        source_correction("AVE.requirements.cabin_preset", "Ryanair", "Custom"),
         source_correction("A340-300.requirements.num_passengers", 290.0, 335.0),
         source_correction("A380-800.requirements.num_passengers", 525.0, 555.0),
         source_correction("A220-300.requirements.num_passengers", 130.0, 140.0),
@@ -740,6 +746,21 @@ fn compare_values(
     actual: &Value,
     expected: &Value,
 ) {
+    if let Some((frozen, sourced)) = product_corrections::published_landing_change(path) {
+        compare_recorded_value(
+            comparison,
+            &format!("{path}: frozen landing input"),
+            expected,
+            &frozen,
+        );
+        compare_recorded_value(
+            comparison,
+            &format!("{path}: published landing input"),
+            actual,
+            &sourced,
+        );
+        return;
+    }
     if let Some((old, new)) = product_corrections::dimensions(path) {
         compare_recorded_value(
             comparison,
@@ -811,6 +832,7 @@ fn compare_values(
                     let child = format!("{path}.{key}");
                     if let Some(new) = product_corrections::engine_copy(&child)
                         .or_else(|| product_corrections::added_planform(&child))
+                        .or_else(|| product_corrections::declared_airfoil_class(&child))
                     {
                         source_corrections.remove(&child);
                         compare_recorded_value(comparison, &child, &actual[key], &new);

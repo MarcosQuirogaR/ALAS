@@ -256,9 +256,13 @@ fn a_request_inside_a_de_generation_costs_at_most_one_more_analysis() {
     // amount of time rather than an unbounded one.
     config.optimizer.solver.refinement.max_evaluations = 80;
     config.optimizer.solver.screening.max_evaluations = 8;
-    // The longest stage limit, so a slow serial initial population on a
-    // loaded machine cannot end the refinement before its first generation.
-    config.optimizer.solver.refinement.time_limit_s = 300.0;
+    // This test measures cancellation by analysis count. A wall-time run
+    // may legitimately stop after the initial population when its measured
+    // duration predicts that another generation would exceed the search
+    // limit, especially while every candidate is still infeasible. Keep
+    // the finite evaluation budget and reach the phase independently of
+    // aircraft feasibility and machine throughput.
+    config.optimizer.solver.stop_on_evaluations_only = true;
     config.optimizer.solver.workers = 1;
 
     let watch = alas_opt::CancelWatch::new();

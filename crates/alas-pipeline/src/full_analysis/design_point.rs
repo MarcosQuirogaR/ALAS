@@ -104,13 +104,28 @@ impl FullAnalysis {
         } else {
             10.0
         };
-        Self::fit_polar_values(polar, ar, cfg)
+        Self::fit_polar_with_origin(polar, ar, cfg, self.reference_compatibility)
     }
 
+    /// The product-mode fit of a sweep, without a built aircraft; the
+    /// polar-fit tests exercise the fitter through it.
+    #[cfg(test)]
     pub(crate) fn fit_polar_values(
         polar: &PolarSweep,
         ar: f64,
         cfg: &alas_config::AnalysisConfig,
+    ) -> PolarFit {
+        Self::fit_polar_with_origin(polar, ar, cfg, false)
+    }
+
+    /// Frozen fixtures retain their two-term fit. Native wakes need the
+    /// linear CL term: forcing a shifted parabola through zero slope at
+    /// CL=0 biases both the intercept and the induced curvature.
+    fn fit_polar_with_origin(
+        polar: &PolarSweep,
+        ar: f64,
+        cfg: &alas_config::AnalysisConfig,
+        parity_only: bool,
     ) -> PolarFit {
         let mut selected_indices: Vec<usize> = polar
             .cl
@@ -133,7 +148,8 @@ impl FullAnalysis {
                 .collect();
         }
 
-        let (cd0, k, status) = if selected_indices.len() >= 2 {
+        let columns = if parity_only { 2 } else { 3 };
+        let (cd0, c1, k, status) = if selected_indices.len() >= columns {
             // Keep a non-finite selected polar point from entering the QR
             // solve.  `least_squares` intentionally owns matrix-shape and
             // rank errors, while this boundary owns the polar's data
@@ -143,28 +159,41 @@ impl FullAnalysis {
                 .iter()
                 .all(|&i| polar.cl[i].is_finite() && polar.cd[i].is_finite());
             if !selected_values_are_finite {
-                (0.02, 0.04, PolarFitStatus::FallbackLeastSquaresFailure)
+                (0.02, 0.0, 0.04, PolarFitStatus::FallbackLeastSquaresFailure)
             } else {
                 let a_mat: Vec<Vec<f64>> = selected_indices
                     .iter()
-                    .map(|&i| vec![1.0, polar.cl[i].powi(2)])
+                    .map(|&i| {
+                        if parity_only {
+                            vec![1.0, polar.cl[i].powi(2)]
+                        } else {
+                            vec![1.0, polar.cl[i], polar.cl[i].powi(2)]
+                        }
+                    })
                     .collect();
                 let b_vec: Vec<f64> = selected_indices.iter().map(|&i| polar.cd[i]).collect();
                 match least_squares(&a_mat, &b_vec) {
-                    Ok(sol) if sol.len() >= 2 && sol.iter().all(|value| value.is_finite()) => (
-                        sol[0],
-                        sol[1],
-                        if used_fallback_window {
-                            PolarFitStatus::FittedFallbackWindow
-                        } else {
-                            PolarFitStatus::Fitted
-                        },
-                    ),
-                    Ok(_) | Err(_) => (0.02, 0.04, PolarFitStatus::FallbackLeastSquaresFailure),
+                    Ok(sol)
+                        if sol.len() == columns && sol.iter().all(|value| value.is_finite()) =>
+                    {
+                        (
+                            sol[0],
+                            if parity_only { 0.0 } else { sol[1] },
+                            sol[columns - 1],
+                            if used_fallback_window {
+                                PolarFitStatus::FittedFallbackWindow
+                            } else {
+                                PolarFitStatus::Fitted
+                            },
+                        )
+                    }
+                    Ok(_) | Err(_) => {
+                        (0.02, 0.0, 0.04, PolarFitStatus::FallbackLeastSquaresFailure)
+                    }
                 }
             }
         } else {
-            (0.02, 0.04, PolarFitStatus::FallbackInsufficientPoints)
+            (0.02, 0.0, 0.04, PolarFitStatus::FallbackInsufficientPoints)
         };
 
         let oswald_e = if k > 0.0 {
@@ -175,6 +204,7 @@ impl FullAnalysis {
 
         PolarFit {
             cd0,
+            c1,
             k,
             oswald_e,
             aspect_ratio: ar,

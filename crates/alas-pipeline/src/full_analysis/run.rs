@@ -53,15 +53,28 @@ impl FullAnalysis {
         design: &DesignVector,
         include_engines: bool,
     ) -> Result<AnalysisReport, String> {
+        let plane = self.build_airplane(design, include_engines)?;
+        self.run_on_airplane(design, plane)
+    }
+
+    /// The aircraft [`Self::run`] analyses for `design`.
+    ///
+    /// # Errors
+    ///
+    /// The geometry build failure, as a description.
+    pub fn build_airplane(
+        &self,
+        design: &DesignVector,
+        include_engines: bool,
+    ) -> Result<Airplane, String> {
         let builder = if self.reference_compatibility {
             AircraftBuilder::new_reference_compatibility(Some(self.config.geometry.clone()))
         } else {
             AircraftBuilder::new(Some(self.config.geometry.clone()))
         };
-        let plane = builder
+        builder
             .build(Some(design), include_engines)
-            .map_err(|e| format!("geometry build error: {e:?}"))?;
-        self.run_on_airplane(design, plane)
+            .map_err(|e| format!("geometry build error: {e:?}"))
     }
 
     /// Execute the same analysis workflow on an aircraft supplied by a CPACS
@@ -148,6 +161,7 @@ impl FullAnalysis {
         let payload_pass::PayloadPass {
             layout: payload_layout,
             structural_payload_limit_kg: effective_structural_payload_limit_kg,
+            offloaded_payload_kg,
             analysis: (masses, coords, _, flops_mass_buildup),
         } = self.payload_pass(design, &plane, &first_pass, coordinate_model)?;
         let (coords, cg) = self.station_coordinates(design, &plane, &masses, coords)?;
@@ -265,6 +279,9 @@ impl FullAnalysis {
         }
         if let Some(limit_kg) = effective_structural_payload_limit_kg {
             geometry_summary.insert("effective_structural_payload_limit_kg".to_owned(), limit_kg);
+        }
+        if offloaded_payload_kg > 0.0 {
+            geometry_summary.insert(ROUTE_PAYLOAD_OFFLOADED_KEY.to_owned(), offloaded_payload_kg);
         }
 
         Ok(AnalysisReport {

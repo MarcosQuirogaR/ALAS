@@ -99,13 +99,13 @@ pub struct MassModelConfig {
     )]
     pub flops_turboprop: FlopsTurbopropConfig,
 
-    /// Whether the product analysis places each mass group at its
-    /// geometry-derived station.
+    /// Whether other product mass groups use geometric stations. The wing always
+    /// uses its primary-box and secondary first moments, including when disabled.
     #[serde(default = "default_true", skip_serializing_if = "Clone::clone")]
     #[config(
         advanced,
         label = "Geometry-derived component stations",
-        help = "Place every mass group at the station the built geometry gives it: the integrated wingbox centroid, the tails at 42 percent of their mean chord, the gear at its nose and main stations, the engines at their nacelles and the fuel in its tanks. Disable to keep the frozen point placement of the reference implementation."
+        help = "Place mass groups at the built geometry stations: tails at 42 percent of their mean chord, gear at its nose and main stations, engines at their nacelles and fuel in its tanks. Disable to keep the other groups at the reference points. The complete wing always uses the sized box plus secondary first moment, shared with the item ledger."
     )]
     pub geometric_component_stations: bool,
 

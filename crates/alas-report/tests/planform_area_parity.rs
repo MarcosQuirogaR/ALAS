@@ -262,6 +262,13 @@ fn compare_case(case: &Value) {
         serde_json::from_value(case["effective_geometry_config_before_builder"].clone()).unwrap();
     let mut actual_geometry = serde_json::to_value(&config.geometry).unwrap();
     let mut expected_geometry = case["effective_geometry_config_before_builder"].clone();
+    // The declared airfoil class is a native wing input the artifact
+    // predates; it does not enter the planform area or the renderer.
+    assert!(expected_geometry["wing"].get("airfoil_class").is_none());
+    actual_geometry["wing"]
+        .as_object_mut()
+        .unwrap()
+        .remove("airfoil_class");
     let actual_engine = actual_geometry["engine"].take();
     let expected_engine = expected_geometry["engine"].take();
     assert_eq!(

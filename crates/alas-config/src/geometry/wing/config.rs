@@ -5,9 +5,10 @@
 
 use serde::{Deserialize, Serialize};
 
+use super::airfoil_class::AirfoilClass;
 use super::planform::{
-    InboardAerodynamicStation, MainWingStation, MainWingStationKind, TransportPlanform,
-    TransportPlanformError, WingSection, WingSectionError,
+    validate_finite, validate_positive, validate_sweep, InboardAerodynamicStation, MainWingStation,
+    MainWingStationKind, TransportPlanform, TransportPlanformError, WingSection, WingSectionError,
 };
 use crate::{ConfigNode, DesignVector};
 
@@ -46,6 +47,16 @@ pub struct WingConfig {
         help = "Vertical placement of the wing-tip leading edge. Tip above root gives positive dihedral."
     )]
     pub tip_z_m: f64,
+
+    /// Static-to-1 g rise of the wing tip over the semispan; the heights
+    /// above are the static ground shape (see [`super::WingShape`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[config(
+        label = "Wing tip rise in flight",
+        unit = "0-1 of semispan",
+        help = "How far the wing tip rises from the static ground shape (the heights above, as the ground-clearance tables measure them at maximum ramp weight) to the 1 g flight shape, as a fraction of the semispan. The aerodynamics and the dihedral checks use the flight shape; ground clearance uses the heights above. Leave unset when one shape serves both."
+    )]
+    pub flight_tip_rise_semispan_fraction: Option<f64>,
 
     /// Incidence of the root section.
     #[config(
@@ -136,6 +147,21 @@ pub struct WingConfig {
     )]
     pub tip_airfoil: String,
 
+    /// Declared section technology of the main wing, which fixes the Korn
+    /// technology factor (see [`AirfoilClass`]). Declared with the aircraft
+    /// (each preset states it with its source); a clean-sheet wing is
+    /// supercritical. Not a form field: it is a property of the aircraft
+    /// being described, not a coefficient to adjust. Always serialized: a
+    /// preset reapplies its own class on load, so an omitted value would
+    /// silently become the preset's. A file saved before the class existed
+    /// loads the preset's (or the clean-sheet supercritical) class.
+    #[serde(default)]
+    #[config(
+        hidden,
+        help = "Declared section technology of the main wing (conventional or supercritical), which fixes the Korn technology factor: 0.87 conventional, 0.95 supercritical (Mason, Configuration Aerodynamics, ch. 7; Malone and Mason 1995)."
+    )]
+    pub airfoil_class: AirfoilClass,
+
     /// Optional user-defined stations lofted between the defining planform
     /// edges. Preset geometry remains locked by the application while this
     /// list is available for a clean-sheet/custom geometry configuration.
@@ -164,6 +190,7 @@ impl Default for WingConfig {
             root_z_m: -2.1,
             break_z_m: -0.3,
             tip_z_m: 2.5,
+            flight_tip_rise_semispan_fraction: None,
             root_twist_deg: 4.0,
             break_twist_deg: 2.0,
             break_span_fraction: 0.35,
@@ -177,6 +204,7 @@ impl Default for WingConfig {
             outboard_le_sweep_deg: None,
             root_airfoil: "SC2-0714".to_owned(),
             tip_airfoil: "naca2410".to_owned(),
+            airfoil_class: AirfoilClass::Supercritical,
             custom_sections: Vec::new(),
             n_subdivisions: 24,
         }
@@ -455,29 +483,5 @@ impl WingConfig {
             chord_m: planform.root.chord_m,
             twist_deg: self.root_twist_deg,
         })
-    }
-}
-
-fn validate_finite(field: &'static str, value: f64) -> Result<(), TransportPlanformError> {
-    if value.is_finite() {
-        Ok(())
-    } else {
-        Err(TransportPlanformError::NonFinite { field, value })
-    }
-}
-
-fn validate_positive(field: &'static str, value: f64) -> Result<(), TransportPlanformError> {
-    if value > 0.0 {
-        Ok(())
-    } else {
-        Err(TransportPlanformError::NonPositive { field, value })
-    }
-}
-
-fn validate_sweep(field: &'static str, value: f64) -> Result<(), TransportPlanformError> {
-    if value.abs() < 89.0 {
-        Ok(())
-    } else {
-        Err(TransportPlanformError::InvalidSweep { field, value })
     }
 }

@@ -349,8 +349,11 @@ pub(crate) fn trim_and_polar(
             cm_tolerance: CM_RESIDUAL_TOLERANCE,
         },
     )
-    .map_err(|_| CandidateFailure {
-        reason: DRAG_TABLE_FAILURE,
+    .map_err(|error| {
+        tracing::warn!(%error, "trimmed drag table rejected");
+        CandidateFailure {
+            reason: DRAG_TABLE_FAILURE,
+        }
     })?;
 
     // `alpha_report = alpha_0L + beta (alpha - alpha_0L)` with
