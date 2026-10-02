@@ -28,9 +28,7 @@ pub enum OptionSource {
     TireClass,
     /// Which trailing-edge ribs the structural mesh generates.
     TeRibMode,
-    /// The differential-evolution strategy names.
-    Strategy,
-    /// Complete aircraft optimization profiles.
+    /// The optimization method.
     OptimizerMethod,
     /// Whether the aircraft carries passengers or freight.
     AircraftType,
@@ -83,6 +81,9 @@ pub enum OptionSource {
     ConstraintPolicy,
     /// How the optimizer treats the aircraft geometry it starts from.
     DesignMode,
+    /// The ICAO Annex 14 aerodrome reference code letter that caps the
+    /// wingspan of a clean-sheet design.
+    AerodromeReferenceCode,
 }
 
 impl OptionSource {
@@ -93,21 +94,7 @@ impl OptionSource {
     pub fn options(self) -> Option<&'static [&'static str]> {
         match self {
             Self::TeRibMode => Some(&["all", "none", "alternate", "inboard", "outboard"]),
-            Self::Strategy => Some(&[
-                "best1bin",
-                "best1exp",
-                "rand1bin",
-                "rand1exp",
-                "best2bin",
-                "best2exp",
-                "rand2bin",
-                "rand2exp",
-                "randtobest1bin",
-                "randtobest1exp",
-                "currenttobest1bin",
-                "currenttobest1exp",
-            ]),
-            Self::OptimizerMethod => Some(&["scipy_legacy", "differential_evolution"]),
+            Self::OptimizerMethod => Some(&["differential_evolution"]),
             Self::AircraftType => Some(&["passenger", "cargo"]),
             Self::MassArchitecture => Some(&[
                 "pure_flops_transport_v1",
@@ -167,6 +154,7 @@ impl OptionSource {
             Self::MtowSizing => Some(&crate::optimizer::MtowSizing::NAMES),
             Self::ConstraintPolicy => Some(&["hard", "soft", "diagnostic", "off"]),
             Self::DesignMode => Some(&["clean_sheet", "reference_adaptation", "baseline_sandbox"]),
+            Self::AerodromeReferenceCode => Some(&crate::optimizer::AerodromeReferenceCode::NAMES),
             _ => None,
         }
     }

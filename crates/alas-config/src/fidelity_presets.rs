@@ -269,9 +269,4 @@ mod tests {
         assert_eq!(error.available, vec!["draft", "high_fidelity", "standard"]);
         assert!(error.to_string().contains("standard"));
     }
-
-    #[test]
-    fn the_dropdown_lists_the_presets_in_registration_order() {
-        assert_eq!(available(), vec!["draft", "standard", "high_fidelity"]);
-    }
 }

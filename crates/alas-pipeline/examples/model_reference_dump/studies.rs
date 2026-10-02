@@ -79,111 +79,40 @@ pub(super) fn mesh_study(name: &str) -> Result<Value, String> {
     Ok(json!({ "preset": name, "cruise_cl": report.design_point.cl, "meshes": rows }))
 }
 
-/// The same A-B-C-D Breguet curve the report figure draws, computed locally.
-///
-/// Duplicated rather than imported so this validation instrument stays
-/// buildable while the report crate is being worked on elsewhere. If the two
-/// ever disagree, the figure is authoritative and this is the bug.
+/// The A-B-C-D payload-range corners of the report figure and the sandbox,
+/// from the shared corner solver
+/// (`alas_pipeline::quick_analysis::payload_range_corners`): every corner
+/// the largest still-air range whose reserve-inclusive fuel plan fits its
+/// fuel, on the report's segment mission model.
 pub(super) fn payload_range(
     config: &AlasConfig,
     report: &alas_pipeline::full_analysis::AnalysisReport,
-    oew_kg: f64,
-    _s_ref: f64,
 ) -> Option<Value> {
-    const G: f64 = 9.81;
     const M_TO_NM: f64 = 1852.0;
-    let mtow_kg = config.requirements.mtow_kg;
-    let published_mzfw_payload = presets::get(&config.preset)
-        .ok()
-        .and_then(|p| p.reference.mzfw_kg)
-        .map(|mzfw| mzfw - oew_kg);
-    let effective = report
-        .geometry_summary
-        .get("effective_structural_payload_limit_kg")
-        .copied();
-    let max_payload_kg = [
-        config.requirements.max_structural_payload_kg,
-        effective.unwrap_or(f64::NAN),
-        published_mzfw_payload.unwrap_or(f64::NAN),
-    ]
-    .into_iter()
-    .filter(|v| v.is_finite() && *v > 0.0)
-    .reduce(f64::min)?;
-
-    let fuel = alas_pipeline::feasibility::assess_fuel_capacity(config, &report.design, report);
-    let mut fuel_capacity_kg = fuel.capacity_kg.filter(|v| v.is_finite())?;
-    let structural_capacity_kg = (mtow_kg - oew_kg).max(0.0);
-    let mut limit = "published usable capacity";
-    if fuel_capacity_kg > structural_capacity_kg {
-        fuel_capacity_kg = structural_capacity_kg;
-        limit = "MTOW budget";
-    }
-
-    let l_over_d = report
-        .trimmed_design_point
-        .as_ref()
-        .map_or(report.design_point.l_over_d, |p| p.l_over_d);
-    let atmo = Atmosphere::new(config.requirements.cruise_altitude_m);
-    let tas = config.requirements.cruise_mach * atmo.speed_of_sound();
-    let tsfc_si = match config.geometry.engine.active_model().ok()? {
-        ActiveEngineModel::Turbofan(spec) => spec.cruise_tsfc_kg_kgf_hr / (G * 3600.0),
-        ActiveEngineModel::Turboprop(_) => {
-            return Some(json!({
-                "corners": null,
-                "fuel_capacity_kg": fuel_capacity_kg,
-                "fuel_capacity_limit": limit,
-                "max_payload_kg": max_payload_kg,
-                "oew_kg": oew_kg,
-                "mtow_kg": mtow_kg,
-                "method": "Capacity limits only; turbofan-TSFC Breguet range is inapplicable to turboprops",
-            }))
-        }
-    };
-    let range_nm = |start_kg: f64, end_kg: f64| {
-        alas_perf::performance::breguet_range_m(tas, l_over_d, tsfc_si, start_kg, end_kg) / M_TO_NM
-    };
-
-    // A: max payload, no fuel. B: max payload, fuel to MTOW. C: full fuel,
-    // payload cut back to MTOW. D: no payload, full fuel.
-    let b_fuel = (mtow_kg - oew_kg - max_payload_kg)
-        .max(0.0)
-        .min(fuel_capacity_kg);
-    let c_payload = (mtow_kg - oew_kg - fuel_capacity_kg)
-        .max(0.0)
-        .min(max_payload_kg);
-    let corners = [
-        ("A", 0.0, max_payload_kg),
-        ("B", b_fuel, max_payload_kg),
-        ("C", fuel_capacity_kg, c_payload),
-        ("D", fuel_capacity_kg, 0.0),
-    ];
-    let points: Vec<Value> = corners
+    let quick = alas_pipeline::quick_analysis::payload_range_corners(config, report).ok()?;
+    let labels = ["A", "B", "C", "D"];
+    let points: Vec<Value> = quick
+        .points
         .iter()
-        .map(|&(label, fuel_kg, payload_kg)| {
-            let start = oew_kg + payload_kg + fuel_kg;
-            let nm = range_nm(start, start - fuel_kg);
+        .zip(labels)
+        .zip(&quick.reserve_fuel_kg)
+        .map(|((&(range_m, payload_kg), label), &reserve_kg)| {
             json!({
                 "label": label,
-                "range_nm": nm,
-                "range_km": nm * 1.852,
+                "range_nm": range_m / M_TO_NM,
+                "range_km": range_m / 1000.0,
                 "payload_kg": payload_kg,
-                "fuel_kg": fuel_kg,
-                "takeoff_mass_kg": start,
+                "reserve_fuel_kg": reserve_kg,
             })
         })
         .collect();
     Some(json!({
         "corners": points,
-        "fuel_capacity_kg": fuel_capacity_kg,
-        "fuel_capacity_limit": limit,
-        "max_payload_kg": max_payload_kg,
-        "oew_kg": oew_kg,
-        "mtow_kg": mtow_kg,
-        "l_over_d_used": l_over_d,
-        "cruise_tsfc_kg_kgf_h_used": match config.geometry.engine.active_model() {
-            Ok(ActiveEngineModel::Turbofan(s)) => s.cruise_tsfc_kg_kgf_hr,
-            _ => f64::NAN,
-        },
-        "method": "Breguet, no reserves, no climb/descent allowance",
+        "fuel_capacity_kg": quick.fuel_capacity_kg,
+        "fuel_capacity_limit": quick.fuel_capacity_basis,
+        "max_payload_kg": quick.max_payload_kg,
+        "oew_kg": quick.oew_kg,
+        "mtow_kg": quick.mtow_kg,
+        "method": quick.note,
     }))
 }

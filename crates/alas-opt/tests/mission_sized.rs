@@ -95,13 +95,23 @@ fn sized_by_mission_closes_and_never_exceeds_the_ceiling() {
 /// reference balance layouts.
 #[test]
 fn an_impossible_design_range_is_hard_infeasible_and_costs_more() {
-    let feasible_objective = DesignObjective::new(block_fuel_config());
+    // The canonical vector cruises past its drag-divergence Mach (about 60
+    // drag counts of wave drag at mid-cruise), which the cruise-thrust and
+    // sweep residuals count; this test is about mission range and mass, so
+    // those two families are recorded as diagnostics like balance.
+    let range_fixture = || {
+        let mut config = block_fuel_config();
+        config.optimizer.objective.performance_constraints = ConstraintPolicy::Diagnostic;
+        config.optimizer.objective.geometry_constraints = ConstraintPolicy::Diagnostic;
+        config
+    };
+    let feasible_objective = DesignObjective::new(range_fixture());
     let x = DesignVector::default().to_array();
     let feasible =
         assess_candidate(&feasible_objective, &x).unwrap_or_else(|reason| panic!("{reason}"));
     assert!(feasible.hard_feasible);
 
-    let mut impossible_config = block_fuel_config();
+    let mut impossible_config = range_fixture();
     // Far beyond the default aircraft's reach, yet still a mission the
     // model can fly to a mass excess: past about 16,000 nmi the mission
     // itself stops closing and `mtow_ceiling` is not the reason.
@@ -204,8 +214,8 @@ fn the_reject_reason_lists_violated_ids_joined_by_plus() {
 fn a_trivial_de_run_returns_ok_or_names_the_failing_residuals() {
     let mut config = block_fuel_config();
     config.optimizer.solver.method = "differential_evolution".to_owned();
-    config.optimizer.solver.population_size = 1;
-    config.optimizer.solver.max_iterations = 0;
+    config.optimizer.solver.screening.max_evaluations = 8;
+    config.optimizer.solver.refinement.max_evaluations = 24;
     config.optimizer.solver.seed = Some(1);
 
     let result = DesignOptimizer::new(config).run(None, None, None);
@@ -714,4 +724,114 @@ fn ave_landing_limit_is_the_declared_mtow_fraction_in_every_mtow_sizing_mode_not
             }
         }
     }
+}
+
+/// The B787-9 route closure on its frozen plans is a property of the
+/// aircraft, not of where the iteration starts or of the integration step
+/// count it starts from: the converged takeoff mass agrees within 0.1 % from
+/// the plan's seed (cold), from warm starts on either side of the closure,
+/// and from two other starting step counts. Before the plan was frozen per
+/// pass, the dispatch re-chose cruise levels and climb revisions at every
+/// Picard mass, and the closure changed with the start and the step count.
+///
+/// The bound: the frozen step count meets a Richardson trip-fuel error of
+/// 5e-4 (`frozen_plan::RICHARDSON_TOLERANCE`) and trip fuel is under half of
+/// the takeoff mass, so discretization moves the closure by well under
+/// 0.1 %; the outer loop's own tolerance is 1 kg.
+#[test]
+fn the_b787_closure_does_not_depend_on_its_start_or_step_count() {
+    use alas_opt::mdo::SizingControls;
+    let name = "B787-9";
+    let config = AlasConfig::from_value(&serde_json::json!({ "preset": name })).unwrap();
+    let design = alas_config::presets::get(name).unwrap().design_vector;
+    let close = |controls: SizingControls| {
+        alas_opt::mdo::assess_product_candidate_with_controls(&config, &design, controls)
+            .unwrap_or_else(|reason| panic!("{controls:?}: {reason}"))
+            .sized
+    };
+    let cold = close(SizingControls::default());
+    assert!(cold.sizing_closed, "the cold closure must close");
+    let cold_kg = cold.takeoff_mass_kg;
+    for controls in [
+        SizingControls {
+            initial_takeoff_mass_kg: Some(0.9 * cold_kg),
+            ..SizingControls::default()
+        },
+        SizingControls {
+            initial_takeoff_mass_kg: Some(1.04 * cold_kg),
+            ..SizingControls::default()
+        },
+        SizingControls {
+            steps_per_segment: Some(2),
+            ..SizingControls::default()
+        },
+        SizingControls {
+            steps_per_segment: Some(8),
+            ..SizingControls::default()
+        },
+    ] {
+        let sized = close(controls);
+        let relative = (sized.takeoff_mass_kg - cold_kg).abs() / cold_kg;
+        assert!(
+            sized.sizing_closed && relative <= 1.0e-3,
+            "{controls:?}: {} kg against {cold_kg} kg ({relative:.2e})",
+            sized.takeoff_mass_kg
+        );
+    }
+}
+
+/// A spent work budget rejects the candidate with its own reason, whichever
+/// limit binds, rather than returning a partly closed aircraft.
+#[test]
+fn an_exhausted_sizing_budget_is_its_own_rejection_reason() {
+    use alas_opt::mdo::mission_model::{SizingBudget, SIZING_BUDGET_EXHAUSTED};
+    use alas_opt::mdo::SizingControls;
+    let name = "A320-200";
+    let config = AlasConfig::from_value(&serde_json::json!({ "preset": name })).unwrap();
+    let design = alas_config::presets::get(name).unwrap().design_vector;
+    let unlimited = SizingBudget {
+        max_trip_flights: u32::MAX,
+        max_deck_evals: u64::MAX,
+        max_outer_passes: u32::MAX,
+    };
+    for budget in [
+        SizingBudget {
+            max_trip_flights: 3,
+            ..unlimited
+        },
+        SizingBudget {
+            max_deck_evals: 1_000,
+            ..unlimited
+        },
+        SizingBudget {
+            max_outer_passes: 1,
+            ..unlimited
+        },
+    ] {
+        let controls = SizingControls {
+            budget: Some(budget),
+            ..SizingControls::default()
+        };
+        let result =
+            alas_opt::mdo::assess_product_candidate_with_controls(&config, &design, controls);
+        assert_eq!(
+            result.err().as_deref(),
+            Some(SIZING_BUDGET_EXHAUSTED),
+            "{budget:?}"
+        );
+    }
+    // The same candidate inside an ample budget closes and reports its work.
+    let sized = alas_opt::mdo::assess_product_candidate_with_controls(
+        &config,
+        &design,
+        SizingControls {
+            budget: Some(unlimited),
+            ..SizingControls::default()
+        },
+    )
+    .unwrap()
+    .sized;
+    assert!(sized.sizing_closed);
+    assert!(sized.work.plan_freezes >= 1 && sized.work.trip_flights > 0);
+    assert!(sized.work.deck_evals > 0);
 }

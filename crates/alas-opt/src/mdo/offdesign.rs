@@ -8,8 +8,9 @@
 //! mode, or the payload-adjusted mode with a design range), the route the
 //! user selected is not what sized the aircraft; it is a mission the sized
 //! aircraft has to be able to fly. It is flown here with the same dispatch
-//! solver and fuel policy, at the route's own cruise altitude, with the
-//! laid-out payload and the converged drag polar, and with no MTOW, landing
+//! solver and fuel policy, at the route's own cruise altitude on a trip plan
+//! frozen for the route ([`super::sizing::planned_mission`]), with the
+//! laid-out payload and the converged trimmed drag, and with no MTOW, landing
 //! or tank limit applied inside the solve, so the three checks read the
 //! unclamped requirement: reserve-inclusive takeoff fuel against usable tank
 //! capacity, route payload against the derived design structural payload
@@ -17,9 +18,10 @@
 
 use alas_config::optimizer::UNBOUNDED_DISPATCH_MTOW_KG;
 use alas_config::AlasConfig;
-use alas_mass::dispatch::{solve_dispatch, DispatchLimits, DispatchSolution, DispatchStatus};
+use alas_mass::dispatch::{DispatchLimits, DispatchSolution, DispatchStatus};
 
-use super::mission_model::SegmentMissionModel;
+use super::mission_model::{FreezeError, SegmentMissionModel, MISSION_STEP_UNCONVERGED};
+use super::sizing::planned_mission::solve_planned_dispatch;
 use super::trim::TrimmedPolar;
 use super::types::CandidateFailure;
 
@@ -48,7 +50,7 @@ pub struct OffDesignFlight {
 
 /// What the off-design flight reads from the closed candidate.
 pub(crate) struct ClosedAircraft<'a> {
-    /// Converged cruise polar.
+    /// Converged cruise trim, whose drag the route is flown on.
     pub polar: &'a TrimmedPolar,
     /// Operating empty mass, kg.
     pub operating_empty_mass_kg: f64,
@@ -66,21 +68,16 @@ pub(crate) struct ClosedAircraft<'a> {
 ///
 /// # Errors
 ///
-/// `cancelled` when the run was cancelled during the solve, and
-/// `trim_solve` when the converged polar does not make a valid route model.
+/// `cancelled` when the run was cancelled during the solve.
 pub(crate) fn fly_route(
     config: &AlasConfig,
     route_model: &SegmentMissionModel,
     range_m: f64,
     aircraft: &ClosedAircraft<'_>,
 ) -> Result<OffDesignFlight, CandidateFailure> {
-    let mut model = route_model.clone();
-    model.cd0 = aircraft.polar.cd0;
-    model.induced_factor_k = aircraft.polar.induced_factor_k;
-    model.wave_drag_cd = aircraft.polar.wave_drag_cd;
-    model.validate().map_err(|_| CandidateFailure {
-        reason: "trim_solve",
-    })?;
+    let model = route_model
+        .clone()
+        .with_cruise_drag(aircraft.polar.drag.cruise_drag());
     let objective = &config.optimizer.objective;
     let zero_fuel_mass_kg = aircraft.operating_empty_mass_kg + aircraft.payload_kg;
     let limits = DispatchLimits {
@@ -89,15 +86,24 @@ pub(crate) fn fly_route(
         mlw_kg: None,
         usable_capacity_kg: None,
     };
-    let dispatch = solve_dispatch(
+    // The route is flown on a trip plan frozen for its own mission, planned
+    // first at the closed takeoff mass, as the closure flies its own.
+    let dispatch = solve_planned_dispatch(
+        &model,
         zero_fuel_mass_kg,
+        aircraft.mtow_kg,
         range_m,
         &config.fuel_policy,
-        &model,
         &limits,
         objective.sizing_max_iterations.max(1) as usize,
         objective.sizing_tolerance_kg,
-    );
+    )
+    .map_err(|error| CandidateFailure {
+        reason: match error {
+            FreezeError::StepUnconverged { .. } => MISSION_STEP_UNCONVERGED,
+            FreezeError::Fuel(_) => "cancelled",
+        },
+    })?;
     if matches!(dispatch.status, DispatchStatus::Cancelled) {
         return Err(CandidateFailure {
             reason: "cancelled",

@@ -65,6 +65,7 @@ pub mod settings;
 pub mod sizing_basis;
 pub use sizing_basis::MassSizingBasis;
 mod cabin_method;
+mod retired_keys;
 pub mod solver_presets;
 pub mod structures;
 pub mod systems_mass;
@@ -104,14 +105,15 @@ pub use flops_structure::{
 };
 pub use fuel_policy::{FuelPolicyConfig, FuelScheme};
 pub use fuel_tanks::{
-    AuxiliaryTankConfig, CenterTankConfig, FuelTankLayoutConfig, TrimTankConfig, WingTankConfig,
+    AuxiliaryTankConfig, CenterTankConfig, FeedTankConfig, FuelTankLayoutConfig, TrimTankConfig,
+    WingTankConfig,
 };
 pub use geometry::{
     ActiveEngineModel, BodyFuselageExtent, EmpennageConfig, EngineBindingError, EngineConfig,
     FuselageConfig, FuselageSection, FuselageSectionError, GeometryConfig,
     InboardAerodynamicStation, LongitudinalStationFrame, MacFrame, MainWingPanel, MainWingStation,
-    MainWingStationKind, TransportPlanform, TransportPlanformError, WingConfig, WingSection,
-    WingSectionError,
+    MainWingStationKind, TailSizing, TransportPlanform, TransportPlanformError, WingConfig,
+    WingSection, WingSectionError,
 };
 pub use landing_gear::{
     effective_main_gear_station, EffectiveGearStationExt, EffectiveMainGearStation,
@@ -130,9 +132,10 @@ pub use oew_reference::{
     OewReferenceConfiguration, OewSource, OewSourceTier, PublishedOewValue,
 };
 pub use optimizer::{
-    ConstraintPolicy, DesignMission, DesignMode, DesignPayloadSource, DesignRange,
-    DesignSpaceConfig, MtowPlan, MtowSizing, ObjectiveConfig, ObjectiveKind, ObjectiveWeights,
-    OptimizerConfig, SolverSettings, StructuralBasis, VariableEnvelope, LEGACY_METHOD_TOKENS,
+    AerodromeReferenceCode, ConstraintPolicy, DesignMission, DesignMode, DesignPayloadSource,
+    DesignRange, DesignSpaceConfig, MtowPlan, MtowSizing, ObjectiveConfig, ObjectiveKind,
+    ObjectiveWeights, OptimizerConfig, SolverSettings, StageBudget, StructuralBasis,
+    VariableEnvelope, LEGACY_METHOD_TOKENS,
 };
 pub use performance::PerformanceConfig;
 pub use performance_presets::{PerformancePreset, UnknownPerformancePreset};
@@ -144,11 +147,15 @@ pub use presets::{
     DesignMissionProvenanceSet, DesignMissionReference, MissingDesignMissionDatum,
     MissionDatumProvenance, MissionEvidenceApplicability, MissionEvidenceTier,
     MissionPromotionRefusal, PartialDesignMissionEvidence, PartialMissionEvidenceKind,
-    PlanningCgEnvelope, PlanningMacReference, PublishedMissionLoadCase, PublishedRange,
-    PublishedReserveContract, UnknownAircraftPreset,
+    PayloadRangeDesignPoint, PlanningCgEnvelope, PlanningMacReference, PublishedAftCgNoseLoad,
+    PublishedMissionLoadCase, PublishedRange, PublishedReserveContract, UnknownAircraftPreset,
 };
 pub use propulsion::PropulsionCycleConfig;
 pub use requirements::{DesignRequirements, RequirementsError};
+pub use retired_keys::{
+    LegacySolverBudget, RetiredKeysDropped, RETIRED_BUDGET_KEYS, RETIRED_OBJECTIVE_KEYS,
+    RETIRED_SOLVER_KEYS, RETIRED_WEIGHT_KEYS,
+};
 pub use settings::{legacy_mission_disabled, AlasConfig, ConfigLoadNotes, WORKSPACE_ENVELOPE_KEY};
 pub use solver_presets::{SolverPreset, UnknownSolverPreset};
 pub use structures::StructuresConfig;

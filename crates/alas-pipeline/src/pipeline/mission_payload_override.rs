@@ -40,6 +40,9 @@ pub(super) fn report_with_payload_override(
     payload_kg: f64,
 ) -> AnalysisReport {
     let mut report = report.clone();
+    // The closure's dispatch plan loads the declared payload; the same
+    // aircraft and fuel model fly the offloaded one.
+    report.fuel = report.fuel.without_dispatch_plan();
     let old_payload_kg = report
         .component_masses
         .get("Payload")

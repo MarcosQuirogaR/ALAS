@@ -598,6 +598,38 @@ mod tests {
     }
 
     #[test]
+    fn the_a320_belly_stands_at_its_published_ground_clearance() {
+        // Airbus A320 AC, Jun 01/24, Figure 2-3-0-991-004-A01 sheet 2:
+        // fuselage bottom forward 1.786 m and aft 1.790 m above the ground at
+        // MRW, aft CG. The built belly under the main gear must stand at the
+        // registered 1.79 m, not at a clearance measured from the nose-tip
+        // centreline.
+        use alas_config::presets;
+        let config = AlasConfig::from_value(&serde_json::json!({ "preset": "A320-200" }))
+            .unwrap_or_else(|error| panic!("{error}"));
+        let registered = presets::get("A320-200").unwrap_or_else(|error| panic!("{error}"));
+        let plane = AircraftBuilder::new(Some(config.geometry.clone()))
+            .build(Some(&registered.design_vector), true)
+            .expect("the A320-200 builds");
+        let fuselage = plane.fuselages.first().expect("a fuselage");
+        let ground_z = ground_plane_z_m(fuselage, &config.geometry, &config.landing_gear);
+        let main_gear_x = preset_stations("A320-200")
+            .expect("the A320-200 resolves its stations")
+            .main_gear
+            .position_m[0];
+        let section = &fuselage
+            .xsecs
+            .windows(2)
+            .find(|pair| pair[0].xyz_c[0] <= main_gear_x && main_gear_x <= pair[1].xyz_c[0])
+            .expect("the main gear lies under the fuselage")[0];
+        let belly_clearance = section.xyz_c[2] - section.height / 2.0 - ground_z;
+        assert!(
+            (belly_clearance - 1.79).abs() < 1.0e-9,
+            "belly {belly_clearance} m above the ground under the main gear"
+        );
+    }
+
+    #[test]
     fn the_main_gear_sits_aft_of_the_nose_gear() {
         let stations = default_stations();
         assert!(stations.main_gear.position_m[0] > stations.nose_gear.position_m[0]);
@@ -901,19 +933,22 @@ mod tests {
     #[test]
     fn low_wing_aircraft_keep_the_wing_mounted_fallback_station() {
         // The refusal is scoped to the layout the fallback rule excludes, not
-        // to the absence of a registered anchor. The DC-10 registers no
-        // anchor either and must still resolve through the same
-        // wing-mounted fallback, by the same method string; the A320-200 and
-        // the B787-9 (anchored to Boeing D6-58333) register one and must be
-        // source-scaled.
+        // to the absence of a registered anchor. The low-wing DC-10 with its
+        // anchors cleared must still resolve through the same wing-mounted
+        // fallback, by the same method string; the registered DC-10
+        // (DAC-67803A), the A320-200 and the B787-9 (Boeing D6-58333)
+        // register one and must be source-scaled.
         let preset = "DC-10";
-        let stations = preset_stations(preset)
+        let stations = unmeasured_preset_stations(preset)
             .unwrap_or_else(|error| panic!("{preset} must still resolve its stations: {error}"));
         assert_eq!(
             stations.main_gear.method, "mlg_x_fraction_mac aft of MAC leading edge",
             "{preset} must keep the wing-mounted fallback"
         );
         assert!(stations.main_gear.position_m[0] > stations.nose_gear.position_m[0]);
+        let dc10 = preset_stations(preset)
+            .unwrap_or_else(|error| panic!("the DC-10 must resolve its stations: {error}"));
+        assert!(dc10.main_gear.method.starts_with("source-scaled"));
         let b787 = preset_stations("B787-9")
             .unwrap_or_else(|error| panic!("the B787-9 must resolve its stations: {error}"));
         assert!(b787.main_gear.method.starts_with("source-scaled"));

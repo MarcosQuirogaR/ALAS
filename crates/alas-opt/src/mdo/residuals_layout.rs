@@ -77,16 +77,21 @@ pub(super) fn layout_residuals(
     residuals
 }
 
-/// Keep the trailing-edge ray from the fuselage centreline to the kink at or
-/// below 90 degrees to the aft fuselage axis. A negative signed TE sweep is
-/// the same forward-running root-to-kink edge in the aircraft x-aft frame.
+/// Exposed trailing-edge limit, deg: 90 plus a rounding guard, not a
+/// relaxation (the ATR 72 edge is exactly 90). The pre-gate reads it too.
+pub(crate) const TE_ANGLE_LIMIT_DEG: f64 = 90.0 + 1.0e-6;
+
+/// Keep the exposed trailing edge, side of body to kink, within
+/// [`TE_ANGLE_LIMIT_DEG`] of the aft fuselage axis
+/// ([`crate::transport_planform::exposed_te_angle_deg`]).
 fn root_to_kink_te_angle_residual(
     outcome: &SizingOutcome,
     config: &AlasConfig,
     policy: ConstraintPolicy,
 ) -> Vec<ConstraintResidual> {
-    const MAX_ANGLE_DEG: f64 = 90.0;
-    let Ok(planform) = config.geometry.wing.transport_planform(&outcome.history.dv) else {
+    let Some(angle_deg) =
+        crate::transport_planform::exposed_te_angle_deg(&config.geometry.wing, &outcome.history.dv)
+    else {
         return vec![ConstraintResidual::direct(
             "root_to_kink_te_angle_unavailable",
             Geometry,
@@ -98,18 +103,13 @@ fn root_to_kink_te_angle_residual(
             policy,
         )];
     };
-    let root_te_x_m = planform.root.leading_edge_x_m + planform.root.chord_m;
-    let kink_te_x_m = planform.kink.leading_edge_x_m + planform.kink.chord_m;
-    let angle_deg = (planform.kink.y_m - planform.root.y_m)
-        .atan2(kink_te_x_m - root_te_x_m)
-        .to_degrees();
     vec![ConstraintResidual::scaled(
         "root_to_kink_te_angle",
         Geometry,
         angle_deg,
-        MAX_ANGLE_DEG,
+        TE_ANGLE_LIMIT_DEG,
         "deg",
-        angle_deg - MAX_ANGLE_DEG,
+        angle_deg - TE_ANGLE_LIMIT_DEG,
         policy,
     )]
 }
@@ -391,80 +391,67 @@ fn vertical_position_residual(
     )]
 }
 
-/// The Korn-equation transonic wave-drag estimate at the candidate's own
-/// design cruise point must not exceed a small ceiling: sweep must be
-/// consistent with the declared cruise Mach for the section thickness and
-/// lift coefficient this candidate actually flies at.
+/// The transonic wave drag at the candidate's own mid-cruise point must not
+/// exceed a small ceiling: sweep must be consistent with the declared cruise
+/// Mach for the section thickness and lift coefficient this candidate
+/// actually flies at.
 ///
-/// # Reuse, not re-derivation
+/// # The drag the missions fly
 ///
-/// The drag-divergence Mach term is `alas_aero::analysis::AeroAnalysis::
-/// wave_drag`'s own Korn-equation formula (Raymer, *Aircraft Design: A
-/// Conceptual Approach*, the Korn-equation transonic wave-drag estimate),
-/// reproduced here rather than called: `alas-opt` cannot add a dependency on
-/// the internals of `alas-aero`'s trimmed analysis object for one scalar,
-/// and this module already reproduces two more `alas_geom`-only helpers
-/// above for the same reason `mdo::range` reproduces its own great-circle
-/// distance rather than depending on `alas-route`. The kappa, onset-Mach and
-/// wave-drag-rise coefficients are the same `config.drag_model` values the
-/// real trim solve uses, so this is not a second, independently-tuned model.
+/// The wave drag is read from the candidate's cruise drag,
+/// [`super::types::CandidateDrag::wave_cd`]: for a natively trimmed
+/// candidate the trimmed drag table, which tabulates
+/// `alas_aero::analysis::AeroAnalysis::wave_drag` (the Lock/Korn law, Raymer,
+/// *Aircraft Design: A Conceptual Approach*, Korn equation, with
+/// `CDw = C (M - M_crit)^4` and `M_crit` from the drag-divergence criterion
+/// `dCD/dM = 0.1`) on the quarter-chord sweep and the area-weighted
+/// thickness ratio; for an external polar, its measured wave term. The
+/// residual and the fuel burn therefore see one wave drag.
 ///
-/// # Band
+/// The lift coefficient is that of mid-cruise at the sizing cruise Mach and
+/// altitude: the closed takeoff mass less half the trip fuel of the mission
+/// it was closed on.
 ///
-/// Every registered aircraft's own reference geometry already sits within a
-/// few hundredths of a Mach number of its own drag-divergence Mach at its
-/// declared cruise point and design lift coefficient (by construction: that
-/// small excess is the few drag counts of wave drag a real transonic
-/// transport is designed to accept, not a modelling defect). The measured
-/// wave-drag estimate at that point never exceeds about 0.4 drag counts
-/// (4e-5) on any of the eight. The ceiling, 8 drag counts (8.0e-4), is set
-/// well above that and is a small fraction of a transport's typical 180-220
-/// count parasite CD0, consistent with the general transonic-design
-/// practice (Raymer; Obert, *Aerodynamic Design of Transport Aircraft*,
-/// drag-divergence/buffet-margin discussion) of keeping cruise wave drag a
-/// minor term rather than a dominant one. An insufficiently swept wing at a
-/// high cruise Mach fails this quickly: the Korn rise is quartic in the
-/// Mach excess past `mach_dd`.
+/// # Ceiling
+///
+/// Sweep is consistent with the cruise Mach when the aircraft cruises at or
+/// below its drag-divergence Mach, `dCD/dM = 0.1` (the definition the Korn
+/// relation and the Lock law share; Raymer, Korn equation). Under
+/// `CDw = C (M - M_crit)^4` that slope is reached at
+/// `M_dd - M_crit = (0.1 / 4C)^(1/3)`, where the wave drag is
+/// `C (0.1 / 4C)^(4/3)`: 26.9 drag counts at the configured `C = 20`. The
+/// ceiling is that value, so the residual is the drag-divergence criterion
+/// expressed on the wave drag the missions fly. An insufficiently swept
+/// wing at a high cruise Mach fails this quickly: the rise is quartic in
+/// the Mach excess past `M_crit`.
 fn wave_drag_ceiling_residual(
     outcome: &SizingOutcome,
     config: &AlasConfig,
     policy: ConstraintPolicy,
 ) -> Vec<ConstraintResidual> {
-    const WAVE_DRAG_CEILING_CD: f64 = 8.0e-4;
-    let Some(thickness) = root_thickness_ratio(&outcome.plane) else {
-        return Vec::new();
-    };
-    let sweep_deg = outcome.history.dv.sweep_deg;
-    let cos_sweep = sweep_deg.to_radians().cos();
-    if cos_sweep <= 0.0 {
-        return Vec::new();
-    }
-    let atmosphere = alas_atmo::Atmosphere::new(config.requirements.cruise_altitude_m);
-    let mach = config.requirements.cruise_mach;
+    /// `dCD/dM` at drag divergence (Korn/Lock).
+    const DRAG_DIVERGENCE_SLOPE: f64 = 0.1;
+    let rise = config.drag_model.wave_drag_coefficient;
+    let wave_drag_ceiling_cd = rise * (DRAG_DIVERGENCE_SLOPE / (4.0 * rise)).powf(4.0 / 3.0);
+    let req = &config.requirements;
+    let sized = &outcome.sized;
+    let atmosphere = alas_atmo::Atmosphere::new(req.cruise_altitude_m);
+    let mach = req.cruise_mach;
     let v_m_s = mach * atmosphere.speed_of_sound();
     let q_pa = 0.5 * atmosphere.density() * v_m_s.powi(2);
-    let cl = config
-        .requirements
-        .required_cruise_cl(q_pa, outcome.plane.s_ref);
-    let drag = &config.drag_model;
-    if mach < drag.wave_drag_onset_mach {
+    let mid_cruise_mass_kg = sized.takeoff_mass_kg - 0.5 * sized.design_mission_trip_fuel_kg;
+    let cl_mid = mid_cruise_mass_kg * req.gravity_m_s2 / (q_pa * outcome.plane.s_ref);
+    if !cl_mid.is_finite() || cl_mid <= 0.0 {
         return Vec::new();
     }
-    let mach_dd = drag.korn_technology_factor / cos_sweep
-        - thickness / cos_sweep.powf(2.0)
-        - cl / (10.0 * cos_sweep.powf(3.0));
-    let wave_drag_cd = if mach > mach_dd {
-        drag.wave_drag_coefficient * (mach - mach_dd).powf(4.0)
-    } else {
-        0.0
-    };
+    let wave_drag_cd = sized.fuel_artifacts.drag.wave_cd(cl_mid, mach);
     vec![ConstraintResidual::scaled(
         "sweep_consistent_with_cruise_mach",
         Geometry,
         wave_drag_cd,
-        WAVE_DRAG_CEILING_CD,
+        wave_drag_ceiling_cd,
         "-",
-        wave_drag_cd - WAVE_DRAG_CEILING_CD,
+        wave_drag_cd - wave_drag_ceiling_cd,
         policy,
     )]
 }

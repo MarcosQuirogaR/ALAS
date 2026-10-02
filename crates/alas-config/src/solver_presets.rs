@@ -5,12 +5,12 @@
 
 //! Named speed-against-thoroughness settings for the design search.
 //!
-//! Every field these presets set is on [`SolverSettings`], and every one of
-//! them trades wall-clock time for how well the search converges. Bundling
-//! them under four names is what makes that trade a single choice: a
-//! population size raised without a matching generation budget explores widely
-//! and converges on nothing, and picking the two independently is how that
-//! happens.
+//! Every field these presets set is a stage budget on [`SolverSettings`]:
+//! screening and refinement wall-clock limits, which trade wall-clock time
+//! for how far the search refines, and evaluation ceilings set well above
+//! what each limit affords (see the stage defaults), so the limits end the
+//! stages and the refinement plans its budget from the measured throughput.
+//! Bundling them under four names makes that trade a single choice.
 //!
 //! Nothing here touches [`crate::ObjectiveWeights`], deliberately. A preset
 //! that changed what the search was looking for as well as how hard it looked
@@ -18,7 +18,7 @@
 
 use std::sync::OnceLock;
 
-use crate::SolverSettings;
+use crate::{SolverSettings, StageBudget};
 
 /// A solver preset that was asked for and is not registered.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -91,27 +91,37 @@ fn sorted_names() -> Vec<String> {
     names
 }
 
+/// A stage budget of `max_evaluations` evaluations and `time_limit_s` s.
+fn stage(max_evaluations: i64, time_limit_s: f64) -> StageBudget {
+    StageBudget {
+        max_evaluations,
+        time_limit_s,
+        replay_evaluations: None,
+        replay_planned_evaluations: None,
+        replay_restoration_evaluations: None,
+        max_pregate_rejects: None,
+    }
+}
+
 fn build() -> Vec<SolverPreset> {
     vec![
         SolverPreset {
             name: "quick_draft",
             display_name: "Quick Draft",
-            description: "Fast, rough pass: small population and few generations. Good for \
-                          iterating on requirements/geometry before committing to a full run.",
+            description: "Fast, rough pass: 15 s of screening and at most 60 s of refinement. \
+                          Good for iterating on requirements/geometry before committing to a \
+                          full run.",
             settings: SolverSettings {
-                strategy: "best1bin".to_owned(),
-                max_iterations: 8,
-                population_size: 4,
-                tolerance: 0.02,
-                workers: 4,
-                display_progress: true,
+                screening: stage(10_000, 15.0),
+                refinement: stage(10_000, 60.0),
                 ..SolverSettings::default()
             },
         },
         SolverPreset {
             name: "balanced",
             display_name: "Balanced (Recommended)",
-            description: "The default tradeoff: good convergence in a reasonable wall-clock time.",
+            description: "The default tradeoff: 30 s of screening and at most 2 min of \
+                          refinement.",
             // Whatever `SolverSettings` itself defaults to, so the recommended
             // preset and an unconfigured run are the same run.
             settings: SolverSettings::default(),
@@ -119,30 +129,23 @@ fn build() -> Vec<SolverPreset> {
         SolverPreset {
             name: "thorough",
             display_name: "Thorough",
-            description: "Larger population and more generations for tighter convergence on a \
-                          final design.",
+            description: "A larger refinement budget, at most 4 min, for a closer local \
+                          optimum on a final design.",
             settings: SolverSettings {
-                strategy: "best1bin".to_owned(),
-                max_iterations: 30,
-                population_size: 10,
-                tolerance: 0.005,
-                workers: 4,
-                display_progress: true,
+                screening: stage(30_000, 60.0),
+                refinement: stage(30_000, 240.0),
                 ..SolverSettings::default()
             },
         },
         SolverPreset {
             name: "exhaustive",
             display_name: "Exhaustive",
-            description: "Widest search: large population, many generations, tight tolerance. \
-                          Slowest option; use for a final high-confidence optimization.",
+            description: "The largest budgets the stages accept: 2 min of screening and 5 min \
+                          of refinement. Slowest option; use for a final high-confidence \
+                          optimization.",
             settings: SolverSettings {
-                strategy: "best1bin".to_owned(),
-                max_iterations: 60,
-                population_size: 15,
-                tolerance: 0.002,
-                workers: 4,
-                display_progress: true,
+                screening: stage(40_000, 120.0),
+                refinement: stage(40_000, crate::optimizer::MAXIMUM_STAGE_TIME_LIMIT_S),
                 ..SolverSettings::default()
             },
         },
@@ -158,48 +161,30 @@ mod tests {
 
     #[test]
     fn the_presets_are_ordered_from_quickest_to_most_thorough() {
-        // The dropdown reads as a scale, so a user picking the next one down
-        // gets more search rather than a different kind of search.
-        let budgets: Vec<i64> = registry()
-            .iter()
-            .map(|preset| preset.settings.max_iterations * preset.settings.population_size)
-            .collect();
-        assert!(
-            budgets.windows(2).all(|pair| pair[0] < pair[1]),
-            "{budgets:?}"
-        );
-    }
-
-    #[test]
-    fn a_longer_search_is_also_asked_to_converge_more_tightly() {
-        // More generations spent against a loose tolerance would stop early
-        // and waste the budget the user just paid for.
-        let tolerances: Vec<f64> = registry()
-            .iter()
-            .map(|preset| preset.settings.tolerance)
-            .collect();
-        assert!(
-            tolerances.windows(2).all(|pair| pair[0] > pair[1]),
-            "{tolerances:?}"
-        );
+        // The dropdown reads as a scale: each step down buys more screening
+        // time, more refinement time and a larger refinement budget, and
+        // every one of them is a budget the optimizer accepts.
+        let settings: Vec<&SolverSettings> =
+            registry().iter().map(|preset| &preset.settings).collect();
+        for pair in settings.windows(2) {
+            assert!(pair[0].screening.time_limit_s < pair[1].screening.time_limit_s);
+            assert!(pair[0].refinement.time_limit_s < pair[1].refinement.time_limit_s);
+            assert!(pair[0].refinement.max_evaluations < pair[1].refinement.max_evaluations);
+        }
+        for preset in registry() {
+            assert_eq!(
+                preset.settings.validate_budgets(),
+                Ok(()),
+                "{}",
+                preset.name
+            );
+            assert_eq!(preset.settings.workers, 0, "{}", preset.name);
+        }
     }
 
     #[test]
     fn the_recommended_preset_is_what_an_unconfigured_run_already_does() {
         assert_eq!(get("balanced").unwrap().settings, SolverSettings::default());
-    }
-
-    #[test]
-    fn every_preset_names_a_strategy_the_solver_accepts() {
-        let accepted = crate::OptionSource::Strategy.options().unwrap();
-        for preset in registry() {
-            assert!(
-                accepted.contains(&preset.settings.strategy.as_str()),
-                "{}: {}",
-                preset.name,
-                preset.settings.strategy
-            );
-        }
     }
 
     #[test]

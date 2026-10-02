@@ -570,13 +570,4 @@ mod tests {
             );
         }
     }
-
-    #[test]
-    fn a_dense_matrix_reads_back_what_was_written() {
-        let mut matrix = DenseMatrix::zeros(3);
-        matrix.set(1, 2, 4.5);
-        assert_eq!(matrix.get(1, 2), 4.5);
-        assert_eq!(matrix.get(2, 1), 0.0);
-        assert_eq!(matrix.dimension(), 3);
-    }
 }

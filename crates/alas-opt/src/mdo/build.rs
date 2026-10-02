@@ -6,7 +6,7 @@
 //! it is built exactly once per candidate.
 //!
 //! This makes the same public crate calls, in the same order, as
-//! `crate::objective_evaluate`'s weighted-penalty path: geometry build, candidate
+//! the earlier weighted-penalty objective's path: geometry build, candidate
 //! payload load case, a two-pass mass analysis with the payload layout
 //! summary, the cruise stall guard, and `stability_and_trim` followed by
 //! `AeroAnalysis::trimmed_performance`. A design vector that fails any of
@@ -14,7 +14,7 @@
 //! mission quantity the search is minimising.
 
 use alas_config::design_variables::{DesignVector, SPECS};
-use alas_config::AlasConfig;
+use alas_config::{AlasConfig, TailSizing};
 use alas_geom::aircraft::airplane::Airplane;
 use alas_geom::builder::AircraftBuilder;
 use alas_mass::breakdown::{
@@ -29,6 +29,7 @@ use alas_payload::oew::oew_and_cg;
 
 use crate::objective::apply_candidate_payload_load_case;
 
+use super::tail_sizing;
 use super::types::{CandidateFailure, PayloadCapacity};
 
 /// Structural result retained between the initial mass pass and later MDA
@@ -85,6 +86,21 @@ pub(crate) fn build_geometry_with_fuselage_policy(
     x: &[f64],
     preserve_explicit_fuselage_length: bool,
 ) -> Result<(AlasConfig, DesignVector, Airplane), CandidateFailure> {
+    let (mut candidate_config, mut dv, tail_sizing) =
+        resolve_before_build(config, x, preserve_explicit_fuselage_length)?;
+    let plane = rebuild_airplane(&mut candidate_config, &mut dv, &tail_sizing)?;
+    Ok((candidate_config, dv, plane))
+}
+
+/// The steps before the candidate airplane is built: the candidate payload
+/// load case, the cabin-derived fuselage (unless preserved) and the tail
+/// sizing of a reference adaptation. Every consumer that needs the aircraft
+/// a candidate is evaluated as, without the evaluation, goes through here.
+pub(crate) fn resolve_before_build(
+    config: &AlasConfig,
+    x: &[f64],
+    preserve_explicit_fuselage_length: bool,
+) -> Result<(AlasConfig, DesignVector, TailSizing), CandidateFailure> {
     let mut dv = DesignVector::from_array(x).map_err(|_| geometry_build_failure())?;
     let mut candidate_config = config.clone();
     if apply_candidate_payload_load_case(&mut candidate_config, &dv).is_err() {
@@ -93,7 +109,23 @@ pub(crate) fn build_geometry_with_fuselage_policy(
     if !preserve_explicit_fuselage_length {
         size_fuselage_from_cabin(&candidate_config, &mut dv)?;
     }
-    let builder = AircraftBuilder::new(Some(candidate_config.geometry.clone()));
+    // A reference adaptation keeps the registered tail volume coefficients
+    // as the wing moves; see `tail_sizing`.
+    tail_sizing::apply(&mut candidate_config, &mut dv)?;
+    let tail_sizing = TailSizing::of(&candidate_config.geometry.empennage, &dv);
+    Ok((candidate_config, dv, tail_sizing))
+}
+
+/// Build the candidate airplane with the empennage scales `sizing`, written
+/// into `config` and `dv` first (`TailSizing::apply_to`), so the mass
+/// analysis, the trim and every later rebuild of the candidate see one tail.
+pub(crate) fn rebuild_airplane(
+    config: &mut AlasConfig,
+    dv: &mut DesignVector,
+    sizing: &TailSizing,
+) -> Result<Airplane, CandidateFailure> {
+    sizing.apply_to(&mut config.geometry.empennage, dv);
+    let builder = AircraftBuilder::new(Some(config.geometry.clone()));
     // The nacelles are part of the candidate, not a reporting embellishment:
     // `alas_mass::stations` places the propulsion group at the nacelle
     // mid-length when the bodies are drawn and falls back to the wing station
@@ -102,12 +134,12 @@ pub(crate) fn build_geometry_with_fuselage_policy(
     // the optimizer balance and trim a different aircraft from the one
     // `alas-pipeline`'s finalist report builds with `include_engines = true`.
     let plane = builder
-        .build(Some(&dv), true)
+        .build(Some(dv), true)
         .map_err(|_| geometry_build_failure())?;
     if plane.s_ref <= 0.0 || plane.c_ref <= 0.0 {
         return Err(geometry_build_failure());
     }
-    Ok((candidate_config, dv, plane))
+    Ok(plane)
 }
 
 /// Derive the shortest clean-sheet body that can carry the requested

@@ -6,7 +6,7 @@
 use alas_config::{AlasConfig, DesignVector};
 use serde::{Deserialize, Serialize};
 
-use super::breguet::QuickPayloadRange;
+use super::payload_range::QuickPayloadRange;
 /// The reduced-model contract version carried by every event.
 pub const QUICK_ANALYSIS_VERSION: u32 = 1;
 

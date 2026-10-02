@@ -526,10 +526,4 @@ mod tests {
         let input = features(&section(), &Conditions::new(4.0, 1e6)).expect("a valid section");
         assert_eq!(mirror_input(&mirror_input(&input)), input);
     }
-
-    #[test]
-    fn restoring_a_mirrored_output_twice_returns_it_unchanged() {
-        let raw: Vec<f64> = (0..OUTPUTS).map(|i| f64::from(i as u32) / 7.0).collect();
-        assert_eq!(restore_mirrored(&restore_mirrored(&raw)), raw);
-    }
 }

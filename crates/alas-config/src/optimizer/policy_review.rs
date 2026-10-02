@@ -47,6 +47,7 @@
 //! deliverable.
 
 mod limits;
+mod limits_aero;
 mod limits_layout;
 mod limits_structure;
 
@@ -68,6 +69,7 @@ pub fn reviewed_limits() -> &'static [ReviewedLimit] {
                 .iter()
                 .chain(limits_layout::LAYOUT_LIMITS)
                 .chain(limits_structure::STRUCTURE_LIMITS)
+                .chain(limits_aero::AERO_LIMITS)
                 .copied()
                 .collect()
         })

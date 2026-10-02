@@ -70,6 +70,7 @@ mod tests {
             payload_layout: None,
             cg_envelope_ok: Some(true),
             neutral_point_conditions: None,
+            fuel: Default::default(),
         };
         report.component_masses.insert("Wing".to_owned(), 5000.0);
         report.geometry_summary.insert("span_m".to_owned(), 35.0);

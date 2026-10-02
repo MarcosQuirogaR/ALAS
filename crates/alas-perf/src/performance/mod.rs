@@ -13,8 +13,7 @@
 //! ([`speeds::compute_v_speeds`]) and the estimated field distances
 //! ([`speeds::compute_field_performance`]) are derived from the same empirical
 //! constants so the numbers a design reports agree with the boundary it was
-//! sized against. [`envelope::breguet_range_m`] and
-//! [`envelope::build_vn_diagram`] round out the surface with cruise range and
+//! sized against. [`envelope::build_vn_diagram`] rounds out the surface with
 //! the flight envelope.
 //!
 //! Every formula is SI in and SI out unless a name says otherwise. The
@@ -33,7 +32,7 @@ pub use constraints::{
     MatchingChartData, OeiClimbAssessment, OeiClimbStatus, OeiDragIncrements, OeiV2Condition,
 };
 pub use envelope::{
-    assess_far25_positive_limit_load_factor, breguet_range_m, build_vn_diagram,
+    assess_far25_positive_limit_load_factor, build_vn_diagram,
     far25_positive_limit_load_factor_min, Far25PositiveLoadFactorStatus, VnDiagramData,
 };
 pub use speeds::{

@@ -59,6 +59,7 @@ mod aircraft;
 mod atr72_600_schedule_fix;
 mod cg_envelope;
 mod evidence;
+mod gear_load;
 mod mission_evidence;
 mod narrowbody;
 mod reference;
@@ -80,8 +81,9 @@ pub use cg_envelope::{
 pub use evidence::{
     CgEnvelopeEvidence, DesignMissionEvidence, DesignMissionReference, MissingDesignMissionDatum,
     MissionEvidenceApplicability, PartialDesignMissionEvidence, PartialMissionEvidenceKind,
-    PublishedMissionLoadCase, PublishedRange, PublishedReserveContract,
+    PayloadRangeDesignPoint, PublishedMissionLoadCase, PublishedRange, PublishedReserveContract,
 };
+pub use gear_load::PublishedAftCgNoseLoad;
 pub use mission_evidence::{
     applicability_label, datum_label, DesignMissionProvenanceSet, MissionDatumProvenance,
     MissionEvidenceTier, MissionPromotionRefusal,

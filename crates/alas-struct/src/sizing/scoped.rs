@@ -287,10 +287,12 @@ fn final_strength_is_consistent(
                 req.gravity_m_s2,
                 point_masses,
             );
-            sizing.spars.iter().all(|spar| {
+            sizing.spars.iter().enumerate().all(|(i, spar)| {
                 moment.iter().enumerate().all(|(j, moment)| {
                     let demand = (spar.frac_moment[j] * moment).abs();
-                    let stress = demand / (spar.a_cap[j] * (0.85 * spar.h[j])).max(1.0e-12);
+                    let skin = super::sizing_cover_skin_boom_areas_m2(sizing, j)[i];
+                    let stress =
+                        demand / ((spar.a_cap[j] + skin) * (0.85 * spar.h[j])).max(1.0e-12);
                     demand <= 1.0
                         || super::margin_is_structurally_non_negative(
                             cap.f_allow_pa / stress.max(1.0e-9) - 1.0,

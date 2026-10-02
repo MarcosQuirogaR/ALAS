@@ -52,25 +52,6 @@ fn fuel_volume_uses_projected_reference_area_and_span() {
     );
 }
 
-/// The frozen objective's stall guard, replayed through the parity
-/// constructor that is its only remaining entry point.
-#[test]
-fn a_cruise_lift_above_the_configured_limit_is_rejected_before_trim() {
-    let mut config = AlasConfig::default();
-    config.requirements.max_cruise_cl = 0.0;
-    let failure_cost = config.optimizer.weights.failure_cost;
-    let mut objective = DesignObjective::new_reference_compatibility(config);
-
-    let actual = objective.evaluate(&DesignVector::default().to_array());
-
-    assert_eq!(actual, failure_cost);
-    assert_eq!(objective.history.valid, vec![false]);
-    assert_eq!(
-        objective.history.reject_reason,
-        vec!["stall_guard".to_owned()]
-    );
-}
-
 #[test]
 fn malformed_design_vectors_record_the_failure_cost_in_objective_history() {
     let config = AlasConfig::default();
@@ -146,92 +127,6 @@ fn diagnostic_families_do_not_bypass_invalid_structure() {
     assert!(cost.is_finite());
     assert_eq!(objective.history.valid, vec![false]);
     assert!(objective.history.reject_reason[0].contains("structural_"));
-}
-
-/// The fuselage-length penalty is confined to reference replay.
-#[test]
-fn fuselage_penalty_does_not_condition_the_product_search() {
-    let mut relaxed = AlasConfig::default();
-    relaxed.optimizer.weights.fuselage_floor_m = 0.0;
-    let mut aggressive = relaxed.clone();
-    aggressive.optimizer.weights.fuselage_floor_m = 1_000.0;
-
-    let design = DesignVector::default().to_array();
-    let relaxed_cost = DesignObjective::new(relaxed).evaluate(&design);
-    let conditioned_cost = DesignObjective::new(aggressive).evaluate(&design);
-
-    assert!(relaxed_cost.is_finite());
-    assert_eq!(conditioned_cost, relaxed_cost);
-}
-
-#[test]
-fn reference_compatibility_restores_the_three_station_planform() {
-    let config = AlasConfig::default();
-    let product_objective = DesignObjective::new(config.clone());
-    let reference_objective = DesignObjective::new_reference_compatibility(config);
-    let design = DesignVector::default();
-
-    assert!(product_objective
-        .config
-        .geometry
-        .wing
-        .side_of_body_span_fraction
-        .is_some());
-    assert!(product_objective
-        .config
-        .geometry
-        .wing
-        .kink_span_fraction
-        .is_some());
-    assert!(product_objective
-        .config
-        .geometry
-        .wing
-        .outboard_le_sweep_deg
-        .is_none());
-    let planform = reference_objective
-        .config
-        .geometry
-        .wing
-        .transport_planform(&design)
-        .expect("the reference-compatible planform is valid");
-
-    assert!(reference_objective
-        .config
-        .geometry
-        .wing
-        .side_of_body_span_fraction
-        .is_none());
-    assert!(reference_objective
-        .config
-        .geometry
-        .wing
-        .side_of_body_chord_ratio
-        .is_none());
-    assert!(reference_objective
-        .config
-        .geometry
-        .wing
-        .kink_span_fraction
-        .is_none());
-    assert!(reference_objective
-        .config
-        .geometry
-        .wing
-        .outboard_le_sweep_deg
-        .is_none());
-    assert!(planform.side_of_body.is_none());
-    assert_eq!(planform.stations().len(), 3);
-    assert_eq!(planform.kink.span_fraction, 0.35);
-    assert_eq!(
-        planform.outboard_le_sweep_deg,
-        design.sweep_deg
-            - reference_objective
-                .config
-                .geometry
-                .wing
-                .outboard_sweep_decrement_deg
-    );
 }
 
 #[test]

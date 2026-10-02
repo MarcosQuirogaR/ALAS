@@ -19,6 +19,24 @@
 //! compression pair, which is the same simplification the reference scripts
 //! made. It is appropriate for a strength-based preliminary sizing pass and
 //! is not a certified stress analysis.
+//!
+//! `CFRP QI` is the product's wing-cover laminate proxy and carries a
+//! damage-tolerant design value, not a coupon strength: 220 MPa at its 55 GPa
+//! modulus is an ultimate strain of 0.40 %. Transport composite covers are
+//! designed to an ultimate strain of about 0.3-0.4 % (3,000-4,000 microstrain)
+//! set by compression after barely visible impact damage and open holes
+//! (M. C. Y. Niu, *Composite Airframe Structures*, Conmilit Press, 1992,
+//! design allowables; the damage-tolerance basis is that of CMH-17-3G,
+//! *Composite Materials Handbook* Vol. 3, SAE International, 2012). The
+//! upper end is taken. The former 450 MPa was a pristine value, 0.82 %
+//! strain, which sized the A220-300 and B787-9 wing boxes at about half the
+//! FLOPS wing. The reference implementation's table keeps 450 MPa; the
+//! divergence is declared in `tests/parity_databases.rs`. No frozen parity
+//! fixture sizes with this material (they use `CFRP UD`), so no fixture moves.
+//!
+//! `CFRP UD` keeps the reference 900 MPa: the frozen sizing, analysis and mesh
+//! fixtures are sized with it. It is a tension figure; the A220-300 and
+//! B787-9 do not use it, the default caps (and so AVE) still do.
 
 use std::sync::OnceLock;
 

@@ -23,6 +23,9 @@ pub enum TankKind {
     WingMid,
     /// The outboard cell burned last to relieve root bending.
     WingOuter,
+    /// An engine feed tank carved out of one end of a wing cell (the
+    /// `feed` group nested in each wing cell): filled first, emptied last.
+    WingFeed,
     /// The wing carry-through box under the cabin floor.
     Center,
     /// The horizontal-stabiliser cruise-balance tank.
@@ -38,6 +41,7 @@ impl TankKind {
             Self::WingInner => "inner wing tank",
             Self::WingMid => "mid wing tank",
             Self::WingOuter => "outer wing tank",
+            Self::WingFeed => "feed tank",
             Self::Center => "center tank",
             Self::Trim => "trim tank",
             Self::Auxiliary => "auxiliary tank",
@@ -54,6 +58,7 @@ impl TankKind {
             Self::WingInner => "wing_inner",
             Self::WingMid => "wing_mid",
             Self::WingOuter => "wing_outer",
+            Self::WingFeed => "wing_feed",
             Self::Center => "center",
             Self::Trim => "trim",
             Self::Auxiliary => "auxiliary",

@@ -231,8 +231,9 @@ impl AlasConfig {
 
     /// The design landing mass `WLDG`, kg, of a structure designed at the
     /// closure `closure_mass_kg`, raised to cover `landing_floor_kg`, the
-    /// design zero-fuel mass plus the reserve fuel (contingency, alternate
-    /// and final reserve) of the sizing mission at that closure.
+    /// design zero-fuel mass plus all fuel the sizing mission carries past
+    /// the destination (contingency, alternate, final reserve, additional
+    /// and extra) at that closure.
     ///
     /// `WLDG = max(design_landing_mass_at_closure, ZFW + reserves)` in the
     /// MTOW band and payload-adjusted modes: an aircraft has to be able to

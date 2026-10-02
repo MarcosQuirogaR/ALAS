@@ -10,12 +10,9 @@
 //! performance and geometry families are large enough on their own that they
 //! live in `mdo::residuals_performance` and `mdo::residuals_geometry`.
 
-use alas_config::{AlasConfig, ConstraintPolicy, ObjectiveConfig, ObjectiveWeights};
+use alas_config::{AlasConfig, ConstraintPolicy, ObjectiveWeights};
 
-use crate::envelope::{
-    assess_model_cg_envelope_with_ledger, ModelCgConstraint, ModelCgConstraintAssessment,
-    ModelCgLoadingAssessment,
-};
+use crate::envelope::{ModelCgConstraint, ModelCgConstraintAssessment, ModelCgLoadingAssessment};
 
 use super::residuals_geometry::geometry_residuals;
 use super::residuals_layout::layout_residuals;
@@ -27,7 +24,14 @@ use super::types::ConstraintResidual;
 mod balance_ledger;
 #[cfg(test)]
 mod critical_tests;
+#[cfg(test)]
+mod declared_fuel_tests;
 mod mtow_modes;
+mod relative_balance;
+#[cfg(test)]
+mod relative_tests;
+
+pub use relative_balance::reporting_relative_balance;
 
 /// Every requirement family's residuals for one sized candidate.
 pub(crate) fn build(
@@ -51,7 +55,7 @@ pub(crate) fn build(
         &outcome.plane,
         outcome.masses.wing,
     ));
-    residuals.extend(mass_residuals(outcome, objective));
+    residuals.extend(mass_residuals(outcome, config));
     residuals.extend(balance_residuals(
         outcome,
         config,
@@ -75,12 +79,56 @@ pub(crate) fn build(
         config,
         objective.geometry_constraints,
     ));
+    residuals.extend(super::residuals_buffet::buffet_residuals(
+        outcome,
+        config,
+        objective.performance_constraints,
+    ));
     residuals
 }
 
+/// The published usable fuel mass of the registered aircraft a reference
+/// adaptation redesigns, kg, or `None` in any other mode or when the preset
+/// carries no published figure. A clean-sheet study has no such requirement,
+/// and the working-default FLOPS capacity is a placeholder, not a source.
+fn published_fuel(config: &AlasConfig) -> Option<(Option<f64>, Option<f64>)> {
+    if config.optimizer.design_space.mode != alas_config::DesignMode::ReferenceAdaptation {
+        return None;
+    }
+    let reference = &alas_config::presets::get(&config.preset).ok()?.reference;
+    let positive = |v: Option<f64>| v.filter(|x| x.is_finite() && *x > 0.0);
+    Some((
+        positive(reference.usable_fuel_mass_kg),
+        positive(reference.usable_fuel_volume_l),
+    ))
+}
+
+/// Modelled usable tank capacity of the registered preset design, kg, for a
+/// reference adaptation; `None` in any other mode or when it cannot be
+/// resolved. Resolved once per complete configuration
+/// ([`super::nominal_cache`]): geometry, structures, tank declarations and
+/// fuel density all move it.
+fn nominal_tank_capacity_kg(config: &AlasConfig) -> Option<f64> {
+    published_fuel(config)?;
+    NOMINAL_TANK_CAPACITY_KG.get_or_resolve(config, || {
+        let design = alas_config::presets::get(&config.preset)
+            .ok()?
+            .design_vector;
+        let plane = alas_geom::builder::AircraftBuilder::new(Some(config.geometry.clone()))
+            .build(Some(&design), false)
+            .ok()?;
+        super::tanks::tank_capacity_kg(config, &plane, &design)
+    })
+}
+
+/// The cache of [`nominal_tank_capacity_kg`].
+static NOMINAL_TANK_CAPACITY_KG: super::nominal_cache::NominalCache<f64> =
+    super::nominal_cache::NominalCache::new();
+
 /// The fuel-capacity, takeoff-mass-ceiling, landing-mass and sizing-closure
 /// residuals.
-fn mass_residuals(outcome: &SizingOutcome, objective: &ObjectiveConfig) -> Vec<ConstraintResidual> {
+fn mass_residuals(outcome: &SizingOutcome, config: &AlasConfig) -> Vec<ConstraintResidual> {
+    let objective = &config.optimizer.objective;
     let policy = objective.mass_constraints;
     if policy == ConstraintPolicy::Off {
         return Vec::new();
@@ -127,6 +175,67 @@ fn mass_residuals(outcome: &SizingOutcome, objective: &ObjectiveConfig) -> Vec<C
             1.0,
             policy,
         ));
+    }
+
+    // A reference adaptation must keep the tanks the registered aircraft's
+    // mission needs. The route check above does not test it: a short route
+    // leaves most of the volume empty. Where the plan closes on a design
+    // mission (design range at design payload), the usable capacity must
+    // hold that mission's reserve-inclusive takeoff fuel
+    // (`SizedCandidate::design_mission_fuel_kg`); the taxi-out fuel on top of
+    // it is the route check's, which then flies the same mission. Otherwise
+    // the fallback is the modelled capacity of the preset design vector:
+    // comparing the model with itself cancels its density and volume bias
+    // (the published kg are converted at each type's own density, the model
+    // at one global density), which a comparison with the published figure
+    // would carry.
+    if let (Some(nominal_kg), true) = (
+        nominal_tank_capacity_kg(config),
+        sized.usable_capacity_kg.is_finite(),
+    ) {
+        let required_kg =
+            if outcome.plan.design_mission.is_some() && sized.design_mission_fuel_kg.is_finite() {
+                sized.design_mission_fuel_kg
+            } else {
+                nominal_kg
+            };
+        residuals.push(ConstraintResidual::scaled(
+            "fuel_capacity_declared",
+            Mass,
+            sized.usable_capacity_kg,
+            required_kg,
+            "kg",
+            required_kg - sized.usable_capacity_kg,
+            policy,
+        ));
+        // Published figures, for context only; never ranked.
+        if let Some(published) = published_fuel(config) {
+            if let Some(kg) = published.0 {
+                residuals.push(ConstraintResidual::scaled(
+                    "fuel_capacity_published",
+                    Mass,
+                    sized.usable_capacity_kg,
+                    kg,
+                    "kg",
+                    kg - sized.usable_capacity_kg,
+                    ConstraintPolicy::Diagnostic,
+                ));
+            }
+            if let Some(litres) = published.1 {
+                let modelled_l = sized.usable_capacity_kg
+                    / config.mass_model.fuel_density_kg_m3.max(1e-9)
+                    * 1_000.0;
+                residuals.push(ConstraintResidual::scaled(
+                    "fuel_volume_published",
+                    Mass,
+                    modelled_l,
+                    litres,
+                    "L",
+                    litres - modelled_l,
+                    ConstraintPolicy::Diagnostic,
+                ));
+            }
+        }
     }
 
     // The takeoff-mass limits follow the plan (`alas_config::MtowPlan`):
@@ -296,38 +405,7 @@ fn balance_residuals(
     if policy == ConstraintPolicy::Off {
         return Vec::new();
     }
-    let assessment = balance_ledger::loading_basis(outcome, config).and_then(|ledger| {
-        if !config.requirements.cruise_mach.is_finite()
-            || !(0.0..1.0).contains(&config.requirements.cruise_mach)
-            || !config.requirements.cruise_altitude_m.is_finite()
-        {
-            return Err(
-                "critical neutral-point condition is outside the finite subsonic domain".to_owned(),
-            );
-        }
-        // Match the reporting condition set at this stage's mesh fidelity.
-        // A clean cruise probe cannot stand in for the critical aft-CG limit.
-        let conditions = alas_stab::neutral_point::neutral_point_conditions(
-            &outcome.plane,
-            &config.analysis,
-            &alas_stab::neutral_point::NpConditionsInput {
-                low_speed_altitude_m: 0.0,
-                cruise_mach: config.requirements.cruise_mach,
-                cruise_altitude_m: config.requirements.cruise_altitude_m,
-                ..Default::default()
-            },
-        )
-        .map_err(|error| format!("critical neutral-point conditions: {error:?}"))?;
-        assess_model_cg_envelope_with_ledger(
-            &outcome.plane,
-            ledger,
-            outcome.x_np,
-            conditions.critical,
-            outcome.mac,
-            config,
-        )
-        .map_err(|error| format!("{error}"))
-    });
+    let assessment = relative_balance::assess(outcome, config);
     let Ok(assessment) = assessment else {
         tracing::debug!(error = ?assessment.err(), "candidate item-level CG assessment unavailable");
         return vec![ConstraintResidual::direct(
@@ -341,39 +419,43 @@ fn balance_residuals(
             policy,
         )];
     };
-    BALANCE_CONSTRAINTS
-        .iter()
-        .filter_map(|&(id, constraint, is_lower_bound)| {
-            worst_by_constraint(&assessment.loading_states, constraint).map(|worst| {
-                let raw_residual = if is_lower_bound {
-                    worst.limit - worst.actual
-                } else {
-                    worst.actual - worst.limit
-                };
-                // Diagnostic constraints (`ModelCgConstraint::is_diagnostic`:
-                // the configured CG range, and tail scrape until the aft
-                // fuselage contour is validated) are reported and visible to
-                // the relaxation review but never reject a candidate, whatever the
-                // Balance family policy -- unless the family is `Off`, which
-                // already short-circuits above.
-                let residual_policy = if constraint.is_diagnostic() {
-                    ConstraintPolicy::Diagnostic
-                } else {
-                    policy
-                };
-                ConstraintResidual::direct(
-                    id,
-                    Balance,
-                    worst.actual,
-                    worst.limit,
-                    constraint.unit(),
-                    raw_residual,
-                    worst.normalized_exceedance,
-                    residual_policy,
-                )
-            })
-        })
-        .collect()
+    // Hard, preset-anchored companions of the two diagnostic residuals below.
+    let mut residuals = relative_balance::residuals(&assessment, config, policy);
+    residuals.extend(
+        BALANCE_CONSTRAINTS
+            .iter()
+            .filter_map(|&(id, constraint, is_lower_bound)| {
+                worst_by_constraint(&assessment.loading_states, constraint).map(|worst| {
+                    let raw_residual = if is_lower_bound {
+                        worst.limit - worst.actual
+                    } else {
+                        worst.actual - worst.limit
+                    };
+                    // Diagnostic constraints (`ModelCgConstraint::is_diagnostic`:
+                    // the configured CG range, and tail scrape until the aft
+                    // fuselage contour is validated) are reported and visible to
+                    // the relaxation review but never reject a candidate, whatever the
+                    // Balance family policy -- unless the family is `Off`, which
+                    // already short-circuits above.
+                    let residual_policy = if constraint.is_diagnostic() {
+                        ConstraintPolicy::Diagnostic
+                    } else {
+                        policy
+                    };
+                    ConstraintResidual::direct(
+                        id,
+                        Balance,
+                        worst.actual,
+                        worst.limit,
+                        constraint.unit(),
+                        raw_residual,
+                        worst.normalized_exceedance,
+                        residual_policy,
+                    )
+                })
+            }),
+    );
+    residuals
 }
 
 /// The per-constraint assessment with the largest normalized exceedance

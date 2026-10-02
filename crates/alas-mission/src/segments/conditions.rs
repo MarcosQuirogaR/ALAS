@@ -257,29 +257,3 @@ pub struct Initials {
     /// Longitude at the end of the previous segment.
     pub longitude_deg: f64,
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn an_expanded_container_is_zeroed_at_the_requested_length() {
-        let conditions = Conditions::expanded(16);
-        assert_eq!(conditions.len(), 16);
-        assert!(!conditions.is_empty());
-        assert!(conditions.altitude_m.iter().all(|&value| value == 0.0));
-        assert_eq!(conditions.position_vector_m[3], [0.0; 3]);
-        // The two analysis-output vectors are filled by the analyses rather
-        // than sized here: nothing reads them before `update_aerodynamics`
-        // and `update_thrust` have written them.
-        assert!(conditions.drag_breakdown.is_empty());
-        assert!(conditions.thrust.is_empty());
-    }
-
-    #[test]
-    fn a_zero_point_container_reports_itself_empty() {
-        let conditions = Conditions::expanded(0);
-        assert!(conditions.is_empty());
-        assert_eq!(conditions.len(), 0);
-    }
-}

@@ -53,9 +53,9 @@ preset may be adapted within (`DesignVariableSpec::preset_lower`,
 | 3 | `break_chord_m` | m | 7.80 | 6.0 | 10.0 | 2.0 | 14.0 | Chord at the trailing-edge break (yehudi). |
 | 4 | `tip_chord_m` | m | 1.60 | 1.0 | 3.0 | 0.5 | 4.0 | Chord at the wing tip. |
 | 5 | `sweep_deg` | deg | 34.00 | 25.0 | 45.0 | 0.0 | 45.0 | Inboard **leading-edge** sweep. **Positive is aft**, matching `WingConfig`. |
-| 6 | `tip_twist_deg` | deg | 0.00 | -5.0 | 1.0 | -5.0 | 2.0 | Geometric twist at the tip. Incidence is **positive leading-edge-up** (washin), so a **negative value is washout**, the usual design intent. |
+| 6 | `tip_twist_deg` | deg | 0.00 | -5.0 | 1.0 | -5.0 | 2.0 | Incidence of the tip section, **absolute** and **positive nose-up**, not a washout relative to the root: the built washout is this value minus the root (and break) incidence of the geometry. Every spanwise run must be non-increasing toward the tip, so the tip may not sit above the break incidence. |
 | 7 | `wing_x_shift_m` | m | 0.00 | -5.0 | 8.0 | -10.0 | 5.0 | Longitudinal shift of the wing root along `x`, for CG balance. **Positive moves the wing aft.** |
-| 8 | `tail_scale` | - | 1.00 | 0.75 | 1.25 | 0.5 | 1.5 | Uniform scale on the empennage. Areas scale as the square. |
+| 8 | `tail_scale` | - | 1.00 | 0.75 | 1.25 | 0.5 | 1.5 | Uniform scale on the empennage. Areas scale as the square. In reference adaptation it is derived, not searched: the tails are resized to the registered aircraft's tail volume coefficients, with the fin carrying its own derived ratio. |
 | 9 | `fuselage_length_m` | m | 76.72 | 65.0 | 85.0 | 20.0 | 90.0 | Overall fuselage length. Fixed, not searched, whenever the cabin sizes the fuselage. |
 | 10 | `tail_x_shift_m` | m | 0.00 | -2.0 | 3.0 | -5.0 | 5.0 | Longitudinal shift of the empennage along `x`. **Positive moves it aft**, lengthening the tail arm. |
 | 11 | `airfoil_thickness_scale` | - | 1.00 | 0.80 | 1.30 | 0.5 | 1.5 | Multiplier on root and break airfoil thickness. |
@@ -76,6 +76,36 @@ Wing vertical position (`WingConfig::root_z_m`, default `-2.1` m) is **not** a
 design variable. The optimizer cannot raise or lower the wing on the
 fuselage, so high-, mid- and low-wing layouts are a configuration choice, not
 a search outcome. Engine architecture is fixed the same way.
+
+In reference adaptation, `design_space.reference_fixed_variables` also holds
+variables at the registered aircraft's values; the tail scale is always
+derived. The default is `fuselage_length_m, tail_x_shift_m, bump_lower_rear`.
+The rule: hold a variable only if its block-fuel sensitivity at the
+registered design is below 0.1 % of block fuel per full window width on all
+three aircraft below. Sensitivities are central differences at +-5 % of the
+window, on the same model the search uses. Only `bump_lower_rear` qualifies.
+
+| Variable | A320-200 | B787-9 | A380-800 |
+| --- | ---: | ---: | ---: |
+| `span_m` | +1.80 | -7.46 | -1.94 |
+| `root_chord_m` | +4.61 | +7.71 | +6.93 |
+| `break_chord_m` | +2.21 | +0.12 | +1.51 |
+| `tip_chord_m` | +0.73 | -0.33 | +0.29 |
+| `sweep_deg` | +0.08 | -8.71 | -1.69 |
+| `tip_twist_deg` | -6.69 | -11.11 | -9.04 |
+| `wing_x_shift_m` | +0.75 | +0.34 | +0.44 |
+| `airfoil_thickness_scale` | +0.21 | +6.42 | +2.67 |
+| `airfoil_camber_scale` | +0.92 | +1.77 | +1.18 |
+| `bump_upper_front` | +0.03 | +0.74 | +0.25 |
+| `bump_upper_rear` | +0.08 | +0.36 | +0.19 |
+| `bump_lower_mid` | -0.01 | -0.83 | -0.29 |
+| `bump_lower_rear` | +0.06 | +0.03 | +0.09 |
+
+A first-order sensitivity at the start point does not measure flatness at the
+optimum, where every interior gradient vanishes. Holding all four bumps was
+measured and rejected: on the B787-9 it left the three-seed block-fuel spread
+unchanged (0.69 % to 0.72 %) and raised the mean by 0.6 %. Removing a name
+from the list frees that variable again.
 
 ## The objective
 
@@ -115,10 +145,13 @@ Non-finite values fail closed to the lower bound rather than propagating.
 ## Reproducibility
 
 `optimizer.solver.seed` fixes the search. Left unset, a fresh seed is taken
-from the clock and the run is **not** reproducible; the resolved seed is
-written to the progress log so a run can be replayed after the fact. The
-Differential Evolution driver evaluates candidates one at a time in a fixed
-order, so its result does not depend on `optimizer.solver.workers`.
+from the clock; the resolved seed is recorded in the result, the summary
+surfaces and the run manifest so the run can be replayed after the fact.
+Candidates are generated and scored in a fixed order, so a run that stops on
+its evaluation budgets does not depend on `optimizer.solver.workers`.
+Time-limited: the stopping point depends on machine speed and worker count;
+replay with the recorded evaluation counts for a bit-identical result at any
+worker count.
 
 ## Known gap: no geometric interference constraint
 

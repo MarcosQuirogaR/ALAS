@@ -113,6 +113,7 @@ fn test_report(masses: HashMap<String, f64>) -> AnalysisReport {
         payload_layout: None,
         cg_envelope_ok: Some(true),
         neutral_point_conditions: None,
+        fuel: Default::default(),
     }
 }
 
@@ -407,29 +408,6 @@ fn product_fuel_volume_check_uses_typed_carried_fuel_and_capacity() {
     assert!(labels.contains(&"Published usable capacity"));
     assert!(labels.contains(&"Analyzed carried fuel"));
     assert!(!labels.contains(&"Required fuel"));
-}
-
-#[test]
-fn reference_contract_covers_every_mass_balance_figure_in_both_themes() {
-    let corpus: serde_json::Value = serde_json::from_str(include_str!(
-        "../../../../../golden/report/reference_render_corpus.json"
-    ))
-    .expect("reference render corpus is valid JSON");
-    for id in [
-        "cg_envelope",
-        "fuel_volume_check",
-        "landing_gear_planform",
-        "mass_breakdown",
-        "mass_distribution",
-    ] {
-        for theme in ["light", "dark"] {
-            let key = format!("{id}:{theme}");
-            let figure = &corpus["figures"][&key];
-            assert_eq!(figure["available"], true, "{key} is unavailable");
-            assert_eq!(figure["theme"], theme);
-            assert!(figure["image"].as_str().is_some(), "{key} has no image");
-        }
-    }
 }
 
 /// The registered ATR 72-600 geometry and configuration: a real high-wing

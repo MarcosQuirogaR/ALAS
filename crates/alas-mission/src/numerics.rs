@@ -186,20 +186,6 @@ fn scale_into(source: &[Vec<f64>], factor: f64, target: &mut Vec<Vec<f64>>) {
 mod tests {
     use super::*;
 
-    #[test]
-    fn defaults_match_the_reference_container() {
-        let numerics = Numerics::default();
-        assert_eq!(numerics.number_control_points, 16);
-        assert_eq!(numerics.solver_jacobian, "none");
-        assert_eq!(numerics.tolerance_solution, 1e-8);
-        assert_eq!(numerics.max_evaluations, 0.0);
-        assert_eq!(numerics.converged, None);
-        assert_eq!(numerics.step_size, None);
-        assert!(numerics.dimensionless.control_points.is_empty());
-        assert!(numerics.time.differentiate.is_empty());
-        assert_eq!(Numerics::TAG, "numerics");
-    }
-
     // What parity checks at N=16; this checks the shape holds at another N so a
     // future caller that changes the control-point count is covered.
     #[test]

@@ -168,8 +168,7 @@ pub(super) fn display_option(value: &str) -> String {
 /// `fuel_per_seat_kilometre` or `lth_civil_transport_v1`. Only identifier-like
 /// values (lower-case ASCII, digits and underscores) are rewritten, so catalogue
 /// names (engines, materials, ULD codes) pass through untouched. Known
-/// acronyms keep their capitals and the differential-evolution strategies use
-/// the conventional `DE/x/n/crossover` notation.
+/// acronyms keep their capitals.
 fn humanize_identifier(value: &str) -> Option<String> {
     let identifier_like = !value.is_empty()
         && value
@@ -182,18 +181,6 @@ fn humanize_identifier(value: &str) -> Option<String> {
         "fuel_per_seat_kilometre" => Some("Fuel per seat-kilometre"),
         "short_medium_haul" => Some("Short/medium haul"),
         "min_pallets" => Some("Minimum pallets"),
-        "best1bin" => Some("DE/best/1/bin"),
-        "best1exp" => Some("DE/best/1/exp"),
-        "best2bin" => Some("DE/best/2/bin"),
-        "best2exp" => Some("DE/best/2/exp"),
-        "rand1bin" => Some("DE/rand/1/bin"),
-        "rand1exp" => Some("DE/rand/1/exp"),
-        "rand2bin" => Some("DE/rand/2/bin"),
-        "rand2exp" => Some("DE/rand/2/exp"),
-        "randtobest1bin" => Some("DE/rand-to-best/1/bin"),
-        "randtobest1exp" => Some("DE/rand-to-best/1/exp"),
-        "currenttobest1bin" => Some("DE/current-to-best/1/bin"),
-        "currenttobest1exp" => Some("DE/current-to-best/1/exp"),
         _ => None,
     };
     if let Some(text) = special {

@@ -7,18 +7,21 @@ Python comparison path remains separate and is not the production search.
 
 The design vector is searched in normalized coordinates. Fixed coordinates do not
 consume population size or mutation opportunities. The nominal aircraft is
-evaluated explicitly; the initial population combines local perturbations and
-global Latin-hypercube exploration when `seed_near_initial_design` is enabled.
-The local radius is a fraction of the declared envelope, not a new physical bound.
+evaluated explicitly; the refinement's initial population combines the
+baseline, a diverse elite of the screening sample (with its best point) and a
+fresh Latin hypercube.
 
-A reduced-fidelity scan nominates starts. Those starts must be re-evaluated at
-search fidelity. Screening results cannot become an accepted design directly.
+A screening stage nominates starts. Those starts are scored by the refinement
+model before they can win. Screening results cannot become an accepted design
+directly.
 Exact repeated vectors at the same full fidelity share an evaluation cache;
 screening and search caches are separate. One persistent Rayon pool bounds both
 independent candidates and their nested VLM work to the requested worker count.
 Screening and full analysis share that pool; single-candidate evaluations also
 run inside it. Results enter history in input order. Worker count changes
-scheduling, not seeded candidate generation or selection order. The coordinator
+scheduling, not seeded candidate generation or selection order; through a
+time-limit stop it changes how many evaluations fit, so a time-limited run is
+replayed with its recorded evaluation counts. The coordinator
 forwards cancellation to an owned token checked inside multidisciplinary and
 mission loops, including during a single long candidate evaluation.
 

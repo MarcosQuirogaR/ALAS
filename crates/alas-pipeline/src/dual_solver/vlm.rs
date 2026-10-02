@@ -7,8 +7,7 @@ use super::*;
 
 /// Run the native search, then make product-profile finalists survive the
 /// application's reporting-fidelity re-evaluation before the branch is
-/// reported as completed. The ALAS v1.1.0 `scipy_legacy` profile returns its
-/// scalar-cost winner directly and does not apply the later product gate.
+/// reported as completed.
 ///
 /// The search ranks candidates on the in-loop panel mesh and its analytic
 /// dispatch closure; the published analysis re-solves the winner on the finer
@@ -80,42 +79,47 @@ pub(super) fn run_vlm_optimizer(request: VlmOptimizerRequest<'_>) -> SolverOptim
         );
     }
 
-    // The SciPy-compatible profile selects a winner from its weighted scalar
-    // objective and hands that design to the ordinary full-analysis/reporting
-    // path. The mission-sized product finalist gate can reject valid winners
-    // on requirements that profile does not enforce (for example the
-    // structural mesh and physical CG-range checks), so do not replay it for
-    // this profile.
-    if effective_config.optimizer.solver.method == alas_config::optimizer::SCIPY_LEGACY_METHOD {
-        let design = optimization.best_design;
-        tracing::info!("SciPy legacy profile skips mission-sized finalist acceptance replay");
-        let report = match FullAnalysis::new(config.clone()).run(&design, true) {
-            Ok(report) => report,
-            Err(error) => {
-                return SolverOptimizationResult::failed(
-                    SolverKind::Vlm,
-                    output_dir,
-                    format!("VLM best-design analysis failed: {error}"),
-                )
-            }
-        };
-        return SolverOptimizationResult {
-            solver: SolverKind::Vlm,
-            status: SolverOptimizationStatus::Completed,
-            design: Some(design),
-            optimization: Some(optimization),
-            report: Some(report),
-            avl_result: None,
-            output_dir,
-            error: None,
-        };
-    }
-
     // The ladder below marks its own phase per candidate; entering it here
     // as well would put two identical records at the same timestamp.
     let scope = alas_opt::CancelScope::attach(cancel);
     let started = Instant::now();
-    let candidates = optimization.ranked_hard_feasible_candidates(MAX_VERIFIED_CANDIDATES);
+    // The ladder runs inside the refinement's verification reserve: its
+    // evaluations less the baseline and the final analysis, and the stage
+    // time the search left. The finalist always runs.
+    let reserve = alas_opt::verification_reserve(&effective_config.optimizer.solver);
+    // The registered aircraft at reporting fidelity, once per run, for the
+    // relative balance guard of every finalist. It is the baseline analysis
+    // when the baseline is the registered vector, else one more analysis.
+    let mut analyses = 0usize;
+    let reporting_nominal = match scope.evaluation(|| {
+        crate::acceptance::ReportingNominal::evaluate(&config, acceptance_route, cancel)
+    }) {
+        None => None,
+        Some(Ok(evaluated)) => {
+            analyses += 1;
+            Some(evaluated)
+        }
+        Some(Err(error)) => {
+            return SolverOptimizationResult::failed(SolverKind::Vlm, output_dir, error);
+        }
+    };
+    let baseline_is_nominal = reporting_nominal
+        .as_ref()
+        .is_some_and(|evaluated| *evaluated.design() == nominal);
+    let separate_nominal = usize::from(reporting_nominal.is_some() && !baseline_is_nominal);
+    let ladder = reserve
+        .evaluations
+        .saturating_sub(2 + separate_nominal)
+        .clamp(1, MAX_VERIFIED_CANDIDATES);
+    let time_left_s = reserve.time_s.map(|_| {
+        optimization
+            .search_diagnostics
+            .iter()
+            .flat_map(|diagnostics| &diagnostics.stages)
+            .find(|stage| stage.stage == "refinement")
+            .map_or(0.0, |stage| stage.time_limit_s - stage.wall_time_s)
+    });
+    let candidates = optimization.ranked_hard_feasible_candidates(ladder);
     let mut evaluated = 0usize;
     let mut finalist: Option<FinalistVerification> = None;
     let mut finalist_rejected_by = Vec::new();
@@ -134,6 +138,14 @@ pub(super) fn run_vlm_optimizer(request: VlmOptimizerRequest<'_>) -> SolverOptim
             ));
             break;
         }
+        if rank > 0 && time_left_s.is_some_and(|left| started.elapsed().as_secs_f64() >= left) {
+            tracing::info!(
+                rank,
+                "reporting-fidelity ladder stopped on the refinement time limit"
+            );
+            break;
+        }
+        analyses += 1;
         scope.enter(
             alas_opt::CancelPhase::ReportingFidelityVerification,
             rank as u64,
@@ -143,6 +155,7 @@ pub(super) fn run_vlm_optimizer(request: VlmOptimizerRequest<'_>) -> SolverOptim
                 &config,
                 candidate,
                 acceptance_route,
+                reporting_nominal.as_ref(),
                 cancel,
             )
         }) {
@@ -204,6 +217,22 @@ pub(super) fn run_vlm_optimizer(request: VlmOptimizerRequest<'_>) -> SolverOptim
             "no candidate survived the reporting-fidelity re-evaluation"
         );
     }
+    // The unmodified baseline through the same re-evaluation, so the
+    // delivered design's gain is a same-model delta rather than a comparison
+    // across the in-loop and reporting models.
+    let baseline = (!scope.requested())
+        .then(|| {
+            analyses += usize::from(!baseline_is_nominal);
+            crate::acceptance::compare_with_baseline(
+                &config,
+                &nominal,
+                &delivered,
+                acceptance_route,
+                reporting_nominal.as_ref(),
+                cancel,
+            )
+        })
+        .flatten();
     optimization.record_delivered_acceptance(DeliveredAcceptance {
         verified,
         finalist_rejected_by,
@@ -212,11 +241,14 @@ pub(super) fn run_vlm_optimizer(request: VlmOptimizerRequest<'_>) -> SolverOptim
         candidates_evaluated: evaluated,
         delivered_is_search_finalist,
         wall_time_s: started.elapsed().as_secs_f64(),
+        analyses,
+        baseline,
     });
 
+    let status = SolverOptimizationStatus::for_delivered(&optimization);
     SolverOptimizationResult {
         solver: SolverKind::Vlm,
-        status: SolverOptimizationStatus::Completed,
+        status,
         design: Some(delivered.design),
         optimization: Some(optimization),
         report: Some(delivered.report),

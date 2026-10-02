@@ -138,61 +138,18 @@ impl FullAnalysis {
 
         // Second pass: build detailed interior layout and recompute mass breakdown and CG.
         let (oew, x_oew) = oew_and_cg(&masses_init, &coords_init);
-        let effective_structural_payload_limit_kg =
-            effective_structural_payload_limit_kg(&self.config, design, oew);
-        let mut payload_config = self.config.clone();
-        payload_config.cabin.passenger = product_cabin.clone();
-        if let Some(limit_kg) = effective_structural_payload_limit_kg {
-            payload_config.requirements.max_structural_payload_kg = limit_kg;
-        }
-        let payload_layout = if self.reference_compatibility {
-            build_payload_layout_reference_compatibility(&plane, &self.config, oew, x_oew)
-        } else {
-            build_payload_layout(&plane, &payload_config, oew, x_oew)
-        }
-        .map_err(|error| format!("payload layout error: {error}"))?;
-        let layout_summary = Some(alas_mass::breakdown::PayloadLayoutSummary {
-            total_mass: payload_layout.total_mass,
-            cg_x: payload_layout.cg_x,
-            cg_y: payload_layout.cg_y,
-        });
-        // One cabin per case (see `cabin_sync`).
-        let (cabin_requirements, cabin_mass_model) = cabin_sync::cabin_synchronized_for_cabin(
-            req,
-            &analysis_mass_model,
-            &product_cabin,
-            &payload_layout,
-        );
-
-        let (masses, coords, _, flops_mass_buildup) = if self.reference_compatibility {
-            let (masses, coords, cg) =
-                alas_mass::breakdown::run_mass_analysis_with_model_checked_with_gear(
-                    &plane,
-                    req,
-                    &self.config.geometry,
-                    &self.config.cabin,
-                    &self.config.control_surfaces,
-                    Some(&self.config.mass_model),
-                    layout_summary.as_ref(),
-                    coordinate_model,
-                    &self.config.landing_gear,
-                )
-                .map_err(|error| format!("mass-coordinate error: {error}"))?;
-            (masses, coords, cg, None)
-        } else {
-            alas_mass::breakdown::run_product_mass_analysis_with_groups(
-                &plane,
-                &cabin_requirements,
-                &self.config.geometry,
-                &payload_config.cabin,
-                &self.config.control_surfaces,
-                Some(&cabin_mass_model),
-                layout_summary.as_ref(),
-                coordinate_model,
-                &self.config.landing_gear,
-            )
-            .map_err(|error| format!("mass-coordinate error: {error}"))?
+        let first_pass = payload_pass::FirstPass {
+            requirements: req,
+            mass_model: &analysis_mass_model,
+            cabin: &product_cabin,
+            oew_kg: oew,
+            x_oew_m: x_oew,
         };
+        let payload_pass::PayloadPass {
+            layout: payload_layout,
+            structural_payload_limit_kg: effective_structural_payload_limit_kg,
+            analysis: (masses, coords, _, flops_mass_buildup),
+        } = self.payload_pass(design, &plane, &first_pass, coordinate_model)?;
         let (coords, cg) = self.station_coordinates(design, &plane, &masses, coords)?;
         // Anchor the aerodynamic moment reference to the actual physical CG.
         plane.xyz_ref[0] = cg[0];
@@ -327,6 +284,7 @@ impl FullAnalysis {
             trimmed_design_point,
             cg_envelope_ok,
             neutral_point_conditions: np_cond,
+            fuel: crate::fuel_model::ReportFuel::default(),
         })
     }
 
@@ -356,6 +314,50 @@ impl FullAnalysis {
         takeoff_mass_kg: f64,
         landing_floor_kg: Option<f64>,
     ) -> Result<AnalysisReport, String> {
+        self.run_sized(
+            design,
+            include_engines,
+            takeoff_mass_kg,
+            landing_floor_kg,
+            None,
+        )
+    }
+
+    /// The report of the sized candidate `sized`, built on its evaluated
+    /// `design` (`alas_opt::ResolvedProductState::design`): the aircraft is
+    /// rebuilt with the empennage scales it was sized with
+    /// (`alas_opt::mdo::rebuild_airplane`), analysed at its design weights
+    /// ([`Self::run_at_sized_design_weights`]), and carries the fuel
+    /// artifacts its closure flew, so every fuel quantity the report prices
+    /// is priced on the closure's own model.
+    ///
+    /// # Errors
+    ///
+    /// The geometry or analysis failure, as a description.
+    pub fn run_sized_candidate(
+        &self,
+        design: &DesignVector,
+        sized: &alas_opt::SizedCandidate,
+    ) -> Result<AnalysisReport, String> {
+        let mut report = self.run_sized(
+            design,
+            true,
+            sized.takeoff_mass_kg,
+            Some(sized.design_landing_mass_kg),
+            Some(&sized.fuel_artifacts.tail_sizing),
+        )?;
+        report.fuel = crate::fuel_model::ReportFuel::sized(crate::fuel_model::SizedFuel::of(sized));
+        Ok(report)
+    }
+
+    fn run_sized(
+        &self,
+        design: &DesignVector,
+        include_engines: bool,
+        takeoff_mass_kg: f64,
+        landing_floor_kg: Option<f64>,
+        tail_sizing: Option<&alas_config::TailSizing>,
+    ) -> Result<AnalysisReport, String> {
         if !takeoff_mass_kg.is_finite() || takeoff_mass_kg <= 0.0 {
             return Err(format!(
                 "sized takeoff mass must be finite and positive, got {takeoff_mass_kg} kg"
@@ -378,7 +380,19 @@ impl FullAnalysis {
             config: sized_config,
             reference_compatibility: self.reference_compatibility,
         };
-        let mut report = sized_analysis.run(design, include_engines)?;
+        let mut report = match tail_sizing {
+            Some(sizing) => {
+                let mut config = sized_analysis.config.clone();
+                let mut design = *design;
+                let plane = alas_opt::mdo::rebuild_airplane(&mut config, &mut design, sizing)?;
+                Self {
+                    config,
+                    ..sized_analysis
+                }
+                .run_on_airplane(&design, plane)?
+            }
+            None => sized_analysis.run(design, include_engines)?,
+        };
         // Provenance rides in the numeric geometry map the report schema
         // already has, so no consumer can read the limit as the flown mass.
         report

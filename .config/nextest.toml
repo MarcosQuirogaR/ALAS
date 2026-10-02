@@ -10,30 +10,31 @@
 
 # The slow tier is one filter expression. The default profile excludes it as
 # `not (<expression>)` and the slow profile selects it; a unit test in xtask
-# fails if the two disagree. Serial times measured on a 32-thread machine:
-#   staged_search                   876 s  optimizer search over three presets
-#   a380_default_regression         153 s
-#   downstream_mass_connectivity     73 s  } the same seeded A220 optimizer
-#   downstream_design_connectivity   69 s  } run, repeated in four places
-#   sized_mass_single_source         64 s  }
-#   summary_masses_of_an_optimized_run_are_the_pipeline_result (alas-gui)  }
-#   sandbox_occlusion                27 s  (89 s when run beside other tests)
-#   acceptance_benchmarks             5 s  (asserts only that timings exist)
+# fails if the two disagree. Times measured on a 32-thread machine:
+#   staged_search                  ~1010 s  the ATR72-600 case alone (one ATR
+#                                           evaluation costs ~15 s); A320 57 s,
+#                                           A380 12 s
+#   a380_default_regression          153 s
+#   sized_design_connectivity         79 s  } the same seeded A220 optimizer
+#   downstream_mass_connectivity      80 s  } run, in three crates
+#   summary_masses_of_an_optimized_run_are_the_pipeline_result (alas-gui) 77 s }
+#   sandbox_occlusion                 27 s  (89 s when run beside other tests)
+#   baseline_figures_at_declared_mass 169 s  every preset's figures at MTOW
 
 [profile.default]
-default-filter = "not (binary(staged_search) | binary(a380_default_regression) | binary(downstream_mass_connectivity) | binary(downstream_design_connectivity) | binary(sized_mass_single_source) | binary(sandbox_occlusion) | binary(acceptance_benchmarks) | test(=views::results_view::summary::tests::summary_masses_of_an_optimized_run_are_the_pipeline_result))"
+default-filter = "not (binary(staged_search) | binary(a380_default_regression) | binary(sized_design_connectivity) | binary(downstream_mass_connectivity) | binary(sandbox_occlusion) | binary(baseline_figures_at_declared_mass) | test(=views::results_view::summary::tests::summary_masses_of_an_optimized_run_are_the_pipeline_result))"
 slow-timeout = { period = "60s", terminate-after = 10 }
 fail-fast = false
 retries = 0
 
 [profile.full]
 default-filter = "all()"
-# The slow tier's longest test takes about 15 minutes alone; the default
+# The slow tier's longest test takes about 17 minutes alone; the default
 # profile's ten-minute limit would kill it.
 slow-timeout = { period = "120s", terminate-after = 30 }
 
 [profile.slow]
-default-filter = "binary(staged_search) | binary(a380_default_regression) | binary(downstream_mass_connectivity) | binary(downstream_design_connectivity) | binary(sized_mass_single_source) | binary(sandbox_occlusion) | binary(acceptance_benchmarks) | test(=views::results_view::summary::tests::summary_masses_of_an_optimized_run_are_the_pipeline_result)"
+default-filter = "binary(staged_search) | binary(a380_default_regression) | binary(sized_design_connectivity) | binary(downstream_mass_connectivity) | binary(sandbox_occlusion) | binary(baseline_figures_at_declared_mass) | test(=views::results_view::summary::tests::summary_masses_of_an_optimized_run_are_the_pipeline_result)"
 slow-timeout = { period = "120s", terminate-after = 30 }
 
 [test-groups]

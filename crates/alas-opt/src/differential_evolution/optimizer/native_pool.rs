@@ -1,15 +1,25 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! One bounded compute pool for independent native candidates and nested VLM.
-//! The coordinator waits outside Rayon, forwarding borrowed cancellation into
-//! an owned worker token. Results and history remain in candidate order.
+//! Native candidate evaluation across `workers` single-threaded lanes.
+//!
+//! A batch is one work-stealing queue: every lane repeatedly takes the next
+//! unclaimed candidate index until the batch is exhausted, and each answer is
+//! stored at its own index, so the scores and the history order never depend
+//! on which lane ran what or on the lane count. Each lane is a one-thread
+//! Rayon pool, so the vortex-lattice assembly's own parallel loops run
+//! sequentially inside a candidate instead of competing with the other
+//! candidates for the same cores. The coordinator waits outside the lanes,
+//! forwarding the caller's borrowed cancellation flag into an owned token the
+//! analyses poll. Once the token is set no lane takes another candidate: a
+//! request costs at most the candidates already in flight, one per lane, and
+//! every candidate never started is recorded as `cancelled_unstarted` so the history
+//! still has one row per requested design.
 
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{mpsc, Arc};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
-use rayon::prelude::*;
 use rayon::{ThreadPool, ThreadPoolBuildError, ThreadPoolBuilder};
 
 use super::{DesignObjective, OptimizationHistory, SearchObjective};
@@ -17,12 +27,17 @@ use crate::cancellation::{CancelScope, EvaluationCancellation};
 
 type CandidateAnswer = Option<(f64, bool, OptimizationHistory)>;
 
+/// One lane's report on one candidate: its index, its answer (`None` after a
+/// panic), how long it ran and whether it finished after the request.
+type LaneReport = (usize, CandidateAnswer, Duration, bool);
+
 pub(super) struct NativeObjective<'a> {
     objective: &'a mut DesignObjective,
-    baseline: DesignObjective,
-    pool: Arc<ThreadPool>,
+    baseline: Arc<DesignObjective>,
+    lanes: Arc<Vec<ThreadPool>>,
     parent_cancel: Option<&'a AtomicBool>,
     cancellation: EvaluationCancellation,
+    telemetry: Option<Vec<(Duration, bool)>>,
 }
 
 impl<'a> NativeObjective<'a> {
@@ -31,16 +46,26 @@ impl<'a> NativeObjective<'a> {
         workers: usize,
         parent_cancel: Option<&'a AtomicBool>,
     ) -> Result<Self, ThreadPoolBuildError> {
-        let pool = ThreadPoolBuilder::new()
-            .num_threads(workers.max(1))
-            .thread_name(|index| format!("alas-native-{index}"))
-            .build()?;
-        Ok(Self::with_pool(objective, Arc::new(pool), parent_cancel))
+        let lanes = (0..workers.max(1))
+            .map(|lane| {
+                ThreadPoolBuilder::new()
+                    .num_threads(1)
+                    .thread_name(move |_| format!("alas-native-{lane}"))
+                    .build()
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(Self::with_lanes(objective, Arc::new(lanes), parent_cancel))
     }
 
-    pub(super) fn with_pool(
+    /// Another objective evaluated on the same lanes, so two stages never
+    /// hold two sets of threads.
+    pub(super) fn sharing_lanes(&self, objective: &'a mut DesignObjective) -> NativeObjective<'a> {
+        Self::with_lanes(objective, Arc::clone(&self.lanes), self.parent_cancel)
+    }
+
+    fn with_lanes(
         objective: &'a mut DesignObjective,
-        pool: Arc<ThreadPool>,
+        lanes: Arc<Vec<ThreadPool>>,
         parent_cancel: Option<&'a AtomicBool>,
     ) -> Self {
         // Never copy accumulated trajectory data into candidate baselines.
@@ -51,16 +76,12 @@ impl<'a> NativeObjective<'a> {
         baseline.cancellation = Some(cancellation.clone());
         Self {
             objective,
-            baseline,
-            pool,
+            baseline: Arc::new(baseline),
+            lanes,
             parent_cancel,
             cancellation,
+            telemetry: None,
         }
-    }
-
-    /// Screening and full-fidelity candidates use the same total CPU budget.
-    pub(super) fn shared_pool(&self) -> Arc<ThreadPool> {
-        Arc::clone(&self.pool)
     }
 
     fn forward_cancellation(&self) {
@@ -90,44 +111,70 @@ impl SearchObjective for NativeObjective<'_> {
         &self.objective.history
     }
 
+    fn runs_concurrently(&self) -> bool {
+        true
+    }
+
+    fn take_concurrent_telemetry(&mut self) -> Option<Vec<(Duration, bool)>> {
+        self.telemetry.take()
+    }
+
     fn evaluate_batch(&mut self, designs: &[Vec<f64>], _workers: usize) -> Vec<(f64, bool)> {
+        self.telemetry = Some(Vec::new());
         if designs.is_empty() {
             return Vec::new();
         }
         self.forward_cancellation();
-        let baseline = self.baseline.clone();
-        let points = designs.to_vec();
-        let (sender, receiver) = mpsc::channel();
-        // Even a singleton with one worker runs inside this pool, so nested
-        // Rayon work cannot escape to the global pool and the coordinator can
-        // continue forwarding the GUI's borrowed cancellation flag.
-        self.pool.spawn(move || {
-            let answer = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                points
-                    .par_iter()
-                    .map(|values| evaluate_independent(&baseline, values))
-                    .collect::<Vec<_>>()
-            }))
-            .ok();
-            let _ = sender.send(answer);
-        });
-        let results = self
-            .receive(&receiver)
-            .ok()
-            .flatten()
-            .unwrap_or_else(|| (0..designs.len()).map(|_| None).collect());
-        results
+        let points = Arc::new(designs.to_vec());
+        let next = Arc::new(AtomicUsize::new(0));
+        let (sender, receiver) = mpsc::channel::<LaneReport>();
+        for lane in self.lanes.iter().take(designs.len()) {
+            let (points, next, sender) = (Arc::clone(&points), Arc::clone(&next), sender.clone());
+            let (baseline, token) = (Arc::clone(&self.baseline), self.cancellation.clone());
+            lane.spawn(move || {
+                while !token.requested() {
+                    let index = next.fetch_add(1, Ordering::Relaxed);
+                    let Some(values) = points.get(index) else {
+                        break;
+                    };
+                    let started = Instant::now();
+                    let answer = evaluate_independent(&baseline, values);
+                    let report = (index, answer, started.elapsed(), token.requested());
+                    if sender.send(report).is_err() {
+                        break;
+                    }
+                }
+            });
+        }
+        drop(sender);
+        let mut answers: Vec<Option<CandidateAnswer>> = (0..designs.len()).map(|_| None).collect();
+        let mut telemetry = Vec::new();
+        for _ in 0..designs.len() {
+            match self.receive(&receiver) {
+                Ok((index, answer, elapsed, after_request)) => {
+                    answers[index] = Some(answer);
+                    telemetry.push((elapsed, after_request));
+                }
+                Err(_) => break,
+            }
+        }
+        self.telemetry = Some(telemetry);
+        answers
             .into_iter()
             .zip(designs)
-            .map(|(result, values)| {
-                if let Some((cost, valid, history)) = result {
+            .map(|(answer, values)| match answer {
+                Some(Some((cost, valid, history))) => {
                     self.objective.history.append(history);
                     (cost, valid)
-                } else {
-                    // A partial failed history stays in the discarded local
-                    // objective. Retrying on the coordinator could re-panic and
-                    // would bypass both the compute budget and cancellation.
-                    record_worker_failure(self.objective, values)
+                }
+                // A partial failed history stays in the discarded local
+                // objective. Retrying on the coordinator could re-panic and
+                // would bypass both the lanes and cancellation.
+                Some(None) => {
+                    record_unanalysed(self.objective, values, "evaluation_worker_failure")
+                }
+                None => {
+                    record_unanalysed(self.objective, values, super::batch::CANCELLED_UNSTARTED)
                 }
             })
             .collect()
@@ -144,20 +191,13 @@ fn evaluate_independent(baseline: &DesignObjective, values: &[f64]) -> Candidate
     .ok()
 }
 
-fn record_worker_failure(objective: &mut DesignObjective, values: &[f64]) -> (f64, bool) {
+/// One history row for a requested design that produced no analysis.
+fn record_unanalysed(objective: &mut DesignObjective, values: &[f64], reason: &str) -> (f64, bool) {
     let cost = objective.config.optimizer.weights.failure_cost;
     let design = alas_config::DesignVector::from_array(values).unwrap_or_default();
-    objective.history.record(
-        design,
-        false,
-        cost,
-        0.0,
-        0.0,
-        0.0,
-        0.0,
-        0.0,
-        "evaluation_worker_failure",
-    );
+    objective
+        .history
+        .record(design, false, cost, 0.0, 0.0, 0.0, 0.0, 0.0, reason);
     (cost, false)
 }
 
@@ -169,7 +209,7 @@ mod tests {
     fn a_worker_failure_records_an_invalid_analysis_without_retrying_it() {
         let mut objective = DesignObjective::new(alas_config::AlasConfig::default());
         let values = alas_config::DesignVector::default().to_array();
-        let (_, valid) = record_worker_failure(&mut objective, &values);
+        let (_, valid) = record_unanalysed(&mut objective, &values, "evaluation_worker_failure");
         assert!(!valid);
         assert_eq!(objective.history.n_evaluations(), 1);
         assert_eq!(
@@ -179,8 +219,8 @@ mod tests {
     }
 
     #[test]
-    fn persistent_workers_keep_history_order_across_batches() {
-        for workers in [1, 3] {
+    fn lanes_keep_history_order_across_batches_at_any_lane_count() {
+        for workers in [1, 3, 16] {
             let mut objective = DesignObjective::new(alas_config::AlasConfig::default());
             let mut pool = NativeObjective::new(&mut objective, workers, None).unwrap();
             for size in [1, 5, 2, 7] {
@@ -200,28 +240,51 @@ mod tests {
     }
 
     #[test]
-    fn screening_reuses_the_same_pool_and_nested_work_obeys_its_budget() {
-        for workers in [1, 3] {
-            let mut full = DesignObjective::new(alas_config::AlasConfig::default());
-            let mut screening = full.clone();
-            let pool = NativeObjective::new(&mut full, workers, None).unwrap();
-            let scan = NativeObjective::with_pool(&mut screening, pool.shared_pool(), None);
-            assert!(Arc::ptr_eq(&pool.pool, &scan.pool));
-            let nested = scan.pool.install(|| {
-                (0..12)
+    fn after_a_request_no_lane_starts_a_candidate_and_none_counts_as_an_analysis() {
+        let parent = AtomicBool::new(true);
+        let mut objective = DesignObjective::new(alas_config::AlasConfig::default());
+        let mut pool = NativeObjective::new(&mut objective, 4, Some(&parent)).unwrap();
+        let scores = pool.evaluate_batch(&vec![Vec::new(); 6], 4);
+        assert_eq!(scores.len(), 6);
+        assert!(scores.iter().all(|(_, valid)| !valid));
+        assert_eq!(pool.take_concurrent_telemetry(), Some(Vec::new()));
+        assert_eq!(pool.history().n_evaluations(), 6);
+        assert!(pool
+            .history()
+            .reject_reason
+            .iter()
+            .all(|reason| reason == super::super::batch::CANCELLED_UNSTARTED));
+        // Through the stage evaluator: one history row per requested design,
+        // none of them an analysis.
+        let bounds = vec![(0.0, 1.0); alas_config::DesignVector::bounds().len()];
+        let designs = vec![vec![0.5; bounds.len()], vec![0.25; bounds.len()]];
+        let mut evaluator =
+            super::super::batch::BatchEvaluator::new(&mut pool, 4, &bounds, None, Some(&parent));
+        let before = evaluator.analyses();
+        evaluator.evaluate_block(&designs);
+        assert_eq!(evaluator.objective.history().n_evaluations(), 8);
+        assert_eq!(evaluator.analyses(), before);
+        assert_eq!(evaluator.cancelled_unstarted, 2);
+    }
+
+    #[test]
+    fn nested_parallel_work_inside_a_lane_runs_on_that_lane_alone() {
+        let mut objective = DesignObjective::new(alas_config::AlasConfig::default());
+        let pool = NativeObjective::new(&mut objective, 3, None).unwrap();
+        for lane in pool.lanes.iter() {
+            let threads = lane.install(|| {
+                use rayon::prelude::*;
+                (0..64)
                     .into_par_iter()
-                    .map(|_| (rayon::current_num_threads(), rayon::current_thread_index()))
-                    .collect::<Vec<_>>()
+                    .map(|_| rayon::current_num_threads())
+                    .max()
             });
-            assert!(nested
-                .iter()
-                .all(|&(size, index)| size == workers && index.is_some()));
+            assert_eq!(threads, Some(1));
         }
     }
 
     #[test]
-    fn a_borrowed_cancellation_flag_reaches_a_running_single_worker() {
-        use std::sync::atomic::Ordering;
+    fn a_borrowed_cancellation_flag_reaches_a_running_lane() {
         use std::time::Instant;
 
         let parent = AtomicBool::new(false);
@@ -230,23 +293,21 @@ mod tests {
         let token = pool.cancellation.clone();
         let (started_sender, started_receiver) = mpsc::channel();
         let (sender, receiver) = mpsc::channel();
-        pool.pool.spawn(move || {
-            started_sender.send(()).unwrap();
+        pool.lanes[0].spawn(move || {
+            let _ = started_sender.send(());
             let deadline = Instant::now() + Duration::from_secs(3);
             while !token.requested() && Instant::now() < deadline {
                 std::thread::sleep(Duration::from_millis(1));
             }
-            sender
-                .send((token.requested(), rayon::current_num_threads()))
-                .unwrap();
+            let _ = sender.send(token.requested());
         });
         std::thread::scope(|scope| {
             let parent = &parent;
             scope.spawn(move || {
-                started_receiver.recv().unwrap();
+                let _ = started_receiver.recv();
                 parent.store(true, Ordering::Release);
             });
-            assert_eq!(pool.receive(&receiver).unwrap(), (true, 1));
+            assert_eq!(pool.receive(&receiver).ok(), Some(true));
         });
     }
 }

@@ -6,7 +6,10 @@
 use alas_config::design_variables::DesignVector;
 use serde::{Deserialize, Serialize};
 
-use super::{NoFeasibleDesign, RestorationDiagnostics};
+use super::{
+    BaselineComparison, NoFeasibleDesign, ReportingBaseline, RestorationDiagnostics,
+    StageRejections, StageSummary,
+};
 use crate::history::OptimizationHistory;
 
 /// One member of a retained multi-objective Pareto set.
@@ -48,13 +51,13 @@ pub struct OptimizationResult {
     /// Stable identifier of the search method that produced this result.
     #[serde(default = "default_result_method")]
     pub method: String,
-    /// Mutation/crossover strategy used by the search.
+    /// Mutation/crossover strategy label of the search kernel.
     #[serde(default = "default_result_strategy")]
     pub strategy: String,
-    /// Durable search lifecycle reason.  For the product L-SHADE search this
-    /// is one of `converged`, `iteration_limit` or `cancelled`; it is kept
-    /// separate from the strategy label so a budget stop is not
-    /// mistaken for convergence.
+    /// Durable search lifecycle reason. For the product search this is the
+    /// refinement's own: `converged`, `stagnated`, `evaluation_budget`,
+    /// `time_budget` or `cancelled`; it is kept separate from the strategy
+    /// label so a budget stop is not mistaken for convergence.
     #[serde(default = "default_result_termination")]
     pub termination: String,
     /// Final nondominated set for a multi-objective method.
@@ -62,8 +65,8 @@ pub struct OptimizationResult {
     pub pareto_front: Vec<ParetoCandidate>,
     /// Measured search lifecycle, for a caller that needs to distinguish a
     /// converged run from one that stopped on a budget or a safety limit.
-    /// Absent for the classic SciPy-compatible differential-evolution
-    /// profile, which preserves the original result contract.
+    /// Absent on a result deserialized from a file saved before the record
+    /// existed.
     #[serde(default)]
     pub search_diagnostics: Option<SearchDiagnostics>,
     /// What the application's own reporting-fidelity re-evaluation made of
@@ -77,49 +80,50 @@ pub struct OptimizationResult {
 ///
 /// The point of this record is that "converged in N seconds" can be checked:
 /// it carries the termination verdict, the analyses that verdict was paid for
-/// with, and the wall-clock split between the staged scan and the search, all
-/// measured from the stage's own analysis-start instant.
+/// with, and the wall-clock split between the screening and refinement
+/// stages ([`Self::stages`] has the full per-stage accounting).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SearchDiagnostics {
-    /// Bounded feasibility restoration, additional to the DE generation budget.
+    /// Bounded feasibility restoration, inside the refinement budget.
     #[serde(default)]
     pub restoration: Option<RestorationDiagnostics>,
-    /// Whether the search reached its convergence criterion. A budget,
-    /// iteration, mesh-floor or watchdog stop is `false`.
+    /// Whether the refinement reached its convergence criterion. A budget,
+    /// time, stagnation or cancellation stop is `false`.
     pub converged: bool,
-    /// Coupled full-fidelity analyses executed by the search stage.
+    /// Coupled full-fidelity analyses executed by the refinement.
     pub analysis_evaluations: usize,
-    /// Repeated mesh nodes served from the search's cache, so never analysed.
+    /// Repeated designs served from the refinement's exact cache.
     pub cache_hits: usize,
-    /// Poll iterations completed.
+    /// Refinement generations completed.
     pub poll_iterations: usize,
-    /// Reduced-model analyses executed by the broad scan. These are ranked on
-    /// a coarser mesh and a looser sizing closure and are not comparable with
-    /// the full-fidelity evaluations above.
+    /// Candidates the screening stage analysed (passed the pre-gate). With the shipped
+    /// screening model (the refinement's own) they are part of the run's
+    /// history; a distinct screening model keeps them out of it.
     pub screening_evaluations: usize,
-    /// How many screened candidates were feasible under the reduced model.
+    /// Screened candidates feasible under the screening model.
     pub screening_feasible: usize,
-    /// Full-fidelity analyses spent verifying the scan finalists.
+    /// Screening elite members seeded into the refinement's initial
+    /// population. They cost a refinement analysis only when the screening
+    /// model differs from the refinement's; with the shipped (same) model
+    /// they are exact cache hits.
     pub verification_evaluations: usize,
-    /// Wall-clock seconds in the broad scan.
+    /// Wall-clock seconds in the screening stage.
     pub scan_wall_time_s: f64,
-    /// Wall-clock seconds in the search stage.
+    /// Wall-clock seconds in the refinement stage.
     pub search_wall_time_s: f64,
-    /// Worker threads used inside one evaluation block.
+    /// Worker threads a batch was spread across.
     pub workers: usize,
-    /// Points evaluated per opportunistic poll block. Fixed independently of
-    /// `workers` so results do not change with the hardware.
+    /// Refinement initial population, set from the refinement budget and
+    /// independent of `workers`.
     pub poll_block_size: usize,
-    /// Objective of the first feasible point the search reached.
+    /// Objective of the first feasible point the refinement reached.
     pub first_feasible_cost: Option<f64>,
     /// Relative improvement of the winner over that first feasible point,
     /// dimensionless.
     pub relative_improvement: Option<f64>,
-    /// Fraction of the final generation's population that was strictly
-    /// feasible, `0` when the search never ran a generation. Absent (`0.0`
-    /// on a saved run predating this field) for anything other than the
-    /// L-SHADE product kernel. This remains the DE population statistic when
-    /// a later restoration succeeds; see `restoration.feasible` for that verdict.
+    /// Fraction of the final refinement population that was strictly
+    /// feasible. This remains the population statistic when a later
+    /// restoration succeeds; see `restoration.feasible` for that verdict.
     #[serde(default)]
     pub feasible_fraction: f64,
     /// The epsilon-constrained method's boundary at the last generation
@@ -128,6 +132,35 @@ pub struct SearchDiagnostics {
     /// applies exactly when this is `0`.
     #[serde(default)]
     pub epsilon_level: f64,
+    /// One entry per search stage, in run order: screening, refinement.
+    #[serde(default)]
+    pub stages: Vec<StageSummary>,
+    /// The design-vector pre-gate of each stage in [`Self::stages`], same
+    /// order: its rejection cap and the rejections by reason.
+    #[serde(default)]
+    pub rejections: Vec<StageRejections>,
+    /// The seed the run replays from; recorded for an unseeded run too.
+    #[serde(default)]
+    pub seed: Option<u64>,
+    /// What the search claims to be (`SEARCH_SCOPE`).
+    #[serde(default)]
+    pub scope: String,
+    /// The winner against the baseline under the same model, when a
+    /// baseline was evaluated.
+    #[serde(default)]
+    pub baseline: Option<BaselineComparison>,
+    /// Whether the baseline lay outside the search box and the search
+    /// started from it clamped into the box: [`Self::baseline`] then
+    /// compares the winner with that constrained start, not with the
+    /// unchanged baseline, and must be labelled so.
+    #[serde(default)]
+    pub baseline_clamped: bool,
+    /// The history row the winner was analysed in. Its vector can differ
+    /// from `best_design` where the evaluator derives a coordinate (the
+    /// tail scale of a reference adaptation), so the row is recorded rather
+    /// than searched for.
+    #[serde(default)]
+    pub winner_history_row: Option<usize>,
 }
 
 /// Termination label for a run whose delivered design was rejected by the
@@ -153,9 +186,7 @@ pub const CANCELLED: &str = "cancelled";
 /// The product L-SHADE kernel reports convergence through
 /// `SearchDiagnostics::converged` instead, which is the authority
 /// [`OptimizationResult::converged`] prefers (population spread plus
-/// best-feasible-cost stagnation; see `search_methods::lshade_de`). The
-/// SciPy-compatible profile uses this string and the classic energy-spread
-/// termination test.
+/// best-feasible-cost stagnation; see `search_methods::lshade_de`).
 const CONVERGED_TERMINATION: &str = "converged";
 
 impl OptimizationResult {
@@ -257,6 +288,16 @@ pub struct DeliveredAcceptance {
     /// Wall-clock seconds spent on the re-evaluation, inside the same stage
     /// clock the search is timed with.
     pub wall_time_s: f64,
+    /// Reporting-fidelity analyses run, ladder candidates and the baseline,
+    /// failed ones included. They are charged to the refinement's
+    /// verification reserve (`crate::verification_reserve`), together with
+    /// the one final analysis the pipeline runs on the delivered design.
+    #[serde(default)]
+    pub analyses: usize,
+    /// The unmodified baseline re-evaluated the same way, and the delivered
+    /// design's trip fuel against it. Absent when it could not be evaluated.
+    #[serde(default)]
+    pub baseline: Option<ReportingBaseline>,
 }
 
 impl OptimizationResult {
@@ -295,16 +336,22 @@ impl OptimizationResult {
     /// residual is never offered, so a fallback can only ever be a design the
     /// search itself considered admissible. `best_design` is placed first
     /// whatever its history row says, because it is the design the search
-    /// returned. Duplicate vectors are removed on their exact bit pattern so
-    /// a re-evaluated mesh node is not verified twice.
+    /// returned, and the winner's own history row is skipped. Duplicate
+    /// vectors are removed on their exact bit pattern so a design is not
+    /// verified twice.
     pub fn ranked_hard_feasible_candidates(&self, limit: usize) -> Vec<DesignVector> {
+        let winner_row = self
+            .search_diagnostics
+            .as_ref()
+            .and_then(|diagnostics| diagnostics.winner_history_row);
         let mut ranked: Vec<(usize, f64, DesignVector)> = self
             .history
             .design_vectors
             .iter()
             .enumerate()
             .filter(|(index, _)| {
-                self.history.valid.get(*index).copied().unwrap_or(false)
+                Some(*index) != winner_row
+                    && self.history.valid.get(*index).copied().unwrap_or(false)
                     && self
                         .history
                         .hard_violation
@@ -349,7 +396,7 @@ impl OptimizationResult {
 /// Failure from the public optimizer boundary.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum OptimizationError {
-    /// The selected method or strategy is not implemented by this build.
+    /// The selected method is not implemented by this build.
     #[error("invalid optimizer configuration: {0}")]
     InvalidConfiguration(String),
     /// The supplied design-space bounds cannot be searched safely.
@@ -365,7 +412,7 @@ fn default_result_method() -> String {
 }
 
 fn default_result_strategy() -> String {
-    "best1bin".to_owned()
+    crate::search_methods::product_de::STRATEGY.to_owned()
 }
 
 fn default_result_termination() -> String {

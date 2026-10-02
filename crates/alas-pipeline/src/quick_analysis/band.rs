@@ -15,8 +15,9 @@ use alas_mass::payload_range::{max_range_with_reserves, RangeStatus};
 
 use super::corners::CORNER_TOLERANCE_M;
 use crate::feasibility::assess_fuel_capacity;
-use crate::fuel_model::segment_model_from_report;
+use crate::fuel_model::report_mission_model;
 use crate::full_analysis::AnalysisReport;
+use alas_opt::mdo::PlannedTrips;
 
 /// Where the design mission sits relative to the band.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -95,7 +96,7 @@ pub fn design_mission_band_check(
     else {
         return DesignMissionBand::unavailable("usable fuel capacity is unavailable");
     };
-    let model = match segment_model_from_report(config, report) {
+    let model = match report_mission_model(config, report) {
         Ok(model) => model,
         Err(reason) => return DesignMissionBand::unavailable(reason),
     };
@@ -112,7 +113,7 @@ pub fn design_mission_band_check(
             oew_kg + design_payload_kg + fuel_kg,
             fuel_kg,
             &config.fuel_policy,
-            &model,
+            &PlannedTrips(&model),
             CORNER_TOLERANCE_M,
         );
         match corner.status {

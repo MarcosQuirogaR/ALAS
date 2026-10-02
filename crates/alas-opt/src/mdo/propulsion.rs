@@ -15,6 +15,7 @@
 //! required thrust between those limits.
 
 use std::fmt;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use alas_atmo::us1976_try_compute_values;
@@ -118,6 +119,10 @@ pub struct PropulsionDeck {
     identity: String,
     kind: DeckKind,
     n_engines: usize,
+    /// Model evaluations made through this deck and every clone of it: a
+    /// work counter for the sizing budget and cost reports that never enters
+    /// a result.
+    evaluations: Arc<AtomicU64>,
 }
 
 impl fmt::Debug for PropulsionDeck {
@@ -184,7 +189,13 @@ impl PropulsionDeck {
             identity,
             kind,
             n_engines,
+            evaluations: Arc::new(AtomicU64::new(0)),
         })
+    }
+
+    /// Model evaluations made through this deck (and its clones) so far.
+    pub fn evaluation_count(&self) -> u64 {
+        self.evaluations.load(Ordering::Relaxed)
     }
 
     /// Technology family of the bound engine.
@@ -355,35 +366,18 @@ impl PropulsionDeck {
         // by its own governor inverse), so the first guess is exact unless
         // the deck floors the request at its lowest running point.
         //
-        // **This is the turboprop's dominant evaluation cost and it is not
-        // safe to route around. Measured, so it is not re-attempted blind:**
-        // on the PW127M at 4 000 m and 120 m/s one `at_thrust` costs 186 us
-        // against 3.2 us for `rated_point`, because the turboprop's
-        // normalized-force demand is itself a governor inverse and the
-        // shortcut runs two of them. Answering through `solve_fraction`
-        // instead costs 18 us and agrees with this path to twelve significant
-        // figures at 10 000 N and 14 000 N, but *not* at low power, where
-        // the PW127M's rating map folds (3 450 N at fraction 0, 1 643 N at
-        // fraction 0.082, 38 962 N at fraction 1) and the two inverses land
-        // on different operating points: at 6 000 N, 0.1414 kg/s through the
-        // governor against 0.0925 kg/s through the rating fraction, a factor
-        // of 1.53. Mixing them therefore makes delivered fuel flow
-        // *non-monotone in the request* (1 557 N at 0.09526 kg/s beside
-        // 3 115 N at 0.03900 kg/s), which
+        // On the turboprop this governor inverse is the dominant cost
+        // (186 us against 3.2 us for `rated_point` on the PW127M at 4,000 m,
+        // 120 m/s), yet it must not be routed through `solve_fraction`: the
+        // PW127M rating map folds at low power (3,450 N at fraction 0,
+        // 1,643 N at 0.082), where the two inverses reach different points
+        // (6,000 N: 0.1414 against 0.0925 kg/s) and mixing them makes fuel
+        // flow non-monotone in the request, which
         // `the_turboprop_inverse_closes_on_the_request_across_the_whole_thrust_band`
-        // now catches. Which of the two inverses is right at low power is a
-        // **deck question owned by propulsion**; until it is answered the
-        // mission must read one of them, and it reads the governor's.
-        //
-        // What *is* safe is not paying a governor inverse merely to read the
-        // reference force. A full-command normalized-force demand returns the
-        // deck's own normalizing rating, so `rated_point` answers the same
-        // question directly - measured bit-identical in thrust on both decks
-        // and pinned by
-        // `a_full_command_normalized_force_is_the_deck_normalizing_rating`.
-        // The request itself still goes through the governor below, so the
-        // solved operating point is unchanged; only the reference read moves
-        // from ~85 us to ~3 us on the PW127M.
+        // catches. Which inverse is right at low power is a propulsion deck
+        // question. Only the reference force is read cheaply: a full-command
+        // normalized demand is the deck's normalizing rating (bit-identical,
+        // `a_full_command_normalized_force_is_the_deck_normalizing_rating`).
         let reference = if self.normalizing_rating() == cap {
             ceiling
         } else {
@@ -587,6 +581,7 @@ impl PropulsionDeck {
         flight: FlightCondition,
         demand: PropulsionDemand,
     ) -> Result<PropulsionResult, DeckError> {
+        self.evaluations.fetch_add(1, Ordering::Relaxed);
         let request = PropulsionRequest {
             flight,
             demand,

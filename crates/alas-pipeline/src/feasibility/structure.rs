@@ -27,6 +27,9 @@ pub(crate) fn sync_selected_delivery(
         crate::solver_mode::SolverKind::Avl => &mut solutions.avl,
     };
     branch.optimization = Some(delivered.clone());
+    if branch.status.has_design() {
+        branch.status = crate::dual_solver::SolverOptimizationStatus::for_delivered(delivered);
+    }
 }
 
 /// Structural design authority shared by reporting and its final native check.
@@ -67,6 +70,8 @@ pub(crate) fn revoke_delivery(
                 candidates_evaluated: 1,
                 delivered_is_search_finalist: true,
                 wall_time_s: 0.0,
+                analyses: 0,
+                baseline: None,
             });
     acceptance.verified = false;
     acceptance.delivered_rejected_by = errors.iter().map(|f| f.code.as_str().to_owned()).collect();
@@ -155,6 +160,32 @@ pub(super) fn append_native(
         findings.push(error(FindingCode::StructuralLinearModelDomain,
             format!("{} (n={:.3}) exceeds the linear beam curvature error budget; a nonlinear structural assessment is required", assessment.governing_load_case, assessment.governing_load_factor),
             Some(assessment.max_linear_curvature_relative_error), Some(assessment.limits.max_curvature_relative_error), "fraction"));
+    }
+    if assessment.manoeuvre_curvature_relative_error
+        > assessment.limits.max_curvature_relative_error
+    {
+        findings.push(warning(FindingCode::StructuralLinearModelDomain,
+            "ultimate-load wing deflection exceeds the linear beam curvature error budget; the reported ultimate deflection is a linear estimate, the ultimate stresses are unaffected",
+            Some(assessment.manoeuvre_curvature_relative_error), Some(assessment.limits.max_curvature_relative_error), "fraction"));
+    }
+}
+
+/// Whether an FE case outside the linear curvature budget vetoes the result.
+///
+/// Only the 1 g flight shape does, for the reason
+/// `alas_struct::feasibility` states: an ultimate case outside the budget has
+/// a linear deflection estimate but unaffected stresses, and is a warning.
+fn curvature_finding(
+    case: &str,
+    code: FindingCode,
+    message: String,
+    actual: f64,
+    limit: f64,
+) -> PhysicalFinding {
+    if case == alas_struct::feasibility::FLIGHT_SHAPE_CASE {
+        error(code, message, Some(actual), Some(limit), "fraction")
+    } else {
+        warning(code, message, Some(actual), Some(limit), "fraction")
     }
 }
 
@@ -323,9 +354,9 @@ pub(crate) fn append_downstream(
         for (case, tip) in response.tip_deflection_m.iter() {
             match fem_curvature_lower_bound(tip, semispan) {
                 Some(error_bound) if error_bound <= config.structures.max_linear_curvature_relative_error => {},
-                Some(error_bound) => findings.push(error(FindingCode::StructuralFemModelDomain,
+                Some(error_bound) => findings.push(curvature_finding(case, FindingCode::StructuralFemModelDomain,
                     format!("{solver} {case} tip displacement proves the linear model exceeds its curvature error budget"),
-                    Some(error_bound), Some(config.structures.max_linear_curvature_relative_error), "fraction")),
+                    error_bound, config.structures.max_linear_curvature_relative_error)),
                 None => findings.push(error(FindingCode::StructuralSolverFailed,
                     format!("{solver} {case} returned an invalid displacement or reference semispan"), Some(tip), semispan, "m")),
             }

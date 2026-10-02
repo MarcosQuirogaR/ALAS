@@ -89,6 +89,32 @@ fn both_mode_prefers_a_completed_vlm_branch_when_avl_is_unavailable() {
 }
 
 #[test]
+fn both_mode_prefers_a_feasible_design_over_an_infeasible_one() {
+    use SolverOptimizationStatus::{Completed, Infeasible};
+    let branch = |solver, status| {
+        let mut result = SolverOptimizationResult::not_requested(solver);
+        result.status = status;
+        result
+    };
+    for (vlm, avl, expected) in [
+        (Infeasible, Completed, SolverKind::Avl),
+        (Completed, Infeasible, SolverKind::Vlm),
+        (Completed, Completed, SolverKind::Vlm),
+        (Infeasible, Infeasible, SolverKind::Vlm),
+    ] {
+        let set = SolverOptimizationSet {
+            vlm: branch(SolverKind::Vlm, vlm),
+            avl: branch(SolverKind::Avl, avl),
+        };
+        assert_eq!(
+            set.selected(OptimizationSolverMode::Both).map(|r| r.solver),
+            Ok(expected),
+            "{vlm:?} / {avl:?}"
+        );
+    }
+}
+
+#[test]
 fn avl_only_mode_never_selects_a_failed_branch_as_a_vlm_fallback() {
     let set = SolverOptimizationSet {
         vlm: SolverOptimizationResult::not_requested(SolverKind::Vlm),
@@ -101,12 +127,8 @@ fn avl_only_mode_never_selects_a_failed_branch_as_a_vlm_fallback() {
 #[test]
 fn an_all_invalid_default_de_branch_is_reported_as_a_typed_pipeline_failure() {
     let mut config = AlasConfig::default();
-    // The default profile is the SciPy-compatible one, which returns its
-    // scalar-cost winner without the hard-feasibility gate; the typed
-    // failure belongs to the product search, so select it explicitly.
-    config.optimizer.solver.method = alas_config::optimizer::PRODUCT_DE_METHOD.to_owned();
-    config.optimizer.solver.max_iterations = 0;
-    config.optimizer.solver.population_size = 1;
+    config.optimizer.solver.refinement.max_evaluations = 24;
+    config.optimizer.solver.screening.max_evaluations = 8;
     config.requirements.max_cruise_cl = 0.01;
 
     let result = run_solver_optimizations(
@@ -139,8 +161,8 @@ fn a_cancelled_flag_stops_the_de_branch_short_of_its_generation_budget() {
     // boundary, well short of the 30-generation budget below, with
     // nothing timed.
     let mut config = AlasConfig::default();
-    config.optimizer.solver.max_iterations = 30;
-    config.optimizer.solver.population_size = 1;
+    config.optimizer.solver.refinement.max_evaluations = 496;
+    config.optimizer.solver.screening.max_evaluations = 8;
     let cancel = AtomicBool::new(true);
 
     let result = run_solver_optimizations(
@@ -182,8 +204,8 @@ fn a_cancelled_branch_persists_a_record_that_claims_nothing() {
     ));
     let _ = std::fs::remove_dir_all(&root);
     let mut config = AlasConfig::default();
-    config.optimizer.solver.max_iterations = 30;
-    config.optimizer.solver.population_size = 1;
+    config.optimizer.solver.refinement.max_evaluations = 496;
+    config.optimizer.solver.screening.max_evaluations = 8;
     let cancel = AtomicBool::new(true);
 
     let result = run_solver_optimizations(
@@ -232,8 +254,11 @@ fn a_request_inside_a_de_generation_costs_at_most_one_more_analysis() {
     // Enough generations that the run cannot finish on its own before the
     // request, small enough that a failure of this test wastes a bounded
     // amount of time rather than an unbounded one.
-    config.optimizer.solver.max_iterations = 4;
-    config.optimizer.solver.population_size = 1;
+    config.optimizer.solver.refinement.max_evaluations = 80;
+    config.optimizer.solver.screening.max_evaluations = 8;
+    // The longest stage limit, so a slow serial initial population on a
+    // loaded machine cannot end the refinement before its first generation.
+    config.optimizer.solver.refinement.time_limit_s = 300.0;
     config.optimizer.solver.workers = 1;
 
     let watch = alas_opt::CancelWatch::new();
@@ -341,5 +366,109 @@ fn a_serial_request_does_not_overwrite_an_explicit_worker_count_upwards() {
             .solver
             .workers,
         1
+    );
+}
+
+fn delivered_fixture(best_valid: bool, verified: Option<bool>) -> alas_opt::OptimizationResult {
+    let mut result = alas_opt::OptimizationResult {
+        best_design: DesignVector::default(),
+        best_cost: 1.0,
+        best_valid,
+        history: alas_opt::OptimizationHistory::new(),
+        wall_time_s: 1.0,
+        method: "differential_evolution".to_owned(),
+        strategy: String::new(),
+        termination: "evaluation_budget".to_owned(),
+        pareto_front: Vec::new(),
+        search_diagnostics: None,
+        delivered_acceptance: None,
+    };
+    if let Some(verified) = verified {
+        result.record_delivered_acceptance(alas_opt::DeliveredAcceptance {
+            verified,
+            finalist_rejected_by: Vec::new(),
+            delivered_rejected_by: Vec::new(),
+            rejection_messages: Vec::new(),
+            candidates_evaluated: 1,
+            delivered_is_search_finalist: true,
+            wall_time_s: 0.0,
+            analyses: 1,
+            baseline: None,
+        });
+    }
+    result
+}
+
+#[test]
+fn an_infeasible_delivered_design_never_reads_as_completed() {
+    for (valid, verified) in [(false, None), (true, Some(false)), (false, Some(true))] {
+        let result = delivered_fixture(valid, verified);
+        assert!(!result.is_delivered_feasible());
+        let status = SolverOptimizationStatus::for_delivered(&result);
+        assert_ne!(status, SolverOptimizationStatus::Completed);
+        assert!(status.has_design(), "the design stays readable");
+        assert!(!status.label().eq_ignore_ascii_case("completed"));
+        let (stage_word, _) = crate::pipeline::optimization_stage_status(Some(&result));
+        assert!(!stage_word.eq_ignore_ascii_case("completed"));
+    }
+    let feasible = delivered_fixture(true, Some(true));
+    assert_eq!(
+        SolverOptimizationStatus::for_delivered(&feasible),
+        SolverOptimizationStatus::Completed
+    );
+}
+
+#[test]
+fn an_infeasible_branch_is_still_selectable_but_not_completed() {
+    let mut vlm = SolverOptimizationResult::not_requested(SolverKind::Vlm);
+    vlm.status = SolverOptimizationStatus::Infeasible;
+    let set = SolverOptimizationSet {
+        vlm,
+        avl: SolverOptimizationResult::not_requested(SolverKind::Avl),
+    };
+    let selected = set.selected(OptimizationSolverMode::Vlm);
+    assert_eq!(
+        selected.map(|branch| branch.status),
+        Ok(SolverOptimizationStatus::Infeasible)
+    );
+}
+
+#[test]
+fn an_avl_candidate_is_drawn_with_the_tail_the_assessment_sizes() {
+    let preset = "A320-200";
+    let config = AlasConfig::from_value(&serde_json::json!({
+        "preset": preset,
+        "optimizer": {"design_space": {"mode": "reference_adaptation"}}
+    }))
+    .expect("valid configuration");
+    let mut moved = alas_config::presets::get(preset)
+        .expect("registered preset")
+        .design_vector;
+    moved.span_m *= 0.95;
+    moved.root_chord_m *= 1.07;
+    moved.break_chord_m *= 1.07;
+    moved.tip_chord_m *= 1.07;
+
+    let (avl_config, avl_design) =
+        avl::sized_candidate(&config, &moved, false).expect("resolvable candidate");
+    let assessment =
+        alas_opt::assess_product_candidate(&config, &moved).expect("assessable candidate");
+    let sizing = assessment.resolved.tail_sizing;
+
+    assert!(
+        (avl_design.tail_scale - sizing.tail_scale).abs() <= 1e-12 * sizing.tail_scale.abs(),
+        "tail scale {} vs {}",
+        avl_design.tail_scale,
+        sizing.tail_scale
+    );
+    let ratio = avl_config.geometry.empennage.vstab_scale_ratio;
+    assert!(
+        (ratio - sizing.vstab_scale_ratio).abs() <= 1e-12 * sizing.vstab_scale_ratio.abs(),
+        "fin ratio {ratio} vs {}",
+        sizing.vstab_scale_ratio
+    );
+    assert!(
+        (avl_design.tail_scale - moved.tail_scale).abs() > 1e-6,
+        "the moved wing must resize the tail for this check to mean anything"
     );
 }

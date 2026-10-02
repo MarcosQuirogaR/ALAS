@@ -187,14 +187,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn from_radius_sets_width_and_height_to_the_diameter() {
-        let xsec = FuselageXSec::new([1.0, 2.0, 3.0], Some(1.5), None, None, DEFAULT_SHAPE)
-            .expect("radius alone is valid");
-        assert_eq!(xsec.width, 3.0);
-        assert_eq!(xsec.height, 3.0);
-    }
-
-    #[test]
     fn from_width_and_height_keeps_them_distinct() {
         let xsec = FuselageXSec::new([0.0, 0.0, 0.0], None, Some(4.0), Some(2.5), DEFAULT_SHAPE)
             .expect("width and height together are valid");

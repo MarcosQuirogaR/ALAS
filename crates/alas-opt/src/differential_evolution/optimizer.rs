@@ -4,17 +4,17 @@
 //! Differential-evolution orchestration for the optimizer boundary.
 
 use std::sync::atomic::AtomicBool;
+use std::time::Duration;
 
 use super::*;
-use crate::cancellation::{CancelPhase, CancelScope};
+use crate::cancellation::CancelScope;
 use crate::search_methods::product_de;
 
+mod batch;
 mod evaluation_cache;
 mod feasibility_restoration;
 mod native_pool;
 mod product_search;
-mod scan;
-mod scipy_search;
 
 /// Whether the caller supplied a single literal fuselage-length bound.
 ///
@@ -40,30 +40,7 @@ fn explicit_fuselage_length_bound(bounds: Option<&[(f64, f64)]>) -> bool {
 impl DesignOptimizer {
     /// Construct a new design optimizer with `config`.
     pub fn new(config: AlasConfig) -> Self {
-        Self {
-            config,
-            reference_mass_coordinates: false,
-        }
-    }
-
-    /// Construct an optimizer that replays the reference-compatible mass
-    /// coordinate.
-    ///
-    /// The `scipy_legacy` solver profile also uses this evaluator. This
-    /// explicit constructor replays the recorded parity fixtures regardless
-    /// of the selected profile.
-    pub fn new_reference_compatibility(mut config: AlasConfig) -> Self {
-        // This constructor is the explicit comparison boundary.  Make the
-        // selected architecture agree with the replay flag so the
-        // compatibility optimizer cannot accidentally ask the pure FLOPS mass evaluator for
-        // a reference-coordinate run.
-        config.mass_model.mass_architecture =
-            alas_config::MassArchitecture::LegacyReferenceCompatibleComparison;
-        config.mass_model.apply_architecture();
-        Self {
-            config,
-            reference_mass_coordinates: true,
-        }
+        Self { config }
     }
 
     fn invalid_solver_setting_reason(&self) -> Option<String> {
@@ -71,45 +48,46 @@ impl DesignOptimizer {
         if !alas_config::SolverSettings::is_supported_method(&solver.method) {
             return Some(format!("unknown optimizer method {:?}", solver.method));
         }
-        if !alas_config::SolverSettings::is_supported_strategy(&solver.strategy) {
-            return Some(format!("unknown optimizer strategy {:?}", solver.strategy));
-        }
-        None
-    }
-
-    /// Whether this run uses the reference-compatible objective, mass
-    /// coordinates and SciPy-style driver.
-    fn uses_scipy_compatible_profile(&self) -> bool {
-        self.reference_mass_coordinates
-            || self.config.optimizer.solver.method == alas_config::optimizer::SCIPY_LEGACY_METHOD
+        solver.validate_budgets().err()
     }
 
     fn validate_request(&self, bounds: Option<&[(f64, f64)]>) -> Result<(), OptimizationError> {
         if let Some(reason) = self.invalid_solver_setting_reason() {
             return Err(OptimizationError::InvalidConfiguration(reason));
         }
-        if !self.uses_scipy_compatible_profile() {
-            if !self.config.mass_model.mass_architecture.is_production() {
-                return Err(OptimizationError::InvalidConfiguration(
-                    "the production optimizer requires pure_flops_transport_v1; use the explicit reference-compatibility constructor for the reference-compatible comparison"
-                        .to_owned(),
-                ));
-            }
-            self.config
-                .optimizer
-                .design_space
-                .validate()
-                .map_err(OptimizationError::InvalidConfiguration)?;
+        if !self.config.mass_model.mass_architecture.is_production() {
+            return Err(OptimizationError::InvalidConfiguration(
+                "the optimizer requires the pure_flops_transport_v1 mass architecture".to_owned(),
+            ));
         }
-        let default_bounds;
-        let bounds = match bounds {
-            Some(bounds) => bounds,
-            None => {
-                default_bounds = DesignVector::bounds();
-                &default_bounds
-            }
-        };
-        validate_bounds(bounds)
+        self.config
+            .optimizer
+            .design_space
+            .validate()
+            .map_err(OptimizationError::InvalidConfiguration)?;
+        bounds.map_or(Ok(()), validate_bounds)
+    }
+
+    /// The search box [`Self::run`] uses for `bounds` and `initial_design`.
+    ///
+    /// This is the one place the preset-anchored envelope is derived from the
+    /// configuration and the nominal design: `None` yields the configured
+    /// design-space envelope around the nominal, and an explicit box is
+    /// intersected with it. A front end that wants to show or pre-validate the
+    /// box reads it here rather than rebuilding the envelope itself.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`OptimizationError::InvalidConfiguration`] or
+    /// [`OptimizationError::InvalidBounds`] exactly as [`Self::run`] would
+    /// before its first evaluation.
+    pub fn resolved_bounds(
+        &self,
+        bounds: Option<&[(f64, f64)]>,
+        initial_design: Option<&DesignVector>,
+    ) -> Result<Vec<(f64, f64)>, OptimizationError> {
+        self.validate_request(bounds)?;
+        self.effective_bounds(bounds, initial_design)
     }
 
     fn effective_bounds(
@@ -120,12 +98,9 @@ impl DesignOptimizer {
         let default_bounds = DesignVector::bounds();
         let requested = bounds.unwrap_or(&default_bounds);
         validate_bounds(requested)?;
-        if self.uses_scipy_compatible_profile() {
-            return Ok(requested.to_vec());
-        }
         let nominal = self.nominal_design(initial_design)?;
         let design_space = &self.config.optimizer.design_space;
-        let declared = design_space.envelope(&nominal);
+        let declared = self.config.design_envelope(&nominal);
         // A caller that supplies no bounds is asking for the design space it
         // configured, and that space is already a complete, anchored envelope:
         // the global box widened to contain the start for a clean sheet, the
@@ -191,6 +166,18 @@ impl DesignOptimizer {
         Ok(effective)
     }
 
+    /// The search box and canonical baseline of a run given no caller
+    /// bounds: the configured design space anchored at the preset.
+    pub(crate) fn anchored_search_space(
+        &self,
+    ) -> Result<(Vec<(f64, f64)>, DesignVector), OptimizationError> {
+        self.validate_request(None)?;
+        Ok((
+            self.effective_bounds(None, None)?,
+            self.nominal_design(None)?,
+        ))
+    }
+
     fn nominal_design(
         &self,
         initial_design: Option<&DesignVector>,
@@ -207,9 +194,6 @@ impl DesignOptimizer {
                 })
                 .unwrap_or_default()
         });
-        if self.uses_scipy_compatible_profile() {
-            return Ok(nominal);
-        }
         crate::mdo::canonical_nominal_design(&self.config, nominal)
             .map_err(OptimizationError::InvalidConfiguration)
     }
@@ -233,8 +217,7 @@ impl DesignOptimizer {
 
     /// [`Self::run`], observing an optional pipeline cancellation flag.
     ///
-    /// `cancel` is checked between serial evaluations, or after a deferred
-    /// generation batch, in both search profiles. A cancelled run returns
+    /// `cancel` is checked between evaluation blocks. A cancelled run returns
     /// `Ok` with `OptimizationResult::termination` set to `"cancelled"`; its
     /// winner is the best fully scored member available when cancellation was
     /// observed.
@@ -255,11 +238,6 @@ impl DesignOptimizer {
         if result.was_cancelled() {
             return Ok(result);
         }
-        if self.uses_scipy_compatible_profile() {
-            // SciPy v1.1.0 always returned its lowest scalar-cost member. The
-            // pipeline can still filter that history at reporting fidelity.
-            return Ok(result);
-        }
         let result = ensure_feasible(result)?;
         restore_winning_payload_load_case(&mut self.config, &result.best_design);
         Ok(result)
@@ -276,16 +254,15 @@ impl DesignOptimizer {
         let effective_bounds = self.effective_bounds(bounds, initial_design)?;
         let nominal = self.nominal_design(initial_design)?;
         let preserve_explicit_fuselage_length = explicit_fuselage_length_bound(bounds);
-        let scipy_compatible = self.uses_scipy_compatible_profile();
-        let mut objective = if scipy_compatible {
-            DesignObjective::new_reference_compatibility(self.config.clone())
-        } else {
-            DesignObjective::new_with_nominal_and_fuselage_policy(
-                self.config.clone(),
-                nominal,
-                preserve_explicit_fuselage_length,
-            )
-        };
+        let mut objective = DesignObjective::new_with_nominal_and_fuselage_policy(
+            self.config.clone(),
+            nominal,
+            preserve_explicit_fuselage_length,
+        );
+        // Every candidate is sized under a cap measured on the nominal, so a
+        // straggler cannot stall a generation (`search::work_cap`).
+        let cap = crate::search::work_cap::nominal_work_cap(&objective, &nominal);
+        objective.sizing_controls.budget = cap;
 
         let search_initial = if bounds.is_none()
             && self
@@ -298,57 +275,47 @@ impl DesignOptimizer {
         } else {
             initial_design.or(Some(&nominal))
         };
-        let result = if scipy_compatible {
-            if cancel.is_some() {
-                let mut parallel = native_pool::NativeObjective::new(
-                    &mut objective,
-                    self.config.optimizer.solver.resolved_workers(),
-                    cancel,
-                )
-                .map_err(|error| {
-                    OptimizationError::InvalidConfiguration(format!(
-                        "could not create the native compute worker pool: {error}"
-                    ))
-                })?;
-                self.run_search(
-                    Some(&effective_bounds),
-                    initial_design,
-                    &mut parallel,
-                    progress_callback,
-                    cancel,
-                )
-            } else {
-                self.run_search(
-                    Some(&effective_bounds),
-                    initial_design,
-                    &mut objective,
-                    progress_callback,
-                    cancel,
-                )
-            }
-        } else {
-            let mut parallel = native_pool::NativeObjective::new(
-                &mut objective,
-                self.config.optimizer.solver.resolved_workers(),
-                cancel,
-            )
-            .map_err(|error| {
-                OptimizationError::InvalidConfiguration(format!(
-                    "could not create the native compute worker pool: {error}"
-                ))
-            })?;
-            let compute_pool = Some(parallel.shared_pool());
-            self.run_product_search(
-                Some(&effective_bounds),
+        let mut parallel = native_pool::NativeObjective::new(
+            &mut objective,
+            self.config.optimizer.solver.resolved_workers(),
+            cancel,
+        )
+        .map_err(|error| {
+            OptimizationError::InvalidConfiguration(format!(
+                "could not create the native compute worker pool: {error}"
+            ))
+        })?;
+        let fidelity = crate::ScreeningFidelity::shipped();
+        if fidelity == crate::ScreeningFidelity::full() {
+            let result = self.run_product_search(
+                &effective_bounds,
                 search_initial,
                 &mut parallel,
+                product_search::ScreeningModel::Same,
                 progress_callback,
                 cancel,
-                compute_pool,
-            )
-        };
-
-        Ok(result)
+            );
+            return Ok(with_work_cap(result, cap));
+        }
+        let mut screening_model = DesignObjective::new_with_nominal_and_fuselage_policy(
+            fidelity.configure(&self.config),
+            nominal,
+            preserve_explicit_fuselage_length,
+        );
+        screening_model.sizing_controls = fidelity.controls();
+        if screening_model.sizing_controls.budget.is_none() {
+            screening_model.sizing_controls.budget = cap;
+        }
+        let mut screening = parallel.sharing_lanes(&mut screening_model);
+        let result = self.run_product_search(
+            &effective_bounds,
+            search_initial,
+            &mut parallel,
+            product_search::ScreeningModel::Separate(&mut screening),
+            progress_callback,
+            cancel,
+        );
+        Ok(with_work_cap(result, cap))
     }
 
     /// Execute the same differential-evolution search with a caller-provided
@@ -409,30 +376,19 @@ impl DesignOptimizer {
         };
         let mut objective =
             DelegatedObjective::new(evaluator, self.config.optimizer.weights.failure_cost);
-        let result = if self.uses_scipy_compatible_profile() {
-            self.run_search(
-                Some(&effective_bounds),
-                initial_design,
-                &mut objective,
-                progress_callback,
-                cancel,
-            )
-        } else {
-            self.run_product_search(
-                Some(&effective_bounds),
-                search_initial,
-                &mut objective,
-                progress_callback,
-                cancel,
-                None,
-            )
-        };
+        // A delegated evaluator is an external, serial model: the refinement
+        // starts from the baseline without a screening stage.
+        let result = self.run_product_search(
+            &effective_bounds,
+            search_initial,
+            &mut objective,
+            product_search::ScreeningModel::Skip,
+            progress_callback,
+            cancel,
+        );
 
         // Same cancellation contract as `run_cancellable`.
         if result.was_cancelled() {
-            return Ok(result);
-        }
-        if self.uses_scipy_compatible_profile() {
             return Ok(result);
         }
         let result = ensure_feasible(result)?;
@@ -440,4 +396,21 @@ impl DesignOptimizer {
         restore_winning_payload_load_case(&mut self.config, &result.best_design);
         Ok(result)
     }
+}
+
+/// `result` with the per-candidate work cap of its native search recorded on
+/// every stage's work summary.
+fn with_work_cap(
+    mut result: OptimizationResult,
+    cap: Option<crate::mdo::mission_model::SizingBudget>,
+) -> OptimizationResult {
+    let stages = result
+        .search_diagnostics
+        .iter_mut()
+        .flat_map(|diagnostics| diagnostics.stages.iter_mut());
+    for work in stages.filter_map(|stage| stage.sizing_work.as_mut()) {
+        work.cap_trip_flights = cap.map(|cap| cap.max_trip_flights);
+        work.cap_deck_evals = cap.map(|cap| cap.max_deck_evals);
+    }
+    result
 }

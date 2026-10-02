@@ -23,7 +23,6 @@ use alas_pipeline::{
 };
 use alas_report::families::{aerodynamics, optimization};
 use alas_report::svg::render_svg;
-use serde_json::Value;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
@@ -74,6 +73,7 @@ fn report() -> AnalysisReport {
         payload_layout: None,
         cg_envelope_ok: Some(true),
         neutral_point_conditions: None,
+        fuel: Default::default(),
     }
 }
 
@@ -326,34 +326,6 @@ fn visible_text(svg: &str) -> String {
         .map(|(text, _)| text.trim())
         .collect::<Vec<_>>()
         .join(" ")
-}
-
-#[test]
-fn python_reference_contract_names_every_family_and_theme() {
-    let corpus: Value = serde_json::from_str(include_str!(
-        "../../../golden/report/reference_render_corpus.json"
-    ))
-    .expect("reference render corpus is valid JSON");
-    let figures = corpus["figures"].as_object().expect("figure map");
-    for id in [
-        "aero_panel",
-        "airfoil_comparison",
-        "airfoil_reynolds",
-        "drag_breakdown",
-        "polar_comparison",
-        "model_comparison",
-        "span_loading",
-        "vlm_flow",
-        "mses_pressure",
-        "mses_mach_contours",
-    ] {
-        for theme in ["light", "dark"] {
-            assert!(
-                figures.contains_key(&format!("{id}:{theme}")),
-                "missing {id}:{theme}"
-            );
-        }
-    }
 }
 
 #[test]

@@ -120,7 +120,7 @@ pub struct StructuresConfig {
     #[config(
         label = "Linear beam curvature error budget",
         unit = "fraction",
-        help = "Maximum relative curvature error from neglecting beam rotation, evaluated as (1 + slope squared) to the power 1.5 minus 1. The default 0.05 is a 5% numerical model-validity budget, not a certification deflection limit. A wing outside this domain requires a geometrically nonlinear structural model and cannot be accepted by this linear analysis. Must be finite and greater than zero."
+        help = "Maximum relative curvature error from neglecting beam rotation, evaluated as (1 + slope squared) to the power 1.5 minus 1. The default 0.05 is a 5% numerical model-validity budget, not a certification deflection limit. It gates the 1 g flight-shape case only: a wing whose 1 g shape is outside this domain requires a geometrically nonlinear structural model and cannot be accepted by this linear analysis. The ultimate-load deflection is reported with its curvature error but does not gate, because the ultimate stresses do not depend on the small-slope approximation. Must be finite and greater than zero."
     )]
     pub max_linear_curvature_relative_error: f64,
 

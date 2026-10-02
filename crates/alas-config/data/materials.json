@@ -80,7 +80,7 @@
     {
       "category": "composite",
       "e_pa": 55000000000.0,
-      "f_allow_pa": 450000000.0,
+      "f_allow_pa": 220000000.0,
       "name": "CFRP QI",
       "nu": 0.31,
       "rho_kg_m3": 1580.0

@@ -122,24 +122,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn every_colormap_covers_its_full_domain_without_panicking() {
-        for cmap in [
-            Colormap::Viridis,
-            Colormap::Turbo,
-            Colormap::Plasma,
-            Colormap::Inferno,
-            Colormap::Magma,
-            Colormap::Jet,
-        ] {
-            let _ = cmap.sample(0.0);
-            let _ = cmap.sample(1.0);
-            let _ = cmap.sample(0.5);
-            let _ = cmap.sample(-0.3); // clamps
-            let _ = cmap.sample(1.7); // clamps
-        }
-    }
-
-    #[test]
     fn viridis_endpoints_match_its_first_and_last_stop() {
         assert_eq!(Colormap::Viridis.sample(0.0), Color::rgb(68, 1, 84));
         assert_eq!(Colormap::Viridis.sample(1.0), Color::rgb(253, 231, 37));

@@ -23,11 +23,15 @@ mod model;
 #[cfg(test)]
 use model::*;
 mod evidence;
+mod inverse;
 mod ratings;
 mod system;
 pub use evidence::*;
 use ratings::isa_temperature_from_density_k;
 pub use system::*;
+
+#[cfg(test)]
+mod solver_tests;
 
 #[cfg(test)]
 // Test fixtures assert successful construction through unwrap and expect.

@@ -50,7 +50,7 @@ pub(super) const STRUCTURE_LIMITS: &[ReviewedLimit] = &[
         id: "root_to_kink_te_angle",
         family: "Geometry",
         review: RelaxationReview::Ineligible,
-        rationale: "The inboard trailing edge between root and kink may not sweep forward past 90 deg from the fuselage axis; beyond it the flap and wing-box layout the mass and structural models assume no longer exists.",
+        rationale: "The exposed trailing edge between side of body and kink may not run forward past 90 deg from the fuselage axis: design practice keeps the flap hinge line and the rear spar from running forward (Torenbeek, Synthesis of Subsonic Airplane Design, 1982; Obert, Aerodynamic Design of Transport Aircraft, 2009). A design-practice limit, not a bound of the models, and not relaxable.",
     },
     preference("transport_root_wingbox_depth"),
     preference("transport_kink_wingbox_depth"),

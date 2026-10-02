@@ -299,5 +299,6 @@ fn test_report(config: &AlasConfig) -> AnalysisReport {
         trimmed_design_point: None,
         cg_envelope_ok: Some(true),
         neutral_point_conditions: None,
+        fuel: Default::default(),
     }
 }

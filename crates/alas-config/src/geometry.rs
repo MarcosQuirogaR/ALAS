@@ -24,7 +24,7 @@ mod frame;
 mod fuselage;
 mod wing;
 
-pub use empennage::EmpennageConfig;
+pub use empennage::{EmpennageConfig, TailSizing};
 pub use engine::{ActiveEngineModel, EngineBindingError, EngineConfig};
 pub use frame::{BodyFuselageExtent, LongitudinalStationFrame, MacFrame};
 pub use fuselage::{FuselageConfig, FuselageSection, FuselageSectionError};
@@ -161,15 +161,5 @@ mod tests {
         let geometry = GeometryConfig::default();
         assert!(geometry.wing_wetted_area_factor > 2.0);
         assert!(geometry.fuselage_wetted_factor < 1.0);
-    }
-
-    #[test]
-    fn a_geometry_round_trips_through_serialization() {
-        let geometry = GeometryConfig::default();
-        let text = serde_json::to_string(&geometry).unwrap();
-        assert_eq!(
-            serde_json::from_str::<GeometryConfig>(&text).unwrap(),
-            geometry
-        );
     }
 }

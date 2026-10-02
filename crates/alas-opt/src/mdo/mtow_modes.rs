@@ -60,6 +60,8 @@ pub(crate) struct ClosureMission {
 /// great-circle distance between the selected aerodromes (zero when it is
 /// not known), used when no design range is declared.
 ///
+/// A charted design payload is flown as that mass.
+///
 /// A planning-seat design payload is taken as the laid-out payload
 /// `laid_out_payload_kg` with its `seated` passengers replaced by the
 /// planning seats at `requirements.passenger_mass_kg` each, so everything
@@ -85,6 +87,7 @@ pub(crate) fn closure_mission(
         DesignPayloadSource::PlanningSeats(seats) if mission.payload_kg.is_some() => Some(
             laid_out_payload_kg + (seats - seated) as f64 * config.requirements.passenger_mass_kg,
         ),
+        DesignPayloadSource::ChartedPoint => mission.payload_kg,
         _ => None,
     };
     let declared_m = mission.range.declared_nmi().map(|nmi| nmi * NAUTICAL_MILE);
@@ -94,6 +97,7 @@ pub(crate) fn closure_mission(
     let mut model = route_model.clone();
     let altitude_m = config.requirements.cruise_altitude_m;
     model.cruise_altitude_m = altitude_m;
+    model.design_cruise_altitude_m = altitude_m;
     model.cruise_tas_m_s = model.cruise_mach
         * Atmosphere::try_new(altitude_m)
             .map_err(|error| invalid(error.to_string()))?
@@ -108,16 +112,23 @@ pub(crate) fn closure_mission(
 }
 
 /// The landing mass a sizing closure has to be able to land at, kg: its
-/// zero-fuel mass plus the reserve fuel of its plan (contingency, alternate
-/// and final reserve), or `None` when the dispatch produced no finite value.
+/// zero-fuel mass plus every fuel the plan carries past the destination
+/// (contingency, alternate, final reserve, additional, extra and the
+/// taxi-in budget), or `None` when the dispatch produced no finite value.
 ///
-/// The floor of `AlasConfig::design_landing_mass_with_reserve_floor`.
+/// This is the plan's own destination landing mass, so the `landing_mass`
+/// residual compares the mission with a limit built on the same fuel basis
+/// and reserve policy. The floor of
+/// `AlasConfig::design_landing_mass_with_reserve_floor`.
 pub(crate) fn landing_floor_kg(dispatch: &DispatchSolution) -> Option<f64> {
     let plan = &dispatch.plan;
     let floor_kg = dispatch.zero_fuel_mass_kg
         + plan.contingency.kg
         + plan.alternate.kg
-        + plan.final_reserve.kg;
+        + plan.final_reserve.kg
+        + plan.additional.kg
+        + plan.extra.kg
+        + plan.taxi_in_fuel_kg();
     (floor_kg.is_finite() && floor_kg > 0.0).then_some(floor_kg)
 }
 

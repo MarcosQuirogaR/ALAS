@@ -150,10 +150,9 @@ fn reviewed_fixed_design_config() -> AlasConfig {
     // that check permissive here, since this test's isolated residual is
     // unrelated to it.
     config.requirements.cg_range_pct_mac = 0.0;
-    config.optimizer.solver.max_iterations = 0;
-    config.optimizer.solver.population_size = 1;
+    config.optimizer.solver.refinement.max_evaluations = 24;
+    config.optimizer.solver.screening.max_evaluations = 8;
     config.optimizer.solver.workers = 1;
-    config.optimizer.solver.display_progress = false;
     config
 }
 
@@ -353,10 +352,9 @@ fn diagnostic_policies_deliver_a_bounded_baseline_when_requirements_are_missed()
     config.optimizer.objective.balance_constraints = diagnostic;
     config.optimizer.objective.performance_constraints = diagnostic;
     config.optimizer.objective.geometry_constraints = diagnostic;
-    config.optimizer.solver.max_iterations = 0;
-    config.optimizer.solver.population_size = 1;
+    config.optimizer.solver.refinement.max_evaluations = 24;
+    config.optimizer.solver.screening.max_evaluations = 8;
     config.optimizer.solver.workers = 1;
-    config.optimizer.solver.display_progress = false;
 
     let design = alas_config::presets::get("A220-300")
         .expect("A220-300 preset")
@@ -406,10 +404,9 @@ fn optimized_pipeline_never_falls_back_to_a_native_infeasible_screening_winner()
     config.structures.enabled = false;
     config.requirements.max_wing_area_m2 = 2_000.0;
     config.requirements.max_cruise_cl = 0.0;
-    config.optimizer.solver.max_iterations = 0;
-    config.optimizer.solver.population_size = 1;
+    config.optimizer.solver.refinement.max_evaluations = 24;
+    config.optimizer.solver.screening.max_evaluations = 8;
     config.optimizer.solver.workers = 1;
-    config.optimizer.solver.display_progress = false;
     let design = DesignVector::default();
     let bounds = design
         .to_array()
@@ -437,63 +434,6 @@ fn optimized_pipeline_never_falls_back_to_a_native_infeasible_screening_winner()
     assert!(error.contains("VLM optimization failed"), "{error}");
     assert!(error.contains("no feasible design"), "{error}");
     assert!(error.contains("trim_cruise_cl_exceeds_max"), "{error}");
-}
-
-#[test]
-fn scipy_legacy_optimization_skips_product_finalist_replay() {
-    let mut config = AlasConfig::default();
-    config.optimizer.solver.method = alas_config::optimizer::SCIPY_LEGACY_METHOD.to_owned();
-    config.optimizer.solver.max_iterations = 0;
-    config.optimizer.solver.population_size = 1;
-    config.optimizer.solver.workers = 1;
-    config.optimizer.solver.display_progress = false;
-    config.mission.enabled = false;
-    config.structures.enabled = false;
-    // Guaranteed to fail the mission-sized product gate, while the SciPy
-    // weighted objective still returns its best scalar-cost candidate.
-    config.requirements.max_wing_area_m2 = 1.0;
-
-    let design = DesignVector::default();
-    let bounds = design
-        .to_array()
-        .into_iter()
-        .map(|value| (value, value))
-        .collect::<Vec<_>>();
-    let options = PipelineOptions {
-        optimize: true,
-        compare_baseline: false,
-        parallel: false,
-        aerodynamic_solver: crate::AerodynamicSolverMode::Vlm,
-        optimization_solver: crate::OptimizationSolverMode::Vlm,
-        output_dir: None,
-        save_plots: false,
-        seed: Some(42),
-        quiet: true,
-    };
-
-    let result = DesignPipeline::new(config)
-        .run_with_design_space(&options, &RunEnvironment::default(), &design, &bounds)
-        .unwrap_or_else(|error| panic!("SciPy finalist must bypass product replay: {error}"));
-
-    assert!(result.optimized_design.is_some());
-    assert!(result.optimized_report.is_some());
-    assert!(result
-        .optimization_result
-        .as_ref()
-        .is_some_and(|optimization| optimization.delivered_acceptance.is_none()));
-    assert!(!result.feasibility.is_feasible());
-    assert!(result
-        .feasibility
-        .findings
-        .iter()
-        .any(|finding| finding.code == crate::FindingCode::WingAreaLimit));
-    assert!(result
-        .solver_optimizations
-        .as_ref()
-        .is_some_and(|solutions| {
-            solutions.vlm.status == crate::SolverOptimizationStatus::Completed
-                && solutions.vlm.report.is_some()
-        }));
 }
 
 #[test]

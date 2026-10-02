@@ -219,6 +219,7 @@ pub fn quick_preview_report(
         trimmed_design_point: None,
         cg_envelope_ok: None,
         neutral_point_conditions: None,
+        fuel: Default::default(),
     })
 }
 

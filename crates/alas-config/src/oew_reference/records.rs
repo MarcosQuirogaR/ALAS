@@ -240,7 +240,7 @@ pub(super) static RECORDS: &[OewReference] = &[
             uncertainty_kg: Some(1_500.0),
             residual_mismatch: &[
                 "inclusion list of the 41,052 kg empty weight not stated",
-                "wingtip-fence span 34.10 m not applied to the geometry (wing sensitivity -455 kg recorded)",
+                "wingtip fences here, sharklets on the preset: the preset's 34.10 m planar wing models neither device's mass",
                 "operator interior, catering and equipment unknown",
             ],
         }),

@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! Exact, per-search reuse of deterministic full-fidelity evaluations.
-//! Reduced screening scores never enter this cache. Keys retain every f64 bit:
-//! no quantization, interpolation or surrogate can hide a constraint crossing.
+//! Exact, per-stage reuse of deterministic evaluations. Each stage owns its
+//! own cache, so a screening score never answers a refinement request. Keys
+//! retain every f64 bit: no quantization, interpolation or surrogate can
+//! hide a constraint crossing.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -11,6 +12,11 @@ use crate::search_methods::{product_de, ScoredPoint};
 
 pub(super) struct EvaluationCache {
     scores: BTreeMap<Vec<u64>, ScoredPoint>,
+    /// The objective history row each analysed design was recorded in. The
+    /// row carries what a [`ScoredPoint`] does not (block fuel), and its own
+    /// vector can differ from the requested one: a reference adaptation
+    /// rewrites `tail_scale` when it sizes the tails.
+    rows: BTreeMap<Vec<u64>, usize>,
     pub(super) hits: usize,
 }
 
@@ -18,6 +24,7 @@ impl EvaluationCache {
     pub(super) fn new(verified: Option<&ScoredPoint>) -> Self {
         let mut cache = Self {
             scores: BTreeMap::new(),
+            rows: BTreeMap::new(),
             hits: 0,
         };
         if let Some(point) = verified {
@@ -28,6 +35,17 @@ impl EvaluationCache {
 
     pub(super) fn insert(&mut self, point: ScoredPoint) {
         self.scores.insert(key(&point.values), point);
+    }
+
+    /// Insert a point the objective analysed into history row `row`.
+    pub(super) fn insert_analysed(&mut self, point: ScoredPoint, row: usize) {
+        self.rows.insert(key(&point.values), row);
+        self.insert(point);
+    }
+
+    /// The history row `values` was analysed in, when it was.
+    pub(super) fn row(&self, values: &[f64]) -> Option<usize> {
+        self.rows.get(&key(values)).copied()
     }
 
     pub(super) fn missing(&mut self, points: &[Vec<f64>]) -> Vec<Vec<f64>> {
@@ -64,13 +82,14 @@ fn key(point: &[f64]) -> Vec<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::search_methods::Tier;
 
     #[test]
     fn duplicate_scores_reuse_only_exact_designs_and_keep_input_order() {
         let point = ScoredPoint {
             values: vec![0.5],
             cost: 7.0,
-            valid: true,
+            tier: Tier::Feasible,
             constraint_violation: 0.0,
             objectives: [7.0; 3],
         };
@@ -80,7 +99,7 @@ mod tests {
         assert_eq!(cache.missing(&points), vec![vec![nearby]]);
         let other = ScoredPoint {
             values: vec![nearby],
-            valid: false,
+            tier: Tier::ClosedInfeasible,
             ..point.clone()
         };
         cache.insert(other.clone());

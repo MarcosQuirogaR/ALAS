@@ -196,23 +196,6 @@ fn typed_config_round_trip_preserves_nested_class_mix_edits() {
 }
 
 #[test]
-fn design_space_labels_expose_human_names_for_key_variables() {
-    let sweep = alas_config::DESIGN_VARIABLE_SPECS
-        .iter()
-        .find(|spec| spec.name == "sweep_deg")
-        .expect("sweep variable");
-    let tail = alas_config::DESIGN_VARIABLE_SPECS
-        .iter()
-        .find(|spec| spec.name == "tail_scale")
-        .expect("tail scale variable");
-
-    assert_eq!(sweep.name, "sweep_deg");
-    assert_eq!(tail.name, "tail_scale");
-    assert_eq!(sweep.description, "Inboard leading-edge sweep angle");
-    assert_eq!(tail.description, "Uniform scale factor on the empennage");
-}
-
-#[test]
 fn all_preview_figure_ids_generate_valid_scenes() {
     let mut state = AppState::default();
 
