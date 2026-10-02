@@ -57,6 +57,7 @@ fn report() -> AnalysisReport {
         },
         polar_fit: PolarFit {
             cd0: 0.013,
+            c1: 0.0,
             k: 0.05,
             oswald_e: 0.85,
             aspect_ratio: 5.0,

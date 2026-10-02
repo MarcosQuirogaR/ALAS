@@ -38,6 +38,12 @@ pub enum FindingCode {
     /// [`FeasibilityReport::model_cg`], for whether the envelope's aft
     /// boundary is the one that actually governs the layout.
     MinimumNoseGearLoadViolation,
+    /// The longitudinal tip-back angle at a loading state's CG height is
+    /// below the required minimum, so the aircraft can sit on its tail.
+    TipBackViolation,
+    /// The aft fuselage lower contour scrapes the ground at a pitch angle
+    /// below the required rotation attitude.
+    TailScrapeViolation,
     /// The analyzed point lies outside a public manufacturer planning envelope.
     PublicPlanningCgEnvelopeViolation,
     /// The cruise trim solve did not produce a finite result.
@@ -111,6 +117,9 @@ pub enum FindingCode {
     /// Independent structural and empirical wing mass estimates differ;
     /// this is a diagnostic comparison, not a physical mass limit.
     StructuralMassModelDifference,
+    /// The candidate primary box leaves no positive secondary inventory
+    /// within the authoritative current complete-wing mass.
+    StructuralInventoryUnverified,
 }
 
 impl FindingCode {
@@ -133,6 +142,8 @@ impl FindingCode {
             Self::NoseGearStrengthViolation => "nose_gear_strength_violation",
             Self::MainGearStrengthViolation => "main_gear_strength_violation",
             Self::MinimumNoseGearLoadViolation => "minimum_nose_gear_load_violation",
+            Self::TipBackViolation => "tip_back_violation",
+            Self::TailScrapeViolation => "tail_scrape_violation",
             Self::PublicPlanningCgEnvelopeViolation => "public_planning_cg_envelope_violation",
             Self::TrimUnavailable => "trim_unavailable",
             Self::InsufficientStaticMargin => "insufficient_static_margin",
@@ -166,6 +177,7 @@ impl FindingCode {
             Self::FuelTankLayoutUnavailable => "fuel_tank_layout_unavailable",
             Self::MassModelDisagreement => "mass_model_disagreement",
             Self::StructuralMassModelDifference => "structural_mass_model_difference",
+            Self::StructuralInventoryUnverified => "structural_inventory_unverified",
         }
     }
 }

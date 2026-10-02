@@ -141,6 +141,10 @@ fn mass_residuals(outcome: &SizingOutcome, config: &AlasConfig) -> Vec<Constrain
     // fairings and other non-box items are not represented by a sourced
     // complete inventory. Keep that limitation binding so a partial wing
     // model cannot become the accepted finalist through a finite penalty.
+    // A box exceeding the reference complete wing leaves no nonnegative
+    // secondary inventory. Keep this veto in reference and sandbox modes too:
+    // the discrepancy must be resolved before delivery, without fitting the
+    // physical sizing model to the empirical estimate.
     if !outcome.structural_inventory_complete {
         residuals.push(ConstraintResidual::direct(
             "structural_inventory_unverified",
@@ -184,15 +188,12 @@ fn mass_residuals(outcome: &SizingOutcome, config: &AlasConfig) -> Vec<Constrain
     // hold that mission's reserve-inclusive takeoff fuel
     // (`SizedCandidate::design_mission_fuel_kg`); the taxi-out fuel on top of
     // it is the route check's, which then flies the same mission. Otherwise
-    // the fallback is the modelled capacity of the preset design vector:
-    // comparing the model with itself cancels its density and volume bias
-    // (the published kg are converted at each type's own density, the model
-    // at one global density), which a comparison with the published figure
-    // would carry.
-    if let (Some(nominal_kg), true) = (
-        nominal_tank_capacity_kg(config),
-        sized.usable_capacity_kg.is_finite(),
-    ) {
+    // the fallback is the product tank inventory of the preset design vector
+    // held against the candidate's own: both come from one resolver
+    // (`alas_mass::tanks::resolve_product_layout`) at one fuel density, and
+    // the candidate's is the capacity its dispatch is bounded by.
+    let capacity_kg = sized.usable_capacity_kg;
+    if let (Some(nominal_kg), true) = (nominal_tank_capacity_kg(config), capacity_kg.is_finite()) {
         let required_kg =
             if outcome.plan.design_mission.is_some() && sized.design_mission_fuel_kg.is_finite() {
                 sized.design_mission_fuel_kg
@@ -202,10 +203,10 @@ fn mass_residuals(outcome: &SizingOutcome, config: &AlasConfig) -> Vec<Constrain
         residuals.push(ConstraintResidual::scaled(
             "fuel_capacity_declared",
             Mass,
-            sized.usable_capacity_kg,
+            capacity_kg,
             required_kg,
             "kg",
-            required_kg - sized.usable_capacity_kg,
+            required_kg - capacity_kg,
             policy,
         ));
         // Published figures, for context only; never ranked.
@@ -214,16 +215,16 @@ fn mass_residuals(outcome: &SizingOutcome, config: &AlasConfig) -> Vec<Constrain
                 residuals.push(ConstraintResidual::scaled(
                     "fuel_capacity_published",
                     Mass,
-                    sized.usable_capacity_kg,
+                    capacity_kg,
                     kg,
                     "kg",
-                    kg - sized.usable_capacity_kg,
+                    kg - capacity_kg,
                     ConstraintPolicy::Diagnostic,
                 ));
             }
             if let Some(litres) = published.1 {
-                let modelled_l = sized.usable_capacity_kg
-                    / config.mass_model.fuel_density_kg_m3.max(1e-9)
+                let modelled_l = capacity_kg
+                    / alas_mass::tanks::inventory_density_kg_m3(config).max(1e-9)
                     * 1_000.0;
                 residuals.push(ConstraintResidual::scaled(
                     "fuel_volume_published",

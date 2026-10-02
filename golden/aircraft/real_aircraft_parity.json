@@ -153,6 +153,12 @@
         "relative": 0.02,
         "unit": "kg",
         "basis": "engine TCDS dry weight (basic engine with standard accessories, excluding nacelle)"
+      },
+      "sweep_angle": {
+        "absolute": 0.5,
+        "relative": null,
+        "unit": "deg",
+        "basis": "quarter-chord sweep published to 0.1-0.5 deg; the reference planform (trapezoidal, crank-equivalent or outboard panel) is rarely stated, so a single sweep value is diagnostic"
       }
     }
   },
@@ -436,6 +442,11 @@
       "title": "JCAB TCDS No. 75 ATR 42/72, Revision 3 (ATR72-212A section)",
       "authority": "JCAB (national TCDS validating the EASA data)",
       "url": "https://asims.cab.mlit.go.jp/fsdb/a_katashikisyoumei.nsf/6b3e09b1290c32b7492574fd0029b17c/34d28828b5d6793249257c0f0033a32a/%24FILE/JCAB%20TCDS-ATR42%2672%20Revision%203.pdf"
+    },
+    "cado_enac_v1_3": {
+      "title": "CADO airplane database, Version 1.3 (Monrolin, Druot, Peteilh, Roches, Kambiri; ENAC 2024), ODbL 1.0, doi:10.57745/LLRJO0; stored unmodified in docs/data/cado/",
+      "authority": "ENAC secondary compilation of manufacturer, manual, book and EUROCONTROL data; not for operational use",
+      "url": "https://doi.org/10.57745/LLRJO0"
     }
   },
   "regulatory": [
@@ -1806,6 +1817,125 @@
           "locator": "PDF p.161, Figure 3-2-1-991-016-A01",
           "tolerance": "payload_range_nmi",
           "note": "Chart read, +-40 nmi; medium confidence, secondary evidence, never scored."
+        },
+        {
+          "id": "geometry.htail_area_m2_cado",
+          "category": "geometry",
+          "model_path": "geometry.htail_area_m2",
+          "source_value": 31,
+          "unit": "m^2",
+          "evidence": "secondary",
+          "condition": "CADO row 'A320-200': CADO htp_area; gross/exposed reference definition not stated by CADO, model exports the trapezoid extended to the centreline; CADO row is the pre-Sharklet A320-200 (span 33.89 m, CFM56-5B4); tail, sweep, area and engine station are common to the Sharklet WV017 preset",
+          "cite": "cado_enac_v1_3",
+          "tolerance": "geometry_area",
+          "condition_match": false
+        },
+        {
+          "id": "geometry.vtail_area_m2_cado",
+          "category": "geometry",
+          "model_path": "geometry.vtail_area_m2",
+          "source_value": 21.51,
+          "unit": "m^2",
+          "evidence": "secondary",
+          "condition": "CADO row 'A320-200': CADO vtp_area; root station and dorsal-fin inclusion not stated by CADO, model exports the root-to-tip trapezoid without dorsal fillet; CADO row is the pre-Sharklet A320-200 (span 33.89 m, CFM56-5B4); tail, sweep, area and engine station are common to the Sharklet WV017 preset",
+          "cite": "cado_enac_v1_3",
+          "tolerance": "geometry_area",
+          "condition_match": false
+        },
+        {
+          "id": "geometry.wing_area_m2_cado",
+          "category": "geometry",
+          "model_path": "geometry.wing_area_m2",
+          "source_value": 122.63,
+          "unit": "m^2",
+          "evidence": "secondary",
+          "condition": "CADO row 'A320-200': CADO wing_area; reference-area convention not stated; CADO row is the pre-Sharklet A320-200 (span 33.89 m, CFM56-5B4); tail, sweep, area and engine station are common to the Sharklet WV017 preset",
+          "cite": "cado_enac_v1_3",
+          "tolerance": "geometry_area",
+          "condition_match": false
+        },
+        {
+          "id": "geometry.sweep_c4_deg_cado",
+          "category": "geometry",
+          "model_path": "geometry.sweep_c4_deg",
+          "source_value": 25,
+          "unit": "deg",
+          "evidence": "secondary",
+          "condition": "CADO row 'A320-200': CADO wing_sweep25 (single value, planform reference not stated); model exports the outboard-panel quarter-chord sweep; CADO row is the pre-Sharklet A320-200 (span 33.89 m, CFM56-5B4); tail, sweep, area and engine station are common to the Sharklet WV017 preset",
+          "cite": "cado_enac_v1_3",
+          "tolerance": "sweep_angle",
+          "condition_match": false
+        },
+        {
+          "id": "geometry.engine_spanwise_position_m_cado",
+          "category": "geometry",
+          "model_path": "geometry.engine_spanwise_position_m",
+          "source_value": 5.745,
+          "unit": "m",
+          "evidence": "secondary",
+          "condition": "CADO row 'A320-200': CADO engine_y_arm, wing-engine axis offset from the centreline; CADO row is the pre-Sharklet A320-200 (span 33.89 m, CFM56-5B4); tail, sweep, area and engine station are common to the Sharklet WV017 preset",
+          "cite": "cado_enac_v1_3",
+          "tolerance": "geometry_length"
+        },
+        {
+          "id": "mass.oew_kg_cado",
+          "category": "mass",
+          "model_path": "mass.oew_kg",
+          "source_value": 42093,
+          "unit": "kg",
+          "evidence": "secondary",
+          "condition": "CADO row 'A320-200': CADO owe; cabin standard and operator items not stated; variant mismatch: CADO row is MTOW 77,020 kg / MLW 65,998 kg pre-Sharklet A320-200, the preset is the Sharklet WV017 78,000 kg / 66,000 kg",
+          "cite": "cado_enac_v1_3",
+          "tolerance": "mass_oew",
+          "condition_match": false
+        },
+        {
+          "id": "mass.usable_fuel_kg_cado",
+          "category": "mass",
+          "model_path": "payload_range.fuel_capacity_kg",
+          "source_value": 18744,
+          "unit": "kg",
+          "evidence": "secondary",
+          "condition": "CADO row 'A320-200': CADO max_fuel as mass; usable/total definition and density not stated; variant mismatch: CADO row is MTOW 77,020 kg / MLW 65,998 kg pre-Sharklet A320-200, the preset is the Sharklet WV017 78,000 kg / 66,000 kg",
+          "cite": "cado_enac_v1_3",
+          "tolerance": "fuel_mass",
+          "condition_match": false
+        },
+        {
+          "id": "performance.vref_mlw_m_s_cado",
+          "category": "performance",
+          "model_path": "performance.vref_mlw_m_s",
+          "source_value": 68.84,
+          "unit": "m/s",
+          "evidence": "secondary",
+          "condition": "CADO row 'A320-200': CADO approach_speed (typical, km/h converted at 1/3.6); weight, flap setting and whether it is VREF or VREF+additive not stated; model exports 1.23 VS1g at MLW (247.84 km/h); variant mismatch: CADO row is MTOW 77,020 kg / MLW 65,998 kg pre-Sharklet A320-200, the preset is the Sharklet WV017 78,000 kg / 66,000 kg",
+          "cite": "cado_enac_v1_3",
+          "tolerance": "approach_speed",
+          "condition_match": false
+        },
+        {
+          "id": "performance.tofl_isa_sl_mtow_m_cado",
+          "category": "performance",
+          "model_path": "performance.takeoff_field_length_isa_sl_mtow_m",
+          "source_value": 1798,
+          "unit": "m",
+          "evidence": "secondary",
+          "condition": "CADO row 'A320-200': CADO tofl; weight, atmosphere and runway conditions not stated; variant mismatch: CADO row is MTOW 77,020 kg / MLW 65,998 kg pre-Sharklet A320-200, the preset is the Sharklet WV017 78,000 kg / 66,000 kg",
+          "cite": "cado_enac_v1_3",
+          "tolerance": "field_length",
+          "condition_match": false
+        },
+        {
+          "id": "performance.lfl_isa_sl_mlw_m_cado",
+          "category": "performance",
+          "model_path": "performance.landing_field_length_isa_sl_mlw_m",
+          "source_value": 1463,
+          "unit": "m",
+          "evidence": "secondary",
+          "condition": "CADO row 'A320-200': CADO lfl; weight and factored/unfactored basis not stated; variant mismatch: CADO row is MTOW 77,020 kg / MLW 65,998 kg pre-Sharklet A320-200, the preset is the Sharklet WV017 78,000 kg / 66,000 kg",
+          "cite": "cado_enac_v1_3",
+          "tolerance": "field_length",
+          "condition_match": false
         }
       ]
     },
@@ -2409,6 +2539,126 @@
           "locator": "PDF p.169, Figure 3-2-1-991-013-A01",
           "tolerance": "payload_range_nmi",
           "note": "Chart read, +-100 nmi; medium confidence, secondary evidence, never scored."
+        },
+        {
+          "id": "geometry.htail_area_m2_cado",
+          "category": "geometry",
+          "model_path": "geometry.htail_area_m2",
+          "source_value": 71.45,
+          "unit": "m^2",
+          "evidence": "secondary",
+          "condition": "CADO row 'A340-300': CADO htp_area; gross/exposed reference definition not stated by CADO, model exports the trapezoid extended to the centreline",
+          "cite": "cado_enac_v1_3",
+          "tolerance": "geometry_area",
+          "condition_match": false
+        },
+        {
+          "id": "geometry.vtail_area_m2_cado",
+          "category": "geometry",
+          "model_path": "geometry.vtail_area_m2",
+          "source_value": 45.2,
+          "unit": "m^2",
+          "evidence": "secondary",
+          "condition": "CADO row 'A340-300': CADO vtp_area; root station and dorsal-fin inclusion not stated by CADO, model exports the root-to-tip trapezoid without dorsal fillet",
+          "cite": "cado_enac_v1_3",
+          "tolerance": "geometry_area",
+          "condition_match": false
+        },
+        {
+          "id": "geometry.wing_area_m2_cado",
+          "category": "geometry",
+          "model_path": "geometry.wing_area_m2",
+          "source_value": 361.39,
+          "unit": "m^2",
+          "evidence": "secondary",
+          "condition": "CADO row 'A340-300': CADO wing_area; reference-area convention not stated",
+          "cite": "cado_enac_v1_3",
+          "tolerance": "geometry_area",
+          "condition_match": false
+        },
+        {
+          "id": "geometry.sweep_c4_deg_cado",
+          "category": "geometry",
+          "model_path": "geometry.sweep_c4_deg",
+          "source_value": 29.7,
+          "unit": "deg",
+          "evidence": "secondary",
+          "condition": "CADO row 'A340-300': CADO wing_sweep25 (single value, planform reference not stated); model exports the outboard-panel quarter-chord sweep",
+          "cite": "cado_enac_v1_3",
+          "tolerance": "sweep_angle",
+          "condition_match": false
+        },
+        {
+          "id": "geometry.outboard_engine_spanwise_position_m_cado",
+          "category": "geometry",
+          "model_path": "geometry.outboard_engine_spanwise_position_m",
+          "source_value": 19.594,
+          "unit": "m",
+          "evidence": "secondary",
+          "condition": "CADO row 'A340-300': CADO engine_y_arm is the outboard-engine axis offset of this four-engine aircraft; the model export carries only the inboard (first) engine station",
+          "cite": "cado_enac_v1_3",
+          "tolerance": "geometry_length",
+          "condition_match": false
+        },
+        {
+          "id": "mass.oew_kg_cado",
+          "category": "mass",
+          "model_path": "mass.oew_kg",
+          "source_value": 130861,
+          "unit": "kg",
+          "evidence": "secondary",
+          "condition": "CADO row 'A340-300': CADO owe; cabin standard and operator items not stated; variant mismatch: CADO row is the CFM56-5C4 A340-313 at MTOW 276,501 kg / MLW 191,997 kg, the preset is the A340-312 WV029 (CFM56-5C3) at 260,000 kg / 188,000 kg",
+          "cite": "cado_enac_v1_3",
+          "tolerance": "mass_oew",
+          "condition_match": false
+        },
+        {
+          "id": "mass.usable_fuel_kg_cado",
+          "category": "mass",
+          "model_path": "payload_range.fuel_capacity_kg",
+          "source_value": 118280,
+          "unit": "kg",
+          "evidence": "secondary",
+          "condition": "CADO row 'A340-300': CADO max_fuel as mass; usable/total definition and density not stated; variant mismatch: CADO row is the CFM56-5C4 A340-313 at MTOW 276,501 kg / MLW 191,997 kg, the preset is the A340-312 WV029 (CFM56-5C3) at 260,000 kg / 188,000 kg",
+          "cite": "cado_enac_v1_3",
+          "tolerance": "fuel_mass",
+          "condition_match": false
+        },
+        {
+          "id": "performance.vref_mlw_m_s_cado",
+          "category": "performance",
+          "model_path": "performance.vref_mlw_m_s",
+          "source_value": 77.17,
+          "unit": "m/s",
+          "evidence": "secondary",
+          "condition": "CADO row 'A340-300': CADO approach_speed (typical, km/h converted at 1/3.6); weight, flap setting and whether it is VREF or VREF+additive not stated; model exports 1.23 VS1g at MLW (277.8 km/h); variant mismatch: CADO row is the CFM56-5C4 A340-313 at MTOW 276,501 kg / MLW 191,997 kg, the preset is the A340-312 WV029 (CFM56-5C3) at 260,000 kg / 188,000 kg",
+          "cite": "cado_enac_v1_3",
+          "tolerance": "approach_speed",
+          "condition_match": false
+        },
+        {
+          "id": "performance.tofl_isa_sl_mtow_m_cado",
+          "category": "performance",
+          "model_path": "performance.takeoff_field_length_isa_sl_mtow_m",
+          "source_value": 3185,
+          "unit": "m",
+          "evidence": "secondary",
+          "condition": "CADO row 'A340-300': CADO tofl; weight, atmosphere and runway conditions not stated; variant mismatch: CADO row is the CFM56-5C4 A340-313 at MTOW 276,501 kg / MLW 191,997 kg, the preset is the A340-312 WV029 (CFM56-5C3) at 260,000 kg / 188,000 kg",
+          "cite": "cado_enac_v1_3",
+          "tolerance": "field_length",
+          "condition_match": false
+        },
+        {
+          "id": "performance.lfl_isa_sl_mlw_m_cado",
+          "category": "performance",
+          "model_path": "performance.landing_field_length_isa_sl_mlw_m",
+          "source_value": 1960,
+          "unit": "m",
+          "evidence": "secondary",
+          "condition": "CADO row 'A340-300': CADO lfl; weight and factored/unfactored basis not stated; variant mismatch: CADO row is the CFM56-5C4 A340-313 at MTOW 276,501 kg / MLW 191,997 kg, the preset is the A340-312 WV029 (CFM56-5C3) at 260,000 kg / 188,000 kg",
+          "cite": "cado_enac_v1_3",
+          "tolerance": "field_length",
+          "condition_match": false
         }
       ]
     },
@@ -3025,6 +3275,126 @@
           "locator": "PDF p.132, Figure 3-2-1-991-001-A01",
           "tolerance": "payload_range_nmi",
           "note": "Chart read, +-60 nmi; medium confidence, secondary evidence, never scored."
+        },
+        {
+          "id": "geometry.htail_area_m2_cado",
+          "category": "geometry",
+          "model_path": "geometry.htail_area_m2",
+          "source_value": 205,
+          "unit": "m^2",
+          "evidence": "secondary",
+          "condition": "CADO row 'A380-800': CADO htp_area; gross/exposed reference definition not stated by CADO, model exports the trapezoid extended to the centreline",
+          "cite": "cado_enac_v1_3",
+          "tolerance": "geometry_area",
+          "condition_match": false
+        },
+        {
+          "id": "geometry.vtail_area_m2_cado",
+          "category": "geometry",
+          "model_path": "geometry.vtail_area_m2",
+          "source_value": 122.3,
+          "unit": "m^2",
+          "evidence": "secondary",
+          "condition": "CADO row 'A380-800': CADO vtp_area; root station and dorsal-fin inclusion not stated by CADO, model exports the root-to-tip trapezoid without dorsal fillet",
+          "cite": "cado_enac_v1_3",
+          "tolerance": "geometry_area",
+          "condition_match": false
+        },
+        {
+          "id": "geometry.wing_area_m2_cado",
+          "category": "geometry",
+          "model_path": "geometry.wing_area_m2",
+          "source_value": 845.79,
+          "unit": "m^2",
+          "evidence": "secondary",
+          "condition": "CADO row 'A380-800': CADO wing_area; reference-area convention not stated",
+          "cite": "cado_enac_v1_3",
+          "tolerance": "geometry_area",
+          "condition_match": false
+        },
+        {
+          "id": "geometry.sweep_c4_deg_cado",
+          "category": "geometry",
+          "model_path": "geometry.sweep_c4_deg",
+          "source_value": 33.5,
+          "unit": "deg",
+          "evidence": "secondary",
+          "condition": "CADO row 'A380-800': CADO wing_sweep25 (single value, planform reference not stated); model exports the outboard-panel quarter-chord sweep",
+          "cite": "cado_enac_v1_3",
+          "tolerance": "sweep_angle",
+          "condition_match": false
+        },
+        {
+          "id": "geometry.outboard_engine_spanwise_position_m_cado",
+          "category": "geometry",
+          "model_path": "geometry.outboard_engine_spanwise_position_m",
+          "source_value": 25.734,
+          "unit": "m",
+          "evidence": "secondary",
+          "condition": "CADO row 'A380-800': CADO engine_y_arm is the outboard-engine axis offset of this four-engine aircraft; the model export carries only the inboard (first) engine station",
+          "cite": "cado_enac_v1_3",
+          "tolerance": "geometry_length",
+          "condition_match": false
+        },
+        {
+          "id": "mass.oew_kg_cado",
+          "category": "mass",
+          "model_path": "mass.oew_kg",
+          "source_value": 277145,
+          "unit": "kg",
+          "evidence": "secondary",
+          "condition": "CADO row 'A380-800': CADO owe; cabin standard and operator items not stated; CADO row is MTOW 560,005 kg / MLW 386,007 kg, consistent with the WV000 preset; engine variant GP7270",
+          "cite": "cado_enac_v1_3",
+          "tolerance": "mass_oew",
+          "condition_match": false
+        },
+        {
+          "id": "mass.usable_fuel_kg_cado",
+          "category": "mass",
+          "model_path": "payload_range.fuel_capacity_kg",
+          "source_value": 252234,
+          "unit": "kg",
+          "evidence": "secondary",
+          "condition": "CADO row 'A380-800': CADO max_fuel as mass; usable/total definition and density not stated; CADO row is MTOW 560,005 kg / MLW 386,007 kg, consistent with the WV000 preset; engine variant GP7270",
+          "cite": "cado_enac_v1_3",
+          "tolerance": "fuel_mass",
+          "condition_match": false
+        },
+        {
+          "id": "performance.vref_mlw_m_s_cado",
+          "category": "performance",
+          "model_path": "performance.vref_mlw_m_s",
+          "source_value": 70.99,
+          "unit": "m/s",
+          "evidence": "secondary",
+          "condition": "CADO row 'A380-800': CADO approach_speed (typical, km/h converted at 1/3.6); weight, flap setting and whether it is VREF or VREF+additive not stated; model exports 1.23 VS1g at MLW (255.58 km/h); CADO row is MTOW 560,005 kg / MLW 386,007 kg, consistent with the WV000 preset; engine variant GP7270",
+          "cite": "cado_enac_v1_3",
+          "tolerance": "approach_speed",
+          "condition_match": false
+        },
+        {
+          "id": "performance.tofl_isa_sl_mtow_m_cado",
+          "category": "performance",
+          "model_path": "performance.takeoff_field_length_isa_sl_mtow_m",
+          "source_value": 2850,
+          "unit": "m",
+          "evidence": "secondary",
+          "condition": "CADO row 'A380-800': CADO tofl; weight, atmosphere and runway conditions not stated; CADO row is MTOW 560,005 kg / MLW 386,007 kg, consistent with the WV000 preset; engine variant GP7270",
+          "cite": "cado_enac_v1_3",
+          "tolerance": "field_length",
+          "condition_match": false
+        },
+        {
+          "id": "performance.lfl_isa_sl_mlw_m_cado",
+          "category": "performance",
+          "model_path": "performance.landing_field_length_isa_sl_mlw_m",
+          "source_value": 1890,
+          "unit": "m",
+          "evidence": "secondary",
+          "condition": "CADO row 'A380-800': CADO lfl; weight and factored/unfactored basis not stated; CADO row is MTOW 560,005 kg / MLW 386,007 kg, consistent with the WV000 preset; engine variant GP7270",
+          "cite": "cado_enac_v1_3",
+          "tolerance": "field_length",
+          "condition_match": false
         }
       ]
     },
@@ -3526,6 +3896,54 @@
           "locator": "p.2, airfield performance (row-paired landing rows)",
           "tolerance": "field_length",
           "note": "Factored regulatory length; the model landing distance definition must include the same factor before this row is scored."
+        },
+        {
+          "id": "geometry.htail_area_m2_cado",
+          "category": "geometry",
+          "model_path": "geometry.htail_area_m2",
+          "source_value": 12,
+          "unit": "m^2",
+          "evidence": "secondary",
+          "condition": "CADO row 'ATR72-500Basic': CADO htp_area; gross/exposed reference definition not stated by CADO, model exports the trapezoid extended to the centreline; variant mismatch: CADO has no ATR 72-600 row; this is the ATR 72-500 (PW127F) airframe, whose wing and empennage the -600 retains",
+          "cite": "cado_enac_v1_3",
+          "tolerance": "geometry_area",
+          "condition_match": false
+        },
+        {
+          "id": "geometry.vtail_area_m2_cado",
+          "category": "geometry",
+          "model_path": "geometry.vtail_area_m2",
+          "source_value": 15,
+          "unit": "m^2",
+          "evidence": "secondary",
+          "condition": "CADO row 'ATR72-500Basic': CADO vtp_area; root station and dorsal-fin inclusion not stated by CADO, model exports the root-to-tip trapezoid without dorsal fillet; variant mismatch: CADO has no ATR 72-600 row; this is the ATR 72-500 (PW127F) airframe, whose wing and empennage the -600 retains",
+          "cite": "cado_enac_v1_3",
+          "tolerance": "geometry_area",
+          "condition_match": false
+        },
+        {
+          "id": "geometry.wing_area_m2_cado",
+          "category": "geometry",
+          "model_path": "geometry.wing_area_m2",
+          "source_value": 61.04,
+          "unit": "m^2",
+          "evidence": "secondary",
+          "condition": "CADO row 'ATR72-500Basic': CADO wing_area; reference-area convention not stated; variant mismatch: CADO has no ATR 72-600 row; this is the ATR 72-500 (PW127F) airframe, whose wing and empennage the -600 retains",
+          "cite": "cado_enac_v1_3",
+          "tolerance": "geometry_area",
+          "condition_match": false
+        },
+        {
+          "id": "geometry.engine_spanwise_position_m_cado",
+          "category": "geometry",
+          "model_path": "geometry.engine_spanwise_position_m",
+          "source_value": 4.05,
+          "unit": "m",
+          "evidence": "secondary",
+          "condition": "CADO row 'ATR72-500Basic': CADO engine_y_arm, wing-engine axis offset from the centreline; variant mismatch: CADO has no ATR 72-600 row; this is the ATR 72-500 (PW127F) airframe, whose wing and empennage the -600 retains",
+          "cite": "cado_enac_v1_3",
+          "tolerance": "geometry_length",
+          "condition_match": false
         }
       ]
     },
@@ -4019,6 +4437,127 @@
           "locator": "PDF p.38, section 3.2.2",
           "tolerance": "payload_range_nmi",
           "note": "Chart read, +-60 nmi, +-1 klb ZFW; medium confidence, secondary evidence, never scored."
+        },
+        {
+          "id": "geometry.htail_area_m2_cado",
+          "category": "geometry",
+          "model_path": "geometry.htail_area_m2",
+          "source_value": 78.6,
+          "unit": "m^2",
+          "evidence": "secondary",
+          "condition": "CADO row '787-9': CADO htp_area; gross/exposed reference definition not stated by CADO, model exports the trapezoid extended to the centreline",
+          "cite": "cado_enac_v1_3",
+          "tolerance": "geometry_area",
+          "condition_match": false
+        },
+        {
+          "id": "geometry.vtail_area_m2_cado",
+          "category": "geometry",
+          "model_path": "geometry.vtail_area_m2",
+          "source_value": 48.2,
+          "unit": "m^2",
+          "evidence": "secondary",
+          "condition": "CADO row '787-9': CADO vtp_area; root station and dorsal-fin inclusion not stated by CADO, model exports the root-to-tip trapezoid without dorsal fillet",
+          "cite": "cado_enac_v1_3",
+          "tolerance": "geometry_area",
+          "condition_match": false
+        },
+        {
+          "id": "geometry.wing_area_m2_cado",
+          "category": "geometry",
+          "model_path": "geometry.wing_area_m2",
+          "source_value": 377,
+          "unit": "m^2",
+          "evidence": "secondary",
+          "condition": "CADO row '787-9': CADO wing_area; reference-area convention not stated",
+          "cite": "cado_enac_v1_3",
+          "tolerance": "geometry_area",
+          "condition_match": false,
+          "note": "CADO and the existing OpenAP anchor both give 377 m^2; they may share an upstream source and are not independent corroboration."
+        },
+        {
+          "id": "geometry.sweep_c4_deg_cado",
+          "category": "geometry",
+          "model_path": "geometry.sweep_c4_deg",
+          "source_value": 31.1,
+          "unit": "deg",
+          "evidence": "secondary",
+          "condition": "CADO row '787-9': CADO wing_sweep25 (single value, planform reference not stated); model exports the outboard-panel quarter-chord sweep",
+          "cite": "cado_enac_v1_3",
+          "tolerance": "sweep_angle",
+          "condition_match": false
+        },
+        {
+          "id": "geometry.engine_spanwise_position_m_cado",
+          "category": "geometry",
+          "model_path": "geometry.engine_spanwise_position_m",
+          "source_value": 9.69,
+          "unit": "m",
+          "evidence": "secondary",
+          "condition": "CADO row '787-9': CADO engine_y_arm, wing-engine axis offset from the centreline",
+          "cite": "cado_enac_v1_3",
+          "tolerance": "geometry_length"
+        },
+        {
+          "id": "mass.oew_kg_cado",
+          "category": "mass",
+          "model_path": "mass.oew_kg",
+          "source_value": 128820,
+          "unit": "kg",
+          "evidence": "secondary",
+          "condition": "CADO row '787-9': CADO owe; cabin standard and operator items not stated; variant mismatch: CADO row is MTOW 250,840 kg / MLW 194,138 kg, the preset is the legacy 254,692 kg / 192,776 kg 787-9",
+          "cite": "cado_enac_v1_3",
+          "tolerance": "mass_oew",
+          "condition_match": false
+        },
+        {
+          "id": "mass.usable_fuel_kg_cado",
+          "category": "mass",
+          "model_path": "payload_range.fuel_capacity_kg",
+          "source_value": 101098,
+          "unit": "kg",
+          "evidence": "secondary",
+          "condition": "CADO row '787-9': CADO max_fuel as mass; usable/total definition and density not stated; variant mismatch: CADO row is MTOW 250,840 kg / MLW 194,138 kg, the preset is the legacy 254,692 kg / 192,776 kg 787-9",
+          "cite": "cado_enac_v1_3",
+          "tolerance": "fuel_mass",
+          "condition_match": false
+        },
+        {
+          "id": "performance.vref_mlw_m_s_cado",
+          "category": "performance",
+          "model_path": "performance.vref_mlw_m_s",
+          "source_value": 78.71,
+          "unit": "m/s",
+          "evidence": "secondary",
+          "condition": "CADO row '787-9': CADO approach_speed (typical, km/h converted at 1/3.6); weight, flap setting and whether it is VREF or VREF+additive not stated; model exports 1.23 VS1g at MLW (283.36 km/h); variant mismatch: CADO row is MTOW 250,840 kg / MLW 194,138 kg, the preset is the legacy 254,692 kg / 192,776 kg 787-9",
+          "cite": "cado_enac_v1_3",
+          "tolerance": "approach_speed",
+          "condition_match": false
+        },
+        {
+          "id": "performance.tofl_isa_sl_mtow_m_cado",
+          "category": "performance",
+          "model_path": "performance.takeoff_field_length_isa_sl_mtow_m",
+          "source_value": 2835,
+          "unit": "m",
+          "evidence": "secondary",
+          "condition": "CADO row '787-9': CADO tofl; weight, atmosphere and runway conditions not stated; variant mismatch: CADO row is MTOW 250,840 kg / MLW 194,138 kg, the preset is the legacy 254,692 kg / 192,776 kg 787-9",
+          "cite": "cado_enac_v1_3",
+          "tolerance": "field_length",
+          "condition_match": false
+        },
+        {
+          "id": "performance.lfl_isa_sl_mlw_m_cado",
+          "category": "performance",
+          "model_path": "performance.landing_field_length_isa_sl_mlw_m",
+          "source_value": 2987,
+          "unit": "m",
+          "evidence": "secondary",
+          "condition": "CADO row '787-9': CADO lfl; weight and factored/unfactored basis not stated; variant mismatch: CADO row is MTOW 250,840 kg / MLW 194,138 kg, the preset is the legacy 254,692 kg / 192,776 kg 787-9",
+          "cite": "cado_enac_v1_3",
+          "tolerance": "field_length",
+          "condition_match": false,
+          "note": "CADO data defect: the 787-8/-9/-10 rows give LFL equal to or above TOFL (787-9: 2,987 m vs TOFL 2,835 m), against 1,814 m on the Boeing ACAP chart; do not use as corroboration."
         }
       ]
     },
@@ -4475,6 +5014,125 @@
           "locator": "PDF p.54, section 3.2.1",
           "tolerance": "payload_range_nmi",
           "note": "Chart read, +-100 nmi; medium confidence, secondary evidence, never scored."
+        },
+        {
+          "id": "geometry.htail_area_m2_cado",
+          "category": "geometry",
+          "model_path": "geometry.htail_area_m2",
+          "source_value": 114.3,
+          "unit": "m^2",
+          "evidence": "secondary",
+          "condition": "CADO row 'DC-10-Series-30': CADO htp_area; gross/exposed reference definition not stated by CADO, model exports the trapezoid extended to the centreline",
+          "cite": "cado_enac_v1_3",
+          "tolerance": "geometry_area",
+          "condition_match": false
+        },
+        {
+          "id": "geometry.vtail_area_m2_cado",
+          "category": "geometry",
+          "model_path": "geometry.vtail_area_m2",
+          "source_value": 56.21,
+          "unit": "m^2",
+          "evidence": "secondary",
+          "condition": "CADO row 'DC-10-Series-30': CADO vtp_area; root station and dorsal-fin inclusion not stated by CADO, model exports the root-to-tip trapezoid without dorsal fillet",
+          "cite": "cado_enac_v1_3",
+          "tolerance": "geometry_area",
+          "condition_match": false
+        },
+        {
+          "id": "geometry.wing_area_m2_cado",
+          "category": "geometry",
+          "model_path": "geometry.wing_area_m2",
+          "source_value": 338.82,
+          "unit": "m^2",
+          "evidence": "secondary",
+          "condition": "CADO row 'DC-10-Series-30': CADO wing_area; reference-area convention not stated",
+          "cite": "cado_enac_v1_3",
+          "tolerance": "geometry_area",
+          "condition_match": false
+        },
+        {
+          "id": "geometry.sweep_c4_deg_cado",
+          "category": "geometry",
+          "model_path": "geometry.sweep_c4_deg",
+          "source_value": 35.2,
+          "unit": "deg",
+          "evidence": "secondary",
+          "condition": "CADO row 'DC-10-Series-30': CADO wing_sweep25 (single value, planform reference not stated); model exports the outboard-panel quarter-chord sweep",
+          "cite": "cado_enac_v1_3",
+          "tolerance": "sweep_angle",
+          "condition_match": false
+        },
+        {
+          "id": "geometry.engine_spanwise_position_m_cado",
+          "category": "geometry",
+          "model_path": "geometry.engine_spanwise_position_m",
+          "source_value": 8.187,
+          "unit": "m",
+          "evidence": "secondary",
+          "condition": "CADO row 'DC-10-Series-30': CADO engine_y_arm, wing-engine axis offset from the centreline",
+          "cite": "cado_enac_v1_3",
+          "tolerance": "geometry_length"
+        },
+        {
+          "id": "mass.oew_kg_cado",
+          "category": "mass",
+          "model_path": "mass.oew_kg",
+          "source_value": 121563,
+          "unit": "kg",
+          "evidence": "secondary",
+          "condition": "CADO row 'DC-10-Series-30': CADO owe; cabin standard and operator items not stated; variant mismatch: CADO row is the DC-10-30 at MTOW 256,280 kg / MLW 186,426 kg, the preset is the high-gross-weight option at 259,454 kg / 190,962 kg",
+          "cite": "cado_enac_v1_3",
+          "tolerance": "mass_oew",
+          "condition_match": false
+        },
+        {
+          "id": "mass.usable_fuel_kg_cado",
+          "category": "mass",
+          "model_path": "payload_range.fuel_capacity_kg",
+          "source_value": 110006,
+          "unit": "kg",
+          "evidence": "secondary",
+          "condition": "CADO row 'DC-10-Series-30': CADO max_fuel as mass; usable/total definition and density not stated; variant mismatch: CADO row is the DC-10-30 at MTOW 256,280 kg / MLW 186,426 kg, the preset is the high-gross-weight option at 259,454 kg / 190,962 kg",
+          "cite": "cado_enac_v1_3",
+          "tolerance": "fuel_mass",
+          "condition_match": false
+        },
+        {
+          "id": "performance.vref_mlw_m_s_cado",
+          "category": "performance",
+          "model_path": "performance.vref_mlw_m_s",
+          "source_value": 75.62,
+          "unit": "m/s",
+          "evidence": "secondary",
+          "condition": "CADO row 'DC-10-Series-30': CADO approach_speed (typical, km/h converted at 1/3.6); weight, flap setting and whether it is VREF or VREF+additive not stated; model exports 1.23 VS1g at MLW (272.24 km/h); variant mismatch: CADO row is the DC-10-30 at MTOW 256,280 kg / MLW 186,426 kg, the preset is the high-gross-weight option at 259,454 kg / 190,962 kg",
+          "cite": "cado_enac_v1_3",
+          "tolerance": "approach_speed",
+          "condition_match": false
+        },
+        {
+          "id": "performance.tofl_isa_sl_mtow_m_cado",
+          "category": "performance",
+          "model_path": "performance.takeoff_field_length_isa_sl_mtow_m",
+          "source_value": 3152,
+          "unit": "m",
+          "evidence": "secondary",
+          "condition": "CADO row 'DC-10-Series-30': CADO tofl; weight, atmosphere and runway conditions not stated; variant mismatch: CADO row is the DC-10-30 at MTOW 256,280 kg / MLW 186,426 kg, the preset is the high-gross-weight option at 259,454 kg / 190,962 kg",
+          "cite": "cado_enac_v1_3",
+          "tolerance": "field_length",
+          "condition_match": false
+        },
+        {
+          "id": "performance.lfl_isa_sl_mlw_m_cado",
+          "category": "performance",
+          "model_path": "performance.landing_field_length_isa_sl_mlw_m",
+          "source_value": 1820,
+          "unit": "m",
+          "evidence": "secondary",
+          "condition": "CADO row 'DC-10-Series-30': CADO lfl; weight and factored/unfactored basis not stated; variant mismatch: CADO row is the DC-10-30 at MTOW 256,280 kg / MLW 186,426 kg, the preset is the high-gross-weight option at 259,454 kg / 190,962 kg",
+          "cite": "cado_enac_v1_3",
+          "tolerance": "field_length",
+          "condition_match": false
         }
       ]
     }

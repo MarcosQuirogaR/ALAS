@@ -26,6 +26,7 @@ use crate::loads;
 use crate::sizing::{trapezoid, WingboxSizing};
 
 mod section;
+mod stress;
 use section::{ei_curve, mass_per_length};
 
 /// `(beta*L, sigma)` for the first four cantilever bending modes: the
@@ -237,7 +238,7 @@ pub fn analyze_structure_reference_compatibility(
 /// this entry point does not silently remove the design state's fuel relief.
 /// Use identical requirements, fuel and point masses for sizing and analysis.
 /// Invalid arrays produce nonfinite results for a fail-closed assessment.
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments)] // Explicit geometry, materials and carried-mass load state.
 pub fn analyze_structure_with_wing_carried_mass(
     wsg: &WingStructureGeometry,
     sizing: &WingboxSizing,
@@ -269,7 +270,7 @@ pub fn analyze_structure_with_wing_carried_mass(
 
 /// Internal product path: an explicit structural running mass keeps swept
 /// cap/web length in both the mass budget and every inertial/modal response.
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments)] // Adds a conserved structural density to the public load-state inputs.
 pub(crate) fn analyze_structure_with_running_mass(
     wsg: &WingStructureGeometry,
     sizing: &WingboxSizing,
@@ -365,18 +366,15 @@ fn analyze_structure_with_rib_mass(
     let semi_span = wsg.semi_span;
     let g = req.gravity_m_s2;
 
-    let ei = ei_curve(sizing, cap_mat, skin_mat);
-    // The cover skin the product law credited beside each cap; the frozen law
-    // sized its caps for the whole moment and recovers stress on them alone.
-    let cover_skin: Vec<Vec<f64>> = (0..n)
-        .map(|j| {
-            if credit_cover_skin {
-                crate::sizing::sizing_cover_skin_boom_areas_m2(sizing, j)
-            } else {
-                Vec::new()
-            }
-        })
-        .collect();
+    let ei = if credit_cover_skin {
+        (0..n)
+            .map(|station| {
+                crate::sizing::section::station_ei(sizing, station, skin_mat, web_mat, cap_mat)
+            })
+            .collect()
+    } else {
+        ei_curve(sizing, cap_mat, skin_mat)
+    };
     let mut m_y = structural_running_mass_kg_m.map_or_else(
         || {
             mass_per_length(
@@ -421,8 +419,11 @@ fn analyze_structure_with_rib_mass(
         // `loads::net_distributed_load` documents.
         let q_aero = loads::elliptic_distributed_load(y, semi_span, l_total);
         let q_net = loads::net_distributed_load(&q_aero, n_factor, g, &m_y);
-        let (v, mut m) = loads::cantilever_shear_moment(y, &q_net);
+        let (mut v, mut m) = loads::cantilever_shear_moment(y, &q_net);
         loads::apply_point_mass_relief(y, &mut m, n_factor, g, &engine_loads);
+        if credit_cover_skin {
+            loads::apply_point_mass_shear_relief(y, &mut v, n_factor, g, &engine_loads);
+        }
 
         let tip_terms: Vec<f64> = (0..n).map(|j| m[j] * m_bar_tip[j] / ei[j]).collect();
         let tip_deflection_m = trapezoid(&tip_terms, y) * sign;
@@ -430,31 +431,15 @@ fn analyze_structure_with_rib_mass(
         let deflection_m: Vec<f64> = defl_curve.iter().map(|&d| d * sign).collect();
         let m_signed: Vec<f64> = m.iter().map(|&mj| mj * sign).collect();
 
-        let mut spar_stress: Vec<SparStressResult> = Vec::with_capacity(sizing.spars.len());
-        for (i, s) in sizing.spars.iter().enumerate() {
-            let stress_pa: Vec<f64> = (0..n)
-                .map(|j| {
-                    let h_eff = s.h[j] * 0.85;
-                    let skin = cover_skin[j].get(i).copied().unwrap_or(0.0);
-                    (s.frac_moment[j] * m_signed[j]).abs()
-                        / ((s.a_cap[j] + skin) * h_eff).max(1e-12)
-                })
-                .collect();
-            let margin_of_safety: Vec<f64> = (0..n)
-                .map(|j| {
-                    if (s.frac_moment[j] * m_signed[j]).abs() > 1.0 {
-                        cap_mat.f_allow_pa / stress_pa[j].max(1e-9) - 1.0
-                    } else {
-                        f64::INFINITY
-                    }
-                })
-                .collect();
-            spar_stress.push(SparStressResult {
-                chord_fraction: s.chord_fraction,
-                stress_pa,
-                margin_of_safety,
-            });
-        }
+        let spar_stress = stress::recover(
+            sizing,
+            &m_signed,
+            &v,
+            skin_mat,
+            web_mat,
+            cap_mat,
+            credit_cover_skin,
+        );
 
         load_cases.push(LoadCaseResult {
             name: case.name,
@@ -496,6 +481,27 @@ fn analyze_structure_with_rib_mass(
 mod tests {
     use super::*;
     use crate::sizing::MassBreakdown;
+
+    #[test]
+    fn virtual_work_recovers_the_uniform_cantilever_tip_and_curve() {
+        // Bruhn, 1973, A6: delta_tip=q*L^4/(8*EI). This verifies metre,
+        // newton and EI units plus the single curvature integration.
+        let length = 12.0_f64;
+        let load = 2500.0;
+        let stiffness = 3.0e8;
+        let stations: Vec<_> = (0..401)
+            .map(|index| length * index as f64 / 400.0)
+            .collect();
+        let moment: Vec<_> = stations
+            .iter()
+            .map(|station| load * (length - station).powi(2) / 2.0)
+            .collect();
+        let deflection = deflection_curve(&stations, &moment, &vec![stiffness; stations.len()]);
+        let expected = load * length.powi(4) / (8.0 * stiffness);
+        assert!((deflection[400] / expected - 1.0).abs() < 7.0e-6);
+        assert_eq!(deflection[0], 0.0);
+        assert!(deflection.windows(2).all(|pair| pair[1] >= pair[0]));
+    }
 
     #[test]
     fn an_empty_station_grid_has_zero_frequencies_rather_than_a_panic() {

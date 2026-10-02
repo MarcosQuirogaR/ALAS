@@ -4,11 +4,17 @@
 //! Shared native structural feasibility and final finite-element vetoes.
 
 use super::{error, warning, FindingCode, PhysicalFinding};
-use crate::{full_analysis::AnalysisReport, structural::StructuralAnalysisResult};
+use crate::{
+    full_analysis::AnalysisReport,
+    structural::{StructuralAnalysisResult, WingMassComparison},
+};
 use alas_config::{AlasConfig, DesignVector};
 use alas_struct::nastran::ResultStatus;
 
+mod delivery;
+mod shell_stress;
 mod spanwise;
+pub(crate) use delivery::append as append_delivery;
 
 /// Keep the GUI's branch-specific optimizer record consistent with delivery.
 pub(crate) fn sync_selected_delivery(
@@ -120,17 +126,40 @@ pub(super) fn append_native(
             return;
         }
     };
-    let strength_limit = 1.0 + alas_struct::sizing::MARGIN_NUMERICAL_ZERO;
     let wing_mass_kg = report
         .component_masses
         .get(alas_mass::breakdown::WING)
         .copied();
-    append_mass_comparisons(
-        Some(assessment.primary_mass_kg),
+    let masses = WingMassComparison::new(
+        assessment.primary_mass_kg,
         assessment.mesh_primary_mass_kg,
-        wing_mass_kg,
-        findings,
+        wing_mass_kg.unwrap_or(f64::NAN),
     );
+    append_assessment(&assessment, &masses, findings);
+}
+
+fn append_assessment(
+    assessment: &alas_struct::feasibility::StructuralFeasibility,
+    masses: &WingMassComparison,
+    findings: &mut Vec<PhysicalFinding>,
+) {
+    let strength_limit = 1.0 + alas_struct::sizing::MARGIN_NUMERICAL_ZERO;
+    append_mass_comparisons(masses, findings);
+    // The station split uses this sized native box. A frozen-reference
+    // diagnostic or a wider-cover FE deck cannot prove that it fits inside
+    // the current authoritative complete-wing inventory.
+    if !alas_mass::wing_reconciliation::primary_fits_complete_wing(
+        assessment.primary_mass_kg,
+        masses.flops_complete_wing_kg,
+    ) {
+        findings.push(error(
+            FindingCode::StructuralInventoryUnverified,
+            "candidate primary box leaves no positive secondary remainder within the current complete-wing mass",
+            Some(assessment.primary_mass_kg),
+            Some(masses.flops_complete_wing_kg),
+            "kg",
+        ));
+    }
     for (actual, limit, label) in [
         (
             assessment.max_strength_utilization,
@@ -165,7 +194,7 @@ pub(super) fn append_native(
         > assessment.limits.max_curvature_relative_error
     {
         findings.push(warning(FindingCode::StructuralLinearModelDomain,
-            "ultimate-load wing deflection exceeds the linear beam curvature error budget; the reported ultimate deflection is a linear estimate, the ultimate stresses are unaffected",
+            "ultimate-load wing response exceeds the linear beam curvature budget; deflection and stresses require geometric-nonlinearity review",
             Some(assessment.manoeuvre_curvature_relative_error), Some(assessment.limits.max_curvature_relative_error), "fraction"));
     }
 }
@@ -173,8 +202,8 @@ pub(super) fn append_native(
 /// Whether an FE case outside the linear curvature budget vetoes the result.
 ///
 /// Only the 1 g flight shape does, for the reason
-/// `alas_struct::feasibility` states: an ultimate case outside the budget has
-/// a linear deflection estimate but unaffected stresses, and is a warning.
+/// `alas_struct::feasibility` states: an ultimate case outside the budget
+/// requires a geometric-nonlinearity review and remains a diagnostic.
 fn curvature_finding(
     case: &str,
     code: FindingCode,
@@ -189,12 +218,8 @@ fn curvature_finding(
     }
 }
 
-fn append_mass_comparisons(
-    native_kg: Option<f64>,
-    mesh_kg: Option<f64>,
-    empirical_kg: Option<f64>,
-    findings: &mut Vec<PhysicalFinding>,
-) {
+fn append_mass_comparisons(masses: &WingMassComparison, findings: &mut Vec<PhysicalFinding>) {
+    let empirical_kg = Some(masses.flops_complete_wing_kg).filter(|mass| mass.is_finite());
     let empirical_valid = empirical_kg.is_some_and(|mass| mass.is_finite() && mass > 0.0);
     if !empirical_valid {
         findings.push(error(
@@ -205,10 +230,7 @@ fn append_mass_comparisons(
             "kg",
         ));
     }
-    for (label, mass) in [
-        ("native primary structure", native_kg),
-        ("FE primary material", mesh_kg),
-    ] {
+    for (label, mass) in masses.primary_inventories() {
         match mass.filter(|v| v.is_finite() && *v > 0.0) {
             None => findings.push(error(
                 FindingCode::StructuralResponseUnavailable,
@@ -351,6 +373,12 @@ pub(crate) fn append_downstream(
             )),
         }
         spanwise::append(config, solver, response, findings);
+        shell_stress::append(
+            result.evaluation_inputs.as_ref(),
+            solver,
+            response,
+            findings,
+        );
         for (case, tip) in response.tip_deflection_m.iter() {
             match fem_curvature_lower_bound(tip, semispan) {
                 Some(error_bound) if error_bound <= config.structures.max_linear_curvature_relative_error => {},
@@ -377,7 +405,7 @@ fn strongest_declared_allowable(config: &AlasConfig) -> Option<f64> {
         &cfg.rib_material,
     ] {
         let allowable =
-            alas_config::materials::get(name).ok()?.f_allow_pa / cfg.additional_safety_factor;
+            alas_struct::allowables::bending_allowable_pa(alas_config::materials::get(name).ok()?);
         if !allowable.is_finite() || allowable <= 0.0 {
             return None;
         }

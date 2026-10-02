@@ -14,6 +14,11 @@
 
 use alas_units::{FOOT, INCH, POUND_FORCE, POUND_MASS};
 
+pub(super) mod gear_length;
+pub mod pressurized_fuselage;
+
+use pressurized_fuselage::{pressurized_fuselage_kg, PressurizedFuselageInputs};
+
 /// FLOPS Table 1 wing constants for transport and hybrid-wing-body aircraft.
 const A1: f64 = 8.80;
 const A2: f64 = 6.25;
@@ -359,6 +364,10 @@ pub struct FlopsStructureInputs {
     /// here, so the nacelle still reaches the structural total exactly once
     /// and from exactly one method.
     pub nacelle_mass_override_kg: Option<f64>,
+    /// The pressure-bending fuselage inputs, when the aircraft belongs to the
+    /// regional turboprop class whose fuselage equation 56 does not describe
+    /// ([`pressurized_fuselage`]). `None` evaluates equation 56.
+    pub pressurized_fuselage: Option<PressurizedFuselageInputs>,
 }
 
 /// The structural group, kg, with the wing terms kept separately.
@@ -402,14 +411,17 @@ pub fn estimate_flops_structure(inputs: &FlopsStructureInputs) -> FlopsStructure
     // Equation 56 multiplies by `NFUSE` linearly. The wing inputs carry the
     // single declared fuselage count (equation 34's `CAYF` reads the same
     // one), so the two equations cannot disagree about the architecture.
-    let fuselage = fuselage_kg(
-        inputs.fuselage_length_m,
-        inputs.fuselage_width_m,
-        inputs.fuselage_depth_m,
-        inputs.scaled_fuselage_engines,
-        inputs.military_cargo_floor,
-        inputs.wing.fuselage_count.max(1),
-    );
+    let fuselage = match inputs.pressurized_fuselage.as_ref() {
+        Some(pressurized) => pressurized_fuselage_kg(pressurized, wing.total_kg),
+        None => fuselage_kg(
+            inputs.fuselage_length_m,
+            inputs.fuselage_width_m,
+            inputs.fuselage_depth_m,
+            inputs.scaled_fuselage_engines,
+            inputs.military_cargo_floor,
+            inputs.wing.fuselage_count.max(1),
+        ),
+    };
     let main_gear = main_gear_kg(
         inputs.design_landing_mass_kg,
         inputs.main_gear_oleo_length_m,

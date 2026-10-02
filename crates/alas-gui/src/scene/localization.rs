@@ -49,7 +49,6 @@ pub(super) fn localize_scene_text(text: &str) -> String {
     }
     for (prefix, key) in [
         ("Wingbox planform", "Wingbox planform"),
-        ("FEM vs Torenbeek wing mass", "FEM vs Torenbeek wing mass"),
         ("Lift curve", "Lift curve"),
         ("Spar x/c=", "Spar x/c="),
         ("Engine:", "Engine:"),

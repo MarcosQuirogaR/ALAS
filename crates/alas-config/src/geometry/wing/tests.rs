@@ -195,3 +195,57 @@ fn both_section_fields_offer_the_airfoil_library_and_still_accept_a_naca_code() 
     }
     assert!(OptionSource::Airfoil.editable());
 }
+
+#[test]
+fn a_wing_without_a_tip_rise_has_one_shape_on_the_ground_and_in_flight() {
+    let wing = WingConfig::default();
+    let planform = wing.transport_planform(&DesignVector::default()).unwrap();
+    assert_eq!(
+        wing.heights(WingShape::Flight, &planform).unwrap(),
+        wing.heights(WingShape::Ground, &planform).unwrap()
+    );
+}
+
+#[test]
+fn the_flight_shape_adds_one_dihedral_increment_from_the_centreline() {
+    // The declared tip rise over the semispan, the same at every station:
+    // the root does not move, the tip rises by the declared fraction of the
+    // semispan, and every station in between by its own span fraction of it.
+    let wing = WingConfig {
+        flight_tip_rise_semispan_fraction: Some(0.1),
+        ..WingConfig::default()
+    };
+    let planform = wing.transport_planform(&DesignVector::default()).unwrap();
+    let ground = wing.heights(WingShape::Ground, &planform).unwrap();
+    let flight = wing.heights(WingShape::Flight, &planform).unwrap();
+    let semi_span = planform.tip.y_m;
+
+    assert_eq!(flight.root_z_m, ground.root_z_m);
+    assert!((flight.tip_z_m - ground.tip_z_m - 0.1 * semi_span).abs() < 1e-12);
+    for k in 0..=40 {
+        let y = semi_span * f64::from(k) / 40.0;
+        let rise = flight.at(&planform, y) - ground.at(&planform, y);
+        assert!((rise - 0.1 * y).abs() < 1e-9, "rise {rise} at y = {y}");
+    }
+}
+
+#[test]
+fn a_sagging_or_out_of_range_flight_tip_rise_is_rejected() {
+    let planform = WingConfig::default()
+        .transport_planform(&DesignVector::default())
+        .unwrap();
+    for fraction in [
+        -0.01,
+        MAX_FLIGHT_TIP_RISE_SEMISPAN_FRACTION + 0.01,
+        f64::NAN,
+    ] {
+        let wing = WingConfig {
+            flight_tip_rise_semispan_fraction: Some(fraction),
+            ..WingConfig::default()
+        };
+        assert!(
+            wing.heights(WingShape::Flight, &planform).is_err(),
+            "{fraction} accepted"
+        );
+    }
+}

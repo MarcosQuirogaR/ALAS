@@ -135,8 +135,28 @@ one that is dispatch-feasible.
 | Geometry | `span` (below the aerodrome reference code letter's wingspan limit, ICAO Annex 14 Table 1-1), `panel_washout_max`, `root_to_kink_te_angle` (exposed edge), `wing_area`, `wing_loading`, body-angle window, plausibility windows, cargo target deviation and passenger shortfall | Aircraft bounds, preferences and model validity. |
 
 Preset wing, engine and fin heights come from the airport-planning ground
-clearances at MRW and aft CG: planform heights fitted to static MRW ground
-clearances; in-flight dihedral and roll stability understated.
+clearances at MRW and aft CG, so the configured wing heights are the static
+**ground shape**. `geometry.wing.flight_tip_rise_semispan_fraction` adds the
+static-to-1 g tip rise of the **flight shape**, spread as one uniform dihedral
+increment from the centreline (`alas_config::WingShape`). The builder lofts
+the flight shape by default: the lattice, the dihedral effect, the layout
+dihedral check and the wingbox layout read it. Ground clearance, nacelle strike
+and the FLOPS main-gear oleo dihedral term read the ground shape. Only the
+A380 declares a rise (Airbus Facts and Figures: over 4 m at take-off); the
+other presets carry one shape, so their in-flight dihedral and roll stability
+stay understated where their heights are ground-fitted (A320, A340).
+
+The fin root is attached to the body. `geometry.empennage.vstab_z_m` is the
+line the drawn fin height and root chord are measured from (usually the
+fuselage top line at the fin); the builder continues the fin trapezoid's
+straight edges down, or trims them up, until the root meets the lowest point
+of the top of the fuselage, or of a centreline nacelle, under its root chord.
+No part of the root then floats above a tapering tail cone, and the tip stays
+at its drawn height. The published fin areas are those of the trapezoid to its
+stated reference line (A320 21.5 m^2 above the fuselage top line, A220
+28.2 m^2 to the fuselage axis); the built fin, which every mass, stability
+and lattice consumer reads, spans from the tail cone, between those two
+reference lines.
 
 ## Engineering-source qualification
 

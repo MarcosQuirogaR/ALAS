@@ -11,10 +11,10 @@ use alas_mass::breakdown::{
     run_product_mass_analysis_with_groups, FlopsMassBuildup, MassCoordinateModel,
     PayloadLayoutSummary,
 };
+use alas_mass::product_stations::product_component_stations;
 use alas_mass::statement::{
     LedgerMethods, LoadState, MassStatement, MassStatementInputs, PayloadItemSummary,
 };
-use alas_mass::stations::component_stations_with_gear;
 use alas_mass::tanks::resolve_product_layout;
 use alas_payload::{build::build_payload_layout, oew::oew_and_cg};
 
@@ -56,17 +56,8 @@ pub(super) fn loading_basis(
     // The wingbox centroid belongs to the structure's design load, not this
     // sector's dispatch load. Reference aircraft retain their declared gross
     // mass; only coupled clean-sheet structures follow the closed mass.
-    let mut station_requirements = config.requirements.clone();
-    station_requirements.mtow_kg = outcome.sized.design_gross_mass_kg;
-    let stations = component_stations_with_gear(
-        plane,
-        &config.geometry,
-        &station_requirements,
-        &config.mass_model,
-        &config.structures,
-        &config.landing_gear,
-    )
-    .map_err(|error| format!("ledger stations: {error}"))?;
+    let stations = product_component_stations(&config, &outcome.history.dv, plane, &outcome.masses)
+        .map_err(|error| format!("ledger stations: {error}"))?;
     let mut tanks = resolve_product_layout(&config, &outcome.history.dv, plane)
         .map_err(|error| format!("ledger tanks: {error}"))?;
     let groups = buildup.as_deref().map(|b| &b.systems_and_operating_items);
@@ -75,11 +66,13 @@ pub(super) fn loading_basis(
             .with_unusable_fuel_total(groups.operating_items.unusable_fuel_kg)
             .map_err(|error| format!("ledger unusable fuel: {error}"))?;
     }
-    let fuel_kg = outcome
+    let carried_kg = outcome
         .masses
         .physical_fuel_mass_kg()
-        .ok_or_else(|| "nonphysical ledger fuel mass".to_owned())?
-        .min(tanks.usable_capacity_kg());
+        .ok_or_else(|| "nonphysical ledger fuel mass".to_owned())?;
+    let fuel_kg = tanks
+        .loadable_fuel_kg(carried_kg)
+        .map_err(|error| format!("ledger fuel load: {error}"))?;
     let fuel = tanks
         .distribute(fuel_kg)
         .map_err(|error| format!("ledger fuel distribution: {error}"))?;
@@ -166,7 +159,14 @@ mod tests {
                 (ledger.zero_fuel_mass_kg - ledger.oew_mass_kg - outcome.masses.payload).abs()
                     < 1.0e-6 * scale
             );
-            assert!(ledger.takeoff_mass_kg >= ledger.zero_fuel_mass_kg);
+            // The tanks carry the whole dispatched fuel: none is clipped away.
+            let carried_kg = outcome.masses.physical_fuel_mass_kg().unwrap_or(f64::NAN);
+            assert!(
+                (ledger.takeoff_mass_kg - ledger.zero_fuel_mass_kg - carried_kg).abs()
+                    < 1.0e-6 * scale,
+                "{name}: ledger fuel {} differs from carried {carried_kg}",
+                ledger.takeoff_mass_kg - ledger.zero_fuel_mass_kg
+            );
             let assessment = crate::envelope::assess_model_cg_envelope_with_ledger(
                 &outcome.plane,
                 ledger,

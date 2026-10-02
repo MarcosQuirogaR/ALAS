@@ -187,6 +187,7 @@ mod tests {
             },
             polar_fit: PolarFit {
                 cd0: 0.02,
+                c1: 0.0,
                 k: 0.04,
                 oswald_e: 0.85,
                 aspect_ratio: 9.0,

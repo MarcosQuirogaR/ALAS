@@ -7,9 +7,10 @@
 
 use alas_config::AlasConfig;
 use alas_perf::performance::{
-    assess_oei_climb, build_matching_chart, compute_v_speeds, far25_oei_gradient,
+    assess_oei_climb, build_matching_chart, compute_v_speeds, far25_oei_gradient, oei_cl_at_v2,
     MatchingChartData, OeiV2Condition,
 };
+use alas_pipeline::field_reference::candidate_field_polar;
 use alas_pipeline::full_analysis::AnalysisReport;
 
 use crate::chart_kit::{draw_legend, draw_title, LegendMarker};
@@ -80,9 +81,55 @@ pub fn figure_matching_chart(
     let n_engines = config.geometry.engine.spanwise_positions_m.len() as i64;
     let oei_gradient = far25_oei_gradient(n_engines).unwrap_or(performance.oei_gradient);
     let tw_design = static_thrust_to_weight(config, takeoff_mass_kg, 0.30);
+    let v_speeds = compute_v_speeds(
+        takeoff_mass_kg,
+        wing_area,
+        departure,
+        performance.cl_max_to,
+        performance.cl_max_land,
+        performance,
+    );
+    let Some(cl_v2) = oei_cl_at_v2(
+        performance.cl_max_to,
+        v_speeds.v2_ms / v_speeds.v_stall_to_ms,
+    ) else {
+        return status_message_scene("Matching Chart", "Departure V2 lift is unavailable.", theme);
+    };
+    let departure_atmosphere =
+        alas_atmo::us1976_compute_values(departure.elevation_m, departure.isa_deviation_c);
+    let field_polar = candidate_field_polar(
+        config,
+        report,
+        cl_v2,
+        v_speeds.v2_ms / departure_atmosphere.speed_of_sound_m_s,
+        departure.elevation_m,
+        departure.isa_deviation_c,
+    );
+    let (cd0, k) = match field_polar {
+        Ok(polar) => polar,
+        Err(reason) => return status_message_scene("Matching Chart", &reason, theme),
+    };
+    let artifacts = match report.fuel.artifacts(config, &report.design) {
+        Ok(artifacts) => artifacts,
+        Err(reason) => return status_message_scene("Matching Chart", &reason, theme),
+    };
+    let cruise_atmosphere = alas_atmo::Atmosphere::new(requirements.cruise_altitude_m);
+    let cruise_speed = requirements.cruise_mach * cruise_atmosphere.speed_of_sound();
+    let cruise_q = 0.5 * cruise_atmosphere.density() * cruise_speed * cruise_speed;
+    if !cruise_q.is_finite()
+        || cruise_q <= 0.0
+        || !performance.thrust_lapse.is_finite()
+        || performance.thrust_lapse <= 0.0
+    {
+        return status_message_scene(
+            "Matching Chart",
+            "Cruise atmosphere or lapse is invalid.",
+            theme,
+        );
+    }
     let mut data = build_matching_chart(
-        report.polar_fit.cd0,
-        report.polar_fit.k,
+        cd0,
+        k,
         requirements.cruise_mach,
         requirements.cruise_altitude_m,
         takeoff_mass_kg,
@@ -94,31 +141,38 @@ pub fn figure_matching_chart(
         Some(performance.thrust_lapse),
         Some(oei_gradient),
         Some(performance.k_land),
-        Some(performance.oei_climb_cl),
+        Some(cl_v2),
         Some(performance.oei_climb_delta_cd),
         Some(tw_design),
         performance.matching_chart_resolution,
         Some(performance.ws_min_pa),
         Some(performance.ws_max_pa),
     );
+    // Each wing loading has its own cruise CL. The field point projection
+    // above is valid only at V2, so replace the compatibility cruise curve
+    // with direct evaluations of the same candidate drag used for fuel.
+    data.tw_cruise = data
+        .ws_pa
+        .iter()
+        .map(|&ws| {
+            let cl = ws * wing_area / artifacts.reference_area_m2 / cruise_q;
+            artifacts
+                .drag
+                .cd(cl, requirements.cruise_mach, requirements.cruise_altitude_m)
+                / cl
+                / performance.thrust_lapse
+        })
+        .collect();
 
     // The chart's y-axis is installed sea-level-static T/W.  A generic cruise
     // lapse is not a valid conversion for the OEI V2 condition, so only use a
     // condition-specific ratio when departure/V2 evidence is present.
-    let v_speeds = compute_v_speeds(
-        takeoff_mass_kg,
-        wing_area,
-        departure,
-        performance.cl_max_to,
-        performance.cl_max_land,
-        performance,
-    );
     data.oei_climb_assessment = assess_oei_climb(
-        report.polar_fit.cd0,
-        report.polar_fit.k,
+        cd0,
+        k,
         n_engines,
         oei_gradient,
-        performance.oei_climb_cl,
+        cl_v2,
         performance.oei_climb_delta_cd,
         performance.cl_max_to,
         Some(OeiV2Condition {

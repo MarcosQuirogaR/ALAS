@@ -218,9 +218,14 @@ impl WingStructureGeometry {
         let c_break = dv.break_chord_m;
         let c_tip = dv.tip_chord_m;
 
-        let z_root = wing_cfg.root_z_m;
-        let z_break = wing_cfg.break_z_m;
-        let z_tip = wing_cfg.tip_z_m;
+        // The box carries the flight loads, so it is laid out on the 1 g
+        // flight shape the aerodynamic wing is lofted on.
+        let heights = wing_cfg
+            .heights(alas_config::WingShape::Flight, &planform)
+            .map_err(|_| WingStructureError::InvalidPlanform)?;
+        let z_root = heights.root_z_m;
+        let z_break = heights.break_z_m;
+        let z_tip = heights.tip_z_m;
 
         let owned_full_span;
         let full_span_in: &[bool] = match spar_full_span {

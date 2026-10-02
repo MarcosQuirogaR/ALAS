@@ -21,7 +21,7 @@ use super::build::first_mass_pass;
 use super::engine::static_thrust_kn_per_engine;
 use super::mda::{converge, MdaContext, MdaState};
 use super::mission_model::SizingBudget;
-use super::tanks::tank_capacity_kg;
+use super::tanks::usable_fuel_capacity;
 use super::trim::{trim_and_polar, TrimmedPolar};
 use super::types::{
     CandidateFailure, CandidateFuelArtifacts, ExternalPolar, HistoryFields, PayloadCapacity,
@@ -251,7 +251,10 @@ pub(crate) fn run_candidate_cancellable(
     // `SegmentMissionModel::minimum_flyable_profile_range_m`.
     let minimum_profile_range_m = model.minimum_flyable_profile_range_m();
 
-    let tank_capacity = tank_capacity_kg(&candidate_config, &plane, &dv);
+    // The one capacity rule the full analysis applies too: published for an
+    // unchanged preset, else the resolved layout.
+    let capacity_assessment = usable_fuel_capacity(&candidate_config, &dv, &plane);
+    let tank_capacity = capacity_assessment.map(|capacity| capacity.kg);
 
     model.cancellation = cancellation;
     let design_mission = super::mtow_modes::closure_mission(
@@ -294,6 +297,8 @@ pub(crate) fn run_candidate_cancellable(
         retrim_allowed: external.is_none(),
         structural_reference: structural_reference.reference,
         structural_feedback: structural_reference.feedback,
+        structural_inventory_complete: structural_reference.inventory_complete,
+        wing_box: Default::default(),
     };
     let closure = converge(
         &context,
@@ -370,6 +375,13 @@ pub(crate) fn run_candidate_cancellable(
         )?),
         _ => None,
     };
+    // MDA updates the candidate box and current FLOPS total. An initially
+    // complete frozen-reference diagnostic cannot verify the final inventory.
+    let structural_inventory_complete = closure.structural_inventory_complete
+        && alas_mass::wing_reconciliation::primary_fits_complete_wing(
+            closure.structural_feedback.primary_mass_kg,
+            state.masses.wing,
+        );
     let sized = SizedCandidate {
         takeoff_mass_kg: analysis_takeoff_mass_kg,
         sizing_basis,
@@ -418,9 +430,10 @@ pub(crate) fn run_candidate_cancellable(
         dispatch: closure.dispatch,
         sizing_iterations: closure.sizing_iterations,
         sizing_closed: closure.sizing_closed,
+        takeoff_mass_settled: closure.takeoff_mass_settled,
         retrim_count: closure.retrim_count,
         cg_shift_pct_mac: closure.cg_shift_pct_mac,
-        structural_inventory_complete: structural_reference.inventory_complete,
+        structural_inventory_complete,
         structural_primary_mass_kg: closure.structural_feedback.primary_mass_kg,
         structural_secondary_mass_kg: closure.structural_feedback.secondary_mass_kg,
     };
@@ -455,7 +468,7 @@ pub(crate) fn run_candidate_cancellable(
         sized,
         history,
         capacity,
-        structural_inventory_complete: structural_reference.inventory_complete,
+        structural_inventory_complete,
     })
 }
 

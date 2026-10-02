@@ -40,6 +40,9 @@ use alas_testkit::{Comparison, Tier};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+#[path = "support/performance_fields.rs"]
+mod performance_fields;
+
 /// One preset as the fixture records it. `settings` is the whole
 /// configuration, whatever the preset's own dataclass called the field
 /// holding it.
@@ -259,6 +262,21 @@ fn compare_settings(
         comparison.exact(&format!("{path}.{key}"), actual_value, expected_value);
     }
     for key in actual.keys() {
+        if performance_fields::is_native_field(path, key) {
+            if key.ends_with("_source") {
+                assert!(actual[key]
+                    .as_str()
+                    .is_some_and(|source| !source.is_empty()));
+            } else {
+                let default = to_value(&alas_config::PerformanceConfig::default());
+                comparison.exact(
+                    &format!("{path}.{key}: left at the default"),
+                    &actual[key],
+                    &default[key],
+                );
+            }
+            continue;
+        }
         // A native addition has no upstream value to compare with, but a
         // preset must still leave it alone: it has to stay at the default.
         if NATIVE_ANALYSIS_ADDITIONS.contains(&key.as_str()) {

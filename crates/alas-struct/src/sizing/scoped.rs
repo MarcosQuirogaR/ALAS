@@ -20,7 +20,7 @@ use alas_geom::wing_structure::WingStructureGeometry;
 use crate::loads::WingInertiaRelief;
 use crate::scope::{
     GustEnvelope, NotAvailable, OmissionDirection, ReliefConvergence, RootDatum, SizingScope,
-    WingFuelDesignCase, WingFuelDistribution, WingMountedRelief, POINT_MASS_SHEAR_RELIEF,
+    WingFuelDesignCase, WingFuelDistribution, WingMountedRelief,
 };
 use crate::tanks;
 
@@ -138,7 +138,7 @@ pub fn size_wingbox_with_scope(
         wing_mounted_omissions,
         root_datum: RootDatum::aircraft_centreline(),
         relief_convergence,
-        solve_omissions: vec![POINT_MASS_SHEAR_RELIEF],
+        solve_omissions: Vec::new(),
     };
     SizedWingbox { sizing, scope }
 }
@@ -249,7 +249,7 @@ pub(super) fn solve_relieved(
 /// A fully stressed fixed point must be checked against its final relief,
 /// not only against the preceding iterate's mass. Exit on the conservative
 /// side of the contraction; do not manufacture a wider strength tolerance.
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments)] // Rechecks every material against the final, explicit carried-mass state.
 fn final_strength_is_consistent(
     wsg: &WingStructureGeometry,
     cfg: &StructuresConfig,
@@ -279,7 +279,7 @@ fn final_strength_is_consistent(
                 req.gravity_m_s2,
                 &running,
             );
-            let (_, mut moment) = crate::loads::cantilever_shear_moment(y, &net);
+            let (mut shear, mut moment) = crate::loads::cantilever_shear_moment(y, &net);
             crate::loads::apply_point_mass_relief(
                 y,
                 &mut moment,
@@ -287,16 +287,22 @@ fn final_strength_is_consistent(
                 req.gravity_m_s2,
                 point_masses,
             );
+            crate::loads::apply_point_mass_shear_relief(
+                y,
+                &mut shear,
+                case.load_factor,
+                req.gravity_m_s2,
+                point_masses,
+            );
             sizing.spars.iter().enumerate().all(|(i, spar)| {
                 moment.iter().enumerate().all(|(j, moment)| {
-                    let demand = (spar.frac_moment[j] * moment).abs();
-                    let skin = super::sizing_cover_skin_boom_areas_m2(sizing, j)[i];
-                    let stress =
-                        demand / ((spar.a_cap[j] + skin) * (0.85 * spar.h[j])).max(1.0e-12);
-                    demand <= 1.0
-                        || super::margin_is_structurally_non_negative(
-                            cap.f_allow_pa / stress.max(1.0e-9) - 1.0,
-                        )
+                    let ratio = super::section::stress_utilization(
+                        sizing, j, i, *moment, shear[j], skin, web, cap,
+                    )
+                    .1;
+                    spar.h[j] <= 0.0
+                        || (moment.abs() <= 1.0 && shear[j].abs() <= 1.0)
+                        || super::margin_is_structurally_non_negative(1.0 / ratio - 1.0)
                 })
             })
         })

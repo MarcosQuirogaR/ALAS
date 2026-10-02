@@ -33,6 +33,7 @@ mod capacity;
 mod compartments;
 mod engine;
 mod headroom;
+pub(crate) use headroom::lacks_underfloor_hold;
 mod manager;
 mod slot;
 

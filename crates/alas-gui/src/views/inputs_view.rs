@@ -929,9 +929,9 @@ mod tests {
     #[test]
     fn passenger_count_input_is_only_available_for_a_custom_cabin() {
         // Eligibility tracks the cabin scheme, not clean-sheet-vs-registered
-        // status: the AVE default (a clean-sheet-eligible synthetic
-        // aircraft) still carries the "Ryanair" percentage-mix cabin, so the
-        // hand-edit input stays hidden even once the study goes clean-sheet.
+        // status. The AVE default seeds the Custom cabin of its declared
+        // 777-9 arrangement, so the input stays available once the study
+        // goes clean-sheet.
         let mut state = AppState::default();
         assert_eq!(state.active_preset, "AVE");
         state.set_design_mode(DesignMode::CleanSheet);
@@ -942,13 +942,20 @@ mod tests {
                 .expect("default config")
                 .requirements
                 .cabin_preset,
-            "Ryanair"
+            "Custom"
         );
-        assert!(!custom_cabin_passenger_target_eligible(
+        assert!(custom_cabin_passenger_target_eligible(
             &state.typed_config().expect("default config")
         ));
 
-        // Switching the cabin scheme to Custom makes the input available.
+        // A named airline profile hides the hand-edit input, and switching
+        // the scheme back to Custom makes it available again.
+        if let Some(values) = state.group_mut("requirements") {
+            values["cabin_preset"] = serde_json::Value::String("Ryanair".to_owned());
+        }
+        assert!(!custom_cabin_passenger_target_eligible(
+            &state.typed_config().expect("airline cabin config")
+        ));
         if let Some(values) = state.group_mut("requirements") {
             values["cabin_preset"] = serde_json::Value::String("Custom".to_owned());
         }

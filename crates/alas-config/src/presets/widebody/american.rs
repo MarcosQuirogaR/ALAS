@@ -44,7 +44,8 @@ pub fn b787_9() -> AircraftPreset {
                 source: "Boeing 787 Airplane Characteristics for Airport Planning Rev Q section 3.2.2 (payload/range long-range cruise, 787-9 typical engines): maximum-zero-fuel-weight corner read as 5,300 nmi (+-60 nmi); payload is the preset MZFW minus its reference OEW; reserves not stated",
             }),
             certified_max_seats: Some(420),
-            certified_exit_layout: None,
+            certified_exit_layout: Some(crate::presets::B787_9_EXIT_LAYOUT),
+            planning_cabin: Some(crate::presets::B787_9_PLANNING_CABIN),
             design_mission_evidence: crate::DesignMissionEvidence::Unverified,
             partial_design_mission_evidence: vec![PartialDesignMissionEvidence {
                 kind: PartialMissionEvidenceKind::PayloadRangeChart,
@@ -76,6 +77,8 @@ pub fn b787_9() -> AircraftPreset {
             }),
             sources: vec![
                 "Boeing 787 ACAP D6-58333 Rev Q, October 2025, section 2",
+                "Boeing 787 ARFF composite-content diagram, p.3: https://www.boeing.com/content/dam/boeing/v2/airports/arff/787_composite_arff_data_2025.pdf",
+                crate::preset_structures::TRANSPORT_CAP_SOURCE,
                 "NASA/TP-20210023843, December 2022, Table I",
                 "Boeing 787 ACAP D6-58333 Rev L, December 2015, p.2-3 (typical OEW only)",
             ],
@@ -123,6 +126,7 @@ pub fn b787_9() -> AircraftPreset {
             airfoil_camber_scale: 1.0,
             ..DesignVector::default()
         },
+        airfoil_class_source: "Design-era declaration: the 787-9 (787 EIS 2011, -9 2014) wing is of the supercritical-section generation; manufacturer section data are not public. Drawn with NASA SC(2)-0612 root and SC(2)-0410 tip sections (Harris, NASA TP-2969, 1990).",
         geometry: GeometryConfig {
             wing: WingConfig {
                 // Quarter-MAC: D6-58333 7.4.2 %MAC/main-gear-load two-point statics
@@ -148,6 +152,7 @@ pub fn b787_9() -> AircraftPreset {
                 // its 9.5 %.
                 root_airfoil: "sc20612".to_owned(),
                 tip_airfoil: "sc20410".to_owned(),
+                airfoil_class: crate::AirfoilClass::Supercritical,
                 ..WingConfig::default()
             },
             empennage: EmpennageConfig {
@@ -164,15 +169,16 @@ pub fn b787_9() -> AircraftPreset {
                 hstab_tip_twist_deg: -2.0,
                 hstab_tip_le_m: (6.0, 9.905, 0.8),
                 // No fin station is published: the offset holds the fin root
-                // leading edge at 52.31 m on the 62.00 m body. The root keeps
-                // its estimated height, and the span puts the tip at the
-                // 16.81 m minimum fin-top height of section 2.3.2 (PDF p.25,
-                // N). Chords are not dimensioned.
+                // leading edge at 52.31 m on the 62.00 m body. The root line
+                // is the crown of the 5.94 m body, the tip at the 16.81 m
+                // minimum fin-top height of section 2.3.2 (PDF p.25, N), and
+                // the builder carries the edges on down to the tail cone
+                // under the root. Chords are not dimensioned.
                 vstab_offset_from_tail_m: 9.69,
-                vstab_z_m: 1.8,
+                vstab_z_m: 3.17,
                 vstab_root_chord_m: 8.0,
                 vstab_tip_chord_m: 2.8,
-                vstab_tip_le_m: (7.5, 0.0, 10.49),
+                vstab_tip_le_m: (7.5, 0.0, 9.12),
                 ..EmpennageConfig::default()
             },
             fuselage: FuselageConfig {
@@ -181,14 +187,11 @@ pub fn b787_9() -> AircraftPreset {
                 diameter_m: 5.77,
                 height_m: Some(5.94),
                 nose_z_m: -0.4,
-                // Generic cabin start and tail-cone length: the ACAP prints no
-                // flight-deck or aft pressure-bulkhead station. On the 62.00 m
-                // body they leave a constant section 0.81 m shorter than on
-                // the 62.81 m one, so the uncapped default seat mix fills 273
-                // seats (the 290 planning ceiling is still filled, with fewer
-                // business seats). B787 273 vs 290 seats: generic
-                // tail-cone/cabin-start model, a limitation for the cabin
-                // layout round.
+                // Generic nose-taper and tail-cone lengths of the outer mould
+                // line: the ACAP prints no flight-deck or aft
+                // pressure-bulkhead station. They shape the body only; the
+                // passenger cabin is bounded by the section 2.7.1 door
+                // stations (`B787_9_EXIT_LAYOUT`).
                 cabin_start_x_m: 5.5,
                 cabin_z_m: 0.2,
                 tailcone_length_m: 12.0,
@@ -336,6 +339,7 @@ pub fn dc_10() -> AircraftPreset {
             airfoil_camber_scale: 1.0,
             ..DesignVector::default()
         },
+        airfoil_class_source: "Design-era declaration: the DC-10 wing was designed in 1966-1968 (EIS 1971), before supercritical sections, first flown on the NASA F-8 SCW in 1971, reached transport service, so its technology is conventional (NACA 6-series era). The drawn root and tip stations are the DSMA-523A surrogate (UIUC Airfoil Coordinates Database; 11.0 % t/c), the nearest published member of the Douglas Santa Monica series the DC-10 used (DSMA-496, -521 and -522 at the root, -519 and -520 at the tip; Lednicer, UIUC Incomplete Guide to Airfoil Usage; coordinates unpublished); it fixes thickness and shape only, its aft loading is not credited in the Korn factor, and it does not change this declaration.",
         geometry: GeometryConfig {
             wing: WingConfig {
                 // Wing-root leading edge at the centreline 19.33 m aft of the
@@ -356,8 +360,25 @@ pub fn dc_10() -> AircraftPreset {
                 side_of_body_chord_ratio: Some(0.925_625_096_354_822),
                 kink_span_fraction: Some(0.35),
                 outboard_sweep_decrement_deg: 2.0,
-                root_airfoil: "sc20612".to_owned(),
-                tip_airfoil: "sc20410".to_owned(),
+                // Section family: Douglas Santa Monica sections, DSMA-496,
+                // -521 and -522 at the root and DSMA-519 and -520 at the tip
+                // (D. Lednicer, "The Incomplete Guide to Airfoil Usage",
+                // UIUC Airfoil Data Site, entry "Douglas DC-10-30"). Their
+                // coordinates are not published. Thickness: 11.0 % average
+                // t/c for the DC-10-10 and -30 (L. R. Jenkinson, P. Simpkin
+                // and D. Rhodes, "Civil Jet Aircraft Design", Arnold, 1999,
+                // Data A, Table 6). No published root, kink or tip t/c was
+                // found, so the wing carries one section at that average:
+                // DSMA-523A (UIUC Airfoil Coordinates Database, "McDonnell/
+                // Douglas DSMA-523 transonic airfoil with sharp trailing
+                // edge"), the nearest member of the same Douglas series in
+                // the library, whose maximum t/c is 0.110.
+                root_airfoil: "dsma523a".to_owned(),
+                tip_airfoil: "dsma523a".to_owned(),
+                // Korn class: the DSMA aft-loaded sections have no sourced
+                // Korn kappa, so the conventional class (0.87) is the sourced
+                // lower bound (Mason, ch. 7; Malone & Mason 1995).
+                airfoil_class: crate::AirfoilClass::Conventional,
                 ..WingConfig::default()
             },
             empennage: EmpennageConfig {
@@ -375,7 +396,12 @@ pub fn dc_10() -> AircraftPreset {
                 hstab_root_twist_deg: -2.0,
                 hstab_tip_twist_deg: -2.0,
                 hstab_tip_le_m: (9.39, 10.845, 0.8),
-                vstab_offset_from_tail_m: 10.0,
+                // No fin station is published. The offset keeps the root
+                // chord over the body: where the fin meets the tail cone and
+                // the centre-engine nacelle, 0.24 m above the line below, its
+                // trailing edge ends 0.03 m short of the tail tip, where the
+                // nacelle ends too.
+                vstab_offset_from_tail_m: 10.55,
                 vstab_z_m: 2.2,
                 vstab_root_chord_m: 10.5,
                 vstab_tip_chord_m: 3.8,

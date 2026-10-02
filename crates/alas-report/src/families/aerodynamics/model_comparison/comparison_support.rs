@@ -12,9 +12,7 @@ use std::f64::consts::PI;
 
 use alas_aero::analysis::PolarSweep;
 use alas_aero::avl::AvlPolarPoint;
-use alas_aero::fourier_lifting_line::{
-    AircraftFourierLiftingLine, AircraftLiftingLineResult, FourierLiftingLineSurface,
-};
+use alas_aero::fourier_lifting_line::{AircraftFourierLiftingLine, AircraftLiftingLineResult};
 use alas_aero::lifting_line::{helmbold_lift_slope_per_rad, LiftingLineModel, LiftingLinePoint};
 use alas_pipeline::full_analysis::AnalysisReport;
 use alas_pipeline::{AvlAnalysisResult, AvlAnalysisStatus};
@@ -27,61 +25,52 @@ use crate::theme::Palette;
 const ALPHA_TOLERANCE_DEG: f64 = 1.0e-8;
 const FOURIER_LIFTING_LINE_HARMONICS: usize = 12;
 
-/// Return the main wing's planform-weighted geometric zero-lift incidence.
-///
-/// The report polar can cover only positive-lift cruise angles. Deriving this
-/// quantity from wing camber and incidence keeps the classical model
-/// independent of VLM output while evaluating it at the same alpha schedule.
-fn classical_zero_lift_angle_rad(report: &AnalysisReport) -> Option<f64> {
-    let main_wing = report
-        .airplane
-        .wings
-        .iter()
-        .filter(|wing| wing.symmetric)
-        .filter_map(|wing| {
-            wing.projected_area()
-                .is_finite()
-                .then_some((wing, wing.projected_area()))
-        })
-        .max_by(|(_, left), (_, right)| left.total_cmp(right))?
-        .0;
-    let surface = FourierLiftingLineSurface::from_wing(main_wing, 1).ok()?;
-
-    let mut weighted_angle = 0.0;
-    let mut area_weight = 0.0;
-    for pair in surface.sections.windows(2) {
-        let [inboard, outboard] = pair else {
-            continue;
-        };
-        let span_fraction = outboard.span_fraction - inboard.span_fraction;
-        let inboard_effective = inboard.zero_lift_angle_rad - inboard.twist_rad;
-        let outboard_effective = outboard.zero_lift_angle_rad - outboard.twist_rad;
-        let segment_weight = span_fraction * (inboard.chord_m + outboard.chord_m) / 2.0;
-        let segment_angle = (inboard.chord_m * inboard_effective
-            + outboard.chord_m * outboard_effective)
-            / (inboard.chord_m + outboard.chord_m);
-        if span_fraction.is_finite()
-            && segment_weight.is_finite()
-            && segment_angle.is_finite()
-            && segment_weight > 0.0
-        {
-            weighted_angle += segment_weight * segment_angle;
-            area_weight += segment_weight;
-        }
-    }
-    (area_weight > 0.0).then_some(weighted_angle / area_weight)
-}
+mod classical;
+use classical::classical_zero_lift_angle_rad;
 
 pub(super) fn lifting_line_points(report: &AnalysisReport) -> Vec<LiftingLinePoint> {
     let Some(zero_lift_angle_rad) = classical_zero_lift_angle_rad(report) else {
         return Vec::new();
     };
+    // The classical wake coefficient excludes wave curvature and the
+    // zero-lift wake energy of the total fitted polar. Anchor its constant
+    // span efficiency and parasite term to one actual polar sample nearest
+    // the design lift; the geometry still supplies its zero-lift incidence.
+    let target_cl = report.design_point.cl;
+    if !target_cl.is_finite() {
+        return Vec::new();
+    }
+    let Some((_, cl, induced_cd, parasite_cd)) = report
+        .polar
+        .cl
+        .iter()
+        .zip(&report.polar.cd_induced)
+        .zip(&report.polar.cd_parasite)
+        .map(|((&cl, &induced), &parasite)| (cl, induced, parasite))
+        .filter(|&(cl, induced, parasite)| {
+            cl.is_finite()
+                && cl.abs() > f64::EPSILON
+                && induced.is_finite()
+                && induced > 0.0
+                && parasite.is_finite()
+                && parasite >= 0.0
+        })
+        .map(|point| ((point.0 - target_cl).abs(), point.0, point.1, point.2))
+        .min_by(|left, right| left.0.total_cmp(&right.0))
+    else {
+        return Vec::new();
+    };
+    let Some(span_efficiency) =
+        derived_span_efficiency(cl, induced_cd, report.polar_fit.aspect_ratio)
+    else {
+        return Vec::new();
+    };
     let model = LiftingLineModel {
         aspect_ratio: report.polar_fit.aspect_ratio,
-        span_efficiency: report.polar_fit.oswald_e,
+        span_efficiency,
         section_lift_slope_per_rad: 2.0 * PI,
         zero_lift_angle_rad,
-        parasite_drag_coefficient: report.polar_fit.cd0,
+        parasite_drag_coefficient: parasite_cd,
         moment_coefficient: 0.0,
     };
     let alpha_rad = report
@@ -480,4 +469,29 @@ fn derived_span_efficiency(cl: f64, induced_drag: f64, aspect_ratio: f64) -> Opt
     (cl.is_finite() && induced_drag.is_finite() && induced_drag > f64::EPSILON)
         .then_some(cl.powi(2) / (PI * aspect_ratio * induced_drag))
         .filter(|value| value.is_finite() && *value > 0.0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_classical_wake_uses_measured_terms_instead_of_the_total_fit() {
+        let config = alas_config::AlasConfig::default();
+        let mut report = alas_pipeline::full_analysis::FullAnalysis::new(config)
+            .run(&alas_config::DesignVector::default(), true)
+            .unwrap_or_else(|error| panic!("comparison report: {error}"));
+        let measured = lifting_line_points(&report);
+        assert!(
+            !measured.is_empty(),
+            "classical comparison needs measured wake data"
+        );
+        report.polar_fit.cd0 = f64::NAN;
+        report.polar_fit.c1 = f64::NAN;
+        report.polar_fit.k = f64::NAN;
+        report.polar_fit.oswald_e = f64::NAN;
+        report.polar.cd_wave.fill(1.0);
+        report.polar.cd.fill(f64::NAN);
+        assert_eq!(lifting_line_points(&report), measured);
+    }
 }

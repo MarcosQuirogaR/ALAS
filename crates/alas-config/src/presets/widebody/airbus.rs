@@ -133,6 +133,7 @@ pub fn a340_300() -> AircraftPreset {
             airfoil_camber_scale: 1.0,
             ..DesignVector::default()
         },
+        airfoil_class_source: "Design-era declaration: the A340-300 (EIS 1993) shares the A330 wing, of the supercritical-section generation; manufacturer section data are not public. Drawn with NASA SC(2)-0612 root and SC(2)-0410 tip sections (Harris, NASA TP-2969, 1990).",
         geometry: GeometryConfig {
             wing: WingConfig {
                 // Quarter-MAC: LEMAC 28.083 m aft of nose (section 7 pavement-load
@@ -162,6 +163,7 @@ pub fn a340_300() -> AircraftPreset {
                 outboard_sweep_decrement_deg: 2.0,
                 root_airfoil: "sc20612".to_owned(),
                 tip_airfoil: "sc20410".to_owned(),
+                airfoil_class: crate::AirfoilClass::Supercritical,
                 ..WingConfig::default()
             },
             empennage: EmpennageConfig {
@@ -183,16 +185,17 @@ pub fn a340_300() -> AircraftPreset {
                 // the nose, a 7.78 m root chord (role read off the drawing,
                 // low confidence), tip leading edge 8.14 m aft of the root,
                 // tip chord 62.84 - 60.56 m, and 8.3 m of fin above the
-                // local fuselage top. The root keeps its estimated height and
-                // the span holds the tip 8.3 m above the crown. The level
-                // model stands 16.07 m tall against the 16.67 m fin-top
-                // clearance, which the about 1 deg nose-down MRW attitude of
-                // Figure 2-3-0-991-005-A01 raises by about 0.6 m.
+                // local fuselage top, so the root line is the crown; the
+                // builder carries the edges on down to the tail cone under
+                // the root. The level model stands 16.07 m tall against the
+                // 16.67 m fin-top clearance, which the about 1 deg nose-down
+                // MRW attitude of Figure 2-3-0-991-005-A01 raises by about
+                // 0.6 m.
                 vstab_offset_from_tail_m: 11.24,
-                vstab_z_m: 1.8,
+                vstab_z_m: 3.02,
                 vstab_root_chord_m: 7.78,
                 vstab_tip_chord_m: 2.28,
-                vstab_tip_le_m: (8.14, 0.0, 9.52),
+                vstab_tip_le_m: (8.14, 0.0, 8.3),
                 ..EmpennageConfig::default()
             },
             fuselage: FuselageConfig {

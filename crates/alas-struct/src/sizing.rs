@@ -3,30 +3,25 @@
 
 //! Direct strength-based wingbox sizing.
 //!
-//! [`size_wingbox`] sizes the spar caps directly from strength: margin of
-//! safety zero by construction at the root, the bending-critical station,
-//! with no mass-target bisection, then applies the spar-cap taper law and the
-//! geometric cap width/height limits, sizes the webs from root shear, fixes
-//! the skin at its configured minimum, and derives the rib spacing from a
-//! panel-buckling criterion.
+//! [`size_wingbox`] constructs caps from compatible section strain at every
+//! station with geometric cap width/height limits, sizes the webs from root
+//! shear, fixes skin at configured minimum, and derives rib spacing from a
+//! panel-buckling criterion. Section bisection enforces material capacity,
+//! never a reference mass target. No spanwise stiffness taper is imposed.
 //!
 //! The cover skin between the spars is bending material: the product law
-//! sizes each cap for the moment its share of the cover skin does not already
-//! carry (the boom idealization of `law::cover_skin_boom_areas_m2`). Sizing
-//! the caps for the whole moment while also charging the minimum-gauge skin
-//! counted the cover twice; the stiffness of the same section
-//! ([`crate::analytical`]) and the rib panel-buckling stress below already
-//! took the skin as loaded. On the A320-200 the double count was 1.6 t of
-//! the 7.3 t strength box.
+//! uses the same modulus-weighted cover, cap and web section in sizing and
+//! response. Each material obeys its own allowable; sharing curvature does
+//! not imply sharing stress in a mixed metal/composite section. See Megson,
+//! *Aircraft Structures for Engineering Students*, 4th ed., 2007, ch. 20,
+//! and [`crate::allowables`] for the product carbon-laminate strain limit.
 //!
 //! Loads come from [`crate::loads`]: an elliptic aerodynamic distribution less
 //! the inertia of the mass the wing carries itself, which is the wing-bending
 //! design case (see [`crate::loads::WingInertiaRelief`] for why the no-relief
 //! form is a different aircraft rather than a conservative version of this
-//! one). Moment and shear are split across the spars weighted by each spar's
-//! local section depth, so a deeper spar carries proportionally more of the
-//! bending moment and a partial-span spar, zeroed outboard of the break,
-//! carries none of it there.
+//! one). Moment shares follow section stiffness. Partial-span spars are
+//! zeroed outboard of the break and carry no moment, shear or mass there.
 //!
 //! The relieved mass is the sized box itself plus the fuel in the integral
 //! tanks the box encloses ([`crate::tanks`]). The box relieves its own loads,
@@ -55,11 +50,14 @@ use crate::tanks;
 
 mod arc_mass;
 mod law;
+mod product_strength;
 mod scoped;
+pub(crate) mod section;
 mod solve;
 mod stiffness;
 mod stiffness_distribution;
 mod types;
+mod web;
 
 pub use scoped::{size_wingbox_with_scope, SizedWingbox, WingFuelRelief};
 pub use stiffness::{size_for_linear_model, StiffnessSizingResult};
@@ -68,7 +66,7 @@ pub use types::{
     MassBreakdown, SparSizing, WingboxSizing, MARGIN_NUMERICAL_ZERO,
 };
 
-pub(crate) use law::{gradient_unit, sizing_cover_skin_boom_areas_m2, trapezoid};
+pub(crate) use law::{gradient_unit, trapezoid};
 use law::{linspace, SizingLaw};
 use solve::size_wingbox_with_law;
 
@@ -557,20 +555,17 @@ mod tests {
         let (wsg, cfg, req, al) = probe_case();
         let sized = size_wingbox(&wsg, &cfg, &req, al, al, al, al);
         let minimum = sized.minimum_margin_of_safety();
-        assert!(minimum < 0.0, "expected the boundary, got {minimum}");
+        // The compatible-section search returns the feasible side. The sign
+        // of round-off is not a physical invariant of a fully stressed box.
+        assert!(
+            minimum.abs() <= MARGIN_NUMERICAL_ZERO,
+            "expected the boundary, got {minimum}"
+        );
         assert!(
             minimum >= -MARGIN_NUMERICAL_ZERO,
             "round-off exceeded its derived band: {minimum}"
         );
         assert!(sized.strength_margins_pass());
-        assert!(sized.controlling_margin_is_numerical_zero());
-        // The exact predicate the band replaced would have rejected it.
-        let exact_predicate = sized
-            .spars
-            .iter()
-            .flat_map(|spar| spar.margin_of_safety.iter())
-            .all(|&margin| !margin.is_nan() && margin >= 0.0);
-        assert!(!exact_predicate, "the regression this band exists for");
     }
 
     #[test]
@@ -620,8 +615,12 @@ mod tests {
         let frozen = size_wingbox_reference_compatibility(&wsg, &cfg, &req, al, al, al, al);
         // The spars sit at 0.25 and 0.70, so the cover is 45 % of the chord
         // the frozen law charges. Skin is linear in that width.
-        let ratio = product.mass_breakdown_kg.skin / frozen.mass_breakdown_kg.skin;
-        assert!((ratio - 0.45).abs() < 1e-9, "skin ratio {ratio}");
+        let expected = 2.0
+            * 0.45
+            * cfg.t_skin_min_m
+            * al.rho_kg_m3
+            * trapezoid(&product.chord, &product.y_stations);
+        assert!((product.mass_breakdown_kg.skin - expected).abs() < 1e-9);
         // Ribs are the section area between the spars rather than the whole
         // aerofoil, which is a smaller share but not a fixed one.
         assert!(

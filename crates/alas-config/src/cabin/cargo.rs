@@ -67,8 +67,10 @@ pub struct HoldCompartmentConfig {
     pub x_start_m: f64,
     /// Aft station, m.
     pub x_end_m: f64,
-    /// Usable volume, m3.
-    pub volume_m3: f64,
+    /// Usable volume, m3, when the source publishes it; `None` takes the
+    /// enclosed volume of the built deck over the declared extent.
+    #[serde(default)]
+    pub volume_m3: Option<f64>,
     /// Structural net-mass limit, kg, when one is published.
     #[serde(default)]
     pub max_net_kg: Option<f64>,
@@ -83,8 +85,9 @@ impl HoldCompartmentConfig {
         self.x_start_m.is_finite()
             && self.x_end_m.is_finite()
             && self.x_end_m > self.x_start_m
-            && self.volume_m3.is_finite()
-            && self.volume_m3 > 0.0
+            && self
+                .volume_m3
+                .is_none_or(|volume| volume.is_finite() && volume > 0.0)
             && self
                 .max_net_kg
                 .is_none_or(|limit| limit.is_finite() && limit >= 0.0)
@@ -228,7 +231,7 @@ mod tests {
                 name: "Aft".to_owned(),
                 x_start_m: 22.0,
                 x_end_m: 24.0,
-                volume_m3: 4.0,
+                volume_m3: Some(4.0),
                 max_net_kg: Some(600.0),
                 deck: HoldDeck::Main,
             }],
@@ -247,7 +250,7 @@ mod tests {
             name: "Fwd".to_owned(),
             x_start_m: 3.0,
             x_end_m: 4.0,
-            volume_m3: 2.0,
+            volume_m3: Some(2.0),
             max_net_kg: None,
             deck: HoldDeck::Lower,
         };
@@ -258,11 +261,11 @@ mod tests {
                 ..good.clone()
             },
             HoldCompartmentConfig {
-                volume_m3: 0.0,
+                volume_m3: Some(0.0),
                 ..good.clone()
             },
             HoldCompartmentConfig {
-                volume_m3: f64::NAN,
+                volume_m3: Some(f64::NAN),
                 ..good.clone()
             },
             HoldCompartmentConfig {

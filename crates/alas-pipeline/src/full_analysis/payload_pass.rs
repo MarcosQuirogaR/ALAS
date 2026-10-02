@@ -39,6 +39,10 @@ pub(super) struct PayloadPass {
     /// The structural payload limit the layout was bounded by, kg, when the
     /// registered maximum zero-fuel mass sets one.
     pub structural_payload_limit_kg: Option<f64>,
+    /// Payload the layout placed above that limit and the route therefore
+    /// does not carry, kg (see `route_payload_cap`). Zero when the limit
+    /// holds.
+    pub offloaded_payload_kg: f64,
     /// Masses, lumped coordinates, CG and the FLOPS groups of the pass.
     pub analysis: (
         MassBreakdown,
@@ -82,6 +86,11 @@ impl FullAnalysis {
             }
             let layout = build_payload_layout(plane, &payload_config, oew_kg, x_oew_m)
                 .map_err(|error| format!("payload layout error: {error}"))?;
+            let (layout, offloaded_payload_kg) = route_payload_cap::cap_route_payload(
+                layout,
+                structural_payload_limit_kg,
+                payload_config.cabin.passenger.belly_cargo_kg,
+            );
             if let Some(pass) = previous.take() {
                 if summary_of(&pass.layout) == summary_of(&layout) {
                     return Ok(pass);
@@ -111,6 +120,7 @@ impl FullAnalysis {
             previous = Some(PayloadPass {
                 layout,
                 structural_payload_limit_kg,
+                offloaded_payload_kg,
                 analysis,
             });
         }
@@ -150,6 +160,7 @@ impl FullAnalysis {
         Ok(PayloadPass {
             layout,
             structural_payload_limit_kg,
+            offloaded_payload_kg: 0.0,
             analysis: (masses, coords, cg, None),
         })
     }

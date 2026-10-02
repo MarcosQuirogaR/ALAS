@@ -82,12 +82,20 @@ impl HoldCompartment {
         x >= self.x_start_m && x <= self.x_end_m
     }
 
-    fn from_config(config: &HoldCompartmentConfig) -> Self {
+    fn from_config(g: &CabinGeometry, config: &HoldCompartmentConfig) -> Self {
+        let volume_m3 = config.volume_m3.unwrap_or_else(|| {
+            span_volume_m3(
+                g,
+                deck_spec(g, config.deck),
+                config.x_start_m,
+                config.x_end_m,
+            )
+        });
         Self {
             name: config.name.clone(),
             x_start_m: config.x_start_m,
             x_end_m: config.x_end_m,
-            volume_m3: config.volume_m3,
+            volume_m3,
             max_net_kg: config.max_net_kg,
             deck: config.deck,
         }
@@ -140,7 +148,8 @@ pub fn derive_hold_compartments(
     let declared: Vec<HoldCompartment> = declared
         .iter()
         .filter(|config| config.is_valid())
-        .map(HoldCompartment::from_config)
+        .map(|config| HoldCompartment::from_config(g, config))
+        .filter(|compartment| compartment.volume_m3 > 0.0)
         .collect();
     if !declared.is_empty() {
         return declared;

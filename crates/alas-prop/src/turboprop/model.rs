@@ -468,7 +468,9 @@ impl Pw127m568fModel {
 /// from `cbrt(A) cbrt(B) = -p/3 = V^2/9` instead of a subtraction, so no
 /// cancellation occurs. The static limit (`V = 0`) is
 /// `T = (2 rho A P^2)^(1/3)`; `P <= 0` at forward speed gives no thrust.
-pub(super) fn actuator_disk_thrust_bound_n(
+/// Callers must supply finite nonnegative power/speed and positive density/area;
+/// this arithmetic bound does not validate an engine or propeller operating point.
+pub fn actuator_disk_thrust_bound_n(
     shaft_power_w: f64,
     density_kg_m3: f64,
     disk_area_m2: f64,

@@ -35,28 +35,27 @@
 //!
 //! [`analysis`] is the hybrid engine this program's
 //! `alas/physics/aerodynamics.py` owns: it drives [`vlm`] for lift,
-//! induced drag and pitching moment, and supplies the two things an inviscid
-//! solve cannot see: the Raymer parasite-drag buildup and the Korn
+//! Trefftz-plane induced drag and pitching moment, and supplies the two things
+//! an inviscid solve cannot see: the Raymer parasite-drag buildup and the Korn
 //! transonic rise. It is the only module here that reads configuration, which
 //! is why this crate depends on `alas-config`. Not to be confused with
-//! `alas-aero::drag_buildup`, the mission-only buildup, which is P6 and
-//! reachable only from inside the mission network.
+//! [`drag_buildup`], the frozen SUAVE-parity-only buildup. Product missions
+//! receive the candidate's shared trimmed drag table.
 //!
 //! [`vorlax`] is the *other* vortex lattice, reached only from inside the
 //! mission network. It panels
 //! differently, imposes its boundary condition differently, and runs its
-//! influence kernel in `f32` where [`vlm`] runs in `f64`. The two are
-//! deliberately not unified, comparing their answers is a result the
-//! program is entitled to report: the same relationship
-//! `alas-prop::mission_turbofan` has to `alas-prop::cycle`.
+//! influence kernel in `f32` where [`vlm`] runs in `f64`. It is
+//! retained for native lift and frozen parity fixtures. Its induced-drag
+//! outputs do not supply product mission drag.
 //!
-//! [`lift_surrogate`] is what the mission actually flies on. Nothing in a
+//! [`lift_surrogate`] supplies native mission lift. Nothing in a
 //! mission segment calls [`vorlax`]: the mission lift analysis
 //! runs it once on a fixed ten-by-eight grid of angles of attack and Mach
 //! numbers, fits a bicubic spline through the result, and every later lift
-//! and induced-drag number is an evaluation of that spline. It is also what
-//! closes [`drag_buildup`]'s open input, which takes the per-wing lift
-//! solution as data because there is no closed form for it on this path.
+//! coefficient is an evaluation of that spline. Its induced-drag output is
+//! retained for frozen parity fixtures; the product evaluates the shared
+//! trimmed table at the resulting aircraft lift coefficient.
 //!
 //! [`mses`] is the one external-solver row here (P9, not P5): it drives Mark
 //! Drela's compiled `mset`/`mses`/`mplot` binaries to run a real coupled

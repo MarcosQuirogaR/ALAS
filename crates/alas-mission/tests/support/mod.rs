@@ -255,10 +255,11 @@ pub fn analyses(vehicle: &Vehicle, training: &SurrogateTraining) -> MissionAnaly
         induced_drag_lift_correction: 1.0,
         signed_cruise_force_residual: false,
         enforce_throttle_envelope: false,
+        drag_source: alas_mission::segments::MissionDragSource::FrozenSuaveParity,
         // The mission fixture is frozen SUAVE evidence. Its historical drag
         // total directly summed per-wing compressibility coefficients; keep
-        // that policy explicit here while product mission construction uses
-        // DragSettings::default() and area-conserving aggregation.
+        // that parity-only policy explicit here. Product missions share the
+        // candidate's trimmed drag table instead of this buildup.
         drag_settings: DragSettings::reference_compatibility(),
         wings: vehicle
             .wings

@@ -22,7 +22,17 @@
 //! inverts the constraint and produces a body with doors every two metres: an
 //! A380 seating 1,400 rather than the 853 it is certified for.
 //! [`max_certifiable_capacity`] is therefore computed first, from the geometry
-//! alone, and the seating truncates against it.
+//! alone, and the seating truncates against it. A registered aircraft whose
+//! source declares its exit pairs is rated by the CS 25.807(g) ratings of
+//! their types instead (`exit_rules`).
+//!
+//! # Declared doors
+//!
+//! Where the source also prints the door stations, the main deck runs between
+//! the first and the last door, every door between them is a cross-aisle, and
+//! the galleys and lavatories take explicit bays of sourced length
+//! (`stations`, `door_seating`). The generic nose and tail-cone lengths
+//! bound only a cabin whose doors are unknown.
 //!
 //! # References
 //!
@@ -32,83 +42,36 @@
 //! * FAR/CS-25.817: no more than three seats between any passenger and an
 //!   aisle.
 
+mod door_seating;
 mod engine;
+mod exit_rules;
 mod fittings;
 mod seating;
+mod stations;
 
+pub(crate) use door_seating::count_declared_deck;
 pub(crate) use engine::build_passenger_layout_with_aircraft_cg_target;
 pub use engine::{build_passenger_layout, build_passenger_layout_reference_compatibility};
+pub(crate) use exit_rules::{
+    effective_pair_capacity, largest_pair_rating, min_exit_pairs, MAX_EXIT_PAIRS_PER_DECK,
+};
+pub use exit_rules::{
+    exit_spec, layout_rating, pair_rating, select_exit_type, ExitSpec, EXIT_TYPES,
+};
+pub(crate) use stations::resolve_door_stations;
+pub use stations::{
+    DoorStation, MonumentKind, GALLEY_LENGTH_M, LAVATORY_LENGTH_M, MONUMENT_BAY_LENGTH_M,
+};
 
 use alas_config::{CertifiedExitLayout, PassengerCabinConfig};
 
 use crate::geometry::{CabinGeometry, DeckSpec};
 use crate::numeric::{floor_div, round_half_even};
 
-/// One FAR/CS-25.807 emergency-exit class: what it may evacuate, and the
-/// smallest cutout it may be built at.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct ExitSpec {
-    /// The type letter, which is what a deck plan labels the door with.
-    pub name: &'static str,
-    /// Seats this type is rated for, per complete exit pair.
-    ///
-    /// The value is already the rating for the two physical exits in one
-    /// pair.  It must not be doubled when the pair's two door cut-outs are
-    /// emitted.
-    pub capacity_per_pair: i64,
-    /// Minimum door width, which lies along the fuselage x-axis in plan.
-    pub width_m: f64,
-    /// Minimum door height.
-    pub height_m: f64,
-}
-
-/// The FAR/CS-25.807(g) exit classification.
-pub static EXIT_TYPES: [ExitSpec; 7] = [
-    ExitSpec {
-        name: "A",
-        capacity_per_pair: 110,
-        width_m: 1.07,
-        height_m: 1.83,
-    },
-    ExitSpec {
-        name: "B",
-        capacity_per_pair: 75,
-        width_m: 0.81,
-        height_m: 1.83,
-    },
-    ExitSpec {
-        name: "C",
-        capacity_per_pair: 55,
-        width_m: 0.76,
-        height_m: 1.22,
-    },
-    ExitSpec {
-        name: "I",
-        capacity_per_pair: 45,
-        width_m: 0.61,
-        height_m: 1.22,
-    },
-    ExitSpec {
-        name: "II",
-        capacity_per_pair: 40,
-        width_m: 0.51,
-        height_m: 1.12,
-    },
-    ExitSpec {
-        name: "III",
-        capacity_per_pair: 35,
-        width_m: 0.51,
-        height_m: 0.91,
-    },
-    ExitSpec {
-        name: "IV",
-        capacity_per_pair: 9,
-        width_m: 0.48,
-        height_m: 0.66,
-    },
-];
-
-/// Longitudinal floor a galley or lavatory bay consumes.
+/// Longitudinal floor a galley or lavatory bay consumes on a cabin without
+/// declared door stations. An engineering estimate carried over from the
+/// generic layout; a cabin bounded by declared doors uses the sourced
+/// [`MONUMENT_BAY_LENGTH_M`] instead.
 pub(crate) const MONUMENT_LEN: f64 = 0.95;
 
 /// The height a seat row is drawn at.
@@ -137,15 +100,6 @@ const MAX_ABREAST_SINGLE_AISLE: i64 = 6;
 /// The twin-aisle counterpart of [`MAX_ABREAST_SINGLE_AISLE`].
 const MAX_ABREAST_TWIN_AISLE: i64 = 12;
 
-/// Door pairs no deck exceeds, whatever its length: no transport aircraft
-/// carries more per deck, and the cap is what stops a long body being given a
-/// door every spacing interval.
-const MAX_EXIT_PAIRS_PER_DECK: i64 = 6;
-
-/// A deck holding more than this many passengers needs two exit pairs rather
-/// than one, independently of what the type rating alone would allow.
-const TWO_PAIR_THRESHOLD: i64 = 110;
-
 /// FAR/CS-25.815 minimum main-aisle width for a passenger count.
 pub fn required_aisle_width(n_pax: i64) -> f64 {
     if n_pax <= 19 {
@@ -163,25 +117,6 @@ pub fn resolve_aisle_width(pax: &PassengerCabinConfig, n_pax: i64) -> f64 {
     } else {
         required_aisle_width(n_pax)
     }
-}
-
-/// A representative exit type for a body of this diameter: a widebody
-/// floor-level door, a narrow or widebody floor-level one, or a small
-/// narrowbody overwing hatch.
-pub fn select_exit_type(diameter_m: f64) -> &'static ExitSpec {
-    let letter = if diameter_m >= 5.0 {
-        "A"
-    } else if diameter_m >= 3.6 {
-        "C"
-    } else {
-        "III"
-    };
-    // The three letters are literals of this function's own writing, so the
-    // search cannot miss; the fallback keeps the signature infallible.
-    EXIT_TYPES
-        .iter()
-        .find(|spec| spec.name == letter)
-        .unwrap_or(&EXIT_TYPES[0])
 }
 
 /// A stretch of one deck available for seating and exits.
@@ -202,14 +137,23 @@ pub struct DeckSegment<'a> {
 /// promised a seat count the detailed layout could not place would be reported
 /// on the cabin page and never flown.
 ///
-/// The main deck runs a quarter of the way into the tailcone and the upper
-/// deck does not: an upper deck ends where the crown starts curving down,
-/// while the main floor carries on into the taper.
+/// A main deck whose door stations are declared runs from the monument bay
+/// ahead of the first door to the one behind the last
+/// (`stations::declared_main_deck_bounds`). Otherwise the generic frame
+/// applies: the main deck runs a quarter of the way into the tailcone and the
+/// upper deck does not, since an upper deck ends where the crown starts
+/// curving down while the main floor carries on into the taper.
 pub fn cabin_deck_segments(g: &CabinGeometry) -> Vec<DeckSegment<'_>> {
     g.passenger_decks
         .iter()
-        .map(|deck| {
-            if deck.name == crate::layout::UPPER {
+        .enumerate()
+        .map(|(index, deck)| {
+            if let Some((x0, x1)) = (index == 0)
+                .then(|| stations::declared_main_deck_bounds(g))
+                .flatten()
+            {
+                DeckSegment { deck, x0, x1 }
+            } else if deck.name == crate::layout::UPPER {
                 DeckSegment {
                     deck,
                     x0: g.cabin_start_x + 3.0,
@@ -238,7 +182,10 @@ pub fn cabin_deck_segments(g: &CabinGeometry) -> Vec<DeckSegment<'_>> {
 /// all-economy seats about 410.
 ///
 /// The two coefficients are calibrated so the shipped presets reproduce the
-/// published seat counts of the aircraft they are named after.
+/// published seat counts of the aircraft they are named after. They are a
+/// proxy for a cabin whose doors are unknown: a main deck bounded by
+/// declared doors charges its explicit monument bays instead and reserves
+/// nothing beyond them (`door_seating`).
 pub fn service_reserve_len(deck_length: f64, mix: &[(&str, f64)]) -> f64 {
     let share = |name: &str| {
         mix.iter()
@@ -314,10 +261,11 @@ pub fn max_certifiable_capacity(g: &CabinGeometry, pax: &PassengerCabinConfig) -
 
 /// The product capacity calculation with a source-defined exit arrangement.
 ///
-/// `source_layout` is used only for a registered product preset.  Its pair
-/// ratings replace the diameter heuristic on the first passenger deck; the
-/// source maximum is then applied as a separate upper bound.  Passing `None`
-/// retains the geometry-only product proxy used by clean-sheet callers.
+/// `source_layout` is used only for a registered product preset.  The
+/// CS 25.807(g) ratings of its declared pair types replace the diameter
+/// heuristic on the first passenger deck; the source maximum is then applied
+/// as a separate upper bound.  Passing `None` retains the geometry-only
+/// product proxy used by clean-sheet callers.
 pub(crate) fn max_certifiable_capacity_with_source_layout(
     g: &CabinGeometry,
     pax: &PassengerCabinConfig,
@@ -333,11 +281,7 @@ pub(crate) fn max_certifiable_capacity_with_source_layout(
         let deck_len = (segment.x1 - segment.x0).max(0.0);
         let deck_cap = if deck_index == 0 {
             if let Some(source_layout) = source_layout {
-                source_layout
-                    .pairs
-                    .iter()
-                    .map(|pair| pair.capacity_per_pair.max(0))
-                    .sum::<i64>()
+                layout_rating(&source_layout)
             } else {
                 let n_pairs =
                     (floor_div(deck_len, spacing) as i64).clamp(1, MAX_EXIT_PAIRS_PER_DECK);
@@ -378,26 +322,6 @@ pub(crate) fn max_certifiable_capacity_reference_compatibility(
         total += deck_cap;
     }
     DeckCapacities { per_deck, total }
-}
-
-/// Effective capacity for one pair on the product path.
-///
-/// The serialized `exit_capacity_realism_factor` predates the pair-unit
-/// correction and stores half of the intended Type-A utilization (`0.478`).
-/// Doubling that legacy field here makes the conversion explicit and keeps the
-/// resulting utilization bounded at one.  Smaller exit classes use their
-/// complete-pair table rating directly.
-pub(crate) fn effective_pair_capacity(spec: &ExitSpec, pax: &PassengerCabinConfig) -> i64 {
-    if spec.name != "A" {
-        return spec.capacity_per_pair.max(0);
-    }
-    let legacy_factor = if pax.exit_capacity_realism_factor.is_finite() {
-        pax.exit_capacity_realism_factor.max(0.0)
-    } else {
-        0.0
-    };
-    let pair_utilization = (2.0 * legacy_factor).clamp(0.0, 1.0);
-    (spec.capacity_per_pair as f64 * pair_utilization).floor() as i64
 }
 
 /// Seats abreast and aisle count for one class at station `x`.
@@ -588,16 +512,6 @@ pub(crate) fn ceil_div(a: i64, b: i64) -> i64 {
     (a + b - 1) / b
 }
 
-/// Whether a deck holding this many passengers needs a second exit pair
-/// regardless of what one pair is rated for.
-pub(crate) fn min_exit_pairs(deck_pax: i64) -> i64 {
-    if deck_pax > TWO_PAIR_THRESHOLD {
-        2
-    } else {
-        1
-    }
-}
-
 // A test asserts on geometry it constructed here directly, so a failed unwrap
 // or expect is the assertion failing, not a library invariant being broken.
 #[allow(clippy::unwrap_used, clippy::expect_used)]
@@ -624,17 +538,6 @@ mod tests {
         pax.aisle_width_m = 0.0;
         assert_eq!(resolve_aisle_width(&pax, 300), 0.51);
     }
-
-    #[test]
-    fn the_exit_type_follows_the_fuselage_diameter() {
-        assert_eq!(select_exit_type(5.9).name, "A");
-        assert_eq!(select_exit_type(4.0).name, "C");
-        assert_eq!(select_exit_type(3.0).name, "III");
-        // The boundaries themselves belong to the larger type.
-        assert_eq!(select_exit_type(5.0).name, "A");
-        assert_eq!(select_exit_type(3.6).name, "C");
-    }
-
     #[test]
     fn a_declared_abreast_count_chooses_its_own_aisle_count() {
         // Six abreast is the most one aisle may serve, so seven needs two.

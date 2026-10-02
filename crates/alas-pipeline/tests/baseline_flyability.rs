@@ -115,19 +115,6 @@ fn every_preset_flies_its_design_mission_and_route_with_reserves_intact() {
             ("design mission", oew_kg + max_payload_kg, design_m),
             ("configured route", oew_kg + laid_out_payload_kg, route_m),
         ] {
-            // Known model-input defect, not a fuel-model result: the ATR72-600
-            // payload layout places 7,000 kg, above the published MZFW less
-            // the model OEW (about 6,392 kg), so its route is flown above
-            // MZFW. Asserted so the case returns to the strict check once
-            // the layout or preset respects MZFW.
-            if name == "ATR72-600" && case == "configured route" {
-                assert!(
-                    laid_out_payload_kg > max_payload_kg,
-                    "ATR72-600 laid-out payload {laid_out_payload_kg:.0} kg now respects the \
-                     {max_payload_kg:.0} kg MZFW payload: remove this known-defect branch"
-                );
-                continue;
-            }
             let margin_kg =
                 reserve_margin_kg(&config, &model, capacity_kg, zero_fuel_mass_kg, range_m);
             if margin_kg < -tolerance_kg {

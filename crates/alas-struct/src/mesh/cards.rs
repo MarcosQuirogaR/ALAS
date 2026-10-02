@@ -226,6 +226,16 @@ impl Deck {
         &self.grids
     }
 
+    /// Every submitted `MAT1`, preserving the deck's material identifiers.
+    pub fn materials(&self) -> &[Mat1] {
+        &self.materials
+    }
+
+    /// Every submitted `PSHELL`, for attributed shell-stress verification.
+    pub fn shell_properties(&self) -> &[Pshell] {
+        &self.shell_properties
+    }
+
     /// Every `CQUAD4`, in the order they were added.
     pub fn quads(&self) -> &[Shell] {
         &self.quads

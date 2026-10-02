@@ -78,6 +78,7 @@ fn sample_report(payload_kg: f64) -> AnalysisReport {
         },
         polar_fit: PolarFit {
             cd0: 0.02,
+            c1: 0.0,
             k: 0.04,
             oswald_e: 0.85,
             aspect_ratio: 9.0,
@@ -132,7 +133,7 @@ fn performance_figures_render_from_the_report_and_configuration() {
     assert!(departure.contains("London Heathrow"));
     assert!(arrival.contains("Dubai"));
     for svg in [departure, arrival] {
-        for label in ["TODR", "BFL", "ASD", "LDR", "V1", "VR", "V2"] {
+        for label in ["TODR", "BFL proxy", "ASD proxy", "LFL", "V1", "VR", "V2"] {
             assert!(svg.contains(label), "missing {label}");
         }
     }

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! Achievable payload and payload-range corners for the reduced analysis.
+//! Achievable payload and payload-range corners for the Quick Analysis.
 //!
 //! The corner convention matches the report's payload-range figure: point A
 //! carries the maximum payload with fuel to the declared MTOW, point B
@@ -85,6 +85,15 @@ pub fn payload_capacity_estimate(
     estimate
 }
 
+/// Short English label of the evidence behind a usable fuel capacity.
+pub fn fuel_capacity_basis(evidence: FuelCapacityEvidence) -> &'static str {
+    match evidence {
+        FuelCapacityEvidence::PublishedPreset => "published usable capacity",
+        FuelCapacityEvidence::GeometryEstimate => "geometry-estimated wing tank capacity",
+        FuelCapacityEvidence::Unavailable => "unavailable",
+    }
+}
+
 /// Why the payload-range corners could not be produced.
 #[derive(Debug, Clone, PartialEq)]
 pub enum PayloadRangeUnavailable {
@@ -95,7 +104,7 @@ pub enum PayloadRangeUnavailable {
     Infeasible(String),
 }
 
-/// The payload-range corners of the reduced analysis.
+/// The payload-range corners of the Quick Analysis.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct QuickPayloadRange {
     /// `(range_m, payload_kg)` from the max-payload corner to the ferry corner.
@@ -123,7 +132,7 @@ pub struct QuickPayloadRange {
     pub note: String,
 }
 
-/// Payload-range corners from a reduced analysis report.
+/// Payload-range corners from an analysis report.
 pub fn payload_range_corners(
     config: &AlasConfig,
     report: &AnalysisReport,
@@ -175,12 +184,7 @@ pub fn payload_range_corners(
             "fuel capacity unavailable for this design".to_owned(),
         ));
     };
-    let mut basis = match capacity.evidence {
-        FuelCapacityEvidence::PublishedPreset => "published usable capacity",
-        FuelCapacityEvidence::GeometryEstimate => "geometry-estimated wing tank capacity",
-        FuelCapacityEvidence::Unavailable => "unavailable",
-    }
-    .to_owned();
+    let mut basis = fuel_capacity_basis(capacity.evidence).to_owned();
     let structural_capacity_kg = mtow_kg - oew_kg;
     let fuel_capacity_kg = if capacity_kg <= structural_capacity_kg {
         capacity_kg

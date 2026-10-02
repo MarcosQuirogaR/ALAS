@@ -337,3 +337,113 @@ best point and the baseline seed the refinement's initial population
 (`alas-opt::search::screening` and `::elite`). It never selects the winner
 directly: every screened point the refinement keeps is scored again under
 the refinement's rule, as an exact cache hit when the models agree.
+
+# Passenger cabin: exits, door stations and monuments
+
+Implemented in `alas-payload::cabin`. Frame: x in metres aft of the nose tip.
+
+- **Exit ceiling.** A registered aircraft declares its exit pairs by CS 25.807
+  type letter only (`alas_config::CertifiedExitLayout`). The seat ceiling is
+  the sum of the CS 25.807(g) pair ratings of those letters (Type A 110,
+  B 75, C 55, I 45, II 40, III 35, IV 9); a source maximum (`certified_max_seats`)
+  and, in a fixed-aircraft basis, the planning seats bound it further. A body
+  without a declared arrangement keeps the generic diameter and pair-spacing
+  proxy.
+- **Door stations.** Where the source prints door stations with the body
+  length they are measured on, the main deck runs from one monument bay ahead
+  of the first door's cross-aisle to one behind the last, and no seat row may
+  overlap a door cross-aisle (the door's CS 25.807(a) opening width). On a body
+  of another length, the first door keeps its nose distance, the last its tail
+  distance, and the doors between are spaced in proportion; an inconsistent
+  mapping falls back to the generic frame. Sources: Boeing 787 ACAP
+  D6-58333 Rev Q section 2.7.1 (787-9), Boeing 777X ACAP D6-86073 Rev G
+  Table 2-3 (777-9, flown on AVE).
+- **Monuments.** On a declared cabin, galleys and lavatories (counts from the
+  provisioning ratios, one lavatory per 45 and one galley per 100 passengers
+  plus one, unless configured) stand side by side across bays that leave the
+  aisles open. The bays at both ends and at each class boundary come with the
+  cabin; further bays are charged at the intermediate doors. A bay is
+  0.813 m long, the 32 in lavatory of D6-86073 Rev G Figure 2-4, which also
+  covers a galley stowing a 0.81 m full-size ATLAS trolley (secondary source).
+  No service length is reserved beyond these bays; the calibrated
+  `service_reserve_len` remains only on a cabin whose doors are unknown.
+- **Main-deck baggage.** A fuselage whose lower deck has less than 0.9 m of
+  clear height mid-cabin stows its baggage on the main deck, so its seats keep
+  their declared pitch and the floor they leave becomes the forward and aft
+  compartments, instead of the pitch being stretched over it.
+
+These are geometric screens, not an evacuation demonstration (CS 25.803) or an
+approved LOPA.
+
+# Propulsion-specific field performance
+
+`performance.legacy_field_correlations = false` selects the corrected field
+method. Jet takeoff retains Raymer's FAR-25 TOP correlation (5th edition,
+section 5.4, Fig. 5.4): 37.7 TOP in ft with wing loading in psf. It already
+estimates field length; its BFL proxy receives no additional 1.15 multiplier.
+[CS/FAR 25.113](https://www.govinfo.gov/content/pkg/CFR-2025-title14-vol1/pdf/CFR-2025-title14-vol1-sec25-113.pdf)
+applies 1.15 to an all-engine takeoff-distance candidate, compared with the
+engine-out distance. It does not multiply a balanced field length by 1.15.
+The historical low-level APIs and the explicit replay selection preserve the
+translated correlation, speed schedule and BFL multiplier for parity.
+
+Propeller distances use Torenbeek, *Synthesis of Subsonic Airplane Design*
+(1982), sections 5.4.5-5.4.6, pp. 167-170, equations 5-73/74, 5-89 and
+5-93/94, with Appendix K defining the separate takeoff phases. The ground
+balance is integrated with installed thrust evaluated at each true airspeed
+and the actual ambient density. The active engine model supplies normal AEO
+power and the declared reserve rating after one engine fails. Clean field drag
+comes from the shared candidate model, with the existing high-lift increment
+added; gear drag is omitted. A positive linear lift term is bounded over the
+field lift range. Unconfigured failed-engine and asymmetric drag are explicit
+zero assumptions, rather than aircraft-specific evidence.
+
+The BFL approximation uses the energy-equivalent acceleration over 0..V2 in
+place of the source's mean over 0..V1, plus its 200/sqrt(sigma) inertia
+allowance and 0.37 g stopping deceleration. The OEI gradient at V2 substitutes
+for the source's equivalent gradient over phases 1..2. The required takeoff
+field is the
+larger of this approximation and 1.15 times the AEO screen-distance estimate.
+Rotation is instantaneous in that AEO estimate. This extension retains
+propeller thrust lapse but does not solve critical V1 or independently certify
+accelerate-stop performance. Single-engine aircraft and nonpositive OEI climb
+gradients are outside this BFL method's domain and report an error.
+
+Propeller actual landing distance is the air-phase energy distance from 50 ft
+plus the touchdown kinetic-energy braking distance. The sourced conceptual
+inputs are mean excess drag/weight 0.10 and mean deceleration 0.40 g (within
+Torenbeek's 0.35-0.45 g turboprop range without reverse). Mean deceleration
+already includes inertia; no second braking delay is added. The field schedule
+uses Vref = 1.23 VS1g under [25.125](https://www.govinfo.gov/content/pkg/CFR-2025-title14-vol1/pdf/CFR-2025-title14-vol1-sec25-125.pdf),
+taking the certified reference stall speed equal to the modeled one-g stall
+speed. Published preset speeds recover effective gross-area CLmax inputs,
+with mass variants, IAS/CAS assumptions and chart-read uncertainties recorded
+in `alas-config::presets::PublishedLandingReference`. Reconstructing those
+speeds verifies the inputs; it is not independent speed validation.
+
+The ATR factsheet additionally supplies V2 min = 116 KCAS at MTOW. Its
+registered takeoff coefficient is model-equivalent under the retained
+V2/VS1g = 1.20 convention, with the 23,000 kg option selected explicitly;
+the family-wide speed line does not identify which MTOW option applies.
+Neither this inversion nor the existing preliminary V2/VMC schedule establishes
+measured takeoff CLmax or certification compliance. The source speed is an
+input independent of the published distance, rather than a distance fit.
+
+Actual landing distance and airport dispatch field length are separate.
+[CAT.POL.A.230(a)](https://www.easa.europa.eu/en/document-library/easy-access-rules/online-publications/easy-access-rules-air-operations?erules-id=ERULES-1963177438-18821)
+uses 60% of LDA for turbojets and 70% for turboprops. The latter is configurable
+through `propeller_dry_landing_distance_share`; select 0.60 for the general
+[FAR 121.195(b)](https://www.ecfr.gov/current/title-14/chapter-I/subchapter-G/part-121/subpart-I/section-121.195)
+turbine-aircraft convention. Corrected feasibility and runway figures compare
+the factored dispatch distance with LDA. The legacy feasibility boundary uses
+actual distance for reproducibility.
+
+The full CADO comparison is reproducible with `tools/field_fleet_before.ps1`,
+`cargo run -p alas-pipeline --profile test --example field_fleet_check`, and
+`tools/field_fleet_compare.ps1`. All 288 rows are inspected, with supported
+metric cohorts and exclusions retained. CADO field lengths and speeds are
+comparison targets, never coefficient-fitting inputs. Aircraft lacking an
+installed model use a declared ideal actuator-disk thrust envelope based on
+CADO shaft rating and rotor diameter, with 0.85 effective-power sensitivity.
+The published preset audit uses the actual installed propulsion model. Neither
+comparison establishes certificated performance.

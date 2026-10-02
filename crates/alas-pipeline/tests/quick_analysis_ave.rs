@@ -7,7 +7,7 @@
 // The timing line is the benchmark evidence this test exists to report.
 #![allow(clippy::print_stderr)]
 
-//! The reduced Quick Analysis on the AVE reference: every metric terminates,
+//! The Quick Analysis on the AVE reference: every metric terminates,
 //! values are finite, stale revisions stay identifiable, and cancellation
 //! stops the run early.
 
@@ -16,7 +16,7 @@ use std::time::Instant;
 
 use alas_config::{AlasConfig, DesignVector};
 use alas_pipeline::quick_analysis::{
-    reduced_config, run_quick_analysis, QuickAnalysisRequest, QuickMetric, QuickOutcome, QuickStage,
+    run_quick_analysis, sandbox_config, QuickAnalysisRequest, QuickMetric, QuickOutcome, QuickStage,
 };
 
 fn ave_request(revision: u64) -> QuickAnalysisRequest {
@@ -69,6 +69,12 @@ fn every_metric_terminates_exactly_once_with_finite_values_on_ave() {
             QuickOutcome::Feasibility(flags) => {
                 assert_eq!(flags.feasible, flags.flags.iter().all(|f| !f.blocking));
             }
+            QuickOutcome::Route(route) => {
+                assert!(route.block_fuel_kg > 0.0 && route.block_fuel_kg.is_finite());
+                assert!(route.takeoff_fuel_kg > route.block_fuel_kg - route.takeoff_fuel_kg);
+                assert!(route.route_distance_m >= route.great_circle_m * (1.0 - 1e-6));
+                assert!(!route.note.is_empty());
+            }
             QuickOutcome::Failed(message) | QuickOutcome::Unsupported(message) => {
                 panic!("{metric:?} did not produce a value on AVE: {message}");
             }
@@ -109,15 +115,14 @@ fn every_metric_terminates_exactly_once_with_finite_values_on_ave() {
 }
 
 #[test]
-fn the_reduced_configuration_keeps_geometry_and_requirements_untouched() {
+fn the_sandbox_configuration_only_fixes_the_design_mode() {
     let config = AlasConfig::default();
-    let reduced = reduced_config(&config);
-    assert_eq!(reduced.geometry, config.geometry);
-    assert_eq!(reduced.requirements, config.requirements);
-    assert!(reduced.analysis.sweep_n_points <= 9);
-    assert!(reduced.analysis.fine_spanwise_resolution <= config.analysis.fine_spanwise_resolution);
+    let sandbox = sandbox_config(&config);
+    assert_eq!(sandbox.geometry, config.geometry);
+    assert_eq!(sandbox.requirements, config.requirements);
+    assert_eq!(sandbox.analysis, config.analysis);
     assert_eq!(
-        reduced.optimizer.design_space.mode,
+        sandbox.optimizer.design_space.mode,
         alas_config::optimizer::DesignMode::BaselineSandbox
     );
 }

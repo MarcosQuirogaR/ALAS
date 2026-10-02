@@ -385,6 +385,28 @@ fn finding_margins_are_negative_on_both_upper_and_lower_bound_failures() {
 }
 
 #[test]
+fn ground_clearance_findings_name_their_own_mechanism_and_not_the_nose_gear() {
+    use super::findings::{
+        actual_label, affected_disciplines, finding_meaning, finding_next_step, finding_title,
+    };
+    for (code, mechanism) in [
+        (FindingCode::TailScrapeViolation, "tail-scrape"),
+        (FindingCode::TipBackViolation, "tip-back"),
+    ] {
+        let title = finding_title(code).to_lowercase();
+        assert!(title.contains(mechanism), "{title}");
+        assert!(!title.contains("nose"), "{title}");
+        assert!(!finding_meaning(code).to_lowercase().contains("nose gear"));
+        assert!(!finding_next_step(code).is_empty());
+        assert!(!affected_disciplines(code).is_empty());
+        assert_eq!(actual_label(code), "Calculated angle");
+        // An angle below its minimum is a negative margin, like the other
+        // lower-bound failures (the tail-scrape case: 5.2 deg against 10 deg).
+        assert!((finding_margin(code, 5.2, 10.0) + 4.8).abs() < 1.0e-12);
+    }
+}
+
+#[test]
 fn incomplete_snapshots_never_receive_a_feasibility_verdict() {
     assert_eq!(status_banner_title(false, 0, 0), "Assessment incomplete");
     assert_ne!(

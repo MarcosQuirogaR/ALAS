@@ -8,6 +8,10 @@
 
 use serde_json::{json, Value};
 
+#[path = "performance_fields.rs"]
+mod performance_fields;
+pub use performance_fields::published_landing_change;
+
 /// The frozen A380 engine offset below the wing reference plane, in metres.
 /// Named because the lint reads 3.14 as a mistyped pi; it is a length.
 #[allow(clippy::approx_constant)]
@@ -36,9 +40,9 @@ pub fn dimensions(path: &str) -> Option<(Value, Value)> {
         // leading edge 11.57 m aft of its 57.28 m root and 3.72 m tip chord;
         // sheet 1 (side view): fin root leading edge 53.94 m, 14.08 m root
         // chord, tip 12.06 m aft of the root, 70.4 m tip trailing edge.
-        // Figure 2-3-0-991-001-A01 (MRW, aft CG): fin tip 24.12 m, reached
-        // by the span from the estimated root; nacelles N1 1.08 m and N2
-        // 1.90 m, met on average by one offset under the flight-shape wing.
+        // Figure 2-3-0-991-001-A01 (MRW, aft CG): fin tip 24.12 m, which
+        // puts the root line at 3.245 m; wing tip W2 5.21 m and
+        // nacelles N1 1.08 m and N2 1.90 m on the ground-shape wing.
         "A380-800.engine_spanwise_positions[0]"
         | "A380-800.geometry.engine.spanwise_positions_m[0]" => (10.0, 14.8),
         "A380-800.engine_spanwise_positions[1]"
@@ -48,7 +52,9 @@ pub fn dimensions(path: &str) -> Option<(Value, Value)> {
         "A380-800.engine_spanwise_positions[3]"
         | "A380-800.geometry.engine.spanwise_positions_m[3]" => (-18.5, -25.7),
         "A380-800.geometry.engine.inlet_x_offset_m" => (4.5, 6.285),
-        "A380-800.geometry.engine.z_m" => (A380_FROZEN_ENGINE_Z_M, -3.384),
+        "A380-800.geometry.engine.z_m" => (A380_FROZEN_ENGINE_Z_M, -0.872),
+        "A380-800.geometry.wing.break_z_m" => (-0.4, -2.5),
+        "A380-800.geometry.wing.tip_z_m" => (3.0, -0.876),
         "A380-800.geometry.empennage.hstab_offset_from_tail_m" => (11.0, 15.45),
         "A380-800.geometry.empennage.hstab_tip_chord_m" => (2.5, 3.72),
         "A380-800.geometry.empennage.hstab_tip_le_m[0]" => (8.5, 11.57),
@@ -56,8 +62,13 @@ pub fn dimensions(path: &str) -> Option<(Value, Value)> {
         "A380-800.geometry.empennage.vstab_root_chord_m" => (11.0, 14.08),
         "A380-800.geometry.empennage.vstab_tip_chord_m" => (3.5, 4.40),
         "A380-800.geometry.empennage.vstab_tip_le_m[0]" => (10.0, 12.06),
-        "A380-800.geometry.empennage.vstab_tip_le_m[2]" => (11.0, 15.335),
+        "A380-800.geometry.empennage.vstab_tip_le_m[2]" => (11.0, 14.59),
+        "A380-800.geometry.empennage.vstab_z_m" => (2.5, 3.245),
         "DC-10.design_vector.sweep_deg" => (35.0, 37.926_177_529_939_146),
+        // No fin station is published; the frozen offset left the 10.5 m
+        // root chord 0.5 m past the tail tip, and this one keeps it over the
+        // body.
+        "DC-10.geometry.empennage.vstab_offset_from_tail_m" => (10.0, 10.55),
         // Quarter-chord sweeps entered as leading-edge angles, converted
         // through the outboard taper: NASA/TP-20210023843 (2022) Table I,
         // 787-9 c/4 32 deg (32.2 deg in the preset's open database; the
@@ -73,10 +84,9 @@ pub fn dimensions(path: &str) -> Option<(Value, Value)> {
         // tailplane tip leading edge 6.43 m aft of its 55.24 m root and tip
         // trailing edge 63.69 m; sheet 1 (side view): fin root leading edge
         // 52.42 m, 7.78 m root chord, tip 8.14 m aft and 8.3 m above the
-        // crown, reached by the span from the estimated root, 2.28 m tip
-        // chord. Figure 2-3-0-991-005-A01 (aft CG): wing tip W2 5.94 m and
-        // nacelles N1 1.28 m and N2 2.35 m above the ground over the 2.13 m
-        // forward belly (F2).
+        // crown, 2.28 m tip chord. Figure 2-3-0-991-005-A01 (aft CG): wing
+        // tip W2 5.94 m and nacelles N1 1.28 m and N2 2.35 m above the
+        // ground over the 2.13 m forward belly (F2).
         "A340-300.engine_spanwise_positions[0]"
         | "A340-300.geometry.engine.spanwise_positions_m[0]" => (7.5, 9.37),
         "A340-300.engine_spanwise_positions[1]"
@@ -96,7 +106,8 @@ pub fn dimensions(path: &str) -> Option<(Value, Value)> {
         "A340-300.geometry.empennage.vstab_root_chord_m" => (8.0, 7.78),
         "A340-300.geometry.empennage.vstab_tip_chord_m" => (2.8, 2.28),
         "A340-300.geometry.empennage.vstab_tip_le_m[0]" => (7.5, 8.14),
-        "A340-300.geometry.empennage.vstab_tip_le_m[2]" => (8.5, 9.52),
+        "A340-300.geometry.empennage.vstab_tip_le_m[2]" => (8.5, 8.3),
+        "A340-300.geometry.empennage.vstab_z_m" => (1.8, 3.02),
         // Airbus A220 ACP Issue 013, DM BD500-A-J06-10-00-00AAA-030A-A,
         // Figure 1 sheet 2: 29.5 deg straight leading edge on the plan view.
         "A220-300.design_vector.sweep_deg" => (25.0, 29.5),
@@ -105,9 +116,8 @@ pub fn dimensions(path: &str) -> Option<(Value, Value)> {
         // table value), nacelle 22.9 in above the ground over the 1.664 m
         // belly; tailplane 36.6 m^2 (Table 6) over 12.263 m (D) with its tip
         // trailing edge 4.94 m aft of the root leading edge (V) at 37.82 m
-        // (H); fin chords from the 28.2 m^2 Table 6 area taken to the fuselage
-        // axis, tip 11.578 m above the ground (C) reached by the span from
-        // the estimated root. The saved-file case
+        // (H); fin 28.2 m^2 to the fuselage axis (Table 6), root on the
+        // crown, tip 11.578 m above the ground (C). The saved-file case
         // `preset_only` loads this preset.
         "A220-300.geometry.fuselage.height_m" | "preset_only.geometry.fuselage.height_m" => {
             return Some((Value::Null, json!(3.721)))
@@ -136,12 +146,23 @@ pub fn dimensions(path: &str) -> Option<(Value, Value)> {
         "A220-300.geometry.empennage.vstab_tip_chord_m"
         | "preset_only.geometry.empennage.vstab_tip_chord_m" => (1.6, 1.616),
         "A220-300.geometry.empennage.vstab_tip_le_m[2]"
-        | "preset_only.geometry.empennage.vstab_tip_le_m[2]" => (5.5, 7.1535),
+        | "preset_only.geometry.empennage.vstab_tip_le_m[2]" => (5.5, 6.193),
+        "A220-300.geometry.empennage.vstab_z_m" | "preset_only.geometry.empennage.vstab_z_m" => {
+            (1.0, 1.9605)
+        }
         // NASA Common Research Model, AIAA 2008-6919 Table 2 (the widebody
         // wing NASA/TP-20210023843 Table I sets beside the 787-9): 0.115
         // area-weighted t/c, which the 12 % root section reproduces in a loft
         // that holds the root section to the kink; the 14 % section gave 0.133.
         "B787-9.geometry.wing.root_airfoil" => return Some((json!("sc20614"), json!("sc20612"))),
+        // Jenkinson, Simpkin and Rhodes, "Civil Jet Aircraft Design" (1999),
+        // Data A, Table 6: 11.0 % average t/c for the DC-10-30, whose
+        // Douglas DSMA-496/-521/-522 root and DSMA-519/-520 tip sections
+        // (Lednicer, "The Incomplete Guide to Airfoil Usage") predate the
+        // supercritical sections. The 11.0 % DSMA-523A replaces the drawn
+        // SC(2)-0612/-0410 pair (0.116 area-weighted) at root and tip alike.
+        "DC-10.geometry.wing.root_airfoil" => return Some((json!("sc20612"), json!("dsma523a"))),
+        "DC-10.geometry.wing.tip_airfoil" => return Some((json!("sc20410"), json!("dsma523a"))),
         // Boeing DC-10 ACAP DAC-67803A Rev A, Figure 2.2 (Series 30 general
         // dimensions): printed 71 ft 2 in (21.69 m) tailplane span; chords,
         // sweep and root station read off the plan view's 5 ft grid.
@@ -177,7 +198,8 @@ pub fn dimensions(path: &str) -> Option<(Value, Value)> {
         // Sheet 2 (plan view, drawing read): 1.24 m tailplane tip chord and
         // tip leading edge 3.31 m aft of the root's; the root chord closes
         // 31.0 m^2. Sheet 1: the 5.87 m fin height runs from the fuselage
-        // top line; the span from the estimated root holds that tip height.
+        // top line, so the fin root sits on the crown.
+        "A320-200.geometry.empennage.vstab_z_m" => (1.2, 2.17),
         "A320-200.geometry.empennage.hstab_root_chord_m" => (4.0, 3.740),
         "A320-200.geometry.empennage.hstab_tip_chord_m" => (1.2, 1.24),
         "A320-200.geometry.empennage.hstab_tip_le_m[0]" => (3.5, 3.31),
@@ -185,7 +207,7 @@ pub fn dimensions(path: &str) -> Option<(Value, Value)> {
         "A320-200.geometry.empennage.vstab_root_chord_m" => (5.2, 5.444),
         "A320-200.geometry.empennage.vstab_tip_chord_m" => (1.8, 1.884),
         "A320-200.geometry.empennage.vstab_tip_le_m[0]" => (5.0, 5.06),
-        "A320-200.geometry.empennage.vstab_tip_le_m[2]" => (5.8, 6.84),
+        "A320-200.geometry.empennage.vstab_tip_le_m[2]" => (5.8, 5.87),
         "A320-200.geometry.fuselage.height_m" => return Some((Value::Null, json!(4.14))),
         "A320-200.geometry.wing.break_span_fraction" => (0.37, 0.379_3),
         // Airbus A320 AC Jun 01/24, FIGURE-2-3-0-991-029-A01 sheet 2 (MRW,
@@ -210,8 +232,8 @@ pub fn dimensions(path: &str) -> Option<(Value, Value)> {
         // tailplane span with its tip trailing edge at the 206 ft 1 in overall
         // length, which is longer than the EASA TCDS 62.0014 m body. Section
         // 2.3.2 (PDF p.25): GEnx nacelle 0.69 m and fin top 16.81 m above the
-        // ground over the 1.75 m forward-belly clearance, the fin reaching it
-        // by its span from the estimated root. The saved-file case
+        // ground over the 1.75 m forward-belly clearance, the fin root line
+        // on the crown. The saved-file case
         // `preset_then_field` loads this preset.
         "B787-9.design_vector.fuselage_length_m" => (62.81, 62.00),
         // Section 2.2.2: body width 18 ft 11 in and height 19 ft 6 in.
@@ -228,7 +250,9 @@ pub fn dimensions(path: &str) -> Option<(Value, Value)> {
         "B787-9.geometry.empennage.vstab_offset_from_tail_m"
         | "preset_then_field.geometry.empennage.vstab_offset_from_tail_m" => (10.5, 9.69),
         "B787-9.geometry.empennage.vstab_tip_le_m[2]"
-        | "preset_then_field.geometry.empennage.vstab_tip_le_m[2]" => (8.5, 10.49),
+        | "preset_then_field.geometry.empennage.vstab_tip_le_m[2]" => (8.5, 9.12),
+        "B787-9.geometry.empennage.vstab_z_m"
+        | "preset_then_field.geometry.empennage.vstab_z_m" => (1.8, 3.17),
         "A320-200.geometry.wing.root_datum_x_m" => (12.9, 11.891),
         // Wing roots re-anchored so the model quarter-MAC point sits on the
         // manufacturer weight-and-balance one, derived by two-point statics
@@ -297,15 +321,18 @@ pub fn engine_copy(path: &str) -> Option<Value> {
 
 /// A key the frozen reference carries that the product schema removed: the
 /// solver `strategy` and the objective weights only the retired weighted
-/// lift-to-drag objective read. The load boundary drops the same keys.
+/// lift-to-drag objective read, and the Korn technology factor the declared
+/// airfoil class replaced. The load boundary drops the same keys.
 pub fn retired_reference_key(path: &str, key: &str) -> bool {
-    path.ends_with(".solver") && alas_config::RETIRED_SOLVER_KEYS.contains(&key)
+    path.ends_with(".drag_model") && alas_config::RETIRED_DRAG_MODEL_KEYS.contains(&key)
+        || path.ends_with(".solver") && alas_config::RETIRED_SOLVER_KEYS.contains(&key)
         || path.ends_with(".weights") && alas_config::RETIRED_WEIGHT_KEYS.contains(&key)
 }
 
 /// Additive propulsion fields are validated by the active-binding unit tests.
 pub fn native_field(path: &str, key: &str) -> bool {
-    (matches!(key, "fuel_policy" | "fuel_tanks" | "downstream") && !path.contains('.'))
+    performance_fields::is_native_field(path, key)
+        || (matches!(key, "fuel_policy" | "fuel_tanks" | "downstream") && !path.contains('.'))
         || (path.ends_with(".landing_gear")
             && matches!(
                 key,
@@ -443,6 +470,22 @@ pub fn added_planform(path: &str) -> Option<Value> {
         "A320-200.geometry.wing.side_of_body_span_fraction" => Some(json!(0.115_84)),
         // Airbus A380 AC Rev 20, Figure 2-2-0-991-001-A01: half the 7.14 m body.
         "A380-800.geometry.wing.side_of_body_span_fraction" => Some(json!(3.57 / 39.875)),
+        // Airbus A380 Facts and Figures (February 2022): the wing flexes
+        // upwards by over 4 m during take-off, over the 39.875 m semispan.
+        "A380-800.geometry.wing.flight_tip_rise_semispan_fraction" => Some(json!(4.0 / 39.875)),
         _ => None,
     }
+}
+
+/// The declared section class that fixes the Korn technology factor, which
+/// replaced the frozen global `drag_model.korn_technology_factor` and so has
+/// no Python counterpart: conventional for the 1966-1968 DC-10 wing and the
+/// non-transonic ATR 72, supercritical for every other preset and for a
+/// clean-sheet configuration (each preset's `airfoil_class_source`).
+pub fn declared_airfoil_class(path: &str) -> Option<Value> {
+    let aircraft = path.strip_suffix(".geometry.wing.airfoil_class")?;
+    Some(json!(match aircraft {
+        "DC-10" | "ATR72-600" => "conventional",
+        _ => "supercritical",
+    }))
 }

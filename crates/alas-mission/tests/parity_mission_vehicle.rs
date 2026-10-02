@@ -128,6 +128,12 @@ fn compare(
                     {
                         continue;
                     }
+                    // The declared airfoil class is a native wing input the
+                    // frozen request predates; alas-config's parity ledgers
+                    // and preset declarations check it.
+                    if path.ends_with(".geometry_config.wing") && key == "airfoil_class" {
+                        continue;
+                    }
                     let child = join(path, key);
                     // A leaf the frozen request never carried is admitted
                     // only through an explicit two-sided correction.
@@ -304,8 +310,11 @@ fn request_corrections() -> BTreeMap<&'static str, RequestCorrection> {
         correction(
             "A320-200.geometry_config.empennage.vstab_tip_le_m[2]",
             5.8,
-            6.84,
+            5.87,
         ),
+        // Airbus A320 AC Jun 01/24, FIGURE-2-2-0-991-004-A01 sheet 1: fin
+        // height from the fuselage top line, so the root sits on the crown.
+        correction("A320-200.geometry_config.empennage.vstab_z_m", 1.2, 2.17),
         correction(
             "A320-200.geometry_config.engine.spanwise_positions_m[0]",
             5.5,
@@ -381,8 +390,9 @@ fn request_corrections() -> BTreeMap<&'static str, RequestCorrection> {
         correction(
             "A340-300.geometry_config.empennage.vstab_tip_le_m[2]",
             8.5,
-            9.52,
+            8.3,
         ),
+        correction("A340-300.geometry_config.empennage.vstab_z_m", 1.8, 3.02),
         correction(
             "A340-300.geometry_config.engine.inlet_x_offset_m",
             3.0,
