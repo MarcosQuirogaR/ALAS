@@ -3,5 +3,12 @@
 
 //! Coupled DC-motor and propeller torque balance.
 
-include!("solver_parts/part_01.rs");
-include!("solver_parts/part_02.rs");
+use super::{apc_performance_map, ElectricPropulsionError, PropellerPerformanceMap};
+use crate::catalog::ComponentKind;
+use crate::optimizer::{PropulsionMap, PropulsionOperatingPoint};
+use crate::Catalog;
+
+mod model;
+pub use model::*;
+mod resolve;
+use resolve::*;

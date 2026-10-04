@@ -98,6 +98,14 @@ pub struct WingAnalysisState {
     pub moment_reference_manual: bool,
     /// Revision of the analysed surfaces.
     pub geometry_revision: u64,
+    /// Revision of the drawn preview scene itself.
+    ///
+    /// Unlike `geometry_revision`, this also advances on a camera or theme
+    /// redraw (`rebuild_preview` bumps it every time it runs), so a
+    /// `SceneView::cache_revision` keyed on it never shows a stale texture
+    /// after an orbit drag, a camera preset button, or a theme switch, none
+    /// of which change the analysed geometry.
+    pub preview_revision: u64,
     /// Revision of everything a run reads.
     pub input_revision: u64,
     /// The most recent outcome whose revision still matches the inputs.
@@ -145,6 +153,7 @@ impl Default for WingAnalysisState {
             camera: PreviewCamera::isometric(),
             moment_reference_manual: false,
             geometry_revision: 0,
+            preview_revision: 0,
             input_revision: 0,
             result: None,
             result_revision: 0,

@@ -23,6 +23,8 @@ use crate::views::{tr, tr_fields};
 
 #[path = "config_edit_custom.rs"]
 mod config_edit_custom;
+#[path = "config_edit_design_space.rs"]
+mod config_edit_design_space;
 
 /// Serialize a configuration for the generic form editor, which edits this
 /// JSON directly and needs every schema field present to find it back.
@@ -46,7 +48,7 @@ pub(crate) fn full_config_values(config: &AlasConfig) -> Value {
 impl AppState {
     /// Persist optional-tool locations separately from an aircraft
     /// config, so restarting the GUI retains setup choices without making
-    /// mission configuration depend on an obsolete Python runtime.
+    /// mission configuration depend on machine-local tool paths.
     pub fn save_tool_preferences(&mut self) {
         let config = match self.typed_config() {
             Some(config) => config,
@@ -78,54 +80,54 @@ impl AppState {
         }
     }
 
-    /// Load a preset by its registry key, replacing geometry, requirements and
-    /// the calibrated mass and performance models, as the reference does.
+    /// Start a complete canonical aircraft case. Only machine locations and
+    /// an explicitly selected baseline workflow survive aircraft selection.
     pub fn load_preset(&mut self, key: &str) {
         let preset = match presets::get(key) {
             Ok(p) => p,
             Err(_) => return,
         };
 
-        let mut config = self.typed_config().unwrap_or_default();
-        let operational = preset.operational_mission_defaults();
-        config.preset = preset.name.to_owned();
-        config.geometry = preset.geometry.clone();
-        config.geometry.engine.apply_engine_spec();
-        config.requirements = preset.requirements.clone();
-        // Keep the interactive path identical to `AlasConfig::from_value`:
-        // registered aircraft carry a representable planning cabin seed,
-        // while their passenger count remains derived from the editable class
-        // shares. Without this assignment a preset loaded after startup kept
-        // the previous cabin (often the generic 15/85 mix), so the displayed
-        // aircraft and its payload layout disagreed.
-        config.cabin = preset.planning_cabin_config();
-        config.landing_gear = preset.landing_gear.clone();
-        if let Some(mm) = &preset.mass_model {
-            config.mass_model = mm.clone();
+        let previous = self.typed_config();
+        // Start fresh rather than copying an allowlist of aircraft fields:
+        // every physical model, constraint, mission and numerical setting
+        // (including future schema groups) must belong to this new case.
+        let mut config = match AlasConfig::from_value(&serde_json::json!({
+            "preset": preset.name,
+        })) {
+            Ok(reference) => reference,
+            Err(error) => {
+                self.log(error.to_string(), LogKind::Error);
+                return;
+            }
+        };
+        if let Some(previous) = previous {
+            preserve_machine_locations(&mut config, &previous);
+            if previous.optimizer.design_space.mode == DesignMode::BaselineSandbox {
+                config.optimizer.design_space.mode = DesignMode::BaselineSandbox;
+            }
         }
-        if let Some(perf) = &preset.performance {
-            config.performance = perf.clone();
-        }
-        config.departure_airport = operational.departure_airport.to_owned();
-        config.arrival_airport = operational.arrival_airport.to_owned();
-        config.mission.profile = operational.profile;
 
         self.config_values = full_config_values(&config);
         self.active_preset = preset.name.to_owned();
-        // Preset operational profiles are automatic suggestions tied to the
-        // preset route. Start a fresh regeneration policy so a later route
-        // edit regenerates until the user changes a phase deliberately.
+        self.selected_aux_preset.clear();
+        // Preset operational profiles are automatic route-linked inputs.
+        // Initialize their cruise-leg count from the route-aware mission
+        // proposal, then keep automatic regeneration enabled until the user
+        // edits a phase or selects a different count.
         self.mission_profile_manual_edit = false;
-        self.mission_profile_route_signature =
-            crate::views::mission_profile_inputs::route_signature(&self.config_values);
+        self.mission_profile_route_signature.clear();
         self.mission_profile_regeneration_prompt = false;
         self.mission_profile_retained_validation = None;
+        crate::views::mission_profile_inputs::initialize_route_profile(self);
 
         // Recenter the design space on the preset's own design vector, using
-        // the selected design-mode envelope rather than the retired fixed
+        // the selected design-mode envelope rather than a fixed
         // percentage window. The same envelope is applied by the product
         // evaluator, so the GUI cannot offer a reference limit it will later
         // ignore.
+        self.design_values.clear();
+        self.bounds.clear();
         if let Ok(dv) = serde_json::to_value(preset.design_vector) {
             if let Some(map) = dv.as_object() {
                 for spec in DESIGN_VARIABLE_SPECS {
@@ -193,30 +195,28 @@ impl AppState {
             );
             return;
         };
+        let from_preset = !config.preset.is_empty();
         if config.optimizer.design_space.mode == mode {
             self.run_options.optimize = mode != DesignMode::BaselineSandbox;
             if mode == DesignMode::BaselineSandbox {
                 self.run_options.compare_baseline = false;
             }
             if mode == DesignMode::CleanSheet && !config.preset.is_empty() {
-                // A registered aircraft is a reference starting point. Once
-                // the user explicitly chooses New aircraft, clear that
-                // provenance so clean-sheet-only inputs (including passenger
-                // target) become available while retaining the current shape
-                // as a useful starting geometry.
+                // Choosing New aircraft clears the registered provenance, so
+                // clean-sheet inputs (the passenger target among them) open
+                // while the current shape stays as the starting geometry.
                 config.preset.clear();
                 self.active_preset.clear();
                 self.config_values = full_config_values(&config);
                 self.on_config_modified();
             }
-            self.reset_design_space_bounds_to_mode();
+            self.reset_design_space_after_mode_change(mode, from_preset);
             return;
         }
         config.optimizer.design_space.mode = mode;
         if mode == DesignMode::CleanSheet {
-            // New aircraft studies may start from the currently displayed
-            // geometry, but they must not carry a registered aircraft's
-            // fixed passenger load case into the product model.
+            // A new aircraft keeps the displayed geometry, never a registered
+            // aircraft's fixed passenger load case.
             config.preset.clear();
             self.active_preset.clear();
         }
@@ -225,7 +225,7 @@ impl AppState {
         if mode == DesignMode::BaselineSandbox {
             self.run_options.compare_baseline = false;
         }
-        self.reset_design_space_bounds_to_mode();
+        self.reset_design_space_after_mode_change(mode, from_preset);
         self.log(
             tr_fields(
                 "Design mode changed to: {mode}",
@@ -234,56 +234,6 @@ impl AppState {
             LogKind::Info,
         );
         self.on_config_modified();
-    }
-
-    /// Rebuild the GUI bounds from the same typed design-mode envelope the
-    /// product optimizer intersects with its request. This is called after a
-    /// mode/window/preset change; ordinary design-space edits still remain
-    /// explicit run bounds within that declared envelope.
-    pub fn reset_design_space_bounds_to_mode(&mut self) {
-        let Some(config) = self.typed_config() else {
-            return;
-        };
-        let nominal = self.current_design().unwrap_or_default();
-        for variable in config.optimizer.design_space.envelope(&nominal) {
-            self.bounds
-                .insert(variable.name.to_owned(), (variable.lower, variable.upper));
-            if variable.fixed {
-                self.design_values
-                    .insert(variable.name.to_owned(), variable.nominal);
-            }
-        }
-    }
-
-    /// Keep variables fixed by the typed envelope fixed immediately before a
-    /// run. This protects the baseline sandbox and clean-sheet cabin sizing
-    /// path even when the user last edited another page.
-    pub fn enforce_design_space_fixed_variables(&mut self) {
-        let Some(config) = self.typed_config() else {
-            return;
-        };
-        let mut nominal = self.current_design().unwrap_or_default();
-        // A cabin-sized clean-sheet fuselage is a derived coordinate. Keep
-        // the editor, the initial point, and the optimizer bounds on the same
-        // materialized length so a GUI run cannot publish a vector that the
-        // evaluator silently replaces during candidate construction.
-        if config.optimizer.design_space.sizes_fuselage_from_cabin()
-            && config.requirements.aircraft_type != "cargo"
-        {
-            if let Ok(canonical) = alas_opt::canonicalize_design(&config, nominal) {
-                nominal = canonical;
-                self.design_values
-                    .insert("fuselage_length_m".to_owned(), nominal.fuselage_length_m);
-            }
-        }
-        for variable in config.optimizer.design_space.envelope(&nominal) {
-            if variable.fixed {
-                self.design_values
-                    .insert(variable.name.to_owned(), variable.nominal);
-                self.bounds
-                    .insert(variable.name.to_owned(), (variable.lower, variable.upper));
-            }
-        }
     }
 
     /// Apply one aux-preset (the Py6-era fidelity/solver/performance pickers)
@@ -352,15 +302,32 @@ impl AppState {
 
     /// Restore one schema group without discarding edits on other pages.
     pub fn reset_group_to_defaults(&mut self, group: &str) -> bool {
+        self.reset_group_to_defaults_preserving(group, &[])
+    }
+
+    /// Restore a group while retaining fields whose editor lives on another
+    /// page, even when an optional field is absent from the saved JSON.
+    pub fn reset_group_to_defaults_preserving(&mut self, group: &str, preserve: &[&str]) -> bool {
         let Ok(defaults) = serde_json::to_value(alas_config::AlasConfig::default()) else {
             return false;
         };
-        let Some(default_group) = defaults.get(group).cloned() else {
+        let Some(mut default_group) = defaults.get(group).cloned() else {
             return false;
         };
         let Some(root) = self.config_values.as_object_mut() else {
             return false;
         };
+        if let (Some(current), Some(default_fields)) =
+            (root.get(group), default_group.as_object_mut())
+        {
+            for name in preserve {
+                if let Some(value) = current.get(*name) {
+                    default_fields.insert((*name).to_owned(), value.clone());
+                } else {
+                    default_fields.remove(*name);
+                }
+            }
+        }
         root.insert(group.to_owned(), default_group);
         self.log(
             tr_fields(
@@ -375,7 +342,7 @@ impl AppState {
 
     /// Draw one design point per variable, uniformly within bounds widened by
     /// `widen` on each side (0.0 keeps it inside the bounds; 0.3 is Random's
-    /// reach beyond them). Reproduces the reference's client-side sampler.
+    /// reach beyond them)..
     pub fn sample_design(&self, widen: f64) -> BTreeMap<String, f64> {
         let mut out = BTreeMap::new();
         for spec in DESIGN_VARIABLE_SPECS {
@@ -387,8 +354,8 @@ impl AppState {
             let span = base_hi - base_lo;
             let lo = base_lo - span * widen;
             let hi = base_hi + span * widen;
-            // A cheap uniform draw off the wall clock; the reference used
-            // Math.random(), an equally unseeded PRNG, for the same purpose.
+            // A cheap uniform draw off the wall clock; it is deliberately
+            // unseeded.
             let t = pseudo_random(spec.name);
             out.insert(spec.name.to_owned(), lo + t * (hi - lo));
         }
@@ -456,6 +423,36 @@ impl AppState {
     }
 }
 
+/// Preserve installed tools, local data and machine memory budgets. Do not
+/// retain solver switches, physics settings or the dispatch account: the
+/// latter can override the new aircraft's route with an unrelated flight.
+fn preserve_machine_locations(config: &mut AlasConfig, previous: &AlasConfig) {
+    config.mses.mses_dir.clone_from(&previous.mses.mses_dir);
+    config.mses.osmap_path.clone_from(&previous.mses.osmap_path);
+    let mission = &mut config.mission;
+    mission
+        .navdata_dir
+        .clone_from(&previous.mission.navdata_dir);
+    mission.routes_dir.clone_from(&previous.mission.routes_dir);
+    mission
+        .texture_path
+        .clone_from(&previous.mission.texture_path);
+    macro_rules! preserve_structure_location {
+        ($($field:ident),+ $(,)?) => { $(
+            config.structures.$field.clone_from(&previous.structures.$field);
+        )+ };
+    }
+    preserve_structure_location!(
+        nastran_exe_path,
+        nastran_solver_path,
+        nastran_memory_mb,
+        nastran95_dir_path,
+        nastran95_runtime_path,
+        nastran95_rf_stage_path,
+        nastran95_open_core_words,
+        patran_exe_path,
+    );
+}
 fn nonempty(value: &str) -> Option<String> {
     (!value.trim().is_empty()).then(|| value.to_owned())
 }
@@ -463,8 +460,8 @@ fn nonempty(value: &str) -> Option<String> {
 /// A deterministic-per-name pseudo-random draw in `[0, 1)`.
 ///
 /// Seeded off the wall clock and the variable name so each variable of one
-/// sample gets a different value; the reference used `Math.random()`, which is
-/// equally unseeded, so nothing here depends on the sequence being reproducible.
+/// sample gets a different value; nothing here depends
+/// on the sequence being reproducible.
 fn pseudo_random(seed: &str) -> f64 {
     use std::time::{SystemTime, UNIX_EPOCH};
     let nanos = SystemTime::now()

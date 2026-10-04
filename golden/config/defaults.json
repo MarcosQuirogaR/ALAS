@@ -812,22 +812,10 @@
         ".optimizer.weights.max_break_root_chord_ratio": {
           "help": true
         },
-        ".optimizer.weights.max_hstab_volume_coef": {
-          "help": true
-        },
-        ".optimizer.weights.max_vstab_volume_coef": {
-          "help": true
-        },
         ".optimizer.weights.min_hstab_area_fraction": {
           "help": true
         },
-        ".optimizer.weights.min_hstab_volume_coef": {
-          "help": true
-        },
         ".optimizer.weights.min_vstab_area_fraction": {
-          "help": true
-        },
-        ".optimizer.weights.min_vstab_volume_coef": {
           "help": true
         },
         ".optimizer.weights.min_wing_position_fraction": {
@@ -843,9 +831,6 @@
           "help": true
         },
         ".optimizer.weights.tail_area_penalty_scale": {
-          "help": true
-        },
-        ".optimizer.weights.tail_volume_penalty_scale": {
           "help": true
         },
         ".optimizer.weights.taper_realism_penalty_scale": {
@@ -1492,18 +1477,13 @@
             "instability_failure_cost": 1000.0,
             "ld_weight": 1.0,
             "max_break_root_chord_ratio": 0.65,
-            "max_hstab_volume_coef": 1.25,
-            "max_vstab_volume_coef": 0.13,
             "min_hstab_area_fraction": 0.15,
-            "min_hstab_volume_coef": 0.75,
             "min_vstab_area_fraction": 0.07,
-            "min_vstab_volume_coef": 0.06,
             "min_wing_position_fraction": 0.27,
             "payload_shortfall_penalty_scale": 1000.0,
             "span_penalty_per_m": 0.02,
             "static_margin_penalty_scale": 20.0,
             "tail_area_penalty_scale": 150.0,
-            "tail_volume_penalty_scale": 200.0,
             "taper_realism_penalty_scale": 250.0,
             "te_root_angle_penalty_scale": 100.0,
             "thickness_floor": 0.9,
@@ -7418,51 +7398,6 @@
                     "name": "tail_area_penalty_scale",
                     "unit": "",
                     "value": 150.0
-                  },
-                  {
-                    "advanced": false,
-                    "help": "Lower bound on the horizontal-tail volume coefficient Vh = Sh*Lh/(S*c_bar), which captures tail effectiveness accounting for its moment arm, not just area (Etkin/Reid convention).",
-                    "kind": "float",
-                    "label": "Minimum H-stab volume coefficient (Vh)",
-                    "name": "min_hstab_volume_coef",
-                    "unit": "",
-                    "value": 0.75
-                  },
-                  {
-                    "advanced": false,
-                    "help": "Upper bound on Vh: penalises an oversized tail / an unnecessarily stretched fuselage moment arm.",
-                    "kind": "float",
-                    "label": "Maximum H-stab volume coefficient (Vh)",
-                    "name": "max_hstab_volume_coef",
-                    "unit": "",
-                    "value": 1.25
-                  },
-                  {
-                    "advanced": false,
-                    "help": "Lower bound on the vertical-tail volume coefficient Vv = Sv*Lv/(S*b).",
-                    "kind": "float",
-                    "label": "Minimum V-stab volume coefficient (Vv)",
-                    "name": "min_vstab_volume_coef",
-                    "unit": "",
-                    "value": 0.06
-                  },
-                  {
-                    "advanced": false,
-                    "help": "Upper bound on Vv (typical jet-transport max is ~0.12).",
-                    "kind": "float",
-                    "label": "Maximum V-stab volume coefficient (Vv)",
-                    "name": "max_vstab_volume_coef",
-                    "unit": "",
-                    "value": 0.13
-                  },
-                  {
-                    "advanced": false,
-                    "help": "Quadratic penalty weight for Vh/Vv falling outside their [min, max] bounds.",
-                    "kind": "weight_slider",
-                    "label": "Tail-volume-coefficient penalty weight",
-                    "name": "tail_volume_penalty_scale",
-                    "unit": "",
-                    "value": 200.0
                   },
                   {
                     "advanced": false,
@@ -18829,22 +18764,10 @@
         ".weights.max_break_root_chord_ratio": {
           "help": true
         },
-        ".weights.max_hstab_volume_coef": {
-          "help": true
-        },
-        ".weights.max_vstab_volume_coef": {
-          "help": true
-        },
         ".weights.min_hstab_area_fraction": {
           "help": true
         },
-        ".weights.min_hstab_volume_coef": {
-          "help": true
-        },
         ".weights.min_vstab_area_fraction": {
-          "help": true
-        },
-        ".weights.min_vstab_volume_coef": {
           "help": true
         },
         ".weights.min_wing_position_fraction": {
@@ -18860,9 +18783,6 @@
           "help": true
         },
         ".weights.tail_area_penalty_scale": {
-          "help": true
-        },
-        ".weights.tail_volume_penalty_scale": {
           "help": true
         },
         ".weights.taper_realism_penalty_scale": {
@@ -18915,18 +18835,13 @@
           "instability_failure_cost": 1000.0,
           "ld_weight": 1.0,
           "max_break_root_chord_ratio": 0.65,
-          "max_hstab_volume_coef": 1.25,
-          "max_vstab_volume_coef": 0.13,
           "min_hstab_area_fraction": 0.15,
-          "min_hstab_volume_coef": 0.75,
           "min_vstab_area_fraction": 0.07,
-          "min_vstab_volume_coef": 0.06,
           "min_wing_position_fraction": 0.27,
           "payload_shortfall_penalty_scale": 1000.0,
           "span_penalty_per_m": 0.02,
           "static_margin_penalty_scale": 20.0,
           "tail_area_penalty_scale": 150.0,
-          "tail_volume_penalty_scale": 200.0,
           "taper_realism_penalty_scale": 250.0,
           "te_root_angle_penalty_scale": 100.0,
           "thickness_floor": 0.9,
@@ -19128,51 +19043,6 @@
                 "name": "tail_area_penalty_scale",
                 "unit": "",
                 "value": 150.0
-              },
-              {
-                "advanced": false,
-                "help": "Lower bound on the horizontal-tail volume coefficient Vh = Sh*Lh/(S*c_bar), which captures tail effectiveness accounting for its moment arm, not just area (Etkin/Reid convention).",
-                "kind": "float",
-                "label": "Minimum H-stab volume coefficient (Vh)",
-                "name": "min_hstab_volume_coef",
-                "unit": "",
-                "value": 0.75
-              },
-              {
-                "advanced": false,
-                "help": "Upper bound on Vh: penalises an oversized tail / an unnecessarily stretched fuselage moment arm.",
-                "kind": "float",
-                "label": "Maximum H-stab volume coefficient (Vh)",
-                "name": "max_hstab_volume_coef",
-                "unit": "",
-                "value": 1.25
-              },
-              {
-                "advanced": false,
-                "help": "Lower bound on the vertical-tail volume coefficient Vv = Sv*Lv/(S*b).",
-                "kind": "float",
-                "label": "Minimum V-stab volume coefficient (Vv)",
-                "name": "min_vstab_volume_coef",
-                "unit": "",
-                "value": 0.06
-              },
-              {
-                "advanced": false,
-                "help": "Upper bound on Vv (typical jet-transport max is ~0.12).",
-                "kind": "float",
-                "label": "Maximum V-stab volume coefficient (Vv)",
-                "name": "max_vstab_volume_coef",
-                "unit": "",
-                "value": 0.13
-              },
-              {
-                "advanced": false,
-                "help": "Quadratic penalty weight for Vh/Vv falling outside their [min, max] bounds.",
-                "kind": "weight_slider",
-                "label": "Tail-volume-coefficient penalty weight",
-                "name": "tail_volume_penalty_scale",
-                "unit": "",
-                "value": 200.0
               },
               {
                 "advanced": false,

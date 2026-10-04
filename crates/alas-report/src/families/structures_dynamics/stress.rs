@@ -3,7 +3,6 @@
 
 // Ported from alas/reporting/visualization.py: figure_structures_stress
 // (L5907-5949).
-// Reference: alas @ rust-port-baseline.
 
 //! Spanwise margin-of-safety per spar cap, one panel per spar, all three
 //! load cases overlaid: `MS >= 0` required everywhere for a valid design
@@ -210,6 +209,8 @@ mod tests {
             nastran95: None,
             patran: None,
             torenbeek_wing_mass_kg: 400.0,
+            wing_mass: None,
+            evaluation_inputs: None,
         }
     }
 

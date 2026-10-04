@@ -327,6 +327,8 @@ pub(super) fn add_spar_caps(
                 gb: upper[index + 1],
                 x: CAP_ORIENTATION,
                 offt: CAP_OFFT,
+                offset_a: [0.0; 3],
+                offset_b: [0.0; 3],
             });
             *eid += 1;
         }
@@ -363,6 +365,7 @@ pub(super) fn add_engine_masses(
     engine_cfg: &EngineConfig,
     mass_cfg: &MassModelConfig,
     req: &DesignRequirements,
+    preserve_declared_station: bool,
 ) -> Vec<i64> {
     let mut attached = Vec::new();
     for (y_engine, mass) in loads::engine_point_loads_n(engine_cfg, mass_cfg, req) {
@@ -387,7 +390,19 @@ pub(super) fn add_engine_masses(
             mass,
             // Generic pylon geometry: the mass hangs ahead of and below the
             // front spar.
-            offset: [-0.15 * chord, 0.0, -1.0],
+            // A perpendicular rib's front-spar GRID need not lie at the
+            // declared engine Y. CONM2 offsets preserve the native point
+            // mass's bending arm (Megson, 2007, ch. 14, inertia loads).
+            // The reference deck retains its frozen snapped station.
+            offset: [
+                -0.15 * chord,
+                if preserve_declared_station {
+                    y_engine.abs() - deck.node_y(nid)
+                } else {
+                    0.0
+                },
+                -1.0,
+            ],
         });
         attached.push(nid);
         *eid += 1;
@@ -403,7 +418,7 @@ pub(super) fn last_spar_point(station: &RibStation) -> i64 {
 
 /// A sizing quantity sampled at `eta` by linear interpolation over the
 /// sizing's own station grid, held at the end values outside it.
-fn station_value(eta: f64, stations: &[f64], values: &[f64]) -> f64 {
+pub(super) fn station_value(eta: f64, stations: &[f64], values: &[f64]) -> f64 {
     let n = stations.len().min(values.len());
     if n == 0 {
         return 0.0;

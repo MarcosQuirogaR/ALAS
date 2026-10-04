@@ -25,9 +25,9 @@ pub(super) fn card(
 ) {
     card_frame(ui).show(ui, |ui| {
         ui.set_min_width(ui.available_width());
-        ui.label(RichText::new(tr(title)).strong());
+        let heading = ui.label(RichText::new(tr(title)).strong());
         if let Some(description) = description {
-            ui.label(RichText::new(tr(description)).weak().small());
+            heading.on_hover_text(tr(description));
         }
         ui.add_space(4.0);
         contents(ui);
@@ -45,16 +45,15 @@ pub(super) fn collapsing_card(
 ) {
     card_frame(ui).show(ui, |ui| {
         ui.set_min_width(ui.available_width());
-        CollapsingHeader::new(RichText::new(tr(title)).strong())
+        let response = CollapsingHeader::new(RichText::new(tr(title)).strong())
             .id_salt(id)
             .default_open(default_open)
             .show(ui, |ui| {
-                if let Some(description) = description {
-                    ui.label(RichText::new(tr(description)).weak().small());
-                    ui.add_space(4.0);
-                }
                 contents(ui);
             });
+        if let Some(description) = description {
+            response.header_response.on_hover_text(tr(description));
+        }
     });
 }
 

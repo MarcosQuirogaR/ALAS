@@ -42,17 +42,27 @@ pub(super) fn search_ran(state: &AppState) -> bool {
 
 /// Render the diagnostics block above the stage timings.
 pub(super) fn show(state: &AppState, ui: &mut Ui) {
-    ui.label(RichText::new(tr("Search diagnostics")).strong().small());
+    ui.label(RichText::new(tr("Search diagnostics")).strong().small())
+        .on_hover_text(tr(
+            "Scan evaluations use a coarser mesh and a looser sizing closure, so they are not comparable with the full-fidelity count.",
+        ));
     let Some(diagnostics) = current(state) else {
-        let message = if search_ran(state) {
-            // The frozen reference-compatibility replay is the one search
-            // path outside the product L-SHADE driver, and it returns no
-            // lifecycle record. Saying so is not the same as reporting zeros.
-            tr("This run's search method reports no diagnostics.")
+        let (status, help) = if search_ran(state) {
+            // A result with no lifecycle record (for example one saved by an
+            // earlier build) is not the same as a search that reported zero
+            // scan or poll work.
+            (
+                tr("No diagnostics reported"),
+                tr("This run's search method reports no diagnostics."),
+            )
         } else {
-            tr("This run included no design search.")
+            (
+                tr("No design search"),
+                tr("This run included no design search."),
+            )
         };
-        ui.label(RichText::new(message).weak().small());
+        ui.label(RichText::new(status).weak().small())
+            .on_hover_text(help);
         ui.add_space(6.0);
         return;
     };
@@ -122,7 +132,7 @@ pub(super) fn show(state: &AppState, ui: &mut Ui) {
             );
             row(
                 ui,
-                tr("Objective at the first feasible point"),
+                tr("Normalized ranking cost [dimensionless], first feasible point"),
                 optional(diagnostics.first_feasible_cost, 6),
             );
             row(
@@ -145,13 +155,6 @@ pub(super) fn show(state: &AppState, ui: &mut Ui) {
                 },
             );
         });
-    ui.label(
-        RichText::new(tr(
-            "Scan evaluations use a coarser mesh and a looser sizing closure, so they are not comparable with the full-fidelity count.",
-        ))
-        .weak()
-        .small(),
-    );
     ui.add_space(6.0);
 }
 

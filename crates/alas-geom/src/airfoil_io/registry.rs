@@ -3,6 +3,7 @@
 
 //! Runtime registry for imported airfoils.
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{OnceLock, RwLock};
 
 use crate::aircraft::airfoil::Airfoil;
@@ -27,6 +28,7 @@ pub fn register(imported: ImportedAirfoil) -> Result<(), AirfoilImportError> {
     }
     let name = Box::leak(name.to_owned().into_boxed_str());
     registry.push(RegisteredAirfoil { imported, name });
+    GENERATION.fetch_add(1, Ordering::Relaxed);
     Ok(())
 }
 
@@ -102,8 +104,20 @@ pub fn replace_records(records: Vec<AirfoilRecord>) -> Result<(), AirfoilImportE
     *registry()
         .write()
         .unwrap_or_else(|poisoned| poisoned.into_inner()) = replacement;
+    GENERATION.fetch_add(1, Ordering::Relaxed);
     Ok(())
 }
+
+/// A counter that changes on every registry mutation. The registry resolves
+/// airfoil names for geometry builds, so a cache of anything built from a
+/// configuration (a GUI preview, say) keys on this as well as the
+/// configuration: re-importing an airfoil under the same name changes the
+/// geometry without changing the configuration text.
+pub fn generation() -> u64 {
+    GENERATION.load(Ordering::Relaxed)
+}
+
+static GENERATION: AtomicU64 = AtomicU64::new(0);
 
 struct RegisteredAirfoil {
     imported: ImportedAirfoil,

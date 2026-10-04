@@ -207,6 +207,17 @@ pub fn download_files(
                 return Err(format!("cannot launch {executable}: {error}"));
             }
         };
+        // Drain stderr while curl runs: a retrying transfer can write more
+        // than the pipe buffer holds, and a child blocked on a full pipe
+        // never exits for `try_wait` to see.
+        let stderr_reader = child.stderr.take().map(|mut stderr| {
+            thread::spawn(move || {
+                use std::io::Read;
+                let mut text = String::new();
+                let _ = stderr.read_to_string(&mut text);
+                text
+            })
+        });
 
         // Poll rather than block on `wait()` so a cancellation request can
         // kill the transfer in flight instead of waiting for it to finish:
@@ -230,16 +241,16 @@ pub fn download_files(
                 Ok(Some(status)) => break status,
                 Ok(None) => thread::sleep(Duration::from_millis(50)),
                 Err(error) => {
+                    let _ = child.kill();
+                    let _ = child.wait();
                     let _ = fs::remove_file(&temporary);
                     return Err(format!("cannot poll {executable}: {error}"));
                 }
             }
         };
-        let mut stderr_text = String::new();
-        if let Some(mut stderr) = child.stderr.take() {
-            use std::io::Read;
-            let _ = stderr.read_to_string(&mut stderr_text);
-        }
+        let stderr_text = stderr_reader
+            .and_then(|reader| reader.join().ok())
+            .unwrap_or_default();
 
         if !status.success() {
             let body = fs::read_to_string(&temporary).unwrap_or_default();
@@ -286,15 +297,11 @@ pub fn download_files(
             }
         }
 
-        // Windows does not replace an existing file with rename, so remove an
-        // invalid old destination only after the new file has passed its size
-        // floor.  A valid old destination was skipped above.
-        if destination.exists() {
-            fs::remove_file(&destination).map_err(|error| {
-                let _ = fs::remove_file(&temporary);
-                format!("cannot replace {}: {error}", destination.display())
-            })?;
-        }
+        // `fs::rename` replaces an existing file on every supported platform
+        // (on Windows it asks for `MOVEFILE_REPLACE_EXISTING` semantics), so
+        // an invalid old destination is swapped for the verified file in one
+        // step, with no moment at which neither exists. A valid old
+        // destination was skipped above.
         if let Err(error) = fs::rename(&temporary, &destination) {
             let _ = fs::remove_file(&temporary);
             return Err(format!("cannot install {}: {error}", destination.display()));
@@ -531,6 +538,30 @@ mod tests {
             "alas-download-{label}-{}-{sequence}",
             std::process::id(),
         ))
+    }
+
+    #[test]
+    fn an_undersized_existing_file_is_replaced_by_the_verified_transfer() {
+        let source_dir = unique_dir("replace-src");
+        fs::create_dir_all(&source_dir).expect("create fixture source directory");
+        let source_file = source_dir.join("payload.dat");
+        let content = b"complete navdata fixture content".repeat(64);
+        fs::write(&source_file, &content).expect("write fixture payload");
+
+        let target = unique_dir("replace-target");
+        fs::create_dir_all(&target).expect("create target directory");
+        fs::write(target.join("payload.dat"), b"short").expect("write undersized file");
+        let spec = DownloadSpec::new("payload.dat", fixture_url(&source_file), 100);
+        let outcome = download_files(&[spec], &target, 30.0, &AtomicBool::new(false))
+            .expect("an undersized destination is replaced, not an error");
+        assert_eq!(outcome.report().downloaded, vec!["payload.dat".to_owned()]);
+        assert_eq!(
+            fs::read(target.join("payload.dat")).expect("read installed file"),
+            content
+        );
+
+        let _ = fs::remove_dir_all(&target);
+        let _ = fs::remove_dir_all(&source_dir);
     }
 
     #[test]

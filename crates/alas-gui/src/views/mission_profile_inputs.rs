@@ -5,22 +5,25 @@
 //!
 //! The profile is edited from the same mission.profile JSON node used by the
 //! pipeline. The card provides a route-linked phase overview; selecting a
-//! phase opens its actual speed/rate/altitude fields in a popup. The route
-//! policy keeps a long-haul step-climb schedule from being copied onto short
-//! routes and makes manual edits explicit.
+//! phase opens its actual speed/rate/altitude fields in a popup. Its native
+//! cruise-leg estimate fits step climbs to the route and makes manual edits
+//! explicit.
 
 use egui::{vec2, Context, Id, RichText, Ui, ViewportBuilder, ViewportClass, Window};
 use serde_json::Value;
 
-use alas_config::{airport_dataset, MissionProfileConfig};
+use alas_config::{airport_dataset, airports::Airport, AlasConfig, MissionProfileConfig};
 
 use crate::native_viewport::show_native_viewport;
 use crate::state::AppState;
 use crate::theme::card_frame;
 use crate::views::{tr, tr_fields};
 
+#[path = "mission_phase_launcher.rs"]
+mod phase_launcher;
+pub(crate) use phase_launcher::show_mission_profile_advanced;
+
 const SHORT_ROUTE_M: f64 = 2_500_000.0;
-const MEDIUM_ROUTE_M: f64 = 7_000_000.0;
 
 /// State for the detached editor opened by clicking a phase in the live
 /// mission figure. The phase remains selected while the native viewport is
@@ -152,12 +155,12 @@ pub(crate) fn show_mission_profile_inputs(state: &mut AppState, ui: &mut Ui) {
         if card_width >= 560.0 {
             ui.columns(2, |columns| {
                 show_route_distance_card(&mut columns[0], route_distance);
-                show_cruise_legs_card(&mut columns[1], cruise_count);
+                show_cruise_legs_card(&mut columns[1], state, cruise_count);
             });
         } else {
             show_route_distance_card(ui, route_distance);
             ui.add_space(6.0);
-            show_cruise_legs_card(ui, cruise_count);
+            show_cruise_legs_card(ui, state, cruise_count);
         }
         ui.add_space(8.0);
         if let Some(config) = state.typed_config() {
@@ -177,30 +180,6 @@ pub(crate) fn show_mission_profile_inputs(state: &mut AppState, ui: &mut Ui) {
     show_regeneration_prompt(state, ui);
 }
 
-/// Render phase-launch buttons in the detached Mission Advanced Settings tab.
-/// The advanced tab owns the phase navigation, while the live profile and its
-/// route cards remain on Setup > Inputs.
-pub(crate) fn show_mission_profile_advanced(state: &mut AppState, ui: &mut Ui) {
-    reconcile_route_profile(state);
-    card_frame(ui).show(ui, |ui| {
-        ui.set_min_width(ui.available_width());
-        ui.label(RichText::new(tr("Mission phases")).strong());
-        ui.add_space(4.0);
-        ui.horizontal_wrapped(|ui| {
-            for phase in PHASES {
-                let selected = state.mission_profile_window.open
-                    && state.mission_profile_window.phase_id.as_deref() == Some(phase.id);
-                if ui
-                    .add(crate::theme::selectable_button(tr(phase.title), selected))
-                    .clicked()
-                {
-                    open_phase_window(state, phase.id);
-                }
-            }
-        });
-    });
-}
-
 fn show_route_distance_card(ui: &mut Ui, distance_m: Option<f64>) {
     card_frame(ui).show(ui, |ui| {
         ui.set_min_width(ui.available_width());
@@ -215,11 +194,24 @@ fn show_route_distance_card(ui: &mut Ui, distance_m: Option<f64>) {
     });
 }
 
-fn show_cruise_legs_card(ui: &mut Ui, cruise_count: usize) {
+fn show_cruise_legs_card(ui: &mut Ui, state: &mut AppState, cruise_count: usize) {
     card_frame(ui).show(ui, |ui| {
         ui.set_min_width(ui.available_width());
-        ui.label(RichText::new(tr("Suggested cruise legs")).strong());
-        ui.label(cruise_count.to_string());
+        ui.label(RichText::new(tr("Cruise legs")).strong())
+            .on_hover_text(tr(
+                "Each additional cruise leg adds a step climb. The default is estimated from route cruise time and typical fuel-burn altitude drift; choose another count to edit the profile.",
+            ));
+        let mut selected = cruise_count.clamp(1, 3);
+        ui.horizontal(|ui| {
+            for count in 1..=3 {
+                ui.radio_value(&mut selected, count, count.to_string());
+            }
+        });
+        if selected != cruise_count && apply_cruise_leg_count(state, selected) {
+            state.mission_profile_manual_edit = true;
+            state.mission_profile_retained_validation = None;
+            state.on_config_modified();
+        }
     });
 }
 
@@ -268,17 +260,12 @@ fn show_phase_editor(state: &mut AppState, ui: &mut Ui, phase_id: &str, class: V
     let Some(phase) = PHASES.iter().find(|phase| phase.id == phase_id).copied() else {
         return;
     };
-    ui.heading(tr(phase.title));
+    ui.heading(tr(phase.title)).on_hover_text(tr(
+        "These values are used by the mission solver in SI units where shown.",
+    ));
     if matches!(class, ViewportClass::Embedded) {
         ui.label(RichText::new(tr("Detached editor fallback")).weak().small());
     }
-    ui.label(
-        RichText::new(tr(
-            "These values are used by the mission solver in SI units where shown.",
-        ))
-        .weak()
-        .small(),
-    );
     ui.add_space(6.0);
     let fields = profile_fields(&state.schema)
         .into_iter()
@@ -292,7 +279,7 @@ fn show_phase_editor(state: &mut AppState, ui: &mut Ui, phase_id: &str, class: V
             profile,
             &std::collections::HashSet::new(),
             Some(state.language.code()),
-            state.help_verbose,
+            false,
         );
     }
     if !edits.is_empty() {
@@ -431,12 +418,132 @@ fn route_distance_m(values: &Value) -> Option<f64> {
     Some(2.0 * 6_371_000.0 * a.sqrt().atan2((1.0 - a).sqrt()))
 }
 
+/// Resolve route endpoints into the minimal airport values needed by
+/// the shared route-aware mission proposal. Route distance and cruise-altitude
+/// selection must use the same endpoint records as the Inputs card.
+pub(crate) fn resolved_route_airports(config: &AlasConfig) -> Option<(Airport, Airport)> {
+    fn resolve(name: &str) -> Option<Airport> {
+        let airport = airport_dataset::resolve(name).ok()?;
+        Some(Airport {
+            name: airport.name.value.unwrap_or_else(|| name.to_owned()),
+            icao: airport.icao.value.unwrap_or_default(),
+            elevation_m: airport.elevation_m.value?,
+            toda_m: airport.toda_m.value.unwrap_or_default(),
+            lda_m: airport.lda_m.value.unwrap_or_default(),
+            isa_deviation_c: airport.isa_deviation_c.value.unwrap_or_default(),
+            notes: String::new(),
+            latitude_deg: airport.latitude_deg.value?,
+            longitude_deg: airport.longitude_deg.value?,
+        })
+    }
+
+    Some((
+        resolve(&config.departure_airport)?,
+        resolve(&config.arrival_airport)?,
+    ))
+}
+
+/// Whether the profile still matches a registered preset's unedited
+/// operational schedule (or the generic default), so its route-based cruise
+/// count may be initialized automatically.
+pub(crate) fn is_automatic_profile(config: &AlasConfig) -> bool {
+    config.mission.profile == MissionProfileConfig::default()
+        || alas_config::presets::get(&config.preset)
+            .ok()
+            .is_some_and(|preset| {
+                config.mission.profile == preset.operational_mission_defaults().profile
+            })
+}
+
+fn route_suggested_cruise_count(state: &AppState, route_distance_m: f64) -> Option<usize> {
+    let config = state.typed_config()?;
+    let (origin, destination) = resolved_route_airports(&config)?;
+    let proposal =
+        alas_mission::propose_profile_for_route(&config, &origin, &destination, route_distance_m)
+            .ok()?;
+    Some(proposal.active_cruise_legs)
+}
+
+fn apply_cruise_leg_count(state: &mut AppState, count: usize) -> bool {
+    let config = state.typed_config().unwrap_or_default();
+    let (cruise_altitude_m, departure_elevation_m) = resolved_route_airports(&config)
+        .map(|(origin, destination)| {
+            (
+                alas_mission::route_cruise_altitude_m(&config, &origin, &destination),
+                origin.elevation_m,
+            )
+        })
+        .unwrap_or((config.requirements.cruise_altitude_m, 0.0));
+    let mut updated_profile = config.mission.profile;
+    alas_mission::configure_cruise_legs(
+        &mut updated_profile,
+        count,
+        cruise_altitude_m,
+        departure_elevation_m,
+    );
+    let Some(profile) = state
+        .config_values
+        .pointer_mut("/mission/profile")
+        .and_then(Value::as_object_mut)
+    else {
+        return false;
+    };
+
+    let fields = [
+        (
+            "cruise_1_distance_fraction",
+            updated_profile.cruise_1_distance_fraction,
+        ),
+        (
+            "cruise_2_distance_fraction",
+            updated_profile.cruise_2_distance_fraction,
+        ),
+        (
+            "cruise_3_distance_fraction",
+            updated_profile.cruise_3_distance_fraction,
+        ),
+        (
+            "initial_climb_altitude_fraction",
+            updated_profile.initial_climb_altitude_fraction,
+        ),
+        (
+            "step_climb_1_altitude_fraction",
+            updated_profile.step_climb_1_altitude_fraction,
+        ),
+    ];
+    let changed = fields
+        .iter()
+        .any(|(name, value)| profile.get(*name).and_then(Value::as_f64) != Some(*value));
+    if changed {
+        for (name, value) in fields {
+            profile.insert(name.to_owned(), Value::from(value));
+        }
+    }
+    changed
+}
+
+/// Apply the route-aware count when a preset or untouched route profile is
+/// loaded. The cruise altitude ladder is brought into line with that count;
+/// aircraft-specific phase speeds and rates remain the preset's own inputs.
+pub(crate) fn initialize_route_profile(state: &mut AppState) {
+    state.mission_profile_manual_edit = false;
+    state.mission_profile_regeneration_prompt = false;
+    state.mission_profile_retained_validation = None;
+    if let Some(distance_m) = route_distance_m(&state.config_values) {
+        if let Some(count) = route_suggested_cruise_count(state, distance_m) {
+            apply_cruise_leg_count(state, count);
+        }
+    }
+    state.mission_profile_route_signature = route_signature(&state.config_values);
+}
+
 fn reconcile_route_profile(state: &mut AppState) {
     let signature = route_signature(&state.config_values);
     if state.mission_profile_route_signature.is_empty() {
         state.mission_profile_route_signature = signature;
         if let Some(config) = state.typed_config() {
-            if config.mission.profile == MissionProfileConfig::default() {
+            if is_automatic_profile(&config) {
+                state.mission_profile_manual_edit = false;
                 if let Some(distance_m) = route_distance_m(&state.config_values) {
                     regenerate_profile(state, distance_m);
                 }
@@ -466,55 +573,14 @@ fn reconcile_route_profile(state: &mut AppState) {
 }
 
 fn regenerate_profile(state: &mut AppState, distance_m: f64) {
-    let cruise_altitude_m = state
-        .config_values
-        .pointer("/requirements/cruise_altitude_m")
-        .and_then(Value::as_f64)
-        .unwrap_or(11_887.2);
-    let cruise_mach = state
-        .config_values
-        .pointer("/requirements/cruise_mach")
-        .and_then(Value::as_f64)
-        .unwrap_or(0.82);
-    let mut count = if distance_m < SHORT_ROUTE_M {
-        1
-    } else if distance_m < MEDIUM_ROUTE_M {
-        2
-    } else {
-        3
-    };
-    // A low-altitude/low-speed requirement has little step-climb capability;
-    // retain one cruise level even if the route itself is long.
-    if cruise_altitude_m < 8_000.0 || cruise_mach < 0.65 {
-        count = count.min(1);
-    }
-    let fractions = match count {
-        1 => [1.0, 0.0, 0.0],
-        2 => [0.45, 0.55, 0.0],
-        _ => [0.28169, 0.33803, 0.38028],
-    };
-    let Some(profile) = state.config_values.pointer_mut("/mission/profile") else {
+    let Some(count) = route_suggested_cruise_count(state, distance_m) else {
         return;
     };
-    let Some(object) = profile.as_object_mut() else {
-        return;
-    };
-    for (name, value) in [
-        ("cruise_1_distance_fraction", fractions[0]),
-        ("cruise_2_distance_fraction", fractions[1]),
-        ("cruise_3_distance_fraction", fractions[2]),
-    ] {
-        object.insert(name.to_owned(), Value::from(value));
+    if apply_cruise_leg_count(state, count) {
+        state.mission_profile_manual_edit = false;
+        state.mission_profile_retained_validation = None;
+        state.on_config_modified();
     }
-    object.insert(
-        "initial_climb_altitude_fraction".to_owned(),
-        Value::from(if count == 1 { 0.82 } else { 0.795 }),
-    );
-    object.insert(
-        "step_climb_1_altitude_fraction".to_owned(),
-        Value::from(0.90),
-    );
-    state.on_config_modified();
 }
 
 fn active_cruise_count(profile: &MissionProfileConfig) -> usize {
@@ -567,10 +633,10 @@ fn profile_issues(state: &AppState, distance_m: Option<f64>) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        active_cruise_count, open_phase_window, reconcile_route_profile, route_signature, PHASES,
-        SHORT_ROUTE_M,
+        active_cruise_count, apply_cruise_leg_count, open_phase_window, reconcile_route_profile,
+        route_signature, PHASES,
     };
-    use alas_config::MissionProfileConfig;
+    use alas_config::{AlasConfig, MissionProfileConfig};
     use serde_json::json;
 
     #[test]
@@ -618,17 +684,40 @@ mod tests {
     }
 
     #[test]
-    fn short_route_profile_has_one_active_cruise_leg_by_policy() {
+    fn one_leg_profile_has_one_active_cruise_leg() {
         let profile = MissionProfileConfig {
             cruise_2_distance_fraction: 0.0,
             cruise_3_distance_fraction: 0.0,
             ..Default::default()
         };
         assert_eq!(active_cruise_count(&profile), 1);
-        // Compile-time sanity bound: the short-route cutoff must stay under
-        // 3,000 km, or the single-cruise-leg policy this test exercises no
-        // longer matches its name.
-        const { assert!(SHORT_ROUTE_M < 3_000_000.0) };
+    }
+
+    #[test]
+    fn selecting_cruise_legs_updates_the_distance_split_and_altitude_ladder() {
+        let config = AlasConfig::from_value(&json!({"preset": "A320-200"}))
+            .expect("the registered A320-200 loads");
+        let mut state = crate::state::AppState {
+            config_values: serde_json::to_value(config).expect("configuration serializes"),
+            ..Default::default()
+        };
+
+        assert!(apply_cruise_leg_count(&mut state, 2));
+        let profile: MissionProfileConfig = serde_json::from_value(
+            state
+                .config_values
+                .pointer("/mission/profile")
+                .cloned()
+                .expect("mission profile exists"),
+        )
+        .expect("updated mission profile decodes");
+        assert_eq!(active_cruise_count(&profile), 2);
+        assert_eq!(profile.cruise_3_distance_fraction, 0.0);
+        let declared_altitude_m = 28_000.0 * 0.3048;
+        let initial_level_m = declared_altitude_m * profile.initial_climb_altitude_fraction;
+        let step_level_m = declared_altitude_m * profile.step_climb_1_altitude_fraction;
+        assert!((initial_level_m - (declared_altitude_m - 2000.0 * 0.3048)).abs() < 2.0);
+        assert!((step_level_m - declared_altitude_m).abs() < 2.0);
     }
 
     #[test]
@@ -651,17 +740,5 @@ mod tests {
             state.mission_profile_window.phase_id.as_deref(),
             Some("takeoff")
         );
-    }
-
-    #[test]
-    fn inputs_overview_and_advanced_phase_launchers_stay_on_separate_surfaces() {
-        let inputs = include_str!("inputs_view.rs");
-        let advanced = include_str!("form_page_parts/part_01.rs");
-
-        assert!(inputs.contains("show_mission_profile_inputs(state, ui)"));
-        assert!(!inputs.contains("show_mission_profile_advanced(state, ui)"));
-        assert!(advanced.contains("page.surface == Surface::Advanced"));
-        assert!(advanced.contains("show_mission_profile_advanced(state, ui)"));
-        assert!(!advanced.contains("show_mission_profile_inputs(state, ui)"));
     }
 }

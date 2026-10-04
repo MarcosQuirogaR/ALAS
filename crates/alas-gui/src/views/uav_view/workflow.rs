@@ -29,18 +29,14 @@ pub(super) const UAV_RELEASE_BLOCKED: bool = true;
 pub(super) fn release_blocker(ui: &mut Ui) {
     card_frame(ui).show(ui, |ui| {
         ui.set_min_width(ui.available_width());
-        ui.heading(tr("Fixed-Wing UAV"));
+        ui.heading(tr("Fixed-Wing UAV")).on_hover_text(tr(
+            "The fixed-wing UAV module is unavailable in the release app while its engineering and catalogue inputs are completed.",
+        ));
         ui.colored_label(
             ui.visuals().warn_fg_color,
             RichText::new(tr("Work in progress")).strong(),
         );
         ui.label(RichText::new(tr("UAV workflow is blocked for this release.")).strong());
-        ui.label(
-            RichText::new(tr(
-                "The fixed-wing UAV module is unavailable in the release app while its engineering and catalogue inputs are completed.",
-            ))
-            .weak(),
-        );
     });
 }
 
@@ -48,13 +44,9 @@ pub(super) fn release_blocker(ui: &mut Ui) {
 pub(super) fn workflow_header(state: &mut UavWorkflowState, ui: &mut Ui) {
     card_frame(ui).show(ui, |ui| {
         ui.set_min_width(ui.available_width());
-        ui.heading(tr("Fixed-Wing UAV"));
-        ui.label(
-            RichText::new(tr(
-                "Catalogue omissions remain unverified; no mass, rating, airfoil, propulsion map, or structural property is inferred.",
-            ))
-            .weak(),
-        );
+        ui.heading(tr("Fixed-Wing UAV")).on_hover_text(tr(
+            "Catalogue omissions remain unverified; no mass, rating, airfoil, propulsion map, or structural property is inferred.",
+        ));
         ui.add_space(8.0);
         ui.label(RichText::new(tr("UAV workflow")).strong());
         ui.add_space(2.0);
@@ -66,8 +58,8 @@ pub(super) fn workflow_header(state: &mut UavWorkflowState, ui: &mut Ui) {
 pub(super) fn section_intro(section: UavSection, ui: &mut Ui) {
     card_frame(ui).show(ui, |ui| {
         ui.set_min_width(ui.available_width());
-        ui.label(RichText::new(tr(section.short_title())).strong().size(18.0));
-        ui.label(RichText::new(tr(section.description())).weak());
+        ui.label(RichText::new(tr(section.short_title())).strong().size(18.0))
+            .on_hover_text(tr(section.description()));
     });
 }
 
@@ -192,14 +184,10 @@ fn positive_finite(value: f64) -> bool {
 pub(super) fn topology_selector(state: &mut UavWorkflowState, ui: &mut Ui) {
     card_frame(ui).show(ui, |ui| {
         ui.set_min_width(ui.available_width());
-        ui.label(RichText::new(tr("Design convention")).strong());
-        ui.label(
-            RichText::new(tr(
+        ui.label(RichText::new(tr("Design convention")).strong())
+            .on_hover_text(tr(
                 "Choose the airframe arrangement first. A selectable convention is not automatically a supported mass or control model.",
-            ))
-            .weak()
-            .small(),
-        );
+            ));
         ui.add_space(4.0);
         let columns = card_column_count(ui.available_width()).min(UavTopology::ALL.len());
         for row in UavTopology::ALL.chunks(columns) {
@@ -218,7 +206,6 @@ pub(super) fn topology_selector(state: &mut UavWorkflowState, ui: &mut Ui) {
             });
             ui.add_space(4.0);
         }
-        ui.label(RichText::new(tr(state.topology.description())).weak().small());
         match state
             .topology
             .availability(UavAnalysisPath::PreliminaryOptimization)

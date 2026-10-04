@@ -27,14 +27,14 @@
 //! segment, and each segment in turn.
 //!
 //! This is the crate where the phase's edges land. The segment chain reaches
-//! `alas-atmo` for the atmosphere, `alas-aero` for the lift surrogate and the
-//! drag polar, `alas-prop` for the engine and `alas-math` for the root finder
+//! `alas-atmo` for the atmosphere, `alas-aero` for the lift surrogate,
+//! the supplied candidate table for drag, `alas-prop` for the engine and
+//! `alas-math` for the root finder
 //! and the discretization, all green rows, and every one of them reached
 //! because a mission segment is where the analyses are actually *evaluated*
 //! rather than merely constructed.
 
 pub mod numerics;
-pub mod operating;
 pub mod profile;
 pub mod segments;
 pub mod solve;
@@ -42,8 +42,9 @@ pub mod vehicle;
 
 pub use numerics::Numerics;
 pub use profile::{
-    build_mission_request, check_profile_for_route, propose_profile_for_route,
-    route_cruise_altitude_m, MissionProfileProposal, MissionProfileRouteCheck, MissionRequest,
+    build_mission_request, check_profile_for_route, configure_cruise_legs,
+    propose_profile_for_route, route_cruise_altitude_m, MissionProfileProposal,
+    MissionProfileRouteCheck, MissionRequest,
 };
 pub use segments::{
     Conditions, Initials, MissionAnalyses, Segment, SegmentError, SegmentKind, SegmentSpec,

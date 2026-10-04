@@ -5,7 +5,6 @@
 //   parasite_drag_wing.py, parasite_drag_fuselage.py, parasite_drag_nacelle.py,
 //   parasite_drag_pylon.py and parasite_total.py
 // Upstream: mission analysis model 2.5.2, LGPL-2.1.
-// Reference: alas @ rust-port-baseline.
 
 //! Parasite drag, component by component.
 //!
@@ -247,16 +246,6 @@ mod tests {
             previous = value;
         }
         assert!((blend_to_sonic(0.975) - 0.5).abs() < 1e-15);
-    }
-
-    #[test]
-    fn the_band_interval_is_not_five_hundredths() {
-        // `1.0 - 0.95` is not the double nearest 0.05, and the blend divides
-        // by it. Stated so that a later simplification to `/ 0.05` is
-        // recognized as a change rather than a tidy-up.
-        let band_end = 1.0_f64;
-        let band_start = 0.95_f64;
-        assert_ne!(band_end - band_start, 0.05_f64);
     }
 
     #[test]

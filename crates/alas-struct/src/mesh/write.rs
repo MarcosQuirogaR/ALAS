@@ -97,20 +97,26 @@ impl Deck {
             card(&mut out, name, &fields);
         }
         for bar in &self.bars {
-            card(
-                &mut out,
-                "CBAR",
-                &[
-                    Field::Int(bar.eid),
-                    Field::Int(bar.pid),
-                    Field::Int(bar.ga),
-                    Field::Int(bar.gb),
-                    Field::Real(bar.x[0]),
-                    Field::Real(bar.x[1]),
-                    Field::Real(bar.x[2]),
-                    Field::Text(bar.offt),
-                ],
-            );
+            let mut fields = vec![
+                Field::Int(bar.eid),
+                Field::Int(bar.pid),
+                Field::Int(bar.ga),
+                Field::Int(bar.gb),
+                Field::Real(bar.x[0]),
+                Field::Real(bar.x[1]),
+                Field::Real(bar.x[2]),
+                Field::Text(bar.offt),
+            ];
+            if bar.offset_a != [0.0; 3] || bar.offset_b != [0.0; 3] {
+                fields.extend([Field::Blank, Field::Blank]);
+                fields.extend(
+                    bar.offset_a
+                        .iter()
+                        .chain(&bar.offset_b)
+                        .map(|&v| Field::Real(v)),
+                );
+            }
+            card(&mut out, "CBAR", &fields);
         }
         for mass in &self.masses {
             card(

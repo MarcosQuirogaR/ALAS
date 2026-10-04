@@ -3,7 +3,6 @@
 
 // Ported from the legacy vehicle-request integration (`build_vehicle_request`,
 // `_cruise_thrust_kn_per_engine`).
-// Reference: alas @ rust-port-baseline.
 
 //! The vehicle half of the mission request.
 //!

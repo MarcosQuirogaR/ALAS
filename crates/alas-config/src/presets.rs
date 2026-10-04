@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/config/presets.py
-// Reference: alas @ rust-port-baseline.
 
 //! Real aircraft, as complete starting points.
 //!
@@ -29,11 +28,10 @@
 //! # What a preset does not settle
 //!
 //! The registry binds each entry to the engine it names, at registration,
-//! before anything downstream can read it. It used to record only the name and
-//! leave the built-in GE9X cycle in place, on the understanding that the
-//! configuration-loading boundary would resolve it. Exactly one caller did.
-//! The geometry builder, the full analysis and the acceptance matrix all read
-//! `preset.geometry` directly, so every turbofan preset was weighed, drawn and
+//! before anything downstream can read it. Recording only the name and
+//! leaving the built-in GE9X cycle in place would be wrong: the geometry
+//! builder, the full analysis and the acceptance matrix all read
+//! `preset.geometry` directly, so every turbofan preset would be weighed, drawn and
 //! flown as a 467 kN GE9X regardless of what it declared: a constant 10.3 t
 //! of propulsion mass per engine, and a 2.1 m-radius nacelle on an A320.
 //! Resolving it here makes the declared engine the one every discipline sees;
@@ -57,5 +55,53 @@
 //! headless run that skipped them would silently revert an A220 to the
 //! widebody-calibrated mass fractions its entry exists to correct.
 
-include!("presets_parts/part_01.rs");
-include!("presets_parts/part_02.rs");
+mod aircraft;
+mod atr72_600_schedule_fix;
+mod cabin_sources;
+mod cg_envelope;
+mod evidence;
+mod gear_load;
+mod landing_reference;
+mod mission_evidence;
+mod narrowbody;
+mod reference;
+mod regional;
+mod registry;
+mod speed_schedules;
+mod takeoff_reference;
+#[cfg(test)]
+mod tests;
+mod widebody;
+
+pub use aircraft::{
+    AircraftPreset, AircraftReferenceData, AircraftVariantIdentity, CertifiedExitLayout,
+    CertifiedExitPair, OperationalMissionDefaults, SourcedPlanningCabin, SourcedSeatClass,
+    UnknownAircraftPreset,
+};
+pub use cabin_sources::{
+    ATR72_600_BAGGAGE_COMPARTMENTS, ATR72_600_EXIT_LAYOUT, ATR72_600_PLANNING_CABIN,
+    B777_9_EXIT_LAYOUT, B777_9_PLANNING_CABIN, B787_9_EXIT_LAYOUT, B787_9_PLANNING_CABIN,
+};
+pub use cg_envelope::{
+    CgEnvelopeCondition, CgEnvelopeSource, CgEnvelopeVertex, CgLimits, PlanningCgEnvelope,
+    PlanningMacReference,
+};
+pub use evidence::{
+    CgEnvelopeEvidence, DesignMissionEvidence, DesignMissionReference, MissingDesignMissionDatum,
+    MissionEvidenceApplicability, PartialDesignMissionEvidence, PartialMissionEvidenceKind,
+    PayloadRangeDesignPoint, PublishedMissionLoadCase, PublishedRange, PublishedReserveContract,
+};
+pub use gear_load::{AftCgNoseLoadPoint, PublishedAftCgNoseLoad};
+pub use landing_reference::{
+    published_landing_reference, published_landing_references, PublishedLandingReference,
+};
+pub use mission_evidence::{
+    applicability_label, datum_label, DesignMissionProvenanceSet, MissionDatumProvenance,
+    MissionEvidenceTier, MissionPromotionRefusal,
+};
+use registry::high_lift;
+pub use registry::{available, display_names, get, registry};
+pub use speed_schedules::atr72_600_takeoff_speed_m_s;
+pub use takeoff_reference::{
+    published_takeoff_reference, published_takeoff_references, PublishedTakeoffReference,
+};

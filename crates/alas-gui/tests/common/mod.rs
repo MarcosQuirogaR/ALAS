@@ -138,9 +138,3 @@ pub fn rasterize_frame(
     }
     render_scene_rgba(&scene).expect("rgba")
 }
-
-/// Encode an RGBA buffer as PNG through the raster path.
-pub fn write_png(path: &std::path::Path, width: u32, height: u32, rgba: &[u8]) {
-    let png = alas_viz::raster::encode_png_rgba(width, height, rgba).expect("png");
-    std::fs::write(path, png).expect("write png");
-}

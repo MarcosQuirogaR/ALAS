@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/reporting/visualization.py (`figure_model_comparison`)
-// Reference: alas @ rust-port-baseline.
 
 //! Compare the VLM-optimized and AVL-optimized aircraft branches.
 //!

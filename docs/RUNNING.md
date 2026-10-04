@@ -8,7 +8,7 @@ and the interesting output is in English.
 
 ## First, the one-time setup
 
-Already done on this machine. If you ever move to another one:
+On a new machine:
 
 1. Install Visual Studio Build Tools with the "Desktop development with C++"
    workload. This provides the linker; no C++ of ours is compiled.
@@ -33,7 +33,7 @@ Run these from the repository root.
 ```powershell
 cargo test              # check that everything still agrees with Python
 cargo xtask gate        # the full check: formatting, lints, tests, conventions
-cargo run               # start the application (once it exists)
+cargo run --release --bin ALAS   # start the application
 ```
 
 The first time each runs it will compile a lot and take a few minutes.
@@ -79,8 +79,7 @@ the diagnosis: one bad value is a boundary case, all of them wrong by the same
 ratio is a unit error, all of them wrong by a growing amount is an accumulating
 index error.
 
-You do not have to diagnose it yourself. Copy the block into a session and ask;
-that is what the `parity-diagnostician` agent exists for. The one thing not
+Include the whole block when reporting a mismatch. The one thing not
 to accept is a fix that widens the tolerance until the test passes; the tiers
 are defined in `crates/alas-testkit/src/lib.rs`, each with the reason it
 exists, and a module that cannot meet its tier is a finding.
@@ -112,8 +111,25 @@ cargo xtask gate
 
 This is what must pass before a commit. It runs, in order: the repository
 conventions (file sizes, licence headers, comment rules), formatting, the
-compiler's lints, and the whole test suite. It stops at the first failure and
+compiler's lints, and the whole test suite. It reports every failed step and
 says what it wants.
+
+The gate has three tiers. The test split needs
+[cargo-nextest](https://nexte.st) (`cargo install cargo-nextest --locked`);
+without it the gate falls back to `cargo test` and cannot separate the slow
+tests.
+
+```powershell
+cargo xtask gate --quick           # every change: checks, fmt, lints and fast tests of affected packages
+cargo xtask gate                   # phase integration and CI: everything
+cargo xtask gate --slow            # only the slow tests
+cargo nextest run                  # the fast tier alone
+cargo nextest run --profile full   # every test
+```
+
+The tiers are defined in `.config/nextest.toml`. Doctests are not used: the gate
+does not run them, and the repository checks reject a doc example that rustdoc
+would run.
 
 For numerical parity against the Python reference and licence provenance,
 read `docs/PORTING.md`; every translated module has a row there. It is not
@@ -213,4 +229,4 @@ cargo xtask backup
 
 That produces a single file containing every branch and every commit, which a
 sync client handles cleanly, unlike the build directory, which produces
-thousands of files and would defeat it. Run it after any substantial session.
+thousands of files and would defeat it. Run it after any substantial working session.

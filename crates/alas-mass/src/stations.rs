@@ -4,7 +4,7 @@
 //! Geometry-derived component stations: where each ledger item sits and how
 //! big it is.
 //!
-//! [`crate::statement`] builds an item-level mass ledger from a legacy
+//! [`crate::statement`] builds an item-level mass ledger from a lumped
 //! [`crate::breakdown::MassBreakdown`] plus loadable items; every item needs
 //! a reference point and an extent before it has an inertia tensor. This
 //! module is the one place those points and extents are derived from the
@@ -17,8 +17,8 @@
 //! 15.2 and the surrounding figures), and Torenbeek, *Synthesis of Subsonic
 //! Airplane Design* (1982), ch. 8. The wing-mounted/fuselage-mounted engine
 //! split and the systems/furnishings cabin fractions also match the
-//! conventions [`crate::breakdown::coordinates::define_mass_coordinates`]
-//! and NASA FLOPS (NASA/TM-2017-219627) already use elsewhere in this crate.
+//! conventions [`crate::breakdown::define_mass_coordinates`] and NASA FLOPS
+//! (NASA/TM-2017-219627) already use elsewhere in this crate.
 //!
 //! [`component_stations`] always returns a wing station, falling back to a
 //! Raymer point rather than propagating a
@@ -33,19 +33,35 @@
 //! an aircraft outside that rule's domain with no registered gear stations
 //! gets [`StationError::MainGearStationNotMeasured`] rather than a placement;
 //! see [`main_gear_station`].
+//!
+//! Validation: the A320-200 operating-empty CG lands near 34 % MAC against
+//! the nominal 26.5 % MAC of the Airbus A320 ACAP (June 2024, 2-3-0 p. 3), a
+//! reference value, not a calibration target. No rule here contradicts a
+//! published placement rule at hand, so the residual is reported, not tuned;
+//! see `alas-pipeline/tests/oew_cg_station_review.rs`.
 
 use alas_config::{
-    DesignRequirements, EffectiveGearStationExt, GeometryConfig, LandingGearConfig,
-    MassModelConfig, StructuresConfig, ValidGearStation,
+    DesignRequirements, GeometryConfig, LandingGearConfig, MassModelConfig, StructuresConfig,
 };
 use alas_geom::aircraft::airplane::Airplane;
-use alas_geom::aircraft::fuselage::{Fuselage, FuselageXSec};
+use alas_geom::aircraft::fuselage::Fuselage;
 use alas_geom::aircraft::wing::Wing;
 
 use crate::wing_centroid::wing_structural_centroid;
 
 mod coordinates;
+mod landing_gear;
+mod propulsion;
 pub use coordinates::NOSE_GEAR_MASS_FRACTION;
+pub(crate) use landing_gear::fuselage_mounted_main_gear_leg_m;
+#[cfg(test)]
+use landing_gear::{
+    fuselage_crown_z_m, weighted_main_gear_station, wing_root_above_fuselage_crown,
+    GEAR_MASS_CENTROID_STRUT_FRACTION,
+};
+pub use landing_gear::{ground_plane_z_m, FALLBACK_BELLY_CLEARANCE_DIAMETER_FRACTION};
+use landing_gear::{main_gear_station, nose_gear_station};
+use propulsion::propulsion_stations;
 
 /// Chordwise sample stations `Airfoil::max_thickness` is evaluated at to
 /// recover a root section's thickness-to-chord ratio.
@@ -418,261 +434,6 @@ fn fuselage_station(fuselage: &Fuselage, geometry: &GeometryConfig) -> Component
     }
 }
 
-/// The strut length and ground-contact height both gear legs share, m.
-///
-/// Vertical placement (fuselage bottom less a strut length of 0.25 fuselage
-/// diameters) is a conceptual-design assumption stated here because neither
-/// gear leg's real strut geometry is modelled.
-fn gear_vertical_datum(fuselage: &Fuselage, geometry: &GeometryConfig) -> (f64, f64) {
-    let (_, _, z) = fuselage_datum(fuselage);
-    let diameter = geometry.fuselage.diameter_m;
-    let strut_length = 0.25 * diameter;
-    (strut_length, z - diameter / 2.0 - strut_length)
-}
-
-/// The longitudinal stations the landing-gear configuration resolves, with
-/// the model-derived fallbacks this module would otherwise supply.
-///
-/// `x_nlg`/`x_mlg` reproduce the exact convention `alas-perf::landing_gear`
-/// is fed under: the nose gear at a fraction of fuselage length from the
-/// nose, the main gear at a fraction of the MAC aft of the MAC leading edge.
-/// Whether the main-gear fallback is admissible at all is decided by
-/// [`main_gear_station`], not here.
-fn resolved_gear_stations(
-    fuselage: &Fuselage,
-    main_wing: &Wing,
-    mass_model: &MassModelConfig,
-    landing_gear: Option<&LandingGearConfig>,
-) -> alas_config::LandingGearStationPositions {
-    let (start_x, length, _) = fuselage_datum(fuselage);
-    let fallback_x_nlg = start_x + length * mass_model.nlg_x_fraction;
-    let mac = main_wing.mean_aerodynamic_chord();
-    let mac_le_x = main_wing.aerodynamic_center(0.0)[0];
-    let fallback_x_mlg = mac_le_x + mass_model.mlg_x_fraction_mac * mac;
-    landing_gear
-        .map(|config| {
-            config.resolved_station_positions(fallback_x_nlg, fallback_x_mlg, start_x, length)
-        })
-        .unwrap_or_else(|| alas_config::LandingGearStationPositions {
-            x_nlg_m: fallback_x_nlg,
-            x_mlg_m: fallback_x_mlg,
-            main_gear_x_m: vec![fallback_x_mlg],
-            source_scaled: false,
-            resolution: alas_config::effective_main_gear_station(&[fallback_x_mlg], None),
-        })
-}
-
-/// The nose landing-gear station.
-///
-/// The fallback rule here (a fraction of fuselage length aft of the nose)
-/// is a fuselage rule and carries no assumption about where the wing is, so
-/// it stands for any layout the geometry admits. Only the main gear's
-/// wing-mounted fallback is layout-specific; see [`main_gear_station`].
-fn nose_gear_station(
-    fuselage: &Fuselage,
-    main_wing: &Wing,
-    geometry: &GeometryConfig,
-    mass_model: &MassModelConfig,
-    landing_gear: Option<&LandingGearConfig>,
-) -> ComponentStation {
-    let (strut_length, ground_z) = gear_vertical_datum(fuselage, geometry);
-    let resolved = resolved_gear_stations(fuselage, main_wing, mass_model, landing_gear);
-    ComponentStation {
-        position_m: [resolved.x_nlg_m, 0.0, ground_z],
-        extent_m: [0.0, 0.0, strut_length],
-        method: if resolved.source_scaled {
-            "source-scaled nose-tip NLG station"
-        } else {
-            "nlg_x_fraction of fuselage length"
-        },
-    }
-}
-
-/// The main landing-gear station, or a typed missing-datum failure when this
-/// aircraft has none.
-///
-/// # Why this can fail
-///
-/// With a complete normalized source anchor
-/// (`landing_gear.reference_mlg_x_fractions` and its companions) the station
-/// is evidence: a published drawing station scaled to the active fuselage.
-/// Without one, the only station available is
-/// `mac_le + mlg_x_fraction_mac * MAC`, which places the main gear inside the
-/// wing box. That is a **wing-mounted gear** rule (Raymer,
-/// *Aircraft Design*, ch. 11): it presumes the wing carry-through sits low
-/// enough on the fuselage for the legs to attach to it and retract into the
-/// wing or its root fairing.
-///
-/// A wing mounted entirely above the fuselage has no wing-root gear bay at
-/// all. Real high-wing transports carry their main gear on fuselage
-/// sponsons, at a station the wing does not determine and this model does not
-/// derive from anything. Applying the wing-mounted rule there is not a
-/// coarse estimate but a placement of the gear where the aircraft has none,
-/// and on a short high-wing turboprop it lands the station forward of the
-/// centre of gravity, which reports a *negative* static nose reaction: the
-/// aeroplane sitting on its tail at every loading state.
-///
-/// So the rule is applied inside its stated domain and refused outside it.
-/// The boundary is the fuselage's own outer surface at the wing root, not a
-/// tuned coefficient: either the wing root is above the crown, in which case
-/// no wing-root bay exists, or it is not.
-/// [`StationError::MainGearStationNotMeasured`] then reports the two heights
-/// that decided it, and is the signal to register the aircraft's published
-/// gear stations rather than to relax a gate.
-///
-/// # Errors
-///
-/// [`StationError::MainGearStationNotMeasured`] when no source anchor is
-/// registered and the wing root sits above the fuselage crown.
-fn main_gear_station(
-    fuselage: &Fuselage,
-    main_wing: &Wing,
-    geometry: &GeometryConfig,
-    mass_model: &MassModelConfig,
-    landing_gear: Option<&LandingGearConfig>,
-) -> Result<ComponentStation, StationError> {
-    let (strut_length, ground_z) = gear_vertical_datum(fuselage, geometry);
-    let resolved = resolved_gear_stations(fuselage, main_wing, mass_model, landing_gear);
-    if !resolved.source_scaled {
-        if let Some((wing_root_z_m, fuselage_crown_z_m)) =
-            wing_root_above_fuselage_crown(main_wing, fuselage)
-        {
-            return Err(StationError::MainGearStationNotMeasured {
-                wing_root_z_m,
-                fuselage_crown_z_m,
-            });
-        }
-    }
-    let outcome = weighted_main_gear_station(&resolved, landing_gear);
-    let x_main_gear = outcome.primary_station_ignoring_rejection();
-    Ok(ComponentStation {
-        position_m: [x_main_gear, 0.0, ground_z],
-        extent_m: [0.0, 0.0, strut_length],
-        method: if !resolved.source_scaled {
-            "mlg_x_fraction_mac aft of MAC leading edge"
-        } else {
-            match outcome {
-                Ok(ValidGearStation::WeightedCentroid { .. }) => {
-                    "source-scaled MLG stations; wheel-count-weighted group centroid"
-                }
-                Ok(ValidGearStation::UnweightedMean { .. }) => {
-                    "source-scaled MLG stations; unweighted strut mean (missing per-strut wheel counts)"
-                }
-                Ok(ValidGearStation::UniformStation { .. }) => "source-scaled primary MLG station",
-                Err(_) => "source-scaled primary MLG station; malformed bogie list rejected",
-            }
-        },
-    })
-}
-
-/// The fuselage's outer top surface at longitudinal station `x_m`, m.
-///
-/// The loft is linear between adjacent cross-sections
-/// ([`alas_geom::aircraft::fuselage::Fuselage`]), so the crown between two of
-/// them is the linear interpolation of their own crowns. A station forward of
-/// the nose section or aft of the tail section takes that end section's
-/// crown. `None` only for a fuselage with no cross-sections.
-fn fuselage_crown_z_m(fuselage: &Fuselage, x_m: f64) -> Option<f64> {
-    let crown = |xsec: &FuselageXSec| xsec.xyz_c[2] + xsec.height / 2.0;
-    let first = fuselage.xsecs.first()?;
-    let last = fuselage.xsecs.last()?;
-    if !x_m.is_finite() || x_m <= first.xyz_c[0] {
-        return Some(crown(first));
-    }
-    if x_m >= last.xyz_c[0] {
-        return Some(crown(last));
-    }
-    for pair in fuselage.xsecs.windows(2) {
-        let (fwd, aft) = (&pair[0], &pair[1]);
-        if x_m >= fwd.xyz_c[0] && x_m <= aft.xyz_c[0] {
-            let span = aft.xyz_c[0] - fwd.xyz_c[0];
-            if span <= 0.0 {
-                return Some(crown(fwd).max(crown(aft)));
-            }
-            let blend = (x_m - fwd.xyz_c[0]) / span;
-            return Some(crown(fwd) + blend * (crown(aft) - crown(fwd)));
-        }
-    }
-    Some(crown(last))
-}
-
-/// `Some((wing_root_z_m, fuselage_crown_z_m))` when the main wing's root
-/// leading edge sits strictly above the fuselage's outer surface at the same
-/// longitudinal station: a high-wing layout, whose main gear cannot be
-/// carried in the wing root.
-///
-/// `None` for every layout whose root is on or below the crown (low-wing,
-/// mid-wing and shoulder-wing alike), which is the domain the wing-mounted
-/// gear rule is stated for. The comparison is between two modelled heights
-/// with no margin term, so it cannot drift with calibration.
-fn wing_root_above_fuselage_crown(main_wing: &Wing, fuselage: &Fuselage) -> Option<(f64, f64)> {
-    let root = main_wing.xsecs.first()?;
-    let root_z_m = root.xyz_le[2];
-    let crown_z_m = fuselage_crown_z_m(fuselage, root.xyz_le[0])?;
-    if root_z_m.is_finite() && crown_z_m.is_finite() && root_z_m > crown_z_m {
-        Some((root_z_m, crown_z_m))
-    } else {
-        None
-    }
-}
-
-/// Return the typed main-gear mass station resolution.
-///
-/// Delegates directly to [`alas_config::effective_main_gear_station`] to ensure
-/// a single, unified domain validity gate across crates, eliminating duplicated logic.
-/// The caller must match on the returned outcome (see [`ValidGearStation`] and
-/// [`alas_config::GearStationRejection`]) rather than collapsing it to a scalar,
-/// so a rejected explicit declaration stays distinguishable from every valid
-/// outcome in the reported station `method` (gear-integration-review.md F5).
-///
-/// Physical agreement on missing counts (`None`):
-/// When per-strut bogie wheel counts are not explicitly provided on a multi-strut
-/// aircraft with distinct stations, both `alas_config` (in `resolved_station_positions`)
-/// and `alas_mass` (here) agree on the declared conceptual approximation: an unweighted
-/// arithmetic mean across all installed struts (`sum(x_i) / N`, equal strut load and mass split).
-/// This eliminates the latent 1.635 m force/moment divergence between the mass model
-/// (previously at the primary station 33.58 m) and the config/performance models (at 35.215 m)
-/// for multi-strut layouts (e.g. A380/A340), while keeping single-strut and uniform twin-gear
-/// layouts invariant at their physical axle station.
-///
-/// When explicit counts are provided:
-/// - Valid standard counts in `{2, 4, 6}` yield the wheel-count-weighted centroid.
-/// - Malformed counts are rejected by `effective_main_gear_station` with a typed
-///   rejection and fall back to the primary station.
-fn weighted_main_gear_station(
-    resolved: &alas_config::LandingGearStationPositions,
-    landing_gear: Option<&LandingGearConfig>,
-) -> alas_config::EffectiveMainGearStation {
-    alas_config::effective_main_gear_station(
-        &resolved.main_gear_x_m,
-        landing_gear.and_then(|config| config.mlg_strut_bogie_wheels.as_deref()),
-    )
-}
-
-/// One station per engine nacelle, at each nacelle's mid-length point.
-fn propulsion_stations(plane: &Airplane) -> Vec<ComponentStation> {
-    plane
-        .fuselages
-        .iter()
-        .filter(|fuselage| fuselage.name.contains("Nacelle"))
-        .map(|nacelle| {
-            let start = nacelle.xsecs.first().map_or([0.0; 3], |xsec| xsec.xyz_c);
-            let end_x = nacelle.xsecs.last().map_or(start[0], |xsec| xsec.xyz_c[0]);
-            let length = end_x - start[0];
-            let radius = nacelle
-                .xsecs
-                .iter()
-                .map(|xsec| xsec.width.max(xsec.height) / 2.0)
-                .fold(0.0, f64::max);
-            ComponentStation {
-                position_m: [start[0] + length * 0.5, start[1], start[2]],
-                extent_m: [length, 2.0 * radius, 2.0 * radius],
-                method: "nacelle mid-length",
-            }
-        })
-        .collect()
-}
-
 /// The systems, furnishings and operating-items station: `fraction` of the
 /// installed cabin length aft of its start, with `extent_yz` as the
 /// width/height pair (`[0.0, 0.0]` for the systems rod, which only extends
@@ -705,46 +466,17 @@ fn cabin_station(
 /// planning payload is distributed over the usable cabin floor and an operator
 /// trims it into the certified envelope; it is not a forward-limit load.
 ///
-/// The previous form placed it at `cabin_start + 0.50 * occupied_len`, the
-/// centre of a block that always begins at the **forward bulkhead**. Whenever
-/// the planning payload does not fill the cabin that is the aircraft's forward
-/// loading extreme, applied as if it were the neutral case, and it is
-/// asymmetric for no stated reason: the same module places `systems` and
-/// `furnishings` as fractions of the *cabin*, not of an occupied block.
-///
-/// Measured across the registered aircraft
-/// (`alas-mass/examples/payload_station_matrix.rs`), the forward-bulkhead form
-/// puts the centroid this far forward of the cabin centre, and moves the centre
-/// of gravity at maximum take-off mass by:
-///
-/// | preset | cabin fill | forward error | CG at MTOW |
-/// |---|---:|---:|---:|
-/// | ATR72-600 | 0.495 | 4.583 m | **1.435 m** |
-/// | A220-300 | 0.570 | 6.125 m | 1.178 m |
-/// | A320-200 | 0.706 | 3.910 m | 0.752 m |
-/// | AVE | 0.771 | 6.485 m | 0.633 m |
-/// | A340-300 | 0.785 | 4.955 m | 0.553 m |
-/// | B787-9 | 0.800 | 4.530 m | 0.516 m |
-/// | DC-10 | 0.811 | 3.650 m | 0.352 m |
-/// | A380-800 | **1.000** | **0.000 m** | **0.000 m** |
-///
-/// On the ATR 72-600 that 1.435 m is **57.4 %** of its 2.499 m mean
-/// aerodynamic chord, which is the scale of that aircraft's open static-margin
-/// and nose-gear-load findings.
-///
-/// The correction consults no target and introduces no coefficient: it is the
-/// one symmetric placement available, and where the cabin is full it is
-/// **exactly** the previous value, which the A380-800 row shows and a test
-/// pins. The occupied length is kept as the station's `extent_m`, which is what
-/// that field describes.
-///
-/// The previous comment's stated intent was that "a stretched fuselage does not
-/// move an unchanged payload's centroid aft for free". That is an optimizer
-/// stability concern rather than a physical one (a longer cabin carrying the
-/// same payload over a uniformly loaded floor *does* move its centroid aft),
-/// and an implausible stretch belongs to the geometry plausibility windows,
-/// which own it. Recorded here rather than preserved by placing mass where it
-/// is not.
+/// Placing it at the centre of a block that always begins at the **forward
+/// bulkhead** would, whenever the payload does not fill the cabin, apply the
+/// aircraft's forward loading extreme as if it were the neutral case, and it
+/// would be asymmetric against `systems` and `furnishings`, which this module
+/// places as fractions of the *cabin*. The cabin centre is the one symmetric
+/// placement available: it consults no target and introduces no coefficient,
+/// and where the cabin is full it coincides with the occupied-block centre.
+/// The occupied length is kept as the station's `extent_m`. A longer cabin
+/// carrying the same payload does move its centroid aft; an implausible
+/// stretch belongs to the geometry plausibility windows, not to the mass
+/// placement.
 fn payload_fallback_station(
     fuselage: &Fuselage,
     geometry: &GeometryConfig,
@@ -799,7 +531,8 @@ fn validate_finite(stations: &ComponentStations) -> Result<(), StationError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alas_config::{AlasConfig, DesignVector};
+    use alas_config::{AlasConfig, DesignVector, ValidGearStation};
+    use alas_geom::aircraft::fuselage::FuselageXSec;
     use alas_geom::builder::AircraftBuilder;
 
     // Building the default product aircraft is an assertion that the
@@ -844,6 +577,57 @@ mod tests {
         for unit in &stations.propulsion_units {
             assert!(all_finite(unit));
         }
+    }
+
+    #[test]
+    fn gear_mass_sits_above_the_ground_line_not_at_it() {
+        // The gear's own mass (axle, oleo, wheels) is not placed at the tire
+        // ground-contact point; it sits a fraction of the extended strut
+        // length above it.
+        let stations = default_stations();
+        let nose_strut = stations.nose_gear.extent_m[2];
+        let main_strut = stations.main_gear.extent_m[2];
+        assert!(nose_strut > 0.0);
+        assert!(main_strut > 0.0);
+        let ground_z_nose =
+            stations.nose_gear.position_m[2] - GEAR_MASS_CENTROID_STRUT_FRACTION * nose_strut;
+        let ground_z_main =
+            stations.main_gear.position_m[2] - GEAR_MASS_CENTROID_STRUT_FRACTION * main_strut;
+        assert!(stations.nose_gear.position_m[2] > ground_z_nose);
+        assert!(stations.main_gear.position_m[2] > ground_z_main);
+        assert!((ground_z_nose - ground_z_main).abs() < 1e-9);
+    }
+
+    #[test]
+    fn the_a320_belly_stands_at_its_published_ground_clearance() {
+        // Airbus A320 AC, Jun 01/24, Figure 2-3-0-991-004-A01 sheet 2:
+        // fuselage bottom forward 1.786 m and aft 1.790 m above the ground at
+        // MRW, aft CG. The built belly under the main gear must stand at the
+        // registered 1.79 m, not at a clearance measured from the nose-tip
+        // centreline.
+        use alas_config::presets;
+        let config = AlasConfig::from_value(&serde_json::json!({ "preset": "A320-200" }))
+            .unwrap_or_else(|error| panic!("{error}"));
+        let registered = presets::get("A320-200").unwrap_or_else(|error| panic!("{error}"));
+        let plane = AircraftBuilder::new(Some(config.geometry.clone()))
+            .build(Some(&registered.design_vector), true)
+            .expect("the A320-200 builds");
+        let fuselage = plane.fuselages.first().expect("a fuselage");
+        let ground_z = ground_plane_z_m(fuselage, &config.geometry, &config.landing_gear);
+        let main_gear_x = preset_stations("A320-200")
+            .expect("the A320-200 resolves its stations")
+            .main_gear
+            .position_m[0];
+        let section = &fuselage
+            .xsecs
+            .windows(2)
+            .find(|pair| pair[0].xyz_c[0] <= main_gear_x && main_gear_x <= pair[1].xyz_c[0])
+            .expect("the main gear lies under the fuselage")[0];
+        let belly_clearance = section.xyz_c[2] - section.height / 2.0 - ground_z;
+        assert!(
+            (belly_clearance - 1.79).abs() < 1.0e-9,
+            "belly {belly_clearance} m above the ground under the main gear"
+        );
     }
 
     #[test]
@@ -1057,7 +841,7 @@ mod tests {
             assert!(payload.extent_m[0] <= cabin_len + 1.0e-9);
             assert!(payload.extent_m[0] > 0.0);
 
-            // The retired forward-bulkhead placement, for the comparison.
+            // The forward-bulkhead placement, for the comparison.
             let nose_first = cabin_start + 0.5 * payload.extent_m[0];
             if fills_the_cabin {
                 assert!(
@@ -1148,22 +932,27 @@ mod tests {
     }
 
     #[test]
-    fn low_wing_aircraft_keep_the_station_they_already_had() {
+    fn low_wing_aircraft_keep_the_wing_mounted_fallback_station() {
         // The refusal is scoped to the layout the fallback rule excludes, not
-        // to the absence of a registered anchor. The B787-9 and the DC-10
-        // register no anchor either and must still resolve through the same
-        // wing-mounted fallback, by the same method string, as before; the
-        // A320-200 registers one and must still be source-scaled.
-        for preset in ["B787-9", "DC-10"] {
-            let stations = preset_stations(preset).unwrap_or_else(|error| {
-                panic!("{preset} must still resolve its stations: {error}")
-            });
-            assert_eq!(
-                stations.main_gear.method, "mlg_x_fraction_mac aft of MAC leading edge",
-                "{preset} must keep the wing-mounted fallback it already used"
-            );
-            assert!(stations.main_gear.position_m[0] > stations.nose_gear.position_m[0]);
-        }
+        // to the absence of a registered anchor. The low-wing DC-10 with its
+        // anchors cleared must still resolve through the same wing-mounted
+        // fallback, by the same method string; the registered DC-10
+        // (DAC-67803A), the A320-200 and the B787-9 (Boeing D6-58333)
+        // register one and must be source-scaled.
+        let preset = "DC-10";
+        let stations = unmeasured_preset_stations(preset)
+            .unwrap_or_else(|error| panic!("{preset} must still resolve its stations: {error}"));
+        assert_eq!(
+            stations.main_gear.method, "mlg_x_fraction_mac aft of MAC leading edge",
+            "{preset} must keep the wing-mounted fallback"
+        );
+        assert!(stations.main_gear.position_m[0] > stations.nose_gear.position_m[0]);
+        let dc10 = preset_stations(preset)
+            .unwrap_or_else(|error| panic!("the DC-10 must resolve its stations: {error}"));
+        assert!(dc10.main_gear.method.starts_with("source-scaled"));
+        let b787 = preset_stations("B787-9")
+            .unwrap_or_else(|error| panic!("the B787-9 must resolve its stations: {error}"));
+        assert!(b787.main_gear.method.starts_with("source-scaled"));
         let a320 = preset_stations("A320-200")
             .unwrap_or_else(|error| panic!("the A320-200 must resolve its stations: {error}"));
         assert!(

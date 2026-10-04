@@ -47,7 +47,26 @@ pub(super) fn declared_structure(name: &str) -> FlopsStructureConfig {
     };
     config.paint_area_density_kg_m2 = declared_paint_area_density_kg_m2(name);
     config.pylon_mass_method = declared_pylon_mass_method(name);
+    config.maximum_operating_altitude_m = certified_maximum_operating_altitude_m(name);
     config
+}
+
+/// The certified maximum operating altitude the pressurized fuselage method
+/// of the regional turboprop class reads, m.
+///
+/// * **ATR 72-600: 25,000 ft = 7,620 m.** JCAB Type Certificate Data Sheet
+///   No. 75 (ATR 42/72), Revision 3, model ATR72-212A, item (18) "Maximum
+///   Operation Altitude", p. 9.
+///
+/// The other registered aircraft are not priced by that method, so none is
+/// declared for them.
+fn certified_maximum_operating_altitude_m(name: &str) -> Option<f64> {
+    /// Meters per foot, exact (international foot).
+    const METERS_PER_FOOT: f64 = 0.3048;
+    match name {
+        "ATR72-600" => Some(25_000.0 * METERS_PER_FOOT),
+        _ => None,
+    }
 }
 
 /// Select the FLOPS `FCOMP` endpoint for a registered aircraft.

@@ -17,7 +17,7 @@ use alas_config::{DesignRequirements, StructuresConfig};
 
 use super::deck::build_modes_deck_for_nodes;
 use super::{
-    build_static_deck, displacement_of, read_displacement_tables, read_eigenvalues,
+    build_static_deck_product, displacement_of, read_displacement_tables, read_eigenvalues,
     read_eigenvector_tables, run_nastran95, Dialect, Nastran95Solver, RunOutcome,
 };
 use crate::loads;
@@ -46,9 +46,37 @@ pub fn run_nastran95_analysis(
 ) -> NastranResults {
     let mut results = NastranResults::default();
     if config.run_sol_static {
-        let text = build_static_deck(deck, node_index, requirements, config, Dialect::Nastran95);
+        let text =
+            build_static_deck_product(deck, node_index, requirements, config, Dialect::Nastran95);
         results.static_solve = match solve_and_retain(solver, work_dir, SOL101, &text, config) {
-            Ok(print) => read_static_print(&print, node_index, requirements, config),
+            Ok(print) => {
+                let mut result = read_static_print(&print, node_index, requirements, config);
+                let cases = loads::load_cases(requirements, config.additional_safety_factor);
+                let response = super::read_static_spanwise_print(&print, deck, node_index, &cases);
+                crate::nastran::static_spanwise::attach(&mut result, response);
+                let stress = super::read_static_shell_stress_print(&print, deck, &cases);
+                if let Some(error) = &stress.error {
+                    result.status = ResultStatus::Error;
+                    result.error = Some(format!(
+                        "{}shell stress output: {error}",
+                        result
+                            .error
+                            .as_ref()
+                            .map_or(String::new(), |e| format!("{e}; "))
+                    ));
+                } else {
+                    for case in &stress.cases {
+                        let peak = case
+                            .samples
+                            .iter()
+                            .map(|s| s.von_mises_pa)
+                            .fold(0.0_f64, f64::max);
+                        result.root_von_mises_max_pa.push(case.name, peak);
+                    }
+                }
+                result.shell_stress = Some(stress);
+                result
+            }
             Err(detail) => StaticResult {
                 status: ResultStatus::Error,
                 error: Some(detail),
@@ -234,6 +262,7 @@ fn read_modes_print(
 
 /// Run with the persisted desktop configuration when present, otherwise retain
 /// the environment-variable contract used by headless developer workflows.
+/// `ALAS_TOOL_DISCOVERY=disabled` suppresses this automatic fallback.
 pub fn run_nastran95_from_config_or_env(
     deck: &Deck,
     node_index: &MeshNodeIndex,
@@ -241,20 +270,7 @@ pub fn run_nastran95_from_config_or_env(
     requirements: &DesignRequirements,
     work_dir: &Path,
 ) -> Option<NastranResults> {
-    let dir = Path::new(config.nastran95_dir_path.trim());
-    let runtime = nonempty_path(&config.nastran95_runtime_path);
-    let rf_stage = nonempty_path(&config.nastran95_rf_stage_path);
-    let open_core_words = nonempty_text(&config.nastran95_open_core_words);
-    let solver = if dir.as_os_str().is_empty() {
-        Nastran95Solver::from_env().or_else(Nastran95Solver::from_adjacent_bundle)
-    } else {
-        Nastran95Solver::from_paths(
-            dir,
-            runtime.as_deref(),
-            rf_stage.as_deref(),
-            open_core_words.as_deref(),
-        )
-    }?;
+    let solver = configured_solver(config, alas_exec::tools::tool_discovery_enabled())?;
     Some(run_nastran95_analysis(
         deck,
         node_index,
@@ -263,6 +279,29 @@ pub fn run_nastran95_from_config_or_env(
         work_dir,
         &solver,
     ))
+}
+
+fn configured_solver(
+    config: &StructuresConfig,
+    discovery_enabled: bool,
+) -> Option<Nastran95Solver> {
+    if !discovery_enabled {
+        return None;
+    }
+    let dir = Path::new(config.nastran95_dir_path.trim());
+    let runtime = nonempty_path(&config.nastran95_runtime_path);
+    let rf_stage = nonempty_path(&config.nastran95_rf_stage_path);
+    let open_core_words = nonempty_text(&config.nastran95_open_core_words);
+    if dir.as_os_str().is_empty() {
+        Nastran95Solver::from_env().or_else(Nastran95Solver::from_adjacent_bundle)
+    } else {
+        Nastran95Solver::from_paths(
+            dir,
+            runtime.as_deref(),
+            rf_stage.as_deref(),
+            open_core_words.as_deref(),
+        )
+    }
 }
 
 /// Public helper retained for developer and test environments that configure
@@ -296,6 +335,32 @@ fn nonempty_text(value: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn disabled_discovery_skips_configured_local_solver_selection() -> std::io::Result<()> {
+        let root =
+            std::env::temp_dir().join(format!("alas-nastran95-discovery-{}", std::process::id()));
+        let executable = root.join("build/bin/nastran.exe");
+        fs::create_dir_all(root.join("build/bin"))?;
+        fs::create_dir_all(root.join("rf"))?;
+        fs::write(&executable, b"test")?;
+        fs::write(root.join("rf/NASINFO"), b"test")?;
+        let config = StructuresConfig {
+            nastran95_dir_path: root.display().to_string(),
+            ..StructuresConfig::default()
+        };
+
+        assert!(configured_solver(&config, false).is_none());
+        assert_eq!(
+            configured_solver(&config, true).map(|solver| solver.exe),
+            Some(executable.clone())
+        );
+        assert_eq!(
+            Nastran95Solver::from_paths(&root, None, None, None).map(|solver| solver.exe),
+            Some(executable)
+        );
+        fs::remove_dir_all(root)
+    }
 
     #[test]
     fn local_static_prints_report_tip_deflection_without_fabricating_stress() {

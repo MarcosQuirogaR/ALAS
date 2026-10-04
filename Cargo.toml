@@ -3,7 +3,7 @@ resolver = "2"
 members = ["crates/*", "xtask"]
 
 [workspace.package]
-version = "1.2.0"
+version = "1.3.0"
 edition = "2021"
 license = "AGPL-3.0-or-later"
 authors = ["Marcos Quiroga Rodriguez <marcos.quiroga.rodriguez@gmail.com>"]
@@ -41,13 +41,18 @@ egui = "0.29"
 # 2.0+).  The GUI's scene path is egui-image based, so it does not require the
 # Glow-specific paint callback API.
 eframe = { version = "0.29", default-features = false, features = ["default_fonts", "wgpu", "x11", "wayland"] }
-# Plotters is the common plotting API.  The GUI uses its drawing primitives
-# through an egui-backed adapter, so figures do not cross the UI boundary as
-# encoded SVG or raster buffers.
+# Plotters is used only by `alas-report::SceneBackend`, which records Plotters
+# drawing calls as scene primitives so such a chart would reach the SVG export
+# and the egui viewport through the same scene. No figure calls it at present;
+# every report figure builds scene primitives directly.
 plotters = "0.3"
 plotters-backend = "0.3"
 resvg = "0.45"
 tiny-skia = "0.11"
+# RFC 4648 base64 for the data URI that embeds the bundled Earth texture in
+# exported SVG. Already in the graph at this version through usvg (resvg's SVG
+# parser), so it adds no crate; the alternative was a hand-rolled encoder.
+base64 = "0.22"
 
 # Dense linear-algebra kernel. `alas-math::linalg` began as a scalar Gaussian
 # elimination over row vectors. At the fine vortex-lattice mesh the product
@@ -87,7 +92,7 @@ print_stdout = "deny"
 print_stderr = "deny"
 dbg_macro = "deny"
 # A panic in library code is a bug. Analyses that cannot produce a number report
-# it through the stage status contract instead (see alas-types).
+# it through its typed status or error value instead.
 unwrap_used = "deny"
 expect_used = "deny"
 todo = "warn"
@@ -105,4 +110,14 @@ strip = "symbols"
 # Parity tests replay full analyses; running them at opt-level 0 makes the suite
 # slow enough that it stops being run.
 [profile.test]
+opt-level = 2
+# Full debuginfo on 170-odd integration-test binaries makes linking (and the
+# PDBs it writes on MSVC) a large share of a workspace test run. Line tables
+# keep file:line in panic backtraces; codegen and float semantics are unchanged.
+debug = "line-tables-only"
+
+# Debug builds of the application otherwise run resvg, tiny-skia, faer and egui
+# unoptimized, which makes an interactive debug session unusably slow. Only
+# third-party packages are affected; workspace crates keep opt-level 0.
+[profile.dev.package."*"]
 opt-level = 2

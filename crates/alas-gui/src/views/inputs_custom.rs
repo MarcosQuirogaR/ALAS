@@ -34,9 +34,8 @@ pub(crate) fn show_custom_wing_sections(state: &mut AppState, ui: &mut Ui) {
         .and_then(|value| serde_json::from_value::<Vec<WingSection>>(value).ok())
         .unwrap_or_default();
     // Presets carry the root, optional side-of-body, kink and tip as the
-    // transport planform itself.  They used to disappear from this editor,
-    // which made a new station hard to place coherently and left the user
-    // editing only the extra `custom_sections` list.  Keep the generated
+    // transport planform itself.  Showing them alongside the extra `custom_sections` list
+    // lets a new station be placed coherently.  Keep the generated
     // stations visible and route the editable cells back to their owning
     // scalar/design values below.
     let mut generated = generated_wing_sections(state);
@@ -173,13 +172,10 @@ pub(crate) fn show_custom_fuselage_sections(state: &mut AppState, ui: &mut Ui) {
     let mut generated = generated_fuselage_sections(state);
     let generated_before = generated.clone();
     if !generated.is_empty() {
-        ui.label(
-            RichText::new(tr(
+        ui.label(RichText::new(tr("Preset stations")).weak().small())
+            .on_hover_text(tr(
                 "Preset/generated stations (edit Body parameters or drag the preview points)",
-            ))
-            .weak()
-            .small(),
-        );
+            ));
         for (index, section) in generated.iter_mut().enumerate() {
             show_generated_fuselage_section(ui, index, section);
         }

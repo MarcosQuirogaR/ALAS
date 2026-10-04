@@ -98,23 +98,23 @@
       },
       "layout": {
         "mlg_tire": {
-          "code": "widebody",
-          "diameter_m": 1.32,
-          "name": "Widebody (~52x21 class, 787/A330)",
-          "rated_load_kg": 24000.0,
-          "width_m": 0.53
+          "code": "narrowbody",
+          "diameter_m": 1.17,
+          "name": "Narrowbody main (46x17.0R20 class, A320/737 MLG)",
+          "rated_load_kg": 20865.25,
+          "width_m": 0.44
         },
         "n_mlg_struts": 2,
         "n_nlg_wheels": 2,
         "nlg_tire": {
           "code": "narrowbody",
           "diameter_m": 1.17,
-          "name": "Narrowbody (~46x17 class, A320/737)",
-          "rated_load_kg": 13000.0,
+          "name": "Narrowbody main (46x17.0R20 class, A320/737 MLG)",
+          "rated_load_kg": 20865.25,
           "width_m": 0.44
         },
-        "pct_load_mlg_max": 1.2151898734177216,
-        "pct_load_nlg_max": 0.3291139240506329,
+        "pct_load_mlg_max": 1.0564683544303797,
+        "pct_load_nlg_max": 0.5282341772151898,
         "r_mlg_total_design_kg": 77148.4375,
         "r_nlg_design_kg": 10492.187499999995,
         "strut_material": "300M high-strength steel",
@@ -140,43 +140,44 @@
             "y": 0.35200000000000004
           },
           {
-            "diameter_m": 1.32,
+            "diameter_m": 1.17,
             "group": "MLG",
             "strut_label": "MLG-L",
-            "width_m": 0.53,
+            "width_m": 0.44,
             "x": 18.5,
-            "y": -4.127750000000001
+            "y": -4.055750000000001
           },
           {
-            "diameter_m": 1.32,
+            "diameter_m": 1.17,
             "group": "MLG",
             "strut_label": "MLG-L",
-            "width_m": 0.53,
+            "width_m": 0.44,
             "x": 18.5,
-            "y": -3.2797500000000004
+            "y": -3.3517500000000005
           },
           {
-            "diameter_m": 1.32,
+            "diameter_m": 1.17,
             "group": "MLG",
             "strut_label": "MLG-R",
-            "width_m": 0.53,
+            "width_m": 0.44,
             "x": 18.5,
-            "y": 3.2797500000000004
+            "y": 3.3517500000000005
           },
           {
-            "diameter_m": 1.32,
+            "diameter_m": 1.17,
             "group": "MLG",
             "strut_label": "MLG-R",
-            "width_m": 0.53,
+            "width_m": 0.44,
             "x": 18.5,
-            "y": 4.127750000000001
+            "y": 4.055750000000001
           }
         ],
         "wheels_per_mlg_strut": 2,
         "x_mlg": 18.5,
         "x_nlg": 5.7
       },
-      "name": "narrowbody_auto"
+      "name": "narrowbody_auto",
+      "_note": "Tire database correction: the NARROWBODY tire rating is 20,865.25 kg (retrieved Goodyear 46x17.0R20 rated load), not 13,000 kg. Only the tire identity, its two rated-load-dependent fields (pct_load_nlg_max/pct_load_mlg_max) and the MLG wheel diameter/width/y (which follow the tire dimensions) differ from the frozen reference; the wheel/strut counts, x-stations, reaction loads, track width and turnover angle are unaffected."
     },
     {
       "config": {},
@@ -200,14 +201,14 @@
         "n_mlg_struts": 2,
         "n_nlg_wheels": 2,
         "nlg_tire": {
-          "code": "widebody",
-          "diameter_m": 1.32,
-          "name": "Widebody (~52x21 class, 787/A330)",
-          "rated_load_kg": 24000.0,
-          "width_m": 0.53
+          "code": "narrowbody",
+          "diameter_m": 1.17,
+          "name": "Narrowbody main (46x17.0R20 class, A320/737 MLG)",
+          "rated_load_kg": 20865.25,
+          "width_m": 0.44
         },
         "pct_load_mlg_max": 1.0708661417322836,
-        "pct_load_nlg_max": 0.1889763779527559,
+        "pct_load_nlg_max": 0.16429330708661416,
         "r_mlg_total_design_kg": 248595.74468085106,
         "r_nlg_design_kg": 32425.531914893618,
         "strut_material": "300M high-strength steel (titanium truck beam)",
@@ -217,20 +218,20 @@
         "wheelbase_m": 23.5,
         "wheels": [
           {
-            "diameter_m": 1.32,
+            "diameter_m": 1.17,
             "group": "NLG",
             "strut_label": "NLG",
-            "width_m": 0.53,
+            "width_m": 0.44,
             "x": 8.5,
-            "y": -0.42400000000000004
+            "y": -0.35200000000000004
           },
           {
-            "diameter_m": 1.32,
+            "diameter_m": 1.17,
             "group": "NLG",
             "strut_label": "NLG",
-            "width_m": 0.53,
+            "width_m": 0.44,
             "x": 8.5,
-            "y": 0.42400000000000004
+            "y": 0.35200000000000004
           },
           {
             "diameter_m": 1.4,
@@ -301,7 +302,8 @@
         "x_mlg": 32.0,
         "x_nlg": 8.5
       },
-      "name": "widebody_auto"
+      "name": "widebody_auto",
+      "_note": "Tire database correction: the nose gear auto-selected tire is the narrowbody class that covers its load rather than the widebody class; the main gear (already heavy class) and every other field are unaffected."
     },
     {
       "config": {},

@@ -4,9 +4,10 @@
 //! The FLOPS-based product mass buildup.
 //!
 //! The eight operating-empty slots use FLOPS grouping, with explicitly
-//! selected LTH cabin/pylon relations and a shaft-power installation branch.
+//! selected LTH cabin/pylon relations, the regional turboprop systems relation
+//! and a shaft-power installation branch.
 //! The resolved buildup retains those equation sources. It is independent of
-//! the frozen Torenbeek/fraction compatibility buildup. The mapping into the
+//! the Torenbeek/fraction comparison buildup. The mapping into the
 //! ALAS slots is fixed here:
 //!
 //! | FLOPS | ALAS slot |
@@ -15,18 +16,18 @@
 //! | Fuselage + paint (eqs. 56, 68) | `fuselage` |
 //! | Installed propulsion + **nacelles** (eqs. 73-92, 136) | `propulsion` |
 //! | Systems and equipment less furnishings (eq. 138) | `systems` |
-//! | Furnishings `WFURN` + operating items `WOPIT` (eqs. 138, 140) | `furnishings` |
+//! | Furnishings `WFURN` (regional turboprop: Torenbeek group less the other eight terms) + operating items `WOPIT` (eqs. 138, 140) | `furnishings` |
 //! | Empty-mass margin `WMARG` (eq. 139) | `systems` |
 //!
 //! **Nacelles are charged to `propulsion` and to nothing else.** FLOPS prints
 //! them in the structural group statement, but they sit on the engines and the
 //! ALAS mass stations put them at the nacelle centroid. Because both groups
 //! are always evaluated together here there is no selection under which the
-//! nacelle group can be dropped or added twice, which is what the previous
-//! per-group selection allowed.
+//! nacelle group can be dropped or added twice.
 
 use alas_config::{
-    CabinConfig, ControlSurfacesConfig, DesignRequirements, GeometryConfig, MassModelConfig,
+    CabinConfig, ControlSurfacesConfig, DesignRequirements, GeometryConfig, LandingGearConfig,
+    MassModelConfig,
 };
 use alas_geom::aircraft::airplane::Airplane;
 
@@ -67,6 +68,20 @@ impl FlopsMassBuildup {
             .map_or(0.0, |structure| structure.nacelle_kg)
     }
 
+    /// The structural group's own `(main_gear_kg, nose_gear_kg)` split
+    /// (FLOPS equations 63/64), before it is summed into the single
+    /// [`MassBreakdown::gear`] slot.
+    ///
+    /// `None` when this buildup carries no structural group (should not
+    /// happen for a successfully built [`FlopsMassBuildup`], since building
+    /// one requires `airframe.structure`, but a buildup carrying only the
+    /// systems/operating-items groups is not ruled out by this type alone).
+    pub fn gear_split_kg(&self) -> Option<(f64, f64)> {
+        self.airframe
+            .structure
+            .map(|structure| (structure.main_gear_kg, structure.nose_gear_kg))
+    }
+
     /// The installed engines, reversers, controls, starters and fuel system,
     /// *without* the nacelles.
     ///
@@ -100,6 +115,7 @@ pub(super) fn build_pure_flops(
     controls: &ControlSurfacesConfig,
     cabin: &CabinConfig,
     mass_model: &MassModelConfig,
+    landing_gear: &LandingGearConfig,
 ) -> Result<FlopsMassBuildup, ComponentMassError> {
     // The systems group reads the same design gross mass as the airframe:
     // a declared `flops_structure.design_gross_mass_kg` pins both, otherwise
@@ -137,6 +153,7 @@ pub(super) fn build_pure_flops(
         controls,
         mass_model,
         systems: Some(&groups.systems),
+        landing_gear,
         selection: FlopsAirframeSelection {
             structure: true,
             propulsion: true,
@@ -231,7 +248,7 @@ mod tests {
     };
     use alas_geom::builder::AircraftBuilder;
 
-    use crate::breakdown::calculate_component_masses_checked_product_with_gear;
+    use crate::breakdown::calculate_component_masses_checked_with_gear;
     use crate::flops_transport::FlopsOperatingItemsBreakdown;
 
     fn provenance() -> FlopsInputProvenance {
@@ -306,6 +323,7 @@ mod tests {
             &ControlSurfacesConfig::default(),
             &CabinConfig::default(),
             mass_model,
+            &LandingGearConfig::default(),
         )
         .unwrap_or_else(|error| panic!("the declared fixture must evaluate: {error}"))
     }
@@ -316,14 +334,14 @@ mod tests {
         geometry: &GeometryConfig,
         mass_model: &MassModelConfig,
     ) -> MassBreakdown {
-        calculate_component_masses_checked_product_with_gear(
+        calculate_component_masses_checked_with_gear(
             plane,
             requirements,
             geometry,
+            &CabinConfig::default(),
             &ControlSurfacesConfig::default(),
             Some(mass_model),
             &alas_config::LandingGearConfig::default(),
-            &CabinConfig::default(),
         )
         .unwrap_or_else(|error| panic!("the declared fixture must evaluate: {error}"))
     }
@@ -476,6 +494,7 @@ mod tests {
             &ControlSurfacesConfig::default(),
             &CabinConfig::default(),
             &mass_model,
+            &LandingGearConfig::default(),
         )
         .expect_err("a missing maximum Mach must block the buildup");
         match error {

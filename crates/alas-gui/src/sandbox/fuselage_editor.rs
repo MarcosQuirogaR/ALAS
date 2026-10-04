@@ -107,12 +107,10 @@ pub fn show_fuselage_editor(state: &mut AppState, ui: &mut Ui) {
     let Some(p) = profile(state) else {
         return;
     };
-    ui.label(egui::RichText::new(tr("Section editor")).strong());
-    ui.label(
-        egui::RichText::new(tr("Drag the station points to place the nose, cabin and tail; drag the section edges to size it."))
-            .weak()
-            .small(),
-    );
+    ui.label(egui::RichText::new(tr("Section editor")).strong())
+        .on_hover_text(tr(
+            "Drag the station points to place the nose, cabin and tail; drag the section edges to size it.",
+        ));
     let width = ui.available_width().max(260.0);
     let (rect, _) = ui.allocate_exact_size(vec2(width, 150.0), Sense::hover());
     let inner = rect.shrink2(vec2(12.0, 14.0));

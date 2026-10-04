@@ -238,15 +238,13 @@ impl CubicSpline {
     /// clamped to the first/last segment when `query_x` is outside the knot
     /// range (which is what makes extrapolation use the nearest segment's
     /// polynomial rather than panicking or requiring a separate code path).
+    ///
+    /// The interior knots are strictly increasing, so the first one above
+    /// `query_x` is found by bisection. A NaN query compares false against
+    /// every knot and lands in the first segment, where it evaluates to NaN
+    /// like it would in any other.
     fn segment_for(&self, query_x: f64) -> usize {
-        let last_segment = self.x.len() - 2;
-        match self.x[1..self.x.len() - 1]
-            .iter()
-            .position(|&knot| query_x < knot)
-        {
-            Some(offset) => offset,
-            None => last_segment,
-        }
+        self.x[1..self.x.len() - 1].partition_point(|&knot| knot <= query_x)
     }
 }
 
@@ -341,15 +339,15 @@ fn thomas_solve(sub: &[f64], diag: &[f64], sup: &[f64], mut rhs: Vec<Vec<f64>>) 
     for i in 1..len {
         let denom = diag[i] - sub[i] * sup_prime[i - 1];
         sup_prime[i] = sup[i] / denom;
-        let previous = rhs[i - 1].clone();
-        for (value, previous_value) in rhs[i].iter_mut().zip(&previous) {
+        let (done, rest) = rhs.split_at_mut(i);
+        for (value, previous_value) in rest[0].iter_mut().zip(&done[i - 1]) {
             *value = (*value - sub[i] * previous_value) / denom;
         }
     }
 
     for i in (0..len - 1).rev() {
-        let next = rhs[i + 1].clone();
-        for (value, next_value) in rhs[i].iter_mut().zip(&next) {
+        let (current, later) = rhs.split_at_mut(i + 1);
+        for (value, next_value) in current[i].iter_mut().zip(&later[0]) {
             *value -= sup_prime[i] * next_value;
         }
     }

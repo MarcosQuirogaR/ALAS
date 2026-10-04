@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/reporting/airfoil_sweep_figures.py
-// Reference: alas @ rust-port-baseline.
 
 //! Airfoil screening figures: the ranking bars, the trade-space map, the
 //! 2-D/3-D re-rank comparison, overlaid section shapes, and the MSES

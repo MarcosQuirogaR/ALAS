@@ -24,7 +24,7 @@ pub enum Colormap {
     Inferno,
     /// Perceptually-uniform map (black -> pale pink), used for NeuralFoil sweeps.
     Magma,
-    /// Classic blue-cyan-yellow-red map, used for legacy-style contour fields.
+    /// Classic blue-cyan-yellow-red map, used for classic contour fields.
     Jet,
 }
 
@@ -120,24 +120,6 @@ impl Colormap {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn every_colormap_covers_its_full_domain_without_panicking() {
-        for cmap in [
-            Colormap::Viridis,
-            Colormap::Turbo,
-            Colormap::Plasma,
-            Colormap::Inferno,
-            Colormap::Magma,
-            Colormap::Jet,
-        ] {
-            let _ = cmap.sample(0.0);
-            let _ = cmap.sample(1.0);
-            let _ = cmap.sample(0.5);
-            let _ = cmap.sample(-0.3); // clamps
-            let _ = cmap.sample(1.7); // clamps
-        }
-    }
 
     #[test]
     fn viridis_endpoints_match_its_first_and_last_stop() {

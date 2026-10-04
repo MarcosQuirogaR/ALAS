@@ -17,13 +17,19 @@ use alas_report::families::performance;
 use alas_report::svg::render_svg;
 use std::collections::HashMap;
 
+/// A report on the scale of the default configuration's 358.67 t
+/// long-range twin: about 510 m^2 of wing (the configuration's area cap is
+/// 535 m^2) and an operating empty mass near 167 t. The payload-range
+/// corners are priced on the configuration's segment mission model, so the
+/// report's masses and the tank volume its wing yields must belong to an
+/// aircraft that model can fly with reserves.
 fn sample_report(payload_kg: f64) -> AnalysisReport {
     let airfoil = Airfoil::from_name("naca0012").expect("fixture airfoil");
     let wing = Wing::new(
         "Main Wing",
         vec![
-            WingXSec::new([0.0, 0.0, 0.0], 3.0, 0.0, airfoil.clone()),
-            WingXSec::new([0.0, 8.0, 0.0], 3.0, 0.0, airfoil),
+            WingXSec::new([0.0, 0.0, 0.0], 8.0, 0.0, airfoil.clone()),
+            WingXSec::new([0.0, 32.0, 0.0], 8.0, 0.0, airfoil),
         ],
         true,
     );
@@ -38,14 +44,14 @@ fn sample_report(payload_kg: f64) -> AnalysisReport {
     };
     let mut component_masses = HashMap::new();
     for (name, mass) in [
-        ("Wing", 8000.0),
-        ("H-Stab", 1000.0),
-        ("V-Stab", 600.0),
-        ("Fuselage", 12000.0),
-        ("Gear", 2000.0),
-        ("Propulsion", 5000.0),
-        ("Systems", 4000.0),
-        ("Furnishings", 3000.0),
+        ("Wing", 37_600.0),
+        ("H-Stab", 4_700.0),
+        ("V-Stab", 2_800.0),
+        ("Fuselage", 56_400.0),
+        ("Gear", 9_400.0),
+        ("Propulsion", 23_500.0),
+        ("Systems", 18_800.0),
+        ("Furnishings", 14_100.0),
     ] {
         component_masses.insert(name.to_owned(), mass);
     }
@@ -72,6 +78,7 @@ fn sample_report(payload_kg: f64) -> AnalysisReport {
         },
         polar_fit: PolarFit {
             cd0: 0.02,
+            c1: 0.0,
             k: 0.04,
             oswald_e: 0.85,
             aspect_ratio: 9.0,
@@ -87,6 +94,8 @@ fn sample_report(payload_kg: f64) -> AnalysisReport {
         geometry_summary: HashMap::new(),
         payload_layout: None,
         cg_envelope_ok: None,
+        neutral_point_conditions: None,
+        fuel: Default::default(),
     }
 }
 
@@ -124,7 +133,7 @@ fn performance_figures_render_from_the_report_and_configuration() {
     assert!(departure.contains("London Heathrow"));
     assert!(arrival.contains("Dubai"));
     for svg in [departure, arrival] {
-        for label in ["TODR", "BFL", "ASD", "LDR", "V1", "VR", "V2"] {
+        for label in ["TODR", "BFL proxy", "ASD proxy", "LFL", "V1", "VR", "V2"] {
             assert!(svg.contains(label), "missing {label}");
         }
     }
@@ -164,6 +173,26 @@ fn payload_range_changes_when_the_analyzed_payload_changes() {
     assert!(low.contains("10.0 t"));
     assert!(high.contains("30.0 t"));
     assert_ne!(low, high);
+
+    // The corners are a reserve-inclusive capability curve: payload falls
+    // and range grows from A to D, every flown corner holds reserve fuel
+    // back, and trading payload for fuel at MTOW (B to C) cannot shorten
+    // the range.
+    let data = performance::payload_range_data(&sample_report(10_000.0), &config)
+        .expect("the corners are priced on the configuration's mission model");
+    assert_eq!(data.range_basis.label(), "reserve-inclusive fuel plan");
+    assert_eq!(data.points[0].range_nm, 0.0);
+    for pair in data.points.windows(2) {
+        assert!(pair[1].range_nm >= pair[0].range_nm, "{:?}", data.points);
+        assert!(
+            pair[1].payload_kg <= pair[0].payload_kg,
+            "{:?}",
+            data.points
+        );
+    }
+    assert!(data.points[3].range_nm > data.points[1].range_nm);
+    assert_eq!(data.reserve_fuel_kg[0], 0.0);
+    assert!(data.reserve_fuel_kg[1..].iter().all(|kg| *kg > 0.0));
 }
 
 #[test]
@@ -192,7 +221,7 @@ fn payload_range_status_names_the_missing_physical_input() {
 }
 
 #[test]
-fn performance_renderers_keep_the_w34_contract_details_visible() {
+fn performance_renderers_keep_the_contract_details_visible() {
     let config = AlasConfig::default();
     let report = sample_report(20_000.0);
 

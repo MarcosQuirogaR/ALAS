@@ -128,7 +128,7 @@ impl<'a> SceneView<'a> {
     /// which keeps a static card pixel-identical to the exported figure. A
     /// scene rebuilt on every camera frame cannot afford that: on the route
     /// globe the vector overlay's SVG round-trip cost about 80 ms per frame
-    /// while the sphere itself cost about 4 ms (2026-09-11). With this
+    /// while the sphere itself cost about 4 ms (measured). With this
     /// enabled the texture is the only per-frame raster and the route,
     /// labels and colorbar are painted directly.
     pub fn vector_overlay(mut self, enabled: bool) -> Self {

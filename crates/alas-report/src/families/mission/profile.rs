@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/reporting/visualization.py, figure_mission_profile (L4365-4447)
-// Reference: alas @ rust-port-baseline.
 
 //! Four-panel mission analysis model mission profile: altitude, mass, true airspeed and SFC
 //! vs. time, plus a fuel-burned/block-time footer.

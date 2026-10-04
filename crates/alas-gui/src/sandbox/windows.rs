@@ -56,15 +56,11 @@ pub fn show_discipline_windows(state: &mut AppState, ctx: &Context) {
                 ui.horizontal(|ui| {
                     if ui
                         .add(crate::theme::selectable_button(tr("Focus"), focused))
+                        .on_hover_text(tr("Edits apply on commit and update the preview."))
                         .clicked()
                     {
                         state.set_sandbox_focus(if focused { None } else { Some(discipline) });
                     }
-                    ui.label(
-                        RichText::new(tr("Edits apply on commit and update the preview."))
-                            .weak()
-                            .small(),
-                    );
                 });
                 ScrollArea::vertical()
                     .id_salt(("sandbox_discipline_scroll", discipline.id()))
@@ -131,10 +127,6 @@ pub fn show_exit_prompt(state: &mut AppState, ctx: &Context) {
         .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
         .show(ctx, |ui| {
             ui.set_min_width(360.0);
-            ui.label(tr(
-                "Keep the sandbox aircraft as the guided workspace's custom baseline, discard it and return to the previous case, or stay in the sandbox.",
-            ));
-            ui.add_space(8.0);
             ui.horizontal(|ui| {
                 if ui
                     .button(RichText::new(tr("Promote to guided workspace")).strong())

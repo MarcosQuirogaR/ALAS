@@ -14,7 +14,7 @@ use alas_geom::aircraft::wing::Wing;
 use alas_geom::builder::AircraftBuilder;
 
 use crate::operating_point::{AxisFrame, OperatingPoint};
-use crate::vlm::{run_with_stability_derivatives, VlmResult, VlmSystem};
+use crate::vlm::{run_with_stability_derivatives, VlmError, VlmResult, VlmSystem};
 
 use super::types::{
     AlphaPoint, ResolvedCondition, SpanStation, StabilityOutcome, SurfaceShare, WingAnalysisError,
@@ -223,6 +223,9 @@ pub fn analyse(
     }
     let (result, point, condition) = solve_at(alpha_deg)?;
     let dynamic_force = condition.dynamic_pressure_pa * reference.area_m2;
+    let cd_induced = system
+        .trefftz_induced_drag_coefficient(&result, &point)
+        .ok_or(VlmError::NonFiniteResult)?;
     let span_load = span_load(&result, &point, &condition, &reference);
     let modelled_surfaces = surface_shares(&result, &point, &model.surface_names());
 
@@ -231,11 +234,13 @@ pub fn analyse(
         if cancelled() {
             return Err(WingAnalysisError::Cancelled);
         }
-        let (swept, _, _) = solve_at(angle)?;
+        let (swept, swept_point, _) = solve_at(angle)?;
         sweep.push(AlphaPoint {
             alpha_deg: angle,
             cl: swept.cl_lift,
-            cd_induced: swept.cd_drag,
+            cd_induced: system
+                .trefftz_induced_drag_coefficient(&swept, &swept_point)
+                .ok_or(VlmError::NonFiniteResult)?,
             cm_pitch: swept.cm_pitch,
         });
     }
@@ -255,12 +260,12 @@ pub fn analyse(
         condition,
         modelled_surfaces,
         cl: result.cl_lift,
-        cd_induced: result.cd_drag,
+        cd_induced,
         cm_pitch: result.cm_pitch,
         lift_n: result.lift,
-        induced_drag_n: result.drag,
+        induced_drag_n: cd_induced * dynamic_force,
         pitch_moment_n_m: result.cm_pitch * dynamic_force * reference.chord_m,
-        span_efficiency: span_efficiency(result.cl_lift, result.cd_drag, reference.aspect_ratio()),
+        span_efficiency: span_efficiency(result.cl_lift, cd_induced, reference.aspect_ratio()),
         span_load,
         sweep,
         stability,
@@ -398,19 +403,16 @@ fn span_load(
         let trailing_edge = midpoint(panel.back_left, panel.back_right);
         let chord = leading_edge.map_or(0.0, |edge| distance(edge, trailing_edge));
         leading_edge = None;
-        // NaN in any of these means a diverged/invalid upstream state (e.g.
-        // `dynamic_pressure_pa` is an explicit NaN sentinel from
-        // `operating_point` for an unreachable atmosphere state, or the
-        // lattice solve produced degenerate panel geometry). Such a station
-        // must be rejected, not silently propagated into `section_cl`, so
-        // this checks finiteness explicitly rather than relying on
-        // `!(x > 0.0)`, which is false (i.e. "valid") for NaN operands on
-        // this partially ordered type. Matches the reference-geometry guard
-        // above (`is_finite() && x > 0.0`).
-        if !(strip_width.is_finite() && strip_width > 0.0)
-            || !(chord.is_finite() && chord > 0.0)
-            || !(dynamic_pressure.is_finite() && dynamic_pressure > 0.0)
-        {
+        // A non-finite value in any of these means a diverged or invalid
+        // upstream state (`dynamic_pressure_pa` is an explicit NaN sentinel
+        // from `operating_point` for an unreachable atmosphere state, or the
+        // lattice produced degenerate panel geometry). Such a strip is
+        // dropped rather than propagated into `section_cl`, matching the
+        // reference-geometry guard above (`is_finite() && x > 0.0`).
+        let usable = [strip_width, chord, dynamic_pressure]
+            .iter()
+            .all(|&value| value.is_finite() && value > 0.0);
+        if !usable {
             strip_lift = 0.0;
             continue;
         }

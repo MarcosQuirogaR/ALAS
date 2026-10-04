@@ -6,7 +6,6 @@
 // mission analysis model/Methods/Flight_Dynamics/Static_Stability/Approximations/
 // Supporting_Functions/convert_sweep.py.
 // Upstream: mission analysis model 2.5.2, LGPL-2.1.
-// Reference: alas @ rust-port-baseline.
 
 //! Turning a wing into the span breaks the panelizer discretizes between.
 //!

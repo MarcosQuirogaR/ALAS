@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-// Ported from alas/reporting/design_report.py
-// Reference: alas @ rust-port-baseline.
-
 //! Exporting design databases to JSON, Selig `.dat` files, and formatted summaries.
 
 use std::collections::HashMap;
@@ -41,7 +38,7 @@ pub struct DesignDatabase {
     pub cpacs: Option<CpacsReference>,
 }
 
-/// Link from the legacy JSON report to the authoritative CPACS aircraft file.
+/// Link from the JSON report to the authoritative CPACS aircraft file.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CpacsReference {
     /// CPACS file path, relative to the report output directory when possible.
@@ -54,6 +51,8 @@ pub struct CpacsReference {
     pub engine_uid: String,
 }
 
+mod aerodynamics;
+
 /// Convert an [`AnalysisReport`] and [`AlasConfig`] into the standard [`DesignDatabase`].
 pub fn report_to_database(report: &AnalysisReport, config: &AlasConfig) -> DesignDatabase {
     let req = &config.requirements;
@@ -62,18 +61,7 @@ pub fn report_to_database(report: &AnalysisReport, config: &AlasConfig) -> Desig
     meta.insert("source".to_owned(), "alas.pipeline".to_owned());
     meta.insert("tool".to_owned(), "ALAS".to_owned());
 
-    let aero = serde_json::json!({
-        "cruise_mach": req.cruise_mach,
-        "cruise_altitude_m": req.cruise_altitude_m,
-        "cd0_cruise": report.polar_fit.cd0,
-        "k_factor": report.polar_fit.k,
-        "oswald_efficiency": report.polar_fit.oswald_e,
-        "aspect_ratio": report.polar_fit.aspect_ratio,
-        "polar_fit_status": report.polar_fit.status.as_str(),
-        "design_point": report.design_point,
-        "static_margin": report.static_margin,
-        "trimmed_design_point": report.trimmed_design_point,
-    });
+    let aero = aerodynamics::database(report, config);
 
     let weights = serde_json::json!({
         "mtow_kg": req.mtow_kg,
@@ -362,12 +350,23 @@ fn feasibility_to_json(report: &FeasibilityReport) -> serde_json::Value {
     );
     serde_json::json!({
         "fuel_loading": {
+            "design_takeoff_loading": fuel.design_takeoff_loading.map(|loading| serde_json::json!({
+                "status": loading.status.as_str(),
+                "zero_fuel_mass_kg": loading.zero_fuel_mass_kg,
+                "mtow_fuel_budget_kg": loading.mtow_fuel_budget_kg,
+                "usable_capacity_kg": loading.usable_capacity_kg,
+                "carried_usable_fuel_kg": loading.carried_usable_fuel_kg,
+                "takeoff_mass_kg": loading.takeoff_mass_kg,
+                "mtow_margin_kg": loading.mtow_margin_kg,
+                "usable_capacity_margin_kg": loading.usable_capacity_margin_kg,
+            })),
             "mtow_closure_fuel_kg": fuel.mtow_closure_fuel_kg,
             "usable_capacity_kg": fuel.usable_capacity.capacity_kg,
             "usable_capacity_evidence": fuel_capacity_evidence_name(
                 fuel.usable_capacity.evidence,
             ),
             "analyzed_carried_fuel_kg": fuel.analyzed_carried_fuel_kg,
+            "flown_carried_fuel_kg": fuel.flown_carried_fuel_kg,
             "carried_fuel_basis": carried_fuel_basis_name(fuel.carried_fuel_basis),
             "zero_fuel_mass_kg": fuel.zero_fuel_mass_kg,
             "analyzed_takeoff_mass_kg": fuel.analyzed_takeoff_mass_kg,
@@ -377,8 +376,14 @@ fn feasibility_to_json(report: &FeasibilityReport) -> serde_json::Value {
                 "status": mission_fuel_status_name(fuel.mission.status),
                 "burned_fuel_kg": fuel.mission.burned_fuel_kg,
                 "required_trip_fuel_kg": fuel.mission.required_trip_fuel_kg,
+                "native": {
+                    "status": mission_fuel_status_name(fuel.mission.native.status),
+                    "burned_fuel_kg": fuel.mission.native.burned_fuel_kg,
+                    "throttle_limited": fuel.mission.native.throttle_limited,
+                    "error": report.native_mission_error,
+                },
             },
-            "dispatch": fuel.dispatch.map(dispatch_to_json),
+            "dispatch": fuel.dispatch.map(|dispatch| dispatch.to_json()),
         },
         "cruise_equilibrium": cruise_equilibrium,
         "mass_balance": report.mass_balance.as_ref().map(mass_balance_to_json),
@@ -454,37 +459,6 @@ fn mass_balance_to_json(
         },
         "ledger_items": items,
         "lumped_takeoff_cg_pct_mac": assessment.lumped_takeoff_cg_pct_mac,
-    })
-}
-
-fn dispatch_to_json(dispatch: crate::feasibility::DispatchAssessment) -> serde_json::Value {
-    let plan = dispatch.plan.map(|plan| {
-        let quantity = |quantity: alas_mass::fuel_plan::FuelQuantity| {
-            serde_json::json!({ "kg": quantity.kg, "rule": format!("{:?}", quantity.rule) })
-        };
-        serde_json::json!({
-            "scheme": plan.scheme.as_str(),
-            "taxi": quantity(plan.taxi),
-            "trip": quantity(plan.trip),
-            "contingency": quantity(plan.contingency),
-            "alternate": quantity(plan.alternate),
-            "final_reserve": quantity(plan.final_reserve),
-            "additional": quantity(plan.additional),
-            "extra": quantity(plan.extra),
-            "takeoff_fuel_kg": plan.takeoff_fuel_kg(),
-            "ramp_fuel_kg": plan.ramp_fuel_kg(),
-            "block_fuel_kg": plan.block_fuel_kg(),
-            "trip_time_s": plan.trip_time_s,
-            "destination_landing_mass_kg": plan.destination_landing_mass_kg,
-            "reserve_landing_mass_kg": plan.reserve_landing_mass_kg,
-        })
-    });
-    serde_json::json!({
-        "outcome": dispatch.outcome.as_str(),
-        "takeoff_mass_kg": dispatch.takeoff_mass_kg,
-        "shortfall_kg": dispatch.shortfall_kg,
-        "native_flights": dispatch.native_flights,
-        "plan": plan,
     })
 }
 
@@ -718,7 +692,11 @@ mod tests {
             assert!(maximum_credit_wing > 0.0 && maximum_credit_wing < baseline_wing);
             assert_eq!(
                 exported["equation_methods"]["cabin_equipment"],
-                "lth_civil_transport_v1"
+                if name == "ATR72-600" {
+                    "regional_turboprop_v1"
+                } else {
+                    "lth_civil_transport_v1"
+                }
             );
             let propulsion = exported["equation_methods"]["installed_propulsion"]
                 .as_str()
@@ -785,6 +763,7 @@ mod tests {
             },
             polar_fit: PolarFit {
                 cd0: 0.02,
+                c1: 0.0,
                 k: 0.04,
                 oswald_e: 1.0 / (std::f64::consts::PI * 10.0 * 0.04),
                 aspect_ratio: 10.0,
@@ -800,6 +779,8 @@ mod tests {
             payload_layout: None,
             trimmed_design_point: None,
             cg_envelope_ok: None,
+            neutral_point_conditions: None,
+            fuel: Default::default(),
         };
 
         let database = report_to_database(&report, &AlasConfig::default());

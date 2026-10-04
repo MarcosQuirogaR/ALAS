@@ -4,7 +4,6 @@
 // Ported from reference geometry/geometry/airfoil/airfoil.py
 // (Airfoil.normalize, and the translate/scale/rotate it composes).
 // Upstream: reference geometry 4.2.8, MIT.
-// Reference: alas @ rust-port-baseline.
 
 //! Putting a section into the frame the airfoil surrogate is trained in:
 //! leading edge at the origin, trailing edge at `(1, 0)`, unit chord.

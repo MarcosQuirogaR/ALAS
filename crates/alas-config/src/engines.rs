@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/config/engines.py
-// Reference: alas @ rust-port-baseline.
 
 //! Turbofans the presets select from, with the data to draw and size them.
 //!
@@ -69,15 +68,17 @@ pub struct TurbofanEngineSpec {
     pub off_design: TurbofanOffDesignSpec,
 }
 
-/// Engine-specific anchor and evidence for the transport turbofan lapse deck.
+/// Cruise reference point and evidence for the transport turbofan deck.
 ///
-/// `cruise_reference_thrust_n` is per engine.  It is deliberately distinct
-/// from the sea-level-static rating: conflating those conditions was the
-/// principal source of the old mission solver's misleading linear lapse.
+/// `cruise_reference_thrust_n` is per engine.  It is the part-power cruise
+/// thrust paired with `cruise_tsfc_kg_kgf_hr`, not a maximum-climb rating:
+/// the deck derives maximum climb at the reference point from the static
+/// rating and bypass ratio (Howe 2000).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TurbofanOffDesignSpec {
-    /// Maximum-climb thrust per engine at the stated reference condition, N.
+    /// Cruise thrust per engine at the stated reference condition, at which
+    /// the catalogue cruise TSFC is quoted, N.
     pub cruise_reference_thrust_n: f64,
     /// Pressure altitude of the reference point, m.
     pub cruise_reference_altitude_m: f64,
@@ -129,19 +130,6 @@ impl TurbopropEngineSpec {
     /// The cruise fuel-flow anchor per installed engine, kg/h.
     pub fn cruise_fuel_flow_per_engine_kg_h(&self) -> f64 {
         self.maximum_cruise_fuel_flow_kg_h / Self::FUEL_FLOW_REFERENCE_ENGINES as f64
-    }
-
-    /// The constant maximum-cruise fuel flow of an installation of
-    /// `installed_engines` identical engines, kg/h.
-    ///
-    /// Scales the published two-engine anchor linearly with the count: each
-    /// engine is assumed to run at the same cruise rating and specific fuel
-    /// consumption as in the reference installation. `None` when no engine
-    /// is installed, so a caller cannot publish a range for an aircraft
-    /// without propulsion.
-    pub fn installed_cruise_fuel_flow_kg_h(&self, installed_engines: usize) -> Option<f64> {
-        (installed_engines > 0)
-            .then(|| self.cruise_fuel_flow_per_engine_kg_h() * installed_engines as f64)
     }
 }
 
@@ -401,12 +389,13 @@ mod tests {
 
     #[test]
     fn the_embedded_table_keeps_the_reference_engines_and_adds_certified_preset_variants() {
-        assert_eq!(database().len(), 11);
+        assert_eq!(database().len(), 12); // old 11 -> 12: TP400-D6 (Airbus A400M) turboprop entry added
         assert!(get("GE9X").is_ok());
         assert!(get("CFM56-5B4/3").is_ok());
         assert!(get("CFM56-5C3/F").is_ok());
         assert!(get("Trent 970-84").is_ok());
         assert!(get("PW127M").is_ok());
+        assert!(get("TP400-D6").is_ok());
     }
 
     #[test]
@@ -447,14 +436,28 @@ mod tests {
     }
 
     #[test]
-    fn genx_mission_anchor_declares_aircraft_level_calibration_scope() {
-        let genx = get("GEnx-1B").unwrap();
-        let off_design = genx.off_design.as_ref().unwrap();
-        assert_eq!(off_design.evidence, "aircraft-kinematic-calibration");
-        assert_eq!(off_design.cruise_reference_thrust_n, 85_000.0);
-        assert!(off_design
-            .source
-            .contains("not a measured engine thrust deck"));
+    fn cruise_reference_thrusts_are_published_pairs_or_svobodas_class_value() {
+        // Svoboda 2000 (via Schulz 2007, Eq. 2.12): F_CR = 200 lbf + 0.2 F_TO,
+        // with OpenAP's 890 N for 200 lbf. No entry may carry an
+        // aircraft-level thrust calibration.
+        for name in available() {
+            let engine = get(name).unwrap();
+            let Some(off_design) = engine.off_design.as_ref() else {
+                continue;
+            };
+            assert!(
+                !off_design.evidence.starts_with("aircraft-"),
+                "{name}: {}",
+                off_design.evidence
+            );
+            if off_design.evidence == "openap-static-fallback" {
+                let svoboda_n = 0.2 * engine.thrust_kn * 1_000.0 + 890.0;
+                assert!(
+                    (off_design.cruise_reference_thrust_n - svoboda_n).abs() < 0.5,
+                    "{name}"
+                );
+            }
+        }
     }
 
     #[test]
@@ -528,9 +531,8 @@ mod tests {
         let ge9x = get("GE9X").unwrap();
         assert_eq!(ge9x.part_power_evidence, "unvalidated-family-proxy");
         let off_design = ge9x.off_design.as_ref().expect("GE9X mission anchor");
-        assert_eq!(off_design.evidence, "aircraft-requirement-calibration");
-        assert!(off_design.source.contains("synthetic requirement"));
-        assert!(off_design.source.contains("not an OEM GE9X thrust deck"));
+        assert_eq!(off_design.evidence, "openap-static-fallback");
+        assert!(off_design.source.contains("Svoboda"));
         assert!(ge9x.part_power_source.contains("GEnx-1B74/75/P2"));
         assert!(!ge9x.part_power_source.contains("GE9X measured"));
         assert_eq!(ge9x.geometry_basis, "installed-nacelle-envelope");

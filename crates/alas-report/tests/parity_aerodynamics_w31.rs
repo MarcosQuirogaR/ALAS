@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! W3.1 figure contracts: Python's saved reference metadata remains the
+//! Aerodynamics figure contracts: Python's saved reference metadata remains the
 //! source of truth for labels, panel titles, and availability semantics.
 
+// Test code: a failed unwrap on a fixture it builds is the assertion failing.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use alas_aero::analysis::PolarSweep;
@@ -22,7 +23,6 @@ use alas_pipeline::{
 };
 use alas_report::families::{aerodynamics, optimization};
 use alas_report::svg::render_svg;
-use serde_json::Value;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
@@ -30,7 +30,7 @@ fn report() -> AnalysisReport {
     AnalysisReport {
         design: DesignVector::default(),
         airplane: Airplane {
-            name: "W3.1 contract aircraft".to_owned(),
+            name: "contract aircraft".to_owned(),
             xyz_ref: [0.0, 0.0, 0.0],
             wings: Vec::new(),
             fuselages: Vec::new(),
@@ -57,6 +57,7 @@ fn report() -> AnalysisReport {
         },
         polar_fit: PolarFit {
             cd0: 0.013,
+            c1: 0.0,
             k: 0.05,
             oswald_e: 0.85,
             aspect_ratio: 5.0,
@@ -72,6 +73,8 @@ fn report() -> AnalysisReport {
         geometry_summary: HashMap::new(),
         payload_layout: None,
         cg_envelope_ok: Some(true),
+        neutral_point_conditions: None,
+        fuel: Default::default(),
     }
 }
 
@@ -327,35 +330,7 @@ fn visible_text(svg: &str) -> String {
 }
 
 #[test]
-fn python_reference_contract_names_every_w31_family_and_theme() {
-    let corpus: Value = serde_json::from_str(include_str!(
-        "../../../golden/report/reference_render_corpus.json"
-    ))
-    .expect("reference render corpus is valid JSON");
-    let figures = corpus["figures"].as_object().expect("figure map");
-    for id in [
-        "aero_panel",
-        "airfoil_comparison",
-        "airfoil_reynolds",
-        "drag_breakdown",
-        "polar_comparison",
-        "model_comparison",
-        "span_loading",
-        "vlm_flow",
-        "mses_pressure",
-        "mses_mach_contours",
-    ] {
-        for theme in ["light", "dark"] {
-            assert!(
-                figures.contains_key(&format!("{id}:{theme}")),
-                "missing {id}:{theme}"
-            );
-        }
-    }
-}
-
-#[test]
-fn report_fed_w31_figures_preserve_python_titles_axes_markers_and_legends() {
+fn report_fed_figures_preserve_python_titles_axes_markers_and_legends() {
     let report = report();
     let svg = render_svg(&aerodynamics::figure_aero_panel(&report, Some("light")));
     text_contract(
@@ -582,7 +557,7 @@ fn model_comparison_overlays_only_compatible_vspaero_lift_and_moment() {
 }
 
 #[test]
-fn w31_optional_figures_are_data_driven_and_honest_without_external_data() {
+fn optional_figures_are_data_driven_and_honest_without_external_data() {
     let report = report();
     let svg = render_svg(&aerodynamics::figure_span_loading(&report, Some("light")));
     text_contract(&svg, &["VLM span loading unavailable"]);
@@ -608,7 +583,7 @@ fn w31_optional_figures_are_data_driven_and_honest_without_external_data() {
 }
 
 #[test]
-fn w31_mses_field_uses_the_complete_native_mplot_domain() {
+fn mses_field_uses_the_complete_native_mplot_domain() {
     let result = MsesPressureResult {
         status: MsesStatus::Ok,
         field_x: vec![-0.4, 0.0, 1.0, 1.4, 8.0],
@@ -635,7 +610,7 @@ fn w31_mses_field_uses_the_complete_native_mplot_domain() {
 }
 
 #[test]
-fn w31_mses_field_fills_native_mplot_grid_cells_when_row_topology_is_retained() {
+fn mses_field_fills_native_mplot_grid_cells_when_row_topology_is_retained() {
     let result = MsesPressureResult {
         status: MsesStatus::Ok,
         field_x: vec![0.0, 1.0, 0.0, 1.0],

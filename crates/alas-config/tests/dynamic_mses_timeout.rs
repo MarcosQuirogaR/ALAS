@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! Public configuration-boundary probes for MSES process deadlines.
+//! Public configuration boundary: MSES process deadlines must be finite and positive.
 
 use alas_config::{validate, AlasConfig, Severity};
 

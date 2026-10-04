@@ -1,26 +1,27 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-// Ported from alas/physics/structural_sizing.py
-// Reference: alas @ rust-port-baseline.
-
 //! Direct strength-based wingbox sizing.
 //!
-//! [`size_wingbox`] sizes the spar caps directly from strength: margin of
-//! safety zero by construction at the root, the bending-critical station,
-//! with no mass-target bisection, then applies the spar-cap taper law and the
-//! geometric cap width/height limits, sizes the webs from root shear, fixes
-//! the skin at its configured minimum, and derives the rib spacing from a
-//! panel-buckling criterion.
+//! [`size_wingbox`] constructs caps from compatible section strain at every
+//! station with geometric cap width/height limits, sizes the webs from root
+//! shear, fixes skin at configured minimum, and derives rib spacing from a
+//! panel-buckling criterion. Section bisection enforces material capacity,
+//! never a reference mass target. No spanwise stiffness taper is imposed.
+//!
+//! The cover skin between the spars is bending material: the product law
+//! uses the same modulus-weighted cover, cap and web section in sizing and
+//! response. Each material obeys its own allowable; sharing curvature does
+//! not imply sharing stress in a mixed metal/composite section. See Megson,
+//! *Aircraft Structures for Engineering Students*, 4th ed., 2007, ch. 20,
+//! and [`crate::allowables`] for the product carbon-laminate strain limit.
 //!
 //! Loads come from [`crate::loads`]: an elliptic aerodynamic distribution less
 //! the inertia of the mass the wing carries itself, which is the wing-bending
 //! design case (see [`crate::loads::WingInertiaRelief`] for why the no-relief
 //! form is a different aircraft rather than a conservative version of this
-//! one). Moment and shear are split across the spars weighted by each spar's
-//! local section depth, so a deeper spar carries proportionally more of the
-//! bending moment and a partial-span spar, zeroed outboard of the break,
-//! carries none of it there.
+//! one). Moment shares follow section stiffness. Partial-span spars are
+//! zeroed outboard of the break and carry no moment, shear or mass there.
 //!
 //! The relieved mass is the sized box itself plus the fuel in the integral
 //! tanks the box encloses ([`crate::tanks`]). The box relieves its own loads,
@@ -47,38 +48,36 @@ use alas_geom::wing_structure::WingStructureGeometry;
 use crate::loads::WingInertiaRelief;
 use crate::tanks;
 
+mod arc_mass;
+mod cap_search;
 mod law;
+mod product_strength;
 mod scoped;
+pub(crate) mod section;
 mod solve;
+mod stiffness;
+mod stiffness_distribution;
 mod types;
+mod web;
 
 pub use scoped::{size_wingbox_with_scope, SizedWingbox, WingFuelRelief};
+pub use stiffness::{size_for_linear_model, StiffnessSizingResult};
 pub use types::{
     margin_is_structurally_non_negative, CompositeProxyDeclaration, ControllingMargin,
     MassBreakdown, SparSizing, WingboxSizing, MARGIN_NUMERICAL_ZERO,
 };
 
-pub(crate) use law::gradient_unit;
+pub(crate) use law::{gradient_unit, trapezoid};
 use law::{linspace, SizingLaw};
 use solve::size_wingbox_with_law;
 
-/// How many relieved-load passes the product law takes.
+/// Maximum relieved-load passes; the solve exits early on verified closure.
 ///
-/// The box relieves its own bending, so its mass appears on both sides of the
-/// sizing equation. The iteration is a strong contraction - the structure is
-/// under a tenth of the relieved mass and the moment responds to it linearly -
-/// so the total settles to inside a milligramme within the budget on every
-/// registered aircraft.
-///
-/// **Two of them do not reach `RELIEF_TOLERANCE` inside it.** Measured at
-/// their own nominal designs, the A340-300 is still moving by `4.10e-9` of its
-/// box mass at the eighth pass and the A380-800 by `4.87e-9`, against a `1e-9`
-/// relative tolerance - `6.1e-5 kg` and `1.3e-4 kg` in absolute terms, which is
-/// structurally nothing and is why this was not visible before. Neither
-/// constant is tuned to cover it: [`size_wingbox_with_scope`] reports the
-/// verdict as [`crate::scope::ReliefConvergence`], so a box that did not settle
-/// is published as one that did not settle rather than assumed to have.
-pub const RELIEF_PASSES: usize = 8;
+/// The former fixed eight-pass budget truncated converging configurations.
+/// Sixty-four is a bounded numerical budget, not a changed physical margin:
+/// the existing relative convergence tolerance remains unchanged, and the
+/// final box must also carry loads relieved by its *own* final mass.
+pub const RELIEF_PASSES: usize = 64;
 
 /// Relative change in total box mass below which the relieved-load fixed point
 /// is taken as converged.
@@ -291,6 +290,23 @@ mod tests {
         // Past the half-chord bound the area cannot be carried: reported short.
         let (w, t) = root_cap_dimensions(0.5, 6.0, 0.5);
         assert!((w - 3.0).abs() < 1e-12 && w * t < 0.5);
+    }
+
+    #[test]
+    fn the_cover_skin_is_lumped_once_and_a_spar_without_depth_is_not_a_boom() {
+        use super::law::cover_skin_boom_areas_m2;
+        // Three spars on a 4 m chord with a 6 mm skin: the whole 0.25-0.70
+        // cover, 1.8 m wide, is 0.0108 m^2, shared half-panel by half-panel.
+        let areas = cover_skin_boom_areas_m2(&[0.25, 0.5, 0.7], &[0.5, 0.45, 0.35], 4.0, 0.006);
+        assert!((areas.iter().sum::<f64>() - 0.006 * 0.45 * 4.0).abs() < 1e-15);
+        assert!((areas[0] - 0.5 * 0.006 * 1.0).abs() < 1e-15);
+        assert!((areas[1] - 0.5 * 0.006 * 1.8).abs() < 1e-15);
+        // Outboard of its break the centre spar has no depth: the panel runs
+        // front to rear and the total skin is unchanged.
+        let areas = cover_skin_boom_areas_m2(&[0.25, 0.5, 0.7], &[0.5, 0.0, 0.35], 4.0, 0.006);
+        assert_eq!(areas[1], 0.0);
+        assert!((areas[0] - areas[2]).abs() < 1e-15);
+        assert!((areas.iter().sum::<f64>() - 0.006 * 0.45 * 4.0).abs() < 1e-15);
     }
 
     #[test]
@@ -540,20 +556,17 @@ mod tests {
         let (wsg, cfg, req, al) = probe_case();
         let sized = size_wingbox(&wsg, &cfg, &req, al, al, al, al);
         let minimum = sized.minimum_margin_of_safety();
-        assert!(minimum < 0.0, "expected the boundary, got {minimum}");
+        // The compatible-section search returns the feasible side. The sign
+        // of round-off is not a physical invariant of a fully stressed box.
+        assert!(
+            minimum.abs() <= MARGIN_NUMERICAL_ZERO,
+            "expected the boundary, got {minimum}"
+        );
         assert!(
             minimum >= -MARGIN_NUMERICAL_ZERO,
             "round-off exceeded its derived band: {minimum}"
         );
         assert!(sized.strength_margins_pass());
-        assert!(sized.controlling_margin_is_numerical_zero());
-        // The exact predicate the band replaced would have rejected it.
-        let exact_predicate = sized
-            .spars
-            .iter()
-            .flat_map(|spar| spar.margin_of_safety.iter())
-            .all(|&margin| !margin.is_nan() && margin >= 0.0);
-        assert!(!exact_predicate, "the regression this band exists for");
     }
 
     #[test]
@@ -603,8 +616,12 @@ mod tests {
         let frozen = size_wingbox_reference_compatibility(&wsg, &cfg, &req, al, al, al, al);
         // The spars sit at 0.25 and 0.70, so the cover is 45 % of the chord
         // the frozen law charges. Skin is linear in that width.
-        let ratio = product.mass_breakdown_kg.skin / frozen.mass_breakdown_kg.skin;
-        assert!((ratio - 0.45).abs() < 1e-9, "skin ratio {ratio}");
+        let expected = 2.0
+            * 0.45
+            * cfg.t_skin_min_m
+            * al.rho_kg_m3
+            * trapezoid(&product.chord, &product.y_stations);
+        assert!((product.mass_breakdown_kg.skin - expected).abs() < 1e-9);
         // Ribs are the section area between the spars rather than the whole
         // aerofoil, which is a smaller share but not a fixed one.
         assert!(

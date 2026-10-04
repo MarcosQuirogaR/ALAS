@@ -7,8 +7,16 @@
 //! resolved database geometry. Mesh/solver choices live on the Advanced tab,
 //! while result cards only display data supplied by OpenFOAM parsers.
 
-#[path = "cfd_view_parts/mod.rs"]
-mod cfd_view_parts;
+pub(crate) mod advanced;
+pub(crate) mod drawing;
+mod effective_config;
+pub(crate) mod layout;
+#[cfg(test)]
+mod layout_tests;
+pub(crate) mod log;
+pub(crate) mod results;
+pub(crate) mod study;
+pub(crate) mod widgets;
 
 use egui::{vec2, Layout, RichText, Ui, ViewportBuilder};
 
@@ -18,10 +26,10 @@ use crate::state::{AppState, LogKind};
 use crate::views::tr;
 use alas_cfd::CfdOutcome;
 
-use cfd_view_parts::advanced::show_advanced_tab;
-use cfd_view_parts::log::show_log_tab;
-use cfd_view_parts::results::show_results_tab;
-use cfd_view_parts::study::show_study_tab;
+use self::advanced::show_advanced_tab;
+use self::log::show_log_tab;
+use self::results::show_results_tab;
+use self::study::show_study_tab;
 
 /// Render the detached Airfoil CFD study window when it is open.
 pub fn show_cfd_window(state: &mut AppState, ctx: &egui::Context) {
@@ -162,9 +170,9 @@ fn show_tabs(state: &mut AppState, ui: &mut Ui) {
 
 #[cfg(test)]
 mod tests {
+    use super::drawing::{bounds, paint_airfoil_outline};
     use super::*;
     use crate::cfd::AirfoilCfdState;
-    use cfd_view_parts::drawing::{bounds, paint_airfoil_outline};
 
     #[test]
     fn airfoil_outline_projection_preserves_positive_y_up() {

@@ -42,7 +42,7 @@ The workspace is organized into shallow, acyclic crates:
 
 | Tier | Crates | Responsibilities |
 |---|---|---|
-| **L0 Foundations** | `alas-units`, `alas-math`, `alas-types`, `alas-i18n`, `alas-config-derive` | Physical unit conversions, root finders, splines, stage status contracts, localization |
+| **L0 Foundations** | `alas-units`, `alas-math`, `alas-i18n`, `alas-config-derive` | Physical unit conversions, root finders, splines, localization |
 | **L1 Environment** | `alas-config`, `alas-atmo` | Authoritative configuration schemas (~5,600 lines of typed settings), atmosphere models |
 | **L2 Geometry & Execution** | `alas-geom`, `alas-route`, `alas-exec` | Airfoil coordinates, wing/fuselage generators, structural mesh, airway routing, external process execution |
 | **L3 Disciplinary Analyses** | `alas-aero`, `alas-prop`, `alas-mass`, `alas-stab`, `alas-perf`, `alas-payload` | Vortex-lattice aerodynamics, turbofan thermodynamic cycle, CG envelopes, longitudinal stability |
@@ -54,10 +54,10 @@ The workspace is organized into shallow, acyclic crates:
 
 ## Key architectural mechanisms
 
-### 1. The stage status contract
+### 1. Typed analysis status
 
-Every disciplinary analysis that can fail or be omitted returns a `Stage<T>`:
-`Ok(T)`, `Error(String)`, or `NotRun`.
+Every disciplinary analysis that can fail or be omitted reports a typed status
+of its own that distinguishes a result, an error and `NotRun`.
 
 This enforces **honest degradation**:
 - An absent external solver reports `NotRun` and the pipeline continues with

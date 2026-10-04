@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! Characterization contracts for the W3.6 propulsion figure family.
+//! Characterization contracts for the propulsion figure family.
 //!
 //! These tests check the visible scientific contract rather than merely
 //! asserting that an SVG string exists: each figure must expose its units,

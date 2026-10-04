@@ -51,57 +51,6 @@ fn every_design_convention_has_a_typed_sizing_boundary() {
 }
 
 #[test]
-#[ignore = "the complete-catalogue gate intentionally removes incomplete source records"]
-fn every_required_role_defaults_to_a_reviewed_provenanced_record() {
-    let state = UavWorkflowState::default();
-    for role in ComponentRole::ALL {
-        let record = state
-            .selected_record(role)
-            .expect("expanded reviewed catalogue covers every UAV role");
-        assert!(record.provenance.source_url.starts_with("https://"));
-        assert!(!record.provenance.publisher.trim().is_empty());
-    }
-    assert_eq!(state.propulsion_input_mode, PropulsionInputMode::Automatic);
-    assert_eq!(state.mission_plan_mode, MissionPlanMode::Standard);
-    assert_eq!(state.selections.motor, "tmotor-at2814-900kv");
-    assert_eq!(state.selections.propeller, "apc-12x6e");
-    assert!(!state.selected_evidence_gaps().is_empty());
-    assert!(state
-        .selected_evidence_gaps()
-        .iter()
-        .any(|gap| gap.contains("allowable stress")));
-}
-
-#[test]
-#[ignore = "the complete-catalogue gate intentionally removes incomplete source records"]
-fn component_selection_exposes_source_expanded_records_without_filling_missing_data() {
-    let mut state = UavWorkflowState::default();
-    let motors = state.records_for(ComponentRole::Motor);
-    let motor = motors
-        .iter()
-        .find(|record| record.id == "tmotor-at1050-kv90")
-        .expect("source-expanded T-MOTOR motor is selectable in the GUI");
-    assert_eq!(motor.provenance.publisher, "T-MOTOR");
-    assert_eq!(
-        motor.provenance.source_url,
-        "https://store.tmotor.com/product/fixed-wing-motor-at1050.html"
-    );
-    match &motor.kind {
-        alas_uav::ComponentKind::Motor(spec) => {
-            assert_eq!(spec.max_static_thrust_n, None);
-            assert_eq!(spec.recommended_propeller_diameter_m, None);
-        }
-        other => panic!("expected motor record, got {other:?}"),
-    }
-
-    state.selections.set(ComponentRole::Motor, motor.id.clone());
-    let selected = state
-        .selected_record(ComponentRole::Motor)
-        .expect("source-expanded selection remains addressable");
-    assert_eq!(selected.id, motor.id);
-}
-
-#[test]
 fn automatic_sizing_uses_reviewed_materials_and_selects_landing_gear() {
     let state = UavWorkflowState::default();
     let materials = state.records_for(ComponentRole::Material);

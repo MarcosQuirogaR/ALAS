@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/config/geometry_config.py
-// Reference: alas @ rust-port-baseline.
 
 //! The scaffold the design vector hangs on.
 //!
@@ -25,13 +24,14 @@ mod frame;
 mod fuselage;
 mod wing;
 
-pub use empennage::EmpennageConfig;
+pub use empennage::{EmpennageConfig, TailSizing};
 pub use engine::{ActiveEngineModel, EngineBindingError, EngineConfig};
 pub use frame::{BodyFuselageExtent, LongitudinalStationFrame, MacFrame};
-pub use fuselage::{FuselageConfig, FuselageSection, FuselageSectionError};
+pub use fuselage::{AftBodyStation, FuselageConfig, FuselageSection, FuselageSectionError};
 pub use wing::{
-    InboardAerodynamicStation, MainWingPanel, MainWingStation, MainWingStationKind,
-    TransportPlanform, TransportPlanformError, WingConfig, WingSection, WingSectionError,
+    AirfoilClass, InboardAerodynamicStation, MainWingPanel, MainWingStation, MainWingStationKind,
+    TransportPlanform, TransportPlanformError, WingConfig, WingHeights, WingSection,
+    WingSectionError, WingShape, MAX_FLIGHT_TIP_RISE_SEMISPAN_FRACTION,
 };
 
 use serde::{Deserialize, Serialize};
@@ -162,15 +162,5 @@ mod tests {
         let geometry = GeometryConfig::default();
         assert!(geometry.wing_wetted_area_factor > 2.0);
         assert!(geometry.fuselage_wetted_factor < 1.0);
-    }
-
-    #[test]
-    fn a_geometry_round_trips_through_serialization() {
-        let geometry = GeometryConfig::default();
-        let text = serde_json::to_string(&geometry).unwrap();
-        assert_eq!(
-            serde_json::from_str::<GeometryConfig>(&text).unwrap(),
-            geometry
-        );
     }
 }

@@ -381,7 +381,7 @@ mod tests {
             }),
         ));
         // Eight normalized profile vertices produce two caps and one quad per
-        // edge. A six-face cuboid would be the old rectangular fallback.
+        // edge. A six-face cuboid is the rectangular fallback.
         assert_eq!(faces.len(), 10);
         assert!(faces.iter().any(|face| face.points.len() == 8));
         assert_rendered_as_polygons(faces);

@@ -31,15 +31,20 @@ pub mod cabin_scene;
 pub mod cpacs;
 #[path = "cpacs/adapters.rs"]
 pub mod cpacs_adapters;
+pub mod cruise_mass;
 pub mod dual_solver;
 pub mod export;
 pub mod feasibility;
+pub mod field_performance;
+pub mod field_reference;
 pub mod flowunsteady;
 pub mod fuel_model;
 pub mod full_analysis;
 pub mod gear_stations;
+mod mission_route;
 mod mission_stage;
 pub mod openvsp;
+pub mod optimizer_summary;
 mod patran;
 pub mod payload_layout_export;
 pub mod pipeline;
@@ -66,12 +71,12 @@ pub use cabin_scene::{
     export_cabin_scene, CabinScene, CabinSceneInputs, CABIN_SCENE_SCHEMA_VERSION,
 };
 pub use cpacs::{
-    export_cpacs, export_cpacs_with_analysis, read_cpacs, read_cpacs_file, render_cpacs_v35,
-    write_cpacs_run_manifest, CpacsAircraft, CpacsAircraftError, CpacsDocument, CpacsEngine,
-    CpacsEnginePosition, CpacsExportError, CpacsExportResult, CpacsFuselage, CpacsFuselageElement,
-    CpacsFuselageProfile, CpacsFuselageSection, CpacsHeader, CpacsReadError, CpacsRunManifest,
-    CpacsSegment, CpacsTransformation, CpacsVersionInfo, CpacsWing, CpacsWingAirfoil,
-    CpacsWingElement, CpacsWingSection, CPACS_35_VERSION, CPACS_V35_SCHEMA_URL,
+    export_cpacs, export_cpacs_document, export_cpacs_with_analysis, read_cpacs, read_cpacs_file,
+    render_cpacs_v35, write_cpacs_run_manifest, CpacsAircraft, CpacsAircraftError, CpacsDocument,
+    CpacsEngine, CpacsEnginePosition, CpacsExportError, CpacsExportResult, CpacsFuselage,
+    CpacsFuselageElement, CpacsFuselageProfile, CpacsFuselageSection, CpacsHeader, CpacsReadError,
+    CpacsRunManifest, CpacsSegment, CpacsTransformation, CpacsVersionInfo, CpacsWing,
+    CpacsWingAirfoil, CpacsWingElement, CpacsWingSection, CPACS_35_VERSION, CPACS_V35_SCHEMA_URL,
 };
 pub use cpacs_adapters::{
     CpacsAdapterContract, CpacsAdapterManifest, CpacsAdapterRequest, CpacsAdapterTool,
@@ -87,10 +92,11 @@ pub use export::{
     export_json_with_feasibility_and_cpacs, format_summary, CpacsReference, DesignDatabase,
 };
 pub use feasibility::{
-    assess_physical_feasibility, assess_physical_feasibility_with_load_case, format_feasibility,
-    CarriedFuelBasis, CgEnvelopeAssessment, CruiseEquilibriumAssessment, DeliveryBlocker,
-    DeliveryClassification, DeliveryVerdict, DesignProvenance, DispatchAssessment, DispatchOutcome,
-    FeasibilityReport, FindingCode, FindingSeverity, FuelCapacityAssessment, FuelCapacityEvidence,
+    assess_physical_feasibility, assess_physical_feasibility_with_load_case, design_mass_config,
+    design_vn_diagram, design_vn_mass_kg, format_feasibility, CarriedFuelBasis,
+    CgEnvelopeAssessment, CruiseEquilibriumAssessment, DeliveryBlocker, DeliveryClassification,
+    DeliveryVerdict, DesignProvenance, DispatchAssessment, DispatchOutcome, FeasibilityReport,
+    FindingCode, FindingSeverity, FuelCapacityAssessment, FuelCapacityEvidence,
     FuelLoadingAssessment, LedgerItemSummary, MassBalanceAssessment, MassStateSummary,
     MissionFuelAssessment, MissionFuelStatus, PhysicalFinding, PlanningCgStatus, RunCompletion,
     TankSummary,
@@ -102,7 +108,9 @@ pub use full_analysis::{
     AnalysisReport, DesignPoint, FullAnalysis, PolarFit, PolarFitStatus, TrimmedDesignPoint,
 };
 pub use gear_stations::{resolved_gear_stations, wing_mounted_gear_domain};
-pub use mission_stage::dispatch::{LoadCaseSelection, PolicyClosureCase, SelectedLoadCase};
+pub use mission_stage::dispatch::{
+    DesignMissionCase, LoadCaseSelection, PolicyClosureCase, SelectedLoadCase,
+};
 pub use openvsp::{
     export_openvsp_script, materialize_openvsp_project, OpenVspExportResult, OpenVspExportStatus,
 };

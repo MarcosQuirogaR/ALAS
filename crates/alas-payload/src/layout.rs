@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/physics/payload.py (`DeckItem`, `PayloadLayout`)
-// Reference: alas @ rust-port-baseline.
 
 //! What a laid-out interior is: an ordered list of physical things, each with
 //! a size, a place and a mass, and the mass properties that fall out of them.
@@ -270,6 +269,14 @@ pub struct PassengerSummary {
     pub hold_used_t: f64,
     /// Containers used in the holds.
     pub hold_ulds: i64,
+    /// Share of the net hold mass in compartments ahead of the wing box, 0 to
+    /// 1. Zero when the holds are empty.
+    pub forward_hold_baggage_fraction: f64,
+    /// Net baggage and freight mass per compartment, kg, forward to aft.
+    pub hold_compartment_masses_kg: Vec<(String, f64)>,
+    /// Mass stowed above the compartment limits, kg. It is carried, never
+    /// dropped, so a positive value means the compartments are overfull.
+    pub overload_kg: f64,
     /// The aisle width laid out against.
     pub aisle_width_m: f64,
     /// The widest row placed.
@@ -348,7 +355,7 @@ pub struct PayloadLayout {
 }
 
 /// Total mass and the two centre-of-gravity coordinates of a set of items:
-/// `PayloadLayout.recompute_cg`, as a function so a builder can compute them
+/// computed as a function so a builder can obtain them
 /// before it has a summary to construct the layout with.
 ///
 /// Only items with positive mass contribute, so the monuments and exits place
@@ -377,11 +384,6 @@ impl PayloadLayout {
         self.items.iter().filter(|it| it.deck == deck).collect()
     }
 
-    /// Every item of one kind, in placement order.
-    pub fn by_kind(&self, kind: ItemKind) -> Vec<&DeckItem> {
-        self.items.iter().filter(|it| it.kind == kind).collect()
-    }
-
     /// The decks this layout uses, in the order items first appear on them.
     pub fn decks(&self) -> Vec<&'static str> {
         let mut seen: Vec<&'static str> = Vec::new();
@@ -391,17 +393,6 @@ impl PayloadLayout {
             }
         }
         seen
-    }
-
-    /// Recompute the mass and centre of gravity from the items.
-    ///
-    /// The engines have already done this for the layouts they return; this is
-    /// for a consumer that has added or removed an item of its own.
-    pub fn recompute_cg(&mut self) {
-        let (mass, cg_x, cg_y) = mass_properties(&self.items);
-        self.total_mass = mass;
-        self.cg_x = cg_x;
-        self.cg_y = cg_y;
     }
 }
 
@@ -481,6 +472,5 @@ mod tests {
         };
         assert_eq!(layout.decks(), vec![MAIN, LOWER, UPPER]);
         assert_eq!(layout.by_deck(MAIN).len(), 2);
-        assert_eq!(layout.by_kind(ItemKind::Bag).len(), 1);
     }
 }

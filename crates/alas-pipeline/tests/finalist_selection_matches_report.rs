@@ -19,12 +19,12 @@
 //! `model_cg` finding surfaced in the printed report and JSON export) is a
 //! *third*, independently invoked assessment of the same design.
 //!
-//! Those two used to balance different aircraft. The search placed the lumped
-//! mass groups with the frozen reference-compatibility fractions and built its
-//! candidate without nacelle bodies; the report placed them on the geometric
-//! stations of an aircraft built with engines. For the r5 nominal run's own
-//! finalist that was worth 0.56 m of centre of gravity: 7.2 percent of the
-//! mean aerodynamic chord, which is how a candidate the search accepted as
+//! Those two must balance the same aircraft. If the search placed the lumped
+//! mass groups with the frozen reference-compatibility fractions on a
+//! candidate built without nacelle bodies while the report placed them on the
+//! geometric stations of an aircraft built with engines, the r5 nominal
+//! run's own finalist would differ by 0.56 m of centre of gravity (7.2 percent
+//! of the mean aerodynamic chord), and a candidate the search accepted as
 //! hard-feasible could print as physically INFEASIBLE in its own final report.
 //!
 //! Both paths are required to resolve their stations through
@@ -36,7 +36,7 @@ use alas_config::AlasConfig;
 use alas_pipeline::{export::report_to_database, FullAnalysis};
 
 /// Exact `design_vector` block from the r5 nominal run's own
-/// `design_database.json` (an internal benchmark run, 2026-09-09), not a
+/// `design_database.json` (an internal benchmark run), not a
 /// hand-picked or simplified fixture.
 fn r5_finalist_design() -> DesignVector {
     DesignVector {
@@ -296,12 +296,14 @@ fn the_neutral_point_resolution_difference_is_pinned_and_purely_aerodynamic() {
         report.x_neutral_point,
     );
 
-    // The forward CG limit is `neutral_point - min_static_margin -
-    // cg_range`, so the neutral-point difference passes through to the limit
-    // one-for-one and nothing else does. Asserting that equality is what
-    // makes this a *resolution* difference rather than an unexplained one:
-    // if some other term crept into either limit, this fails even though the
-    // bound above still passed.
+    // The physical forward CG limit is scoped per loading state (rotation at
+    // takeoff, landing trim in flight, the maximum nose load everywhere) and
+    // none of those mechanisms depends on the neutral point, so it does not
+    // inherit the NP resolution difference asserted above. The search's
+    // `forward_cg_range` residual reports the worst state's own limit, so it
+    // must equal the limit of the report state that is worst by the same
+    // ranking, not the envelope-wide `configured_forward_limit_pct_mac`
+    // (which is the most aft of every mechanism whatever the phase).
     let feasibility = alas_pipeline::assess_physical_feasibility(&config, &design, &report, None);
     let model_cg = feasibility
         .model_cg
@@ -313,13 +315,69 @@ fn the_neutral_point_resolution_difference_is_pinned_and_purely_aerodynamic() {
         .find(|residual| residual.id == "forward_cg_range")
         .map(|residual| residual.limit)
         .expect("the balance family evaluates the forward CG range");
-    let limit_difference_pct_mac =
-        (model_cg.configured_forward_limit_pct_mac - search_forward_limit).abs();
+    // The search gates the same loading states as the report, the flown
+    // landing state included (the unified loading model builds it on both
+    // sides), so the comparison covers every state, none filtered out.
+    let report_forward = model_cg
+        .loading_states
+        .iter()
+        .flat_map(|state| {
+            state
+                .constraints
+                .iter()
+                .filter(|constraint| {
+                    constraint.constraint == alas_opt::ModelCgConstraint::PhysicalForwardCgLimit
+                })
+                .map(move |constraint| (state, constraint))
+        })
+        .max_by(|a, b| {
+            a.1.normalized_exceedance
+                .total_cmp(&b.1.normalized_exceedance)
+        })
+        .expect("the report gates the physical forward CG limit");
+    // Finding: under Hard MTOW with the derived rotation authority the
+    // takeoff rotation boundary (the report's analysed TOW state) is not the
+    // worst forward state; the flown landing-trim boundary is, and the search
+    // and the report both carry it.
+    assert_eq!(
+        report_forward.0.state,
+        alas_opt::ModelCgLoadingState::AnalyzedLanding,
+        "the worst forward-CG state is {}",
+        report_forward.0.state.label()
+    );
+    // Per-state consistency: the gated limit is that state's own scoped
+    // forward limit, never wider than the envelope-wide one.
+    for state in &model_cg.loading_states {
+        for constraint in &state.constraints {
+            if constraint.constraint == alas_opt::ModelCgConstraint::PhysicalForwardCgLimit {
+                assert_eq!(constraint.limit, state.physical_limits.fwd_limit_pct_mac);
+                assert!(
+                    constraint.limit <= model_cg.configured_forward_limit_pct_mac + 1.0e-9,
+                    "{} forward limit {} is aft of the envelope-wide {}",
+                    state.state.label(),
+                    constraint.limit,
+                    model_cg.configured_forward_limit_pct_mac
+                );
+            }
+        }
+    }
+    // The takeoff rotation boundary depends on the takeoff mass
+    // (thrust-to-weight at V_R) and CG height
+    // (the thrust and rolling-friction moment, about
+    // `100 (T/W - mu (1 - L/W)) / c` %MAC per meter of height). Search and
+    // report build that state from their own closed ledgers, which agree to
+    // round-off (measured 0.0025 %MAC here, under a millimeter of CG height),
+    // so the contract is agreement to round-off, not exact equality. The
+    // allowance below is four times that round-off; any change of mechanism (rotation speed, thrust,
+    // phase scoping) moves the limit by whole percent of MAC.
+    const ROUND_OFF_PCT_MAC: f64 = 0.01;
+    let limit_difference_pct_mac = (report_forward.1.limit - search_forward_limit).abs();
     assert!(
-        (limit_difference_pct_mac - np_difference_pct_mac).abs() < 1.0e-6,
-        "the forward CG limits differ by {limit_difference_pct_mac}% MAC but the neutral points \
-         differ by {np_difference_pct_mac}% MAC; the limit difference is no longer explained by \
-         the neutral-point resolution alone",
+        limit_difference_pct_mac <= ROUND_OFF_PCT_MAC,
+        "the search forward CG limit {search_forward_limit} differs by \
+         {limit_difference_pct_mac}% MAC from the report's worst state ({}) limit {}",
+        report_forward.0.state.label(),
+        report_forward.1.limit,
     );
 }
 
@@ -359,7 +417,7 @@ fn a_hard_feasible_finalist_is_never_reported_physically_infeasible() {
         .expect("the balance family evaluates the forward CG range");
     let report_forward_violated = model_cg.loading_states.iter().any(|state| {
         state.constraints.iter().any(|constraint| {
-            constraint.constraint == alas_opt::ModelCgConstraint::ConfiguredForwardCgRange
+            constraint.constraint == alas_opt::ModelCgConstraint::PhysicalForwardCgLimit
                 && constraint.violated
         })
     });

@@ -1,6 +1,6 @@
 [package]
 name = "alas-opt"
-description = "Design optimization: objective function, CG envelope checks, sampling, and differential evolution."
+description = "Design optimization: objective function, CG envelope checks, and differential evolution."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -8,7 +8,6 @@ authors.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-alas-types = { path = "../alas-types" }
 alas-config = { path = "../alas-config" }
 alas-geom = { path = "../alas-geom" }
 alas-atmo = { path = "../alas-atmo" }
@@ -19,7 +18,6 @@ alas-perf = { path = "../alas-perf" }
 alas-aero = { path = "../alas-aero" }
 alas-prop = { path = "../alas-prop" }
 alas-stab = { path = "../alas-stab" }
-alas-math = { path = "../alas-math" }
 alas-units = { path = "../alas-units" }
 # One function: `route_cruise_altitude_m`, the rule that decides what altitude
 # a configured route is actually flown at. The optimizer's sizing mission and
@@ -29,9 +27,10 @@ alas-mission = { path = "../alas-mission" }
 tracing = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
+# One local compute budget shared by candidate jobs and nested VLM kernels.
+rayon = { workspace = true }
 
 [dev-dependencies]
-alas-testkit = { path = "../alas-testkit" }
 serde_json = { workspace = true }
 
 [lints]

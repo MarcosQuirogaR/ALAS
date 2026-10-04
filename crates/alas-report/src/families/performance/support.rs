@@ -3,13 +3,12 @@
 
 // Ported from alas/sidecar/figures_extra.py (`_resolve_airport`, `_style_axes`)
 // and alas/physics/performance.py (`static_thrust_to_weight`).
-// Reference: alas @ rust-port-baseline.
 
 //! Shared helpers for the matching-chart and landing/take-off figures:
 //! airport-string resolution, sea-level static thrust-to-weight, a status
 //! placeholder for an airport that cannot be resolved, and drawing
-//! primitives (arrowheads, star and diamond markers) that neither figure
-//! needed on its own but both do now.
+//! primitives (arrowheads, star and diamond markers) used by
+//! both figures.
 
 use alas_config::airports::{Airport, UnknownAirport};
 use alas_config::AlasConfig;
@@ -48,15 +47,17 @@ pub(super) fn resolve_airport(s: &str) -> Result<&'static Airport, UnknownAirpor
     Err(UnknownAirport(s.to_owned()))
 }
 
-/// Sea-level static thrust-to-weight at MTOW -- `static_thrust_to_weight`.
+/// Sea-level static thrust-to-weight at the analyzed takeoff mass `mass_kg`
+/// (the sized mass, or the declared MTOW for an unsized report) --
+/// `static_thrust_to_weight`.
 ///
 /// Upstream wraps the whole expression in a bare `except Exception` and
 /// returns `default` on any failure; the only way this particular expression
 /// fails is a division by a non-positive `MTOW * g`, which this reproduces as
 /// an explicit guard rather than a caught panic.
-pub(super) fn static_thrust_to_weight(config: &AlasConfig, default: f64) -> f64 {
+pub(super) fn static_thrust_to_weight(config: &AlasConfig, mass_kg: f64, default: f64) -> f64 {
     let n_eng = config.geometry.engine.spanwise_positions_m.len() as f64;
-    let mtow_g = config.requirements.mtow_kg * G;
+    let mtow_g = mass_kg * G;
     if mtow_g <= 0.0 {
         return default;
     }
@@ -167,7 +168,7 @@ mod tests {
             .unwrap()
             .rated_thrust_kn = 400.0;
         cfg.requirements.mtow_kg = 80_000.0;
-        let tw = static_thrust_to_weight(&cfg, 0.30);
+        let tw = static_thrust_to_weight(&cfg, cfg.requirements.mtow_kg, 0.30);
         let expected = 2.0 * 400.0 * 1000.0 / (80_000.0 * G);
         assert!((tw - expected).abs() < 1e-9);
     }
@@ -176,7 +177,10 @@ mod tests {
     fn static_thrust_to_weight_falls_back_when_mtow_is_non_positive() {
         let mut cfg = AlasConfig::default();
         cfg.requirements.mtow_kg = 0.0;
-        assert_eq!(static_thrust_to_weight(&cfg, 0.30), 0.30);
+        assert_eq!(
+            static_thrust_to_weight(&cfg, cfg.requirements.mtow_kg, 0.30),
+            0.30
+        );
     }
 
     #[test]

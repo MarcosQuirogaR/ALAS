@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/routing/simbrief_route.py
-// Reference: alas @ rust-port-baseline.
 
 //! Reading a real dispatch flight plan into a route.
 //!

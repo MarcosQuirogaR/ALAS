@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-// Ported from alas/analysis/airfoil_screening.py
-// Reference: alas @ rust-port-baseline.
-
 //! Stage 3: MSES coupled viscous/inviscid Euler analysis for transonic verification.
 
 use std::path::Path;
@@ -19,6 +16,8 @@ use crate::score::interp_linear;
 use crate::types::AirfoilCandidateResult;
 
 /// Verify candidate section using MSES coupled viscous-inviscid solver.
+// The flight condition, the tool location and the cancellation flag are
+// independent inputs of one external run; a struct would only rename them.
 #[allow(clippy::too_many_arguments)]
 pub fn verify_candidate_mses(
     candidate: &mut AirfoilCandidateResult,

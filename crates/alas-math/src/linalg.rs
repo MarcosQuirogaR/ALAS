@@ -2,15 +2,13 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 //! Dense linear algebra with no upstream counterpart: a general square solve
-//! and the LU factorization behind it, factored out once it gained a second
-//! caller.
+//! and the LU factorization behind it, shared by every crate that solves a
+//! dense system.
 //!
-//! [`solve`] began inside `bspline.rs`, written against that module's own
-//! collocation systems: a few tens of rows, and banded, since a B-spline's
-//! basis functions are locally supported. [`crate::BicubicSpline`] took it as
-//! a second, in-crate caller without moving it, since both lived in the same
-//! crate already. `alas-aero::vlm`'s AIC matrix is a third caller, and not
-//! in this crate: dense rather than banded (an aircraft's induced-velocity
+//! [`solve`] serves the B-spline collocation systems (a few tens of rows,
+//! and banded, since a B-spline's basis functions are locally supported),
+//! [`crate::BicubicSpline`], and `alas-aero::vlm`'s AIC matrix, which lives
+//! in another crate: dense rather than banded (an aircraft's induced-velocity
 //! field couples every panel to every other one, so there is no locality to
 //! exploit), and it runs to several hundred rows at the fine product mesh.
 //! `alas-payload::numeric`'s module doc states the rule this follows: private
@@ -19,14 +17,13 @@
 //!
 //! # Why the kernel is `faer`
 //!
-//! The first implementation here was a textbook partial-pivot elimination
-//! over a vector of row vectors: correct, and adequate for the collocation
-//! systems it was written for. The vortex-lattice AIC at the fine product
-//! mesh is 800 by 800, and there that scalar loop measured 164 ms per solve at
-//! about 2 Gflop/s on one core (2026-09-11), 90 % of every VLM call. NumPy's
-//! `numpy.linalg.solve` hands the same matrix to LAPACK `dgesv`, which is
-//! blocked and vectorized, so the port lost to the reference on the one stage
-//! that dominates the full analysis. `faer` is a kernel of that class in pure
+//! A textbook partial-pivot elimination over a vector of row vectors is
+//! adequate for the collocation systems but not for the vortex-lattice AIC at
+//! the fine product mesh, which is 800 by 800: that scalar loop measured
+//! 164 ms per solve at about 2 Gflop/s on one core, 90 % of every VLM call.
+//! NumPy's `numpy.linalg.solve` hands the same matrix to LAPACK `dgesv`, which
+//! is blocked and vectorized, so the frozen reference would win on the one
+//! stage that dominates the full analysis. `faer` is a kernel of that class in pure
 //! Rust: blocked LU with partial pivoting, SIMD inner kernels, and a rayon
 //! pool for the trailing update. It picks the same pivots partial pivoting
 //! always picks (the largest magnitude in the column) so results agree
@@ -54,7 +51,7 @@
 //! faer's default is to spread the trailing update over a rayon pool. On a
 //! 16-thread desktop that was measured slower than the sequential kernel at
 //! every size this program factors (n = 200: 3.3 ms against 0.42 ms;
-//! n = 800: 25 ms against 12 ms; 2026-09-11): the matrices are too small
+//! n = 800: 25 ms against 12 ms): the matrices are too small
 //! for the fork/join to pay for itself, and callers already parallelize
 //! above this level (the screening's candidates, the optimizers' batches).
 //! The kernel is therefore pinned to [`faer::Par::Seq`] once, before the
@@ -143,7 +140,7 @@ impl DenseMatrix {
     ///
     /// The error is the first diagonal position of `U` that is exactly zero:
     /// the elimination step that found no usable pivot, in the same terms
-    /// the elimination this replaced reported.
+    /// a textbook elimination reports.
     pub fn factor(self) -> Result<LuFactorization, usize> {
         let n = self.inner.nrows();
         if n == 0 {
@@ -152,6 +149,7 @@ impl DenseMatrix {
                 lu: None,
                 minimum_pivot: 0.0,
                 pivot_ratio: 1.0,
+                norm_inf: 0.0,
             });
         }
         sequential_kernels();
@@ -174,13 +172,31 @@ impl DenseMatrix {
         } else {
             (min_pivot, f64::INFINITY)
         };
+        let norm_inf = row_sum_norm(&self.inner);
         Ok(LuFactorization {
             a: self.inner,
             lu: Some(lu),
             minimum_pivot,
             pivot_ratio,
+            norm_inf,
         })
     }
+}
+
+/// `||A||_infinity`, the largest absolute row sum.
+///
+/// Each row is summed in ascending column order, which is the order a
+/// row-wise `Iterator::sum` would use, but the matrix is walked column by
+/// column so that every read is contiguous in faer's column-major storage.
+fn row_sum_norm(a: &Mat<f64>) -> f64 {
+    let n = a.nrows();
+    let mut row_sums = vec![0.0_f64; n];
+    for j in 0..a.ncols() {
+        for (sum, value) in row_sums.iter_mut().zip(a.col_as_slice(j)) {
+            *sum += value.abs();
+        }
+    }
+    row_sums.into_iter().fold(0.0_f64, f64::max)
 }
 
 /// The LU factorization of a [`DenseMatrix`], ready to solve any number of
@@ -192,6 +208,9 @@ pub struct LuFactorization {
     lu: Option<PartialPivLu<f64>>,
     minimum_pivot: f64,
     pivot_ratio: f64,
+    /// `||A||_infinity`, fixed by the matrix and so computed once rather
+    /// than on every solve's diagnostics.
+    norm_inf: f64,
 }
 
 impl LuFactorization {
@@ -242,25 +261,35 @@ impl LuFactorization {
     }
 
     /// The residual evidence for one solve, against the matrix as given.
+    ///
+    /// `A x` is accumulated column by column so that the reads of `A` are
+    /// contiguous; a row-wise dot product strides through the whole matrix
+    /// once per row, which at the 800-row VLM system misses cache on nearly
+    /// every element. Each entry of `A x` still sums its terms in ascending
+    /// column order, so the residual is the one a row-wise sum produces.
     fn diagnostics(&self, x: &Mat<f64>, b: &Mat<f64>) -> SolveDiagnostics {
         let n = self.dimension();
         let k = b.ncols();
-        let mut max_a = 0.0_f64;
-        let mut max_b = 0.0_f64;
+        let max_b = (0..n)
+            .map(|i| (0..k).map(|j| b[(i, j)].abs()).sum::<f64>())
+            .fold(0.0_f64, f64::max);
         let mut max_x = 0.0_f64;
         let mut residual_norm = 0.0_f64;
-        for i in 0..n {
-            let row_a: f64 = (0..n).map(|j| self.a[(i, j)].abs()).sum();
-            max_a = max_a.max(row_a);
-            let row_b: f64 = (0..k).map(|j| b[(i, j)].abs()).sum();
-            max_b = max_b.max(row_b);
-            for column in 0..k {
-                max_x = max_x.max(x[(i, column)].abs());
-                let predicted: f64 = (0..n).map(|j| self.a[(i, j)] * x[(j, column)]).sum();
-                residual_norm = residual_norm.max((predicted - b[(i, column)]).abs());
+        let mut predicted = vec![0.0_f64; n];
+        for column in 0..k {
+            predicted.fill(0.0);
+            for j in 0..n {
+                let x_j = x[(j, column)];
+                max_x = max_x.max(x_j.abs());
+                for (value, a_ij) in predicted.iter_mut().zip(self.a.col_as_slice(j)) {
+                    *value += a_ij * x_j;
+                }
+            }
+            for (i, value) in predicted.iter().enumerate() {
+                residual_norm = residual_norm.max((value - b[(i, column)]).abs());
             }
         }
-        let scale = (max_a * max_x).max(max_b).max(1.0);
+        let scale = (self.norm_inf * max_x).max(max_b).max(1.0);
         SolveDiagnostics {
             residual_norm,
             normalized_residual: residual_norm / scale,
@@ -499,12 +528,46 @@ mod tests {
         assert_eq!(from_rows.pivot_ratio(), from_flat.pivot_ratio());
     }
 
+    /// The residual diagnostics as a row-wise pass computes them, the
+    /// oracle the column-sweep implementation must reproduce bit for bit.
+    fn row_wise_diagnostics(a: &[Vec<f64>], x: &[Vec<f64>], b: &[Vec<f64>]) -> (f64, f64) {
+        let n = a.len();
+        let k = b.first().map_or(0, Vec::len);
+        let (mut max_a, mut max_b, mut max_x, mut residual) = (0.0_f64, 0.0_f64, 0.0_f64, 0.0_f64);
+        for i in 0..n {
+            max_a = max_a.max((0..n).map(|j| a[i][j].abs()).sum::<f64>());
+            max_b = max_b.max((0..k).map(|j| b[i][j].abs()).sum::<f64>());
+            for column in 0..k {
+                max_x = max_x.max(x[i][column].abs());
+                let predicted: f64 = (0..n).map(|j| a[i][j] * x[j][column]).sum();
+                residual = residual.max((predicted - b[i][column]).abs());
+            }
+        }
+        let scale = (max_a * max_x).max(max_b).max(1.0);
+        (residual, residual / scale)
+    }
+
     #[test]
-    fn a_dense_matrix_reads_back_what_was_written() {
-        let mut matrix = DenseMatrix::zeros(3);
-        matrix.set(1, 2, 4.5);
-        assert_eq!(matrix.get(1, 2), 4.5);
-        assert_eq!(matrix.get(2, 1), 0.0);
-        assert_eq!(matrix.dimension(), 3);
+    fn the_column_sweep_residual_is_bit_identical_to_the_row_wise_one() {
+        for (n, k, seed) in [
+            (1usize, 1usize, 3u64),
+            (9, 2, 17),
+            (120, 1, 29),
+            (64, 4, 41),
+        ] {
+            let (a, b) = random_system(n, k, seed);
+            let (x, diagnostics) = solve_with_diagnostics(&a, &b).expect("well conditioned");
+            let (residual, normalized) = row_wise_diagnostics(&a, &x, &b);
+            assert_eq!(
+                diagnostics.residual_norm.to_bits(),
+                residual.to_bits(),
+                "n={n}"
+            );
+            assert_eq!(
+                diagnostics.normalized_residual.to_bits(),
+                normalized.to_bits(),
+                "n={n}"
+            );
+        }
     }
 }

@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/reporting/visualization.py and alas/sidecar/figures_extra.py
-// Reference: alas @ rust-port-baseline.
 
 //! Flight envelope V-n diagrams, payload-range curves, matching charts, and field performance.
 

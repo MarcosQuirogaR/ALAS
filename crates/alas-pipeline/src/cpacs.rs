@@ -14,6 +14,7 @@ mod model;
 mod reader;
 mod render;
 mod validation;
+mod wing_roles;
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -140,7 +141,29 @@ pub fn export_cpacs(
     config: &AlasConfig,
     path: &Path,
 ) -> Result<CpacsExportResult, CpacsExportError> {
-    export_cpacs_with_analysis(report, config, None, None, path)
+    export_cpacs_document(report, config, path).map(|(export, _)| export)
+}
+
+/// Export computed geometry as a CPACS 3.5 aircraft document and return the
+/// XML that was written.
+///
+/// A caller that reads the aircraft back should parse the returned XML rather
+/// than the file: another run writing to the same output directory can
+/// replace the file between this write and a later read.
+pub fn export_cpacs_document(
+    report: &AnalysisReport,
+    config: &AlasConfig,
+    path: &Path,
+) -> Result<(CpacsExportResult, String), CpacsExportError> {
+    let document = render::render_cpacs_v35_with_analysis(
+        report,
+        config,
+        None,
+        None,
+        &current_timestamp_utc(),
+    )?;
+    let export = write_export(report, path, &document)?;
+    Ok((export, document))
 }
 
 /// Export a CPACS 3.5 aircraft document and the standard analyses available
@@ -152,9 +175,6 @@ pub fn export_cpacs_with_analysis(
     mission: Option<&MissionResult>,
     path: &Path,
 ) -> Result<CpacsExportResult, CpacsExportError> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
     let document = render::render_cpacs_v35_with_analysis(
         report,
         config,
@@ -162,7 +182,34 @@ pub fn export_cpacs_with_analysis(
         mission,
         &current_timestamp_utc(),
     )?;
-    fs::write(path, document)?;
+    write_export(report, path, &document)
+}
+
+/// Write `document` to `path` whole: it is written to a sibling file unique to
+/// this process and write, then renamed over the target, so a concurrent
+/// reader never sees a truncated document.
+fn write_document_atomically(path: &Path, document: &str) -> io::Result<()> {
+    static SEQUENCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let sequence = SEQUENCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let mut staging = path.as_os_str().to_owned();
+    staging.push(format!(".{}-{sequence}.partial", std::process::id()));
+    let staging = PathBuf::from(staging);
+    if let Err(error) = fs::write(&staging, document).and_then(|()| fs::rename(&staging, path)) {
+        let _ = fs::remove_file(&staging);
+        return Err(error);
+    }
+    Ok(())
+}
+
+fn write_export(
+    report: &AnalysisReport,
+    path: &Path,
+    document: &str,
+) -> Result<CpacsExportResult, CpacsExportError> {
+    write_document_atomically(path, document)?;
 
     Ok(CpacsExportResult {
         path: path.to_path_buf(),
@@ -234,4 +281,52 @@ fn civil_from_days(days_since_unix_epoch: i64) -> (i64, i64, i64) {
     let day = day_of_year - (153 * month_prime + 2) / 5 + 1;
     let month = month_prime + if month_prime < 10 { 3 } else { -9 };
     (year + i64::from(month <= 2), month, day)
+}
+
+#[cfg(test)]
+mod tests {
+    // A test asserts on values it constructed, so a failed unwrap is the
+    // assertion failing.
+    #![allow(clippy::unwrap_used, clippy::expect_used)]
+
+    use super::*;
+
+    /// Concurrent writers to one path never let a reader see a partial
+    /// document: every read is one writer's complete text.
+    #[test]
+    fn concurrent_writes_to_one_path_are_never_read_partially() {
+        let dir = std::env::temp_dir().join(format!(
+            "alas-cpacs-atomic-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or_default()
+        ));
+        let path = dir.join("cpacs/aircraft.cpacs.xml");
+        let documents: Vec<String> = (0..4)
+            .map(|writer| format!("<cpacs>{}</cpacs>", format!("{writer}").repeat(200_000)))
+            .collect();
+        write_document_atomically(&path, &documents[0]).unwrap();
+        std::thread::scope(|scope| {
+            for document in &documents {
+                let path = &path;
+                scope.spawn(move || {
+                    for _ in 0..20 {
+                        write_document_atomically(path, document).unwrap();
+                    }
+                });
+            }
+            for _ in 0..200 {
+                if let Ok(text) = fs::read_to_string(&path) {
+                    assert!(
+                        documents.contains(&text),
+                        "read a partial document of {} bytes",
+                        text.len()
+                    );
+                }
+            }
+        });
+        let _ = fs::remove_dir_all(&dir);
+    }
 }

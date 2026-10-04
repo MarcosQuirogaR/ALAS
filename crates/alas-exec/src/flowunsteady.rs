@@ -10,10 +10,11 @@
 use std::fs::{self, File};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::thread;
-use std::time::{Duration, Instant};
 
-use crate::process::{kill_process_tree, NewProcessGroup, NoConsoleWindow};
+use crate::process::{
+    absolute_path, parent_directory, timeout_from_seconds, wait_with_timeout, DeadlineWait,
+    NewProcessGroup, NoConsoleWindow,
+};
 use crate::supervise::SupervisedSpawn;
 
 /// Process outcome before parsing adapter output.
@@ -21,6 +22,9 @@ use crate::supervise::SupervisedSpawn;
 pub enum FlowUnsteadyProcessStatus {
     /// Request file was absent before launch.
     InputMissing,
+    /// The configured timeout was not a finite number of seconds greater
+    /// than zero; nothing was launched.
+    InvalidTimeout,
     /// Adapter executable could not start.
     LaunchFailed,
     /// Adapter exceeded its deadline.
@@ -37,6 +41,7 @@ impl FlowUnsteadyProcessStatus {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::InputMissing => "input_missing",
+            Self::InvalidTimeout => "invalid_timeout",
             Self::LaunchFailed => "launch_failed",
             Self::TimedOut => "timed_out",
             Self::SolverFailed => "solver_failed",
@@ -87,16 +92,29 @@ pub fn run_flowunsteady_adapter(
         ));
         return result;
     }
-    if result_path.exists() && fs::remove_file(&result_path).is_err() {
-        result.status = FlowUnsteadyProcessStatus::LaunchFailed;
-        result.error = Some(format!("cannot remove stale {}", result_path.display()));
-        return result;
+    let timeout = match timeout_from_seconds("FLOWUnsteady adapter", timeout_seconds) {
+        Ok(timeout) => timeout,
+        Err(error) => {
+            result.status = FlowUnsteadyProcessStatus::InvalidTimeout;
+            result.error = Some(error.to_string());
+            return result;
+        }
+    };
+    if result_path.exists() {
+        if let Err(error) = fs::remove_file(&result_path) {
+            result.status = FlowUnsteadyProcessStatus::LaunchFailed;
+            result.error = Some(format!(
+                "cannot remove stale {}: {error}",
+                result_path.display()
+            ));
+            return result;
+        }
     }
     let stdout = match File::create(&stdout_path) {
         Ok(file) => file,
         Err(error) => {
             result.status = FlowUnsteadyProcessStatus::LaunchFailed;
-            result.error = Some(error.to_string());
+            result.error = Some(format!("cannot create {}: {error}", stdout_path.display()));
             return result;
         }
     };
@@ -104,17 +122,21 @@ pub fn run_flowunsteady_adapter(
         Ok(file) => file,
         Err(error) => {
             result.status = FlowUnsteadyProcessStatus::LaunchFailed;
-            result.error = Some(error.to_string());
+            result.error = Some(format!("cannot create {}: {error}", stderr_path.display()));
             return result;
         }
     };
+    // The adapter starts in the request's directory, so both file arguments
+    // are absolute: a relative request path would otherwise be resolved a
+    // second time below that directory, and the empty parent of a bare file
+    // name is not a directory a process can start in.
     let mut command = Command::new(executable);
     command
         .args(["--alas-request"])
-        .arg(request_path)
+        .arg(absolute_path(request_path))
         .args(["--alas-result"])
-        .arg(&result_path)
-        .current_dir(request_path.parent().unwrap_or(Path::new(".")))
+        .arg(absolute_path(&result_path))
+        .current_dir(parent_directory(request_path))
         .stdin(Stdio::null())
         .stdout(Stdio::from(stdout))
         .stderr(Stdio::from(stderr))
@@ -131,25 +153,19 @@ pub fn run_flowunsteady_adapter(
             return result;
         }
     };
-    let deadline = Instant::now() + Duration::from_secs_f64(timeout_seconds.max(0.1));
-    let status = loop {
-        match child.try_wait() {
-            Ok(Some(status)) => break status,
-            Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(25)),
-            Ok(None) => {
-                kill_process_tree(child.id());
-                let _ = child.wait();
-                result.status = FlowUnsteadyProcessStatus::TimedOut;
-                result.error = Some(format!(
-                    "FLOWUnsteady adapter exceeded {timeout_seconds:.1} s"
-                ));
-                return result;
-            }
-            Err(error) => {
-                result.status = FlowUnsteadyProcessStatus::SolverFailed;
-                result.error = Some(error.to_string());
-                return result;
-            }
+    let status = match wait_with_timeout(&mut child, timeout) {
+        DeadlineWait::Exited(status) => status,
+        DeadlineWait::TimedOut => {
+            result.status = FlowUnsteadyProcessStatus::TimedOut;
+            result.error = Some(format!(
+                "FLOWUnsteady adapter exceeded {timeout_seconds:.1} s"
+            ));
+            return result;
+        }
+        DeadlineWait::PollFailed(error) => {
+            result.status = FlowUnsteadyProcessStatus::SolverFailed;
+            result.error = Some(format!("cannot poll FLOWUnsteady adapter: {error}"));
+            return result;
         }
     };
     if !status.success() {
@@ -184,5 +200,24 @@ mod tests {
             FlowUnsteadyProcessStatus::OutputMissing.as_str(),
             "output_missing"
         );
+    }
+
+    #[test]
+    fn a_non_finite_timeout_is_rejected_before_launch() {
+        let root = std::env::temp_dir().join(format!(
+            "alas-flowunsteady-timeout-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        fs::create_dir_all(&root).unwrap_or_else(|error| panic!("create root: {error}"));
+        let request = root.join("request.txt");
+        fs::write(&request, b"request").unwrap_or_else(|error| panic!("write request: {error}"));
+        let result = run_flowunsteady_adapter(Path::new("absent-adapter"), &request, f64::NAN);
+        assert_eq!(result.status, FlowUnsteadyProcessStatus::InvalidTimeout);
+        assert!(result
+            .error
+            .as_deref()
+            .is_some_and(|error| error.starts_with("FLOWUnsteady adapter timeout must be")));
+        let _ = fs::remove_dir_all(root);
     }
 }

@@ -250,7 +250,7 @@ fn compressible_fv_schemes(config: &CfdStudyConfig, startup: bool) -> String {
     };
     let _ = config;
     format!(
-        "FoamFile\n{{\n    version 2.0;\n    format ascii;\n    class dictionary;\n    object fvSchemes;\n}}\n\nddtSchemes\n{{ default steadyState; }}\ngradSchemes\n{{\n    default Gauss linear;\n    grad(U) {gradient};\n}}\ndivSchemes\n{{\n    default none;\n    div(phi,U) {velocity};\n    energy {energy};\n    div(phi,e) {energy};\n    div(phi,K) {energy};\n    div(phi,Ekp) {energy};\n    div(phid,p) Gauss upwind;\n    div((phi|interpolate(rho)),p) bounded Gauss upwind;\n    div(phi,k) bounded Gauss upwind;\n    div(phi,omega) bounded Gauss upwind;\n    div(((rho*nuEff)*dev2(T(grad(U))))) Gauss linear;\n}}\nlaplacianSchemes\n{{ default Gauss linear limited corrected 0.5; }}\ninterpolationSchemes\n{{ default linear; }}\nsnGradSchemes\n{{ default limited corrected 0.5; }}\nwallDist\n{{ method meshWave; }}\nfluxRequired {{ default no; p; }}\n"
+        "FoamFile\n{{\n    version 2.0;\n    format ascii;\n    class dictionary;\n    object fvSchemes;\n}}\n\nddtSchemes\n{{ default steadyState; }}\ngradSchemes\n{{\n    default Gauss linear;\n    limited {gradient};\n    grad(U) {gradient};\n}}\ndivSchemes\n{{\n    default none;\n    div(phi,U) {velocity};\n    energy {energy};\n    div(phi,e) {energy};\n    div(phi,K) {energy};\n    div(phi,Ekp) {energy};\n    div(phid,p) Gauss upwind;\n    div((phi|interpolate(rho)),p) bounded Gauss upwind;\n    div(phi,k) bounded Gauss upwind;\n    div(phi,omega) bounded Gauss upwind;\n    div(((rho*nuEff)*dev2(T(grad(U))))) Gauss linear;\n}}\nlaplacianSchemes\n{{ default Gauss linear limited corrected 0.5; }}\ninterpolationSchemes\n{{ default linear; }}\nsnGradSchemes\n{{ default limited corrected 0.5; }}\nwallDist\n{{ method meshWave; }}\nfluxRequired {{ default no; p; }}\n"
     )
 }
 
@@ -277,18 +277,20 @@ const POTENTIAL_FLOW_NON_ORTHOGONAL_CORRECTORS: u32 = 5;
 /// the acceptance criterion, which is unchanged at `residual_tolerance`.
 const RESIDUAL_CONTROL_MARGIN: f64 = 0.5;
 
+// Keep coupled equations active below the absolute residual tolerance. Without
+// minIter, OpenFOAM may legitimately skip them while pressure still evolves.
 fn fv_solution(config: &CfdStudyConfig) -> String {
     if config.effective_simulation().compressible {
         return compressible_fv_solution(config);
     }
     let transport = config.solver.momentum_linear_solver.fv_solution_entry();
     format!(
-        "FoamFile\n{{\n    version 2.0;\n    format ascii;\n    class dictionary;\n    object fvSolution;\n}}\n\nsolvers\n{{\n    // potentialFoam writes a flux field before simpleFoam starts.\n    Phi\n    {{ solver PCG; preconditioner DIC; tolerance {inner_tolerance:.3e}; relTol 0; }}\n    p\n    {{ solver GAMG; tolerance {inner_tolerance:.3e}; relTol {pressure_rel_tol}; smoother GaussSeidel; }}\n    U\n    {{ {transport} tolerance {inner_tolerance:.3e}; relTol 0.05; }}\n    k\n    {{ {transport} tolerance {inner_tolerance:.3e}; relTol 0.05; }}\n    omega\n    {{ {transport} tolerance {inner_tolerance:.3e}; relTol 0.05; }}\n}}\n\ncache\n{{\n    grad(U);\n}}\n\nSIMPLE\n{{\n    nNonOrthogonalCorrectors {non_orthogonal_correctors};\n    consistent yes;\n    residualControl\n    {{\n        p {residual:.3e};\n        U {residual:.3e};\n        k {residual:.3e};\n        omega {residual:.3e};\n    }}\n}}\n\npotentialFlow\n{{\n    nNonOrthogonalCorrectors {potential_correctors};\n}}\n\n// Relaxation for the SIMPLEC (consistent yes) loop.  These factors set the\n// iteration path only; the converged fields satisfy the same discrete\n// equations at any stable pair, so they are a speed/robustness control and\n// never a physics or tolerance change.\nrelaxationFactors\n{{\n    fields {{ p {pressure_relaxation}; }}\n    equations {{ U {equation_relaxation}; k {turbulence_relaxation}; omega {turbulence_relaxation}; }}\n}}\n",
+        "FoamFile\n{{\n    version 2.0;\n    format ascii;\n    class dictionary;\n    object fvSolution;\n}}\n\nsolvers\n{{\n    // potentialFoam writes a flux field before simpleFoam starts.\n    Phi\n    {{ solver PCG; preconditioner DIC; tolerance {inner_tolerance:.3e}; minIter 1; relTol 0; }}\n    p\n    {{ solver GAMG; tolerance {inner_tolerance:.3e}; minIter 1; relTol {pressure_rel_tol}; smoother GaussSeidel; }}\n    U\n    {{ {transport} tolerance {inner_tolerance:.3e}; minIter 1; relTol 0.05; }}\n    k\n    {{ {transport} tolerance {inner_tolerance:.3e}; minIter 1; relTol 0.05; }}\n    omega\n    {{ {transport} tolerance {inner_tolerance:.3e}; minIter 1; relTol 0.05; }}\n}}\n\ncache\n{{\n    grad(U);\n}}\n\nSIMPLE\n{{\n    nNonOrthogonalCorrectors {non_orthogonal_correctors};\n    consistent yes;\n    residualControl\n    {{\n        p {residual:.3e};\n        U {residual:.3e};\n        k {residual:.3e};\n        omega {residual:.3e};\n    }}\n}}\n\npotentialFlow\n{{\n    nNonOrthogonalCorrectors {potential_correctors};\n}}\n\n// Relaxation for the SIMPLEC (consistent yes) loop.  These factors set the\n// iteration path only; the converged fields satisfy the same discrete\n// equations at any stable pair, so they are a speed/robustness control and\n// never a physics or tolerance change.\nrelaxationFactors\n{{\n    fields {{ p {pressure_relaxation}; }}\n    equations {{ U {equation_relaxation}; k {turbulence_relaxation}; omega {turbulence_relaxation}; }}\n}}\n",
         // One source of truth with the convergence gate.  The classifier's
         // skipped-equation guard reasons about residuals relative to this
         // number; when it was a literal here and a constant there, the two
         // could drift silently and the guard would be comparing against a
-        // tolerance the case no longer emitted.
+        // tolerance the case does not emit.
         inner_tolerance = LINEAR_SOLVER_RESIDUAL_FLOOR,
         residual = config.solver.residual_tolerance * RESIDUAL_CONTROL_MARGIN,
         potential_correctors = POTENTIAL_FLOW_NON_ORTHOGONAL_CORRECTORS,
@@ -310,7 +312,9 @@ fn compressible_fv_solution(config: &CfdStudyConfig) -> String {
     let simulation = config.effective_simulation();
     let residual = config.solver.residual_tolerance.min(1.0e-4) * RESIDUAL_CONTROL_MARGIN;
     format!(
-        "FoamFile\n{{\n    version 2.0;\n    format ascii;\n    class dictionary;\n    object fvSolution;\n}}\n\nsolvers\n{{\n    \"rho.*\"\n    {{ solver diagonal; }}\n    \"p.*\"\n    {{ solver GAMG; smoother GaussSeidel; tolerance 1.0e-8; relTol 0.01; }}\n    \"(U|e).*\"\n    {{ solver PBiCGStab; preconditioner DILU; tolerance 1.0e-8; relTol 0.05; }}\n    \"(k|omega).*\"\n    {{ solver PBiCGStab; preconditioner DILU; tolerance 1.0e-8; relTol 0.05; }}\n}}\n\nSIMPLE\n{{\n    residualControl\n    {{\n        p {residual:.3e};\n        U {residual:.3e};\n        e {residual:.3e};\n        k {residual:.3e};\n        omega {residual:.3e};\n    }}\n    nNonOrthogonalCorrectors {non_orthogonal_correctors};\n    pMinFactor 0.1;\n    pMaxFactor 2;\n}}\n\nrelaxationFactors\n{{\n    fields\n    {{\n        p {pressure_relaxation:.3};\n        rho 0.01;\n    }}\n    equations\n    {{\n        U {equation_relaxation:.3};\n        e {equation_relaxation:.3};\n        k {turbulence_relaxation:.3};\n        omega {turbulence_relaxation:.3};\n    }}\n}}\n",
+        "FoamFile\n{{\n    version 2.0;\n    format ascii;\n    class dictionary;\n    object fvSolution;\n}}\n\nsolvers\n{{\n    \"rho.*\"\n    {{ solver diagonal; }}\n    \"p.*\"\n    {{ solver GAMG; smoother GaussSeidel; tolerance {inner_tolerance:.3e}; minIter 1; relTol 0.01; }}\n    \"(U|e).*\"\n    {{ solver PBiCGStab; preconditioner DILU; tolerance {inner_tolerance:.3e}; minIter 1; relTol 0.05; }}\n    \"(k|omega).*\"\n    {{ solver PBiCGStab; preconditioner DILU; tolerance {inner_tolerance:.3e}; minIter 1; relTol 0.05; }}\n}}\n\nSIMPLE\n{{\n    residualControl\n    {{\n        p {residual:.3e};\n        U {residual:.3e};\n        e {residual:.3e};\n        k {residual:.3e};\n        omega {residual:.3e};\n    }}\n    nNonOrthogonalCorrectors {non_orthogonal_correctors};\n    pMinFactor 0.1;\n    pMaxFactor {pressure_upper_factor:.16e};\n}}\n\nrelaxationFactors\n{{\n    fields\n    {{\n        p {pressure_relaxation:.3};\n        rho 0.01;\n    }}\n    equations\n    {{\n        U {equation_relaxation:.3};\n        e {equation_relaxation:.3};\n        k {turbulence_relaxation:.3};\n        omega {turbulence_relaxation:.3};\n    }}\n}}\n",
+        pressure_upper_factor = config.compressible_pressure_upper_factor(),
+        inner_tolerance = LINEAR_SOLVER_RESIDUAL_FLOOR,
         residual = residual,
         non_orthogonal_correctors = simulation.non_orthogonal_correctors,
         pressure_relaxation = simulation.pressure_relaxation,
@@ -328,7 +332,7 @@ fn control_dict(config: &CfdStudyConfig) -> String {
     // by rhoSimpleFoam on the compressible path.
     let force_rho = config.density_kg_m3;
     let mut out = format!(
-        "FoamFile\n{{\n    version 2.0;\n    format ascii;\n    class dictionary;\n    object controlDict;\n}}\n\napplication {application};\nstartFrom startTime;\nstartTime 0;\nstopAt endTime;\nendTime {end};\ndeltaT 1;\nwriteControl timeStep;\nwriteInterval {write};\npurgeWrite 0;\nwriteFormat ascii;\nwritePrecision 12;\nwriteCompression off;\ntimeFormat general;\ntimePrecision 8;\nrunTimeModifiable true;\n\nfunctions\n{{\n    forceCoeffs\n    {{\n        type forceCoeffs;\n        libs (forces);\n        patches (airfoil);\n        rho rhoInf;\n        rhoInf {rho:.16e};\n        CofR ({quarter:.16e} 0 {midspan:.16e});\n        liftDir ({lx:.16e} {ly:.16e} 0);\n        dragDir ({dx:.16e} {dy:.16e} 0);\n        pitchAxis ({px} {py} {pz});\n        magUInf {speed:.16e};\n        lRef {chord:.16e};\n        Aref {area:.16e};\n        writeControl timeStep;\n        writeInterval 1;\n    }}\n    forces\n    {{\n        type forces;\n        libs (forces);\n        patches (airfoil);\n        rho rhoInf;\n        rhoInf {rho:.16e};\n        CofR ({quarter:.16e} 0 {midspan:.16e});\n        writeControl timeStep;\n        writeInterval 1;\n        log off;\n    }}\n",
+        "FoamFile\n{{\n    version 2.0;\n    format ascii;\n    class dictionary;\n    object controlDict;\n}}\n\napplication {application};\nstartFrom startTime;\nstartTime 0;\nstopAt endTime;\nendTime {end};\ndeltaT 1;\nwriteControl timeStep;\nwriteInterval {write};\npurgeWrite 0;\nwriteFormat ascii;\nwritePrecision 17;\nwriteCompression off;\ntimeFormat general;\ntimePrecision 8;\nrunTimeModifiable true;\n\nfunctions\n{{\n    forceCoeffs\n    {{\n        type forceCoeffs;\n        libs (forces);\n        patches (airfoil);\n        rho rhoInf;\n        rhoInf {rho:.16e};\n        CofR ({quarter:.16e} 0 {midspan:.16e});\n        liftDir ({lx:.16e} {ly:.16e} 0);\n        dragDir ({dx:.16e} {dy:.16e} 0);\n        pitchAxis ({px} {py} {pz});\n        magUInf {speed:.16e};\n        lRef {chord:.16e};\n        Aref {area:.16e};\n        writeControl timeStep;\n        writeInterval 1;\n    }}\n    forces\n    {{\n        type forces;\n        libs (forces);\n        patches (airfoil);\n        rho rhoInf;\n        rhoInf {rho:.16e};\n        CofR ({quarter:.16e} 0 {midspan:.16e});\n        writeControl timeStep;\n        writeInterval 1;\n        log off;\n    }}\n",
         application = application,
         end = simulation.max_iterations,
         write = simulation.write_interval,
@@ -346,6 +350,14 @@ fn control_dict(config: &CfdStudyConfig) -> String {
         chord = reference.chord_m,
         area = reference.area_m2,
     );
+    if simulation.compressible {
+        // hePsiThermo registers the solved sensible internal energy as a
+        // NO_WRITE field. Persist the actual native e object at field writes
+        // so the energy equation has the same update evidence as p/U/k/omega.
+        out.push_str(
+            "    solvedEnergy\n    {\n        type writeObjects;\n        libs (utilityFunctionObjects);\n        objects (e);\n        writeOption anyWrite;\n        writeControl writeTime;\n    }\n",
+        );
+    }
     // Close the top-level `functions` dictionary after the force object.  The
     // diagnostics below are inserted immediately before this brace.
     out.push_str("}\n");
@@ -614,24 +626,54 @@ fn initial_nut(config: &CfdStudyConfig) -> String {
     )
 }
 
+fn compressible_streamwise_entries(
+    config: &CfdStudyConfig,
+    value: &str,
+    subsonic_type: &str,
+    value_key: &str,
+) -> (String, String) {
+    if config.has_supersonic_streamwise_boundaries() {
+        (
+            format!("inlet {{ type fixedValue; value uniform {value}; }}"),
+            "outlet { type zeroGradient; }".to_owned(),
+        )
+    } else {
+        let entry =
+            format!("type {subsonic_type}; {value_key} uniform {value}; value uniform {value};");
+        (
+            format!("inlet {{ {entry} }}"),
+            format!("outlet {{ {entry} }}"),
+        )
+    }
+}
+
 fn compressible_initial_u(config: &CfdStudyConfig) -> String {
     let (ux, uy) = velocity_components(config);
+    let value = format!("({ux:.16e} {uy:.16e} 0)");
+    let (inlet, outlet) =
+        compressible_streamwise_entries(config, &value, "freestreamVelocity", "freestreamValue");
     format!(
-        "FoamFile\n{{\n    version 2.0;\n    format ascii;\n    class volVectorField;\n    object U;\n}}\n\ndimensions [0 1 -1 0 0 0 0];\ninternalField uniform ({ux:.16e} {uy:.16e} 0);\nboundaryField\n{{\n    inlet {{ type freestreamVelocity; freestreamValue uniform ({ux:.16e} {uy:.16e} 0); value uniform ({ux:.16e} {uy:.16e} 0); }}\n    outlet {{ type freestreamVelocity; freestreamValue uniform ({ux:.16e} {uy:.16e} 0); value uniform ({ux:.16e} {uy:.16e} 0); }}\n    farField {{ type freestreamVelocity; freestreamValue uniform ({ux:.16e} {uy:.16e} 0); value uniform ({ux:.16e} {uy:.16e} 0); }}\n    frontAndBack {{ type empty; }}\n    airfoil {{ type noSlip; }}\n}}\n"
+        "FoamFile\n{{\n    version 2.0;\n    format ascii;\n    class volVectorField;\n    object U;\n}}\n\ndimensions [0 1 -1 0 0 0 0];\ninternalField uniform ({ux:.16e} {uy:.16e} 0);\nboundaryField\n{{\n    {inlet}\n    {outlet}\n    farField {{ type freestreamVelocity; freestreamValue uniform ({ux:.16e} {uy:.16e} 0); value uniform ({ux:.16e} {uy:.16e} 0); }}\n    frontAndBack {{ type empty; }}\n    airfoil {{ type noSlip; }}\n}}\n"
     )
 }
 
 fn compressible_initial_p(config: &CfdStudyConfig) -> String {
     let pressure = config.effective_static_pressure_pa();
+    let value = format!("{pressure:.16e}");
+    let (inlet, outlet) =
+        compressible_streamwise_entries(config, &value, "freestreamPressure", "freestreamValue");
     format!(
-        "FoamFile\n{{\n    version 2.0;\n    format ascii;\n    class volScalarField;\n    object p;\n}}\n\ndimensions [1 -1 -2 0 0 0 0];\ninternalField uniform {pressure:.16e};\nboundaryField\n{{\n    inlet {{ type freestreamPressure; freestreamValue uniform {pressure:.16e}; value uniform {pressure:.16e}; }}\n    outlet {{ type freestreamPressure; freestreamValue uniform {pressure:.16e}; value uniform {pressure:.16e}; }}\n    farField {{ type freestreamPressure; freestreamValue uniform {pressure:.16e}; value uniform {pressure:.16e}; }}\n    frontAndBack {{ type empty; }}\n    airfoil {{ type zeroGradient; }}\n}}\n"
+        "FoamFile\n{{\n    version 2.0;\n    format ascii;\n    class volScalarField;\n    object p;\n}}\n\ndimensions [1 -1 -2 0 0 0 0];\ninternalField uniform {pressure:.16e};\nboundaryField\n{{\n    {inlet}\n    {outlet}\n    farField {{ type freestreamPressure; freestreamValue uniform {pressure:.16e}; value uniform {pressure:.16e}; }}\n    frontAndBack {{ type empty; }}\n    airfoil {{ type zeroGradient; }}\n}}\n"
     )
 }
 
 fn compressible_initial_t(config: &CfdStudyConfig) -> String {
     let temperature = config.freestream_temperature_k;
+    let value = format!("{temperature:.16e}");
+    let (inlet, outlet) =
+        compressible_streamwise_entries(config, &value, "inletOutlet", "inletValue");
     format!(
-        "FoamFile\n{{\n    version 2.0;\n    format ascii;\n    class volScalarField;\n    object T;\n}}\n\ndimensions [0 0 0 1 0 0 0];\ninternalField uniform {temperature:.16e};\nboundaryField\n{{\n    inlet {{ type inletOutlet; inletValue uniform {temperature:.16e}; value uniform {temperature:.16e}; }}\n    outlet {{ type inletOutlet; inletValue uniform {temperature:.16e}; value uniform {temperature:.16e}; }}\n    farField {{ type inletOutlet; inletValue uniform {temperature:.16e}; value uniform {temperature:.16e}; }}\n    frontAndBack {{ type empty; }}\n    airfoil {{ type zeroGradient; }}\n}}\n"
+        "FoamFile\n{{\n    version 2.0;\n    format ascii;\n    class volScalarField;\n    object T;\n}}\n\ndimensions [0 0 0 1 0 0 0];\ninternalField uniform {temperature:.16e};\nboundaryField\n{{\n    {inlet}\n    {outlet}\n    farField {{ type inletOutlet; inletValue uniform {temperature:.16e}; value uniform {temperature:.16e}; }}\n    frontAndBack {{ type empty; }}\n    airfoil {{ type zeroGradient; }}\n}}\n"
     )
 }
 
@@ -665,7 +707,7 @@ fn case_readme(config: &CfdStudyConfig, airfoil: &AirfoilSnapshot) -> String {
     let turbulence = config.effective_turbulence();
     let simulation = config.effective_simulation();
     format!(
-        "# ALAS OpenFOAM airfoil case\n\nTemplate: `{TEMPLATE_VERSION}`\nAirfoil: `{}`\nCoordinate hash: `{}`\nChord: `{:.8} m`\nAngle of attack: `{:.6} deg`\nSpeed: `{:.8} m/s`\nReynolds number: `{:.8e}`\nDensity: `{:.8} kg/m^3`\nDynamic viscosity: `{:.8e} Pa s`\nStatic temperature: `{:.8} K`\nStatic pressure used by thermodynamics: `{:.8} Pa`\nDry-air speed of sound: `{:.8} m/s`\nFreestream Mach number: `{:.8}`\nFlow regime: `{}`\nOpenFOAM solver: `{}`\nCompressible equation set: `{}`\nAutomatic maximum iterations: `{}`\nAutomatic startup iterations: `{}`\nAutomatic momentum relaxation: `{:.3}`\nAutomatic turbulence relaxation: `{:.3}`\nAutomatic pressure relative tolerance: `{:.3e}`\n\nFreestream turbulence specification: `{}`\nTurbulence intensity: `{:.6e}`\nConfigured length scale: `{:.8e} m`\nConfigured nu_t/nu ratio: `{:.8e}`\nEffective k: `{:.8e} m^2/s^2`\nEffective omega: `{:.8e} 1/s`\nEffective nu_t: `{:.8e} m^2/s`\nEffective nu_t/nu: `{:.8e}`\nEffective length implied by omega: `{:.8e} m`\n\nThe section frame is chord +x, normal +y and extrusion +z. Positive angle rotates the freestream velocity toward +y. Drag is positive along the freestream and lift is positive 90 degrees counter-clockwise from it. The moment reference is x/c = 0.25 on the extrusion mid-plane, Cm is positive nose-up (leading edge toward +y) through the forceCoeffs pitch axis (0 0 -1), lRef is the chord and Aref = chord times the explicit extrusion span. Mach is `U/sqrt(gamma R T)` using dry-air gamma 1.4, R = 287.05287 J/(kg K), and the declared static temperature. For Mach below 0.3 the case uses incompressible steady k-omega SST `simpleFoam`; at and above Mach 0.3 it uses perfect-gas steady k-omega SST `rhoSimpleFoam`, includes density and energy equations, and switches to bounded shock-safe convection and damped relaxation. Numerical convergence is evidence from this case; it is not physical validation against experiment.\n",
+        "# ALAS OpenFOAM airfoil case\n\nTemplate: `{TEMPLATE_VERSION}`\nAirfoil: `{}`\nCoordinate hash: `{}`\nChord: `{:.8} m`\nAngle of attack: `{:.6} deg`\nSpeed: `{:.8} m/s`\nReynolds number: `{:.8e}`\nDensity: `{:.8} kg/m^3`\nDynamic viscosity: `{:.8e} Pa s`\nStatic temperature: `{:.8} K`\nStatic pressure used by thermodynamics: `{:.8} Pa`\nDry-air speed of sound: `{:.8} m/s`\nFreestream Mach number: `{:.8}`\nFlow regime: `{}`\nOpenFOAM solver: `{}`\nCompressible equation set: `{}`\nAutomatic maximum iterations: `{}`\nAutomatic startup iterations: `{}`\nAutomatic momentum relaxation: `{:.3}`\nAutomatic turbulence relaxation: `{:.3}`\nAutomatic pressure relative tolerance: `{:.3e}`\n\nFreestream turbulence specification: `{}`\nTurbulence intensity: `{:.6e}`\nConfigured length scale: `{:.8e} m`\nConfigured nu_t/nu ratio: `{:.8e}`\nEffective k: `{:.8e} m^2/s^2`\nEffective omega: `{:.8e} 1/s`\nEffective nu_t: `{:.8e} m^2/s`\nEffective nu_t/nu: `{:.8e}`\nEffective length implied by omega: `{:.8e} m`\n\nThe section frame is chord +x, normal +y and extrusion +z. Positive angle rotates the freestream velocity toward +y. Drag is positive along the freestream and lift is positive 90 degrees counter-clockwise from it. The moment reference is x/c = 0.25 on the extrusion mid-plane, Cm is positive nose-up (leading edge toward +y) through the forceCoeffs pitch axis (0 0 -1), lRef is the chord and Aref = chord times the explicit extrusion span. Mach is `U/sqrt(gamma R T)` using dry-air gamma 1.4, R = 287.05287 J/(kg K), and the declared static temperature. For Mach below 0.3 the case uses incompressible steady k-omega SST `simpleFoam`; at and above Mach 0.3 it uses perfect-gas steady k-omega SST `rhoSimpleFoam`, includes density and energy equations, and switches to bounded shock-safe convection and damped relaxation. When freestream normal Mach at the vertical inlet/outlet planes, M*cos(alpha), exceeds one, U/p/T are prescribed at the inlet and extrapolated with zeroGradient at the outlet. This assumes remote streamwise boundaries remain supersonic; it is not a dynamic local characteristic treatment. Lateral mixed boundary conditions are retained. The pressure upper safety bound is at least the perfect-gas isentropic stagnation pressure for the configured Mach, avoiding the former factor-two clipping of valid supersonic shocks. Numerical convergence is evidence from this case; it is not physical validation against experiment.\n",
         airfoil.name,
         airfoil.coordinate_hash,
         config.chord_m,
@@ -696,4 +738,43 @@ fn case_readme(config: &CfdStudyConfig, airfoil: &AirfoilSnapshot) -> String {
         turbulence.nu_t_over_nu,
         turbulence.effective_length_m,
     )
+}
+
+#[cfg(test)]
+mod solver_activity_tests {
+    use super::*;
+
+    #[test]
+    fn both_equation_sets_request_inner_work_without_relaxing_tolerances() {
+        let config = CfdStudyConfig::default();
+        let tolerance = format!("tolerance {LINEAR_SOLVER_RESIDUAL_FLOOR:.3e}; minIter 1;");
+        let incompressible = fv_solution(&config);
+        assert_eq!(incompressible.matches(&tolerance).count(), 5);
+        let compressible = compressible_fv_solution(&config);
+        assert_eq!(compressible.matches(&tolerance).count(), 3);
+        assert!(incompressible.contains("k 5.000e-6;"));
+    }
+
+    #[test]
+    fn written_fields_preserve_double_precision_for_update_observations() {
+        assert!(control_dict(&CfdStudyConfig::default()).contains("writePrecision 17;"));
+    }
+
+    #[test]
+    fn compressible_energy_evidence_writes_the_native_no_write_object() {
+        let mut config = CfdStudyConfig::default();
+        assert!(!control_dict(&config).contains("solvedEnergy"));
+        config.speed_m_s = 300.0;
+        let control = control_dict(&config);
+        let energy = control
+            .split("    solvedEnergy\n")
+            .nth(1)
+            .unwrap_or_else(|| panic!("missing native energy writer"));
+        let energy = energy.split('}').next().unwrap_or_default();
+        assert!(energy.contains("type writeObjects;"));
+        assert!(energy.contains("libs (utilityFunctionObjects);"));
+        assert!(energy.contains("objects (e);"));
+        assert!(energy.contains("writeOption anyWrite;"));
+        assert!(energy.contains("writeControl writeTime;"));
+    }
 }

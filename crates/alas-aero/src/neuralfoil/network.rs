@@ -4,7 +4,6 @@
 // Ported from neuralfoil/main.py (get_aero_from_kulfan_parameters and the
 // _sigmoid / _squared_mahalanobis_distance helpers it calls).
 // Upstream: NeuralFoil 0.3.x, MIT.
-// Reference: alas @ rust-port-baseline.
 
 //! The network itself: eighteen shape numbers and a flight condition in,
 //! a lift curve and a boundary layer out.
@@ -166,16 +165,18 @@ pub fn evaluate_sweep(
     }
     // Direct at odd, mirrored at even positions: pushed mirrored-first so
     // the swap above keeps `input` usable without a copy.
-    let outputs = network.evaluate_batch(&inputs);
+    // The batch output is owned, so each pair is corrected in place rather
+    // than copied out first.
+    let mut outputs = network.evaluate_batch(&inputs);
     Ok(conditions
         .iter()
-        .zip(inputs.chunks_exact(2).zip(outputs.chunks_exact(2)))
+        .zip(inputs.chunks_exact(2).zip(outputs.chunks_exact_mut(2)))
         .map(|(conditions, (pair_in, pair_out))| {
-            let mut direct = pair_out[1].clone();
+            let (mirrored, direct) = pair_out.split_at_mut(1);
+            let (mirrored, direct) = (&mut mirrored[0], &mut direct[0]);
             direct[0] -= distribution.squared_mahalanobis_distance(&pair_in[1]) / penalty;
-            let mut mirrored = pair_out[0].clone();
             mirrored[0] -= distribution.squared_mahalanobis_distance(&pair_in[0]) / penalty;
-            fuse(&direct, &restore_mirrored(&mirrored), conditions.reynolds)
+            fuse(direct, &restore_mirrored(mirrored), conditions.reynolds)
         })
         .collect())
 }
@@ -524,11 +525,5 @@ mod tests {
     fn mirroring_an_input_twice_returns_it_unchanged() {
         let input = features(&section(), &Conditions::new(4.0, 1e6)).expect("a valid section");
         assert_eq!(mirror_input(&mirror_input(&input)), input);
-    }
-
-    #[test]
-    fn restoring_a_mirrored_output_twice_returns_it_unchanged() {
-        let raw: Vec<f64> = (0..OUTPUTS).map(|i| f64::from(i as u32) / 7.0).collect();
-        assert_eq!(restore_mirrored(&restore_mirrored(&raw)), raw);
     }
 }

@@ -21,7 +21,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::{ConfigNode, Kind, Leaf};
+use crate::{ConfigNode, Kind, Leaf, PylonMassMethod};
 
 /// Versioned method used for the structural group.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -67,65 +67,6 @@ impl PropulsionMassMethod {
 }
 
 impl Leaf for PropulsionMassMethod {
-    fn kind(&self, _name: &str) -> Kind {
-        Kind::Str
-    }
-}
-
-/// Which method prices the engine pylons of a podded installation.
-///
-/// **FLOPS has no pylon term at all.** Every propulsion mass in
-/// NASA/TM-2017-219627 Vol. I sections 5.2.9 and 5.3 is an engine, a nacelle,
-/// a reverser, a control, a starter or a fuel system; searching the published
-/// equation set for a strut or pylon returns nothing, and equation 137 sums
-/// only those groups. The structure that carries a podded engine to the wing
-/// is therefore outside the published empty-weight boundary, not estimated at
-/// zero by it.
-///
-/// That gap is not small. Inverting the published computed masses and
-/// deviations of Fernandes da Moura (2001) against three independent methods
-/// gives an actual pylon mass of **469 kg per pylon on the A320-200** and
-/// **724 kg per pylon on the A340-300**, i.e. **2.27 % and 2.23 % of operating
-/// empty weight**: the whole of ALAS's A320 deficit and about a sixth of the
-/// A340's.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum PylonMassMethod {
-    /// Charge no pylon, which is the published FLOPS boundary exactly.
-    ///
-    /// This is the auditable baseline: it reproduces the transport equation
-    /// set as printed, and it is also the physically right answer for an
-    /// installation with no pylon at all, such as a wing-faired turboprop
-    /// nacelle.
-    #[default]
-    None,
-    /// The LTH box-beam pylon relation, `m = n x 0.2648 x SLST^0.6517` with
-    /// the sea-level static thrust of one engine in newtons and the mass in
-    /// kilograms.
-    ///
-    /// Source: Luftfahrttechnisches Handbuch, Masseanalyse MA 401 12-01 B
-    /// (Dorbath, 2013), whose stated validity is *"grosse zivile
-    /// Verkehrsflugzeuge (MTOM > 40 t)"* and *"bezieht sich ausschliesslich
-    /// auf zivile Verkehrsflugzeuge"*. Against the two pylon masses derived
-    /// above it returns 515 kg (+9.8 %) and 625 kg (-13.7 %) per pylon.
-    ///
-    /// It prices the wing pylons of a podded installation and nothing else: a
-    /// tail-mounted centre engine is carried by fuselage and fin structure
-    /// that this relation was not fitted on, so it is not charged one.
-    LthBoxBeamV1,
-}
-
-impl PylonMassMethod {
-    /// Stable serialized name.
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::None => "none",
-            Self::LthBoxBeamV1 => "lth_box_beam_v1",
-        }
-    }
-}
-
-impl Leaf for PylonMassMethod {
     fn kind(&self, _name: &str) -> Kind {
         Kind::Str
     }
@@ -336,7 +277,7 @@ pub struct FlopsStructureConfig {
         advanced,
         label = "Main-gear oleo length",
         unit = "m",
-        help = "FLOPS XMLG: length of the extended main landing-gear oleo. Blank uses the FLOPS estimate from nacelle diameter, wing dihedral, outboard engine position and fuselage width (equation 66)."
+        help = "FLOPS XMLG: length of the extended main landing-gear oleo. Blank uses the fuselage ground clearance for a fuselage-mounted main gear, else the FLOPS estimate from nacelle diameter, wing dihedral, outboard engine position and fuselage width (equation 66)."
     )]
     pub main_gear_oleo_length_m: Option<f64>,
 
@@ -348,6 +289,26 @@ pub struct FlopsStructureConfig {
         help = "FLOPS XNLG: length of the extended nose landing-gear oleo. Blank uses 70 percent of the main-gear length (equation 67)."
     )]
     pub nose_gear_oleo_length_m: Option<f64>,
+
+    /// Certified maximum operating altitude, m, from which the pressurized
+    /// fuselage method derives its design cabin pressure differential.
+    #[config(
+        advanced,
+        label = "Maximum operating altitude",
+        unit = "m",
+        help = "Certified maximum operating altitude. The pressurized fuselage method of the regional turboprop class sizes the shell for the cabin pressure differential between an 8,000 ft cabin (CS 25.841(a)) and this altitude in the ISA. Blank uses the cruise altitude requirement."
+    )]
+    pub maximum_operating_altitude_m: Option<f64>,
+
+    /// Maximum zero-fuel mass the pressurized fuselage method sizes the
+    /// fuselage bending at, kg.
+    #[config(
+        advanced,
+        label = "Design zero-fuel mass",
+        unit = "kg",
+        help = "Maximum zero-fuel mass for the fuselage bending term of the pressurized fuselage method of the regional turboprop class. Blank uses the structural design gross mass, an upper bound."
+    )]
+    pub design_zero_fuel_mass_kg: Option<f64>,
 
     /// Paint area density, FLOPS `WPAINT`.
     #[config(
@@ -485,6 +446,8 @@ impl Default for FlopsStructureConfig {
             design_landing_mass_kg: None,
             main_gear_oleo_length_m: None,
             nose_gear_oleo_length_m: None,
+            maximum_operating_altitude_m: None,
+            design_zero_fuel_mass_kg: None,
             paint_area_density_kg_m2: 0.0,
             pylon_mass_method: PylonMassMethod::None,
             baseline_engine_mass_kg: None,
@@ -566,6 +529,11 @@ impl FlopsStructureConfig {
             ("design_landing_mass_kg", self.design_landing_mass_kg),
             ("main_gear_oleo_length_m", self.main_gear_oleo_length_m),
             ("nose_gear_oleo_length_m", self.nose_gear_oleo_length_m),
+            (
+                "maximum_operating_altitude_m",
+                self.maximum_operating_altitude_m,
+            ),
+            ("design_zero_fuel_mass_kg", self.design_zero_fuel_mass_kg),
             ("baseline_engine_mass_kg", self.baseline_engine_mass_kg),
             ("baseline_engine_thrust_kn", self.baseline_engine_thrust_kn),
         ] {

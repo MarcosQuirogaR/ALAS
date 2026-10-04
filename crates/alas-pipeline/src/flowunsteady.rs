@@ -25,6 +25,9 @@ pub enum FlowUnsteadyAnalysisStatus {
     NotConfigured,
     /// Rust could not render or retain a valid request.
     RequestRejected,
+    /// The configured timeout was not a finite number of seconds greater than
+    /// zero; the solver was not launched.
+    InvalidTimeout,
     /// Adapter executable could not launch.
     LaunchFailed,
     /// Adapter exceeded its deadline.
@@ -46,6 +49,7 @@ impl FlowUnsteadyAnalysisStatus {
         match self {
             Self::NotConfigured => "not_configured",
             Self::RequestRejected => "request_rejected",
+            Self::InvalidTimeout => "invalid_timeout",
             Self::LaunchFailed => "launch_failed",
             Self::TimedOut => "timed_out",
             Self::SolverFailed => "solver_failed",
@@ -300,6 +304,10 @@ pub fn run_flowunsteady_analysis(
     match process.status {
         FlowUnsteadyProcessStatus::InputMissing => {
             result.status = FlowUnsteadyAnalysisStatus::RequestRejected;
+            return result;
+        }
+        FlowUnsteadyProcessStatus::InvalidTimeout => {
+            result.status = FlowUnsteadyAnalysisStatus::InvalidTimeout;
             return result;
         }
         FlowUnsteadyProcessStatus::LaunchFailed => {

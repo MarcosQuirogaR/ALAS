@@ -5,25 +5,25 @@
 // sample_training, build_surrogate and evaluate_surrogate, and the
 // fuselage_correction/aircraft_total tail of Fidelity_Zero's lift chain.
 // Upstream: mission analysis model 2.5.2, LGPL-2.1.
-// Reference: alas @ rust-port-baseline.
 
-//! The lift and induced-drag surrogate the mission actually flies on.
+//! The native mission lift surrogate, with frozen parity induced-drag outputs.
 //!
 //! `mission analysis model.Analyses.Aerodynamics.Vortex_Lattice` does not run a vortex lattice
 //! per flight condition. It runs [`crate::vorlax`] **once**, on a fixed grid
 //! of ten angles of attack against eight Mach numbers, fits a bicubic spline
-//! through the result, and every lift and induced-drag number a mission
-//! segment then sees is an evaluation of that spline. So this is not an
-//! optimization of the solver: it is the model. A knot placed differently is
+//! through the result. Native mission lift is an evaluation of that spline;
+//! its induced-drag outputs are retained for parity-only analyses. The spline
+//! defines the lift model. A knot placed differently is
 //! a different aeroplane, which is why [`alas_math::BicubicSpline`] exists as
 //! its own green row rather than as "a bicubic through the same points".
 //!
-//! This row is also what closes `alas-aero::drag_buildup`'s open input. That
-//! module takes each wing's lift coefficient and inviscid induced drag
+//! On the frozen parity path this closes `alas-aero::drag_buildup`'s open input.
+//! That module takes each wing's lift coefficient and inviscid induced drag
 //! coefficient as data, because with `span_efficiency` at its `None` default
 //! the inviscid induced drag *is* the vortex lattice's and there is no
 //! closed-form fallback on the path this program takes. [`LiftSolution`] is
-//! what supplies them.
+//! what supplies them. Product mission drag comes from the shared candidate
+//! table evaluated at the aircraft lift coefficient.
 //!
 //! # Scope
 //!
@@ -51,6 +51,16 @@
 //! `Fidelity_Zero.__defaults__` sets `use_surrogate = True` and the mission
 //! runner overrides nothing, so `initialize` never binds it.
 
-include!("lift_surrogate_parts/part_01.rs");
-include!("lift_surrogate_parts/part_02.rs");
-include!("lift_surrogate_parts/part_03.rs");
+use crate::vorlax::{self, VlmError, VlmGeometry, VlmSettings};
+use alas_math::{BicubicSpline, BicubicSplineError};
+use std::collections::BTreeMap;
+
+mod types;
+pub use types::*;
+mod surrogate;
+pub use surrogate::*;
+// A test asserts on values it constructed here directly, so a failed unwrap
+// or expect is the assertion failing, not a library invariant being broken.
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+#[cfg(test)]
+mod tests;

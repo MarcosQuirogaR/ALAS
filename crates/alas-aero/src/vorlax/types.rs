@@ -4,7 +4,6 @@
 // Ported from mission analysis model/Methods/Aerodynamics/Common/Fidelity_Zero/Lift/
 // generate_vortex_distribution.py and VLM.py.
 // Upstream: mission analysis model 2.5.2, LGPL-2.1.
-// Reference: alas @ rust-port-baseline.
 
 //! The inputs and outputs of one VORLAX solve.
 //!
@@ -305,13 +304,6 @@ impl VortexDistribution {
     pub fn leading_edge_panels(&self) -> Vec<usize> {
         (0..self.n_cp)
             .filter(|&i| self.leading_edge_indices[i])
-            .collect()
-    }
-
-    /// Indices of the trailing-edge panels.
-    pub fn trailing_edge_panels(&self) -> Vec<usize> {
-        (0..self.n_cp)
-            .filter(|&i| self.trailing_edge_indices[i])
             .collect()
     }
 

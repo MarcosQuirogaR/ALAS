@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/reporting/visualization.py (figure_structures_loads, L5819-5906).
-// Reference: alas @ rust-port-baseline.
 
 //! Bending stiffness `EI(y)` and moment `M(y)` for the sizing-governing load
 //! case (left, dual axis), and the spanwise deflection curve for every load
@@ -525,6 +524,8 @@ mod tests {
             nastran95: None,
             patran: None,
             torenbeek_wing_mass_kg: 15000.0,
+            wing_mass: None,
+            evaluation_inputs: None,
         }
     }
 

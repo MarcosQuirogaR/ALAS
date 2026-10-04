@@ -47,8 +47,8 @@ pub(crate) fn turbofan_installed_mass(
     if thrust_per_engine_n <= 0.0 {
         return None;
     }
-    // Keep the association used by the legacy buildup: n * (T / (factor*g))
-    // * installation. This matters to exact-reference floating-point parity.
+    // The association is n * (T / (factor*g)) * installation, shared with the
+    // Torenbeek-comparison buildup so the two agree to the last bit.
     let dry_engines_kg =
         engine_count as f64 * (thrust_per_engine_n / (thrust_to_weight_factor * gravity_m_s2));
     let total_kg = dry_engines_kg * installation_factor;

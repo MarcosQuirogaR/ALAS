@@ -7,7 +7,7 @@ identity, the exact coordinate snapshot and hash, the SI operating point, the
 boundary and mesh settings, the solver settings, and the versioned case
 template in `study.json`.
 
-The current template is `alas-airfoil-2d-openfoam-gmsh-v5`.  Gmsh creates an
+The current template is `alas-airfoil-2d-openfoam-gmsh-v7`.  Gmsh creates an
 exact straight-edge polygon from the section coordinates, a chord-scaled outer
 domain, and a one-layer extrusion.  `gmshToFoam` converts the mesh and the
 runner enforces these patch contracts:
@@ -103,7 +103,7 @@ dry-air speed of sound `a = sqrt(gamma R T)` and Mach `M = U/a`, with
 the incompressible steady `simpleFoam` path.  At and above `M = 0.3`, it
 automatically selects `rhoSimpleFoam`, `hePsiThermo` with a perfect-gas
 equation of state, absolute pressure and temperature fields, density/energy
-residuals, and bounded shock-safe transport.  The `M = 0.8 .. 1.2` band is
+residuals, and bounded convection schemes. These controls do not establish shock-solution stability or experimental accuracy.  The `M = 0.8 .. 1.2` band is
 reported as transonic; it receives a longer SIMPLE budget, bounded-upwind
 startup, limited gradients, GAMG pressure, PBiCGStab/DILU transport solves,
 and damped relaxation.  The steady contract is bounded at `M <= 2.0` and
@@ -124,9 +124,7 @@ definitions on the native solved `U` and `p` fields with ParaView's
 `paraFoam -vtk -case <case> -touch` through MSYS2 and then invokes that
 renderer against the exact `.foam` marker created by paraFoam.  It also keeps
 the launcher and renderer logs beside the images.  The Airfoil CFD Results
-tab loads those exact PNG artifacts when they are present; if they have not
-been rendered, it leaves the contour card unavailable and keeps the native
-fields available for the ParaView handoff.
+tab loads those exact PNG artifacts and asynchronously renders missing images when the configured ParaView installation supplies `pvpython`. It offers an explicit refresh/retry, captures renderer logs, and limits each rendering attempt to 120 seconds. If rendering is unavailable or fails, it shows that state and keeps the native fields available for the ParaView handoff.
 
 For an existing case, run the wrapper after the solver has written a finite
 `U` and `p` field (replace the paths with the installed locations):
@@ -146,8 +144,11 @@ is intensity `0.052%` and turbulent-to-molecular
 viscosity ratio `0.009`; the generated `k`, `omega`, estimated eddy viscosity,
 and implied length scale are recorded in the case README.  A length-scale
 input remains available for tunnel or inflow data specified that way.  The
-wall treatment is `kqRWallFunction`, blended `omegaWallFunction`, and
-`nutUSpaldingWallFunction`, with a default 25-layer boundary-layer field,
+wall treatment uses `kqRWallFunction` and blended `omegaWallFunction`.
+The incompressible path uses `nutUSpaldingWallFunction`; the compressible path
+uses `nutkWallFunction` and an adiabatic temperature wall. This wall-model
+change across the solver switch must be included in physical validation.
+The mesh uses a default 25-layer boundary-layer field,
 first-cell-centre target of `1e-5 m`, and target `y+ = 1`.  The flat-plate
 estimate is sizing evidence only.  The solved yPlus summary is retained in
 `MeshQuality.near_wall` when the solver emitted a finite patch result.
@@ -206,13 +207,81 @@ columns from modern `forceCoeffs` output are kept distinct from pressure and
 viscous components; absent components remain unavailable.
 
 The `fields` list points to native OpenFOAM fields and sampled raw outputs.
-The GUI can open the case in a configured ParaView executable using the
+The Results tab generates native ParaView Mach and pressure images in a
+background worker when they are missing, and provides an explicit refresh
+control. The installed ParaView must include `pvpython` beside its executable.
+Rendering errors remain visible and require an explicit retry. Compressible
+Mach uses the solved local static temperature; incompressible Mach is a
+diagnostic based on the configured freestream temperature. Images retain the
+case outcome, including failed or unconverged states. Cp/Cf curves classify
+surfaces by wall normal and sort each branch by x/c on shared axes. Vertical
+base faces are omitted from these curves, with their count shown, but remain
+in the force integration; signed negative skin friction is retained.
+
+The GUI can also open the case in a configured ParaView executable using the
 generated `case.foam` marker.  The case folder, raw logs, native fields,
 `results.json`, and `report.md` are exportable together.  The final provenance
 records the selected backend, OpenFOAM version, and deterministic FNV-1a hashes
 of generated case artifacts and executed utility binaries.  Results include
 the exact coordinate hash and never replace a missing or malformed database
 airfoil with a fallback section.
+
+### Reproducible validation and robustness runs
+
+Build `cargo build -p alas-cfd --example run_airfoil_case`. The example accepts
+`ALAS_CFD_CONFIG` as a JSON study configuration and `ALAS_CFD_AIRFOIL_DAT` as
+an optional custom benchmark geometry. `--list-airfoils` prints the available
+population without starting external tools. Configuration files preserve mesh
+and solver controls instead of applying the example's coarse default.
+
+`tools/cfd_validation_campaign.py` runs a manifest of `{id, config,
+airfoil_dat?}` entries through this same Rust runner, records every outcome,
+and refuses to overwrite existing case directories. The environment JSON uses
+the same `openfoam` executable settings as `airfoil-cfd-environment.json`.
+Keep population, random seed, selection, reference data, geometry and operating
+conditions with the campaign. Do not replace failed randomly selected sections.
+
+Template v7 sets `minIter 1` for iterative linear solves and writes 17 significant
+ASCII digits. This prevents transport equations from being skipped solely
+because their initial residual is below the inner absolute tolerance, while
+retaining the outer residual, force, conservation and mesh gates. Equal stored
+values remain an observation about precision, not proof of equation failure.
+Compressible cases explicitly write the native solved `e` field through
+`writeObjects` (`anyWrite`, at solution write times), because the solver writes
+`T` by default while the certification contract requires energy evidence.
+The energy field is not replaced by a temperature surrogate; its sign alone
+is not a temperature-validity test because of the thermodynamic reference offset.
+An unchanged turbulence field can coexist with a pressure convergence failure;
+the diagnostic reports independent residual blockers as well.
+
+Template v7 adds boundary-layer fans at acute convex solid corners, including
+sharp leading edges, without resampling the section or relaxing mesh gates.
+It also defines the named `limited` gradient used by compressible
+`linearUpwind limited` convection. A `grad(U)` entry alone does not define
+that named scheme; an absent alias silently uses the unlimited default,
+including in the energy equation.
+
+For freestream Mach normal to the vertical streamwise boundaries greater than
+one (`M*cos(alpha) > 1`), the compressible template prescribes U/p/T at the
+inlet and extrapolates them at the outlet. Lateral boundaries retain their
+separate treatment. This assumes the remote streamwise patches remain locally
+supersonic; it is not a dynamically switching characteristic boundary. The
+pressure upper factor is `max(2, (1 + (gamma-1)*M^2/2)^(gamma/(gamma-1)))`, so
+the numerical limiter admits valid stagnation pressures throughout the stated
+Mach range. These changes repair equation/boundary controls; they do not
+establish experimental validation.
+
+Numerical convergence, mesh/domain independence and agreement with experiment
+are separate requirements. Suitable primary references include the
+[OpenFOAM NACA 0012 validation case](https://doc.openfoam.com/2606/examples/verification-validation/turbulent/naca0012/),
+the [NASA/TMBWG NACA 0012 experiments and geometry](https://tmbwg.github.io/turbmodels/naca0012_val.html),
+and [NASA RAE 2822 Case 6](https://www.grc.nasa.gov/www/wind/valid/raetaf/raetaf05/raetaf05.html).
+Match geometry, Mach, Reynolds number, angle, transition/trip and wall model;
+the official NACA tutorial's Spalart–Allmaras model is not the app's SST model.
+The RAE experimental file's ordinate is minus Cp (verify its accompanying
+source plot before conversion). The NACA TN3396 diamond pressure experiment
+has incompletely specified operating conditions and reflected tunnel shocks;
+an assumed-condition comparison to it cannot certify supersonic validation.
 
 The GUI also supports sequential angle-of-attack or Reynolds sweeps.  Every
 point gets its own isolated case and retains its own status, result, effective

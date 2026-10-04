@@ -35,6 +35,7 @@ impl AppState {
             self.set_design_mode(DesignMode::BaselineSandbox);
         }
         let baseline_only = baseline_only || self.design_mode() == DesignMode::BaselineSandbox;
+        self.refresh_clean_sheet_brief();
         self.enforce_design_space_fixed_variables();
         let mut config = match self.typed_config() {
             Some(c) => c,
@@ -66,6 +67,7 @@ impl AppState {
                 return;
             }
         };
+        let form_config = config.clone();
         self.apply_preset_dispatch_policy(&mut config, &mut initial_design, &mut bounds);
 
         self.is_running = true;
@@ -75,6 +77,8 @@ impl AppState {
         self.status_message = "Running...".to_owned();
         self.stage.clear();
         self.pipeline_result = None;
+        self.pipeline_result_design_values = Some(self.design_values.clone());
+        self.pipeline_result_form_config = Some(form_config);
         self.pipeline_result_complete = false;
         self.result_figure_cache.clear();
         self.patran_textures.clear();

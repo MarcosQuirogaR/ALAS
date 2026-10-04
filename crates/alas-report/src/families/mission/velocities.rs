@@ -3,7 +3,6 @@
 
 // Ported from alas/reporting/visualization.py, figure_mission_velocities
 // (L4448-4488) and figure_mission_flight_path (L4489-4522).
-// Reference: alas @ rust-port-baseline.
 
 //! Two-panel airspeed (TAS+EAS overlaid, Mach) and two-panel flight path
 //! (cumulative range, pitch angle) vs. time.

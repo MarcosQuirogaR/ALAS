@@ -11,7 +11,8 @@
 //! kilometres per hour.
 
 use alas_pipeline::quick_analysis::{
-    QuickFeasibility, QuickMetric, QuickOutcome, QuickPayloadRange, QuickValue,
+    QuickBasis, QuickFeasibility, QuickMetric, QuickOutcome, QuickPayloadRange, QuickRouteFuel,
+    QuickValue,
 };
 use egui::{pos2, vec2, RichText, ScrollArea, Stroke, Ui};
 
@@ -59,6 +60,58 @@ fn show_value(ui: &mut Ui, metric: QuickMetric, value: &QuickValue) {
                 format_quantity(metric, requested)
             ))
             .weak()
+            .small(),
+        );
+    }
+}
+
+/// The card title: the metric label, with the route's planner tier and its
+/// excess over the great circle once the route fuel is known.
+fn metric_title(metric: QuickMetric, state: &MetricState) -> String {
+    let MetricState::Done(QuickOutcome::Route(route)) = state else {
+        return tr(metric.label());
+    };
+    let source = match route.source.as_str() {
+        "navdata_graph" => tr("airway"),
+        "simbrief_kml" => tr("KML dispatch plan"),
+        "simbrief_api" => tr("SimBrief dispatch plan"),
+        _ => tr("great circle"),
+    };
+    tr_fields(
+        "Block fuel: Route ({source}, {excess} %)",
+        &[
+            ("source", source),
+            (
+                "excess",
+                format!("{:+.1}", 100.0 * route.excess_over_great_circle()),
+            ),
+        ],
+    )
+}
+
+fn show_route(ui: &mut Ui, route: &QuickRouteFuel) {
+    ui.label(RichText::new(format!("{:.0} kg", route.block_fuel_kg)).strong())
+        .on_hover_text(&route.note);
+    ui.label(
+        RichText::new(tr_fields(
+            "{route} km flown against the {great_circle} km great circle; takeoff fuel {fuel} kg at {mass} kg",
+            &[
+                ("route", format!("{:.0}", route.route_distance_m / 1000.0)),
+                ("great_circle", format!("{:.0}", route.great_circle_m / 1000.0)),
+                ("fuel", format!("{:.0}", route.takeoff_fuel_kg)),
+                ("mass", format!("{:.0}", route.takeoff_mass_kg)),
+            ],
+        ))
+        .weak()
+        .small(),
+    );
+    if route.shortfall_kg > 0.0 {
+        ui.label(
+            RichText::new(tr_fields(
+                "{shortfall} kg short of the route's policy fuel",
+                &[("shortfall", format!("{:.0}", route.shortfall_kg))],
+            ))
+            .color(ui.visuals().warn_fg_color)
             .small(),
         );
     }
@@ -133,6 +186,31 @@ fn show_payload_range(ui: &mut Ui, corners: &QuickPayloadRange) {
     .on_hover_text(&corners.note);
 }
 
+/// The tag that says whether a card shows the Full Analysis' own value or
+/// an estimate, with the measured bound in its hover text.
+fn show_basis(ui: &mut Ui, basis: QuickBasis) {
+    let (tag, explanation) = match basis {
+        QuickBasis::FullAnalysis => (
+            tr("Full Analysis"),
+            tr("The value the Full Analysis computes for this aircraft, by the same model."),
+        ),
+        QuickBasis::ClosureEstimate => (
+            tr("Estimate"),
+            tr("Mission-sized closure estimate. The Full Analysis prices the route on this closure's drag table and plan, so over the same still-air distance its dispatch agrees within its 1 kg settling tolerance. A route planned along airways is longer and needs more fuel."),
+        ),
+        QuickBasis::EnvelopeEstimate => (
+            tr("Estimate"),
+            tr("Thrust-limited envelope estimate the Full Analysis does not report: maximum-climb thrust against its trimmed drag table at the closure takeoff mass, one mass for the whole cruise."),
+        ),
+    };
+    let color = match basis {
+        QuickBasis::FullAnalysis => ui.visuals().weak_text_color(),
+        QuickBasis::ClosureEstimate | QuickBasis::EnvelopeEstimate => ui.visuals().warn_fg_color,
+    };
+    ui.label(RichText::new(tag).small().color(color))
+        .on_hover_text(explanation);
+}
+
 fn show_feasibility(ui: &mut Ui, flags: &QuickFeasibility) {
     let (text, color) = if flags.feasible {
         (
@@ -166,7 +244,7 @@ pub fn show_estimates_strip(state: &mut AppState, ui: &mut Ui) {
                 .color(ui.visuals().hyperlink_color),
         )
         .on_hover_text(tr(
-            "Reduced in-process model at fixed geometry: mission-sized mass closure, in-loop vortex lattice with Raymer/Korn drag, catalogue propulsion deck, Breguet range. Not a validated performance figure.",
+            "In-process analysis of the drawn aircraft at fixed geometry: a mission-sized mass closure flown on the segment mission model with reserve-inclusive fuel plans, then the full baseline analysis the Full Analysis runs. Each card states whether its value is the Full Analysis' own or an estimate. Not a validated performance figure.",
         ));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if crate::theme::close_icon_button(ui, tr("Collapse")).clicked() {
@@ -216,7 +294,10 @@ pub fn show_estimates_strip(state: &mut AppState, ui: &mut Ui) {
             for (metric, state) in &rows {
                 crate::theme::card_frame(ui).show(ui, |ui| {
                     ui.set_min_width(ui.available_width());
-                    ui.label(RichText::new(tr(metric.label())).small().weak());
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new(metric_title(*metric, state)).small().weak());
+                        show_basis(ui, metric.basis());
+                    });
                     match state {
                         MetricState::Idle => {}
                         MetricState::Running => {
@@ -231,6 +312,7 @@ pub fn show_estimates_strip(state: &mut AppState, ui: &mut Ui) {
                         MetricState::Done(QuickOutcome::PayloadRange(corners)) => {
                             show_payload_range(ui, corners)
                         }
+                        MetricState::Done(QuickOutcome::Route(route)) => show_route(ui, route),
                         MetricState::Done(QuickOutcome::Feasibility(flags)) => {
                             show_feasibility(ui, flags)
                         }

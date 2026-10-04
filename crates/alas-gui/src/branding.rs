@@ -19,8 +19,8 @@ use egui::IconData;
 const APP_LOGO_PNG: &[u8] = include_bytes!("../../../app_logo.png");
 const APP_TEXT_LOGO_PNG: &[u8] = include_bytes!("../../../app_text_logo.png");
 
-/// Build the native options used by the production shell and GUI audit
-/// examples, including the embedded ALAS window and task-bar icon.
+/// Build the native options used by the production shell and the
+/// rendering examples, including the embedded ALAS window and task-bar icon.
 pub fn native_options(
     title: impl Into<String>,
     inner_size: [f32; 2],

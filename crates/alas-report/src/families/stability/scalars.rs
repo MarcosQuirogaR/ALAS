@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/reporting/visualization.py (_stability_scalars)
-// Reference: alas @ rust-port-baseline.
 
 //! Shared side-view/metrics scalar quantities, computed once from the
 //! [`AnalysisReport`] (no new VLM runs) so [`super::side_view`] and
@@ -188,6 +187,7 @@ mod tests {
             },
             polar_fit: PolarFit {
                 cd0: 0.02,
+                c1: 0.0,
                 k: 0.04,
                 oswald_e: 0.85,
                 aspect_ratio: 9.0,
@@ -203,6 +203,8 @@ mod tests {
             payload_layout: None,
             trimmed_design_point: None,
             cg_envelope_ok: None,
+            neutral_point_conditions: None,
+            fuel: Default::default(),
         }
     }
 

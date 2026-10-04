@@ -32,33 +32,27 @@ all sixteen variables, defaults, and bounds are tabulated there.
 
 Fully covered in [Cabin & payload](../cabin-and-payload.md).
 
-## Optimizer: `SolverSettings` / `ObjectiveWeights`
+## Optimizer: `solver` and `objective`
 
-`SolverSettings` is fully covered in
+`optimizer.solver` is covered in
 [Design space & optimizer](../design-space-and-optimizer.md#the-search-differential-evolution).
-`ObjectiveWeights` penalty terms not already named there:
+`optimizer.objective` holds what is minimised and how it is bounded:
 
-| Field | Default | Penalizes |
+| Field | Default | Meaning |
 |---|---|---|
-| `ld_weight` | 1.0 | (primary term, not a penalty) reward for cruise L/D |
-| `alpha_penalty_scale` / `alpha_min/max_penalty_deg` | 5.0 / 0°–10° | Cruise AoA drifting outside a sane window |
-| `span_penalty_per_m` | 0.02 | Linear cost per meter of span (a mild leverage against unbounded growth) |
-| `cd0_penalty_scale` | 50.0 | Excess parasite drag |
-| `area_penalty_scale` / `wing_loading_penalty_scale` | 0.5 / 0.005 | Violating `max_wing_area_m2` / `min_wing_loading_kg_m2` |
-| `cg_penalty_scale` / `cg_envelope_penalty_scale` | 200.0 / 400,000 | CG drifting from target / outside the operational envelope |
-| `cg_envelope_reward` | 5.0 | Bonus for margin *inside* the CG envelope, not just avoiding violation |
-| `fuel_penalty_scale` / `fuel_volume_penalty_scale` | 50.0 / 300.0 | Fuel-budget mismatch / fuel physically not fitting in the wing |
-| `static_margin_penalty_scale` | 20.0 | Static margin below target |
-| `thickness_floor` / `thickness_penalty_scale` | 0.90 / 20.0 | Airfoil thickness scaled too far below nominal |
-| `fuselage_floor_m` / `fuselage_penalty_scale` | 60.0 / 5.0 | Fuselage shrunk implausibly short |
-| `min_h/vstab_area_fraction`, `tail_area_penalty_scale` | 0.15 / 0.07 / 150.0 | Tail undersized relative to wing |
-| `min/max_h/vstab_volume_coef`, `tail_volume_penalty_scale` | see code / 200.0 | Tail volume coefficient outside a realistic band |
-| `max_break_root_chord_ratio`, `taper_realism_penalty_scale` | 0.65 / 250.0 | Implausible taper shape |
-| `te_root_angle_penalty_scale` | 100.0 | Unrealistic trailing-edge root angle |
-| `min_wing_position_fraction`, `wing_position_penalty_scale` | 0.27 / 300.0 | Wing shifted too far forward on the fuselage |
-| `payload_shortfall_penalty_scale` | 1000.0 | Payload budget not met |
-| `fineness_ratio_max`, `fineness_ratio_penalty_scale` | 15.0 / 500.0 | Fuselage fineness ratio (length/diameter) too high |
-| `failure_cost` / `instability_failure_cost` | 1,000.0 each | Fixed cost for a hard-infeasible or unstable candidate |
+| `kind` | `block_fuel` | Block fuel, takeoff mass, operating empty mass, or fuel per seat-kilometre |
+| `design_range_nmi` | 0 | Still-air design range; 0 uses the great-circle distance of the route |
+| `mtow_sizing` | `sized_by_mission` (presets: `fixed_requirement`) | [Takeoff-mass mode](../design-space-and-optimizer.md#takeoff-mass-modes) |
+| `mtow_target_kg`, `mtow_band_fraction` | 0 (= `mtow_kg`), 0.05 | Target and half-width for `mtow_band` |
+| `sizing_max_iterations`, `sizing_tolerance_kg` | 30, 1 kg | Sizing-loop budget and closure tolerance |
+| `retrim_cg_tolerance_pct_mac` | 0.1 | CG shift that triggers a re-trim inside the loop |
+| `preference_weight` | 10 | Scale of study-preference terms; never a constraint allowance |
+| `aerodrome_reference_code` | `F` (`auto` for a clean-sheet brief) | ICAO Annex 14 letter capping the wingspan; `unrestricted` disables |
+| `max_approach_speed_kt` | 0 | Approach-speed limit; 0 disables |
+
+Constraints are hard; there are no per-constraint penalty scales. The
+`requirements` fields (wing-area cap, wing-loading floor, cruise-CL cap,
+static-margin floor, CG range) are the bounds a candidate must satisfy.
 
 ## Analysis fidelity: `AnalysisConfig`
 

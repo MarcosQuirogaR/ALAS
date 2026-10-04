@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/reporting/visualization.py
-// Reference: alas @ rust-port-baseline.
 
 //! Stability and control figures: dynamic modes, static margins, side views,
 //! and control surfaces.

@@ -4,7 +4,6 @@
 // Ported from mission analysis model/Methods/Aerodynamics/Common/Fidelity_Zero/Lift/
 // generate_vortex_distribution.py.
 // Upstream: mission analysis model 2.5.2, LGPL-2.1.
-// Reference: alas @ rust-port-baseline.
 
 //! Laying panels on a vehicle: VLM steps 1 through 10.
 //!

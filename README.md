@@ -22,9 +22,9 @@ and the full pipeline (geometry, mass/CG, mission, drag build-up, wingbox
 sizing, figures) runs end to end for hand-built and CPACS-imported aircraft,
 against eight reference presets and the external solvers that are installed.
 None of that means it is trustworthy yet: no preset currently has a verified
-design mission, and several open defects are tracked in `docs/STATUS.md`.
+design mission, and the known limitations are listed in `docs/STATUS.md`.
 
-`docs/STATUS.md` is the authoritative answer to "does it work and what is
+`docs/STATUS.md` is the answer to "does it work and what is
 wrong with it". `docs/PORTING.md` answers a narrower, still-important
 question: whether a given module has been checked against the Python
 reference to a stated tolerance, and what licence its content carries, which
@@ -46,7 +46,7 @@ cargo xtask gate    # what has to pass before a commit
 | `crates/` | The workspace. One crate per discipline; `docs/ARCHITECTURE.md` explains the layering. |
 | `golden/` | Reference values generated from the Python implementation, and the generators that produce them. |
 | `xtask/` | Repository checks and the backup task. `cargo xtask` lists them. |
-| `docs/` | Architecture, current project status, the parity/provenance ledger, and the methods the models come from. |
+| `docs/` | Architecture, current project status, the parity and provenance records, and the methods the models come from. |
 
 ---
 

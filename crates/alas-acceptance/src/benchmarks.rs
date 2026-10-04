@@ -6,7 +6,7 @@
 //! Measures execution latency and throughput of the numerical core across
 //! aerodynamics, mission integration, structural sizing, airfoil database
 //! screening, and end-to-end pipeline execution, comparing throughput against
-//! the legacy Python baseline.
+//! the Python reference baseline.
 
 use std::time::Instant;
 
@@ -36,7 +36,7 @@ pub struct BenchmarkResult {
     pub min_ms: f64,
     /// Maximum iteration duration in milliseconds.
     pub max_ms: f64,
-    /// Approximate legacy Python execution time in milliseconds.
+    /// Approximate Python reference execution time in milliseconds.
     pub legacy_python_ms: f64,
     /// Measured speedup factor relative to Python.
     pub speedup_factor: f64,
@@ -103,7 +103,10 @@ where
 
 /// Benchmark full baseline design pipeline execution.
 pub fn bench_full_pipeline(iters: usize) -> BenchmarkResult {
-    let config = AlasConfig::default();
+    let mut config = AlasConfig::default();
+    config.structures.run_nastran = false;
+    config.structures.run_patran_export = false;
+    config.optimizer.objective.mtow_sizing = alas_config::MtowSizing::FixedRequirement;
     let pipeline = DesignPipeline::new(config);
     let options = PipelineOptions {
         optimize: false,
@@ -127,9 +130,13 @@ pub fn bench_full_pipeline(iters: usize) -> BenchmarkResult {
 
 /// Benchmark full aerodynamic polar sweep, trim, stability, and mass analysis.
 pub fn bench_full_analysis(iters: usize) -> BenchmarkResult {
-    let preset = match presets::get("AVE") {
-        Ok(p) => p,
-        Err(_) => {
+    let (preset, config) = match presets::get("AVE").ok().and_then(|preset| {
+        AlasConfig::from_value(&serde_json::json!({ "preset": preset.name }))
+            .ok()
+            .map(|config| (preset, config))
+    }) {
+        Some(pair) => pair,
+        None => {
             return BenchmarkResult {
                 name: "Full Analysis (VLM/Polars/Trim)".to_owned(),
                 iterations: iters,
@@ -141,10 +148,6 @@ pub fn bench_full_analysis(iters: usize) -> BenchmarkResult {
                 failures: iters,
             };
         }
-    };
-    let config = AlasConfig {
-        geometry: preset.geometry.clone(),
-        ..Default::default()
     };
     let full = FullAnalysis::new(config);
 
@@ -233,9 +236,13 @@ fn unavailable(name: &str, iters: usize, legacy_ms: f64) -> BenchmarkResult {
 
 /// Benchmark wingbox analytical structural sizing and analysis.
 pub fn bench_structural_sizing(iters: usize) -> BenchmarkResult {
-    let preset = match presets::get("AVE") {
-        Ok(p) => p,
-        Err(_) => {
+    let (preset, config) = match presets::get("AVE").ok().and_then(|preset| {
+        AlasConfig::from_value(&serde_json::json!({ "preset": preset.name }))
+            .ok()
+            .map(|config| (preset, config))
+    }) {
+        Some(pair) => pair,
+        None => {
             return BenchmarkResult {
                 name: "Wingbox Structural Sizing".to_owned(),
                 iterations: iters,
@@ -248,10 +255,9 @@ pub fn bench_structural_sizing(iters: usize) -> BenchmarkResult {
             };
         }
     };
-    let config = AlasConfig {
-        geometry: preset.geometry.clone(),
-        ..Default::default()
-    };
+    let mut config = config;
+    config.structures.run_nastran = false;
+    config.structures.run_patran_export = false;
     let full = FullAnalysis::new(config.clone());
     let report = match full.run(&preset.design_vector, false) {
         Ok(r) => r,
@@ -284,7 +290,8 @@ pub fn bench_structural_sizing(iters: usize) -> BenchmarkResult {
 
 /// Benchmark Selig airfoil database screening.
 pub fn bench_airfoil_screening(iters: usize) -> BenchmarkResult {
-    let config = AlasConfig::default();
+    let mut config = AlasConfig::default();
+    config.optimizer.objective.mtow_sizing = alas_config::MtowSizing::FixedRequirement;
     let options = AirfoilScreeningOptions {
         name_filter: "NACA*".to_string(),
         refine_3d: false,
@@ -331,7 +338,10 @@ pub fn bench_figure_rendering(iters: usize) -> BenchmarkResult {
             };
         }
     };
-    let config = AlasConfig::default();
+    let mut config = AlasConfig::default();
+    config.structures.run_nastran = false;
+    config.structures.run_patran_export = false;
+    config.optimizer.objective.mtow_sizing = alas_config::MtowSizing::FixedRequirement;
     let pipeline = DesignPipeline::new(config.clone());
     let options = PipelineOptions {
         optimize: false,

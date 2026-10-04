@@ -13,14 +13,15 @@
 
 use alas_config::{
     AuxiliaryTankConfig, CenterTankConfig, FuelPolicyConfig, FuelTankLayoutConfig, FuselageConfig,
-    GeometryConfig, StructuresConfig, TrimTankConfig, WingConfig, WingTankConfig,
+    GeometryConfig, StructuresConfig, TrimTankConfig, WingConfig,
 };
 use alas_geom::aircraft::airplane::Airplane;
 use alas_geom::aircraft::wing::Wing;
 
+use super::bays::{wing_bays, WingBay};
 use super::geometry::{
-    fuselage_station, horizontal_stabilizer, integrate_wing_box, section_box, semispan_bounds,
-    side_of_body_y_m, spar_box_limits, SectionBox, M3_PER_LITRE,
+    fuselage_station, horizontal_stabilizer, integrate_wing_box, section_box, section_box_at_y,
+    semispan_bounds, side_of_body_y_m, spar_box_limits, SectionBox, M3_PER_LITRE,
 };
 use super::types::{CapacitySource, FuelTank, FuelTankLayout, TankKind, TankLayoutError, TankSide};
 
@@ -77,7 +78,9 @@ impl FuelTankLayout {
             if !cell.enabled {
                 continue;
             }
-            tanks.extend(wing_tank_pair(wing, kind, cell, &pricing)?);
+            for bay in wing_bays(kind, cell) {
+                tanks.extend(wing_tank_pair(wing, &bay, &pricing)?);
+            }
         }
 
         if config.center.enabled {
@@ -147,19 +150,18 @@ fn usable_volume(
     }
 }
 
-/// One or two [`FuelTank`]s (mirrored, for a symmetric wing) for an integral
-/// wing cell.
+/// One or two [`FuelTank`]s (mirrored, for a symmetric wing) for one wing
+/// bay.
 fn wing_tank_pair(
     wing: &Wing,
-    kind: TankKind,
-    cell: &WingTankConfig,
+    bay: &WingBay,
     pricing: &TankPricing,
 ) -> Result<Vec<FuelTank>, TankLayoutError> {
     let (front, rear) = (pricing.front, pricing.rear);
     let (root_y, _tip_y, semispan) =
         semispan_bounds(wing).ok_or(TankLayoutError::DegenerateWingSpan)?;
-    let start_y = root_y + cell.span_start_fraction * semispan;
-    let end_y = root_y + cell.span_end_fraction * semispan;
+    let start_y = root_y + bay.span_start_fraction * semispan;
+    let end_y = root_y + bay.span_end_fraction * semispan;
     let integral = integrate_wing_box(wing, front, rear, start_y, end_y)
         .ok_or(TankLayoutError::DegenerateWingSpan)?;
     if integral.is_degenerate() {
@@ -175,14 +177,31 @@ fn wing_tank_pair(
     let y_centroid = integral.y_centroid_m();
     let z_centroid = integral.z_centroid_m();
 
+    // The tank's lowest point as it drains: the lower of its two spanwise
+    // boundary cross-sections. Dihedral (or anhedral) moves this
+    // point in z relative to the full-tank centroid; sweep moves it in x.
+    // Falls back to the full centroid when a boundary cross-section cannot
+    // be resolved (should not happen for a boundary this same call already
+    // used to build `integral`, but a fallback keeps `resolve` total rather
+    // than adding a new error variant for an unreachable case).
+    let low_point_m = [
+        section_box_at_y(wing, front, rear, start_y),
+        section_box_at_y(wing, front, rear, end_y),
+    ]
+    .into_iter()
+    .flatten()
+    .zip([start_y, end_y])
+    .min_by(|(a, _), (b, _)| a.z_mid_m.total_cmp(&b.z_mid_m))
+    .map_or([x_centroid, y_centroid, z_centroid], |(low, y_low)| {
+        [low.x_mid_m, y_low, low.z_mid_m]
+    });
+
     // A published wing-tank volume is both sides together; each side gets
     // half, since the two are geometrically mirrored and fed independently.
-    let published_each_side_l = cell
-        .published_usable_volume_l
-        .map(|volume_l| volume_l / 2.0);
+    let published_each_side_l = bay.published_usable_volume_l.map(|volume_l| volume_l / 2.0);
     let (usable_volume_each_m3, capacity_source) = usable_volume(
         integral.volume_m3,
-        cell.usable_fraction,
+        bay.usable_fraction,
         pricing.expansion_space_fraction,
         published_each_side_l,
     );
@@ -196,16 +215,17 @@ fn wing_tank_pair(
     Ok(sides
         .iter()
         .map(|&(side, sign)| FuelTank {
-            id: format!("{}_{}", kind.id_prefix(), side.suffix()),
-            kind,
+            id: format!("{}_{}", bay.id_stem, side.suffix()),
+            kind: bay.kind,
             side,
             geometric_volume_m3: integral.volume_m3,
             usable_volume_m3: usable_volume_each_m3,
             usable_capacity_kg,
             unusable_kg: pricing.unusable_fuel_fraction * usable_capacity_kg,
             centroid_m: [x_centroid, sign * y_centroid, z_centroid],
+            low_point_m: [low_point_m[0], sign * low_point_m[1], low_point_m[2]],
             extent_m,
-            burn_priority: cell.burn_priority,
+            burn_priority: bay.burn_priority,
             capacity_source,
         })
         .collect())
@@ -270,6 +290,10 @@ fn center_tank(
         usable_capacity_kg,
         unusable_kg: pricing.unusable_fuel_fraction * usable_capacity_kg,
         centroid_m: [representative.x_mid_m, 0.0, representative.z_mid_m],
+        // No spanwise low end is modelled for the carry-through centre
+        // cell (it does not taper across a dihedral break the way a wing
+        // cell does): the full centroid stands for every fill level.
+        low_point_m: [representative.x_mid_m, 0.0, representative.z_mid_m],
         extent_m: [representative.width_m, width_y_m, representative.depth_m],
         burn_priority: cell.burn_priority,
         capacity_source,
@@ -331,6 +355,10 @@ fn trim_tank(
         usable_capacity_kg,
         unusable_kg: pricing.unusable_fuel_fraction * usable_capacity_kg,
         centroid_m: [integral.x_centroid_m(), 0.0, integral.z_centroid_m()],
+        // Trim-tank pooling under horizontal-stabiliser dihedral is not
+        // modelled (partial-fill pooling applies to the wing tank only); the
+        // full centroid stands for every fill level.
+        low_point_m: [integral.x_centroid_m(), 0.0, integral.z_centroid_m()],
         extent_m,
         burn_priority: cell.burn_priority,
         capacity_source,
@@ -366,6 +394,9 @@ fn auxiliary_tank(
         usable_capacity_kg,
         unusable_kg: unusable_fuel_fraction * usable_capacity_kg,
         centroid_m,
+        // A declared fuselage tank has no modelled internal geometry to
+        // pool fuel against; the full centroid stands for every fill level.
+        low_point_m: centroid_m,
         extent_m: [side_m, side_m, side_m],
         burn_priority: cell.burn_priority,
         capacity_source: CapacitySource::Declared,

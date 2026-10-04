@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! Product-path evidence for systems-method provenance in exported databases.
+//! Product-path evidence for systems-method provenance in eyported databases.
 
 use std::fs;
 

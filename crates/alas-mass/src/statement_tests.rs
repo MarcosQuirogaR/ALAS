@@ -3,6 +3,7 @@
 
 use super::*;
 use crate::flops_transport::{FlopsOperatingItemsBreakdown, FlopsSystemsBreakdown};
+use crate::ledger::MassGroup;
 use crate::ledger::{InertiaTensor, MassMethod, MassRole};
 use crate::stations::ComponentStation;
 
@@ -20,7 +21,7 @@ fn station(x: f64, z: f64) -> ComponentStation {
 
 /// A hand-built, geometrically plausible station set: gear, tails and
 /// systems all aft of the wing, no nacelle geometry (exercising the
-/// legacy no-nacelle propulsion fallback).
+/// no-nacelle propulsion fallback).
 fn sample_stations() -> ComponentStations {
     ComponentStations {
         wing: station(20.0, 0.0),
@@ -81,12 +82,13 @@ fn build_statement(
         landing_fuel_items: Vec::new(),
         unusable_fuel_items: Vec::new(),
         flops: None,
+        flops_gear_split_kg: None,
     })
     .expect("a consistent hand-built statement validates")
 }
 
 #[test]
-fn state_identities_match_the_legacy_breakdown_sums() {
+fn state_identities_match_the_breakdown_sums() {
     let masses = sample_masses();
     let stations = sample_stations();
     let takeoff_fuel_items = vec![fuel_item("fuel-takeoff", 12_000.0, [20.0, 0.0, 1.0])];
@@ -183,22 +185,13 @@ fn the_flops_split_preserves_systems_and_furnishings_totals() {
         landing_fuel_items: Vec::new(),
         unusable_fuel_items: Vec::new(),
         flops: Some(&flops),
+        flops_gear_split_kg: None,
     })
     .expect("a consistent FLOPS-split statement validates");
 
-    let totals = statement.group_totals(LoadState::ZeroFuel);
-    let systems_total: f64 = totals
-        .iter()
-        .filter(|(group, _)| *group == MassGroup::Systems)
-        .map(|(_, mass_kg)| *mass_kg)
-        .sum();
-    let furnishings_and_operating_total: f64 = totals
-        .iter()
-        .filter(|(group, _)| {
-            *group == MassGroup::Furnishings || *group == MassGroup::OperatingItems
-        })
-        .map(|(_, mass_kg)| *mass_kg)
-        .sum();
+    let systems_total = group_mass(&statement, MassGroup::Systems);
+    let furnishings_and_operating_total = group_mass(&statement, MassGroup::Furnishings)
+        + group_mass(&statement, MassGroup::OperatingItems);
 
     assert!(
         (systems_total - masses.systems).abs() < 1.0e-6,
@@ -245,9 +238,74 @@ fn the_flops_split_preserves_systems_and_furnishings_totals() {
         assert_eq!(
             item.method,
             MassMethod::Correlation("FLOPS"),
-            "a statement carrying FLOPS groups must not retain a legacy label for {id}"
+            "a statement carrying FLOPS groups must not retain a Torenbeek-comparison label for {id}"
         );
     }
+}
+
+/// The FLOPS main/nose gear split, read as a fraction and applied to
+/// [`MassBreakdown::gear`], places the two gear items at that fraction
+/// rather than the fixed default fraction.
+#[test]
+fn a_flops_gear_split_overrides_the_default_nose_fraction() {
+    let masses = sample_masses();
+    let stations = sample_stations();
+    // FLOPS-typical A320-class split (11.2% nose), deliberately
+    // not summing to `masses.gear` (2_670.0 + 330.0 = 3_000.0 here, but the
+    // fraction, not the absolute pair, is what this reads): the test would
+    // still pass if the two values were scaled by any positive constant.
+    let flops_gear_split_kg = Some((2_670.0, 330.0));
+    let statement = MassStatement::build(MassStatementInputs {
+        masses: &masses,
+        stations: &stations,
+        payload_items: &[],
+        takeoff_fuel_items: Vec::new(),
+        landing_fuel_items: Vec::new(),
+        unusable_fuel_items: Vec::new(),
+        flops: None,
+        flops_gear_split_kg,
+    })
+    .expect("a consistent FLOPS-gear-split statement validates");
+
+    let mass_of = |id: &str| -> f64 {
+        statement
+            .ledger()
+            .items()
+            .iter()
+            .find(|item| item.id == id)
+            .map_or(0.0, |item| item.mass_kg)
+    };
+    let nose_mass = mass_of("nose_gear");
+    let main_mass = mass_of("main_gear");
+    assert!(close(nose_mass + main_mass, masses.gear));
+    assert!(
+        close(nose_mass / masses.gear, 330.0 / 3_000.0),
+        "nose fraction {} expected {}",
+        nose_mass / masses.gear,
+        330.0 / 3_000.0
+    );
+
+    // The `None` path uses the fixed fraction instead, and differs
+    // from the FLOPS-split result above: the two are not accidentally the
+    // same split.
+    let fixed_split = MassStatement::build(MassStatementInputs {
+        masses: &masses,
+        stations: &stations,
+        payload_items: &[],
+        takeoff_fuel_items: Vec::new(),
+        landing_fuel_items: Vec::new(),
+        unusable_fuel_items: Vec::new(),
+        flops: None,
+        flops_gear_split_kg: None,
+    })
+    .expect("the fixed-split statement validates");
+    let fixed_split_nose_mass = fixed_split
+        .ledger()
+        .items()
+        .iter()
+        .find(|item| item.id == "nose_gear")
+        .map_or(0.0, |item| item.mass_kg);
+    assert!((fixed_split_nose_mass - nose_mass).abs() > 1.0);
 }
 
 /// The FLOPS fixture of [`the_flops_split_preserves_systems_and_furnishings_totals`],
@@ -311,6 +369,7 @@ fn flops_statement(
         landing_fuel_items: Vec::new(),
         unusable_fuel_items,
         flops: Some(flops),
+        flops_gear_split_kg: None,
     })
 }
 
@@ -465,8 +524,9 @@ fn ledger_method_labels_follow_the_authoritative_mass_architecture() {
         landing_fuel_items: Vec::new(),
         unusable_fuel_items: Vec::new(),
         flops: Some(&flops),
+        flops_gear_split_kg: None,
     };
-    let legacy_inputs = || MassStatementInputs {
+    let comparison_inputs = || MassStatementInputs {
         masses: &masses,
         stations: &stations,
         payload_items: &[],
@@ -474,6 +534,7 @@ fn ledger_method_labels_follow_the_authoritative_mass_architecture() {
         landing_fuel_items: Vec::new(),
         unusable_fuel_items: Vec::new(),
         flops: None,
+        flops_gear_split_kg: None,
     };
     let label = |statement: &MassStatement, id: &str| {
         statement
@@ -486,7 +547,7 @@ fn ledger_method_labels_follow_the_authoritative_mass_architecture() {
     };
 
     // The pure architecture owns every replaceable group, even if a caller
-    // mutates one of the legacy selector mirrors after construction.
+    // mutates one of the per-group selector mirrors after construction.
     let stale = alas_config::MassModelConfig {
         systems_mass_method: alas_config::SystemsMassMethod::ReferenceCompatibleFractions,
         ..alas_config::MassModelConfig::default()
@@ -513,31 +574,33 @@ fn ledger_method_labels_follow_the_authoritative_mass_architecture() {
         MassMethod::Correlation("FLOPS")
     );
 
-    // The legacy buildup is still available only when the architecture is
+    // The Torenbeek buildup is available only when the architecture is
     // explicitly selected by name.
-    let mut legacy = alas_config::MassModelConfig {
+    let mut comparison = alas_config::MassModelConfig {
         mass_architecture: MassArchitecture::LegacyReferenceCompatibleComparison,
         ..alas_config::MassModelConfig::default()
     };
-    legacy.apply_architecture();
-    let legacy_statement =
-        MassStatement::build_with_methods(legacy_inputs(), LedgerMethods::from_mass_model(&legacy))
-            .expect("valid legacy comparison statement");
+    comparison.apply_architecture();
+    let comparison_statement = MassStatement::build_with_methods(
+        comparison_inputs(),
+        LedgerMethods::from_mass_model(&comparison),
+    )
+    .expect("valid comparison-architecture statement");
     assert_eq!(
-        label(&legacy_statement, "wing"),
+        label(&comparison_statement, "wing"),
         MassMethod::Correlation("Torenbeek")
     );
     assert_eq!(
-        label(&legacy_statement, "main_gear"),
+        label(&comparison_statement, "main_gear"),
         MassMethod::TakeoffMassFraction
     );
     assert_eq!(
-        label(&legacy_statement, "propulsion"),
+        label(&comparison_statement, "propulsion"),
         MassMethod::Correlation("thrust-to-weight")
     );
 }
 
-// Building the default product aircraft and running the legacy mass
+// Building the default product aircraft and running the Torenbeek-comparison mass
 // analysis are assertions that the default configuration is valid, so a
 // failed expect here is that assertion failing, not a library invariant
 // being broken.
@@ -578,6 +641,7 @@ fn the_default_aircraft_ledger_tensor_is_physical_and_plausible() {
         landing_fuel_items: Vec::new(),
         unusable_fuel_items: Vec::new(),
         flops: None,
+        flops_gear_split_kg: None,
     })
     .expect("the default aircraft ledger validates");
 

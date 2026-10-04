@@ -42,6 +42,7 @@ pub(super) fn check_mesh_health(
     };
     let mut warnings = Vec::new();
 
+    check_finite_reals(deck)?;
     check_perpendicularity(stations, regions, wsg, &mut report, &mut warnings);
     check_warping(deck, &mut report, &mut warnings);
     check_degenerate_triangles(deck, &mut report)?;
@@ -50,6 +51,65 @@ pub(super) fn check_mesh_health(
 
     report.warnings = warnings;
     Ok(report)
+}
+
+/// Every real the deck carries must be finite.
+///
+/// A NaN compares false against every threshold below, so without this check
+/// a NaN grid passes all of them. The large-field writer then has no spelling
+/// for it and writes `0.`, which gives the solver a plausible deck of the
+/// wrong wing. Checked first because the geometric checks mean nothing
+/// over a non-finite coordinate.
+fn check_finite_reals(deck: &Deck) -> Result<(), MeshError> {
+    let cards: [(&'static str, Vec<f64>); 7] = [
+        (
+            "GRID",
+            deck.grids.iter().flat_map(|grid| grid.xyz).collect(),
+        ),
+        (
+            "MAT1",
+            deck.materials
+                .iter()
+                .flat_map(|m| [m.e, m.g, m.nu, m.rho])
+                .collect(),
+        ),
+        (
+            "PSHELL",
+            deck.shell_properties.iter().map(|p| p.t).collect(),
+        ),
+        (
+            "PBARL",
+            deck.bar_properties
+                .iter()
+                .flat_map(|p| p.dim.iter().copied())
+                .collect(),
+        ),
+        ("CBAR", deck.bars.iter().flat_map(|bar| bar.x).collect()),
+        (
+            "CONM2",
+            deck.masses
+                .iter()
+                .flat_map(|m| [m.mass, m.offset[0], m.offset[1], m.offset[2]])
+                .collect(),
+        ),
+        (
+            "RBE3",
+            deck.rigid_elements.iter().map(|r| r.weight).collect(),
+        ),
+    ];
+    let mut first_card = None;
+    let mut count = 0;
+    for (card, values) in &cards {
+        let bad = values.iter().filter(|value| !value.is_finite()).count();
+        if bad > 0 {
+            first_card.get_or_insert(*card);
+            count += bad;
+        }
+    }
+    match first_card {
+        Some(card) => Err(MeshError::NonFiniteValue { card, count }),
+        None => Ok(()),
+    }
 }
 
 /// Each rib's realized cut should come out perpendicular to the local leading
@@ -390,6 +450,36 @@ mod tests {
                 worst: -1.25
             })
         );
+    }
+
+    #[test]
+    fn a_non_finite_real_is_fatal_rather_than_written_as_zero() {
+        let deck = deck_with(&[[0.0, 1.0, 0.0], [0.0, f64::NAN, 0.0]]);
+        // The root-plane check cannot see it: NaN is not below anything.
+        assert!(check_root_plane(&deck).is_ok());
+        assert_eq!(
+            check_finite_reals(&deck),
+            Err(MeshError::NonFiniteValue {
+                card: "GRID",
+                count: 1
+            })
+        );
+
+        let mut deck = deck_with(&[[0.0, 1.0, 0.0]]);
+        deck.shell_properties.push(crate::mesh::cards::Pshell {
+            pid: 1,
+            mid1: 1,
+            t: f64::INFINITY,
+            mid2: 1,
+        });
+        assert_eq!(
+            check_finite_reals(&deck),
+            Err(MeshError::NonFiniteValue {
+                card: "PSHELL",
+                count: 1
+            })
+        );
+        assert!(check_finite_reals(&deck_with(&[[1.0, 2.0, 3.0]])).is_ok());
     }
 
     #[test]

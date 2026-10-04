@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/config/airports.py
-// Reference: alas @ rust-port-baseline.
 
 //! Aerodromes the field-performance check and the route are evaluated at.
 //!
@@ -147,7 +146,7 @@ pub fn get(name_or_icao: &str) -> Result<&'static Airport, UnknownAirport> {
     {
         return Ok(airport);
     }
-    crate::airport_io::legacy_by_name_or_icao(name_or_icao)
+    crate::airport_io::airport_by_name_or_icao(name_or_icao)
         .ok_or_else(|| UnknownAirport(name_or_icao.to_owned()))
 }
 

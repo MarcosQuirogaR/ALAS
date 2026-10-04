@@ -234,7 +234,8 @@ fn packaged_cli_invocation_preserves_diagnostics_and_failure_status() {
 fn preset_config(preset: &str, mission_enabled: bool) -> String {
     serde_json::json!({
         "preset": preset,
-        "mission": {"enabled": mission_enabled}
+        "mission": {"enabled": mission_enabled},
+        "structures": {"run_nastran": false}
     })
     .to_string()
 }
@@ -248,6 +249,7 @@ fn preset_tool_config(
     serde_json::json!({
         "preset": preset,
         "mission": {"enabled": mission_enabled},
+        "structures": {"run_nastran": false},
         "mses": {"enabled": mses_enabled, "mses_dir": mses_dir}
     })
     .to_string()
@@ -268,6 +270,7 @@ fn preset_forced_transition_tool_config(
     serde_json::json!({
         "preset": preset,
         "mission": {"enabled": mission_enabled},
+        "structures": {"run_nastran": false},
         "mses": {
             "enabled": true,
             "mses_dir": mses_dir,

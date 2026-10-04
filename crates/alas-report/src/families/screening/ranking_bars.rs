@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/reporting/airfoil_sweep_figures.py (`fig_ranking_bars`)
-// Reference: alas @ rust-port-baseline.
 
 //! Top-candidate ranking bar chart: the plain "what should I pick"
 //! read-out.

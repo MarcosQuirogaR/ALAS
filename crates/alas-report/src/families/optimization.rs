@@ -2,144 +2,19 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/reporting/visualization.py
-// Reference: alas @ rust-port-baseline.
 
-//! Optimization convergence history and airfoil shape evolution.
+//! Optimization history and airfoil shape evolution.
 
-use crate::chart_kit::{draw_colorbar, draw_legend, draw_title, LegendMarker};
-use crate::colormap::Colormap;
-use crate::scene::{Axes2D, Color, Fill, Scene, SceneElement, Stroke};
+use crate::chart_kit::{draw_legend, draw_title, LegendMarker};
+use crate::scene::{Axes2D, Color, Scene, Stroke};
 use crate::theme::{get_palette, BASELINE_COLOR, OPTIMIZED_COLOR};
-use alas_opt::history::OptimizationHistory;
 
-/// The objective value of every valid evaluation, colored by span, with
-/// the running best: the mission quantity the search minimises where the
-/// native objective recorded one, and the ranking cost otherwise (a
-/// delegated evaluator reports only that).
-pub fn figure_optimization_history(history: &OptimizationHistory, theme: Option<&str>) -> Scene {
-    let pal = get_palette(theme);
-    let mut scene = Scene::new(720.0, 480.0, Some(Color::from_hex(pal.bg)));
-    let valid: Vec<usize> = (0..history.n_evaluations())
-        .filter(|&index| history.valid.get(index).copied().unwrap_or(false))
-        .collect();
-    let n_eval = valid.len();
-    let title = format!("Optimization convergence ({n_eval} valid evaluations)");
-    scene.title = Some(title.clone());
-    draw_title(&mut scene, &title, pal);
-    scene.suppress_derived_title();
-
-    if n_eval == 0 {
-        return scene;
-    }
-
-    let objective: Vec<f64> = valid
-        .iter()
-        .map(|&index| {
-            history
-                .objective_value
-                .get(index)
-                .copied()
-                .filter(|value| value.is_finite())
-                .unwrap_or_else(|| history.cost.get(index).copied().unwrap_or(f64::NAN))
-        })
-        .collect();
-    let spans: Vec<f64> = valid
-        .iter()
-        .map(|&index| history.span_m.get(index).copied().unwrap_or(0.0))
-        .collect();
-    let (y_min, y_max) = padded_range(&objective);
-    let (span_min, span_max) = finite_range(&spans);
-    let axes = Axes2D::new(
-        (64.0, 42.0, 520.0, 350.0),
-        (0.5, n_eval as f64 + 0.5),
-        (y_min, y_max),
-    );
-    axes.draw_frame_with_labels(&mut scene, pal, "valid evaluation #", "objective");
-
-    let cmap = Colormap::Viridis;
-    let span_delta = (span_max - span_min).max(1e-12);
-    for (index, &value) in objective.iter().enumerate() {
-        if !value.is_finite() {
-            continue;
-        }
-        let color = cmap.sample((spans[index] - span_min) / span_delta);
-        let point = axes.map_point(index as f64 + 1.0, value);
-        scene.add(SceneElement::Circle {
-            center: point,
-            radius: 3.5,
-            fill: Some(Fill::new(Color::rgba(color.r, color.g, color.b, 179))),
-            stroke: None,
-        });
-    }
-
-    let mut best = f64::INFINITY;
-    let mut best_so_far = Vec::with_capacity(n_eval);
-    for (index, &value) in objective.iter().enumerate() {
-        if value.is_finite() {
-            best = best.min(value);
-        }
-        if best.is_finite() {
-            best_so_far.push((index as f64 + 1.0, best));
-        }
-    }
-    axes.add_line_series(
-        &mut scene,
-        &best_so_far,
-        Stroke::new(Color::from_hex(OPTIMIZED_COLOR), 2.0),
-    );
-
-    draw_legend(
-        &mut scene,
-        [
-            axes.left + axes.width - 142.0,
-            axes.top + axes.height - 42.0,
-        ],
-        &[
-            (
-                "Evaluation".to_owned(),
-                LegendMarker::Circle(Color::from_hex("#35a27f")),
-            ),
-            (
-                "best so far".to_owned(),
-                LegendMarker::Line(Stroke::new(Color::from_hex(OPTIMIZED_COLOR), 2.0)),
-            ),
-        ],
-        pal,
-        8.0,
-    );
-    draw_colorbar(
-        &mut scene,
-        (610.0, axes.top, 16.0, axes.height),
-        cmap,
-        span_min,
-        span_max,
-        "span [m]",
-        pal,
-    );
-
-    scene
-}
-
-fn finite_range(values: &[f64]) -> (f64, f64) {
-    let finite: Vec<f64> = values
-        .iter()
-        .copied()
-        .filter(|value| value.is_finite())
-        .collect();
-    if finite.is_empty() {
-        return (0.0, 1.0);
-    }
-    let lo = finite.iter().copied().fold(f64::INFINITY, f64::min);
-    let hi = finite.iter().copied().fold(f64::NEG_INFINITY, f64::max);
-    (lo, hi)
-}
-
-fn padded_range(values: &[f64]) -> (f64, f64) {
-    let (lo, hi) = finite_range(values);
-    let span = (hi - lo).max(hi.abs().max(1.0) * 1e-3);
-    let pad = span * 0.08;
-    (lo - pad, hi + pad)
-}
+mod history;
+pub use history::{
+    figure_evaluation_trace, figure_optimization_history, figure_optimization_history_labelled,
+    figure_optimization_run, BEST_VALID_LABEL, FAILED_LABEL, HISTORY_TITLE, HISTORY_X_LABEL,
+    MUTED_DISPLAY_CAP, MUTED_RADIUS, REJECTED_LABEL, VALID_LABEL, VALID_RADIUS, VERIFIED_RADIUS,
+};
 
 /// Generate airfoil cross-section geometry comparison (Initial vs Optimized).
 pub fn figure_airfoil_comparison(
@@ -197,53 +72,7 @@ pub fn figure_airfoil_comparison(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alas_config::design_variables::DesignVector;
-
-    #[test]
-    fn history_plots_objective_scatter_span_colorbar_and_running_best() {
-        let mut history = OptimizationHistory::new();
-        let dv = DesignVector::default();
-        for (fuel, span) in [(9_000.0, 28.0), (8_500.0, 30.0), (8_800.0, 29.0)] {
-            history.record_mission_sized(
-                dv, true, 0.5, 17.0, span, 2.0, 400.0, 1.0, "", fuel, 80_000.0, fuel, 0.0, 0.0,
-            );
-        }
-        // An invalid evaluation is not plotted.
-        history.record(dv, false, 1.0e6, 0.0, 0.0, 0.0, 0.0, 0.0, "trim_solve");
-
-        let scene = figure_optimization_history(&history, Some("dark"));
-        let circles = scene
-            .elements
-            .iter()
-            .filter(|element| matches!(element, SceneElement::Circle { .. }))
-            .count();
-        let colorbar_cells = scene
-            .elements
-            .iter()
-            .filter(|element| matches!(element, SceneElement::Rect { fill: Some(_), .. }))
-            .count();
-        let polylines = scene
-            .elements
-            .iter()
-            .filter(|element| matches!(element, SceneElement::Polyline { .. }))
-            .count();
-        let labels: Vec<&str> = scene
-            .elements
-            .iter()
-            .filter_map(|element| match element {
-                SceneElement::Text { text, .. } => Some(text.as_str()),
-                _ => None,
-            })
-            .collect();
-
-        assert_eq!(circles, 4, "three evaluations plus one legend marker");
-        assert!(colorbar_cells >= 64, "Viridis colorbar cells are present");
-        assert_eq!(polylines, 1, "running-best overlay is a line series");
-        assert!(labels.contains(&"valid evaluation #"));
-        assert!(labels.contains(&"objective"));
-        assert!(labels.contains(&"Span [m]"));
-        assert!(labels.contains(&"Best so far"));
-    }
+    use crate::scene::SceneElement;
 
     #[test]
     fn airfoil_comparison_has_a_palette_colored_visible_title() {

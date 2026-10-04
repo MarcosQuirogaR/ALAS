@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/reporting/visualization.py, figure_mission_drag_components (L4617-4659)
-// Reference: alas @ rust-port-baseline.
 
 //! Single-panel drag-component breakdown: parasite, induced, compressibility,
 //! miscellaneous and total CD, overlaid vs. time.

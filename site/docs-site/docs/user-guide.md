@@ -42,11 +42,15 @@ The four pages you need before a first run.
 
 The mission you want flown, and the aircraft family that will fly it.
 
-- **Aircraft preset**: seven airliners ship with the application: **AVE**
+- **Aircraft preset**: eight aircraft ship with the application: **AVE**
   (the long-range reference twin), **A340-300**, **A380-800**, **B787-9**,
-  **A320-200**, **A220-300** and **DC-10**. Choosing one swaps the geometry
+  **A320-200**, **A220-300**, **DC-10** and **ATR72-600**. Choosing one swaps the geometry
   scaffold, engine, cabin defaults and design-space bounds together, as a
-  consistent set. It is the fastest way to start from something sane.
+  consistent set. It is the fastest way to start from something sane. With
+  no preset the brief is a
+  [clean-sheet design](design-space-and-optimizer.md#clean-sheet-design); to
+  start from a preset and edit it freely, choose **New aircraft**, which
+  clears the preset identity and keeps the geometry editable.
 - **Engine**: selecting a different engine re-scales nacelle geometry,
   mounting position and the wetted-area drag contribution automatically.
 - **Cruise Mach and altitude**: the design point everything is sized
@@ -201,7 +205,8 @@ working on.
 ### Optimizer & weights
 
 Solver settings (strategy, population size, iteration count, tolerance,
-random seed, worker count) and the objective weights described in
+random seed, worker count), the objective and the takeoff-mass mode
+described in
 [Design space & optimizer](design-space-and-optimizer.md#the-objective-function).
 
 Two settings deserve attention. **Seeding near the initial design** starts the

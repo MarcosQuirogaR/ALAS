@@ -91,33 +91,6 @@ fn unavailable(reasons: Vec<FlopsTransportUnverifiedReason>) -> FlopsTransportEv
     }
 }
 
-/// Evaluate a built aircraft with NASA/TM-2017-219627 transport inputs.
-///
-/// Every optional datum in [`FlopsTransportConfig`] is a declared physical
-/// input. Missing data remain visible as `Unverified`; no preset fraction is
-/// used as a fallback. The returned input record is retained with the result
-/// so an audit can reproduce exactly which architecture was evaluated.
-pub fn evaluate_product(
-    plane: &Airplane,
-    requirements: &DesignRequirements,
-    geometry: &GeometryConfig,
-    controls: &ControlSurfacesConfig,
-    cabin: &CabinConfig,
-    flops: &FlopsTransportConfig,
-    turboprop: &FlopsTurbopropConfig,
-) -> FlopsTransportEvaluation {
-    evaluate_product_at_design_gross_mass(
-        plane,
-        requirements,
-        geometry,
-        controls,
-        cabin,
-        flops,
-        turboprop,
-        None,
-    )
-}
-
 /// The checked baggage FLOPS charges to the cargo containers, kg.
 ///
 /// The cabin configuration owns the baggage share of the single combined
@@ -156,7 +129,7 @@ fn containerized_baggage_kg(
     Ok(share * passengers * per_passenger_kg)
 }
 
-/// [`evaluate_product`] with the FLOPS design gross mass `DG` declared
+/// The product evaluation with the FLOPS design gross mass `DG` declared
 /// separately from the takeoff-mass requirement.
 ///
 /// `None` sizes at `requirements.mtow_kg`, the takeoff mass of the case being
@@ -164,7 +137,7 @@ fn containerized_baggage_kg(
 /// `flops_structure.design_gross_mass_kg` override, which is also how a
 /// fixed-aircraft mission closure keeps the surface-controls term at the
 /// aircraft's design weight while the closure mass moves.
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments)] // one argument per resolved FLOPS input
 pub fn evaluate_product_at_design_gross_mass(
     plane: &Airplane,
     requirements: &DesignRequirements,
@@ -480,6 +453,28 @@ mod tests {
     use alas_geom::aircraft::airplane::Airplane;
     use alas_geom::builder::AircraftBuilder;
 
+    /// The product evaluation with no declared design gross mass.
+    fn evaluate_product(
+        plane: &Airplane,
+        requirements: &DesignRequirements,
+        geometry: &GeometryConfig,
+        controls: &ControlSurfacesConfig,
+        cabin: &alas_config::CabinConfig,
+        flops: &FlopsTransportConfig,
+        turboprop: &alas_config::FlopsTurbopropConfig,
+    ) -> FlopsTransportEvaluation {
+        evaluate_product_at_design_gross_mass(
+            plane,
+            requirements,
+            geometry,
+            controls,
+            cabin,
+            flops,
+            turboprop,
+            None,
+        )
+    }
+
     #[test]
     fn absent_geometry_is_unverified_instead_of_using_a_mass_fraction() {
         let plane = Airplane {
@@ -500,10 +495,10 @@ mod tests {
             &FlopsTransportConfig::default(),
             &alas_config::FlopsTurbopropConfig::default(),
         );
-        assert_eq!(
-            result.verification_status().as_str(),
-            "unverified_architecture"
-        );
+        assert!(matches!(
+            result,
+            FlopsTransportEvaluation::Unverified { .. }
+        ));
         let FlopsTransportEvaluation::Unverified { reasons, .. } = result else {
             panic!("missing geometry must not produce a verified systems mass");
         };
@@ -579,10 +574,7 @@ mod tests {
             &flops,
             &alas_config::FlopsTurbopropConfig::default(),
         );
-        assert_eq!(
-            result.verification_status().as_str(),
-            "verified_architecture"
-        );
+        assert!(matches!(result, FlopsTransportEvaluation::Verified { .. }));
         let FlopsTransportEvaluation::Verified {
             breakdown,
             inputs,
@@ -739,10 +731,10 @@ mod tests {
             &complete_test_config(),
             &alas_config::FlopsTurbopropConfig::default(),
         );
-        assert_eq!(
-            result.verification_status().as_str(),
-            "unverified_architecture"
-        );
+        assert!(matches!(
+            result,
+            FlopsTransportEvaluation::Unverified { .. }
+        ));
     }
 
     /// The container tare is hardware, so it exists only on an aircraft whose

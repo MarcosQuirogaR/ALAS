@@ -9,15 +9,17 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::AtomicBool;
 
-use alas_aero::analysis::{AeroAnalysis, PolarSweep};
+use alas_aero::analysis::PolarSweep;
 use alas_aero::avl::{parse_total_forces, render_geometry, AvlDeckRequest, AvlModel, AvlPolar};
-use alas_atmo::Atmosphere;
-use alas_config::airports::get as get_airport;
 use alas_config::AlasConfig;
-use alas_exec::avl::{run_avl, AvlProcessStatus};
+use alas_exec::avl::{run_avl_with_options_cancellable, AvlProcessStatus, AvlRunOptions};
 
 use crate::full_analysis::AnalysisReport;
+
+mod reference;
+use reference::{rejected_reference_result, takeoff_comparison_reference};
 
 /// Product-level state of a requested native AVL analysis.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -26,10 +28,15 @@ pub enum AvlAnalysisStatus {
     NotConfigured,
     /// The aircraft could not be represented by the declared AVL deck scope.
     DeckRejected,
+    /// The configured timeout was not a finite number of seconds greater than
+    /// zero; the solver was not launched.
+    InvalidTimeout,
     /// The executable could not be launched.
     LaunchFailed,
     /// The native process exceeded its deadline.
     TimedOut,
+    /// Cancellation stopped the owned native process.
+    Cancelled,
     /// AVL returned a failing process status.
     SolverFailed,
     /// AVL returned success without all fresh force files.
@@ -48,8 +55,10 @@ impl AvlAnalysisStatus {
         match self {
             Self::NotConfigured => "not_configured",
             Self::DeckRejected => "deck_rejected",
+            Self::InvalidTimeout => "invalid_timeout",
             Self::LaunchFailed => "launch_failed",
             Self::TimedOut => "timed_out",
+            Self::Cancelled => "cancelled",
             Self::SolverFailed => "solver_failed",
             Self::OutputMissing => "output_missing",
             Self::ParseFailed => "parse_failed",
@@ -132,57 +141,12 @@ impl AvlAnalysisResult {
     }
 }
 
-/// Export, run, parse, and classify one native AVL sweep.
-pub fn run_avl_analysis(
-    report: &AnalysisReport,
-    config: &AlasConfig,
-    output_dir: &Path,
-    executable: Option<&Path>,
-    timeout_seconds: f64,
-) -> AvlAnalysisResult {
-    let reference = AvlComparisonReference {
-        phase: "cruise".to_owned(),
-        mach: config.requirements.cruise_mach,
-        altitude_m: config.requirements.cruise_altitude_m,
-        vlm_polar: report.polar.clone(),
-        geometric_alpha_deg: report.polar.geometric_alpha_deg.clone(),
-    };
-    run_avl_analysis_with_reference(
-        report,
-        config,
-        output_dir,
-        executable,
-        timeout_seconds,
-        reference,
-    )
-}
-
-/// Compare AVL with ALAS VLM at the configured takeoff-climb condition.
-///
-/// The optimizer and the cruise report remain unchanged. This is a separate
-/// diagnostic run at the midpoint of the configured takeoff segment, where
-/// the linear Prandtl-Glauert model is comfortably inside its documented
-/// expected-valid domain for ordinary transport-aircraft schedules.
-pub fn run_avl_takeoff_comparison(
-    report: &AnalysisReport,
-    config: &AlasConfig,
-    output_dir: &Path,
-    executable: Option<&Path>,
-    timeout_seconds: f64,
-) -> AvlAnalysisResult {
-    let reference = match takeoff_comparison_reference(report, config) {
-        Ok(reference) => reference,
-        Err(error) => return rejected_reference_result(output_dir, executable, error),
-    };
-    run_avl_analysis_with_reference(
-        report,
-        config,
-        output_dir,
-        executable,
-        timeout_seconds,
-        reference,
-    )
-}
+#[path = "avl_execution.rs"]
+mod execution;
+pub use execution::{
+    run_avl_analysis, run_avl_analysis_cancellable, run_avl_takeoff_comparison,
+    run_avl_takeoff_comparison_cancellable,
+};
 
 fn run_avl_analysis_with_reference(
     report: &AnalysisReport,
@@ -191,6 +155,7 @@ fn run_avl_analysis_with_reference(
     executable: Option<&Path>,
     timeout_seconds: f64,
     reference: AvlComparisonReference,
+    cancel: Option<&AtomicBool>,
 ) -> AvlAnalysisResult {
     let geometry_path = output_dir.join("avl/optimized_aircraft.avl");
     let base = geometry_path.with_extension("");
@@ -240,11 +205,13 @@ fn run_avl_analysis_with_reference(
             Some("native AVL executable is not configured; geometry deck exported".to_owned());
         return result;
     };
-    let process = run_avl(
+    let process = run_avl_with_options_cancellable(
         executable,
         &geometry_path,
         &reference.geometric_alpha_deg,
         timeout_seconds,
+        &AvlRunOptions::default(),
+        cancel,
     );
     result.session_path = process.session_path;
     result.force_paths = process.force_paths;
@@ -256,8 +223,18 @@ fn run_avl_analysis_with_reference(
             result.error = process.error;
             return result;
         }
+        AvlProcessStatus::InvalidTimeout => {
+            result.status = AvlAnalysisStatus::InvalidTimeout;
+            result.error = process.error;
+            return result;
+        }
         AvlProcessStatus::LaunchFailed => {
             result.status = AvlAnalysisStatus::LaunchFailed;
+            result.error = process.error;
+            return result;
+        }
+        AvlProcessStatus::Cancelled => {
+            result.status = AvlAnalysisStatus::Cancelled;
             result.error = process.error;
             return result;
         }
@@ -386,7 +363,13 @@ pub fn classify_avl_comparison(
             }
         }
     }
-    let wing_normal_mach = wing_normal_mach(reference.mach, report.design.sweep_deg);
+    let wing_normal_mach = wing_normal_mach(
+        reference.mach,
+        alas_aero::analysis::AeroAnalysis::quarter_chord_sweep_deg(
+            &report.airplane,
+            report.design.sweep_deg,
+        ),
+    );
     if !pg_domain_supported(wing_normal_mach) {
         mismatches.push(format!(
             "wing-normal Mach {wing_normal_mach:.3} is outside AVL's documented Prandtl-Glauert expected-valid range (<0.7)"
@@ -399,70 +382,6 @@ pub fn classify_avl_comparison(
         ])
     } else {
         AvlComparisonStatus::Rejected(mismatches.join("; "))
-    }
-}
-
-fn takeoff_comparison_reference(
-    report: &AnalysisReport,
-    config: &AlasConfig,
-) -> Result<AvlComparisonReference, String> {
-    let airport = get_airport(&config.departure_airport)
-        .map_err(|error| format!("takeoff comparison airport is unavailable: {error}"))?;
-    let altitude_m = airport.elevation_m + 0.5 * config.mission.profile.takeoff_altitude_gain_m;
-    let atmosphere = Atmosphere::new(altitude_m);
-    let speed_of_sound = atmosphere.speed_of_sound();
-    let airspeed = config.mission.profile.takeoff_air_speed_m_s;
-    if !airspeed.is_finite()
-        || airspeed <= 0.0
-        || !speed_of_sound.is_finite()
-        || speed_of_sound <= 0.0
-    {
-        return Err(
-            "takeoff comparison requires finite positive airspeed and atmosphere".to_owned(),
-        );
-    }
-    let mach = airspeed / speed_of_sound;
-    let mut analysis = config.analysis.clone();
-    analysis.spanwise_resolution = analysis.fine_spanwise_resolution;
-    analysis.chordwise_resolution = analysis.fine_chordwise_resolution;
-    let vlm_polar = AeroAnalysis::new(
-        &report.airplane,
-        AeroAnalysis::quarter_chord_sweep_deg(&report.airplane, report.design.sweep_deg),
-        Some(config.geometry.clone()),
-        Some(config.drag_model.clone()),
-        Some(analysis),
-    )
-    .run_sweep(mach, altitude_m)
-    .map_err(|error| format!("takeoff-condition ALAS VLM sweep failed: {error}"))?;
-    let geometric_alpha_deg = vlm_polar.geometric_alpha_deg.clone();
-    Ok(AvlComparisonReference {
-        phase: "takeoff climb midpoint".to_owned(),
-        mach,
-        altitude_m,
-        vlm_polar,
-        geometric_alpha_deg,
-    })
-}
-
-fn rejected_reference_result(
-    output_dir: &Path,
-    executable: Option<&Path>,
-    error: String,
-) -> AvlAnalysisResult {
-    let geometry_path = output_dir.join("avl/optimized_aircraft.avl");
-    let base = geometry_path.with_extension("");
-    AvlAnalysisResult {
-        status: AvlAnalysisStatus::DeckRejected,
-        runtime_executable: executable.map(Path::to_path_buf),
-        geometry_path,
-        session_path: base.with_extension("avl.session.txt"),
-        force_paths: Vec::new(),
-        stdout_path: base.with_extension("avl.stdout.txt"),
-        stderr_path: base.with_extension("avl.stderr.txt"),
-        polar: None,
-        comparison_reference: None,
-        comparison: AvlComparisonStatus::NotEvaluated,
-        error: Some(error),
     }
 }
 
@@ -485,6 +404,8 @@ fn close(left: f64, right: f64) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alas_atmo::Atmosphere;
+    use alas_config::airports::get as get_airport;
 
     #[test]
     fn status_text_keeps_runtime_and_comparison_failures_distinct() {
