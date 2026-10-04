@@ -93,9 +93,19 @@ pub(super) fn show_fullscreen_result(
                     ui.add_space(6.0);
                     // Keep the scene above the footer and inside the inset
                     // frame, including on the smallest supported window.
+                    let openvsp = view_key
+                        .split(';')
+                        .any(|part| part == "figure=openvsp_cad_preview");
+                    let launch_row = if openvsp {
+                        super::openvsp::LAUNCH_ROW_HEIGHT
+                    } else {
+                        0.0
+                    };
                     let available = ui.available_size();
-                    let available = vec2(available.x.max(320.0), (available.y - 28.0).max(180.0));
-                    let canvas_rect = egui::Rect::from_min_size(ui.cursor().min, available);
+                    let available = vec2(
+                        available.x.max(320.0),
+                        (available.y - 28.0 - launch_row).max(180.0),
+                    );
                     // A double-click maximized the card; the same gesture on
                     // the maximized figure restores it.  The click that
                     // opened the overlay cannot re-trigger here because egui
@@ -144,11 +154,8 @@ pub(super) fn show_fullscreen_result(
                         );
                         restore |= response.double_clicked();
                     }
-                    if view_key
-                        .split(';')
-                        .any(|part| part == "figure=openvsp_cad_preview")
-                    {
-                        super::openvsp::show_launch_button(state, ui, canvas_rect);
+                    if openvsp {
+                        super::openvsp::show_launch_button(state, ui);
                     }
                 });
         });

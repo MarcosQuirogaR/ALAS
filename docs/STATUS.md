@@ -144,29 +144,42 @@ Ranked by what would most surprise someone using a result.
    only, not validated.** Each loading state is gated only by the mechanisms
    of its phase (`PhaseLimits`): rotation and the static-margin floor at
    takeoff, landing trim and ground mechanisms at landing, ground mechanisms
-   at OEW. The rotation limit is the nose-wheel liftoff moment balance at
-   VR = 1.10 VS (stall branch) with the all-engine thrust term and runway
-   friction (mu 0.02, an engineering estimate). Drag is omitted: it would move
-   the limit 0.3-0.4 %MAC and the omission is non-conservative. Elevator
-   authority is not derived (CL_h is a fixed estimate). Against published
-   limits, on the manufacturer's MAC frame:
-   - Forward, rotation at takeoff: A320 15.4 vs 17 (ACAP most-forward CG used
-     in the pavement-load analysis at MRW, not a certified limit) and A220
-     10.7 vs 12.0 (ARP p. 119, a flight envelope). The model admits a CG 1.6
-     and 1.3 %MAC further forward than the manufacturer does
-     (non-conservative). The A340 (26.0 vs 20.3, same ACAP provenance) is an
-     ignored known residual 5.7 points aft of the ACAP value; the A380 (33.3)
-     has only pavement-load figures (34.65-37.8) and is not an anchor. B787
-     (22.0), AVE (22.6) and ATR (22.3) are unanchored.
+   at OEW. The rotation limit is the nose-wheel lift-off moment balance about
+   the main-gear contact (Sadraey 2012, sec. 9.6.2 and 12.6) at VR = 1.10 VS
+   (stall branch) with the all-engine thrust term and runway friction (mu
+   0.02, an engineering estimate), the ledger pitch inertia transferred to
+   the contact (solved exactly, quadratic in the CG), 7 deg/s^2 pitch
+   acceleration for every class (Sadraey's Table 9.6 could not be confirmed;
+   optional config overrides exist) and a tail lift at full up-elevator
+   derived from the tail geometry, downwash in ground effect, a -25 deg class
+   elevator limit, the DATCOM plain-flap large-deflection correction (0.60 at
+   25 deg; other anchors not digitised from the figure) and a tail-section
+   lift cap (does not bind on the presets): CL_h -0.85 to -0.97. Drag is
+   omitted (about 1 %MAC or less). Against published limits, on the
+   manufacturer's MAC frame:
+   - Forward, rotation at takeoff: A320 9.2 vs 17 (ACAP most-forward CG used
+     in the pavement-load analysis at MRW, not a certified limit), A220 -3.0
+     vs 18.4 at 67,585 kg (ARP Table 3, certified flight and ground limit)
+     and A340 28.3 vs 20.3 (ACAP; aft of the published value, a known
+     residual, its test is ignored). Before the large-deflection correction
+     and the tail cap these were -17.5, -37.9 and 5.6. The A320 and A220
+     can still lift the nose wheel forward of the published limits, so
+     those are set by criteria the model does not carry (finding F-ROT-1). The takeoff state's
+     forward limit is then the maximum nose load on the A320 and A220 and
+     rotation elsewhere. A380 (25.0), B787 (-0.8), DC-10 (0.6), AVE (8.8)
+     and ATR (10.9) are unanchored. The elevator effectiveness keeps the
+     thin-airfoil value times an empirical large-deflection factor, still a
+     class-generic assumption (delta_e -25 deg).
    - Aft: the A320 aft limit is the minimum-nose-load ground limit (6 % nose
      load) and reproduces the published 40 %MAC. Tip-back is about 5 points
      too restrictive on the A320 (h_cg over the aft axle). The A220 aft limit
      is not weight-dependent in the model while the published one is (31.0 to
      37.3 %MAC), so it is too tight at mid weights. The aerodynamic aft limit
      never governs.
-   - DC-10 is a known failure: its rotation limit (32.3 %MAC) rejects the
-     loaded takeoff; the centerline tail engine puts the thrust line above the
-     CG and the main-gear station is not anchored to a source.
+   - DC-10: its rotation limit (0.6 %MAC) no longer rejects the loaded
+     takeoff (16.5 %MAC); the registered design fails the minimum nose load
+     at OEW (23.62 against 23.58 %MAC). Its main-gear station is not anchored
+     to a source.
    - OEW-CG residual: the A320 model OEW CG sits +7.85 %MAC aft of the ACAP
      nominal 26.5 %, so the A320 load-trim potato leaves the ground limits
      aft. The A320 OperationalReserve state (33.3) and the tank-burn path

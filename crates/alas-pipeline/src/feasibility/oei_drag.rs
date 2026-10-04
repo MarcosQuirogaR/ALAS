@@ -151,7 +151,7 @@ mod tests {
     #[test]
     fn sized_candidate_oei_evidence_gap_matches_optimizer_in_hot_and_cold_air() {
         use alas_config::airport_io::{register_custom_airport, CustomAirport};
-        use alas_config::ConstraintPolicy;
+        use alas_opt::mdo::ResidualRole;
         use alas_perf::performance::OeiClimbStatus;
 
         // Unique in-memory records avoid replacing the shared airport registry.
@@ -250,10 +250,10 @@ mod tests {
                 .iter()
                 .find(|residual| residual.id == "oei_second_segment")
                 .unwrap_or_else(|| panic!("optimizer OEI residual"));
-            assert_eq!(optimizer_residual.policy, ConstraintPolicy::Soft);
+            assert_eq!(optimizer_residual.role, ResidualRole::Preference);
             assert!(assessment.residuals.iter().any(|residual| {
                 residual.id == "oei_second_segment_evidence_gap"
-                    && residual.policy == ConstraintPolicy::Diagnostic
+                    && residual.role == ResidualRole::Diagnostic
             }));
             assert!(
                 (report_demand - optimizer_residual.limit).abs() < 1.0e-14,

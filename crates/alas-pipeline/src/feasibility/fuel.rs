@@ -80,6 +80,9 @@ pub enum CarriedFuelBasis {
 /// Distinct fuel masses governing one analyzed aircraft load case.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FuelLoadingAssessment {
+    /// The maximum-fuel Hard-MTOW design load, retained independently of a
+    /// flown route's dispatch. Route telemetry cannot redefine this envelope.
+    pub design_takeoff_loading: Option<alas_mass::loading::MtowFuelLoading>,
     /// `MTOW - zero-fuel mass`, in kilograms: the *usable*-fuel budget, with
     /// the resolved tank inventory's unusable fuel already reserved out of
     /// the reported component's gross fuel-system mass (see
@@ -95,6 +98,12 @@ pub struct FuelLoadingAssessment {
     pub zero_fuel_mass_kg: f64,
     /// Takeoff mass actually analyzed, in kilograms.
     pub analyzed_takeoff_mass_kg: f64,
+    /// Usable fuel the dispatched route loads at brake release, in kilograms,
+    /// when it differs in kind from the analyzed load: under Hard MTOW the
+    /// analyzed load is the sized design loading
+    /// ([`Self::design_takeoff_loading`]), and the route is flown at its own
+    /// dispatch mass. `None` when the analyzed load is the flown one.
+    pub flown_carried_fuel_kg: Option<f64>,
     /// Landing mass reached by a complete mission, when available, in kilograms.
     ///
     /// This is an analyzed state, not the maximum-landing-mass limit or the
@@ -122,12 +131,14 @@ pub struct FuelLoadingAssessment {
 impl Default for FuelLoadingAssessment {
     fn default() -> Self {
         Self {
+            design_takeoff_loading: None,
             mtow_closure_fuel_kg: f64::NAN,
             usable_capacity: FuelCapacityAssessment::default(),
             analyzed_carried_fuel_kg: f64::NAN,
             carried_fuel_basis: CarriedFuelBasis::CapacityUnverified,
             zero_fuel_mass_kg: f64::NAN,
             analyzed_takeoff_mass_kg: f64::NAN,
+            flown_carried_fuel_kg: None,
             analyzed_landing_mass_kg: None,
             mtow_shortfall_kg: f64::NAN,
             mission: MissionFuelAssessment::default(),
@@ -143,7 +154,7 @@ pub(crate) fn plan_fuel_loading(
     design: &DesignVector,
     report: &AnalysisReport,
 ) -> FuelLoadingAssessment {
-    let analysis_mass_basis_kg = report.analysis_takeoff_mass_kg(config.requirements.mtow_kg);
+    let analysis_mass_basis_kg = report.loaded_takeoff_mass_kg(config.requirements.mtow_kg);
     let gross_mtow_closure_fuel_kg = report
         .component_masses
         .get("Fuel")
@@ -156,21 +167,35 @@ pub(crate) fn plan_fuel_loading(
         unusable_fuel_kg,
         config.mass_model.mass_architecture.is_pure_flops(),
     );
+    let hard_mtow = config.optimizer.objective.mtow_sizing
+        == alas_config::MtowSizing::FixedRequirement
+        && config.mass_model.mass_architecture.is_pure_flops();
+    let zero_fuel_mass_kg = analysis_mass_basis_kg - usable_mtow_closure_fuel_kg;
+    let (mass_limit_kg, usable_budget_kg) = if hard_mtow {
+        (
+            config.requirements.mtow_kg,
+            config.requirements.mtow_kg - zero_fuel_mass_kg,
+        )
+    } else {
+        (analysis_mass_basis_kg, usable_mtow_closure_fuel_kg)
+    };
     let mut loading = FuelLoadingAssessment {
         unusable_fuel_kg,
-        ..plan_from_values(
-            analysis_mass_basis_kg,
-            usable_mtow_closure_fuel_kg,
-            usable_capacity,
-        )
+        ..plan_from_values(mass_limit_kg, usable_budget_kg, usable_capacity)
     };
+    if !hard_mtow {
+        loading.design_takeoff_loading = None;
+    }
     // A report bound to a sized candidate carries the fuel its dispatch
     // plan loads at brake release; that, not the mass-budget remainder, is
     // the fuel the aircraft takes off with, at the report's own zero-fuel
     // mass.
     if let Some(sized) = report.fuel.sized_fuel() {
+        if let Some(design_loading) = sized.takeoff_loading {
+            loading.design_takeoff_loading = Some(design_loading);
+        }
         let carried_kg = sized.takeoff_fuel_kg;
-        if carried_kg.is_finite() && carried_kg > 0.0 {
+        if sized.takeoff_loading.is_none() && carried_kg.is_finite() && carried_kg > 0.0 {
             loading.analyzed_carried_fuel_kg = carried_kg;
             loading.analyzed_takeoff_mass_kg = loading.zero_fuel_mass_kg + carried_kg;
             loading.carried_fuel_basis = CarriedFuelBasis::ReservePolicyClosure;
@@ -239,6 +264,16 @@ pub(super) fn plan_from_values(
     mtow_closure_fuel_kg: f64,
     usable_capacity: FuelCapacityAssessment,
 ) -> FuelLoadingAssessment {
+    let zero_fuel_mass_kg = mtow_kg - mtow_closure_fuel_kg;
+    let design_takeoff_loading = alas_mass::loading::MtowFuelLoading::resolve(
+        mtow_kg,
+        zero_fuel_mass_kg,
+        usable_capacity.capacity_kg,
+    )
+    .ok();
+    // The same `min(MTOW - ZFW, capacity)` as the loading above, taken on
+    // the closure itself so the carried fuel is exactly the closure or the
+    // capacity rather than a re-differenced remainder.
     let nonnegative_closure_kg = mtow_closure_fuel_kg.max(0.0);
     let (analyzed_carried_fuel_kg, carried_fuel_basis) = match usable_capacity.capacity_kg {
         Some(capacity_kg) if capacity_kg.is_finite() => {
@@ -252,16 +287,17 @@ pub(super) fn plan_from_values(
         }
         _ => (nonnegative_closure_kg, CarriedFuelBasis::CapacityUnverified),
     };
-    let zero_fuel_mass_kg = mtow_kg - mtow_closure_fuel_kg;
     let analyzed_takeoff_mass_kg = zero_fuel_mass_kg + analyzed_carried_fuel_kg;
 
     FuelLoadingAssessment {
+        design_takeoff_loading,
         mtow_closure_fuel_kg,
         usable_capacity,
         analyzed_carried_fuel_kg,
         carried_fuel_basis,
         zero_fuel_mass_kg,
         analyzed_takeoff_mass_kg,
+        flown_carried_fuel_kg: None,
         analyzed_landing_mass_kg: None,
         mtow_shortfall_kg: (mtow_kg - analyzed_takeoff_mass_kg).max(0.0),
         mission: MissionFuelAssessment::default(),
@@ -311,9 +347,9 @@ pub(super) fn findings(mtow_kg: f64, fuel_loading: &FuelLoadingAssessment) -> Ve
     if fuel_loading.unusable_fuel_kg.is_none() {
         // The tank inventory that would reserve unusable fuel out of the
         // MTOW closure budget could not be resolved. `mtow_closure_fuel_kg`
-        // therefore carries the *gross* remainder unreserved, same as the
-        // pre-fix behavior: flagged here rather than silently treated as a
-        // verified zero-unusable-fuel aircraft.
+        // therefore carries the *gross* remainder unreserved: flagged here
+        // rather than silently treated as a verified zero-unusable-fuel
+        // aircraft.
         findings.push(PhysicalFinding {
             code: FindingCode::FuelTankLayoutUnavailable,
             severity: FindingSeverity::Warning,
@@ -526,13 +562,10 @@ mod tests {
             config.requirements.mtow_kg,
             fuel_loading.analyzed_takeoff_mass_kg
         );
-        // Before this fix, `zero_fuel_mass_kg` was built from the gross
-        // remainder without reserving unusable fuel, so
-        // `zero_fuel_mass_kg + gross_fuel_kg == mtow` looked closed on its
-        // own, but the CG ledger separately adds `unusable_fuel_kg` as
-        // real extra mass on top, so the aircraft it actually described
-        // weighed `mtow + unusable_fuel_kg`. The assertion above is that
-        // exact overshoot's regression check.
+        // `zero_fuel_mass_kg` must reserve unusable fuel: the CG ledger adds
+        // `unusable_fuel_kg` as real mass on top, so building it from the
+        // gross remainder would describe an aircraft weighing
+        // `mtow + unusable_fuel_kg`. The assertion above checks that overshoot.
     }
 
     #[test]
@@ -562,11 +595,21 @@ mod tests {
         let gross_fuel_kg = report.component_masses["Fuel"];
         let fuel_loading = plan_fuel_loading(&config, &preset.design_vector, &report);
         assert!(fuel_loading.unusable_fuel_kg.is_some_and(|kg| kg > 0.0));
-        assert!(
-            (fuel_loading.mtow_closure_fuel_kg - gross_fuel_kg).abs() < 1.0e-6,
-            "usable closure {} kg must equal the gross closure {} kg",
+        let design = fuel_loading
+            .design_takeoff_loading
+            .expect("Hard-MTOW design loading");
+        assert_eq!(gross_fuel_kg, design.carried_usable_fuel_kg);
+        assert_eq!(
             fuel_loading.mtow_closure_fuel_kg,
-            gross_fuel_kg
+            config.requirements.mtow_kg - design.zero_fuel_mass_kg
+        );
+        assert_eq!(
+            fuel_loading.mtow_closure_fuel_kg - gross_fuel_kg,
+            design.mtow_margin_kg
+        );
+        assert_eq!(
+            fuel_loading.analyzed_takeoff_mass_kg,
+            design.zero_fuel_mass_kg + gross_fuel_kg
         );
     }
 

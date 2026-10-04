@@ -610,7 +610,7 @@ SizingInput {
 }
 ```
 
-`MissionDefinition` must include a segment graph, route distance, start/end conditions, load cases, atmosphere assumptions, and the range convention. `AccommodationRequirements` must retain design and maximum passenger/cargo cases, mass basis, deck/LD3-45 requirements, and cabin policy. `PerformanceRequirements` must retain Mach/MMO/VMO, ICA/TTC, OEI ceiling, cruise ceiling, TOFL, landing, and approach speed. Every field inherits the existing hard/soft/objective/diagnostic policy.
+`MissionDefinition` must include a segment graph, route distance, start/end conditions, load cases, atmosphere assumptions, and the range convention. `AccommodationRequirements` must retain design and maximum passenger/cargo cases, mass basis, deck/LD3-45 requirements, and cabin policy. `PerformanceRequirements` must retain Mach/MMO/VMO, ICA/TTC, OEI ceiling, cruise ceiling, TOFL, landing, and approach speed. Every constraint is hard; intrinsic study preferences and diagnostics retain their fixed roles.
 
 ### 8.2 Stage outputs
 

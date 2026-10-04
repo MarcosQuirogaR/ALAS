@@ -399,7 +399,7 @@ impl Mses {
                                     solver_output: run.stdout,
                                 });
                                 if status == MsesPolarPointStatus::Converged {
-                                    // The exact requested angle now has its own
+                                    // The exact requested angle has its own
                                     // genuinely converged state in `workdir`;
                                     // MPlot extracts from this, not the offset.
                                     converged_alpha = alpha_deg;

@@ -132,7 +132,7 @@ pub(super) fn show(state: &AppState, ui: &mut Ui) {
             );
             row(
                 ui,
-                tr("Objective at the first feasible point"),
+                tr("Normalized ranking cost [dimensionless], first feasible point"),
                 optional(diagnostics.first_feasible_cost, 6),
             );
             row(

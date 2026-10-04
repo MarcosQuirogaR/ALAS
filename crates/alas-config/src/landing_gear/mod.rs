@@ -25,6 +25,14 @@ use crate::ConfigNode;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ConfigNode)]
 #[serde(deny_unknown_fields)]
 pub struct LandingGearConfig {
+    /// A candidate's solved main-gear group translation, separate from every
+    /// published reference anchor (see [`DerivedMainGearStation`]). A replay
+    /// writes it back explicitly. It is serialized only when present, so a
+    /// saved delivered configuration keeps its placed gear; it is not an
+    /// editable setting.
+    #[config(skip)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub derived_main_gear: Option<DerivedMainGearStation>,
     /// Margin left in the rated tire load after the static reaction.
     #[config(
         label = "Tire load safety factor",
@@ -229,24 +237,25 @@ pub struct LandingGearConfig {
     )]
     pub fuselage_ground_clearance_m: Option<f64>,
 
-    /// Required pitch angular acceleration at rotation, for the forward
-    /// CG rotation (nose-wheel liftoff) criterion.
-    #[serde(default = "default_rotation_pitch_acceleration_deg_s2")]
+    /// Optional override of the required pitch angular acceleration at
+    /// rotation; `None` takes the class value (7 deg/s^2, the midpoint of the
+    /// Torenbeek/Roskam 6-8 deg/s^2 transport range).
+    #[serde(default)]
     #[config(
         label = "Rotation pitch angular acceleration",
         unit = "deg/s^2",
-        help = "Required pitch angular acceleration at rotation (V_R), used by the forward-CG nose-wheel-liftoff moment balance. Torenbeek/Roskam cite a typical transport-category range of 6-8 deg/s^2; this is a documented conceptual-design estimate, not a certified or measured value for any specific aircraft."
+        help = "Optional override of the required pitch angular acceleration at rotation (V_R) in the forward-CG nose-wheel-liftoff moment balance. Leave unset to use the class value (7 deg/s^2, the midpoint of the Torenbeek/Roskam 6-8 deg/s^2 transport-category range); a conceptual-design estimate, not a certified or measured value for any specific aircraft."
     )]
-    pub rotation_pitch_acceleration_deg_s2: f64,
+    pub rotation_pitch_acceleration_deg_s2: Option<f64>,
 
-    /// Pitch radius of gyration as a fraction of MAC, for the same
-    /// rotation criterion's inertia term.
-    #[serde(default = "default_pitch_radius_of_gyration_frac_mac")]
+    /// Optional override of the pitch radius of gyration as a fraction of
+    /// MAC; `None` derives it from the mass ledger's takeoff pitch inertia.
+    #[serde(default)]
     #[config(
         label = "Pitch radius of gyration (fraction of MAC)",
-        help = "Pitch radius of gyration r_y, as a fraction of MAC, used by the forward-CG nose-wheel-liftoff moment balance's pitch-inertia term. Torenbeek/Roskam typical-transport range is roughly 0.25-0.35; this is a documented conceptual-design estimate, not derived from this aircraft's actual mass distribution."
+        help = "Optional override of the pitch radius of gyration r_y, as a fraction of MAC, in the nose-wheel-liftoff balance's pitch-inertia term. Leave unset to derive it from the mass ledger's takeoff pitch inertia (Raymer's jet-transport radius when no ledger exists); Torenbeek/Roskam give roughly 0.25-0.35 for transports."
     )]
-    pub pitch_radius_of_gyration_frac_mac: f64,
+    pub pitch_radius_of_gyration_frac_mac: Option<f64>,
 
     /// Wing-body lift coefficient at the ground (pre-rotation) attitude,
     /// as a fraction of `CL_max,TO`, for the same rotation criterion's
@@ -271,16 +280,6 @@ pub struct LandingGearConfig {
 const fn default_rotation_rolling_friction_coefficient() -> f64 {
     // Conceptual-design value for a dry hard runway (engineering estimate).
     0.02
-}
-
-const fn default_rotation_pitch_acceleration_deg_s2() -> f64 {
-    // Torenbeek/Roskam typical transport-category range 6-8 deg/s^2.
-    7.0
-}
-
-const fn default_pitch_radius_of_gyration_frac_mac() -> f64 {
-    // Torenbeek/Roskam typical-transport range ~0.25-0.35.
-    0.30
 }
 
 const fn default_cl_ground_attitude_frac_of_cl_max_to() -> f64 {
@@ -309,6 +308,7 @@ const fn default_required_rotation_angle_deg() -> f64 {
 impl Default for LandingGearConfig {
     fn default() -> Self {
         Self {
+            derived_main_gear: None,
             tire_safety_factor: 1.07,
             n_nlg_wheels: 0,
             nlg_dual_wheel_mtow_kg: 15_000.0,
@@ -332,8 +332,8 @@ impl Default for LandingGearConfig {
             min_tip_back_deg: default_min_tip_back_deg(),
             required_rotation_angle_deg: default_required_rotation_angle_deg(),
             fuselage_ground_clearance_m: None,
-            rotation_pitch_acceleration_deg_s2: default_rotation_pitch_acceleration_deg_s2(),
-            pitch_radius_of_gyration_frac_mac: default_pitch_radius_of_gyration_frac_mac(),
+            rotation_pitch_acceleration_deg_s2: None,
+            pitch_radius_of_gyration_frac_mac: None,
             cl_ground_attitude_frac_of_cl_max_to: default_cl_ground_attitude_frac_of_cl_max_to(),
             rotation_rolling_friction_coefficient: default_rotation_rolling_friction_coefficient(),
         }
@@ -401,22 +401,24 @@ impl LandingGearConfig {
                 .collect();
             let effective =
                 effective_main_gear_station(&main_gear_x_m, self.mlg_strut_bogie_wheels.as_deref());
-            return LandingGearStationPositions {
+            return self.apply_derived_main_gear(LandingGearStationPositions {
                 x_nlg_m,
                 x_mlg_m: effective.primary_station_ignoring_rejection(),
                 main_gear_x_m,
                 source_scaled: true,
+                derived: false,
                 resolution: effective,
-            };
+            });
         }
 
-        LandingGearStationPositions {
+        self.apply_derived_main_gear(LandingGearStationPositions {
             x_nlg_m: fallback_x_nlg_m,
             x_mlg_m: fallback_x_mlg_m,
             main_gear_x_m: vec![fallback_x_mlg_m],
             source_scaled: false,
+            derived: false,
             resolution: effective_main_gear_station(&[fallback_x_mlg_m], None),
-        }
+        })
     }
 
     /// [`Self::resolved_station_positions`], refusing the caller's
@@ -472,7 +474,9 @@ impl LandingGearConfig {
     }
 }
 
+mod derived;
 mod station;
+pub use derived::DerivedMainGearStation;
 pub use station::{
     effective_main_gear_station, EffectiveGearStationExt, EffectiveMainGearStation,
     GearStationRejection, LandingGearStationPositions, MainGearFallbackRefusal, ValidGearStation,

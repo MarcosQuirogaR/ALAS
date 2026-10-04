@@ -87,7 +87,7 @@ pub use stability_derivatives::{
     run_with_stability_derivatives_with_steps, CoefficientDerivatives, VlmStabilityResult,
 };
 pub use streamlines::{calculate_streamlines, PanelSample};
-pub use system::VlmSystem;
+pub use system::{VlmGeometryCache, VlmSystem};
 pub use trefftz::trefftz_induced_drag_coefficient;
 
 /// The Kaufmann vortex core smoothing radius `VortexLatticeMethod`'s

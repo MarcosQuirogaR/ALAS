@@ -2,6 +2,7 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 use super::*;
+use alas_config::presets;
 
 #[test]
 fn successful_mses_exports_retain_the_verbatim_mplot_tables() {
@@ -222,17 +223,31 @@ fn fixed_design_review_exposes_its_binding_constraint_without_promoting_a_finali
         .unwrap_or_else(|error| panic!("fixed-design finalist run: {error}"));
 
     assert_eq!(result.optimized_design, Some(design));
+    // The review is usable: it reports, and the one error it carries is the
+    // takeoff forward-CG finding of this notional shape. With the rotation
+    // authority corrected for large elevator deflection, the default
+    // clean-sheet aircraft's takeoff CG lies ahead of the nose-wheel lift-off
+    // boundary; that is a real finding of the shape, independent of the
+    // sizing residual under test, and it is asserted rather than hidden.
+    let errors = result
+        .feasibility
+        .findings
+        .iter()
+        .filter(|finding| finding.severity == crate::FindingSeverity::Error)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        errors.len(),
+        1,
+        "the physical review carries only the rotation forward-CG finding; errors: {errors:?}"
+    );
+    assert_eq!(
+        errors[0].code,
+        crate::FindingCode::ModelCgForwardRangeViolation
+    );
     assert!(
-        result.feasibility.is_feasible(),
-        "the physical review remains usable; the sizing constraint is retained on the solver \
-         branch; error findings: {:?}",
-        result
-            .feasibility
-            .findings
-            .iter()
-            .filter(|finding| finding.severity == crate::FindingSeverity::Error)
-            .map(|finding| (finding.code, finding.message.as_str()))
-            .collect::<Vec<_>>()
+        errors[0].message.contains("nose-wheel liftoff (rotation)"),
+        "{}",
+        errors[0].message
     );
     assert!(result.solver_optimizations.as_ref().is_some_and(|set| {
         set.vlm.status == crate::SolverOptimizationStatus::Failed
@@ -342,23 +357,16 @@ fn a_passenger_brief_is_reconciled_to_what_the_cabin_seats_rather_than_constrain
 }
 
 #[test]
-fn diagnostic_policies_deliver_a_bounded_baseline_when_requirements_are_missed() {
-    // Every requirement family is diagnostic, so a missed minimum wing loading
-    // is reported on the finalist rather than making the search infeasible. The
-    // registered A220-300 is the baseline because its design passes the hard
-    // takeoff-rotation gate that the default clean-sheet design fails; no hard
-    // requirement (such as the wing-area limit) is set.
+fn a_hard_feasible_finalist_preserves_search_bounds_and_resolved_tail() {
     let mut config = AlasConfig::from_value(&serde_json::json!({ "preset": "A220-300" }))
         .expect("A220-300 preset configuration");
+    assert_eq!(
+        config.optimizer.objective.mtow_sizing,
+        alas_config::MtowSizing::FixedRequirement
+    );
     config.optimizer.solver.method = alas_config::optimizer::PRODUCT_DE_METHOD.to_owned();
     config.mission.enabled = false;
     config.structures.enabled = false;
-    config.requirements.min_wing_loading_kg_m2 = 2_000.0;
-    let diagnostic = alas_config::ConstraintPolicy::Diagnostic;
-    config.optimizer.objective.mass_constraints = diagnostic;
-    config.optimizer.objective.balance_constraints = diagnostic;
-    config.optimizer.objective.performance_constraints = diagnostic;
-    config.optimizer.objective.geometry_constraints = diagnostic;
     config.optimizer.solver.refinement.max_evaluations = 24;
     config.optimizer.solver.screening.max_evaluations = 8;
     config.optimizer.solver.workers = 1;
@@ -387,11 +395,11 @@ fn diagnostic_policies_deliver_a_bounded_baseline_when_requirements_are_missed()
 
     let result = DesignPipeline::new(config.clone())
         .run_with_design_space(&options, &RunEnvironment::default(), &design, &bounds)
-        .unwrap_or_else(|error| panic!("diagnostic bounded finalist run: {error}"));
+        .unwrap_or_else(|error| panic!("hard-feasible bounded finalist run: {error}"));
 
     let optimized = result
         .optimized_design
-        .expect("a diagnostic-policy optimization publishes the baseline finalist");
+        .expect("a hard-feasible optimization publishes its finalist");
     // The registered preset runs as a reference adaptation, which derives the
     // tail scale from the wing (automatic tail sizing to the registered tail
     // volume coefficients) instead of searching it. The published design is

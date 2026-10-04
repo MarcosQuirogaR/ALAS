@@ -35,6 +35,7 @@ pub(in crate::vlm) fn inter_surface_core(field_wing_index: usize, source: &Panel
 /// derived from them: the per-panel arrays `run` builds and consumes,
 /// grouped so the assembly loop reads as one step per panel rather than
 /// eight parallel index operations.
+#[derive(Debug, Clone, PartialEq)]
 pub(in crate::vlm) struct Panel {
     pub(super) normal_direction: [f64; 3],
     pub(super) left_vortex_vertex: [f64; 3],
@@ -121,30 +122,48 @@ pub(super) fn mesh_panels(
 ) -> Result<Vec<Panel>, VlmError> {
     let mut panels = Vec::new();
     for (wing_index, wing) in airplane.wings.iter().enumerate() {
-        let subdivided;
-        let wing_ref: &Wing = if spanwise_resolution > 1 {
-            subdivided = wing.subdivide_sections(spanwise_resolution, SpacingFunction::Cosspace)?;
-            &subdivided
-        } else {
-            wing
-        };
-
-        let (points, faces) = wing_ref.mesh_thin_surface(chordwise_resolution, true);
-        // Upstream's `(arange(len(faces)) + 1) % chordwise_resolution == 0`,
-        // evaluated per wing (including its mirrored half, already appended
-        // to `faces` by `mesh_thin_surface` when the wing is symmetric)
-        // before the per-wing arrays are concatenated.
-        for (i, face) in faces.iter().enumerate() {
-            let is_trailing_edge = (i + 1) % chordwise_resolution == 0;
-            panels.push(Panel::from_quad(
-                points[face[0]],
-                points[face[1]],
-                points[face[2]],
-                points[face[3]],
-                is_trailing_edge,
-                wing_index,
-            )?);
-        }
+        mesh_wing_panels(
+            wing,
+            wing_index,
+            spanwise_resolution,
+            chordwise_resolution,
+            &mut panels,
+        )?;
     }
     Ok(panels)
+}
+
+/// Append one surface's panels in the same order as the full mesh.
+pub(super) fn mesh_wing_panels(
+    wing: &Wing,
+    wing_index: usize,
+    spanwise_resolution: usize,
+    chordwise_resolution: usize,
+    panels: &mut Vec<Panel>,
+) -> Result<(), VlmError> {
+    let subdivided;
+    let wing_ref: &Wing = if spanwise_resolution > 1 {
+        subdivided = wing.subdivide_sections(spanwise_resolution, SpacingFunction::Cosspace)?;
+        &subdivided
+    } else {
+        wing
+    };
+
+    let (points, faces) = wing_ref.mesh_thin_surface(chordwise_resolution, true);
+    // Upstream's `(arange(len(faces)) + 1) % chordwise_resolution == 0`,
+    // evaluated per wing (including its mirrored half, already appended
+    // to `faces` by `mesh_thin_surface` when the wing is symmetric)
+    // before the per-wing arrays are concatenated.
+    for (i, face) in faces.iter().enumerate() {
+        let is_trailing_edge = (i + 1) % chordwise_resolution == 0;
+        panels.push(Panel::from_quad(
+            points[face[0]],
+            points[face[1]],
+            points[face[2]],
+            points[face[3]],
+            is_trailing_edge,
+            wing_index,
+        )?);
+    }
+    Ok(())
 }

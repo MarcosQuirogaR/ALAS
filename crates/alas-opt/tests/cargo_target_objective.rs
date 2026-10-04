@@ -21,7 +21,9 @@
 // controls, so a failed unwrap there is the assertion failing.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-use alas_config::{AlasConfig, ConstraintPolicy};
+use alas_opt::mdo::ResidualRole;
+
+use alas_config::AlasConfig;
 use alas_opt::{assess_product_candidate, CandidateAssessment, ConstraintResidual};
 
 /// A freighter configuration built on the reference twin, with `target_kg` as
@@ -68,9 +70,9 @@ fn the_cargo_target_is_reported_as_a_two_sided_soft_pair() {
     let excess = residual(&assessment, "cargo_target_excess");
 
     // A target, not a hard minimum. Under the default hard geometry
-    // policy it is still demoted to a ranking term.
-    assert_eq!(shortfall.policy, ConstraintPolicy::Soft);
-    assert_eq!(excess.policy, ConstraintPolicy::Soft);
+    // role it is still demoted to a ranking term.
+    assert_eq!(shortfall.role, ResidualRole::Preference);
+    assert_eq!(excess.role, ResidualRole::Preference);
     assert_eq!(shortfall.unit, "kg");
     assert_eq!(shortfall.limit, target_kg);
     assert_eq!(excess.limit, target_kg);
@@ -351,7 +353,7 @@ fn two_registered_passenger_presets_carry_no_cargo_residual_and_no_cargo_term() 
         let soft: f64 = assessment
             .residuals
             .iter()
-            .filter(|residual| residual.policy == ConstraintPolicy::Soft)
+            .filter(|residual| residual.role == ResidualRole::Preference)
             .map(|residual| residual.normalized_violation)
             .sum();
         assert!(

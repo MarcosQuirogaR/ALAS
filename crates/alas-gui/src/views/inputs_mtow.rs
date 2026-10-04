@@ -14,7 +14,7 @@
 //! selector is enabled only then. With the optimizer off the declared MTOW is
 //! the hard limit of a fixed-aircraft analysis whatever mode is stored.
 
-use alas_config::{AlasConfig, DesignRange, Entry, Field, MtowSizing};
+use alas_config::{AlasConfig, Entry, Field, MtowSizing};
 use alas_pipeline::quick_analysis::band::{
     design_mission_band_check, BandStatus, DesignMissionBand,
 };
@@ -41,7 +41,10 @@ const HARD_HELP: &str =
 
 /// The three modes a person can pick.
 const CHOICES: [(MtowSizing, &str); 3] = [
-    (MtowSizing::FixedRequirement, "Hard MTOW constraint"),
+    (
+        MtowSizing::FixedRequirement,
+        "Hard MTOW constraint (preset default)",
+    ),
     (MtowSizing::MtowBand, "MTOW objective (band)"),
     (MtowSizing::PayloadAdjusted, "Payload-adjusted MTOW"),
 ];
@@ -51,7 +54,7 @@ pub(crate) fn optimize_active(state: &AppState) -> bool {
     state.run_options.optimize && state.design_mode() != alas_config::DesignMode::BaselineSandbox
 }
 
-/// The stored mode; a document that omits it reads as the legacy default.
+/// The explicit mode, or the preset-aware default when its key is absent.
 pub(crate) fn stored_mode(state: &AppState) -> MtowSizing {
     let name = state
         .config_values
@@ -60,7 +63,12 @@ pub(crate) fn stored_mode(state: &AppState) -> MtowSizing {
     MtowSizing::ALL
         .into_iter()
         .find(|mode| Some(mode.as_str()) == name)
-        .unwrap_or_default()
+        .unwrap_or_else(|| {
+            state
+                .typed_config()
+                .map(|config| config.optimizer.objective.mtow_sizing)
+                .unwrap_or_default()
+        })
 }
 
 fn legacy_label(mode: MtowSizing, stored: bool) -> Option<&'static str> {
@@ -87,7 +95,7 @@ fn mode_label(mode: MtowSizing, stored: bool) -> &'static str {
         .find(|(candidate, _)| *candidate == mode)
         .map(|(_, label)| *label)
         .or_else(|| legacy_label(mode, stored))
-        .unwrap_or("Hard MTOW constraint")
+        .unwrap_or("Hard MTOW constraint (preset default)")
 }
 
 fn objective_number(state: &AppState, key: &str) -> Option<f64> {
@@ -102,8 +110,8 @@ pub(crate) fn set_objective(state: &mut AppState, key: &str, value: Value, label
     let shown = value
         .as_str()
         .map_or_else(|| value.to_string(), str::to_owned);
-    // The objective group is omitted from the document while it is all
-    // defaults, and its own serde defaults fill whatever an edit leaves out.
+    // Older documents may omit this group; serde defaults fill any fields
+    // that an edit leaves out.
     let Some(objective) = state
         .group_mut("optimizer")
         .and_then(Value::as_object_mut)
@@ -160,10 +168,16 @@ fn show_mode_selector(state: &mut AppState, ui: &mut Ui) {
     ui.label(tr("MTOW mode"));
     ComboBox::from_id_salt("inputs_mtow_mode")
         .width(ui.available_width())
+        // One line when closed; the full label leads the hover text.
+        .truncate()
         .selected_text(tr(mode_label(current, stored)))
         .show_ui(ui, |ui| {
             for (mode, label) in CHOICES {
-                if ui.selectable_label(current == mode, tr(label)).clicked() {
+                if ui
+                    .selectable_label(current == mode, tr(label))
+                    .on_hover_text(tr(mode_help(mode)))
+                    .clicked()
+                {
                     chosen = Some(mode);
                 }
             }
@@ -171,7 +185,13 @@ fn show_mode_selector(state: &mut AppState, ui: &mut Ui) {
                 ui.separator();
                 ui.add_enabled(false, egui::SelectableLabel::new(true, tr(label)));
             }
-        });
+        })
+        .response
+        .on_hover_text(format!(
+            "{}\n\n{}",
+            tr(mode_label(current, stored)),
+            tr(mode_help(current))
+        ));
     if let Some(mode) = chosen.filter(|mode| *mode != current) {
         set_objective(
             state,
@@ -205,17 +225,56 @@ fn drag_row(
     changed && value.is_finite()
 }
 
-/// The design range field, with the value it resolves to when left at zero.
+fn mode_help(mode: MtowSizing) -> &'static str {
+    match mode {
+        MtowSizing::FixedRequirement => HARD_HELP,
+        MtowSizing::MtowBand => "The take-off mass may take any value in the band shown below, with no preference toward the target. MTOW is closed on the design mission (design range at full payload), and the route from the Inputs is then checked off-design.",
+        MtowSizing::PayloadAdjusted => "Take-off mass is closed by the mission with the selected passengers or cargo and the fuel reserves of the fuel policy.",
+        MtowSizing::SizedByMission | MtowSizing::Unconstrained => "Declared MTOW. In the loaded mode it seeds the closure, and it also caps it unless the mode is unconstrained.",
+    }
+}
+
+/// Resolve the still-air design range with the model's preset precedence.
+pub(crate) fn effective_design_range_nmi(state: &AppState) -> Option<f64> {
+    let config = state.typed_config()?;
+    config
+        .mtow_plan()
+        .design_mission
+        .and_then(|mission| mission.range.declared_nmi())
+        .or_else(|| {
+            let explicit = config.optimizer.objective.design_range_nmi;
+            if explicit.is_finite() && explicit > 0.0 {
+                return Some(explicit);
+            }
+            let coordinates = |name: &str| {
+                let airport = alas_config::airport_dataset::resolve(name).ok()?;
+                let latitude = airport.latitude_deg.value?;
+                let longitude = airport.longitude_deg.value?;
+                (latitude.is_finite() && longitude.is_finite()).then_some((latitude, longitude))
+            };
+            let (origin_lat, origin_lon) = coordinates(&config.departure_airport)?;
+            let (destination_lat, destination_lon) = coordinates(&config.arrival_airport)?;
+            Some(
+                alas_route::route::haversine_m(
+                    origin_lat,
+                    origin_lon,
+                    destination_lat,
+                    destination_lon,
+                ) / NMI_M,
+            )
+        })
+}
+
+/// Display the resolved range without replacing an automatic configuration.
 fn show_design_range(state: &mut AppState, ui: &mut Ui) {
-    let mut range = objective_number(state, "design_range_nmi").unwrap_or(0.0);
-    if drag_row(
-        ui,
-        "Design range",
-        "Still-air distance of the design mission. Zero uses the declared design range of the aircraft, or the route distance when none is declared.",
-        &mut range,
-        10.0,
-        "nmi",
-    ) {
+    let effective = effective_design_range_nmi(state);
+    let mut range = effective.unwrap_or(0.0);
+    let help = if effective.is_some() {
+        "Still-air distance of the design mission. Zero uses the declared design range of the aircraft, or the route distance when none is declared."
+    } else {
+        "Automatic design range is unavailable until both airport coordinates are known. Enter a design range, or select the route airports."
+    };
+    if drag_row(ui, "Design range", help, &mut range, 10.0, "nmi") {
         set_objective(
             state,
             "design_range_nmi",
@@ -223,29 +282,9 @@ fn show_design_range(state: &mut AppState, ui: &mut Ui) {
             "Design range",
         );
     }
-    if range <= 0.0 {
-        let text = match state
-            .typed_config()
-            .map(|config| config.design_mission().range)
-        {
-            Some(DesignRange::ChartedPoint(nmi)) => tr_fields(
-                "Default: {range} nmi, the design point of the manufacturer's payload-range chart.",
-                &[("range", format!("{nmi:.0}"))],
-            ),
-            Some(DesignRange::FlopsDesignRange(nmi)) => tr_fields(
-                "Default: {range} nmi, the declared design range of the aircraft.",
-                &[("range", format!("{nmi:.0}"))],
-            ),
-            _ => tr("Default: the route distance selected below."),
-        };
-        ui.label(RichText::new(text).weak().small());
-    }
 }
 
 fn show_band_controls(state: &mut AppState, ui: &mut Ui) {
-    ui.label(tr(
-        "The take-off mass may take any value in the band shown below, with no preference toward the target. MTOW is closed on the design mission (design range at full payload), and the route from the Inputs is then checked off-design.",
-    ));
     let declared = state
         .typed_config()
         .map_or(0.0, |config| config.requirements.mtow_kg);
@@ -293,17 +332,6 @@ fn show_band_controls(state: &mut AppState, ui: &mut Ui) {
             "MTOW band fraction",
         );
     }
-    if let Some(plan) = state.typed_config().map(|config| config.mtow_plan()) {
-        if let (Some(lo), Some(hi)) = (plan.lower_bound_kg, plan.upper_bound_kg) {
-            ui.label(
-                RichText::new(tr_fields(
-                    "Band: {lower} to {upper} kg",
-                    &[("lower", format!("{lo:.0}")), ("upper", format!("{hi:.0}"))],
-                ))
-                .weak(),
-            );
-        }
-    }
     show_design_range(state, ui);
     show_band_check(state, ui);
 }
@@ -326,31 +354,24 @@ fn band_check(state: &AppState) -> Option<DesignMissionBand> {
     let plan = config.mtow_plan();
     let (lo_kg, hi_kg) = (plan.lower_bound_kg?, plan.upper_bound_kg?);
     let payload_kg = config.design_payload_kg().0;
-    let range_m = match config.design_mission().range.declared_nmi() {
-        Some(nmi) => nmi * NMI_M,
-        None => state
-            .pipeline_result
-            .as_ref()?
-            .route
-            .as_ref()?
-            .total_distance_m(),
-    };
+    let range_m = effective_design_range_nmi(state)? * NMI_M;
     Some(design_mission_band_check(
         &config, report, payload_kg, range_m, lo_kg, hi_kg,
     ))
 }
 
+/// Cache identity includes the configuration and externally resolved route range.
+pub(crate) fn band_cache_key(state: &AppState) -> String {
+    format!(
+        "{}|{:?}|{}",
+        state.config_values,
+        effective_design_range_nmi(state),
+        latest_report(state).map_or(0, |report| std::ptr::from_ref(report) as usize)
+    )
+}
+
 fn show_band_check(state: &AppState, ui: &mut Ui) {
-    let Some(config) = state.typed_config() else {
-        return;
-    };
-    let plan = config.mtow_plan();
-    let key = format!(
-        "{:?}|{:?}|{}",
-        plan,
-        config.fuel_policy,
-        latest_report(state).map_or(0, |report| std::ptr::from_ref(report) as usize),
-    );
+    let key = band_cache_key(state);
     let id = Id::new("inputs_mtow_band_check");
     let cached = ui
         .ctx()
@@ -380,24 +401,19 @@ fn show_band_check(state: &AppState, ui: &mut Ui) {
     let warn = ui.visuals().warn_fg_color;
     match check.status {
         BandStatus::BandTooHeavy => {
-            ui.label(RichText::new(tr_fields(
+            ui.label(RichText::new(tr("Band too heavy")).color(warn)).on_hover_text(tr_fields(
                 "Warning: the design mission is already reachable at the lower band edge ({lo} nmi), so every mass in the band is heavier than the mission needs. Lower the target or lengthen the design range.",
                 &fields(&check),
-            )).color(warn));
+            ));
         }
         BandStatus::BandTooLight => {
-            ui.label(RichText::new(tr_fields(
+            ui.label(RichText::new(tr("Band too light")).color(warn)).on_hover_text(tr_fields(
                 "Warning: the design mission is out of reach even at the upper band edge ({hi} nmi). Raise the target or the allowed variation, or shorten the design range.",
                 &fields(&check),
-            )).color(warn));
+            ));
         }
         BandStatus::Inside => {
-            ui.label(
-                RichText::new(tr(
-                    "The design mission fits inside the band (quick estimate).",
-                ))
-                .weak(),
-            );
+            ui.label(RichText::new(tr("Design mission fits the band.")).weak());
         }
         BandStatus::Unavailable => {
             ui.label(RichText::new(tr("The band check is unavailable for this report.")).weak());
@@ -405,21 +421,8 @@ fn show_band_check(state: &AppState, ui: &mut Ui) {
     }
 }
 
-fn show_adjusted_controls(state: &mut AppState, ui: &mut Ui) {
-    show_design_range(state, ui);
-    ui.label(tr(
-        "Take-off mass is closed by the mission with the selected passengers or cargo and the fuel reserves of the fuel policy.",
-    ));
-    ui.label(
-        RichText::new(tr(
-            "Seeded from the declared MTOW; not a limit in this mode.",
-        ))
-        .weak(),
-    );
-}
-
 /// Render the card body.
-fn show_mtow_body(state: &mut AppState, ui: &mut Ui) {
+pub(crate) fn show_mtow_controls(state: &mut AppState, ui: &mut Ui) {
     if !optimize_active(state) {
         ui.label(RichText::new(tr("Available when Optimize design space is on.")).weak());
         show_declared_mtow(state, ui, HARD_HELP);
@@ -442,7 +445,7 @@ fn show_mtow_body(state: &mut AppState, ui: &mut Ui) {
                 ui,
                 "Declared MTOW. Only the first estimate of the closure starts from it.",
             );
-            show_adjusted_controls(state, ui);
+            show_design_range(state, ui);
         }
         MtowSizing::SizedByMission | MtowSizing::Unconstrained => {
             show_declared_mtow(
@@ -450,12 +453,6 @@ fn show_mtow_body(state: &mut AppState, ui: &mut Ui) {
                 ui,
                 "Declared MTOW. In the loaded mode it seeds the closure, and it also caps it unless the mode is unconstrained.",
             );
-            let note = if mode_is_stored(state) {
-                "This mode came from a loaded configuration. Choose one of the listed modes to replace it."
-            } else {
-                "Default mode: take-off mass closed by the mission up to the declared MTOW."
-            };
-            ui.label(RichText::new(tr(note)).weak());
         }
     }
 }
@@ -463,7 +460,7 @@ fn show_mtow_body(state: &mut AppState, ui: &mut Ui) {
 /// The Maximum take-off mass card.
 pub(crate) fn show_mtow_card(state: &mut AppState, ui: &mut Ui) {
     let _ = super::inputs_view::card(ui, "Maximum take-off mass", |ui| {
-        show_mtow_body(state, ui);
+        show_mtow_controls(state, ui);
     });
     ui.add_space(8.0);
 }

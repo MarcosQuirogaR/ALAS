@@ -236,6 +236,7 @@ fn isolated_wireframes_include_thickness_without_a_secondary_axes_caption() {
     ] {
         let svg = render_svg(&scene);
         assert!(!svg.contains("axes: metres"));
+        assert!(svg.matches("<polygon").count() >= 4);
         assert!(svg.matches("<polyline").count() >= 4);
     }
 }

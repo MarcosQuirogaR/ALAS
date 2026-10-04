@@ -5,32 +5,21 @@
 
 use super::*;
 
-/// The solver configuration a run with `parallel` uses.
-///
-/// `parallel` is the run-level "use this machine" switch (`--no-parallel`
-/// clears it), and it governs both the choice to run the VLM and AVL
-/// branches side by side and candidate evaluation inside each branch, which
-/// would otherwise read `optimizer.solver.workers` alone and start a batch on
-/// every worker the setting allowed. Clamping the
-/// count here is what makes the serial request actually serial.
-///
-/// It is a scheduling change only - the batch, its designs and their scores
-/// are identical at any worker count - so a serial run returns the same
-/// aircraft, more slowly.
-///
-/// What this does *not* claim is a single-threaded process. One coupled
-/// evaluation still fills its vortex-lattice influence matrix and factorises
-/// it across the shared rayon pool (`alas_aero::vlm::system`,
-/// `alas_math::linalg`). That is data parallelism inside one arithmetic
-/// operation, with a result documented and tested as bit-identical to the
-/// serial loop, not concurrent evaluation of independent work; no candidate,
-/// branch or pipeline stage overlaps another under `--no-parallel`.
-pub(super) fn serial_solver_config(config: &AlasConfig, parallel: bool) -> AlasConfig {
-    let mut config = config.clone();
-    if !parallel {
-        config.optimizer.solver.workers = 1;
+/// Independent configurations and the scheduling choice for the two branches.
+pub(super) struct SolverBranches {
+    pub(super) vlm_config: AlasConfig,
+    pub(super) avl_config: AlasConfig,
+    pub(super) parallel: bool,
+}
+
+/// Branch scheduling preserves the candidate worker count configured for
+/// each optimizer, including automatic resolution against the machine.
+pub(super) fn solver_branches(config: &AlasConfig, parallel: bool) -> SolverBranches {
+    SolverBranches {
+        vlm_config: config.clone(),
+        avl_config: config.clone(),
+        parallel,
     }
-    config
 }
 
 /// Persist what a cancelled search produced, in its own branch directory.

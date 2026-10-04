@@ -4,24 +4,23 @@
 //! Opt-in transport shape preferences, evaluated on the candidate wing.
 //! These are study preferences, not structural or certification limits.
 //! Thresholds reuse ObjectiveWeights; product ranking uses the common
-//! normalized soft-residual policy, not L/D penalty multipliers.
+//! normalized soft-residual role, not L/D penalty multipliers.
+
+use crate::mdo::ResidualRole;
 
 use crate::mdo::{ConstraintFamily, ConstraintResidual};
 use crate::transport_planform::assess_product_transport_planform;
-use alas_config::{AlasConfig, ConstraintPolicy, DesignVector, ObjectiveWeights};
+use alas_config::{AlasConfig, DesignVector, ObjectiveWeights};
 use alas_geom::aircraft::airplane::Airplane;
 
 pub(super) fn residuals(
     plane: &Airplane,
     design: &DesignVector,
     config: &AlasConfig,
-    policy: ConstraintPolicy,
+    role: ResidualRole,
 ) -> Vec<ConstraintResidual> {
     let w = &config.optimizer.weights;
-    if policy == ConstraintPolicy::Off
-        || !w.transport_planform_constraints_enabled
-        || !w.transport_shape_priors_enabled
-    {
+    if !w.transport_planform_constraints_enabled || !w.transport_shape_priors_enabled {
         return Vec::new();
     }
     if !limits_valid(w)
@@ -36,8 +35,8 @@ pub(super) fn residuals(
     let Some(a) = assess_product_transport_planform(plane, design, config) else {
         return invalid();
     };
-    let policy = match policy {
-        ConstraintPolicy::Hard => ConstraintPolicy::Soft,
+    let role = match role {
+        ResidualRole::Constraint => ResidualRole::Preference,
         other => other,
     };
     vec![
@@ -46,28 +45,28 @@ pub(super) fn residuals(
             a.root_wingbox_depth_m,
             w.min_root_wingbox_depth_m,
             "m",
-            policy,
+            role,
         ),
         lower(
             "transport_kink_wingbox_depth",
             a.kink_wingbox_depth_m,
             w.min_break_wingbox_depth_m,
             "m",
-            policy,
+            role,
         ),
         lower(
             "transport_kink_wingbox_width",
             a.kink_wingbox_width_m,
             w.min_break_wingbox_width_m,
             "m",
-            policy,
+            role,
         ),
         lower(
             "transport_flap_area_fraction",
             a.flap_area_fraction,
             w.min_flap_area_fraction,
             "-",
-            policy,
+            role,
         ),
         ConstraintResidual::scaled(
             "transport_root_box_slenderness",
@@ -76,7 +75,7 @@ pub(super) fn residuals(
             w.max_root_bending_box_slenderness,
             "-",
             a.root_bending_box_slenderness - w.max_root_bending_box_slenderness,
-            policy,
+            role,
         ),
         window(
             "transport_inboard_te_sweep",
@@ -84,7 +83,7 @@ pub(super) fn residuals(
             w.min_inboard_te_sweep_deg,
             w.max_inboard_te_sweep_deg,
             "deg",
-            policy,
+            role,
         ),
         window(
             "transport_break_root_chord_ratio",
@@ -92,14 +91,14 @@ pub(super) fn residuals(
             w.min_break_root_chord_ratio,
             w.max_break_root_chord_ratio,
             "-",
-            policy,
+            role,
         ),
         lower(
             "transport_tip_root_chord_ratio",
             a.tip_root_chord_ratio,
             w.min_tip_root_chord_ratio,
             "-",
-            policy,
+            role,
         ),
     ]
 }
@@ -113,7 +112,7 @@ fn invalid() -> Vec<ConstraintResidual> {
         "bool",
         1.0,
         1.0,
-        ConstraintPolicy::Hard,
+        ResidualRole::Constraint,
     )]
 }
 
@@ -145,7 +144,7 @@ fn lower(
     actual: f64,
     minimum: f64,
     unit: &'static str,
-    policy: ConstraintPolicy,
+    role: ResidualRole,
 ) -> ConstraintResidual {
     ConstraintResidual::scaled(
         id,
@@ -154,7 +153,7 @@ fn lower(
         minimum,
         unit,
         minimum - actual,
-        policy,
+        role,
     )
 }
 
@@ -164,7 +163,7 @@ fn window(
     minimum: f64,
     maximum: f64,
     unit: &'static str,
-    policy: ConstraintPolicy,
+    role: ResidualRole,
 ) -> ConstraintResidual {
     let (limit, raw) = if actual - minimum <= maximum - actual {
         (minimum, minimum - actual)
@@ -181,7 +180,7 @@ fn window(
         unit,
         raw,
         (raw / (maximum - minimum)).max(0.0),
-        policy,
+        role,
     )
 }
 
@@ -205,61 +204,60 @@ mod tests {
     }
 
     #[test]
-    fn preferences_are_opt_in_and_off_stays_off() {
+    fn preferences_require_both_enable_flags() {
         let (mut config, design, plane) = fixture();
-        assert!(residuals(&plane, &design, &config, ConstraintPolicy::Off).is_empty());
         config.optimizer.weights.transport_shape_priors_enabled = false;
-        assert!(residuals(&plane, &design, &config, ConstraintPolicy::Hard).is_empty());
+        assert!(residuals(&plane, &design, &config, ResidualRole::Constraint).is_empty());
         config.optimizer.weights.transport_shape_priors_enabled = true;
         config
             .optimizer
             .weights
             .transport_planform_constraints_enabled = false;
-        assert!(residuals(&plane, &design, &config, ConstraintPolicy::Hard).is_empty());
+        assert!(residuals(&plane, &design, &config, ResidualRole::Constraint).is_empty());
     }
 
     #[test]
     fn violated_shape_preferences_never_become_hard_requirements() {
         let (mut config, design, plane) = fixture();
         config.optimizer.weights.min_root_wingbox_depth_m = 100.0;
-        let rows = residuals(&plane, &design, &config, ConstraintPolicy::Hard);
+        let rows = residuals(&plane, &design, &config, ResidualRole::Constraint);
         assert_eq!(rows.len(), 8);
-        assert!(rows.iter().all(|r| r.policy == ConstraintPolicy::Soft));
+        assert!(rows.iter().all(|r| r.role == ResidualRole::Preference));
         assert!(rows[0].normalized_violation > 0.0);
         assert!(rows.iter().all(|r| r.normalized_violation.is_finite()));
-        let diagnostics = residuals(&plane, &design, &config, ConstraintPolicy::Diagnostic);
+        let diagnostics = residuals(&plane, &design, &config, ResidualRole::Diagnostic);
         assert!(diagnostics
             .iter()
-            .all(|r| r.policy == ConstraintPolicy::Diagnostic));
+            .all(|r| r.role == ResidualRole::Diagnostic));
     }
 
     #[test]
     fn invalid_assessment_and_nonfinite_limits_are_hard_errors() {
         let (mut config, design, mut plane) = fixture();
         plane.wings.clear();
-        let rows = residuals(&plane, &design, &config, ConstraintPolicy::Diagnostic);
+        let rows = residuals(&plane, &design, &config, ResidualRole::Diagnostic);
         assert_eq!(rows[0].id, "transport_planform_invalid");
-        assert_eq!(rows[0].policy, ConstraintPolicy::Hard);
+        assert_eq!(rows[0].role, ResidualRole::Constraint);
         config.optimizer.weights.min_root_wingbox_depth_m = f64::NAN;
-        let rows = residuals(&plane, &design, &config, ConstraintPolicy::Hard);
+        let rows = residuals(&plane, &design, &config, ResidualRole::Constraint);
         assert_eq!(rows[0].id, "transport_planform_invalid");
         assert!(rows[0].normalized_violation > 0.0);
     }
 
     #[test]
     fn zero_degree_boundary_is_normalized_by_window_width() {
-        let row = window("angle", -0.22, 0.0, 22.0, "deg", ConstraintPolicy::Soft);
+        let row = window("angle", -0.22, 0.0, 22.0, "deg", ResidualRole::Preference);
         assert!((row.normalized_violation - 0.01).abs() < 1e-12);
-        let on_boundary = window("angle", 0.0, 0.0, 22.0, "deg", ConstraintPolicy::Soft);
+        let on_boundary = window("angle", 0.0, 0.0, 22.0, "deg", ResidualRole::Preference);
         assert_eq!(on_boundary.normalized_violation, 0.0);
     }
 
     #[test]
     fn geometry_drives_wingbox_depth() {
         let (config, design, mut plane) = fixture();
-        let baseline = residuals(&plane, &design, &config, ConstraintPolicy::Hard);
+        let baseline = residuals(&plane, &design, &config, ResidualRole::Constraint);
         plane.wings[0].xsecs[0].chord *= 0.5;
-        let changed = residuals(&plane, &design, &config, ConstraintPolicy::Hard);
+        let changed = residuals(&plane, &design, &config, ResidualRole::Constraint);
         assert!((changed[0].actual / baseline[0].actual - 0.5).abs() < 1e-12);
     }
 }

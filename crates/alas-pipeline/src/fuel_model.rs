@@ -38,6 +38,9 @@ pub struct SizedFuel {
     pub trip_fuel_kg: f64,
     /// Design-mission range the closure was flown over, m.
     pub design_range_m: f64,
+    /// Physical maximum-fuel loading under Hard MTOW, separate from the
+    /// required design-mission plan used by dispatch and mission replay.
+    pub takeoff_loading: Option<alas_mass::loading::MtowFuelLoading>,
 }
 
 impl SizedFuel {
@@ -49,6 +52,7 @@ impl SizedFuel {
             takeoff_fuel_kg: sized.design_mission_fuel_kg,
             trip_fuel_kg: sized.design_mission_trip_fuel_kg,
             design_range_m: sized.design_range_m,
+            takeoff_loading: sized.takeoff_loading,
         }
     }
 }

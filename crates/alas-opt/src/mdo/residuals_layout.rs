@@ -38,12 +38,14 @@
 //! # Where these are enforced
 //!
 //! `mdo::residuals::build` calls [`layout_residuals`] under the same
-//! Geometry family and `objective.geometry_constraints` policy every other
+//! Geometry family and `ResidualRole::Constraint` role every other
 //! geometry residual uses, so a candidate that fails one is rejected by the
-//! same relaxation and feasibility rules as `aspect_ratio_max`: not a
+//! same hard feasibility rules as `aspect_ratio_max`: not a
 //! separate gate.
 
-use alas_config::{AlasConfig, ConstraintPolicy};
+use crate::mdo::ResidualRole;
+
+use alas_config::AlasConfig;
 use alas_geom::aircraft::airplane::Airplane;
 
 use super::sizing::SizingOutcome;
@@ -54,26 +56,23 @@ use super::types::ConstraintResidual;
 pub(super) fn layout_residuals(
     outcome: &SizingOutcome,
     config: &AlasConfig,
-    policy: ConstraintPolicy,
+    role: ResidualRole,
 ) -> Vec<ConstraintResidual> {
-    if policy == ConstraintPolicy::Off {
-        return Vec::new();
-    }
     let plane = &outcome.plane;
     let mut residuals = Vec::new();
-    residuals.extend(root_to_kink_te_angle_residual(outcome, config, policy));
-    residuals.extend(wing_root_incidence_residuals(config, policy));
+    residuals.extend(root_to_kink_te_angle_residual(outcome, config, role));
+    residuals.extend(wing_root_incidence_residuals(config, role));
     if let (Some(fuselage_length), Some(root), Some(tip)) = (
         fuselage_length_m(plane),
         root_station(plane),
         tip_station(plane),
     ) {
-        residuals.extend(dihedral_residuals(root, tip, policy));
-        residuals.extend(apex_on_fuselage_residuals(root, fuselage_length, policy));
-        residuals.extend(wingbox_depth_residual(root, plane, config, policy));
-        residuals.extend(vertical_position_residual(root, config, policy));
+        residuals.extend(dihedral_residuals(root, tip, role));
+        residuals.extend(apex_on_fuselage_residuals(root, fuselage_length, role));
+        residuals.extend(wingbox_depth_residual(root, plane, config, role));
+        residuals.extend(vertical_position_residual(root, config, role));
     }
-    residuals.extend(wave_drag_ceiling_residual(outcome, config, policy));
+    residuals.extend(wave_drag_ceiling_residual(outcome, config, role));
     residuals
 }
 
@@ -87,7 +86,7 @@ pub(crate) const TE_ANGLE_LIMIT_DEG: f64 = 90.0 + 1.0e-6;
 fn root_to_kink_te_angle_residual(
     outcome: &SizingOutcome,
     config: &AlasConfig,
-    policy: ConstraintPolicy,
+    role: ResidualRole,
 ) -> Vec<ConstraintResidual> {
     let Some(angle_deg) =
         crate::transport_planform::exposed_te_angle_deg(&config.geometry.wing, &outcome.history.dv)
@@ -100,7 +99,7 @@ fn root_to_kink_te_angle_residual(
             "bool",
             1.0,
             1.0,
-            policy,
+            role,
         )];
     };
     vec![ConstraintResidual::scaled(
@@ -110,7 +109,7 @@ fn root_to_kink_te_angle_residual(
         TE_ANGLE_LIMIT_DEG,
         "deg",
         angle_deg - TE_ANGLE_LIMIT_DEG,
-        policy,
+        role,
     )]
 }
 
@@ -187,7 +186,7 @@ fn root_thickness_ratio(plane: &Airplane) -> Option<f64> {
 /// margin each side.
 fn wing_root_incidence_residuals(
     config: &AlasConfig,
-    policy: ConstraintPolicy,
+    role: ResidualRole,
 ) -> Vec<ConstraintResidual> {
     const MIN_DEG: f64 = 0.0;
     const MAX_DEG: f64 = 6.5;
@@ -198,7 +197,7 @@ fn wing_root_incidence_residuals(
         MIN_DEG,
         MAX_DEG,
         "deg",
-        policy,
+        role,
     )
 }
 
@@ -237,19 +236,12 @@ fn mean_dihedral_deg(root: WingStation, tip: WingStation) -> f64 {
 fn dihedral_residuals(
     root: WingStation,
     tip: WingStation,
-    policy: ConstraintPolicy,
+    role: ResidualRole,
 ) -> Vec<ConstraintResidual> {
     let dihedral_deg = mean_dihedral_deg(root, tip);
     let low_wing = root.xyz_le[2] < 0.0;
     let (min_deg, max_deg) = if low_wing { (3.0, 10.0) } else { (-3.0, 5.0) };
-    signed_window_residuals(
-        "wing_dihedral",
-        dihedral_deg,
-        min_deg,
-        max_deg,
-        "deg",
-        policy,
-    )
+    signed_window_residuals("wing_dihedral", dihedral_deg, min_deg, max_deg, "deg", role)
 }
 
 /// The wing root leading and trailing edges must sit on the fuselage that
@@ -274,7 +266,7 @@ fn dihedral_residuals(
 fn apex_on_fuselage_residuals(
     root: WingStation,
     fuselage_length_m: f64,
-    policy: ConstraintPolicy,
+    role: ResidualRole,
 ) -> Vec<ConstraintResidual> {
     const CLEARANCE_FRACTION: f64 = 0.02;
     const MIN_APEX_FRACTION: f64 = 0.15;
@@ -292,7 +284,7 @@ fn apex_on_fuselage_residuals(
             nose_clearance_m,
             "m",
             nose_clearance_m - root_le_x,
-            policy,
+            role,
         ),
         ConstraintResidual::scaled(
             "wing_root_te_on_fuselage",
@@ -301,7 +293,7 @@ fn apex_on_fuselage_residuals(
             tail_clearance_x_m,
             "m",
             root_te_x - tail_clearance_x_m,
-            policy,
+            role,
         ),
     ]
     .into_iter()
@@ -311,7 +303,7 @@ fn apex_on_fuselage_residuals(
         MIN_APEX_FRACTION,
         MAX_APEX_FRACTION,
         "-",
-        policy,
+        role,
     ))
     .collect()
 }
@@ -335,7 +327,7 @@ fn wingbox_depth_residual(
     root: WingStation,
     plane: &Airplane,
     config: &AlasConfig,
-    policy: ConstraintPolicy,
+    role: ResidualRole,
 ) -> Vec<ConstraintResidual> {
     const MAX_DEPTH_FRACTION_OF_HEIGHT: f64 = 0.60;
     let Some(thickness_ratio) = root_thickness_ratio(plane) else {
@@ -351,7 +343,7 @@ fn wingbox_depth_residual(
         limit_m,
         "m",
         box_depth_m - limit_m,
-        policy,
+        role,
     )]
 }
 
@@ -373,7 +365,7 @@ fn wingbox_depth_residual(
 fn vertical_position_residual(
     root: WingStation,
     config: &AlasConfig,
-    policy: ConstraintPolicy,
+    role: ResidualRole,
 ) -> Vec<ConstraintResidual> {
     let diameter_m = config.geometry.fuselage.diameter_m;
     if !(diameter_m.is_finite() && diameter_m > 0.0) {
@@ -387,7 +379,7 @@ fn vertical_position_residual(
         diameter_m,
         "m",
         offset_m - diameter_m,
-        policy,
+        role,
     )]
 }
 
@@ -409,8 +401,13 @@ fn vertical_position_residual(
 /// residual and the fuel burn therefore see one wave drag.
 ///
 /// The lift coefficient is that of mid-cruise at the sizing cruise Mach and
-/// altitude: the closed takeoff mass less half the trip fuel of the mission
-/// it was closed on.
+/// altitude, at [`super::types::SizedCandidate::mid_cruise_mass_kg`]: the
+/// design mission flown from the candidate's takeoff loading,
+/// `TOW - (F - R) / 2` with `F` the fuel loaded at brake release and `R` the
+/// fuel its dispatch keeps on landing ([`super::cruise_mass`]). Under Hard
+/// MTOW that is the maximum loading's own mission, not its takeoff mass
+/// combined with another mission's trip; under the mission-closed modes it
+/// is the closed mission's own mid-cruise mass.
 ///
 /// # Ceiling
 ///
@@ -427,7 +424,7 @@ fn vertical_position_residual(
 fn wave_drag_ceiling_residual(
     outcome: &SizingOutcome,
     config: &AlasConfig,
-    policy: ConstraintPolicy,
+    role: ResidualRole,
 ) -> Vec<ConstraintResidual> {
     /// `dCD/dM` at drag divergence (Korn/Lock).
     const DRAG_DIVERGENCE_SLOPE: f64 = 0.1;
@@ -439,12 +436,18 @@ fn wave_drag_ceiling_residual(
     let mach = req.cruise_mach;
     let v_m_s = mach * atmosphere.speed_of_sound();
     let q_pa = 0.5 * atmosphere.density() * v_m_s.powi(2);
-    let mid_cruise_mass_kg = sized.takeoff_mass_kg - 0.5 * sized.design_mission_trip_fuel_kg;
+    let mid_cruise_mass_kg = sized.mid_cruise_mass_kg();
     let cl_mid = mid_cruise_mass_kg * req.gravity_m_s2 / (q_pa * outcome.plane.s_ref);
     if !cl_mid.is_finite() || cl_mid <= 0.0 {
         return Vec::new();
     }
     let wave_drag_cd = sized.fuel_artifacts.drag.wave_cd(cl_mid, mach);
+    // The start of cruise is reported beside the mid-cruise point the gate
+    // is evaluated at: the loaded takeoff mass, climb burn not deducted, so
+    // an upper bound of the heaviest cruise state.
+    let start_mass_kg = sized.start_of_cruise_mass_kg();
+    let cl_start = start_mass_kg * req.gravity_m_s2 / (q_pa * outcome.plane.s_ref);
+    let start_drag_cd = sized.fuel_artifacts.drag.wave_cd(cl_start, mach);
     vec![ConstraintResidual::scaled(
         "sweep_consistent_with_cruise_mach",
         Geometry,
@@ -452,8 +455,12 @@ fn wave_drag_ceiling_residual(
         wave_drag_ceiling_cd,
         "-",
         wave_drag_cd - wave_drag_ceiling_cd,
-        policy,
-    )]
+        role,
+    )
+    .with_detail(format!(
+        "gated at mid-cruise: mass {mid_cruise_mass_kg:.0} kg, CL {cl_mid:.4}, wave CD {wave_drag_cd:.5}; \
+         start of cruise (not gated): mass {start_mass_kg:.0} kg, CL {cl_start:.4}, wave CD {start_drag_cd:.5}"
+    ))]
 }
 
 /// Stable `<stem>_min` / `<stem>_max` identifiers for a windowed quantity,
@@ -479,7 +486,7 @@ fn signed_window_residuals(
     minimum: f64,
     maximum: f64,
     unit: &'static str,
-    policy: ConstraintPolicy,
+    role: ResidualRole,
 ) -> Vec<ConstraintResidual> {
     if !value.is_finite() {
         return Vec::new();
@@ -495,7 +502,7 @@ fn signed_window_residuals(
             unit,
             value - maximum,
             ((value - maximum) / scale).max(0.0),
-            policy,
+            role,
         ),
         ConstraintResidual::direct(
             min_id,
@@ -505,7 +512,7 @@ fn signed_window_residuals(
             unit,
             minimum - value,
             ((minimum - value) / scale).max(0.0),
-            policy,
+            role,
         ),
     ]
 }

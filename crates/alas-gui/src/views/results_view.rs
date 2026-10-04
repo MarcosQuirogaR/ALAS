@@ -12,6 +12,9 @@ use crate::views::{tr, tr_fields};
 use alas_report::scene::Scene;
 use egui::{vec2, Id, RichText, ScrollArea, Ui};
 
+mod gallery;
+use gallery::{figure_gallery_layout, fitted_canvas_height, tile_scene, TileScene};
+pub(crate) use gallery::{responsive_card_layout, CARD_GAP, CARD_MIN_WIDTH};
 mod summary;
 use summary::show_summary;
 mod external;
@@ -83,48 +86,12 @@ const TABS: &[Tab] = &[
     },
 ];
 
-/// Minimum width of a result card before another responsive column is added.
-pub(crate) const CARD_MIN_WIDTH: f32 = 320.0;
-/// Horizontal space between adjacent result cards.
-pub(crate) const CARD_GAP: f32 = 12.0;
 /// Equal side margins around the result gallery content.
 const RESULTS_SIDE_MARGIN: f32 = 20.0;
 /// Result tabs are intentionally capped at five per row so their labels stay
 /// legible and the Summary tab cannot push the last discipline off-screen.
 const RESULT_TAB_MIN_WIDTH: f32 = 176.0;
 const RESULT_TAB_MAX_COLUMNS: usize = 5;
-
-/// Return a stable column count and card width for the current content pane.
-///
-/// The width is calculated from the whole available row, rather than from a
-/// fixed card width, so a two-column row cannot leave a permanent right gutter.
-pub(crate) fn responsive_card_layout(available_width: f32) -> (usize, f32) {
-    let width = available_width.max(1.0);
-    let columns = ((width + CARD_GAP) / (CARD_MIN_WIDTH + CARD_GAP))
-        .floor()
-        .clamp(1.0, 3.0) as usize;
-    let card_width = (width - CARD_GAP * (columns - 1) as f32) / columns as f32;
-    (columns, card_width.max(1.0))
-}
-
-/// Model Comparison is a single, information-dense overlay. Giving it the
-/// whole gallery row keeps its axes and legend readable and avoids wasting the
-/// results viewport below a generic 320 px canvas.
-fn figure_gallery_layout(
-    available_width: f32,
-    available_height: f32,
-    full_width: bool,
-) -> (usize, f32, f32) {
-    if full_width {
-        return (
-            1,
-            available_width.max(1.0),
-            (available_height - 52.0).clamp(320.0, 640.0),
-        );
-    }
-    let (columns, tile_width) = responsive_card_layout(available_width);
-    (columns, tile_width, 320.0)
-}
 
 fn result_tab_column_count(available_width: f32) -> usize {
     ((available_width / RESULT_TAB_MIN_WIDTH).floor() as usize).clamp(1, RESULT_TAB_MAX_COLUMNS)
@@ -218,6 +185,22 @@ pub fn show_results_view(state: &mut AppState, ui: &mut Ui) {
             let item_count = descriptors.len();
             for row_start in (0..item_count).step_by(columns) {
                 let row_end = (row_start + columns).min(item_count);
+                let row = &descriptors[row_start..row_end];
+                // One canvas height per row keeps the cards of a row level;
+                // it is the tallest drawing's own height at the card width,
+                // so a single-column gallery shows every figure without
+                // empty bands above and below it.
+                let canvas_height = if full_width_figures {
+                    canvas_height
+                } else {
+                    let canvas_width = crate::theme::card_content_width(tile_width);
+                    row.iter()
+                        .map(|descriptor| {
+                            let tile = tile_scene(state, &result_config, descriptor);
+                            fitted_canvas_height(&tile, canvas_width, canvas_height)
+                        })
+                        .fold(0.0, f32::max)
+                };
                 ui.horizontal(|ui| {
                     // Horizontal layout advances through explicit spaces. A
                     // zero-height allocation in the surrounding vertical
@@ -225,7 +208,6 @@ pub fn show_results_view(state: &mut AppState, ui: &mut Ui) {
                     // visible left inset.
                     ui.spacing_mut().item_spacing.x = 0.0;
                     ui.add_space(RESULTS_SIDE_MARGIN);
-                    let row = &descriptors[row_start..row_end];
                     for (offset, descriptor) in row.iter().enumerate() {
                         figure_tile(
                             state,
@@ -256,19 +238,12 @@ fn figure_tile(
 ) {
     let (id, title, description) = (descriptor.id, descriptor.title, descriptor.description);
     let theme = state.theme.figure_theme_name().to_owned();
-    let language = alas_i18n::get_language();
-    let view_key = format!(
-        "run={};solver={:?};theme={theme};language={language};figure={id}",
-        state.run_identity, state.selected_solver_view
-    );
-    let orbitable = result_3d::is_orbitable_result(id);
-    let camera_key = result_3d::result_camera_key(state.run_identity, id);
-    let scene = if orbitable {
-        let camera = result_3d::result_camera(state, &camera_key);
-        state.cached_result_figure_with_camera(&view_key, id, config, &theme, Some(camera))
-    } else {
-        state.cached_result_figure(&view_key, id, config, &theme)
-    };
+    let TileScene {
+        scene,
+        view_key,
+        camera_key,
+        orbitable,
+    } = tile_scene(state, config, descriptor);
     let card = crate::theme::card_frame(ui).show(ui, |ui| {
         let content_width = crate::theme::card_content_width(tile_width);
         ui.set_min_width(content_width);
@@ -280,10 +255,6 @@ fn figure_tile(
             match scene.as_ref() {
                 Some(scene) => {
                     let canvas_width = ui.available_width().max(1.0);
-                    let canvas_rect = egui::Rect::from_min_size(
-                        ui.cursor().min,
-                        vec2(canvas_width, canvas_height),
-                    );
                     if images::scene_has_external_images(scene) {
                         if images::show_external_images(
                             state,
@@ -355,7 +326,7 @@ fn figure_tile(
                         }
                     }
                     if id == "openvsp_cad_preview" {
-                        openvsp::show_launch_button(state, ui, canvas_rect);
+                        openvsp::show_launch_button(state, ui);
                     }
                 }
                 None => {

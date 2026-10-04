@@ -235,7 +235,7 @@ For early ALAS design, a life-cycle model can start with a transparent event cal
 
 ## 3. Requirements, preferences, objectives, and diagnostics
 
-The existing ALAS requirements-first document already distinguishes hard, soft, objective, and diagnostic policies. The operations extension should preserve that separation and add source confidence and coverage.
+The existing ALAS requirements-first document distinguishes hard constraints, objectives, intrinsic study preferences and diagnostics. Its constraint families have no selectable policies. The operations policy alternatives below are research proposals; an implementation would also need source confidence and coverage.
 
 | Concern | Recommended policy | What it means in ALAS |
 |---|---|---|
@@ -422,11 +422,11 @@ The weights should sum to one and be traceable to the mission/network definition
 
 ## 5. ALAS integration points
 
-The existing requirements-first document already provides the policy language and design-stage mapping needed for this extension. The operations layer should be additive and should consume existing discipline results.
+The existing requirements-first document distinguishes hard constraints, objectives, intrinsic study preferences and diagnostics, and provides the design-stage mapping for this extension. The operations layer should be additive and should consume existing discipline results.
 
 | ALAS area | Existing seam | Proposed integration |
 |---|---|---|
-| alas-config / design brief | mission, accommodation, performance/airport limits and hard/soft/objective/diagnostic policy | Add an optional operations profile: scenario set, station/airport constraints, turnaround target, reliability policy, cost basis, fleet and schedule assumptions. Freeze it with the design brief. |
+| alas-config / design brief | mission, accommodation, hard performance/airport constraints, objectives, intrinsic study preferences and diagnostics; requirement families have no selectable policies | Add an optional operations profile: scenario set, station/airport constraints, turnaround target, reliability policy, cost basis, fleet and schedule assumptions. Freeze it with the design brief. |
 | alas-mission | MissionRequest carries route, elevations, ISA deviation, distance, and mission profile | Preserve physical mission calculations. Add a wrapper result for block time, reserve policy, route scenario ID, and operational ground-time assumptions. Do not put fare or schedule preferences in the physics request. |
 | alas-payload | PayloadLayout, passenger/cargo summaries, ULDs, hold capacity, doors, CG, aisle/deck utilization | Feed seat map, passenger count, carry-on/baggage assumptions, ULD compatibility, door proximity, loading strategy, and CG trim into turnaround and cargo task models. |
 | alas-config::airports | ICAO, elevation, TODA, LDA, ISA deviation, coordinates | Use as the physical airport baseline. Add a derived or optional airport-operations profile for stand, gate, GSE, pavement, fire category, curfew, and service-resource data. |

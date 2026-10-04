@@ -85,7 +85,7 @@ mod tests {
 
     #[test]
     fn archive_file_name_selects_zip_on_windows_and_tar_gz_elsewhere() {
-        let name = archive_file_name("alas-v1.2.0-windows-x86_64");
+        let name = archive_file_name("alas-v1.3.0-windows-x86_64");
         if cfg!(windows) {
             assert!(name.ends_with(".zip"), "{name}");
         } else {

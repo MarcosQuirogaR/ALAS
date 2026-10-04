@@ -350,12 +350,23 @@ fn feasibility_to_json(report: &FeasibilityReport) -> serde_json::Value {
     );
     serde_json::json!({
         "fuel_loading": {
+            "design_takeoff_loading": fuel.design_takeoff_loading.map(|loading| serde_json::json!({
+                "status": loading.status.as_str(),
+                "zero_fuel_mass_kg": loading.zero_fuel_mass_kg,
+                "mtow_fuel_budget_kg": loading.mtow_fuel_budget_kg,
+                "usable_capacity_kg": loading.usable_capacity_kg,
+                "carried_usable_fuel_kg": loading.carried_usable_fuel_kg,
+                "takeoff_mass_kg": loading.takeoff_mass_kg,
+                "mtow_margin_kg": loading.mtow_margin_kg,
+                "usable_capacity_margin_kg": loading.usable_capacity_margin_kg,
+            })),
             "mtow_closure_fuel_kg": fuel.mtow_closure_fuel_kg,
             "usable_capacity_kg": fuel.usable_capacity.capacity_kg,
             "usable_capacity_evidence": fuel_capacity_evidence_name(
                 fuel.usable_capacity.evidence,
             ),
             "analyzed_carried_fuel_kg": fuel.analyzed_carried_fuel_kg,
+            "flown_carried_fuel_kg": fuel.flown_carried_fuel_kg,
             "carried_fuel_basis": carried_fuel_basis_name(fuel.carried_fuel_basis),
             "zero_fuel_mass_kg": fuel.zero_fuel_mass_kg,
             "analyzed_takeoff_mass_kg": fuel.analyzed_takeoff_mass_kg,

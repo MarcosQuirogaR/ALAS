@@ -19,7 +19,7 @@
 //! while the builder read another. Upstream keeps them in two places and
 //! asserts at import that they agree. Here one table generates both, so the
 //! failure it guards against cannot be written down: the assertion still
-//! exists as a test, but it is now checking a property the construction
+//! exists as a test, but it checks a property the construction
 //! already guarantees rather than one a maintainer has to preserve.
 //!
 //! This is not part of the settings form, nothing here carries form

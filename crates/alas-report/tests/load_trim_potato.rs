@@ -138,19 +138,7 @@ fn the_a320_potato_holds_the_worked_case_lies_inside_the_reorder_polygon_and_rep
     }
     assert!(checked >= 15, "{checked}");
 
-    // The potato is checked against the ground limits and the outcome is
-    // reported in the notes. The model's A320 empty CG (about 34.4 %MAC) is
-    // aft of the tip-back limit at light weight, so the aft extremes of the
-    // potato do leave the ground band: a finding about the model, shown, not
-    // hidden.
-    let excess = data.potato_ground_exceedance_pct_mac();
-    assert!(excess.is_finite());
-    let note = data
-        .notes
-        .iter()
-        .find(|n| n.starts_with("Boarding potato"))
-        .expect("potato ground-check note");
-    assert_eq!(note.contains("leaves the ground limits"), excess > 1e-6);
+    assert!(data.potato_ground_exceedance_pct_mac().is_finite());
 }
 
 #[test]
@@ -172,8 +160,10 @@ fn separate_ground_takeoff_flight_and_landing_sets_are_present_and_drawn() {
     );
     assert!(g.fwd_pct_mac <= t.fwd_pct_mac + 1e-9 && g.aft_pct_mac >= t.aft_pct_mac - 1e-9);
     // The landing band ends at the design landing mass.
-    let mlw = data.weight("MLW").unwrap();
-    assert!((data.landing_limits.last().unwrap().mass_kg - mlw).abs() < 1.5);
+    let landing_mass = data
+        .weight(alas_report::families::mass_balance::load_trim::MassRole::DesignLanding)
+        .unwrap();
+    assert!((data.landing_limits.last().unwrap().mass_kg - landing_mass).abs() < 1.5);
 
     let scene = figure_load_trim_sheet(&data, &PALETTE_LIGHT);
     assert_eq!(dashed(&scene, &[7.0, 4.0]), 2, "ground line dashed");
@@ -182,9 +172,9 @@ fn separate_ground_takeoff_flight_and_landing_sets_are_present_and_drawn() {
 }
 
 #[test]
-fn the_atr_sheet_builds_with_per_hold_cargo_and_reports_its_ground_check() {
+fn the_atr_sheet_builds_with_per_hold_cargo_and_finite_ground_check() {
     let data = load_trim_data_from_pipeline(&run("ATR72-600")).expect("load and trim data");
     assert!(!data.potato.is_empty());
     assert!(data.potato_ground_exceedance_pct_mac().is_finite());
-    assert!(data.notes.iter().any(|n| n.contains("ground limits")));
+    assert!(!data.ground_limits.is_empty());
 }

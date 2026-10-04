@@ -27,6 +27,7 @@
 
 pub mod geometry;
 mod layout;
+pub mod placement;
 pub mod tires;
 
 use alas_config::{EffectiveGearStationExt, LandingGearConfig};
@@ -41,7 +42,7 @@ pub use tires::{TireSpec, TIRE_DATABASE};
 /// fuselage-centreline unit. Four-leg layouts add the two body units. The
 /// fallback for a larger explicit count keeps every configured leg visible,
 /// but it does not invent a new aircraft-specific track definition.
-fn mlg_strut_positions(n_mlg_struts: i64, half_track: f64) -> Vec<(String, f64)> {
+pub fn mlg_strut_positions(n_mlg_struts: i64, half_track: f64) -> Vec<(String, f64)> {
     let count = n_mlg_struts.max(2) as usize;
     let mut positions = Vec::with_capacity(count);
     positions.push(("L".to_owned(), -half_track));

@@ -70,7 +70,7 @@ pub(super) fn aircraft_metrics(
             && report.airplane.s_ref > 0.0
         {
             metrics.push(("Wing span", format!("{:.1} m", report.airplane.b_ref)));
-            metrics.push(("Wing area", format!("{:.1} m^2", report.airplane.s_ref)));
+            metrics.push(("Wing area", format!("{:.1} m\u{b2}", report.airplane.s_ref)));
         }
     }
     metrics
@@ -198,6 +198,12 @@ pub(super) fn mass_metrics(result: &alas_pipeline::PipelineResult) -> Vec<(&'sta
         "Takeoff mass margin",
         takeoff_mass_margin(fuel.mtow_shortfall_kg),
     ));
+    if let Some(loading) = fuel.design_takeoff_loading {
+        metrics.push((
+            "Takeoff fuel load",
+            takeoff_fuel_load(loading.status.as_str()),
+        ));
+    }
     if fuel.zero_fuel_mass_kg.is_finite() && fuel.zero_fuel_mass_kg >= 0.0 {
         metrics.push((
             "Zero-fuel mass",
@@ -227,6 +233,18 @@ pub(super) fn takeoff_mass_rows(
         ),
         ("MTOW limit (input)", format!("{:.1} t", mtow_kg / 1_000.0)),
     ]
+}
+
+/// Which limit set the Hard-MTOW takeoff fuel: a volume-limited load departs
+/// below MTOW with full tanks, and the summary says so rather than leaving
+/// the lower takeoff mass unexplained.
+/// `status` is the loading's stable identifier (`MtowFuelLoadingStatus::as_str`).
+pub(super) fn takeoff_fuel_load(status: &str) -> String {
+    match status {
+        "volume_limited" => tr("Volume-limited: tanks full"),
+        "mass_limited" => tr("Mass-limited: fuel up to MTOW"),
+        _ => tr("Tank capacity not established"),
+    }
 }
 
 pub(super) fn takeoff_mass_margin(mtow_shortfall_kg: f64) -> String {
@@ -385,7 +403,7 @@ pub(super) fn payload_summary_metrics(layout: &PayloadLayout) -> Vec<(&'static s
             ("ULD positions", summary.n_slots.to_string()),
             ("Cargo capacity", tonnes(summary.capacity_t)),
             ("Cargo capacity used", format!("{:.1} %", summary.fill_pct)),
-            ("Cargo volume", format!("{:.1} m^3", summary.volume_m3)),
+            ("Cargo volume", format!("{:.1} m\u{b3}", summary.volume_m3)),
             ("Main deck ULDs", summary.n_main_deck.to_string()),
             ("Lower deck ULDs", summary.n_lower_deck.to_string()),
             (

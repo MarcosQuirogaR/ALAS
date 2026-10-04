@@ -20,6 +20,37 @@ use alas_opt::{CandidateAssessment, ConstraintResidual, SearchDiagnostics};
 use alas_pipeline::{AnalysisReport, PipelineResult};
 use serde_json::{json, Value};
 
+/// Distinct designs satisfying every hard constraint at the full in-loop fidelity.
+/// Screening with a separate model never enters this history.
+pub(super) fn full_fidelity_valid(history: &alas_opt::OptimizationHistory) -> usize {
+    history
+        .design_vectors
+        .iter()
+        .zip(&history.valid)
+        .enumerate()
+        .filter(|(index, (_, valid))| {
+            **valid
+                && history.hard_violation.get(*index) == Some(&0.0)
+                && history
+                    .cost
+                    .get(*index)
+                    .is_some_and(|cost| cost.is_finite())
+                && history
+                    .objective_value
+                    .get(*index)
+                    .is_some_and(|value| value.is_finite())
+        })
+        .map(|(_, (design, _))| {
+            design
+                .to_array()
+                .into_iter()
+                .map(|value| if value == 0.0 { 0 } else { value.to_bits() })
+                .collect::<Vec<_>>()
+        })
+        .collect::<std::collections::BTreeSet<_>>()
+        .len()
+}
+
 /// ICAO Annex 14, Vol. I, Table 1-1: aerodrome reference code letter from
 /// wingspan. Returns the code letter and the exclusive upper span bound of
 /// that code in metres (`None` above code F).
@@ -112,8 +143,9 @@ pub(super) fn stages_json(diagnostics: &SearchDiagnostics) -> Value {
 fn residual_json(residual: &ConstraintResidual) -> Value {
     json!({
         "id": residual.id,
+        "detail": residual.detail,
         "family": format!("{:?}", residual.family),
-        "policy": format!("{:?}", residual.policy),
+        "role": format!("{:?}", residual.role),
         "value": residual.actual,
         "limit": residual.limit,
         "unit": residual.unit,
@@ -294,10 +326,16 @@ mod tests {
         assert_eq!(row["replay_evaluations"], row["evaluations"]);
         assert_eq!(row["max_pregate_rejects"], 4000);
         let reasons = &row["pre_gate_reasons"];
-        let total: u64 = ["design_box", "planform", "trailing_edge_angle", "span_code"]
-            .iter()
-            .filter_map(|key| reasons[key].as_u64())
-            .sum();
+        let total: u64 = [
+            "design_box",
+            "planform",
+            "trailing_edge_angle",
+            "span_code",
+            "wing_area",
+        ]
+        .iter()
+        .filter_map(|key| reasons[key].as_u64())
+        .sum();
         assert_eq!(json!(total), row["pre_gate_rejects"]);
         assert_eq!(row["analysed_failures"]["cg_envelope"], 7);
     }

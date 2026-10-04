@@ -290,7 +290,7 @@ fn fv_solution(config: &CfdStudyConfig) -> String {
         // skipped-equation guard reasons about residuals relative to this
         // number; when it was a literal here and a constant there, the two
         // could drift silently and the guard would be comparing against a
-        // tolerance the case no longer emitted.
+        // tolerance the case does not emit.
         inner_tolerance = LINEAR_SOLVER_RESIDUAL_FLOOR,
         residual = config.solver.residual_tolerance * RESIDUAL_CONTROL_MARGIN,
         potential_correctors = POTENTIAL_FLOW_NON_ORTHOGONAL_CORRECTORS,

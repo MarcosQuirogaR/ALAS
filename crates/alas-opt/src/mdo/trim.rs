@@ -35,18 +35,21 @@
 //! stations m in geometry axes (x positive aft). Mach and every coefficient
 //! are dimensionless; coefficients are referred to `Airplane::s_ref`.
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use alas_aero::analysis::{AeroAnalysis, TrimPoint, TrimmedPerformance};
 use alas_atmo::Atmosphere;
 use alas_config::design_variables::DesignVector;
 use alas_config::AlasConfig;
 use alas_geom::aircraft::airplane::Airplane;
-use alas_stab::trim::stability_and_trim;
+use alas_stab::trim::stability_and_trim_with_cache;
 
 use super::drag_table::{DesignTrim, TrimmedDragTable};
 use super::mission_model::ParabolicPolar;
 use super::types::{CandidateDrag, CandidateFailure, ExternalPolar};
+
+/// Geometry-only work shared by the initial trim and every CG re-trim.
+pub(crate) type CandidateVlmCache = Arc<Mutex<alas_aero::vlm::VlmGeometryCache>>;
 
 /// History label for a trimmed cruise point whose drag table could not be
 /// built: an untrimmed induced node, a fourth trimmed point that disagrees
@@ -257,12 +260,36 @@ fn trim_solve_failure() -> CandidateFailure {
 /// or non-physically-signed component, a trimmed lift that misses the target
 /// by more than [`CL_TARGET_RELATIVE_TOLERANCE`], or a moment residual larger
 /// than [`CM_RESIDUAL_TOLERANCE`].
+#[cfg(test)]
 pub(crate) fn trim_and_polar(
     config: &AlasConfig,
     plane: &mut Airplane,
     cg_x: f64,
     dv: &DesignVector,
     cruise_mass_kg: f64,
+) -> Result<TrimmedPolar, CandidateFailure> {
+    trim_and_polar_with_cache(
+        config,
+        plane,
+        cg_x,
+        dv,
+        cruise_mass_kg,
+        &Default::default(),
+        false,
+    )
+}
+
+/// Trim at the current CG, retaining exact lattice and wake work from the
+/// other trims of this candidate. Cache validation includes actual panel
+/// geometry, so incidence continues to rotate the full stabilizer mesh.
+pub(crate) fn trim_and_polar_with_cache(
+    config: &AlasConfig,
+    plane: &mut Airplane,
+    cg_x: f64,
+    dv: &DesignVector,
+    cruise_mass_kg: f64,
+    cache: &CandidateVlmCache,
+    screening_drag_table: bool,
 ) -> Result<TrimmedPolar, CandidateFailure> {
     let req = &config.requirements;
     plane.xyz_ref[0] = cg_x;
@@ -288,12 +315,13 @@ pub(crate) fn trim_and_polar(
         });
     }
 
-    let trim = stability_and_trim(
+    let trim = stability_and_trim_with_cache(
         plane,
         &config.analysis,
         cl_target,
         req.cruise_mach,
         req.cruise_altitude_m,
+        cache,
     )
     .map_err(|_| trim_solve_failure())?;
 
@@ -316,7 +344,8 @@ pub(crate) fn trim_and_polar(
         Some(config.geometry.clone()),
         Some(config.drag_model.clone()),
         Some(config.analysis.clone()),
-    );
+    )
+    .with_vlm_cache(cache.clone());
     let trim_point = TrimPoint {
         trim_alpha_deg: trim.trim_alpha_deg,
         trim_ih_deg: trim.trim_ih_deg,
@@ -336,7 +365,7 @@ pub(crate) fn trim_and_polar(
         return Err(trim_solve_failure());
     }
 
-    let drag_table = TrimmedDragTable::build(
+    let drag_table = TrimmedDragTable::build_with_check_set(
         &aero,
         &DesignTrim {
             trim,
@@ -348,6 +377,7 @@ pub(crate) fn trim_and_polar(
             cl_max_clean: config.performance.cl_max_clean,
             cm_tolerance: CM_RESIDUAL_TOLERANCE,
         },
+        screening_drag_table,
     )
     .map_err(|error| {
         tracing::warn!(%error, "trimmed drag table rejected");

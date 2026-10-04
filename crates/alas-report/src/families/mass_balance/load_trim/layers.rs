@@ -2,14 +2,14 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 //! Chart layers of the load-and-trim sheet that carry the loading result:
-//! the boarding potato with its named orders, and the four scoped limit sets.
+//! the four scoped limit sets.
 //!
 //! Limit line styles: ground dashed, takeoff solid, flight dotted, landing
 //! dash-dot. The styles are shared with the panel key ([`limit_style`]).
 
 use super::render::Ink;
 use super::{limit_at, Frame, LimitVertex, LoadTrimSheetData};
-use crate::scene::{Color, Fill, Point2D, Scene, SceneElement, Stroke};
+use crate::scene::{Color, Point2D, Scene, SceneElement, Stroke};
 
 /// Which limit set a line belongs to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -76,43 +76,4 @@ pub(super) fn draw_limit_sets(scene: &mut Scene, data: &LoadTrimSheetData, fr: &
             });
         }
     }
-}
-
-/// Draw the boarding potato (filled between its forward and aft CG chains)
-/// and every composed loading order as a thin line.
-pub(super) fn draw_potato(scene: &mut Scene, data: &LoadTrimSheetData, fr: &Frame, ink: &Ink) {
-    for path in &data.sequences {
-        let points: Vec<Point2D> = path
-            .points
-            .iter()
-            .map(|&(m, p)| fr.map(data.index_at(m, p), m))
-            .collect();
-        let mut thin = ink.envelope;
-        thin.a = 110;
-        scene.add(SceneElement::Polyline {
-            points,
-            stroke: Stroke::new(thin, 0.6),
-        });
-    }
-    if data.potato.len() < 2 {
-        return;
-    }
-    let mut outline: Vec<Point2D> = data
-        .potato
-        .iter()
-        .map(|l| fr.map(data.index_at(l.mass_kg, l.fwd_pct_mac), l.mass_kg))
-        .collect();
-    outline.extend(
-        data.potato
-            .iter()
-            .rev()
-            .map(|l| fr.map(data.index_at(l.mass_kg, l.aft_pct_mac), l.mass_kg)),
-    );
-    let mut fill = ink.envelope;
-    fill.a = 38;
-    scene.add(SceneElement::Polygon {
-        points: outline,
-        fill: Some(Fill::new(fill)),
-        stroke: Some(Stroke::new(ink.envelope, 1.1)),
-    });
 }

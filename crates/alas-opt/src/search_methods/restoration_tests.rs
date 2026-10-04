@@ -14,6 +14,51 @@ fn limits(max_scores: usize) -> Limits {
     }
 }
 
+#[test]
+fn a_partial_poll_wave_replays_its_admitted_prefix_without_extra_scores() {
+    let initial = coupled(&[0.5, 1500.0, 7.0]);
+    let bounds = [(0.0, 1.0), (1000.0, 2000.0), (7.0, 7.0)];
+    let score = |values: &Vec<f64>| {
+        let mut score = coupled(values);
+        if values[0] < 0.5 {
+            score.tier = Tier::PreGateFailed;
+        }
+        score
+    };
+    for prefix in 2..=4 {
+        let mut recorded = Vec::new();
+        let limited = run(
+            &bounds,
+            initial.clone(),
+            limits(4),
+            &CancelScope::attach(None),
+            &mut |points| {
+                let started = &points[..prefix];
+                recorded.extend_from_slice(started);
+                started.iter().map(score).collect()
+            },
+        );
+        let mut replayed = Vec::new();
+        let replay = run(
+            &bounds,
+            initial.clone(),
+            Limits {
+                stop_after: limited.requested_scores - limited.rejected_scores,
+                ..limits(4)
+            },
+            &CancelScope::attach(None),
+            &mut |points| {
+                replayed.extend_from_slice(points);
+                points.iter().map(score).collect()
+            },
+        );
+        assert_eq!(recorded, replayed, "prefix {prefix}");
+        assert_eq!(limited.winner, replay.winner);
+        assert_eq!(limited.requested_scores, replay.requested_scores);
+        assert_eq!(limited.rejected_scores, replay.rejected_scores);
+    }
+}
+
 fn coupled(values: &[f64]) -> ScoredPoint {
     let x = values[0];
     let y = (values[1] - 1000.0) / 1000.0;

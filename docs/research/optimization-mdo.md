@@ -808,7 +808,7 @@ in another architecture or load case.
 |---|---|---|
 | docs/design-constraints.md | Defines the boundary between requirements, model inputs, numerical settings, preferences, and validity limits. | Treat as the constraint-policy reference. Add explicit robust-mode and fidelity-per-requirement fields when the data model is extended. |
 | crates/alas-opt/src/evaluator.rs | ObjectiveEvaluation is the legacy scalar view. ObjectiveAssessment adds ConstraintResidual values and FeasibilityScore. ObjectiveEvaluator can override assessment evaluation. | Add architecture/fidelity/scenario/status/provenance to the assessment sidecar while preserving legacy compatibility. |
-| crates/alas-opt/src/feasibility.rs | ConstraintResidual uses positive violation, scale, hard/soft, physical/evaluation-failure kind. FeasibilityScore aggregates hard/soft/failure metrics. CandidateScore supports feasibility-first policy. | Insert soft residual before ordinary objective in requirements-first ranking. Add explicit comparability and robust-hard fields. Test every ordering term. |
+| crates/alas-opt/src/mdo/types/residual.rs | ConstraintResidual uses positive violation and fixed constraint, preference or diagnostic roles. Every constraint is hard, and candidate selection ranks feasibility first. | Preserve hard rejection before study preferences and the ordinary objective. Add explicit comparability and robust-hard fields. Test every ordering term. |
 | crates/alas-opt/src/history.rs | Stores design vectors, validity, cost, aerodynamic values, and reject reason; detailed residuals are not serialized in the basic history. | Persist stage statuses, residuals, architecture IDs, fidelity/scenario IDs, cache state, and convergence evidence in a versioned sidecar. |
 | crates/alas-opt/src/differential_evolution/optimizer.rs | Uses bounded variables, seed, worker count, population/iteration controls, LHS initialization, and batch evaluation. | Add complete CandidateKey/caching, architecture loop, promotion policy, and run summary metrics. |
 | crates/alas-opt/src/search_methods/constrained_de.rs | Feasibility-first DE with LHS and Lampinen-style constrained comparison reference. | Use as the default inner continuous method and add mixed-architecture orchestration outside it. |
@@ -831,7 +831,7 @@ in another architecture or load case.
 | Takeoff, landing, Vapp, runway | alas-perf and airport model | Promote finalists and validate uncertainty model where possible. |
 | Span, geometry, wetted/planform bounds | alas-geom | Hard geometry residuals at materialization. |
 | ACN/pavement | performance/airport evidence where implemented | Diagnostic or unresolved until the appropriate data/model exists. |
-| CG, static margin, trim | alas-mass, alas-stab, alas-aero | Hard/soft policy from the DesignBrief and load case. |
+| CG, static margin, trim | alas-mass, alas-stab, alas-aero | Hard constraints from the design brief and load case. |
 | Wingbox, stress, deflection, aeroelasticity | alas-struct and external tools | High-fidelity promotion with explicit model/fidelity identity. |
 
 ## 10. Verification plan

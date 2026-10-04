@@ -245,7 +245,7 @@ pub(crate) fn refine_candidate_3d_with_mass_model(
         return;
     }
 
-    // A finite fallback is not a closed trim.  The stability solve now
+    // A finite fallback is not a closed trim.  The stability solve
     // reports whether its 2x2 Jacobian was finite and nonsingular; screening
     // must carry that status through instead of admitting a pure-alpha or
     // singular fallback as a stable candidate.

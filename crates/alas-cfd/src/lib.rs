@@ -448,7 +448,7 @@ mod tests {
     /// skipped-equation guard reasons about must be the same number.  They were
     /// a literal in five places and a constant in one, and could drift apart
     /// silently; the guard would then have been comparing residuals against a
-    /// tolerance the case no longer used.
+    /// tolerance the case does not use.
     #[test]
     fn the_emitted_inner_tolerance_is_the_one_the_convergence_gate_uses() {
         let config = CfdStudyConfig::default();
@@ -792,8 +792,8 @@ mod tests {
     #[test]
     fn the_case_report_states_the_answer_and_the_margin() {
         // A report that says "the criteria are satisfied" without printing a
-        // coefficient or a residual cannot be acted on, and until now that is
-        // what it said.  Values are `Z1-shipped-defaults-coarse`'s measured tail.
+        // coefficient or a residual cannot be acted on.
+        // Values are `Z1-shipped-defaults-coarse`'s measured tail.
         let path = test_case_dir("report-answer");
         let config = CfdStudyConfig::default();
         let generated = generate_case(&config, &path).expect("case generation should succeed");
@@ -1068,7 +1068,7 @@ mod tests {
         assert!(detail.contains("is unchanged in all"), "{detail}");
 
         // `L2-medium-le2` in miniature, and the reason the residual pattern is
-        // no longer a precondition: the field is frozen while the residual keeps
+        // not a precondition: the field is frozen while the residual keeps
         // varying, because it is recomputed each outer iteration from a pressure
         // field that is still moving.  Every residual-shaped trigger (run
         // length, depth, zero solver work) misses this.  The field does not.

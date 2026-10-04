@@ -153,10 +153,9 @@ mod tests {
 
         assert!(sea_level_power_w > intermediate_power_w);
         assert!(intermediate_power_w > fl170_power_w);
-        // Was `(0.70 / 1.225)^0.75`, a lapse from sea-level ISA with an
-        // aircraft-calibrated exponent. The climb rating now shares the
-        // maximum-continuous flat-rating corner (sea-level pressure at 48 C,
-        // TCDS IM.E.041) and lapses with Nita's PW120 exponent 0.728 below it.
+        // The climb rating shares the maximum-continuous flat-rating corner
+        // (sea-level pressure at 48 C, TCDS IM.E.041) and lapses with Nita's
+        // PW120 exponent 0.728 below it.
         let corner_kg_m3 = 1.225 * 288.15 / 321.15;
         assert!(
             (model.flat_rating_corner_density_kg_m3(Pw127mRating::MaximumClimb) - corner_kg_m3)
@@ -344,10 +343,9 @@ mod tests {
         assert_eq!(output.engine_shaft_power_w, 1_400_000.0);
     }
 
-    /// Was `cruise_fuel_anchor_reproduces_the_published_aircraft_flow`, which
-    /// pinned the constant-PSFC calibration to 762 kg/h to 1e-9. The flow is
-    /// now shaft power times the class PSFC at the ISA temperature of the
-    /// density, and the published point is not reproduced by construction.
+    /// The fuel flow is shaft power times the class PSFC at the ISA
+    /// temperature of the density, and the published point is not reproduced by
+    /// construction.
     #[test]
     fn cruise_fuel_flow_is_shaft_power_times_the_class_psfc() {
         let model = Pw127m568fModel::default();
@@ -503,7 +501,7 @@ mod tests {
         };
         let static_thrust = evaluate_at(0.0);
         let near_static_thrust = evaluate_at(1.0e-6);
-        // The static point is now on the momentum bound rather than under it,
+        // The static point is on the momentum bound rather than under it,
         // because the bound is evaluated at the same figure of merit the
         // static branch uses. The two therefore differ by the bound's own
         // physical slope, `dT/dV ~ -2T/(3 v_i)`, which is about 2e-8 of the
@@ -536,8 +534,8 @@ mod tests {
         assert!(output.power_balance_residual_w.abs() < 1.0e-8);
         let reconstructed_power = output.propeller_torque_n_m * 2.0 * PI * 20.0;
         assert!((reconstructed_power - output.propeller_power_w).abs() < 1.0e-8);
-        // Was the constant calibrated PSFC; now the class PSFC at the ISA
-        // temperature of the evaluated density.
+        // Fuel is the class PSFC at the ISA temperature of the evaluated
+        // density.
         let expected_fuel = output.engine_shaft_power_w
             * model.psfc_kg_kwh(isa_temperature_from_density_k(1.0, 1.225))
             / JOULES_PER_KWH;
@@ -657,7 +655,7 @@ mod tests {
         let disk_area_m2 = PI * model.propeller_diameter_m.powi(2) / 4.0;
         // The fallback bounds the thrust on the blade-efficiency share of the
         // shaft power, which is the same effective-power loss factor the
-        // governed branch now applies, and not on the whole of it.
+        // governed branch applies, and not on the whole of it.
         let expected_fallback_thrust_n = actuator_disk_thrust_bound_n(
             model.blade_efficiency(advance_ratio) * output.propeller_power_w,
             density_kg_m3,
@@ -718,7 +716,7 @@ mod tests {
         let disk_area_m2 = PI * model.propeller_diameter_m.powi(2) / 4.0;
         // The fallback bounds the thrust on the blade-efficiency share of the
         // shaft power, which is the same effective-power loss factor the
-        // governed branch now applies, and not on the whole of it.
+        // governed branch applies, and not on the whole of it.
         let expected_fallback_thrust_n = actuator_disk_thrust_bound_n(
             model.blade_efficiency(advance_ratio) * output.propeller_power_w,
             density_kg_m3,
@@ -1135,11 +1133,10 @@ mod tests {
     }
 
     /// The declared bands must have the sign the evidence gives them. The
-    /// static figure of merit is now the class preliminary-design 0.70 inside
-    /// a 0.65-0.80 band (it was 0.72 at the optimistic end of an older
-    /// 0.50-0.70 band, so the static band was one-sided), so the static thrust
-    /// band points both ways; the forward-flight thrust can still only be
-    /// higher, because its blade efficiency sits at the conservative end of
+    /// static figure of merit is the class preliminary-design 0.70 inside
+    /// a 0.65-0.80 band, so the static thrust band points both ways; the
+    /// forward-flight thrust can still only be higher,
+    /// because its blade efficiency sits at the conservative end of
     /// its band.
     #[test]
     fn the_declared_thrust_bands_carry_the_sign_their_evidence_gives_them() {
@@ -1234,11 +1231,7 @@ mod tests {
         assert!(envelope.fuel_validity.contains("762 kg/h"));
     }
 
-    /// Replaces `the_published_cruise_fuel_flow_anchor_is_reproduced_exactly`
-    /// and `the_implied_fuel_consumption_is_constant_and_its_excess_is_quantified`,
-    /// which pinned the single-point calibration (762 kg/h to the gram, a
-    /// constant 0.3646 kg/kWh 21-28 % above measured PW120A data). The
-    /// published flow is now a validation point: the model is evaluated
+    /// The published flow is a validation point: the model is evaluated
     /// against it, and moving the published datum does not move the model.
     #[test]
     fn the_published_cruise_fuel_flow_is_a_validation_point_not_a_fit() {

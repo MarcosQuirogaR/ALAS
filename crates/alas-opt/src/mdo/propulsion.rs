@@ -451,10 +451,9 @@ impl PropulsionDeck {
     /// evaluations each time, which made one coupled ATR leg 167 ms against
     /// the A320-200's 0.6 ms. Halving the retained endpoint's residual after
     /// it is retained twice restores superlinear convergence, so the solve
-    /// now reaches the same 1e-6 relative thrust tolerance (more often
-    /// *inside* it than before, since the old path usually fell out of the
-    /// loop) in a handful of evaluations. Nothing in the deck, the rating
-    /// map or the tolerance changes.
+    /// reaches the 1e-6 relative thrust tolerance, usually *inside* it rather
+    /// than falling out of the loop, in a handful of evaluations. The deck,
+    /// the rating map and the tolerance are unchanged by this.
     fn solve_fraction(
         &self,
         flight: FlightCondition,
@@ -871,7 +870,7 @@ mod tests {
         assert!(half.fuel_flow_kg_s < rated.fuel_flow_kg_s);
     }
 
-    /// The turboprop inverse now answers through the rating-fraction solve
+    /// The turboprop inverse answers through the rating-fraction solve
     /// wherever that map brackets the request, and through the governor's own
     /// normalized-force inverse everywhere else. The two must remain one
     /// operating point, not two, so this pins the contract the routing rests

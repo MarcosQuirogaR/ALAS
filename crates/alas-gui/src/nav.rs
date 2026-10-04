@@ -206,7 +206,7 @@ const MODELING_PAGES: &[Page] = &[
         description: Some("Mass-method and CG-solver assumptions: Torenbeek/Raymer structural relations, compatibility-only MTOW fractions for systems and furnishings, or the architecture-dependent NASA FLOPS transport component build-up. FLOPS inputs, high-lift mass loads and propulsion mass factors are in Advanced Settings."),
         surface: Surface::Modeling,
         preview: Some("mass_cg"),
-        preview_title: Some("CG envelope (illustrative)"),
+        preview_title: Some("LOAD & TRIM SHEET"),
         ..Page::form("mass_model", "Mass", "mass_model")
     },
     Page {
@@ -291,7 +291,7 @@ pub const ADVANCED_SETTINGS_PAGES: &[Page] = &[
     Page {
         description: Some("Search settings for the mission-sized L-SHADE optimizer. Whether a run optimizes at all is chosen on Inputs; the selected catalogue engine remains fixed."),
         detail: &[
-            "Each candidate is mass-balanced, trimmed and closed by the design mission, then ranked against the selected fuel, mass or efficiency objective and requirement policies.",
+            "Each candidate is mass-balanced, trimmed and closed by the design mission, then ranked against the selected fuel, mass or efficiency objective subject to hard requirements.",
             "The search uses L-SHADE under epsilon constraints, seeded by a screening sample of the design box, with bounded feasibility restoration. It reports convergence, stagnation, an evaluation-budget or time-limit stop, or cancellation; convergence is the algorithm's stopping test, not a proof of global optimality.",
         ],
         ..Page::form("optimizer", "Optimizer", "optimizer")

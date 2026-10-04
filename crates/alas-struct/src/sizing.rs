@@ -49,6 +49,7 @@ use crate::loads::WingInertiaRelief;
 use crate::tanks;
 
 mod arc_mass;
+mod cap_search;
 mod law;
 mod product_strength;
 mod scoped;

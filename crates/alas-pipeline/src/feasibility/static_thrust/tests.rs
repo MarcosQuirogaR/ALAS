@@ -62,9 +62,21 @@ fn cruise_thrust_requirement_is_the_shared_table_drag_over_weight() {
 
 #[test]
 fn sized_candidate_cruise_demand_matches_optimizer_after_lift_coefficient_changes() {
+    candidate_cruise_demand_matches_optimizer(alas_config::MtowSizing::SizedByMission);
+}
+
+#[test]
+fn hard_mtow_candidate_cruise_demand_matches_optimizer() {
+    candidate_cruise_demand_matches_optimizer(alas_config::MtowSizing::FixedRequirement);
+}
+
+fn candidate_cruise_demand_matches_optimizer(mode: alas_config::MtowSizing) {
     let config = AlasConfig::from_value(&serde_json::json!({
         "preset": "A320-200",
-        "optimizer": {"design_space": {"mode": "reference_adaptation"}}
+        "optimizer": {
+            "design_space": {"mode": "reference_adaptation"},
+            "objective": {"mtow_sizing": mode}
+        }
     }))
     .expect("registered preset config");
     let design = alas_config::presets::get("A320-200")
@@ -97,12 +109,25 @@ fn sized_candidate_cruise_demand_matches_optimizer_after_lift_coefficient_change
     let wing_loading_pa =
         sized.takeoff_mass_kg * config.requirements.gravity_m_s2 / report.airplane.s_ref;
     let sized_cl = wing_loading_pa / dynamic_pressure_pa;
-    assert!(sized.takeoff_mass_kg < sized.design_gross_mass_kg);
-    assert!(
-        (sized_cl - table.design_cl()).abs() > 1.0e-6,
-        "fixture must move cruise CL: sized {sized_cl}, table {}",
-        table.design_cl()
-    );
+    if mode == alas_config::MtowSizing::SizedByMission {
+        assert!(sized.takeoff_mass_kg < sized.design_gross_mass_kg);
+        assert!(
+            (sized_cl - table.design_cl()).abs() > 1.0e-6,
+            "fixture must move cruise CL: sized {sized_cl}, table {}",
+            table.design_cl()
+        );
+    } else {
+        // Hard MTOW: the takeoff load is ZFW plus min(MTOW - ZFW, usable
+        // capacity); the structure stays at the declared MTOW.
+        let load = sized.takeoff_loading.expect("Hard-MTOW takeoff loading");
+        assert_eq!(
+            sized.takeoff_mass_kg,
+            load.zero_fuel_mass_kg
+                + (config.requirements.mtow_kg - load.zero_fuel_mass_kg)
+                    .min(sized.usable_capacity_kg)
+        );
+        assert_eq!(sized.design_gross_mass_kg, config.requirements.mtow_kg);
+    }
 
     // These are independently evaluated consumers of the same carried
     // table. A report fit cannot replace the final-mass cruise demand.

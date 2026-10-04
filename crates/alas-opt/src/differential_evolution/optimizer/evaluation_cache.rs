@@ -8,7 +8,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::search_methods::{product_de, ScoredPoint};
+use crate::search_methods::ScoredPoint;
 
 pub(super) struct EvaluationCache {
     scores: BTreeMap<Vec<u64>, ScoredPoint>,
@@ -62,15 +62,11 @@ impl EvaluationCache {
         pending
     }
 
-    pub(super) fn resolve(&self, points: &[Vec<f64>]) -> Vec<ScoredPoint> {
+    /// Scores up to the first candidate no evaluation or pre-gate answered.
+    pub(super) fn resolve_prefix(&self, points: &[Vec<f64>]) -> Vec<ScoredPoint> {
         points
             .iter()
-            .map(|point| {
-                self.scores
-                    .get(&key(point))
-                    .cloned()
-                    .unwrap_or_else(|| product_de::unevaluated(point))
-            })
+            .map_while(|point| self.scores.get(&key(point)).cloned())
             .collect()
     }
 }
@@ -104,7 +100,7 @@ mod tests {
         };
         cache.insert(other.clone());
         assert_eq!(
-            cache.resolve(&points),
+            cache.resolve_prefix(&points),
             vec![point.clone(), other.clone(), other, point]
         );
         assert_eq!(cache.hits, 3);

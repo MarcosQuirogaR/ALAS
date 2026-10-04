@@ -169,7 +169,7 @@ SafetyResidual { requirement_id, load_case_id, actual, target, direction,
                  policy, severity, physical_or_evidence, status, evidence_refs }
 ```
 
-The existing `ConstraintResidual` shape in `alas-opt` can carry the numeric residual, hard/soft policy, severity and physical/evaluation-failure kind. The richer certification metadata can remain in the requirement/evidence layer until an implementation owner chooses a stable schema.
+The existing `ConstraintResidual` shape in `alas-opt` carries the numeric residual and its fixed constraint, preference or diagnostic role. Constraints are always hard. The richer certification metadata can remain in the requirement/evidence layer until an implementation owner chooses a stable schema.
 
 ## 4. Preliminary FHA/PSSA/SSA model
 
@@ -397,7 +397,7 @@ For each placeholder, the wizard should show what is missing, why it matters, th
 
 ### 8.1 Reuse the requirements-first acceptance semantics
 
-The current ALAS concepts already distinguish hard/soft policy, feasibility-first ranking, positive residual as violation, and evaluation failure. Certification/safety should use the same semantics:
+The current ALAS concepts distinguish hard constraints, intrinsic study preferences, diagnostics, feasibility-first ranking, positive residual as violation, and evaluation failure. Certification/safety should use the same semantics:
 
 ```text
 upper-bound residual = actual - limit

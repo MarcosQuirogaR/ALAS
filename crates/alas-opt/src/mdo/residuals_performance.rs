@@ -4,10 +4,10 @@
 //! The airworthiness performance family: engine-out second-segment climb,
 //! cruise and takeoff thrust margin, landing field length and approach speed.
 
+use crate::mdo::ResidualRole;
+
 use alas_config::airports::Airport;
-use alas_config::{
-    AlasConfig, ConstraintPolicy, DesignRequirements, ObjectiveConfig, PerformanceConfig,
-};
+use alas_config::{AlasConfig, DesignRequirements, ObjectiveConfig, PerformanceConfig};
 use alas_perf::performance::{
     assess_oei_climb, compute_v_speeds_at_masses, density_ratio, far25_oei_gradient, oei_cl_at_v2,
     tw_takeoff_constraint, ws_landing_limit, OeiClimbStatus, OeiV2Condition,
@@ -25,11 +25,8 @@ use super::types::ConstraintResidual;
 pub(super) fn performance_residuals(
     outcome: &SizingOutcome,
     config: &AlasConfig,
-    policy: ConstraintPolicy,
+    role: ResidualRole,
 ) -> Vec<ConstraintResidual> {
-    if policy == ConstraintPolicy::Off {
-        return Vec::new();
-    }
     let req = &config.requirements;
     let perf = &config.performance;
     let objective = &config.optimizer.objective;
@@ -111,9 +108,9 @@ pub(super) fn performance_residuals(
         .or(oei_assessment.required_inflight_tw)
     {
         let oei_policy = if oei_assessment.status == OeiClimbStatus::SlsEquivalent {
-            policy
+            role
         } else {
-            ConstraintPolicy::Soft
+            ResidualRole::Preference
         };
         residuals.push(ConstraintResidual::scaled(
             "oei_second_segment",
@@ -135,7 +132,7 @@ pub(super) fn performance_residuals(
             "bool",
             1.0,
             1.0,
-            ConstraintPolicy::Diagnostic,
+            ResidualRole::Diagnostic,
         )),
         OeiClimbStatus::ConceptualInflight | OeiClimbStatus::EvidenceGap => {
             residuals.push(ConstraintResidual::direct(
@@ -146,7 +143,7 @@ pub(super) fn performance_residuals(
                 "bool",
                 1.0,
                 1.0,
-                ConstraintPolicy::Diagnostic,
+                ResidualRole::Diagnostic,
             ));
         }
     }
@@ -168,7 +165,7 @@ pub(super) fn performance_residuals(
         required_cruise_tw,
         "T/W",
         required_cruise_tw - available_tw,
-        policy,
+        role,
     ));
 
     if !outcome.airport_records_resolved {
@@ -180,7 +177,7 @@ pub(super) fn performance_residuals(
             "bool",
             1.0,
             1.0,
-            policy,
+            role,
         ));
     } else if !outcome.declared_airport_data_complete {
         residuals.push(ConstraintResidual::direct(
@@ -191,7 +188,7 @@ pub(super) fn performance_residuals(
             "bool",
             1.0,
             1.0,
-            policy,
+            role,
         ));
     }
 
@@ -204,7 +201,7 @@ pub(super) fn performance_residuals(
             "bool",
             1.0,
             1.0,
-            policy,
+            role,
         ));
     }
 
@@ -216,7 +213,7 @@ pub(super) fn performance_residuals(
             outcome.minimum_profile_range_m,
             "m",
             outcome.minimum_profile_range_m - sized.design_range_m,
-            policy,
+            role,
         ));
     }
 
@@ -234,13 +231,13 @@ pub(super) fn performance_residuals(
             req.gravity_m_s2,
             departure,
             perf.cl_max_to,
-            policy,
+            role,
         ));
     }
 
     if let Some(arrival) = outcome.arrival {
         residuals.extend(landing_and_approach_residuals(
-            outcome, req, perf, objective, arrival, s_ref, policy,
+            outcome, req, perf, objective, arrival, s_ref, role,
         ));
     }
 
@@ -262,7 +259,7 @@ fn takeoff_field_residual(
     gravity_m_s2: f64,
     departure: &Airport,
     cl_max_to: f64,
-    policy: ConstraintPolicy,
+    role: ResidualRole,
 ) -> ConstraintResidual {
     let weight_n = mass_kg * gravity_m_s2;
     let available_tw = static_thrust_n / weight_n;
@@ -276,7 +273,7 @@ fn takeoff_field_residual(
         required_tw,
         "T/W",
         required_tw - available_tw,
-        policy,
+        role,
     )
 }
 
@@ -307,7 +304,7 @@ fn landing_and_approach_residuals(
     objective: &ObjectiveConfig,
     arrival: &Airport,
     s_ref: f64,
-    policy: ConstraintPolicy,
+    role: ResidualRole,
 ) -> Vec<ConstraintResidual> {
     let sized = &outcome.sized;
     let sigma = density_ratio(arrival.elevation_m, arrival.isa_deviation_c);
@@ -321,7 +318,7 @@ fn landing_and_approach_residuals(
         ws_land_limit_pa,
         "Pa",
         landing_ws_pa - ws_land_limit_pa,
-        policy,
+        role,
     )];
 
     if objective.max_approach_speed_kt > 0.0 {
@@ -342,7 +339,7 @@ fn landing_and_approach_residuals(
             objective.max_approach_speed_kt,
             "kt",
             v_app_kt - objective.max_approach_speed_kt,
-            policy,
+            role,
         ));
     }
     residuals

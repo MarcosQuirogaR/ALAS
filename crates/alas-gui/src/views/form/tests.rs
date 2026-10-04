@@ -9,6 +9,50 @@ use super::options::{optional_hint, parse_number_or_sentinel, sentinel_word};
 use alas_config::{AlasConfig, ConfigNode, Entry, Field, Kind, LeafField, Node, OptionalValueKind};
 use serde_json::{json, Value};
 
+#[test]
+fn objective_options_reuse_result_labels_and_worker_zero_round_trips() {
+    let objective_schema = alas_config::ObjectiveConfig::default().schema();
+    let objective = objective_schema.field("kind").unwrap();
+    let plain = plain_option_field();
+    for token in [
+        "block_fuel",
+        "takeoff_mass",
+        "operating_empty_mass",
+        "fuel_per_seat_kilometre",
+    ] {
+        let kind = super::options::objective_kind(objective, token).expect("objective");
+        assert_eq!(
+            display_option(objective, token),
+            crate::views::tr(alas_pipeline::optimizer_summary::objective::objective_label(kind))
+        );
+        // The objective labels follow the schema's option source, not any
+        // value that happens to spell an objective token.
+        assert_eq!(super::options::objective_kind(&plain, token), None);
+    }
+    let schema = alas_config::SolverSettings::default().schema();
+    let field = schema.field("workers").unwrap();
+    let text = super::options::sentinel_text(field, 0.0).unwrap();
+    let threads = std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get);
+    assert_eq!(
+        text,
+        crate::views::tr_fields(
+            "Automatic (all {count} threads)",
+            &[("count", threads.to_string())]
+        )
+    );
+    assert_eq!(parse_number_or_sentinel(&text, field), Some(0.0));
+    assert_eq!(parse_number_or_sentinel("3", field), Some(3.0));
+    assert_eq!(super::options::sentinel_text(field, 3.0), None);
+    // Another whole-number field, even one named `workers`, keeps zero a
+    // number unless its schema declares the automatic meaning.
+    let undeclared = layout_test_leaf("workers", "Workers", Kind::Int, json!(0));
+    assert_eq!(super::options::sentinel_text(&undeclared, 0.0), None);
+}
+
+fn plain_option_field() -> Field {
+    layout_test_leaf("plain", "Plain", Kind::Str, json!(""))
+}
+
 fn visit_fields(fields: &[alas_config::Field], values: &Value, names: &mut Vec<String>) {
     for field in fields {
         match &field.entry {
@@ -145,6 +189,41 @@ fn one_dimensionless_convention_replaces_the_four_that_reached_the_screen() {
         display_unit("fraction of fuselage length"),
         "of fuselage length"
     );
+}
+
+#[test]
+fn every_fraction_reference_in_the_schema_reads_in_spanish() {
+    fn units(fields: &[alas_config::Field], out: &mut Vec<&'static str>) {
+        for field in fields {
+            out.push(field.unit);
+            if let alas_config::Entry::Node(node) = &field.entry {
+                units(&node.fields, out);
+            }
+        }
+    }
+    let mut all = Vec::new();
+    units(
+        &alas_config::AlasConfig::default().schema().fields,
+        &mut all,
+    );
+    let references: Vec<_> = all
+        .into_iter()
+        .filter(|unit| unit.starts_with("fraction of ") || unit.starts_with("0-1 of "))
+        .collect();
+    assert!(!references.is_empty());
+    alas_i18n::es::install();
+    let previous = alas_i18n::get_language();
+    for unit in references {
+        alas_i18n::set_language(Some("en"));
+        let english = display_unit(unit);
+        alas_i18n::set_language(Some("es"));
+        let spanish = display_unit(unit);
+        assert!(
+            english.starts_with("of ") && spanish.starts_with("de"),
+            "{unit}: {english:?} / {spanish:?}"
+        );
+    }
+    alas_i18n::set_language(Some(&previous));
 }
 
 #[test]
@@ -335,6 +414,7 @@ fn layout_test_leaf(name: &'static str, label: &'static str, kind: Kind, value: 
             columns: None,
             readonly_unless: None,
             options: None,
+            zero_means: None,
         }),
     }
 }
@@ -498,39 +578,50 @@ fn expandable_groups_stack_across_the_page_instead_of_sharing_a_row() {
 
 #[test]
 fn fixed_option_values_are_capitalized_without_changing_their_data_value() {
-    assert_eq!(display_option("passenger"), "Passenger");
-    assert_eq!(display_option("auto"), "Auto");
-    assert_eq!(display_option("target_cg"), "Target CG");
-    assert_eq!(display_option("block_fuel"), "Block fuel");
-    assert_eq!(display_option("long_haul"), "Long haul");
+    let plain = plain_option_field();
+    assert_eq!(display_option(&plain, "passenger"), "Passenger");
+    assert_eq!(display_option(&plain, "auto"), "Auto");
+    assert_eq!(display_option(&plain, "target_cg"), "Target CG");
+    assert_eq!(display_option(&plain, "block_fuel"), "Block fuel");
+    assert_eq!(display_option(&plain, "long_haul"), "Long haul");
     assert_eq!(
-        display_option("lth_civil_transport_v1"),
+        display_option(&plain, "lth_civil_transport_v1"),
         "LTH civil transport v1"
     );
     assert_eq!(
-        display_option("fuel_per_seat_kilometre"),
+        display_option(&plain, "fuel_per_seat_kilometre"),
         "Fuel per seat-kilometre"
     );
     // Catalogue names are not identifiers and are never rewritten.
-    assert_eq!(display_option("LD3-45"), "LD3-45");
-    assert_eq!(display_option("7075-T6 aluminium"), "7075-T6 aluminium");
+    assert_eq!(display_option(&plain, "LD3-45"), "LD3-45");
+    assert_eq!(
+        display_option(&plain, "7075-T6 aluminium"),
+        "7075-T6 aluminium"
+    );
 }
 
 #[test]
 fn cabin_presets_display_a_descriptive_airline_independent_name() {
+    let plain = plain_option_field();
     // The combo box shows a descriptive name, but `resolved_options` above
     // still returns the serialized identifier a saved config stores and
     // `apply_cabin_preset` matches on, only the label changes.
-    assert_eq!(display_option("Ryanair"), "High-density single-class");
-    assert_eq!(display_option("Iberia"), "Two-class (Business/Economy)");
     assert_eq!(
-        display_option("Emirates"),
+        display_option(&plain, "Ryanair"),
+        "High-density single-class"
+    );
+    assert_eq!(
+        display_option(&plain, "Iberia"),
+        "Two-class (Business/Economy)"
+    );
+    assert_eq!(
+        display_option(&plain, "Emirates"),
         "Three-class (First/Business/Economy)"
     );
     // Unaffected cabin/cargo identifiers still pass through unchanged.
-    assert_eq!(display_option("Custom"), "Custom");
-    assert_eq!(display_option("Max payload"), "Max payload");
-    assert_eq!(display_option("Dense payload"), "Dense payload");
+    assert_eq!(display_option(&plain, "Custom"), "Custom");
+    assert_eq!(display_option(&plain, "Max payload"), "Max payload");
+    assert_eq!(display_option(&plain, "Dense payload"), "Dense payload");
 }
 
 fn node_named<'a>(fields: &'a [Field], name: &str) -> Option<&'a Node> {
@@ -745,5 +836,55 @@ fn a_three_column_form_has_no_overlapping_editors_and_keeps_its_rows_aligned() {
     assert!(
         rows.len() <= fields.len().div_ceil(3),
         "labels drift off a three-column row grid: {tops:?}"
+    );
+}
+
+#[test]
+fn an_empty_optional_box_is_as_tall_as_the_numeric_box_beside_it() {
+    let schema = AlasConfig::default().schema();
+    let ribs = leaf_named(&schema.fields, "num_ribs_override").expect("rib count override");
+    let stations = layout_test_leaf("stations", "Stations", Kind::Int, json!(200));
+    let ctx = egui::Context::default();
+    crate::theme::apply_theme(crate::theme::AppTheme::Light, &ctx);
+    let mut heights = (0.0, 0.0);
+    for _ in 0..2 {
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                let mut empty = Value::Null;
+                let optional = ui.scope(|ui| {
+                    super::editors::edit_leaf(
+                        ui,
+                        ribs,
+                        Kind::Optional,
+                        &mut empty,
+                        "test",
+                        None,
+                        "",
+                    )
+                });
+                let mut count = json!(200);
+                let numeric = ui.scope(|ui| {
+                    super::editors::edit_leaf(
+                        ui,
+                        &stations,
+                        Kind::Int,
+                        &mut count,
+                        "test",
+                        None,
+                        "",
+                    )
+                });
+                heights = (
+                    optional.response.rect.height(),
+                    numeric.response.rect.height(),
+                );
+            });
+        });
+    }
+    assert!(
+        (heights.0 - heights.1).abs() < 0.5,
+        "optional {} vs numeric {}",
+        heights.0,
+        heights.1
     );
 }

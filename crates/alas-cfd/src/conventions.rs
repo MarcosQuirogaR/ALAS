@@ -794,7 +794,7 @@ mod tests {
         let schemes = fs::read_to_string(path.join("system/fvSchemes")).expect("fvSchemes");
         let solution = fs::read_to_string(path.join("system/fvSolution")).expect("fvSolution");
         let nut = fs::read_to_string(path.join("0/nut")).expect("nut");
-        // The shipped default is now the UNLIMITED gradient: the cell limiter
+        // The shipped default is the UNLIMITED gradient: the cell limiter
         // was measured to be the dominant destabiliser of this template.
         assert!(
             schemes.contains("gradSchemes { default Gauss linear; grad(U) Gauss linear; }"),

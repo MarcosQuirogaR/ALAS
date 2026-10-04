@@ -102,6 +102,23 @@ impl WingStructureGeometry {
         )
     }
 
+    /// All breakpoints of the section's piecewise-linear upper/lower
+    /// interpolants, as dimensionless x/c in ascending order. Between these
+    /// knots the thickness is linear at every spanwise station.
+    pub fn airfoil_chordwise_knots(&self) -> Vec<f64> {
+        let mut knots = vec![0.0, 1.0];
+        knots.extend(
+            [&self.root_xu, &self.root_xl, &self.tip_xu, &self.tip_xl]
+                .into_iter()
+                .flatten()
+                .copied()
+                .filter(|x| x.is_finite() && (0.0..=1.0).contains(x)),
+        );
+        knots.sort_by(f64::total_cmp);
+        knots.dedup();
+        knots
+    }
+
     /// Free web height (extrados - intrados) at `(eta, xc_frac)`, in metres.
     pub fn spar_height(&self, eta: f64, xc_frac: f64) -> f64 {
         let (zu, zl) = self.airfoil_zu_zl(eta, xc_frac);

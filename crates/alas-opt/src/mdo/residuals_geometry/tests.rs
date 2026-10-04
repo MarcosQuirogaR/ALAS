@@ -5,6 +5,8 @@
 // failing rather than a library invariant being broken.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+use crate::mdo::ResidualRole;
+
 use super::*;
 use crate::mdo::sizing::run_candidate;
 use alas_config::AerodromeReferenceCode;
@@ -21,6 +23,24 @@ fn nominal(preset: &str) -> DesignVector {
     alas_config::presets::get(preset).unwrap().design_vector
 }
 
+#[test]
+fn invalid_plausibility_windows_are_hard_failures_for_direct_callers() {
+    let mut config = config("A320-200", "reference_adaptation");
+    let outcome = run_candidate(&config, &nominal("A320-200").to_array()).unwrap();
+    for upper in [3.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        for enabled in [true, false] {
+            config.optimizer.plausibility.max_aspect_ratio = upper;
+            config.optimizer.plausibility.enabled = enabled;
+            let rows = plausibility_residuals(&outcome, &config, ResidualRole::Constraint);
+            assert!(rows
+                .iter()
+                .any(|row| row.id == "plausibility_configuration_invalid"
+                    && row.role == ResidualRole::Constraint
+                    && row.violated()));
+        }
+    }
+}
+
 /// The geometry residuals of `dv` under `config`, keyed by identifier.
 fn residuals(config: &AlasConfig, dv: &DesignVector) -> Vec<ConstraintResidual> {
     let outcome = run_candidate(config, &dv.to_array()).unwrap_or_else(|f| panic!("{}", f.reason));
@@ -28,7 +48,7 @@ fn residuals(config: &AlasConfig, dv: &DesignVector) -> Vec<ConstraintResidual> 
         &outcome,
         config,
         &config.optimizer.weights,
-        ConstraintPolicy::Hard,
+        ResidualRole::Constraint,
         0,
         0.0,
     )

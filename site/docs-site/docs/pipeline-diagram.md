@@ -20,7 +20,7 @@ flowchart TD
         GEN --> BUILD["Build the<br/>aircraft<br/><small>shape → geometry</small>"]
         BUILD --> FAST["Score it<br/><small>coarse VLM</small>"]
         FAST --> MASS["Close the<br/>mass budget<br/><small>lumped payload</small>"]
-        MASS --> PEN["Apply penalties<br/><small>CG · stability<br/>tail · fuel volume</small>"]
+        MASS --> PEN["Check constraints<br/><small>CG · stability<br/>tail · fuel volume</small>"]
         PEN -- "next candidate" --> GEN
     end
 
@@ -63,12 +63,10 @@ candidates. That is why the aerodynamics in the loop is a coarse
 vortex-lattice solve and the payload is a lumped mass rather than a seat
 map. Anything expensive gets multiplied by fifteen hundred.
 
-**Penalties, not rejections.** A candidate that violates a constraint is
-not thrown away: it is scored badly, with the size of the penalty scaled
-to how badly it misses. A hard failure, like an unstable aircraft, gets a
-large fixed cost instead. The difference matters: outright rejection leaves
-the search with no gradient to follow back toward the feasible region,
-whereas a graded penalty points the way.
+**Constraints are hard.** A candidate that violates a constraint is
+invalid. It is kept in the evaluation history, with its residuals, so you can
+see what failed, but ranking always places a feasible candidate ahead of any
+invalid one, and the reported design satisfied every constraint.
 
 **Nothing survives the boundary between the loop and the final analysis.**
 The winning design is re-analysed from scratch at full fidelity: denser

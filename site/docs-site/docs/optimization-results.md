@@ -8,10 +8,23 @@ generations.
 
 ## Convergence
 
+The optimization history plots every candidate the run requested, stage by
+stage, against the request index, with a light separator at each stage
+boundary. **Valid candidates are highlighted** at full size in the accent
+colour; rejected and failed candidates are small and low-contrast, and a
+candidate whose model produced no finite objective is a tick in a strip below
+the plot, so the count of everything explored stays visible. The running best
+is taken over valid candidates only. When the screening stage scored with a
+cheaper model, its running best is a separate dashed line. Legend counts
+cover the full trace; display thinning only touches the muted points.
+
+The figure below shows the valid evaluations of the AVE run
+only.
+
 <figure markdown>
   ![Optimization convergence](assets/ave-optimization-history-light.png#only-light)
   ![Optimization convergence](assets/ave-optimization-history-dark.png#only-dark)
-  <figcaption>466 valid evaluations (of the ~1,440 the population/generation settings imply; the rest were rejected by a penalty or hard constraint before scoring). Color is span; the red line is the best-so-far L/D.</figcaption>
+  <figcaption>466 valid evaluations (of the ~1,440 the population/generation settings imply; the rest were rejected by a hard constraint before scoring). Color is span; the red line is the best-so-far L/D.</figcaption>
 </figure>
 
 Two things are worth reading off this chart rather than skimming past it.

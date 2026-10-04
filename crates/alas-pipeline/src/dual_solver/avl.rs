@@ -116,6 +116,8 @@ pub(super) fn run_avl_optimizer(
         design: Some(design),
         optimization: Some(optimization),
         report: Some(report),
+        verification: None,
+        baseline_verification: None,
         avl_result: Some(avl_result),
         output_dir,
         error: None,

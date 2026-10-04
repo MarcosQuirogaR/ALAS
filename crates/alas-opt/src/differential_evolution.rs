@@ -118,18 +118,7 @@ fn scored_point_at(
         .filter(|value| value.is_finite() && *value >= 0.0)
         .unwrap_or(f64::NAN);
     let constraint_violation = if valid {
-        // A strictly feasible candidate has no hard violation at all, so this
-        // is zero and the ranking key reduces to the objective, exactly as
-        // before. A candidate admitted only by the controlled-relaxation
-        // policy still carries the violations that were relaxed, and the key
-        // is lexicographic in (admissible, violation, cost), so every fully
-        // feasible design ranks ahead of every relaxed one whatever their
-        // objectives - obtained without a tuned penalty.
-        if hard_violation.is_finite() && hard_violation > 0.0 {
-            hard_violation
-        } else {
-            0.0
-        }
+        0.0
     } else if hard_violation.is_finite() && hard_violation > 0.0 {
         // A physical miss is ordered by its dimensionless aggregate
         // violation. Counting reject labels made a severe single miss appear
@@ -171,7 +160,7 @@ const CLOSURE_FAILURE_IDS: [&str; 4] = [
 /// The ranking tier of an evaluated candidate: feasible; closed with a
 /// violated residual; not closed (closure failure or no residual table);
 /// or outside the design box, which the evaluator rejects before analysis.
-fn candidate_tier(valid: bool, reason: &str, hard_violation: f64) -> Tier {
+pub(crate) fn candidate_tier(valid: bool, reason: &str, hard_violation: f64) -> Tier {
     let labels = || reason.split('+');
     if valid {
         Tier::Feasible
@@ -233,6 +222,15 @@ fn result_from_method(
 trait SearchObjective {
     fn evaluate(&mut self, design: &[f64]) -> f64;
     fn history(&self) -> &OptimizationHistory;
+
+    /// Stop taking new candidates at this stage deadline; in-flight work
+    /// completes and a timed batch returns only its started prefix.
+    fn set_deadline(&mut self, _deadline: Option<Instant>) {}
+
+    /// Whether deadline checks happen between individual queue dispatches.
+    fn honors_deadline(&self) -> bool {
+        false
+    }
 
     /// Whether a batch runs concurrently and stops taking candidates on
     /// cancellation, reporting each candidate it ran through

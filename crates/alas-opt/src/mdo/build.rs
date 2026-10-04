@@ -13,7 +13,7 @@
 //! these is not a physically evaluable aircraft, independent of which
 //! mission quantity the search is minimising.
 
-use alas_config::design_variables::{DesignVector, SPECS};
+use alas_config::design_variables::DesignVector;
 use alas_config::{AlasConfig, TailSizing};
 use alas_geom::aircraft::airplane::Airplane;
 use alas_geom::builder::AircraftBuilder;
@@ -159,11 +159,11 @@ pub(crate) fn size_fuselage_from_cabin(
         return Ok(());
     }
     let target = config.requirements.num_passengers.max(0);
-    let Some(spec) = SPECS.iter().find(|spec| spec.name == "fuselage_length_m") else {
-        return Err(geometry_build_failure());
-    };
-    let mut lower = spec.lower;
-    let mut upper = spec.upper;
+    // The global box for a registered or reference study, a derived or
+    // explicit clean-sheet interval otherwise.
+    let (interval_lower, interval_upper) = config.fuselage_sizing_interval_m();
+    let mut lower = interval_lower;
+    let mut upper = interval_upper;
 
     // `build` takes `&self` and reads only `config.geometry`, which this
     // bisection never mutates, so one builder is reused across every trial
@@ -227,16 +227,17 @@ pub(crate) fn size_fuselage_from_cabin(
     }
 
     // Rescue the rare non-monotone row-packing bracket.  Search the actual
-    // specification interval at a bounded 0.10 m resolution and select the
+    // sizing interval at a bounded 0.10 m resolution and select the
     // first sampled length that seats the complete requested load.  This is
     // deliberately a fallback after bisection so normal optimizer candidates
     // retain the cheap 36-evaluation path.  The returned length is a real
     // geometry value and is re-evaluated by the ordinary builder below.
     const DISCRETE_CAPACITY_SCAN_STEP_M: f64 = 0.10;
-    let span = spec.upper - spec.lower;
+    let span = interval_upper - interval_lower;
     let samples = (span / DISCRETE_CAPACITY_SCAN_STEP_M).ceil() as usize;
     for index in 0..=samples {
-        let length = (spec.lower + index as f64 * DISCRETE_CAPACITY_SCAN_STEP_M).min(spec.upper);
+        let length =
+            (interval_lower + index as f64 * DISCRETE_CAPACITY_SCAN_STEP_M).min(interval_upper);
         if capacity_at(length)? >= target {
             design.fuselage_length_m = length;
             return Ok(());

@@ -35,6 +35,7 @@ fn passing_physical_limits() -> PhysicalCgLimits {
         // `fwd_limit_pct_mac` is still governed by `MaxNoseLoadHandling`.
         rotation_fwd_pct_mac: 9.0,
         rotation_longitudinal_force_shift_pct_mac: 0.0,
+        rotation_tail_lift_coefficient: -1.3,
         landing_trim_fwd_pct_mac: 9.5,
         usable_range_pct_mac: 80.0,
     }
@@ -379,6 +380,7 @@ fn every_state_is_gated_against_its_own_phase_scoped_limits() {
         takeoff_mass_kg: tow_m,
         takeoff_cg_x_m: tow_x,
         takeoff_cg_z_m: tow_z,
+        takeoff_pitch_inertia_kg_m2: f64::NAN,
     };
     let x_np = cg[0] + 0.10 * plane.c_ref;
     let landing = super::LedgerLandingState {
@@ -964,23 +966,18 @@ fn the_a320_200_aerodynamic_aft_limit_is_not_the_governing_one() {
         "main gear at {:.2} m against the published 17.71 m",
         to_m(assessment.main_gear_station_pct_mac)
     );
-    // The ground minimum-nose-load aft boundary reproduces the published A320
-    // aft CG limit of 40 % MAC [S Airbus A320 ACAP pavement-analysis range
-    // 17 to 40 % MAC]; the residual is the model's 6 % minimum nose load
-    // against the aircraft's own (engineering estimate, 2 % MAC band).
+    // The ground minimum-nose-load aft boundary at the 78,000 kg takeoff
+    // state reproduces the published aft CG there: 37.08 % MAC, linear
+    // between WV007 (77,400 kg, 37.5 %) and WV017 (78,400 kg, 36.8 %)
+    // [S Airbus A320 AC Jun 01/24, Figure 7-3-0-991-010-A01]. The band is
+    // the model-frame MAC/LEMAC residual (1 % MAC).
     assert!(
-        (assessment.ground_aft_limit_pct_mac - 40.0).abs() < 2.0,
-        "ground aft limit {:.2} % MAC against the published 40 %",
+        (assessment.ground_aft_limit_pct_mac - 37.08).abs() < 1.0,
+        "ground aft limit {:.2} % MAC against the published 37.08 %",
         assessment.ground_aft_limit_pct_mac
     );
-    // The configured forward limit (rotation at V_R with the elevator-limited
-    // tail lift) against the published 17 % MAC forward limit [S ACAP]; the
-    // model is conservative (more aft) by a few percent MAC [E, 3 % MAC band].
-    assert!(
-        (assessment.configured_forward_limit_pct_mac - 17.0).abs() < 3.0,
-        "forward limit {:.2} % MAC against the published 17 %",
-        assessment.configured_forward_limit_pct_mac
-    );
+    // The forward limit against the published 17 % MAC is its own test,
+    // `the_a320_200_forward_limit_is_near_the_published_acap_value`.
     // Thrust and rolling friction push the rotation limit aft of the bare
     // moment balance: a nose-down pitching moment of the thrust line and
     // ground friction, so the shift carries a negative sign here.
@@ -1012,10 +1009,9 @@ fn the_a320_200_aerodynamic_aft_limit_is_not_the_governing_one() {
         "the usable CG range must be positive"
     );
     // The ground minimum nose load governs at the 78,000 kg takeoff state:
-    // the published WV017 gear split (Airbus A320 AC Jun 01/24, Figure
-    // 7-2-0-991-010-A01 sheet 6) read as a main-gear load limit leaves a
-    // 6.6 % nose share there, 38.4 % MAC, between the published 36.8 % at
-    // MRW and 40 % at 73,900 kg. Tip-back, measured from the belly ground
+    // the published weight-variant splits (Airbus A320 AC Jun 01/24, Figure
+    // 7-3-0-991-010-A01) give 7.0 % there, between WV007 (77,400 kg,
+    // 37.5 % MAC) and WV017 (78,400 kg, 36.8 %). Tip-back, measured from the belly ground
     // plane, sits aft of it. The overhang is measured against the
     // aerodynamic boundary and is positive.
     let overhang = assessment.aft_limit_governance.overhang_pct_mac();
@@ -1045,6 +1041,45 @@ fn the_a320_200_aerodynamic_aft_limit_is_not_the_governing_one() {
     );
 
     assert!(assessment.governing_aft_limit_pct_mac() < assessment.aerodynamic_aft_limit_pct_mac);
+}
+
+/// The A320-200 envelope-wide forward limit against the published 17 % MAC
+/// ACAP most-forward CG [S Airbus A320 AC, Fig. 7-3-0-991-010], within a
+/// 3 % MAC band [E].
+///
+/// Finding F-ROT-1 (rotation authority exceeds the published forward
+/// limit). With the tail lift at rotation derived from the tail geometry
+/// and full up-elevator (CL_h about -0.97 after the plain-flap
+/// large-deflection correction) and the pitch inertia transferred to the
+/// main-gear contact, nose-wheel lift-off is possible forward of 17 % MAC; the
+/// envelope-wide forward
+/// limit is then more than 3 % MAC forward of
+/// the ACAP value. A published forward limit is the worst of several
+/// criteria (FAA AC 25-7D, sec. 42.11); the ones that set the A320's are
+/// not all modelled. The band is kept, not widened: the test asserts the
+/// finding, and fails when the model's limit returns inside the band, which
+/// is the point to assert the band again.
+#[test]
+fn the_a320_200_forward_limit_is_forward_of_the_published_acap_band() {
+    let (config, plane, masses, coordinates, cg_x) = preset_case("A320-200");
+    let x_np = 18.417_621_430_740_57;
+    let assessment = assess_model_cg_envelope(
+        &plane,
+        &masses,
+        &coordinates,
+        cg_x,
+        x_np,
+        x_np,
+        plane.c_ref,
+        &config,
+    )
+    .unwrap_or_else(|error| panic!("the A320-200 must be assessed: {error}"));
+    assert!(
+        assessment.configured_forward_limit_pct_mac < 17.0 - 3.0,
+        "finding F-ROT-1 no longer holds: forward limit {:.2} % MAC is within 3 % MAC of \
+         the published 17 %; assert the band again",
+        assessment.configured_forward_limit_pct_mac
+    );
 }
 
 /// The contrast case that keeps the diagnostic from being a blanket
@@ -1126,7 +1161,7 @@ fn the_ground_aft_boundary_is_the_state_nose_load_split_read_backwards() {
     );
     let wheelbase_m = stations.x_mlg_m - stations.x_nlg_m;
     // The top-level ground boundary is the analyzed takeoff state's, whose
-    // minimum is the published A320 WV017 gear split at that mass.
+    // minimum is the published A320 nose share at that mass.
     let takeoff_mass_kg = assessment
         .loading_states
         .iter()

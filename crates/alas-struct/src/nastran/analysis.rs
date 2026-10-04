@@ -391,11 +391,17 @@ mod tests {
     /// Write the decks without running anything, and return the work directory.
     fn write_only(label: &str, config: &StructuresConfig) -> (TempDir, NastranResults) {
         let work = TempDir::new(label);
+        let mut config = config.clone();
+        config.nastran95_dir_path = work
+            .path
+            .join("missing-nastran95")
+            .to_string_lossy()
+            .into_owned();
         let deck = Deck::new();
         let results = run_nastran_analysis(
             &deck,
             &node_index(),
-            config,
+            &config,
             &DesignRequirements::default(),
             &work.path,
             None,

@@ -51,6 +51,7 @@ fn unevaluated(name: &str) -> PresetAcceptanceResult {
         mtow_closure_fuel_kg: 0.0,
         usable_fuel_capacity_kg: None,
         analyzed_carried_fuel_kg: 0.0,
+        flown_carried_fuel_kg: None,
         analyzed_takeoff_mass_kg: 0.0,
         mtow_shortfall_kg: 0.0,
         payload_kg: 0.0,

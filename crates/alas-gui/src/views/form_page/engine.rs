@@ -101,15 +101,15 @@ pub(super) fn render_engine_physics_summary(ui: &mut Ui, model: &EngineEditorMod
             readonly_metrics(
                 ui,
                 &[
-                    ("Rated thrust per engine", *rated_thrust_kn, "kN"),
-                    ("Bypass ratio", *bypass_ratio, "-"),
-                    ("ICAO take-off bypass ratio", *takeoff_bypass_ratio, "-"),
-                    ("Overall pressure ratio", *overall_pressure_ratio, "-"),
-                    ("Fan pressure ratio", *fan_pressure_ratio, "-"),
-                    ("Turbine inlet temperature", *turbine_inlet_temp_k, "K"),
-                    ("Cruise TSFC reference", *cruise_tsfc, "kg/(kgf.hr)"),
+                    (tr("Rated thrust per engine"), *rated_thrust_kn, "kN"),
+                    (tr("Bypass ratio"), *bypass_ratio, "-"),
+                    (tr("ICAO take-off bypass ratio"), *takeoff_bypass_ratio, "-"),
+                    (tr("Overall pressure ratio"), *overall_pressure_ratio, "-"),
+                    (tr("Fan pressure ratio"), *fan_pressure_ratio, "-"),
+                    (tr("Turbine inlet temperature"), *turbine_inlet_temp_k, "K"),
+                    (tr("Cruise TSFC reference"), *cruise_tsfc, "kg/(kgf.hr)"),
                     (
-                        "ICAO take-off fuel flow per engine",
+                        tr("ICAO take-off fuel flow per engine"),
                         *takeoff_fuel_flow_kg_s,
                         "kg/s",
                     ),
@@ -138,19 +138,19 @@ pub(super) fn render_engine_physics_summary(ui: &mut Ui, model: &EngineEditorMod
             readonly_metrics(
                 ui,
                 &[
-                    ("Take-off shaft power per engine", *takeoff_kw, "kW"),
-                    ("Maximum reserve / OEI power", *reserve_kw, "kW"),
-                    ("Maximum continuous power", *continuous_kw, "kW"),
-                    ("Maximum climb power", *climb_kw, "kW"),
-                    ("Maximum cruise power", *cruise_kw, "kW"),
+                    (tr("Take-off shaft power per engine"), *takeoff_kw, "kW"),
+                    (tr("Maximum reserve / OEI power"), *reserve_kw, "kW"),
+                    (tr("Maximum continuous power"), *continuous_kw, "kW"),
+                    (tr("Maximum climb power"), *climb_kw, "kW"),
+                    (tr("Maximum cruise power"), *cruise_kw, "kW"),
                     (
-                        "Two-engine maximum-cruise fuel flow",
+                        tr("Two-engine maximum-cruise fuel flow"),
                         *cruise_fuel_flow_kg_h,
                         "kg/h",
                     ),
-                    ("Propeller diameter", *diameter_m, "m"),
-                    ("Governed propeller speed", *governed_rpm, "rpm"),
-                    ("Reduction ratio", *reduction_ratio, "-"),
+                    (tr("Propeller diameter"), *diameter_m, "m"),
+                    (tr("Governed propeller speed"), *governed_rpm, "rpm"),
+                    (tr("Reduction ratio"), *reduction_ratio, "-"),
                 ],
             );
             ui.label(format!("{}: {propeller_model}", tr("Propeller model")));
@@ -159,7 +159,7 @@ pub(super) fn render_engine_physics_summary(ui: &mut Ui, model: &EngineEditorMod
     });
 }
 
-fn readonly_metrics(ui: &mut Ui, metrics: &[(&str, f64, &str)]) {
+fn readonly_metrics(ui: &mut Ui, metrics: &[(String, f64, &str)]) {
     // Each column lays out independently, so a taller metric in one column
     // does not leave an empty row beside it. Narrow windows use one column.
     let columns = ((ui.available_width() / 380.0).floor() as usize)
@@ -167,8 +167,16 @@ fn readonly_metrics(ui: &mut Ui, metrics: &[(&str, f64, &str)]) {
         .min(metrics.len());
     let rows_per_column = metrics.len().div_ceil(columns);
     ui.columns(columns, |column_uis| {
-        for (index, &(label, value, unit)) in metrics.iter().enumerate() {
-            column_uis[index / rows_per_column].label(format!("{}: {value:.3} {unit}", tr(label)));
+        for (index, (label, value, unit)) in metrics.iter().enumerate() {
+            // The schema's unit convention: a dimensionless ratio is a bare
+            // number, and a physical unit gets its typographic form.
+            let unit = crate::views::form::display_unit(unit);
+            let text = if unit.is_empty() {
+                format!("{label}: {value:.3}")
+            } else {
+                format!("{label}: {value:.3} {unit}")
+            };
+            column_uis[index / rows_per_column].label(text);
         }
     });
 }

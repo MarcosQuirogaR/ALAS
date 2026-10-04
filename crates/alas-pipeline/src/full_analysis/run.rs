@@ -12,6 +12,7 @@ impl FullAnalysis {
         Self {
             config,
             reference_compatibility,
+            closure_bound: false,
         }
     }
 
@@ -44,6 +45,7 @@ impl FullAnalysis {
         Self {
             config,
             reference_compatibility: true,
+            closure_bound: false,
         }
     }
 
@@ -162,8 +164,20 @@ impl FullAnalysis {
             layout: payload_layout,
             structural_payload_limit_kg: effective_structural_payload_limit_kg,
             offloaded_payload_kg,
-            analysis: (masses, coords, _, flops_mass_buildup),
+            analysis: (mut masses, mut coords, _, flops_mass_buildup),
         } = self.payload_pass(design, &plane, &first_pass, coordinate_model)?;
+        // An unsized analysis at the declared MTOW, in every sizing mode, and
+        // a Hard-MTOW closure both carry the maximum loadable fuel; another
+        // mode's closure carries its own mission fuel.
+        let loading = if self.reference_compatibility
+            || (self.closure_bound
+                && self.config.optimizer.objective.mtow_sizing
+                    != alas_config::MtowSizing::FixedRequirement)
+        {
+            None
+        } else {
+            takeoff_loading::apply(&self.config, design, &plane, &mut masses, &mut coords)?
+        };
         let (coords, cg) = self.station_coordinates(design, &plane, &masses, coords)?;
         // Anchor the aerodynamic moment reference to the actual physical CG.
         plane.xyz_ref[0] = cg[0];
@@ -205,8 +219,14 @@ impl FullAnalysis {
         // The trim solution and everything that constrains the aircraft run at
         // the takeoff-mass lift coefficient; only the reported cruise CL, CD
         // and L/D move to the mid-cruise mass (`crate::cruise_mass`).
-        let takeoff_cl = self.cruise_cl(&plane);
-        let cruise_cl = self.reported_cruise_cl(&plane, zero_fuel_mass_kg);
+        let loaded_analysis = loading.map(|loading| {
+            let mut config = self.config.clone();
+            config.requirements.mtow_kg = loading.takeoff_mass_kg;
+            Self { config, ..*self }
+        });
+        let operating = loaded_analysis.as_ref().unwrap_or(self);
+        let takeoff_cl = operating.cruise_cl(&plane);
+        let cruise_cl = operating.reported_cruise_cl(&plane, zero_fuel_mass_kg);
         let design_point = self.compute_design_point(&polar, cruise_cl)?;
         let polar_fit = self.fit_polar(&plane, &polar);
 
@@ -262,6 +282,13 @@ impl FullAnalysis {
             });
 
         let mut geometry_summary = self.geometry_summary(&plane, design);
+        if let Some(loading) = loading {
+            takeoff_loading::annotate(&mut geometry_summary, loading);
+            geometry_summary.insert(
+                "analysis_mtow_limit_kg".to_owned(),
+                self.config.requirements.mtow_kg,
+            );
+        }
         // Report note: the reported cruise CL lies outside the analysed polar,
         // so the reported cruise drag and L/D are the polar's end values rather
         // than interpolations. The key is present only when that happens.
@@ -282,6 +309,12 @@ impl FullAnalysis {
         }
         if offloaded_payload_kg > 0.0 {
             geometry_summary.insert(ROUTE_PAYLOAD_OFFLOADED_KEY.to_owned(), offloaded_payload_kg);
+        }
+        if let Some(derived) = self.config.landing_gear.derived_main_gear {
+            geometry_summary.insert(
+                crate::gear_stations::MAIN_GEAR_TRANSLATION_KEY.to_owned(),
+                derived.translation_m,
+            );
         }
 
         Ok(AnalysisReport {
@@ -364,6 +397,9 @@ impl FullAnalysis {
             Some(&sized.fuel_artifacts.tail_sizing),
         )?;
         report.fuel = crate::fuel_model::ReportFuel::sized(crate::fuel_model::SizedFuel::of(sized));
+        if let Some(loading) = sized.takeoff_loading {
+            takeoff_loading::annotate(&mut report.geometry_summary, loading);
+        }
         Ok(report)
     }
 
@@ -396,6 +432,7 @@ impl FullAnalysis {
         let sized_analysis = Self {
             config: sized_config,
             reference_compatibility: self.reference_compatibility,
+            closure_bound: true,
         };
         let mut report = match tail_sizing {
             Some(sizing) => {
@@ -432,33 +469,4 @@ impl FullAnalysis {
         }
         Ok(report)
     }
-}
-
-/// Resolve the structural payload bound for an unchanged registered preset:
-/// the smaller of the configured cap (normally the published `MZFW - OEW`)
-/// and `MZFW - modeled OEW`, because the modeled OEW can be heavier than the
-/// source OEW and the layout would otherwise respect the cap while producing
-/// an overweight zero-fuel mass. Notional designs inherit no published MZFW.
-pub(crate) fn effective_structural_payload_limit_kg(
-    config: &AlasConfig,
-    design: &DesignVector,
-    modeled_oew_kg: f64,
-) -> Option<f64> {
-    let preset = presets::get(&config.preset).ok()?;
-    if *design != preset.design_vector {
-        return None;
-    }
-    let mzfw_kg = preset.reference.mzfw_kg?;
-    let available_payload_kg = mzfw_kg - modeled_oew_kg;
-    if !mzfw_kg.is_finite() || !modeled_oew_kg.is_finite() || available_payload_kg <= 0.0 {
-        return None;
-    }
-    let configured_limit_kg = config.requirements.max_structural_payload_kg;
-    Some(
-        if configured_limit_kg.is_finite() && configured_limit_kg > 0.0 {
-            configured_limit_kg.min(available_payload_kg)
-        } else {
-            available_payload_kg
-        },
-    )
 }

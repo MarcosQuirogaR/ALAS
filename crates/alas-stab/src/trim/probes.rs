@@ -2,6 +2,36 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 use super::*;
+use alas_aero::vlm::VlmGeometryCache;
+use std::sync::{Arc, Mutex};
+
+/// Assembly policy shared by the base probes and every rotated-tail probe.
+pub(super) struct TrimAssembly<'a> {
+    pub(super) analysis: &'a AnalysisConfig,
+    cache: Option<&'a Arc<Mutex<VlmGeometryCache>>>,
+}
+
+impl<'a> TrimAssembly<'a> {
+    pub(super) fn new(
+        analysis: &'a AnalysisConfig,
+        cache: Option<&'a Arc<Mutex<VlmGeometryCache>>>,
+    ) -> Self {
+        Self { analysis, cache }
+    }
+
+    pub(super) fn assemble<'p>(&self, airplane: &'p Airplane) -> Result<VlmSystem<'p>, VlmError> {
+        let Some(cache) = self.cache else {
+            return assemble(airplane, self.analysis);
+        };
+        let mut cache = cache.lock().map_err(|_| VlmError::NonFiniteResult)?;
+        VlmSystem::assemble_cached(
+            airplane,
+            resolution(self.analysis.spanwise_resolution),
+            resolution(self.analysis.chordwise_resolution),
+            &mut cache,
+        )
+    }
+}
 
 /// One low-side/high-side VLM probe: a level operating point (no sideslip, no
 /// rotation) at `alpha_deg`, solved at the analysis mesh resolution.
@@ -79,7 +109,7 @@ pub(super) fn with_hstab_twist(airplane: &Airplane, twist_deg: f64) -> Airplane 
 /// compatibility API keeps the historical one-shot result and its fixtures.
 pub(super) fn refine_trim(
     airplane: &Airplane,
-    analysis: &AnalysisConfig,
+    assembly: &TrimAssembly<'_>,
     cl_target: f64,
     atmosphere: Atmosphere,
     velocity: f64,
@@ -98,7 +128,7 @@ pub(super) fn refine_trim(
 
     for _ in 0..MAX_ITERATIONS {
         let at_incidence = with_hstab_twist(airplane, incidence_deg);
-        let at_incidence = assemble(&at_incidence, analysis)?;
+        let at_incidence = assembly.assemble(&at_incidence)?;
         let base = probe(&at_incidence, atmosphere, velocity, alpha_deg)?;
         let residual_cl = base.cl_lift - cl_target;
         let residual_cm = base.cm_pitch;
@@ -115,9 +145,12 @@ pub(super) fn refine_trim(
             velocity,
             alpha_deg + ALPHA_STEP_DEG,
         )?;
+        // Both results own their data; release this geometry's kernel before
+        // updating the cache for the incidence probe.
+        drop(at_incidence);
         let incidence_probe = with_hstab_twist(airplane, incidence_deg + INCIDENCE_STEP_DEG);
         let incidence_probe = probe(
-            &assemble(&incidence_probe, analysis)?,
+            &assembly.assemble(&incidence_probe)?,
             atmosphere,
             velocity,
             alpha_deg,
@@ -327,6 +360,77 @@ mod tests {
         let analysis = AnalysisConfig::default();
         stability_and_trim(&plane, &analysis, 0.4, 0.3, 0.0).expect("the probe meshes and solves");
         assert_eq!(plane.wings, before.wings);
+    }
+
+    fn assert_trim_bits_equal(expected: StabilityTrimResult, actual: StabilityTrimResult) {
+        let values = |result: StabilityTrimResult| {
+            [
+                result.x_np,
+                result.static_margin,
+                result.cl_alpha,
+                result.cm_alpha,
+                result.trim_alpha_deg,
+                result.trim_ih_deg,
+                result.cl_ih,
+                result.cm_ih,
+            ]
+            .map(f64::to_bits)
+        };
+        assert_eq!(actual.converged, expected.converged);
+        assert_eq!(values(actual), values(expected));
+    }
+
+    #[test]
+    fn cached_trim_matches_fresh_assemblies_across_lift_targets_and_cg_changes() {
+        let mut plane = probe_airplane(true);
+        plane.wings[0].xsecs[0].airfoil = naca("naca2412");
+        plane.wings[0].xsecs[1].airfoil = naca("naca2412");
+        plane.wings[0].xsecs[1].xyz_le = [3.0, 8.0, 0.6];
+        let analysis = AnalysisConfig {
+            spanwise_resolution: 2,
+            chordwise_resolution: 3,
+            ..Default::default()
+        };
+        let cache = Arc::new(Mutex::new(VlmGeometryCache::default()));
+        for (cg_x, cl_target, mach, altitude_m) in [
+            (1.0, 0.25, 0.3, 0.0),
+            (1.3, 0.45, 0.7, 10_000.0),
+            (0.8, 0.65, 0.2, 1_500.0),
+            (1.0, 0.25, 0.3, 0.0),
+        ] {
+            plane.xyz_ref[0] = cg_x;
+            let expected = stability_and_trim(&plane, &analysis, cl_target, mach, altitude_m)
+                .expect("fresh trim solve");
+            let actual = stability_and_trim_with_cache(
+                &plane, &analysis, cl_target, mach, altitude_m, &cache,
+            )
+            .expect("cached trim solve");
+            assert_trim_bits_equal(expected, actual);
+        }
+    }
+
+    #[test]
+    fn cached_trim_invalidates_geometry_and_mesh_and_preserves_missing_tail_fallback() {
+        let cache = Arc::new(Mutex::new(VlmGeometryCache::default()));
+        for (with_tail, spanwise, chordwise, wing_x) in [
+            (true, 1, 2, 0.0),
+            (true, 2, 3, 0.0),
+            (true, 2, 3, 1.0),
+            (false, 2, 3, 1.0),
+        ] {
+            let mut plane = probe_airplane(with_tail);
+            plane.wings[0].xsecs[0].xyz_le[0] = wing_x;
+            let analysis = AnalysisConfig {
+                spanwise_resolution: spanwise,
+                chordwise_resolution: chordwise,
+                ..Default::default()
+            };
+            let expected =
+                stability_and_trim(&plane, &analysis, 0.4, 0.3, 0.0).expect("fresh trim solve");
+            let actual = stability_and_trim_with_cache(&plane, &analysis, 0.4, 0.3, 0.0, &cache)
+                .expect("cached trim solve");
+            assert_trim_bits_equal(expected, actual);
+        }
     }
 
     #[test]

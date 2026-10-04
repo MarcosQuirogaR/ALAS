@@ -187,7 +187,7 @@ mod tests {
     /// whose CG-targeted cargo is laid out against the same empty mass. The
     /// DC-10 drawn from DAC-67803A Rev A Figure 2.2 (printed 55.35 m length,
     /// wing engines at the 8.18 m station) is where the seed-cabin layout
-    /// used to carry 82 kg more cargo than the closure.
+    /// would carry 82 kg more cargo than the closure.
     #[test]
     fn a_sized_report_carries_the_closure_zero_fuel_mass() {
         let mut config = AlasConfig::from_value(&serde_json::json!({ "preset": "DC-10" })).unwrap();

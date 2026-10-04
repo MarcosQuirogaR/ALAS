@@ -131,15 +131,24 @@ fn launch_target(state: &AppState) -> Result<(PathBuf, PathBuf), String> {
     Ok((executable, model))
 }
 
-/// Center the explicit interactive action on the geometry canvas.
-pub(super) fn show_launch_button(state: &mut AppState, ui: &mut egui::Ui, canvas: egui::Rect) {
+/// Height the launch row takes below the geometry canvas, in points.
+pub(super) const LAUNCH_ROW_HEIGHT: f32 = 44.0;
+
+/// The explicit interactive action, in its own row centred below the
+/// geometry canvas: over the canvas it would cover the preview image or the
+/// status message drawn when no preview exists. Returns the button's rect.
+pub(super) fn show_launch_button(state: &mut AppState, ui: &mut egui::Ui) -> egui::Rect {
     let target = cached_launch_target(ui.ctx(), state);
-    let button = egui::Rect::from_center_size(canvas.center(), egui::vec2(200.0, 36.0));
+    ui.add_space(LAUNCH_ROW_HEIGHT - 36.0);
     let response = ui
-        .add_enabled_ui(target.is_ok(), |ui| {
-            ui.put(button, egui::Button::new(tr("Explore in OpenVSP")))
+        .vertical_centered(|ui| {
+            ui.add_enabled_ui(target.is_ok(), |ui| {
+                ui.add_sized([200.0, 36.0], egui::Button::new(tr("Explore in OpenVSP")))
+            })
+            .inner
         })
         .inner;
+    let button = response.rect;
     let error_id = ui.id().with("openvsp_launch_error");
     match target {
         Ok((executable, model)) => {
@@ -179,15 +188,11 @@ pub(super) fn show_launch_button(state: &mut AppState, ui: &mut egui::Ui, canvas
         }
     }
     if let Some(error) = ui.ctx().data(|data| data.get_temp::<String>(error_id)) {
-        let error_rect = egui::Rect::from_center_size(
-            button.center() + egui::vec2(0.0, 46.0),
-            egui::vec2(canvas.width().min(480.0), 48.0),
-        );
-        ui.put(
-            error_rect,
-            egui::Label::new(egui::RichText::new(error).color(ui.visuals().error_fg_color)),
-        );
+        ui.vertical_centered(|ui| {
+            ui.label(egui::RichText::new(error).color(ui.visuals().error_fg_color));
+        });
     }
+    button
 }
 
 #[cfg(test)]

@@ -140,6 +140,48 @@ line exists because a CG behind the main gear would sit the aircraft on
 its tail. Both derive directly from this geometry, which is why the gear
 layout is checked *with* the CG envelope rather than as an afterthought.
 
+## Load & trim sheet
+
+The **LOAD & TRIM SHEET** is the airline-style form of the CG envelope:
+airplane gross weight against an index (a linear measure of moment) with
+the CG in %MAC. A side panel carries three boxes. The *limit definitions*
+key names the ground, takeoff, flight and landing limit sets. The
+*loading points* table is the worked case: each step lists its added mass and
+index (`dW`, `dI`) and the running weight, index and %MAC. The *CG gate* table
+gives the run's verdict for each loading state (limit, forward and aft
+bounds, margin). A state the gate fails is ringed, and a loading step the gate
+does not evaluate is marked `not gated`. It is available in the desktop
+application and in the exported report.
+
+Each loading state is gated only by the mechanisms of its phase: rotation and
+the static-margin floor at takeoff, landing trim and ground mechanisms at
+landing, ground mechanisms (nose-gear load, tip-back) at OEW.
+
+### Rotation: the forward CG limit
+
+The forward limit at takeoff is the nose-wheel lift-off balance about the
+main-gear contact at the rotation speed (1.10 of the stall speed) with
+takeoff thrust and runway friction. The required pitch acceleration is
+7 deg/s^2, the midpoint of the 6-8 deg/s^2 range in the conceptual-design
+literature. Three parts matter:
+
+- **Pitch inertia with the parallel axis.** The inertia about the contact is
+  `I_P = I_yy,cg + m[(x_P - x_cg)^2 + h_cg^2]`, with `I_yy,cg` from the mass
+  ledger's takeoff state. The balance is then quadratic in the CG and is
+  solved exactly.
+- **Tail authority from geometry.** The tail lift at full up-elevator is
+  `CL_h = a_h [i_h - epsilon + tau_e (b_e/b_h) delta_e,max]`: the DATCOM
+  lift-curve slope of the built tail and its incidence, the wing downwash
+  reduced for ground effect, the elevator effectiveness of the configured
+  chord multiplied by the USAF DATCOM large-deflection factor for plain flaps
+  (0.60 at 25 deg) and by its span fraction, with `delta_e,max` = -25 deg. The
+  result is limited to the tail section's stall.
+- **Published limits are checks only.** Manufacturer limits (A320, A220,
+  A340) are compared against the model result in the tests and are never used
+  to tune it. The model reproduces some of them and misses others (A340 is
+  aft of its published value), so treat the limit as a conceptual-design
+  estimate.
+
 ## Payload-range and fuel volume
 
 <figure markdown>
@@ -158,7 +200,8 @@ Point B is the aircraft's most efficient real-world operating point: the
 furthest you can fly *fully loaded*. Beyond it, every additional mile has
 to come from trading payload for fuel, which is exactly the downward slope
 from B to C/D. Fuel capacity here (170,239 kg) is itself capped by the
-MTOW budget rather than physical tank volume; a separate fuel-volume
+MTOW budget rather than physical tank volume (takeoff fuel is capped at
+the usable tank capacity); a separate fuel-volume
 check confirms the wing can physically hold the fuel the mass budget
 assumes it carries, which matters because a wing sized purely for
 aerodynamics and structure could, in principle, be too thin to hold its
@@ -171,7 +214,7 @@ own design fuel load.
 </figure>
 
 For AVE the check passes with plenty of room, but this is exactly the
-constraint the optimizer's `fuel_volume_penalty_scale` term exists to
-enforce during a search, because a candidate that thins the airfoil
+constraint the optimizer's fuel-capacity check enforces during a
+search, because a candidate that thins the airfoil
 (`airfoil_thickness_scale` toward its 0.80 lower bound) to chase wave-drag
 gains is quietly shrinking this tank at the same time.

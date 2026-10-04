@@ -3,7 +3,7 @@
 
 //! The sandbox workspace's central aircraft scene.
 //!
-//! Unlike the report wireframes, this scene shows every lifting surface as
+//! Shared with the report surface figures, this scene shows every lifting surface as
 //! its actual lofted skin: each cross-section's resolved airfoil outline is
 //! placed in aircraft axes by [`Wing::section_outlines`] (chord, twist,
 //! placement and symmetry applied), consecutive outlines are joined into

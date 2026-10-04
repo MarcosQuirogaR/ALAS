@@ -18,8 +18,11 @@ use alas_route::route::{Route, RouteSource};
 use alas_route::SimbriefFetchStatus;
 
 fn config_for_preset(name: &str) -> AlasConfig {
-    AlasConfig::from_value(&serde_json::json!({"preset": name}))
-        .unwrap_or_else(|error| panic!("preset {name}: {error}"))
+    let mut config = AlasConfig::from_value(&serde_json::json!({"preset": name}))
+        .unwrap_or_else(|error| panic!("preset {name}: {error}"));
+    config.structures.run_nastran = false;
+    config.structures.run_patran_export = false;
+    config
 }
 
 fn dispatched_route(config: &AlasConfig) -> Route {
@@ -34,6 +37,52 @@ fn dispatched_route(config: &AlasConfig) -> Route {
     );
     route.source = RouteSource::SimbriefApi;
     route
+}
+
+/// The run records the route it planned on the configuration it runs with,
+/// so the search flies the route the published mission flies, off-design
+/// beside its great-circle sizing mission: a dispatched route with a detour,
+/// longer than the great circle.
+#[test]
+fn the_run_flies_its_planned_route_in_the_sizing_loop() {
+    let config = config_for_preset("A220-300");
+    let mut route = dispatched_route(&config);
+    let middle = route.waypoints.len() / 2;
+    route.waypoints[middle].lat += 1.0;
+    let great_circle_m = dispatched_route(&config).total_distance_m();
+    let planned_m = route.total_distance_m();
+    assert!(planned_m > 1.001 * great_circle_m);
+    assert_eq!(config.mission.route_distance_m, 0.0);
+    let result = DesignPipeline::new(config)
+        .run_with_environment_and_route(&options(), &RunEnvironment::default(), Some(route))
+        .expect("A220 public mission run");
+    assert_eq!(result.config.mission.route_distance_m, planned_m);
+    let design = alas_config::presets::get("A220-300").unwrap().design_vector;
+    let assessment = alas_opt::assess_product_candidate(&result.config, &design).unwrap();
+    let sizing = assessment
+        .residuals
+        .iter()
+        .find(|row| row.id == "mission_profile_range")
+        .expect("the sizing loop reports its mission distance");
+    // The sizing mission is the great circle between the airport records
+    // the sizing loop reads, which agree with the registry's to well inside
+    // the detour.
+    assert!((sizing.actual - great_circle_m).abs() <= 1.0e-3 * great_circle_m);
+    let route = assessment
+        .sized
+        .mtow
+        .offdesign
+        .as_ref()
+        .expect("the planned route is flown off-design");
+    assert_eq!(route.range_m, planned_m);
+    assert_eq!(
+        assessment.sized.flown_dispatch(),
+        &route.dispatch,
+        "the flown load is the route's"
+    );
+    let load_case = result.mission_load_case.as_ref().expect("a load case");
+    let priced = load_case.route_case().expect("the route is priced");
+    assert_eq!(priced.route_distance_m, planned_m);
 }
 
 fn options() -> PipelineOptions {

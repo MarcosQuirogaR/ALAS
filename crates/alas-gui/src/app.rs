@@ -74,6 +74,13 @@ impl AlasApp {
             layout_debug: crate::layout_debug::LayoutDebug::default(),
         }
     }
+
+    /// The shell's state, for examples and UI audits that drive navigation
+    /// between frames.
+    #[doc(hidden)]
+    pub fn state_mut(&mut self) -> &mut AppState {
+        &mut self.state
+    }
 }
 
 impl App for AlasApp {
