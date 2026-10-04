@@ -8,11 +8,14 @@ pub mod analyses_view;
 pub mod cfd_view;
 pub mod control_bar;
 pub mod design_space_view;
+pub mod external_tool_catalog;
 pub mod form;
 pub mod form_page;
 pub mod guide_data;
 pub(crate) mod inputs_custom;
-pub(crate) mod inputs_relaxation;
+pub(crate) mod inputs_mtow;
+#[cfg(test)]
+mod inputs_mtow_tests;
 pub mod inputs_view;
 pub(crate) mod mission_profile_inputs;
 pub(crate) mod mission_profile_preview;
@@ -39,7 +42,6 @@ pub use preview_dock::show_preview_dock;
 pub use results_view::show_results_view;
 pub use run_log::show_run_log;
 pub use screening_view::show_screening_view;
-pub(crate) use screening_view::show_screening_view_advanced;
 pub use tools_view::show_tools_view;
 pub use uav_view::show_uav_view;
 

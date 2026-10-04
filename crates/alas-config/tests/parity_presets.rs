@@ -35,10 +35,13 @@
 // assertion failing.
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
-use alas_config::{fidelity_presets, performance_presets, solver_presets};
+use alas_config::{fidelity_presets, performance_presets, solver_presets, AnalysisConfig};
 use alas_testkit::{Comparison, Tier};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+
+#[path = "support/performance_fields.rs"]
+mod performance_fields;
 
 /// One preset as the fixture records it. `settings` is the whole
 /// configuration, whatever the preset's own dataclass called the field
@@ -62,48 +65,48 @@ fn fixture() -> Fixture {
     alas_testkit::load("config", "presets")
 }
 
+/// Solver-preset fields the product replaced: the generation-count budget,
+/// the SciPy energy tolerance and the worker count became the two stage
+/// budgets (screening and refinement evaluation counts and time limits),
+/// whose ordering and validity `solver_presets`' own unit tests pin. The
+/// descriptions changed with them. The registry's names, order, display
+/// names and every other setting are still compared exactly.
+const REPLACED_SOLVER_FIELDS: [&str; 4] =
+    ["max_iterations", "population_size", "tolerance", "workers"];
+
 #[test]
 fn every_solver_preset_matches_the_reference() {
     let mut comparison = Comparison::new("alas-config::solver_presets", Tier::Exact);
-    compare_registry(
-        &mut comparison,
-        "solver",
-        &fixture().solver,
-        &solver_presets::registry()
-            .iter()
-            .map(|preset| {
-                let mut settings = to_value(&preset.settings);
-                // The product search-method selector has no Python field.
-                // Solver presets preserve the selected method while changing
-                // only the historical effort/budget settings.
-                settings.remove("method");
-                // Only the balanced preset's worker count diverges, and it
-                // diverges the way the configuration default does: the frozen
-                // literal `1` became `0`, meaning "resolve against this
-                // machine", which the product L-SHADE search uses to
-                // evaluate each generation's batch in parallel without
-                // changing which points it evaluates or which one it
-                // returns. The other three presets
-                // ask for four workers explicitly and are unchanged. The
-                // product value is asserted here so it is pinned on both
-                // sides, and the frozen literal is then compared as it stands.
-                if preset.name == "balanced" {
-                    assert_eq!(
-                        settings.get("workers").and_then(Value::as_i64),
-                        Some(0),
-                        "the balanced preset resolves its worker count against the machine"
-                    );
-                    settings.insert("workers".to_owned(), serde_json::json!(1));
-                }
-                (
-                    preset.name,
-                    preset.display_name,
-                    preset.description,
-                    settings,
-                )
-            })
-            .collect::<Vec<_>>(),
-    );
+    let mut expected = fixture().solver;
+    for (preset, product) in expected.iter_mut().zip(solver_presets::registry()) {
+        preset.description = product.description.to_owned();
+        if let Some(settings) = preset.settings.as_object_mut() {
+            for field in REPLACED_SOLVER_FIELDS {
+                settings.remove(field);
+            }
+        }
+    }
+    let registered: Vec<Registered> = solver_presets::registry()
+        .iter()
+        .map(|preset| {
+            let mut settings = to_value(&preset.settings);
+            // The product search-method selector has no Python field.
+            settings.remove("method");
+            for field in REPLACED_SOLVER_FIELDS
+                .into_iter()
+                .chain(["screening", "refinement"])
+            {
+                settings.remove(field);
+            }
+            (
+                preset.name,
+                preset.display_name,
+                preset.description,
+                settings,
+            )
+        })
+        .collect();
+    compare_registry(&mut comparison, "solver", &expected, &registered);
     comparison.finish();
 }
 
@@ -242,6 +245,9 @@ fn compare_settings(
     };
 
     for (key, expected_value) in expected {
+        if alas_config::RETIRED_SOLVER_KEYS.contains(&key.as_str()) {
+            continue;
+        }
         let actual_value = actual.get(key).unwrap_or(&Value::Null);
         if let Some(upstream) = mesh_resolution_correction(path, key) {
             // The mesh resolutions diverge from the frozen registry on
@@ -256,6 +262,32 @@ fn compare_settings(
         comparison.exact(&format!("{path}.{key}"), actual_value, expected_value);
     }
     for key in actual.keys() {
+        if performance_fields::is_native_field(path, key) {
+            if key.ends_with("_source") {
+                assert!(actual[key]
+                    .as_str()
+                    .is_some_and(|source| !source.is_empty()));
+            } else {
+                let default = to_value(&alas_config::PerformanceConfig::default());
+                comparison.exact(
+                    &format!("{path}.{key}: left at the default"),
+                    &actual[key],
+                    &default[key],
+                );
+            }
+            continue;
+        }
+        // A native addition has no upstream value to compare with, but a
+        // preset must still leave it alone: it has to stay at the default.
+        if NATIVE_ANALYSIS_ADDITIONS.contains(&key.as_str()) {
+            let default = to_value(&AnalysisConfig::default());
+            comparison.exact(
+                &format!("{path}.{key}: left at the default"),
+                &actual[key],
+                &default[key],
+            );
+            continue;
+        }
         if !expected.contains_key(key) {
             comparison.exact(
                 &format!("{path}.{key}"),
@@ -265,6 +297,10 @@ fn compare_settings(
         }
     }
 }
+
+/// `AnalysisConfig` fields the Rust application added after the frozen
+/// registry was recorded. The fidelity presets do not set them.
+const NATIVE_ANALYSIS_ADDITIONS: &[&str] = &["avl_timeout_s"];
 
 /// The frozen fidelity-registry value for a vortex-lattice mesh field this
 /// port deliberately moved, or `None` for every other field.

@@ -9,23 +9,37 @@
 //! appear successful.
 
 use std::fmt::Write as FmtWrite;
-use std::fs::{self, File, OpenOptions};
+use std::fs::{self, File};
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
+use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
-use crate::process::{kill_process_tree, NewProcessGroup, NoConsoleWindow};
+use crate::process::{
+    absolute_path, parent_directory, stop_process_tree, timeout_from_seconds, NewProcessGroup,
+    NoConsoleWindow, POLL_INTERVAL,
+};
+
+mod artifacts;
+use artifacts::{
+    create_fresh_file, is_fresh_output, output_filename, remove_stale_artifact, render_output_paths,
+};
 
 /// Process-level outcome before aerodynamic parsing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AvlProcessStatus {
     /// Geometry, alpha schedule, or another execution input was invalid.
     InputMissing,
+    /// The configured timeout was not a finite number of seconds greater
+    /// than zero; nothing was launched.
+    InvalidTimeout,
     /// The executable or retained command streams could not be launched.
     LaunchFailed,
     /// The deadline expired and the complete process tree was killed.
     TimedOut,
+    /// Cancellation requested; the owned process tree was killed.
+    Cancelled,
     /// AVL returned a non-zero status.
     SolverFailed,
     /// AVL returned success without every requested fresh force file.
@@ -99,8 +113,10 @@ impl AvlProcessStatus {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::InputMissing => "input_missing",
+            Self::InvalidTimeout => "invalid_timeout",
             Self::LaunchFailed => "launch_failed",
             Self::TimedOut => "timed_out",
+            Self::Cancelled => "cancelled",
             Self::SolverFailed => "solver_failed",
             Self::OutputMissing => "output_missing",
             Self::Completed => "completed",
@@ -180,6 +196,25 @@ pub fn run_avl_with_options(
     timeout_seconds: f64,
     options: &AvlRunOptions,
 ) -> AvlProcessResult {
+    run_avl_with_options_cancellable(
+        executable,
+        geometry_path,
+        alpha_deg,
+        timeout_seconds,
+        options,
+        None,
+    )
+}
+
+/// Execute a sweep while polling cancellation and killing its owned process tree.
+pub fn run_avl_with_options_cancellable(
+    executable: &Path,
+    geometry_path: &Path,
+    alpha_deg: &[f64],
+    timeout_seconds: f64,
+    options: &AvlRunOptions,
+    cancel: Option<&AtomicBool>,
+) -> AvlProcessResult {
     let paths = render_output_paths(
         geometry_path,
         alpha_deg.len(),
@@ -200,6 +235,11 @@ pub fn run_avl_with_options(
         stderr_path: stderr_path.clone(),
         error: None,
     };
+    if cancel.is_some_and(|flag| flag.load(Ordering::Relaxed)) {
+        result.status = AvlProcessStatus::Cancelled;
+        result.error = Some("AVL cancelled before launch".to_owned());
+        return result;
+    }
     if !geometry_path.is_file() {
         result.error = Some(format!(
             "AVL geometry is missing: {}",
@@ -212,9 +252,13 @@ pub fn run_avl_with_options(
         return result;
     }
 
-    let Some(timeout) = timeout_duration(timeout_seconds) else {
-        result.error = Some("AVL timeout must be a finite value".to_owned());
-        return result;
+    let timeout = match timeout_from_seconds("AVL", timeout_seconds) {
+        Ok(timeout) => timeout,
+        Err(error) => {
+            result.status = AvlProcessStatus::InvalidTimeout;
+            result.error = Some(error.to_string());
+            return result;
+        }
     };
     if let Some(namespace) = options.result_namespace.as_deref() {
         if let Err(error) = fs::create_dir_all(namespace) {
@@ -237,6 +281,7 @@ pub fn run_avl_with_options(
 
     for path in paths.all_artifacts() {
         if let Err(error) = remove_stale_artifact(path) {
+            result.status = AvlProcessStatus::LaunchFailed;
             result.error = Some(format!("cannot remove stale {}: {error}", path.display()));
             return result;
         }
@@ -319,11 +364,21 @@ pub fn run_avl_with_options(
         }
     };
 
-    let deadline = Instant::now() + timeout;
+    // A deadline beyond the platform clock's range never arrives, where
+    // `Instant + Duration` would panic.
+    let deadline = Instant::now().checked_add(timeout);
     let process_status = loop {
+        if cancel.is_some_and(|flag| flag.load(Ordering::Relaxed)) {
+            stop_process_tree(&mut child);
+            result.status = AvlProcessStatus::Cancelled;
+            result.error = Some("AVL cancelled; process tree force-killed".to_owned());
+            return result;
+        }
         match child.try_wait() {
             Ok(Some(status)) => break status,
-            Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(25)),
+            Ok(None) if deadline.is_none_or(|deadline| Instant::now() < deadline) => {
+                thread::sleep(POLL_INTERVAL);
+            }
             Ok(None) => {
                 stop_process_tree(&mut child);
                 result.status = AvlProcessStatus::TimedOut;
@@ -427,150 +482,6 @@ fn render_session_with_outputs(
     session
 }
 
-#[derive(Debug, Clone)]
-struct AvlRunPaths {
-    session_path: PathBuf,
-    force_paths: Vec<PathBuf>,
-    stdout_path: PathBuf,
-    stderr_path: PathBuf,
-    output_paths: AvlOutputPaths,
-}
-
-impl AvlRunPaths {
-    fn all_artifacts(&self) -> impl Iterator<Item = &Path> {
-        self.force_paths
-            .iter()
-            .map(PathBuf::as_path)
-            .chain(self.output_paths.strip_forces.iter().map(PathBuf::as_path))
-            .chain(self.output_paths.derivatives.iter().map(PathBuf::as_path))
-            .chain(self.output_paths.trim.iter().map(PathBuf::as_path))
-            .chain([
-                self.session_path.as_path(),
-                self.stdout_path.as_path(),
-                self.stderr_path.as_path(),
-            ])
-    }
-
-    fn required_outputs(&self) -> impl Iterator<Item = &Path> {
-        self.force_paths
-            .iter()
-            .map(PathBuf::as_path)
-            .chain(self.output_paths.strip_forces.iter().map(PathBuf::as_path))
-            .chain(self.output_paths.derivatives.iter().map(PathBuf::as_path))
-            .chain(self.output_paths.trim.iter().map(PathBuf::as_path))
-    }
-}
-
-fn render_output_paths(
-    geometry_path: &Path,
-    alpha_count: usize,
-    namespace: Option<&Path>,
-    channels: &AvlOutputChannels,
-) -> AvlRunPaths {
-    let source_base = geometry_path.with_extension("");
-    let base = match namespace {
-        Some(namespace) => namespace.join(
-            source_base
-                .file_name()
-                .map(PathBuf::from)
-                .unwrap_or_else(|| PathBuf::from("avl_case")),
-        ),
-        None => source_base,
-    };
-    let force_paths = (0..alpha_count)
-        .map(|index| base.with_extension(format!("avl.{index:03}.ft")))
-        .collect::<Vec<_>>();
-    let output_paths = AvlOutputPaths {
-        strip_forces: if channels.strip_forces {
-            (0..alpha_count)
-                .map(|index| base.with_extension(format!("avl.{index:03}.fs")))
-                .collect()
-        } else {
-            Vec::new()
-        },
-        derivatives: channels
-            .stability_derivatives
-            .then(|| base.with_extension("avl.derivatives.txt")),
-        trim: channels
-            .trim_commands
-            .as_ref()
-            .map(|_| base.with_extension("avl.trim.ft")),
-    };
-    AvlRunPaths {
-        session_path: base.with_extension("avl.session.txt"),
-        force_paths,
-        stdout_path: base.with_extension("avl.stdout.txt"),
-        stderr_path: base.with_extension("avl.stderr.txt"),
-        output_paths,
-    }
-}
-
-fn output_filename(path: &Path) -> String {
-    path.file_name()
-        .map(|name| name.to_string_lossy().into_owned())
-        .unwrap_or_else(|| path.as_os_str().to_string_lossy().into_owned())
-}
-
-fn parent_directory(path: &Path) -> &Path {
-    path.parent()
-        .filter(|parent| !parent.as_os_str().is_empty())
-        .unwrap_or_else(|| Path::new("."))
-}
-
-fn absolute_path(path: &Path) -> PathBuf {
-    if path.is_absolute() {
-        return path.to_path_buf();
-    }
-    std::env::current_dir()
-        .map(|directory| directory.join(path))
-        .unwrap_or_else(|_| path.to_path_buf())
-}
-
-fn timeout_duration(timeout_seconds: f64) -> Option<Duration> {
-    if !timeout_seconds.is_finite() {
-        return None;
-    }
-    if timeout_seconds <= 0.1 {
-        return Some(Duration::from_millis(100));
-    }
-    if timeout_seconds >= Duration::MAX.as_secs_f64() {
-        return Some(Duration::MAX);
-    }
-    Some(Duration::from_secs_f64(timeout_seconds))
-}
-
-fn create_fresh_file(path: &Path) -> std::io::Result<File> {
-    OpenOptions::new()
-        .create_new(true)
-        .write(true)
-        .truncate(false)
-        .open(path)
-}
-
-fn remove_stale_artifact(path: &Path) -> std::io::Result<()> {
-    match fs::symlink_metadata(path) {
-        Ok(metadata) if metadata.file_type().is_file() || metadata.file_type().is_symlink() => {
-            fs::remove_file(path)
-        }
-        Ok(_) => Err(std::io::Error::new(
-            std::io::ErrorKind::AlreadyExists,
-            "expected an output file, found another filesystem object",
-        )),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(error),
-    }
-}
-
-fn is_fresh_output(path: &Path) -> bool {
-    fs::symlink_metadata(path)
-        .is_ok_and(|metadata| metadata.file_type().is_file() && metadata.len() > 100)
-}
-
-fn stop_process_tree(child: &mut Child) {
-    kill_process_tree(child.id());
-    let _ = child.wait();
-}
-
 #[cfg(test)]
 #[path = "avl_tests.rs"]
 mod avl_tests;
@@ -627,6 +538,7 @@ mod tests {
     #[test]
     fn process_status_text_keeps_timeout_and_output_failure_distinct() {
         assert_eq!(AvlProcessStatus::InputMissing.as_str(), "input_missing");
+        assert_eq!(AvlProcessStatus::InvalidTimeout.as_str(), "invalid_timeout");
         assert_eq!(AvlProcessStatus::LaunchFailed.as_str(), "launch_failed");
         assert_eq!(AvlProcessStatus::TimedOut.as_str(), "timed_out");
         assert_eq!(AvlProcessStatus::SolverFailed.as_str(), "solver_failed");

@@ -93,8 +93,9 @@ fn installed_openvsp_materializes_and_validates_the_native_project() {
             export.preview_error
         );
         assert!(export.preview_error.is_none());
-        let capture_stdout =
-            fs::read_to_string(export.script_path.with_extension("preview.stdout.txt")).unwrap();
+        let capture_path = export.script_path.with_extension("preview.stdout.txt");
+        let capture_stdout = fs::read_to_string(&capture_path)
+            .unwrap_or_else(|error| panic!("read {}: {error}", capture_path.display()));
         assert!(capture_stdout.contains("ALAS_NATIVE_CAPTURE_COMPLETE"));
     }
     if export.preview_available {

@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/config/propulsion_config.py
-// Reference: alas @ rust-port-baseline.
 
 //! Component efficiencies and losses of the on-design turbofan cycle.
 //!

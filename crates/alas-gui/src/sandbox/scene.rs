@@ -30,6 +30,9 @@ use crate::state::AppState;
 
 use super::fields::Discipline;
 
+#[path = "live_preview_cache.rs"]
+mod live_preview_cache;
+
 /// Camera key of the sandbox viewport.
 pub const SANDBOX_CAMERA_ID: &str = "sandbox_3d";
 /// Viewport key of the sandbox canvas.
@@ -87,8 +90,9 @@ pub fn build_sandbox_scene(state: &AppState) -> Option<(Scene, SceneFraming)> {
 /// state, but shares the exact `SandboxSceneModel` renderer and its 40-point
 /// section sampling so the two previews do not disagree about geometry.
 pub fn build_live_preview_scene(state: &AppState, camera: Camera3D) -> Option<Scene> {
-    let (plane, _) = build_sandbox_airplane(state)?;
-    let model = build_sandbox_model(&plane);
+    let config = state.typed_config()?;
+    let design = state.current_design()?;
+    let model = live_preview_cache::model(interactive_geometry(&config), design)?;
     Some(
         model
             .render(

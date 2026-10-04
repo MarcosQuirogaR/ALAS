@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/reporting/airfoil_sweep_figures.py (`fig_rerank_2d_3d`)
-// Reference: alas @ rust-port-baseline.
 
 //! 2-D proxy L/D vs 3-D-wing L/D for the refined shortlist, against a `y=x`
 //! reference: points below the diagonal are the sections the 2-D screen

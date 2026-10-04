@@ -23,6 +23,9 @@ pub enum TankKind {
     WingMid,
     /// The outboard cell burned last to relieve root bending.
     WingOuter,
+    /// An engine feed tank carved out of one end of a wing cell (the
+    /// `feed` group nested in each wing cell): filled first, emptied last.
+    WingFeed,
     /// The wing carry-through box under the cabin floor.
     Center,
     /// The horizontal-stabiliser cruise-balance tank.
@@ -38,6 +41,7 @@ impl TankKind {
             Self::WingInner => "inner wing tank",
             Self::WingMid => "mid wing tank",
             Self::WingOuter => "outer wing tank",
+            Self::WingFeed => "feed tank",
             Self::Center => "center tank",
             Self::Trim => "trim tank",
             Self::Auxiliary => "auxiliary tank",
@@ -54,6 +58,7 @@ impl TankKind {
             Self::WingInner => "wing_inner",
             Self::WingMid => "wing_mid",
             Self::WingOuter => "wing_outer",
+            Self::WingFeed => "wing_feed",
             Self::Center => "center",
             Self::Trim => "trim",
             Self::Auxiliary => "auxiliary",
@@ -116,6 +121,17 @@ pub struct FuelTank {
     pub unusable_kg: f64,
     /// Volume centroid, aircraft geometry axes (x aft, y starboard, z up), m.
     pub centroid_m: [f64; 3],
+    /// Where the tank's last fuel pools as it drains, aircraft geometry
+    /// axes, m. See [`super::distribute::fuel_prism_item`] for how this and
+    /// [`Self::centroid_m`] combine into a fill-dependent position.
+    ///
+    /// For a wing tank this is the lower of the two spanwise-boundary
+    /// cross-section midpoints ([`super::resolve::wing_tank_pair`]), because
+    /// gravity pools the residual fuel at the geometrically lowest point the
+    /// cell reaches, regardless of the dihedral sign; for every other tank
+    /// kind it equals [`Self::centroid_m`] (no spanwise low end is modelled),
+    /// so a partial fill there is not moved.
+    pub low_point_m: [f64; 3],
     /// Extent of the equivalent rectangular prism: length (x), width (y),
     /// height (z), m.
     pub extent_m: [f64; 3],
@@ -132,6 +148,23 @@ pub struct FuelCgPoint {
     pub fuel_kg: f64,
     /// Centre of gravity of that fuel alone, aircraft geometry axes, m.
     pub cg_m: [f64; 3],
+}
+
+/// One point of a fuel-burn centre-of-gravity vector: see
+/// [`super::distribute::fuel_vector`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FuelVectorPoint {
+    /// Fuel remaining on board at this point, kg.
+    pub fuel_kg: f64,
+    /// Longitudinal centre of gravity of the remaining fuel, aircraft
+    /// geometry axes (x aft from the nose), m. `f64::NAN`-free only while
+    /// `fuel_kg` is positive; the fuel-empty endpoint reports the
+    /// zero-mass convention [`crate::ledger::MassProperties::EMPTY`] uses
+    /// (`0.0`), not a physical fuel position.
+    pub x_m: f64,
+    /// Vertical centre of gravity of the remaining fuel, aircraft geometry
+    /// axes (z up), m. Same empty-endpoint convention as [`Self::x_m`].
+    pub z_m: f64,
 }
 
 /// The resolved fuel-tank arrangement of a built aircraft.
@@ -264,6 +297,14 @@ pub enum TankLayoutError {
         /// The requested total, kg.
         total_kg: f64,
     },
+    /// A registered layout's cell total disagrees with its preset's published
+    /// usable volume beyond the reconciliation tolerance.
+    PublishedInventoryMismatch {
+        /// Usable volume of the resolved cells, L.
+        cells_l: f64,
+        /// Published usable volume, L.
+        published_l: f64,
+    },
     /// A burn removed more fuel than the state held.
     InsufficientFuel {
         /// How far short of the request the state's fuel fell, kg.
@@ -332,6 +373,16 @@ impl fmt::Display for TankLayoutError {
                 write!(
                     formatter,
                     "unusable fuel total {total_kg} kg is invalid or cannot be distributed"
+                )
+            }
+            Self::PublishedInventoryMismatch {
+                cells_l,
+                published_l,
+            } => {
+                write!(
+                    formatter,
+                    "registered tank cells hold {cells_l} L against {published_l} L published, \
+                     beyond the reconciliation tolerance"
                 )
             }
             Self::InsufficientFuel { shortfall_kg } => {

@@ -37,6 +37,9 @@ pub struct FieldConfig {
     /// Names the list of accepted values, which lives in a crate this one
     /// must not depend on. See `alas_config::OptionSource`.
     pub options: Option<syn::Ident>,
+    /// Names what zero stands for in a whole-number field. See
+    /// `alas_config::ZeroMeaning`.
+    pub zero_means: Option<syn::Ident>,
 }
 
 impl FieldConfig {
@@ -116,6 +119,8 @@ impl FieldConfig {
             self.readonly_unless = Some(readonly_unless(meta)?);
         } else if path.is_ident("options") {
             self.options = Some(meta.value()?.parse()?);
+        } else if path.is_ident("zero_means") {
+            self.zero_means = Some(meta.value()?.parse()?);
         } else {
             return Err(meta.error("unknown #[config(...)] key"));
         }

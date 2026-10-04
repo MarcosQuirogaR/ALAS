@@ -35,11 +35,17 @@ pub fn atr72_600() -> AircraftPreset {
     engine.radius_scale_m = 0.65;
     // ATR 72-600 factsheet 2020 p.22 states an 8.10 m propeller-axis
     // separation; half of that is the single-engine spanwise station.
-    // Physics review v1.2, section 4.3: the previous 4.25 m was 0.20 m
-    // off-source.
     engine.spanwise_positions_m = vec![4.05, -4.05];
     engine.z_m = -0.70;
-    engine.inlet_x_offset_m = 1.2;
+    // ATR 72-600 factsheet 2020 p.22 side view: the spinner tip sits
+    // 8.45 +/- 0.15 m aft of the nose (read against both the printed
+    // 27.166 m length and the 10.77 m wheelbase, which disagree by 3 %),
+    // 2.70 m ahead of the wing leading edge at the 4.05 m nacelle station.
+    // Independent check: JCAB TCDS No. 75 Rev 3, ATR 72-212A item (17)(a),
+    // engine oil H-arm 12.190 m, i.e. 9.828 m aft of the nose with the
+    // 2.362 m datum of item (9); the nacelle mid-length mass station lands
+    // 0.10 m aft of it.
+    engine.inlet_x_offset_m = 2.70;
 
     AircraftPreset {
         name: "ATR72-600",
@@ -55,19 +61,20 @@ pub fn atr72_600() -> AircraftPreset {
             // weight variant. The 23,000 kg MTOW / 22,350 kg MLW /
             // 21,000 kg MZFW variant this preset declares is Mod 6219 (TCDS
             // A.084 section III.13.b, "ATR 72-212A models" table), a
-            // separate, independently applicable modification. Physics
-            // review v1.2, section 4.3: the prior text named only Mod 5948
-            // and could be read as the weight-variant citation.
+            // separate, independently applicable modification; Mod 5948 alone is not
+            // the weight-variant citation.
             modification_state: "ATR 72-600 commercial standard (Mod 5948, NAS/glass cockpit); 23,000 kg MTOW weight variant (Mod 6219)",
             tank_configuration: "standard integral wing tanks",
         },
         reference: AircraftReferenceData {
+            // ICAO Annex 14 Vol. I Table 1-1 (aerodrome reference code) applied to the
+            // preset wingspan of 27.05 m (ATR 72-600): 24 m <= b < 36 m is code C.
+            aerodrome_reference_code: Some(crate::AerodromeReferenceCode::C),
             // EASA TCDS A.084, Issue 14 (23 Feb 2026), section III.13.b
             // "ATR 72-212A models", Mod 6219 column: MRW 23,170 kg, MTOW
             // 23,000 kg, MLW 22,350 kg, MZFW 21,000 kg. The MTOW/MLW/MZFW
             // already matched this preset exactly; only MRW needed
-            // correcting from an uncited 23,150 kg (physics review v1.2,
-            // section 4.3, decoded from the downloaded TCDS PDF with pypdf).
+            // taken from the TCDS in place of an uncited 23,150 kg.
             mrw_kg: Some(23_170.0),
             mtow_kg: Some(23_000.0),
             mlw_kg: Some(22_350.0),
@@ -77,7 +84,14 @@ pub fn atr72_600() -> AircraftPreset {
             usable_fuel_mass_kg: Some(5_000.0),
             reference_wing_area_m2: Some(61.0),
             planning_seats: Some(72),
+            design_point: Some(crate::PayloadRangeDesignPoint {
+                range_nmi: 758.0,
+                payload_kg: None,
+                source: "ATR 72-600 Factsheet (PW127M/N edition, 2020-07) p.2: range with maximum passengers (72 seats) 758 nmi; reserves and payload mass not stated, so the planning cabin is the payload",
+            }),
             certified_max_seats: Some(78),
+            certified_exit_layout: Some(crate::presets::ATR72_600_EXIT_LAYOUT),
+            planning_cabin: Some(crate::presets::ATR72_600_PLANNING_CABIN),
             partial_design_mission_evidence: vec![PartialDesignMissionEvidence {
                 kind: PartialMissionEvidenceKind::AdvertisedRange,
                 range: Some(PublishedRange::NauticalMiles(740.0)),
@@ -156,12 +170,10 @@ pub fn atr72_600() -> AircraftPreset {
             // balance needs; the ATR main gear is a trailing-arm unit, so its
             // axle and its contact station are not the same point and only the
             // contact station is dimensioned. Declaring the three fields is
-            // what retires the `StationError::MainGearStationNotMeasured`
-            // refusal this block previously carried: the refusal was correct
-            // while no ATR station in a stated frame was held, and the
-            // wing-mounted fallback (`x_mlg = mac_le + mlg_x_fraction_mac x
-            // mac`) remains outside its domain for this sponson gear - it is
-            // now simply not reached.
+            // what avoids the `StationError::MainGearStationNotMeasured`
+            // refusal; the wing-mounted fallback (`x_mlg = mac_le + mlg_x_fraction_mac x
+            // mac`) remains outside its domain for this sponson gear and is
+            // not reached.
             reference_wheelbase_m: Some(10.772),
             reference_track_m: Some(4.10),
             reference_station_frame: Some("nose_tip_drawing_reference".to_owned()),
@@ -171,17 +183,29 @@ pub fn atr72_600() -> AircraftPreset {
                 (1.728 + 10.772) / 27.166,
                 (1.728 + 10.772) / 27.166,
             ]),
+            // UK AAIB Bulletin AAIB-31376 (ATR 72-212A G-OASB, PW127M), p.3:
+            // pre-flight full-and-free check "left elevator range of +12.7 deg
+            // to -21.8 deg" (negative = nose-up). One airframe's measured
+            // stop, not the AMM nominal travel; the stabiliser is fixed and
+            // trimmed by elevator tabs (ATSB AO-2014-032, Fig. 4), so no
+            // takeoff stabiliser setting is credited.
+            elevator_up_travel_deg: Some(21.8),
             ..LandingGearConfig::default()
         },
         design_vector: DesignVector {
             span_m: 27.05,
-            // ATR 72-600 Factsheets (2020), three-view: S_ref = 61 m^2.
-            // Scale the estimated chords together to close the active
-            // side-of-body planform area. Chords and MAC remain estimates;
-            // the unverified training-manual MAC is not a fitting target.
-            root_chord_m: 4.015_779_489_708_101,
-            break_chord_m: 2.805_544_575_001_549_7,
-            tip_chord_m: 0.935_181_525_000_516_7,
+            // The factsheet 2020 p.22 plan view draws a constant-chord centre
+            // section out past the nacelles and a straight-tapered outer
+            // panel. With the kink at the 0.32 semispan station, these two
+            // chords close the factsheet's 61 m^2 and the 2.303 m MAC of JCAB
+            // TCDS No. 75 Rev 3, ATR 72-212A item (10), exactly.
+            root_chord_m: 2.590_444,
+            break_chord_m: 2.590_444,
+            tip_chord_m: 1.604_089,
+            // Leading-edge sweep, an engineering estimate: no value is
+            // published, and the factsheet three-view shows a nearly unswept
+            // inboard leading edge and about 4 deg outboard of the nacelle,
+            // which one straight leading edge cannot carry.
             sweep_deg: 3.0,
             tip_twist_deg: -2.0,
             wing_x_shift_m: 0.0,
@@ -192,27 +216,16 @@ pub fn atr72_600() -> AircraftPreset {
             airfoil_camber_scale: 1.0,
             ..DesignVector::default()
         },
+        airfoil_class_source: "Not transonic: the 0.44 cruise Mach is below the wave-drag onset Mach, so the class does not enter its drag. Declared conventional, matching the drawn NACA 23018 root and 23012 tip sections.",
         geometry: GeometryConfig {
             wing: WingConfig {
                 // ATR Weight and Balance Manual, LIMITATIONS LIM.1 p.03 (15
-                // JAN 2021): reference-chord leading edge 11.242 m aft of the
-                // nose (station 0 is 2.362 m forward of the nose; station 0
-                // to reference-chord LE is 13.604 m; 13.604 - 2.362 =
-                // 11.242). The built wing's own area-weighted MAC leading
-                // edge (`Wing::aerodynamic_center(0.0)`) sat at 10.488 m at
-                // the previous 10.2 m datum -- 0.754 m forward of the WBM
-                // reference chord -- which is what drove the model's
-                // static margin to roughly -46% and the ZFW nose-gear
-                // reaction negative (physics review v1.2, section 4.3).
-                // Moving the datum aft by that same 0.754 m places the
-                // built LEMAC on the WBM station; it does not change the
-                // built wing's own MAC length (2.498 m against the WBM's
-                // 2.303 m reference chord, an 8% difference the review
-                // separately notes and this fix does not close, since doing
-                // so would need a planform-shape change, not a translation).
-                // 10.2 + (11.242 - 10.488069716279679) = 10.953930283720321,
-                // rounded to the WBM source's own three-decimal precision.
-                root_datum_x_m: 10.954,
+                // JAN 2021) and JCAB TCDS No. 75 Rev 3 items (9)-(10): the
+                // reference-chord leading edge is 13.604 m aft of station 0,
+                // which is 2.362 m forward of the nose, so 11.242 m aft of the
+                // nose. This datum puts the built wing's MAC leading edge
+                // (`Wing::aerodynamic_center(0.0)`) on that station.
+                root_datum_x_m: 10.916,
                 root_z_m: 1.85,
                 break_z_m: 1.85,
                 tip_z_m: 1.85,
@@ -220,50 +233,38 @@ pub fn atr72_600() -> AircraftPreset {
                 break_twist_deg: 0.0,
                 break_span_fraction: 0.32,
                 kink_span_fraction: None,
-                // 2.9615 m over the 4.0158 m centreline chord: model
-                // geometry, not a measured manufacturer station. This is the
-                // side-of-body chord `WingConfig::transport_planform` already
-                // derives for these chords: the straight-trailing-edge clip
-                // `min(interpolated_root_to_kink_chord, kink_trailing_edge_x
-                // - side_of_body_leading_edge_x)`, which on this planform is
-                // narrower than a plain linear root-to-kink interpolation
-                // (~0.906 root-chord ratio) would give. Left derived (the
-                // WingConfig default), the station is computed by
-                // `transport_planform` but never meshed into the production
-                // wing, only an explicit ratio drives `build_main_wing`'s
-                // side-of-body xsec (see
-                // `crates/alas-geom/src/builder_parts/part_01.rs`). Leaving
-                // it unset (as this preset originally did) skips the clip
-                // that the chords above were fit to close: the built wing
-                // came out at 63.926 m^2 against the published 61 m^2
-                // three-view area. Pinning the exact ratio the closure test
-                // in `preset_dimension_corrections.rs` already assumes (as
-                // A320-200/A380-800/DC-10 already do for their own
-                // side-of-body clips) makes the production `s_ref` close
-                // the published area instead of silently skipping the clip.
-                // `transport_planform`/the closure test remain the
-                // authoritative computation of this value; the literal below
-                // is that computation's output, not an independent estimate.
-                side_of_body_chord_ratio: Some(0.737_461_787_891_521_7),
+                // The fuselage-side station carries the constant centre-section
+                // chord. Meshing it as an explicit section keeps the lattice of
+                // the neutral-point condition probes resolvable: without it
+                // the high-lift probe's influence matrix reports a pivot ratio
+                // of 1.2e4 and the critical neutral point silently falls back
+                // to the clean one.
+                side_of_body_chord_ratio: Some(1.0),
                 outboard_sweep_decrement_deg: 0.0,
                 root_airfoil: "naca23018".to_owned(),
                 tip_airfoil: "naca23012".to_owned(),
+                airfoil_class: crate::AirfoilClass::Conventional,
                 ..WingConfig::default()
             },
             empennage: EmpennageConfig {
                 tail_airfoil: "naca0012".to_owned(),
-                hstab_offset_from_tail_m: 4.6,
-                hstab_z_m: 1.0,
-                hstab_root_chord_m: 2.8,
-                hstab_tip_chord_m: 1.0,
+                // Approximate reconstruction of ATR's 2020 factsheet p.22,
+                // not certified surface stations: +/-0.3 m digitization/model
+                // uncertainty. Nose x=0, barrel centre z=0, z positive up.
+                // The T-tail root and fin tip share (x,z)=(24.8,4.7) m.
+                // See docs/research/atr72-tail-geometry-provenance.md.
+                hstab_offset_from_tail_m: 27.166 - 24.8,
+                hstab_z_m: 4.7,
+                hstab_root_chord_m: 1.8,
+                hstab_tip_chord_m: 1.2,
                 hstab_root_twist_deg: -1.0,
                 hstab_tip_twist_deg: -1.0,
-                hstab_tip_le_m: (2.8, 3.6, 0.3),
-                vstab_offset_from_tail_m: 4.2,
+                hstab_tip_le_m: (0.6, 3.6, 0.0),
+                vstab_offset_from_tail_m: 27.166 - 22.3,
                 vstab_z_m: 1.0,
-                vstab_root_chord_m: 4.0,
-                vstab_tip_chord_m: 1.4,
-                vstab_tip_le_m: (3.4, 0.0, 4.6),
+                vstab_root_chord_m: 3.8,
+                vstab_tip_chord_m: 1.8,
+                vstab_tip_le_m: (2.5, 0.0, 3.7),
                 ..EmpennageConfig::default()
             },
             fuselage: FuselageConfig {
@@ -273,6 +274,12 @@ pub fn atr72_600() -> AircraftPreset {
                 cabin_z_m: 0.0,
                 tailcone_length_m: 6.0,
                 tail_z_m: 1.0,
+                // Solved so the tail-down angle is 8 deg: the ATR maintenance manual's
+                // tail skid "is designed to avoid fuselage contact with the runway when
+                // the take-off or landing attitude has an angle of 8 deg or greater"
+                // (quoted in UK AAIB Bulletin 8/2006, ATR 72-212A D-ANFH, EW/C2005/09/04,
+                // p.3); the skid sits between frames 38 and 39.
+                belly_upsweep_length_m: Some(7.8),
                 ..FuselageConfig::default()
             },
             engine,
@@ -308,6 +315,30 @@ pub fn atr72_600() -> AircraftPreset {
 #[allow(clippy::expect_used)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn atr_conceptual_t_tail_attaches_and_stays_inside_drawing_envelope() {
+        let atr = atr72_600();
+        let e = &atr.geometry.empennage;
+        let length = 27.166;
+        let h_x = length - e.hstab_offset_from_tail_m;
+        let v_x = length - e.vstab_offset_from_tail_m;
+        // Builder's nominal tail_scale=1, tail_x_shift=0 coordinates.
+        assert!((h_x - (v_x + e.vstab_tip_le_m.0)).abs() < 1e-10);
+        assert!((e.hstab_z_m - (e.vstab_z_m + e.vstab_tip_le_m.2)).abs() < 1e-10);
+        assert_eq!(e.hstab_root_chord_m, e.vstab_tip_chord_m);
+        assert!((e.hstab_z_m - 4.7).abs() < 0.3);
+        for trailing_edge in [
+            h_x + e.hstab_root_chord_m,
+            h_x + e.hstab_tip_le_m.0 + e.hstab_tip_chord_m,
+            v_x + e.vstab_root_chord_m,
+            v_x + e.vstab_tip_le_m.0 + e.vstab_tip_chord_m,
+        ] {
+            assert!(trailing_edge.is_finite() && trailing_edge < length);
+        }
+        assert!(e.hstab_tip_le_m.1 > 0.0);
+        assert_eq!(e.hstab_tip_le_m.2, 0.0);
+    }
 
     #[test]
     fn atr_identity_and_certified_mass_limits_are_not_mixed() {

@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-// Ported from alas/paths.py
-// Reference: alas @ rust-port-baseline.
-
 //! Central path resolution for application bundles, persistent user data, and external tools.
 
 use std::env;

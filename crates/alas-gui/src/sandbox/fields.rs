@@ -18,8 +18,10 @@
 
 use std::collections::BTreeMap;
 
-use alas_config::{presets, ConfigNode, EngineConfig, Entry, Kind, Node, DESIGN_VARIABLE_SPECS};
+use alas_config::{presets, ConfigNode, EngineConfig, Entry, Node, DESIGN_VARIABLE_SPECS};
 use serde_json::Value;
+
+mod belly_upsweep;
 
 /// The name of the reference aircraft every sandbox starts from.
 pub const REFERENCE_PRESET: &str = "AVE";
@@ -192,6 +194,13 @@ const fn dv(
     }
 }
 
+/// Editing range of a height in the geometry frame, m.
+const HEIGHT_M: Bounds = Bounds {
+    min: -15.0,
+    max: 15.0,
+    decimals: 2,
+};
+
 const PLANFORM: &str = "Planform";
 const TWIST: &str = "Twist and dihedral";
 const PLACEMENT: &str = "Placement";
@@ -313,11 +322,7 @@ const SPECS: &[Spec] = &[
         TWIST,
         "/geometry/wing/root_twist_deg",
         FieldKind::Float,
-        Bounds {
-            min: -15.0,
-            max: 15.0,
-            decimals: 2,
-        },
+        HEIGHT_M,
     ),
     cfg(
         "geometry.wing.break_twist_deg",
@@ -325,11 +330,7 @@ const SPECS: &[Spec] = &[
         TWIST,
         "/geometry/wing/break_twist_deg",
         FieldKind::Float,
-        Bounds {
-            min: -15.0,
-            max: 15.0,
-            decimals: 2,
-        },
+        HEIGHT_M,
     ),
     dv(
         "design.tip_twist_deg",
@@ -343,11 +344,7 @@ const SPECS: &[Spec] = &[
         TWIST,
         "/geometry/wing/root_z_m",
         FieldKind::Float,
-        Bounds {
-            min: -15.0,
-            max: 15.0,
-            decimals: 2,
-        },
+        HEIGHT_M,
     ),
     cfg(
         "geometry.wing.break_z_m",
@@ -355,11 +352,7 @@ const SPECS: &[Spec] = &[
         TWIST,
         "/geometry/wing/break_z_m",
         FieldKind::Float,
-        Bounds {
-            min: -15.0,
-            max: 15.0,
-            decimals: 2,
-        },
+        HEIGHT_M,
     ),
     cfg(
         "geometry.wing.tip_z_m",
@@ -367,10 +360,18 @@ const SPECS: &[Spec] = &[
         TWIST,
         "/geometry/wing/tip_z_m",
         FieldKind::Float,
+        HEIGHT_M,
+    ),
+    cfg(
+        "geometry.wing.flight_tip_rise_semispan_fraction",
+        Discipline::Wing,
+        TWIST,
+        "/geometry/wing/flight_tip_rise_semispan_fraction",
+        FieldKind::OptionalFloat,
         Bounds {
-            min: -15.0,
-            max: 15.0,
-            decimals: 2,
+            min: 0.0,
+            max: alas_config::MAX_FLIGHT_TIP_RISE_SEMISPAN_FRACTION,
+            decimals: 3,
         },
     ),
     // Placement.
@@ -508,11 +509,7 @@ const SPECS: &[Spec] = &[
         TWIST,
         "/geometry/empennage/hstab_root_twist_deg",
         FieldKind::Float,
-        Bounds {
-            min: -15.0,
-            max: 15.0,
-            decimals: 2,
-        },
+        HEIGHT_M,
     ),
     cfg(
         "geometry.empennage.hstab_tip_twist_deg",
@@ -520,11 +517,7 @@ const SPECS: &[Spec] = &[
         TWIST,
         "/geometry/empennage/hstab_tip_twist_deg",
         FieldKind::Float,
-        Bounds {
-            min: -15.0,
-            max: 15.0,
-            decimals: 2,
-        },
+        HEIGHT_M,
     ),
     cfg(
         "geometry.empennage.hstab_offset_from_tail_m",
@@ -705,6 +698,7 @@ const SPECS: &[Spec] = &[
             decimals: 2,
         },
     ),
+    belly_upsweep::SPEC,
     cfg(
         "geometry.fuselage.nose_z_m",
         Discipline::Fuselage,
@@ -1061,11 +1055,6 @@ pub fn grouped(
         }
     }
     groups
-}
-
-/// Whether the schema kind of a leaf is one the sandbox editors accept.
-pub fn schema_kind_is_supported(kind: Kind) -> bool {
-    !matches!(kind, Kind::Nested | Kind::Unsupported)
 }
 
 // Tests assert on values they construct here, so a failed expect is the

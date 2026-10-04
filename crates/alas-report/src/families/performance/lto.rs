@@ -3,21 +3,22 @@
 
 // Ported from alas/sidecar/figures_extra.py (`_draw_runway`, `_draw_bars`,
 // `_figure_lto`, `figure_lto_departure`, and `figure_lto_arrival`).
-// Reference: alas @ rust-port-baseline.
 
 //! Landing and take-off runway and required-versus-available distance figures.
 
 use alas_config::airports::Airport;
-use alas_config::{ActiveEngineModel, AlasConfig, PropulsionTechnology};
-use alas_perf::performance::{compute_field_performance_at_masses, FieldPerformance};
+use alas_config::AlasConfig;
+use alas_perf::performance::FieldPerformance;
 use alas_pipeline::full_analysis::AnalysisReport;
 
 use crate::chart_kit::draw_title;
 use crate::families::performance::support::{
-    draw_arrow, format_thousands, resolve_airport, static_thrust_to_weight, status_message_scene,
+    draw_arrow, format_thousands, resolve_airport, status_message_scene,
 };
 use crate::scene::{Color, Fill, Scene, SceneElement, Stroke, TextAlign, TextBaseline};
 use crate::theme::get_palette;
+
+mod inputs;
 
 const MS_TO_KT: f64 = 1.94384;
 const GRASS: &str = "#2d5a27";
@@ -63,9 +64,12 @@ pub fn figure_lto_for_airport(
     role: &str,
     theme: Option<&str>,
 ) -> Scene {
-    let takeoff_mass_kg = config.requirements.mtow_kg;
-    let landing_mass_kg = config
-        .design_landing_mass_for(takeoff_mass_kg)
+    // The sized takeoff mass when the report carries one, never the declared
+    // MTOW ceiling.
+    let takeoff_mass_kg = report.analysis_takeoff_mass_kg(config.requirements.mtow_kg);
+    let landing_mass_kg = report
+        .design_landing_mass_kg()
+        .unwrap_or_else(|| config.design_landing_mass_at_closure(takeoff_mass_kg))
         .clamp(0.0, takeoff_mass_kg);
     figure_lto_for_airport_at_masses(
         report,
@@ -82,7 +86,7 @@ pub fn figure_lto_for_airport(
 ///
 /// Pipeline and GUI callers should use this entry point so a tank-limited
 /// takeoff or mission-derived arrival is not silently redrawn at configured
-/// MTOW/MLW. The legacy wrapper remains for standalone report construction
+/// MTOW/MLW. The wrapper without masses remains for standalone report construction
 /// where no completed load state exists.
 pub fn figure_lto_for_airport_at_masses(
     report: &AnalysisReport,
@@ -93,59 +97,22 @@ pub fn figure_lto_for_airport_at_masses(
     landing_mass_kg: f64,
     theme: Option<&str>,
 ) -> Scene {
-    if matches!(
-        config.geometry.engine.propulsion_technology,
-        PropulsionTechnology::Turboprop
-    ) {
-        return status_message_scene(
-            "Landing & Take-Off",
-            "Turboprop take-off distance is uncalibrated: the current field model requires jet static T/W and cannot substitute zero thrust for PW127M/568F propeller force capability.",
-            theme,
-        );
-    }
-    if report
-        .airplane
-        .wings
-        .first()
-        .filter(|wing| wing.xsecs.len() >= 2)
-        .is_none()
-    {
-        return status_message_scene(
-            "Landing & Take-Off",
-            "The analyzed report has no main wing; field performance cannot be computed.",
-            theme,
-        );
-    }
-    let wing_area = report
-        .geometry_summary
-        .get("wing_area_m2")
-        .copied()
-        .unwrap_or(report.airplane.s_ref);
-    let rated_thrust_n = match config.geometry.engine.active_model() {
-        Ok(ActiveEngineModel::Turbofan(spec)) => {
-            config.geometry.engine.spanwise_positions_m.len() as f64 * spec.rated_thrust_kn * 1000.0
-        }
-        _ => 0.0,
-    };
-    let takeoff_weight_n = takeoff_mass_kg * config.requirements.gravity_m_s2;
-    let tw_sl = if takeoff_weight_n.is_finite() && takeoff_weight_n > 0.0 {
-        rated_thrust_n / takeoff_weight_n
-    } else {
-        static_thrust_to_weight(config, 0.30)
-    };
-    let performance = compute_field_performance_at_masses(
+    let performance = match inputs::field_performance(
+        report,
+        config,
+        airport,
         takeoff_mass_kg,
         landing_mass_kg,
-        wing_area,
-        airport,
-        config.performance.cl_max_to,
-        config.performance.cl_max_land,
-        tw_sl,
-        config.performance.k_land,
-        config.performance.bfl_factor,
-        &config.performance,
-    );
-    draw_lto(&performance, role, theme)
+    ) {
+        Ok(performance) => performance,
+        Err(reason) => return status_message_scene("Landing & Take-Off", &reason, theme),
+    };
+    draw_lto(
+        &performance,
+        role,
+        theme,
+        config.performance.legacy_field_correlations,
+    )
 }
 
 fn missing_airport_scene(airport_name: &str, theme: Option<&str>) -> Scene {
@@ -156,19 +123,34 @@ fn missing_airport_scene(airport_name: &str, theme: Option<&str>) -> Scene {
     )
 }
 
-fn draw_lto(performance: &FieldPerformance, role: &str, theme: Option<&str>) -> Scene {
+fn draw_lto(
+    performance: &FieldPerformance,
+    role: &str,
+    theme: Option<&str>,
+    legacy: bool,
+) -> Scene {
     let pal = get_palette(theme);
     let mut scene = Scene::new(900.0, 800.0, Some(Color::from_hex(pal.bg)));
     let title = format!("Landing & Take-Off - {role}");
     scene.title = Some(title.clone());
     draw_title(&mut scene, &title, pal);
     scene.suppress_derived_title();
-    draw_runway(&mut scene, performance, pal);
-    draw_bars(&mut scene, performance, pal);
+    let labels = if legacy {
+        ["TODR", "BFL", "ASD", "LDR"]
+    } else {
+        ["TODR", "BFL proxy", "ASD proxy", "LFL"]
+    };
+    draw_runway(&mut scene, performance, pal, &labels);
+    draw_bars(&mut scene, performance, pal, &labels);
     scene
 }
 
-fn draw_runway(scene: &mut Scene, performance: &FieldPerformance, pal: &crate::theme::Palette) {
+fn draw_runway(
+    scene: &mut Scene,
+    performance: &FieldPerformance,
+    pal: &crate::theme::Palette,
+    labels: &[&str; 4],
+) {
     let left = 60.0;
     let top = 50.0;
     let field_width = 780.0;
@@ -230,8 +212,8 @@ fn draw_runway(scene: &mut Scene, performance: &FieldPerformance, pal: &crate::t
     }
 
     let mut upper_distances = [
-        ("TODR", performance.todr_m, "#3498db"),
-        ("BFL", performance.bfl_m, "#e67e22"),
+        (labels[0], performance.todr_m, "#3498db"),
+        (labels[1], performance.bfl_m, "#e67e22"),
     ];
     upper_distances.sort_by(|a, b| b.1.total_cmp(&a.1));
     for (index, (name, distance, colour)) in upper_distances.iter().enumerate() {
@@ -245,8 +227,8 @@ fn draw_runway(scene: &mut Scene, performance: &FieldPerformance, pal: &crate::t
         );
     }
     let mut lower_distances = [
-        ("ASD", performance.asd_m, "#e74c3c"),
-        ("LDR", performance.ldr_m, "#2ecc71"),
+        (labels[2], performance.asd_m, "#e74c3c"),
+        (labels[3], performance.ldr_m, "#2ecc71"),
     ];
     lower_distances.sort_by(|a, b| b.1.total_cmp(&a.1));
     for (index, (name, distance, colour)) in lower_distances.iter().enumerate() {
@@ -350,12 +332,16 @@ fn draw_distance_arrow(scene: &mut Scene, x0: f64, x1: f64, y: f64, colour: Colo
     });
 }
 
-fn draw_bars(scene: &mut Scene, performance: &FieldPerformance, pal: &crate::theme::Palette) {
+fn draw_bars(
+    scene: &mut Scene,
+    performance: &FieldPerformance,
+    pal: &crate::theme::Palette,
+    labels: &[&str; 4],
+) {
     let left = 100.0;
     let top = 500.0;
     let width = 700.0;
     let height = 220.0;
-    let labels = ["TODR", "BFL", "ASD", "LDR"];
     let values = [
         performance.todr_m,
         performance.bfl_m,
@@ -524,7 +510,7 @@ mod tests {
     #[test]
     fn the_lto_renderer_contains_all_required_distances_and_speeds() {
         let performance = sample_performance();
-        let scene = draw_lto(&performance, "Departure", None);
+        let scene = draw_lto(&performance, "Departure", None, false);
         let labels: Vec<&str> = scene
             .elements
             .iter()
@@ -533,7 +519,7 @@ mod tests {
                 _ => None,
             })
             .collect();
-        for label in ["TODR", "BFL", "ASD", "LDR", "V1", "VR", "V2"] {
+        for label in ["TODR", "BFL proxy", "ASD proxy", "LFL", "V1", "VR", "V2"] {
             assert!(
                 labels.iter().any(|text| text.contains(label)),
                 "missing {label}"
@@ -547,14 +533,14 @@ mod tests {
     }
 
     /// The V1/VR/V2 dashed markers must sit within the drawn TODR distance,
-    /// scaled the same way as the golden `gen_w62_lto.py` sidecar (by
-    /// `todr_m`, not by the full declared TODA). A prior port regression
-    /// scaled by TODA instead, pushing the markers far past the TODR/BFL
+    /// scaled the same way as the LTO golden sidecar (by
+    /// `todr_m`, not by the full declared TODA). Scaling by TODA
+    /// would push the markers far past the TODR/BFL
     /// arrows whenever TODR is a small fraction of the available runway.
     #[test]
     fn v_speed_markers_are_scaled_by_todr_not_toda() {
         let performance = sample_performance();
-        let scene = draw_lto(&performance, "Departure", None);
+        let scene = draw_lto(&performance, "Departure", None, true);
 
         let left = 60.0;
         let field_width = 780.0;

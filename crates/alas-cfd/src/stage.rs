@@ -2,6 +2,7 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 use super::*;
+use alas_exec::openfoam::OpenFoamOutputStream;
 
 /// Shared, per-stage execution state threaded through the small helpers below.
 ///
@@ -159,36 +160,45 @@ where
         format!("__executable_path:{tool}"),
         command.program.to_string_lossy().into_owned(),
     );
-    let mut partial_line = String::new();
+    // One line buffer per pipe: the two streams arrive interleaved in chunks,
+    // and a shared buffer would splice a stderr fragment into a stdout line
+    // and give the result the severity of whichever chunk ended it.
+    let mut stdout_line = String::new();
+    let mut stderr_line = String::new();
     let result = adapter.run_with_callback(
         &command,
         ctx.cancel,
         Duration::from_secs(ctx.timeout_seconds.clamp(1, 86_400)),
         |stream, chunk| {
+            let partial_line = match stream {
+                OpenFoamOutputStream::Stdout => &mut stdout_line,
+                OpenFoamOutputStream::Stderr => &mut stderr_line,
+            };
             partial_line.push_str(&chunk);
             while let Some(newline) = partial_line.find('\n') {
                 let line = partial_line[..newline].trim_end_matches('\r').to_owned();
                 partial_line.drain(..=newline);
                 if is_live_diagnostic(&line) {
-                    let severity = if stream == alas_exec::openfoam::OpenFoamOutputStream::Stderr {
-                        CfdEventSeverity::Warning
-                    } else {
-                        CfdEventSeverity::Info
-                    };
                     let message = truncate_live_line(&format!("{tool}: {line}"));
-                    emit_event(emit, ctx.started, stage, severity, message);
+                    emit_event(emit, ctx.started, stage, live_severity(stream), message);
                 }
             }
         },
     );
-    if !partial_line.trim().is_empty() && is_live_diagnostic(partial_line.trim()) {
-        emit_event(
-            emit,
-            ctx.started,
-            stage,
-            CfdEventSeverity::Info,
-            truncate_live_line(&format!("{tool}: {}", partial_line.trim())),
-        );
+    for (stream, partial_line) in [
+        (OpenFoamOutputStream::Stdout, &stdout_line),
+        (OpenFoamOutputStream::Stderr, &stderr_line),
+    ] {
+        let partial_line = partial_line.trim();
+        if !partial_line.is_empty() && is_live_diagnostic(partial_line) {
+            emit_event(
+                emit,
+                ctx.started,
+                stage,
+                live_severity(stream),
+                truncate_live_line(&format!("{tool}: {partial_line}")),
+            );
+        }
     }
     let combined = format!("{}\n{}", result.stdout, result.stderr);
     let log_key = unique_log_key(ctx.command_logs, tool);
@@ -313,6 +323,15 @@ pub(crate) fn process_summary(
             format!(", last output: {}", detail.trim())
         }
     )
+}
+
+/// Live-event severity of a diagnostic line: a utility writes warnings and
+/// fatal errors to stderr.
+fn live_severity(stream: OpenFoamOutputStream) -> CfdEventSeverity {
+    match stream {
+        OpenFoamOutputStream::Stdout => CfdEventSeverity::Info,
+        OpenFoamOutputStream::Stderr => CfdEventSeverity::Warning,
+    }
 }
 
 fn is_live_diagnostic(line: &str) -> bool {

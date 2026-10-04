@@ -112,7 +112,7 @@ pub fn render_scene_rgba_scaled(scene: &Scene, scale: f64) -> Result<(u32, u32, 
 /// texture, which has no vector equivalent, still passes through a pixel
 /// buffer. On the route globe the SVG round-trip of the vector overlay cost
 /// about 80 ms per camera frame at 1.5x density while the sphere itself
-/// cost about 4 ms (2026-09-11), so this split is what makes orbiting the
+/// cost about 4 ms (measured), so this split is what makes orbiting the
 /// globe interactive. `None` when the scene has no textured element, so the
 /// caller can skip the texture entirely.
 pub fn render_scene_textures_rgba_scaled(scene: &Scene, scale: f64) -> Option<RasterResult> {
@@ -228,6 +228,7 @@ fn draw_equirectangular_sphere(
     // Every row is projected independently and written into its own slice
     // of the canvas, so the rows run on the rayon pool; the per-pixel
     // arithmetic is unchanged and the result is identical to a serial pass.
+    let rotation = CameraRotation::new(camera);
     let stride = destination.width() as usize * 4;
     let rows = &mut destination.data_mut()[top as usize * stride..bottom as usize * stride];
     rows.par_chunks_mut(stride)
@@ -242,7 +243,7 @@ fn draw_equirectangular_sphere(
                     continue;
                 }
                 let depth = (1.0 - radial_sq).sqrt();
-                let [world_x, world_y, z] = sphere_sample_direction(dx, dy, depth, camera);
+                let [world_x, world_y, z] = rotation.sample_direction(dx, dy, depth);
                 let longitude = world_y.atan2(world_x);
                 let source_longitude = source_longitude(longitude, mirror_longitude);
                 let latitude = z.clamp(-1.0, 1.0).asin();
@@ -264,16 +265,44 @@ fn draw_equirectangular_sphere(
 /// Reconstruct the unit-length globe direction under one orthographic pixel.
 /// This is the inverse of [`Camera3D::project`]; the caller may then reflect
 /// the source longitude together with the globe's geographic geometry.
+#[cfg(test)]
 fn sphere_sample_direction(dx: f64, dy: f64, depth: f64, camera: Camera3D) -> [f64; 3] {
-    let azimuth = camera.azim_deg.to_radians();
-    let elevation = camera.elev_deg.to_radians();
-    let y_rot = dy * elevation.sin() + depth * elevation.cos();
-    let z = -dy * elevation.cos() + depth * elevation.sin();
-    [
-        dx * azimuth.cos() + y_rot * azimuth.sin(),
-        -dx * azimuth.sin() + y_rot * azimuth.cos(),
-        z,
-    ]
+    CameraRotation::new(camera).sample_direction(dx, dy, depth)
+}
+
+/// Sines and cosines of a camera's azimuth and elevation, computed once per
+/// globe rather than once per pixel.
+#[derive(Clone, Copy)]
+struct CameraRotation {
+    sin_azimuth: f64,
+    cos_azimuth: f64,
+    sin_elevation: f64,
+    cos_elevation: f64,
+}
+
+impl CameraRotation {
+    fn new(camera: Camera3D) -> Self {
+        let (sin_azimuth, cos_azimuth) = camera.azim_deg.to_radians().sin_cos();
+        let (sin_elevation, cos_elevation) = camera.elev_deg.to_radians().sin_cos();
+        Self {
+            sin_azimuth,
+            cos_azimuth,
+            sin_elevation,
+            cos_elevation,
+        }
+    }
+
+    /// The unit-length globe direction under one orthographic pixel: the
+    /// inverse of [`Camera3D::project`].
+    fn sample_direction(self, dx: f64, dy: f64, depth: f64) -> [f64; 3] {
+        let y_rot = dy * self.sin_elevation + depth * self.cos_elevation;
+        let z = -dy * self.cos_elevation + depth * self.sin_elevation;
+        [
+            dx * self.cos_azimuth + y_rot * self.sin_azimuth,
+            -dx * self.sin_azimuth + y_rot * self.cos_azimuth,
+            z,
+        ]
+    }
 }
 
 fn source_longitude(world_longitude: f64, mirror_longitude: bool) -> f64 {
@@ -423,16 +452,12 @@ mod tests {
         );
     }
 
-    /// Regression for the actual GUI figure-card bug: this function used to
-    /// clear `scene.background` before calling `render_svg` so the vector
-    /// layer stayed transparent over pre-painted texture content. That also
-    /// blinded `visual_title`'s contrast decision (it reads the same field),
-    /// so every automatic figure title rendered in its near-black
-    /// light-theme color on Grey and Dark, on top of a still-correctly-dark
-    /// background, reproducing the reported "black global titles on Grey
-    /// background despite white panel titles". Panel headings were
-    /// unaffected because they are colored explicitly from the palette, not
-    /// through `visual_title`.
+    /// The vector layer must not clear `scene.background` to stay transparent
+    /// over pre-painted texture content: `visual_title` reads the same field
+    /// for its contrast decision, and clearing it would render every automatic
+    /// figure title in its near-black light-theme color on Grey and Dark
+    /// backgrounds. Panel headings are colored explicitly from the palette and
+    /// are unaffected.
     #[test]
     fn automatic_title_stays_legible_against_dark_and_grey_backgrounds() {
         for (theme_name, bg_hex) in [("grey", "#3a3a3a"), ("dark", "#1e1e1e")] {

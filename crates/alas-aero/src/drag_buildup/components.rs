@@ -5,7 +5,6 @@
 //   induced_drag_aircraft.py, compressibility_drag_wing.py,
 //   compressibility_drag_wing_total.py and miscellaneous_drag_aircraft_ESDU.py
 // Upstream: mission analysis model 2.5.2, LGPL-2.1.
-// Reference: alas @ rust-port-baseline.
 
 //! The three contributions parasite drag does not cover: induced,
 //! compressibility and excrescence drag.
@@ -69,7 +68,7 @@ pub fn induced_drag_aircraft(
     }
 }
 
-/// Compressibility drag of one wing.
+/// Frozen SUAVE-parity-only compressibility drag of one wing.
 ///
 /// The crest-critical Mach number is a six-term quadratic fit in the
 /// sweep-corrected thickness and lift coefficient; the drag rise past it is a
@@ -138,11 +137,22 @@ pub struct MiscellaneousDrag {
     pub total: f64,
 }
 
+/// Coefficients of the ESDU 94044 figure 1 excrescence fit,
+/// `D/q = 0.40 (A + B W - C W^2)` in m2 with `W` the total wetted area, m2.
+const FIT_A: f64 = 0.0184;
+const FIT_B: f64 = 0.000_469;
+const FIT_C: f64 = 1.13e-7;
+/// The wetted area at which the fit peaks, `B / (2 C)`, about 2075 m2.
+const FIT_VERTEX_WETTED_AREA_M2: f64 = FIT_B / (2.0 * FIT_C);
+
 /// Excrescence drag, from ESDU 94044 figure 1.
 ///
 /// A quadratic in the whole aircraft's wetted area, marked up by 10% for
 /// surfaces the component areas do not account for.
-pub fn miscellaneous_drag_aircraft_esdu(vehicle: &DragVehicle<'_>) -> MiscellaneousDrag {
+pub fn miscellaneous_drag_aircraft_esdu(
+    vehicle: &DragVehicle<'_>,
+    clamp_fit_at_vertex: bool,
+) -> MiscellaneousDrag {
     let mut wetted = 0.0;
     for wing in vehicle.wings {
         wetted += wing.wetted_area_m2;
@@ -157,7 +167,18 @@ pub fn miscellaneous_drag_aircraft_esdu(vehicle: &DragVehicle<'_>) -> Miscellane
     }
     wetted *= 1.10;
 
-    let drag_over_q = 0.40 * (0.0184 + 0.000_469 * wetted - 1.13e-7 * wetted * wetted);
+    // The fit is a downward parabola, so beyond its vertex it falls and
+    // turns negative at about 4150 m2, which would make a very large
+    // aircraft's excrescence drag negative. Excrescence drag does not
+    // decrease with size, and the figure does not extend past its peak, so the
+    // fit is held at the vertex value: monotone, non-negative, and no new
+    // constant.
+    let fit_wetted = if clamp_fit_at_vertex {
+        wetted.min(FIT_VERTEX_WETTED_AREA_M2)
+    } else {
+        wetted
+    };
+    let drag_over_q = 0.40 * (FIT_A + FIT_B * fit_wetted - FIT_C * fit_wetted * fit_wetted);
 
     MiscellaneousDrag {
         total_wetted_area_m2: wetted,
@@ -268,7 +289,7 @@ mod tests {
             nacelles: &[],
             network_count: 1,
         };
-        let result = miscellaneous_drag_aircraft_esdu(&vehicle);
+        let result = miscellaneous_drag_aircraft_esdu(&vehicle, true);
         assert!((result.total_wetted_area_m2 - 1084.0 * 1.10).abs() < 1e-9);
     }
 
@@ -285,16 +306,63 @@ mod tests {
         let one = [nacelles(1)];
         let two = [nacelles(2)];
         let build = |slice: &[NacelleParams]| {
-            miscellaneous_drag_aircraft_esdu(&DragVehicle {
-                reference_area_m2: 529.0,
-                wings: &[],
-                fuselages: &[],
-                nacelles: slice,
-                network_count: 1,
-            })
+            miscellaneous_drag_aircraft_esdu(
+                &DragVehicle {
+                    reference_area_m2: 529.0,
+                    wings: &[],
+                    fuselages: &[],
+                    nacelles: slice,
+                    network_count: 1,
+                },
+                true,
+            )
             .total_wetted_area_m2
         };
 
         assert!((build(&two) - 2.0 * build(&one)).abs() < 1e-9);
+    }
+
+    #[test]
+    fn excrescence_drag_is_non_negative_and_non_decreasing_in_wetted_area() {
+        // Per unit reference area the coefficient times the reference area is
+        // the fit's own D/q, so a fixed reference area isolates the fit.
+        let d_over_q = |wetted_with_allowance: f64| {
+            let fuselages = [crate::drag_buildup::FuselageParams {
+                length_m: 60.0,
+                effective_diameter_m: 6.0,
+                front_projected_area_m2: 28.0,
+                wetted_area_m2: wetted_with_allowance / 1.10,
+            }];
+            miscellaneous_drag_aircraft_esdu(
+                &DragVehicle {
+                    reference_area_m2: 1.0,
+                    wings: &[],
+                    fuselages: &fuselages,
+                    nacelles: &[],
+                    network_count: 1,
+                },
+                true,
+            )
+            .total
+        };
+        let mut previous = 0.0;
+        let mut wetted = 500.0;
+        while wetted <= 6000.0 {
+            let value = d_over_q(wetted);
+            assert!(value >= 0.0, "negative excrescence drag at {wetted} m2");
+            assert!(
+                value >= previous - 1e-15,
+                "excrescence drag fell at {wetted} m2"
+            );
+            previous = value;
+            wetted += 25.0;
+        }
+        // Held at the vertex value beyond the fit's peak, continuous there.
+        let peak = d_over_q(FIT_VERTEX_WETTED_AREA_M2);
+        assert!((d_over_q(6000.0) - peak).abs() < 1e-12);
+        assert!((FIT_VERTEX_WETTED_AREA_M2 - 2075.0).abs() < 1.0);
+        // The raw fit, kept for frozen fixtures, does go negative.
+        let raw = 0.40 * (FIT_A + FIT_B * 6000.0 - FIT_C * 6000.0 * 6000.0);
+        assert!(raw < 0.0);
     }
 }

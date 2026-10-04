@@ -10,5 +10,12 @@
 //! `None`, allowing the feasibility layer to report an unverified constraint
 //! instead of substituting a plausible value.
 
-include!("catalog_parts/part_01.rs");
-include!("catalog_parts/part_02.rs");
+pub use crate::catalog_equipment::{ElectronicsSpec, LandingGearSpec, ReceiverSpec};
+use serde::{Deserialize, Serialize};
+use std::io::Read;
+use std::sync::OnceLock;
+
+mod records;
+pub use records::*;
+mod specs;
+pub use specs::*;

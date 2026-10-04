@@ -93,7 +93,6 @@ impl StorageCategoryId {
 /// system temporary directory.
 pub const SCRATCH_PREFIXES: [&str; 2] = ["alas_mses_", "alas-analysis-"];
 
-#[path = "storage_parts/ownership.rs"]
 mod ownership;
 
 use ownership::{admitted, authorize_root, owns_configured_root, removal_target};

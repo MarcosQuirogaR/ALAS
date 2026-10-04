@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/config/performance_config.py
-// Reference: alas @ rust-port-baseline.
 
 //! High-lift capability, field performance and the certified speed schedule.
 //!
@@ -13,13 +12,11 @@
 //! out. Defaults follow Raymer (*Aircraft Design: A Conceptual Approach*,
 //! 5th ed.) and FAR Part 25.
 //!
-//! The V-speed factors are the certified schedule written as multiples of
-//! stall speed, which is how the regulation itself states them: FAR 25.107
-//! requires rotation at no less than 1.05 times the minimum control speed and
-//! 1.10 times the stall speed, and 25.125 sets the approach speed at 1.30
-//! times the landing stall speed. They are configuration rather than
-//! constants so a known type can be reproduced exactly, which is the only way
-//! to tell a modelling error from a calibration one.
+//! The configurable speed factors preserve the translated legacy schedule.
+//! Current 14 CFR 25.125(b)(2) sets a non-icing Vref floor of 1.23 VSR0;
+//! the propulsion-specific field method uses 1.23 VS1g as its preliminary
+//! approximation. The legacy approach factor of 1.30 remains selectable for
+//! numerical replay and is not the current regulatory minimum.
 
 use serde::{Deserialize, Serialize};
 
@@ -36,12 +33,87 @@ pub struct PerformanceConfig {
     )]
     pub cl_max_to: f64,
 
+    /// Reference supporting the configured takeoff maximum lift coefficient.
+    #[serde(default = "default_takeoff_lift_source")]
+    #[config(
+        label = "Takeoff maximum lift source",
+        help = "Reference for CLmax_TO. A coefficient recovered from a published V2 and the selected model speed ratio is an effective model input, not a measured aerodynamic maximum or a certified speed schedule."
+    )]
+    pub cl_max_to_source: String,
+
     /// Maximum lift coefficient in the landing configuration.
     #[config(
         label = "Max lift coefficient, landing (CLmax_L)",
         help = "Maximum lift coefficient achievable in the landing flap/slat configuration. Drives landing distance."
     )]
     pub cl_max_land: f64,
+
+    /// Reference supporting the configured landing maximum lift coefficient.
+    #[serde(default = "default_landing_lift_source")]
+    #[config(
+        label = "Landing maximum lift source",
+        help = "Reference for CLmax_land, including the published landing mass and reference approach speed when it is derived from an aircraft source. Generic values are conceptual high-lift assumptions."
+    )]
+    pub cl_max_land_source: String,
+
+    /// Select the translated field correlations and their original speed factors.
+    #[serde(default)]
+    #[config(
+        label = "Use legacy field correlations",
+        help = "Reproduce the translated jet correlation for every propulsion type, including its additional balanced-field multiplier and configured approach-speed factor. Disable for propulsion-specific sourced field estimates."
+    )]
+    pub legacy_field_correlations: bool,
+
+    /// Dry hard-runway rolling coefficient for the propeller takeoff calculation.
+    #[serde(default = "default_takeoff_rolling_friction")]
+    #[config(
+        label = "Propeller takeoff rolling friction",
+        help = "Dry concrete rolling coefficient in the ground equation of motion. Torenbeek, Synthesis of Subsonic Airplane Design, Sec. 5.4.5, p. 168: 0.02. This is rolling resistance, not the braking coefficient."
+    )]
+    pub propeller_takeoff_rolling_friction: f64,
+
+    /// Mean dry-runway reject deceleration divided by standard gravity.
+    #[serde(default = "default_takeoff_stop_deceleration")]
+    #[config(
+        label = "Propeller rejected-takeoff deceleration",
+        unit = "g",
+        help = "Torenbeek Sec. 5.4.5, p. 169: mean stopping deceleration 0.37 g in the preliminary balanced-field calculation. No reverse-thrust credit is included. Aircraft-specific brake data supersede this conceptual value."
+    )]
+    pub propeller_takeoff_stop_deceleration_g: f64,
+
+    /// Sea-level inertia-distance allowance in the preliminary balanced-field model.
+    #[serde(default = "default_takeoff_inertia_distance")]
+    #[config(
+        label = "Propeller takeoff inertia distance",
+        unit = "m",
+        help = "Torenbeek Sec. 5.4.5, p. 169, Eq. 5-89: 200 m for an equivalent inertia time of 4.5 s, valid for preliminary propeller and jet field estimates. The allowance scales as 1/sqrt(density ratio)."
+    )]
+    pub propeller_takeoff_inertia_distance_m: f64,
+
+    /// Mean landing airborne drag minus thrust divided by weight.
+    #[serde(default = "default_landing_mean_drag_to_weight")]
+    #[config(
+        label = "Propeller landing mean (D-T)/W",
+        help = "Torenbeek Sec. 5.4.6, p. 170, Eq. 5-93: 0.10 is a preliminary mean excess-drag-to-weight ratio between the 50 ft screen and touchdown. Includes approach and flare energy dissipation."
+    )]
+    pub propeller_landing_mean_drag_to_weight: f64,
+
+    /// Mean dry-concrete landing deceleration divided by gravity.
+    #[serde(default = "default_landing_deceleration")]
+    #[config(
+        label = "Propeller landing deceleration",
+        unit = "g",
+        help = "Torenbeek Sec. 5.4.6, p. 170: turboprop without propeller reverse 0.35-0.45 g. The default 0.40 g is the midpoint of that sourced preliminary range, not an aircraft-data fit."
+    )]
+    pub propeller_landing_deceleration_g: f64,
+
+    /// Share of available runway usable by the unfactored dry landing distance.
+    #[serde(default = "default_propeller_landing_distance_share")]
+    #[config(
+        label = "Propeller dry landing distance share",
+        help = "EU Air Ops CAT.POL.A.230(a)(2): turboprop dry landing distance must fit within 70 percent of LDA. Use 0.60 for a 14 CFR 121.195(b) turbine-airplane dispatch comparison. This factor is applied to actual landing distance exactly once."
+    )]
+    pub propeller_dry_landing_distance_share: f64,
 
     /// Maximum lift coefficient with the high-lift system stowed.
     #[config(
@@ -141,10 +213,10 @@ pub struct PerformanceConfig {
     )]
     pub ws_max_pa: f64,
 
-    /// Multiplier turning takeoff distance into balanced field length.
+    /// Historical replay multiplier on the translated jet field correlation.
     #[config(
         label = "Balanced field length factor",
-        help = "BFL = bfl_factor x TODR (take-off distance required). Raymer Table 17.1: 1.15 for twin jets, ~1.18 for quads."
+        help = "Additional historical multiplier applied only by the legacy field path. The corrected jet TOP correlation already estimates field length and ignores this factor. Under 14 CFR 25.113, 1.15 applies to the all-engine distance candidate, not to every balanced field length."
     )]
     pub bfl_factor: f64,
 
@@ -183,10 +255,10 @@ pub struct PerformanceConfig {
     )]
     pub v1_vr_factor: f64,
 
-    /// Approach speed as a multiple of landing stall speed.
+    /// Legacy approach speed as a multiple of landing stall speed.
     #[config(
         label = "VAPP / VS_land",
-        help = "Approach speed as a multiple of landing stall speed (FAR 25.125)."
+        help = "Approach-speed multiple retained for translated legacy results. The corrected method uses Vref = 1.23 VS1g, approximating the non-icing 14 CFR 25.125 VSR0 floor."
     )]
     pub vapp_vstall_land_factor: f64,
 
@@ -209,7 +281,16 @@ impl Default for PerformanceConfig {
     fn default() -> Self {
         Self {
             cl_max_to: 1.80,
+            cl_max_to_source: default_takeoff_lift_source(),
             cl_max_land: 2.60,
+            cl_max_land_source: default_landing_lift_source(),
+            legacy_field_correlations: false,
+            propeller_takeoff_rolling_friction: default_takeoff_rolling_friction(),
+            propeller_takeoff_stop_deceleration_g: default_takeoff_stop_deceleration(),
+            propeller_takeoff_inertia_distance_m: default_takeoff_inertia_distance(),
+            propeller_landing_mean_drag_to_weight: default_landing_mean_drag_to_weight(),
+            propeller_landing_deceleration_g: default_landing_deceleration(),
+            propeller_dry_landing_distance_share: default_propeller_landing_distance_share(),
             cl_max_clean: 1.50,
             cl_min_clean: -1.00,
             thrust_lapse: 0.235,
@@ -233,6 +314,33 @@ impl Default for PerformanceConfig {
             matching_chart_resolution: 150,
         }
     }
+}
+
+fn default_takeoff_lift_source() -> String {
+    "Raymer, Aircraft Design: A Conceptual Approach, 5th ed., 2012, Sec. 5.4 and Ch. 17; retained conceptual high-lift CLmax_TO input, not a manufacturer measurement or a recovered certified stall limit".to_owned()
+}
+
+fn default_landing_lift_source() -> String {
+    "Mattingly et al., Aircraft Engine Design, 2nd ed., Table 2.1, p. 36 (credits Torenbeek 1976): Fowler landing CLmax/cos(quarter-chord sweep) 2.5-2.9; CLmax 2.60 is a retained engineering selection at nominal 25 deg (normalized 2.87), a conceptual class default rather than an aircraft coefficient; https://doczz.net/doc/8595015/2-constraint-analysis".to_owned()
+}
+
+fn default_takeoff_rolling_friction() -> f64 {
+    0.02
+}
+fn default_takeoff_stop_deceleration() -> f64 {
+    0.37
+}
+fn default_takeoff_inertia_distance() -> f64 {
+    200.0
+}
+fn default_landing_mean_drag_to_weight() -> f64 {
+    0.10
+}
+fn default_landing_deceleration() -> f64 {
+    0.40
+}
+fn default_propeller_landing_distance_share() -> f64 {
+    0.70
 }
 
 // A test asserts on values it constructed here directly, so a failed unwrap

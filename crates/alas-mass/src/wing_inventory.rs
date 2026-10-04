@@ -49,5 +49,14 @@
 //! variable-sweep, all-moving and blended-wing-body configurations are outside
 //! the domain of both source correlations and are not covered.
 
-include!("wing_inventory_parts/part_01.rs");
-include!("wing_inventory_parts/part_02.rs");
+mod build;
+#[cfg(test)]
+mod tests;
+mod types;
+
+pub use build::build_wing_inventory;
+pub use types::{
+    FixedNonBoxStructure, MovableSurface, TorenbeekWingGroup, WingInventoryDiagnostics,
+    WingInventoryEntry, WingInventoryError, WingInventoryFinding, WingInventoryInputs,
+    WingInventoryStatus, WingMovableSurfaces, WingNonBoxInventory, ITEM_COUNT, MAX_FINDINGS,
+};

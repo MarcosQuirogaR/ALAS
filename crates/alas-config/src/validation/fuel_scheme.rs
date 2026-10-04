@@ -13,7 +13,7 @@ use crate::{AlasConfig, FuelScheme, PropulsionTechnology, Severity, ValidationIs
 /// under 121.641 instead, which this program does not implement. Nothing in
 /// the scheme's own type gates it by propulsion, so a turboprop preset could
 /// otherwise be planned under the turbofan rule it is explicitly excluded
-/// from. Physics review v1.2, finding F1.
+/// from.
 pub(super) fn fuel_scheme_matches_the_propulsion_type(config: &AlasConfig) -> Vec<ValidationIssue> {
     let mut issues = Vec::new();
     if config.fuel_policy.scheme == FuelScheme::FaaFlagSupplemental

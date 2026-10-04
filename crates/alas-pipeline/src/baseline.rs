@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-// Ported from alas/pipeline.py (`BaselineReport`, `_baseline_analysis`).
-// Reference: alas @ rust-port-baseline.
-
 //! Fast weight & balance and longitudinal stability check for the initial design.
 //!
 //! [`analyze_baseline`] builds the nominal design, sizes the lumped/detailed
@@ -238,12 +235,10 @@ pub fn analyze_baseline(config: &AlasConfig, design: &DesignVector) -> BaselineR
     };
 
     let mac = plane.c_ref;
-    let x_wing_ac = if !plane.wings.is_empty() {
-        plane.wings[0].aerodynamic_center(0.25)[0]
-    } else {
-        0.0
-    };
-    let x_mac_le = x_wing_ac - 0.25 * mac;
+    // Canonical MAC frame:
+    // the main wing's own `mac_station()` leading edge, never reconstructed
+    // from `aerodynamic_center(0.25) - 0.25 * c_ref`.
+    let x_mac_le = plane.mac_frame().map_or(0.0, |frame| frame.x_lemac_m);
 
     let to_pct = |x_val: f64| -> f64 {
         if mac > 0.001 {

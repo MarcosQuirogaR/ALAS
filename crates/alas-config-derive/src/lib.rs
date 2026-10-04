@@ -179,10 +179,17 @@ fn leaf_entry(
         }
         None => quote!(::std::option::Option::None),
     };
+    let zero_means = match &config.zero_means {
+        Some(meaning) => {
+            quote!(::std::option::Option::Some(::alas_config::ZeroMeaning::#meaning))
+        }
+        None => quote!(::std::option::Option::None),
+    };
 
     quote! {
         ::alas_config::Entry::Leaf(::alas_config::LeafField {
             kind: ::alas_config::Leaf::kind(&self.#ident, #name),
+            optional_value_kind: ::alas_config::Leaf::optional_value_kind(&self.#ident),
             value: ::alas_config::Leaf::value(&self.#ident),
             min: #min,
             max: #max,
@@ -190,6 +197,7 @@ fn leaf_entry(
             columns: #columns,
             readonly_unless: #readonly_unless,
             options: #options,
+            zero_means: #zero_means,
         })
     }
 }

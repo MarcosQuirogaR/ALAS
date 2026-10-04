@@ -14,13 +14,12 @@
 //! tanks extend into the inboard wing and carry more than half the fuel;
 //! they are declared as centre tanks with their published volume, so the
 //! capacity is exact while the centroid is the carry-through box's. Sources
-//! and the estimation method are in an internal 2026-09-05 fuel-tank-layout
-//! research note, which cites EASA.A.064 III.9, EASA.A.110, the Airbus A220
-//! operator WBM Table
-//! 3-1, the Boeing 787 ACAP Rev Q, the DC-10 ACAP and EASA.A.084.
+//! and the estimation method cite EASA.A.064 III.9, EASA.A.110, the Airbus A220
+//! operator WBM Table 3-1, the Boeing 787 ACAP Rev Q, the DC-10 ACAP and EASA.A.084.
 
 use crate::{
-    AuxiliaryTankConfig, CenterTankConfig, FuelTankLayoutConfig, TrimTankConfig, WingTankConfig,
+    AuxiliaryTankConfig, CenterTankConfig, FeedTankConfig, FuelTankLayoutConfig, TrimTankConfig,
+    WingTankConfig,
 };
 
 /// An integral wing cell with a published two-side volume.
@@ -32,6 +31,21 @@ fn wing(start: f64, end: f64, burn_priority: i64, published_l: f64) -> WingTankC
         usable_fraction: 0.92,
         burn_priority,
         published_usable_volume_l: Some(published_l),
+        feed: FeedTankConfig::default(),
+    }
+}
+
+/// `host` with an engine feed tank of `published_l` (both sides) over
+/// `[start, end]`, one end shared with the host cell.
+fn with_feed(host: WingTankConfig, start: f64, end: f64, published_l: f64) -> WingTankConfig {
+    WingTankConfig {
+        feed: FeedTankConfig {
+            enabled: true,
+            span_start_fraction: start,
+            span_end_fraction: end,
+            published_usable_volume_l: Some(published_l),
+        },
+        ..host
     }
 }
 
@@ -135,7 +149,7 @@ pub fn layout_for(preset_name: &str) -> Option<FuelTankLayoutConfig> {
         // "Systems" row, usable fuel held in lines and engines rather than in
         // a tank, so it has no tank station and is deliberately not modelled
         // here. The declared total is kept as the certified aeroplane figure
-        // and the residual between it and these cells is now exactly that
+        // and the residual between it and these cells is exactly that
         // 793 L (0.245 %), where before it was an unexplained 5,031 L.
         // `calibrate_to_published_capacity` cannot close it in either case:
         // every A380 cell carries its own published volume, so the
@@ -150,13 +164,26 @@ pub fn layout_for(preset_name: &str) -> Option<FuelTankLayoutConfig> {
         // from FLOPS equation 121 rather than from it, so the certified
         // figure is recorded and not wired here.
         //
-        // Span stations remain volume-consistent estimates, not published.
-        // Burn order is unchanged and stays as the Airbus A380 AC fuel
-        // subject describes the transfer: inner feeds first, then mid, trim,
-        // and the outers last.
+        // The four feed tanks are separate tanks inside those cells, so they
+        // fill first and burn last (`alas_mass::tanks::order`). Their
+        // spanwise order is the one the TCDS table lists tip to tip and the
+        // Airbus A380 AC Dec 01/25, FIGURE-10-0-0-991-002-A01 (hazardous
+        // materials) draws: from the root, Feed 2/3, Inner, Mid, Feed 1/4,
+        // Outer. The figure is an oblique view, so each feed boundary is
+        // placed where the model's own spar box splits its cell in the
+        // certified volume ratio (Feed 2 + 3 = 58,698 L of the inner cell,
+        // Feed 1 + 4 = 55,264 L of the mid cell); the figure reads about
+        // 0.22 and 0.47 of the semispan against the 0.16 and 0.50 used.
+        // Feed 2/3 also sit in the aft part of the root bays, which a
+        // full-chord spanwise cell cannot represent.
+        //
+        // The group boundaries remain estimates, not published. Transfer
+        // burn order as the Airbus A380 AC fuel subject describes it: inner
+        // first, then mid, and the outers last; the trim tank is emptied
+        // first in every layout.
         "A380-800" => FuelTankLayoutConfig {
-            inner_wing: wing(0.09, 0.33, 1, 150_982.0),
-            mid_wing: wing(0.33, 0.72, 2, 128_186.0),
+            inner_wing: with_feed(wing(0.09, 0.33, 1, 150_982.0), 0.09, 0.16, 58_698.0),
+            mid_wing: with_feed(wing(0.33, 0.72, 2, 128_186.0), 0.50, 0.72, 55_264.0),
             outer_wing: wing(0.72, 0.85, 4, 20_680.0),
             trim: trim(3, 23_698.0),
             ..base
@@ -327,6 +354,16 @@ mod tests {
             "Outer Left + Outer Right"
         );
         assert_eq!(a380.trim.published_usable_volume_l, Some(23_698.0));
+        assert_eq!(
+            a380.inner_wing.feed.published_usable_volume_l,
+            Some(29_349.0 + 29_349.0),
+            "Feed 2 + Feed 3, the root end of the inner cell"
+        );
+        assert_eq!(
+            a380.mid_wing.feed.published_usable_volume_l,
+            Some(27_632.0 + 27_632.0),
+            "Feed 1 + Feed 4, the outboard end of the mid cell"
+        );
 
         // The tanks sum to the certified tank total, and what the preset
         // declares beyond it is exactly the certified 793 L "Systems"

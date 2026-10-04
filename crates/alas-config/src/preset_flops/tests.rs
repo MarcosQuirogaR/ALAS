@@ -104,11 +104,10 @@ mod tests {
     }
 
     /// The hold architecture is one physical fact and must have one
-    /// declaration. It used to have two: the FLOPS container tare read
-    /// `declared_cargo_loading`, the cabin layout engine read
-    /// `cabin.cargo.lower_deck_uld`, and they disagreed on the ATR 72-600 and
-    /// the A320-200 - the ATR, which has no lower hold at all, was still being
-    /// offered LD3 positions in one.
+    /// declaration. The FLOPS container tare reads
+    /// `declared_cargo_loading` and the cabin layout engine reads
+    /// `cabin.cargo.lower_deck_uld`; the two must agree on the ATR 72-600 (which
+    /// has no lower hold at all, so no LD3 positions) and on the A320-200.
     #[test]
     fn the_hold_architecture_has_one_declaration_that_both_consumers_agree_on() {
         use crate::CargoHoldLoading;
@@ -140,11 +139,10 @@ mod tests {
 
     /// The LTH relations' stated domain is a civil transport of **at least**
     /// 40 t maximum takeoff mass **or at least** 70 passenger seats, and the
-    /// selection applies both clauses. The ATR 72-600 is admitted by the seat
-    /// clause at 72 seats even though it is far below the mass clause, and it
-    /// is the one aircraft the method makes worse - which is exactly why this
-    /// test exists: the threshold must not be trimmed back to the mass clause
-    /// to recover that aircraft's number.
+    /// selection applies both clauses to a jet. A shaft-power aircraft below
+    /// 40 t, the ATR 72-600, takes the regional turboprop relation because the
+    /// LTH fit population contains no turboprop; a shaft-power aircraft of 40 t
+    /// or more keeps the LTH selection.
     #[test]
     fn the_cabin_equipment_domain_rule_is_the_whole_published_statement() {
         use crate::CabinEquipmentMethod;
@@ -159,30 +157,53 @@ mod tests {
             "DC-10",
         ] {
             let inputs = inputs_for(name).unwrap_or_else(|| panic!("{name} FLOPS inputs"));
+            let expected = if name == "ATR72-600" {
+                CabinEquipmentMethod::RegionalTurbopropV1
+            } else {
+                CabinEquipmentMethod::LthCivilTransportV1
+            };
             assert_eq!(
-                inputs.transport.cabin_equipment_method,
-                CabinEquipmentMethod::LthCivilTransportV1,
-                "{name} is inside the LTH domain by mass, by seats, or by both"
+                inputs.transport.cabin_equipment_method, expected,
+                "{name}: jets are inside the LTH domain by mass, by seats, or by both; the shaft-power aircraft below 40 t takes the regional relation"
             );
         }
         // Negative controls on the rule itself, so "every preset takes LTH"
         // cannot be read as the rule doing nothing.
         assert_eq!(
-            CabinEquipmentMethod::for_civil_transport_size(Some(23_000.0), Some(72)),
+            CabinEquipmentMethod::for_civil_transport_size(Some(23_000.0), Some(72), false),
             CabinEquipmentMethod::LthCivilTransportV1,
-            "the ATR 72-600's 72 seats admit it through the seat clause"
+            "a 72-seat jet is admitted through the seat clause"
         );
         assert_eq!(
-            CabinEquipmentMethod::for_civil_transport_size(Some(23_000.0), Some(69)),
+            CabinEquipmentMethod::for_civil_transport_size(Some(23_000.0), Some(72), true),
+            CabinEquipmentMethod::RegionalTurbopropV1,
+            "a 72-seat turboprop below 40 t is outside the LTH fit population"
+        );
+        assert_eq!(
+            CabinEquipmentMethod::for_civil_transport_size(Some(39_999.0), Some(50), true),
+            CabinEquipmentMethod::RegionalTurbopropV1
+        );
+        assert_eq!(
+            CabinEquipmentMethod::for_civil_transport_size(Some(40_000.0), Some(50), true),
+            CabinEquipmentMethod::LthCivilTransportV1,
+            "a turboprop at 40 t or more keeps the LTH selection"
+        );
+        assert_eq!(
+            CabinEquipmentMethod::for_civil_transport_size(None, Some(72), true),
+            CabinEquipmentMethod::LthCivilTransportV1,
+            "the regional class needs a known mass below 40 t"
+        );
+        assert_eq!(
+            CabinEquipmentMethod::for_civil_transport_size(Some(23_000.0), Some(69), false),
             CabinEquipmentMethod::FlopsTransportV1
         );
         assert_eq!(
-            CabinEquipmentMethod::for_civil_transport_size(Some(40_000.0), Some(50)),
+            CabinEquipmentMethod::for_civil_transport_size(Some(40_000.0), Some(50), false),
             CabinEquipmentMethod::LthCivilTransportV1,
             "the mass clause is 'mindestens 40 Tonnen', inclusive"
         );
         assert_eq!(
-            CabinEquipmentMethod::for_civil_transport_size(None, None),
+            CabinEquipmentMethod::for_civil_transport_size(None, None, false),
             CabinEquipmentMethod::FlopsTransportV1,
             "with neither clause evaluable the published FLOPS baseline stands"
         );
@@ -232,50 +253,42 @@ mod tests {
             if published != computed {
                 divergent.push((name, published, computed));
             }
+            let shaft_power = matches!(
+                preset.geometry.engine.active_model(),
+                Ok(crate::ActiveEngineModel::Turboprop(_))
+            );
             // Whichever seat number is read, the method must be the same, so
             // the consolidation above cannot have moved any mass.
             assert_eq!(
-                CabinEquipmentMethod::for_civil_transport_size(Some(mtom_kg), Some(computed)),
-                CabinEquipmentMethod::for_civil_transport_size(Some(mtom_kg), Some(published)),
+                CabinEquipmentMethod::for_civil_transport_size(
+                    Some(mtom_kg),
+                    Some(computed),
+                    shaft_power
+                ),
+                CabinEquipmentMethod::for_civil_transport_size(
+                    Some(mtom_kg),
+                    Some(published),
+                    shaft_power
+                ),
                 "{name}"
             );
             assert_eq!(
                 transport.cabin_equipment_method,
-                CabinEquipmentMethod::for_civil_transport_size(Some(mtom_kg), Some(computed)),
+                CabinEquipmentMethod::for_civil_transport_size(
+                    Some(mtom_kg),
+                    Some(computed),
+                    shaft_power
+                ),
                 "{name}"
             );
         }
-        // Pinned so a future cabin change that silently resolves - or silently
-        // introduces - a published/computed divergence has to say so here.
-        //
-        // Every registered aircraft whose reference OEW belongs to a published
-        // cabin seats **fewer** passengers in the model than in that cabin, and
-        // always in the same direction. Under the LTH method the seat count
-        // reaches exactly one mass term, `m_opp`, so the effect is an exact
-        // single-term propagation rather than an estimate:
-        //
-        // | preset | published | computed | `m_opp` kg | at published kg | delta |
-        // |---|---:|---:|---:|---:|---:|
-        // | A340-300 | 335 | 290 | 19,816.3 | 23,271.1 | **+3,454.8** |
-        // | A380-800 | 555 | 525 | 38,387.9 | 40,839.6 | **+2,451.7** |
-        // | A220-300 | 140 | 130 |  4,738.3 |  5,110.8 |   +372.4 |
-        // | DC-10-30 | 255 | 250 | 16,796.1 | 17,170.8 |   +374.7 |
-        //
-        // That is a **configuration mismatch, not a model error**, and it is
-        // deliberately not closed by editing the FLOPS seat input: doing so
-        // would price a cabin the rest of the product does not fly. It is
-        // recorded here because it means a real share of the remaining
-        // operating-empty deficits is a cabin difference rather than a mass
-        // method being wrong.
-        assert_eq!(
-            divergent,
-            vec![
-                ("A340-300", 335, 290),
-                ("A380-800", 555, 525),
-                ("A220-300", 140, 130),
-                ("DC-10", 255, 250),
-            ],
-            "published-versus-computed cabin divergence"
+        // The registered cabin is the published planning cabin, so the model
+        // prices the seats the reference operating-empty mass belongs to. A
+        // future change that reintroduces a published/computed divergence has
+        // to say so here.
+        assert!(
+            divergent.is_empty(),
+            "published-versus-computed cabin divergence: {divergent:?}"
         );
     }
 
@@ -318,12 +331,11 @@ mod tests {
         assert_eq!(b787.business_class_passenger_count, Some(28));
         assert_eq!(b787.tourist_class_passenger_count, Some(262));
 
-        // Published A340 and A380 layouts have different passenger totals;
-        // they remain explicit all-economy study cabins until a matching
-        // installed configuration is sourced.
+        // The A340 planning cabin is an explicit all-economy study cabin until
+        // a matching installed class split is sourced.
         let a340 = inputs_for("A340-300").expect("A340 FLOPS inputs").transport;
         assert_eq!(a340.first_class_passenger_count, Some(0));
         assert_eq!(a340.business_class_passenger_count, Some(0));
-        assert_eq!(a340.tourist_class_passenger_count, Some(290));
+        assert_eq!(a340.tourist_class_passenger_count, Some(335));
     }
 }

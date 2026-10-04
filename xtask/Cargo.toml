@@ -11,6 +11,8 @@ publish = false
 # actual test items; a line grep can hide production items following tests.
 syn = { workspace = true, features = ["visit"] }
 proc-macro2 = { workspace = true, features = ["span-locations"] }
+# Reads `cargo metadata` to find the workspace packages and their dependencies.
+serde_json = { workspace = true }
 
 [lints.rust]
 unsafe_code = "forbid"

@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/config/geometry_config.py (`WingConfig`)
-// Reference: alas @ rust-port-baseline.
 
 //! The parts of the main wing the optimizer is not allowed to move.
 //!
@@ -16,5 +15,17 @@
 //! are named fields rather than the constants the original scripts buried
 //! inside their geometry builders.
 
-include!("wing_parts/part_01.rs");
-include!("wing_parts/part_02.rs");
+mod airfoil_class;
+mod config;
+mod planform;
+mod shape;
+#[cfg(test)]
+mod tests;
+
+pub use airfoil_class::AirfoilClass;
+pub use config::WingConfig;
+pub use planform::{
+    InboardAerodynamicStation, MainWingPanel, MainWingStation, MainWingStationKind,
+    TransportPlanform, TransportPlanformError, WingSection, WingSectionError,
+};
+pub use shape::{WingHeights, WingShape, MAX_FLIGHT_TIP_RISE_SEMISPAN_FRACTION};

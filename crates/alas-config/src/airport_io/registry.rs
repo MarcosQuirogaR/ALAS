@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! Runtime registry and legacy lookup adapters for custom airports.
+//! Runtime registry and static lookup adapters for custom airports.
 
 use std::sync::{OnceLock, RwLock};
 
@@ -16,8 +16,11 @@ pub fn register_custom_airport(mut airport: CustomAirport) -> Result<(), Airport
         .write()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     ensure_no_collision(&airport, &registry)?;
-    let legacy = Box::leak(Box::new(to_legacy(&airport)));
-    registry.push(RegisteredAirport { airport, legacy });
+    let static_airport = Box::leak(Box::new(to_airport(&airport)));
+    registry.push(RegisteredAirport {
+        airport,
+        static_airport,
+    });
     Ok(())
 }
 
@@ -28,7 +31,7 @@ pub fn replace_custom_airports(airports: Vec<CustomAirport>) -> Result<(), Airpo
         airport.validate_and_normalize()?;
         ensure_no_collision(&airport, &replacement)?;
         replacement.push(RegisteredAirport {
-            legacy: Box::leak(Box::new(to_legacy(&airport))),
+            static_airport: Box::leak(Box::new(to_airport(&airport))),
             airport,
         });
     }
@@ -58,20 +61,20 @@ pub fn find_custom(name_or_icao: &str) -> Option<CustomAirport> {
         .map(|registered| registered.airport.clone())
 }
 
-/// Resolve a custom airport as a legacy Airport without borrowing the
+/// Resolve a custom airport as a static [`Airport`] without borrowing the
 /// registry lock.
-pub(crate) fn legacy_by_name_or_icao(name_or_icao: &str) -> Option<&'static Airport> {
+pub(crate) fn airport_by_name_or_icao(name_or_icao: &str) -> Option<&'static Airport> {
     custom_registry()
         .read()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
         .iter()
         .find(|registered| same_key(&registered.airport, name_or_icao))
-        .map(|registered| registered.legacy)
+        .map(|registered| registered.static_airport)
 }
 
 struct RegisteredAirport {
     airport: CustomAirport,
-    legacy: &'static Airport,
+    static_airport: &'static Airport,
 }
 
 fn custom_registry() -> &'static RwLock<Vec<RegisteredAirport>> {
@@ -116,7 +119,7 @@ fn same_key(airport: &CustomAirport, key: &str) -> bool {
     airport.icao.eq_ignore_ascii_case(key.trim()) || airport.name.eq_ignore_ascii_case(key.trim())
 }
 
-fn to_legacy(airport: &CustomAirport) -> Airport {
+fn to_airport(airport: &CustomAirport) -> Airport {
     let physical_length = airport
         .runway_lengths_m
         .iter()

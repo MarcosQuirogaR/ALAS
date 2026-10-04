@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/config/presets.py (the `AVE` entry)
-// Reference: alas @ rust-port-baseline.
 
 //! AVE: the notional long-range twin this program was built around.
 //!
@@ -37,17 +36,53 @@ pub fn ave() -> AircraftPreset {
             tank_configuration: "conceptual integral wing tanks",
         },
         reference: AircraftReferenceData {
+            // ICAO Annex 14 Vol. I Table 1-1 (aerodrome reference code) applied to the
+            // notional 777X-class wingspan of 71.75 m with the wingtips extended:
+            // 65 m <= b < 80 m is code F. A folded-tip gate span is not modeled.
+            aerodrome_reference_code: Some(crate::AerodromeReferenceCode::F),
+            // Declared notional-cabin requirement (DesignRequirements default); not a published aircraft datum.
+            planning_seats: Some(350),
+            // AVE's body is the 777-9's (76.72 m against 76.73 m), so the
+            // 777-9's doors and standard cabin stand in for its own: the
+            // cabin is bounded by real door stations and seeded with a
+            // published class mix. The 350-seat planning requirement above
+            // is AVE's own and is left as declared.
+            certified_exit_layout: Some(crate::presets::B777_9_EXIT_LAYOUT),
+            planning_cabin: Some(crate::presets::B777_9_PLANNING_CABIN),
+            // Notional long-range widebody class default: the declared AVE
+            // design range, flown at the planning cabin. Not a chart read.
+            design_point: Some(crate::PayloadRangeDesignPoint {
+                range_nmi: 7_600.0,
+                payload_kg: None,
+                source: "AVE-v1 design requirements (notional); class default, no published payload/range chart",
+            }),
             cg_evidence: CgEnvelopeEvidence::DesignRequirement,
-            sources: vec!["docs/PRESET_PHYSICAL_AUDIT.md#variant-identity"],
+            sources: vec!["notional design requirement; no published aircraft data"],
             ..AircraftReferenceData::default()
         },
         engine_name: "GE9X",
         n_engines: 2,
-        landing_gear: LandingGearConfig::default(),
+        landing_gear: LandingGearConfig {
+            // No published tail-strike attitude backs this preset's aft-fuselage
+            // geometry, so its model tail-down angle is unvalidated (the generic
+            // tailcone loft understates it): keep the Raymer/Roskam 15 deg floor on
+            // top of the tail-down criterion.
+            min_tip_back_deg: 15.0,
+            takeoff_stabilizer_nose_up_deg: Some(crate::landing_gear::TRANSPORT_THS_TAKEOFF_NOSE_UP_DEG),
+            ..LandingGearConfig::default()
+        },
         design_vector: DesignVector {
             span_m: 71.75,
-            root_chord_m: 16.50,
-            break_chord_m: 7.80,
+            // With the 34 deg leading-edge sweep and the kink at 35 % semi-span,
+            // the root-to-kink trailing edge runs aft (at most 90 deg to the
+            // aft fuselage axis, the `root_to_kink_te_angle` limit) only when
+            // the kink trailing edge is at or behind the root trailing edge:
+            // The 16.0 m root and 8.0 m break chords give a root-to-kink
+            // trailing-edge angle of 87.9 deg, inside the 90 deg limit.
+            // Engineering choice for a notional aircraft; the chords are
+            // set together with the wing area, span and tip chord.
+            root_chord_m: 16.00,
+            break_chord_m: 8.00,
             tip_chord_m: 1.60,
             sweep_deg: 34.0,
             tip_twist_deg: 0.0,
@@ -67,6 +102,7 @@ pub fn ave() -> AircraftPreset {
             airfoil_camber_scale: 1.0,
             ..DesignVector::default()
         },
+        airfoil_class_source: "Clean-sheet default for a notional 777X-class transonic twin: current transonic transport wings carry supercritical sections. Drawn with NASA SC(2) sections, root SC2-0714 and tip SC(2)-0410 (C. D. Harris, NASA Supercritical Airfoils, NASA TP-2969, 1990).",
         geometry: GeometryConfig {
             wing: WingConfig {
                 root_datum_x_m: 25.14,
@@ -80,6 +116,7 @@ pub fn ave() -> AircraftPreset {
                 outboard_sweep_decrement_deg: 2.0,
                 root_airfoil: "SC2-0714".to_owned(),
                 tip_airfoil: "sc20410".to_owned(),
+                airfoil_class: crate::AirfoilClass::Supercritical,
                 ..WingConfig::default()
             },
             empennage: EmpennageConfig {
@@ -125,6 +162,9 @@ pub fn ave() -> AircraftPreset {
             min_wing_loading_kg_m2: 485.0,
             // Notional, at the maximum payload of a 777-300ER.
             max_structural_payload_kg: 65_000.0,
+            // The cabin is the 777-9 standard two-class one the reference
+            // data declares, not a named airline profile.
+            cabin_preset: "Custom".to_owned(),
             ..DesignRequirements::default()
         },
         mass_model: None,

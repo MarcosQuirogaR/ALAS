@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/reporting/visualization.py (`figure_airfoil_reynolds`)
-// Reference: alas @ rust-port-baseline.
 
 //! NeuralFoil coefficient maps over angle of attack and Reynolds number.
 

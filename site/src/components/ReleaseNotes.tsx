@@ -6,6 +6,16 @@ const RELEASES_URL = 'https://github.com/MarcosQuirogaR/ALAS/releases'
 // bodies can contain historical branding or editorial notes that do not belong
 // in the current product site.
 const RELEASE_SUMMARIES: Record<string, string[]> = {
+  'v1.3.0': [
+    'Hard MTOW as the default for presets, with takeoff fuel capped at usable tank capacity, and hard constraints throughout.',
+    'Clean-sheet design from a preset-less brief, a load and trim CG sheet, and an all-evaluation optimization history.',
+    'Rotation forward-CG model with a geometry-derived tail authority, and an MSC Nastran wing-box validation.',
+  ],
+  'v1.2.0': [
+    'One optimiser: L-SHADE differential evolution under the epsilon-constrained method, deterministic for a given seed.',
+    'Wing and fuselage layout constraints, revised mass, fuel and mission models, and a first-start download of the optional OpenVSP preview runtime.',
+    'Windows and Linux packages built and checked by the release workflow from the tagged commit.',
+  ],
   'v1.1.0': [
     'Native Rust desktop packages for Windows and Linux.',
     'Portable archives include a release manifest and a sibling SHA-256 file.',

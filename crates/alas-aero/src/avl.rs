@@ -11,5 +11,14 @@
 //! Reference: M. Drela and H. Youngren, *AVL 3.40 User Primer*, geometry
 //! input and OPER total-forces sections, 22 February 2022.
 
-include!("avl_parts/part_01.rs");
-include!("avl_parts/part_02.rs");
+use alas_geom::aircraft::airplane::Airplane;
+use std::fmt::Write as FmtWrite;
+mod formats;
+pub use formats::*;
+
+mod deck;
+pub use deck::*;
+mod helpers;
+use helpers::*;
+#[cfg(test)]
+mod tests;

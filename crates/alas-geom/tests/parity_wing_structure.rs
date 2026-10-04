@@ -112,7 +112,14 @@ struct Fixture {
 /// pattern `pipeline.py`'s structural-analysis stage uses.
 fn build_geometry(fixture: &Fixture) -> WingStructureGeometry {
     let dv = DesignVector::default();
-    let wing_cfg = WingConfig::default();
+    // The frozen reference's planform: a break station at `break_span_fraction`
+    // and the outboard sweep decrement. The current default configuration also
+    // carries a kink and side-of-body station, which the reference predates.
+    let wing_cfg = WingConfig {
+        kink_span_fraction: None,
+        side_of_body_span_fraction: None,
+        ..WingConfig::default()
+    };
     assert_eq!(wing_cfg.root_airfoil, fixture.config.root_airfoil);
     assert_eq!(wing_cfg.tip_airfoil, fixture.config.tip_airfoil);
 

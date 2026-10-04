@@ -12,7 +12,7 @@ use egui::{vec2, RichText, Ui, ViewportBuilder, ViewportCommand};
 
 use crate::native_viewport::{show_native_viewport, viewport_id};
 use crate::state::{AppState, LogKind};
-use crate::views::{show_screening_view, show_screening_view_advanced, tr};
+use crate::views::{show_screening_view, tr};
 
 /// The key both the viewport and its focus command are built from.
 const SCREENING_VIEWPORT_KEY: &str = "airfoil_screening";
@@ -21,8 +21,8 @@ const CUSTOM_AIRFOIL_IMPORT_VIEWPORT_KEY: &str = "custom_airfoil_import";
 /// Render the custom-airfoil importer requested from the screening selector.
 ///
 /// The file action deliberately lives in its own native viewport.  Inputs has
-/// no importer card, so a custom section can only be added from the
-/// Advanced Settings > Airfoil Screening airfoil selector.
+/// no importer card, so a custom section can only be added from the Airfoil
+/// Screening window's airfoil selector.
 pub fn show_custom_airfoil_import_window(state: &mut AppState, ctx: &egui::Context) {
     if !state.screening.custom_airfoil_import_open {
         return;
@@ -119,26 +119,24 @@ fn close_window(state: &mut AppState) {
 /// the blank panel an early return would leave.
 pub fn show_screening_page(state: &mut AppState, ui: &mut Ui) {
     if !state.screening.window_open {
-        show_screening_view_advanced(state, ui);
+        show_screening_view(state, ui);
         return;
     }
 
-    ui.heading(tr("Airfoil Screening"));
+    ui.heading(tr("Airfoil Screening")).on_hover_text(tr(
+        "The Airfoil Screening workspace is open in its own window. Its sweep, options, and results live there.",
+    ));
     ui.add_space(6.0);
     crate::theme::card_frame(ui).show(ui, |ui| {
         ui.set_min_width(ui.available_width());
-        ui.label(RichText::new(tr(
-            "The Airfoil Screening workspace is open in its own window. Its sweep, options, and results live there.",
-        )));
         if state.screening.is_cancelling() {
-            ui.label(
-                RichText::new(tr(
+            ui.label(RichText::new(tr("Cancellation requested")).weak())
+                .on_hover_text(tr(
                     "A cancellation was requested; the sweep stops at its next stage checkpoint.",
-                ))
-                .weak(),
-            );
+                ));
         } else if state.screening.running {
-            ui.label(RichText::new(tr("A sweep is running in that window.")).weak());
+            ui.label(RichText::new(tr("Sweep running")).weak())
+                .on_hover_text(tr("A sweep is running in that window."));
         }
         ui.add_space(6.0);
         ui.horizontal_wrapped(|ui| {

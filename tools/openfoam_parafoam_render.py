@@ -190,7 +190,7 @@ def main() -> int:
                 f"renderer_exit_code={render_result.returncode}",
                 f"density_kg_m3={args.rho_kg_m3:.16e}",
                 f"static_temperature_k={args.temperature_k:.16e}",
-                "mach_definition=mag(U)/sqrt(1.4*287.05287*T)",
+                ("mach_definition=mag(U)/sqrt(1.4*287.05287*T_local)" if args.compressible else "mach_definition=mag(U)/sqrt(1.4*287.05287*T_freestream)"),
                 (
                     f"pressure_definition=p_absolute-p_reference; pressure_reference_pa={args.pressure_reference_pa:.16e}"
                     if args.compressible

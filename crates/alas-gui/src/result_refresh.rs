@@ -16,6 +16,8 @@ impl AppState {
     /// in-flight snapshot.
     pub fn set_completed_pipeline_result(&mut self, result: alas_pipeline::PipelineResult) {
         self.pipeline_result = Some(result);
+        self.pipeline_result_design_values = Some(self.design_values.clone());
+        self.pipeline_result_form_config = self.typed_config();
         self.pipeline_result_complete = true;
     }
 
@@ -109,10 +111,10 @@ mod tests {
         let mut state = AppState::default();
         state
             .result_figure_cache
-            .insert("run=1;figure=structures_patran".into(), None);
+            .insert("run=1;figure=structures_patran".into(), (None, 1));
         state.result_figure_cache.insert(
             "run=1;figure=openvsp_cad_preview".into(),
-            Some(Arc::new(Scene::new(10.0, 10.0, None))),
+            (Some(Arc::new(Scene::new(10.0, 10.0, None))), 2),
         );
         state
             .view_states
@@ -142,6 +144,9 @@ mod tests {
                     optimize: false,
                     compare_baseline: false,
                     quiet: true,
+                    // A private workspace: the default relative `outputs`
+                    // directory is shared by every test running in parallel.
+                    output_dir: None,
                     ..Default::default()
                 },
                 &alas_exec::RunEnvironment::default(),
@@ -195,39 +200,11 @@ mod tests {
             .result_figure_cache
             .get(&key)
             .unwrap()
+            .0
             .as_ref()
             .unwrap();
         assert!(final_scene.elements.iter().any(|element| matches!(element,
             SceneElement::Image { source, .. } if source == &path.to_string_lossy().replace('\\', "/"))));
         std::fs::remove_file(path).unwrap();
-    }
-
-    #[test]
-    #[ignore = "requires ALAS_CAD_MESH from a retained native OpenVSP run"]
-    fn retained_openvsp_mesh_replaces_early_status_and_renders_without_graphics_build() {
-        let path =
-            std::path::PathBuf::from(std::env::var_os("ALAS_CAD_MESH").expect("retained mesh"));
-        let mut state = AppState {
-            pipeline_result: Some(completed_result()),
-            ..Default::default()
-        };
-        let result = state.pipeline_result.as_mut().unwrap();
-        let export = result.openvsp_export.as_mut().unwrap();
-        export.status = alas_pipeline::OpenVspExportStatus::Vsp3Materialized;
-        export.cad_preview_geometry_available = true;
-        export.cad_preview_geometry_path = path;
-        export.preview_available = false;
-        export.preview_error = Some("runtime has no graphics-capable GUI build".into());
-        let scene =
-            alas_report::families::geometry::figure_openvsp_cad_preview(Some(export), Some("dark"));
-        assert!(scene
-            .elements
-            .iter()
-            .any(|element| matches!(element, SceneElement::Polygon { .. })));
-        let png = alas_viz::raster::render_scene_png(&scene).expect("native mesh rasterizes");
-        let output = std::path::PathBuf::from(
-            std::env::var_os("ALAS_CAD_PREVIEW_OUTPUT").expect("preview destination"),
-        );
-        std::fs::write(output, png).unwrap();
     }
 }

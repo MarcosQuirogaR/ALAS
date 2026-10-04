@@ -39,7 +39,10 @@ pub fn format_feasibility(report: &FeasibilityReport) -> String {
         };
         lines.push(format!("  - {severity}: {detail}"));
     }
-    lines.push(format_model_cg_assessment(report.model_cg.as_ref()));
+    lines.push(format_model_cg_assessment(
+        report.model_cg.as_ref(),
+        report.design_model_cg.as_ref(),
+    ));
     if let Some(line) = format_aft_limit_governance(report.model_cg.as_ref()) {
         lines.push(line);
     }
@@ -50,21 +53,37 @@ pub fn format_feasibility(report: &FeasibilityReport) -> String {
     lines.join("\n")
 }
 
-fn format_model_cg_assessment(assessment: Option<&ModelCgEnvelopeAssessment>) -> String {
+/// The status line counts exactly what the feasibility verdict gates on: the
+/// hard constraints of the flown-loading assessment and, when it is a
+/// separate assessment, of the maximum-fuel design loading. The minimum
+/// usable CG range and the tail-scrape clearance are diagnostics in both the
+/// search and the verdict (`ModelCgConstraint::is_diagnostic`), so they are
+/// counted on their own and never reported as hard failures.
+fn format_model_cg_assessment(
+    assessment: Option<&ModelCgEnvelopeAssessment>,
+    design: Option<&ModelCgEnvelopeAssessment>,
+) -> String {
     let Some(assessment) = assessment else {
         return "Model CG status     : NOT EVALUATED".to_owned();
     };
-    let failed_constraints = assessment
-        .loading_states
-        .iter()
+    let gated = std::iter::once(assessment)
+        .chain(design.filter(|design| *design != assessment))
+        .flat_map(|assessment| &assessment.loading_states)
         .flat_map(|state| &state.constraints)
-        .filter(|constraint| constraint.violated)
-        .count();
-    let status = if failed_constraints == 0 {
+        .filter(|constraint| constraint.violated);
+    let (diagnostic, hard): (Vec<&alas_opt::ModelCgConstraintAssessment>, Vec<_>) =
+        gated.partition(|constraint| constraint.constraint.is_diagnostic());
+    let mut status = if hard.is_empty() {
         "HARD CONSTRAINTS PASS".to_owned()
     } else {
-        format!("HARD CONSTRAINTS FAIL ({failed_constraints})")
+        format!("HARD CONSTRAINTS FAIL ({})", hard.len())
     };
+    if !diagnostic.is_empty() {
+        status.push_str(&format!(
+            " ({} diagnostic limit(s) not met)",
+            diagnostic.len()
+        ));
+    }
     let target_status = if assessment.target_static_margin.met_or_exceeded() {
         "at/above preference"
     } else {

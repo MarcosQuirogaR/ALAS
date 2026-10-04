@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/physics/cargo_loader.py (`build_cargo_layout`)
-// Reference: alas @ rust-port-baseline.
 
 //! The freighter layout engine: a load plan for a requested payload.
 //!

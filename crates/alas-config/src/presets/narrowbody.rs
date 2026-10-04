@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/config/presets.py (the single-aisle entries)
-// Reference: alas @ rust-port-baseline.
 
 //! Two published single-aisle types, which is where the global assumptions
 //! stop fitting.
@@ -24,64 +23,17 @@
 //! which sizes them out of runways they operate from every day.
 
 use crate::{
-    AircraftPreset, AircraftReferenceData, AircraftVariantIdentity, CertifiedExitLayout,
-    CertifiedExitPair, CgEnvelopeEvidence, DesignRequirements, DesignVector, EmpennageConfig,
-    EngineConfig, FuselageConfig, GeometryConfig, LandingGearConfig, MassModelConfig,
-    MissingDesignMissionDatum, MissionEvidenceApplicability, PartialDesignMissionEvidence,
-    PartialMissionEvidenceKind, PublishedMissionLoadCase, PublishedRange, WingConfig,
+    AircraftPreset, AircraftReferenceData, AircraftVariantIdentity, CgEnvelopeEvidence,
+    DesignRequirements, DesignVector, EmpennageConfig, EngineConfig, FuselageConfig,
+    GeometryConfig, LandingGearConfig, MissingDesignMissionDatum, MissionEvidenceApplicability,
+    PartialDesignMissionEvidence, PartialMissionEvidenceKind, PublishedMissionLoadCase, WingConfig,
 };
 
-/// EASA's baseline A220-300 cabin arrangement for the legacy registered
-/// variant.  Each number is the rating of the complete exit pair; the
-/// physical layout has two Type-C pairs and one Type-III pair, for 145 seats
-/// in the source table.  The 149-seat C-III*-C option requires a different
-/// exit installation and is intentionally absent here.
-const A220_300_CERTIFIED_EXIT_LAYOUT: CertifiedExitLayout = CertifiedExitLayout {
-    label: "C-III-C",
-    pairs: &[
-        CertifiedExitPair {
-            exit_type: "C",
-            capacity_per_pair: 55,
-        },
-        CertifiedExitPair {
-            exit_type: "III",
-            capacity_per_pair: 35,
-        },
-        CertifiedExitPair {
-            exit_type: "C",
-            capacity_per_pair: 55,
-        },
-    ],
-    source: "EASA.IM.A.570 BD-500 TCDS Issue 24, 2026-02-20, Section 2 BD-500-1A11 III.19 p.23 (baseline C-III-C MPSC 145; Option C25631002 is required for C-III*-C 149)",
-};
+mod a220;
+mod exit_layouts;
 
-/// EASA's A320-200 maximum-seating arrangement.  The four stations on each
-/// side are two Type-C door pairs and two Type-III overwing pairs; their
-/// complete-pair ratings sum to the 180-seat certified maximum.  The source
-/// permits a lower maximum when an overwing exit is deactivated, so this
-/// metadata is tied to the fully active WV017 arrangement used by the preset.
-const A320_200_CERTIFIED_EXIT_LAYOUT: CertifiedExitLayout = CertifiedExitLayout {
-    label: "C-III-III-C",
-    pairs: &[
-        CertifiedExitPair {
-            exit_type: "C",
-            capacity_per_pair: 55,
-        },
-        CertifiedExitPair {
-            exit_type: "III",
-            capacity_per_pair: 35,
-        },
-        CertifiedExitPair {
-            exit_type: "III",
-            capacity_per_pair: 35,
-        },
-        CertifiedExitPair {
-            exit_type: "C",
-            capacity_per_pair: 55,
-        },
-    ],
-    source: "EASA.A.064 A318/A319/A320/A321 TCDS Issue 12, 2013-09-12, Section 1 III.19 (maximum certified seating 180 with all four Type III overwing exits active)",
-};
+pub use a220::a220_300;
+use exit_layouts::A320_200_CERTIFIED_EXIT_LAYOUT;
 
 /// Short and medium-range twin, the reference single-aisle.
 pub fn a320_200() -> AircraftPreset {
@@ -97,6 +49,10 @@ pub fn a320_200() -> AircraftPreset {
             tank_configuration: "three tanks; MOD37331 + MOD160001",
         },
         reference: AircraftReferenceData {
+            // ICAO Annex 14 Vol. I Table 1-1 (aerodrome reference code) applied to the
+            // published sharklet wingspan of 35.80 m (Airbus A320 Aircraft Characteristics,
+            // section 2-2-0): 24 m <= b < 36 m is code C.
+            aerodrome_reference_code: Some(crate::AerodromeReferenceCode::C),
             mrw_kg: Some(78_400.0),
             mtow_kg: Some(78_000.0),
             mlw_kg: Some(66_000.0),
@@ -107,6 +63,13 @@ pub fn a320_200() -> AircraftPreset {
             usable_fuel_volume_l: Some(24_167.0),
             usable_fuel_mass_kg: Some(19_334.0),
             fuel_density_kg_l: Some(0.8),
+            // Airbus A320 Aircraft Characteristics for Airport Planning, Rev 46, section 2-4-1 (typical two-class cabin).
+            planning_seats: Some(150),
+            design_point: Some(crate::PayloadRangeDesignPoint {
+                range_nmi: 2_120.0,
+                payload_kg: Some(19_700.0),
+                source: "Airbus A320 Aircraft Characteristics Jun 2024, section 3-2-1 Figure 3-2-1-991-016-A01 (payload/range ISA, A320-200, 78,000 kg curve, no ACT), maximum-payload corner read as 2,120 nmi at 19.7 t; read uncertainty +-40 nmi, +-0.3 t; reserves not stated on the figure",
+            }),
             certified_max_seats: Some(180),
             certified_exit_layout: Some(A320_200_CERTIFIED_EXIT_LAYOUT),
             partial_design_mission_evidence: vec![PartialDesignMissionEvidence {
@@ -130,10 +93,13 @@ pub fn a320_200() -> AircraftPreset {
                 source: "Airbus A320 Aircraft Characteristics Rev 46, 2026-07-01, section 3-2-1 p.3, Figure 3-2-1-991-017-A01",
             }],
             cg_evidence: CgEnvelopeEvidence::AfmRequired,
+            aft_cg_nose_load: Some(crate::presets::gear_load::A320_200),
             reference_wing_area_m2: Some(122.6),
             sources: vec![
                 "Airbus A320 Aircraft Characteristics Rev 46, 2026-07-01, section 2-1-1 p.2",
-                "Airbus A320 Aircraft Characteristics, section 2-2-0 Figure 2-2-0-991-004-A01 (sharklet general aircraft dimensions: 35.80 m span, 37.57 m length, 3.95 m body width, 12.45 m tailplane span, 5.87 m fin height, 6.07 m side-of-body wing chord, 16.29 m nose to leading edge of MAC)",
+                "Airbus A320 Aircraft Characteristics, Jun 01/24, section 2-2-0 Figure 2-2-0-991-004-A01 (sheets 1-2, wing tip fence: 34.10 m span; sheets 3-4, sharklet: 35.80 m span over the sharklets, 37.57 m length, 3.95 m body width, 12.45 m tailplane span, 5.87 m fin height, 6.07 m wing root chord at the body including the leading-edge fillet, 1.64 m chord at the 16.29 m aileron-end station; sheet 2 draws the 1.50 m chord at the 17.05 m wing tip; plan view read for a 27.1 deg straight leading edge, an unswept inboard trailing edge and the trailing-edge kink 6.42-6.46 m from the centreline; its 16.29 m dimension is spanwise, from the centreline to the trailing edge at the outboard end of the aileron, not a nose-to-MAC station)",
+                "Airbus A320 Aircraft Characteristics, Jun 01/24, section 2-3-0 Figure 2-3-0-991-029-A01 sheet 2 (sharklet ground clearances at MRW 78,400 kg, aft CG 36.8 %MAC: sharklet bottom W2 4.009 m, fuselage bottom aft F2 1.792 m, CFM56-5B nacelle low point N1 0.577 m)",
+                "Airbus A320 Aircraft Characteristics, Jun 01/24, section 7-3-0 Figure 7-3-0-991-010-A01 (static nose-gear loads at 17% MAC and main-gear loads at 38.7-43% MAC per weight variant; two-point statics with NLG 5.07 m and wheelbase 12.64 m place the leading edge of MAC 15.24-15.33 m aft of the nose)",
                 "Airbus A320 Aircraft Characteristics, section 2-3-0 ground-clearance figures (45,000 kg empty weight for maintenance; 17% / 36.8% MAC CG conditions; no OEW)",
                 "EASA.A.064 Issue 62, pp.37-48",
                 "EASA.A.064 Issue 12, section 1 items 15-16 (datum 2.540 m forward of nose; MAC 4.1935 m)",
@@ -159,31 +125,41 @@ pub fn a320_200() -> AircraftPreset {
             reference_station_fuselage_length_m: Some(37.57),
             reference_nlg_x_fraction: Some(5.07 / 37.57),
             reference_mlg_x_fractions: Some(vec![17.71 / 37.57, 17.71 / 37.57]),
+            // Airbus A320 AC Jun 01/24, Figure 2-3-0-991-004-A01 sheet 2:
+            // fuselage "bottom aft" (F2) 1.792 m above ground at MRW 78.4 t,
+            // aft CG 36.8 %MAC (1.762-1.843 m across the tabulated states).
+            fuselage_ground_clearance_m: Some(1.79),
+            takeoff_stabilizer_nose_up_deg: Some(crate::landing_gear::TRANSPORT_THS_TAKEOFF_NOSE_UP_DEG),
             ..LandingGearConfig::default()
         },
-        // The four planform numbers below are not read off a specification
-        // sheet (Airbus does not publish centreline, kink and tip chords)
-        // but they are not free either. They are the one chord set that closes
-        // three published quantities at once: the 122.6 m^2 reference area,
-        // the 4.1935 m mean aerodynamic chord of EASA.A.064, and a 25.0 deg
-        // outboard quarter-chord sweep. `sweep_deg` is a *leading-edge* angle
-        // here, which is why it reads 27 and not the 25 every specification
-        // sheet prints: 25 deg is the quarter-chord value, and at this taper
-        // a 27.0 deg leading edge produces 25.01 deg at the quarter chord.
+        // The planform is the planar wing of the Airbus plan view (Figure
+        // 2-2-0-991-004-A01): 34.10 m span, the span the wing-tip-fence
+        // sheet prints; the 35.80 m of the sharklet sheet is measured over
+        // the sharklets, a wingtip device this geometry does not model, so
+        // their mass and drag are excluded. Three further numbers come off
+        // that drawing: the 1.64 m chord, a 27.1 deg leading edge, straight
+        // from the side of the body to the tip (there is no inboard
+        // leading-edge crank), and an unswept inboard trailing edge. The
+        // 1.64 m is drawn at the 16.29 m aileron-end station, not at the tip,
+        // where sheet 2 draws 1.50 m; it stands here as the tip chord of the
+        // equivalent trapezoid, whose trailing edge at the tip lies 0.18 m
+        // aft of the drawn one. With them the centreline, kink and kink
+        // station are the one set that closes the 122.6 m^2 reference area
+        // and the 4.1935 m mean aerodynamic chord of EASA.A.064 together.
         //
-        // The check that the fit is a wing and not a curve fit is a fourth
-        // number nothing above was tuned to: interpolated to the side of the
-        // 3.95 m body, this planform gives a 6.067 m root chord, against the
-        // 6.07 m Airbus prints on the plan view. Its mean aerodynamic chord
-        // also lands 3.377 m aft of the root leading edge, which puts the
-        // leading edge of MAC 16.29 m aft of the nose for the `root_datum_x_m`
-        // below: the same 16.29 m the same drawing dimensions.
+        // Two numbers nothing was tuned to check the fit: the kink lands
+        // 6.467 m from the centreline, where the plan view puts the
+        // trailing-edge break (6.42-6.46 m), and the outboard quarter-chord
+        // sweep comes out 25.0 deg, the value specification sheets quote.
+        // The root chord the fit gives at the side of the body is 5.86 m,
+        // 0.21 m short of the 6.07 m printed there, which is measured from
+        // the leading-edge fillet rather than from the swept leading edge.
         design_vector: DesignVector {
-            span_m: 35.80,
-            root_chord_m: 7.333,
-            break_chord_m: 3.432,
-            tip_chord_m: 1.40,
-            sweep_deg: 27.0,
+            span_m: 34.10,
+            root_chord_m: 6.875,
+            break_chord_m: 3.566,
+            tip_chord_m: 1.64,
+            sweep_deg: 27.1,
             tip_twist_deg: -1.5,
             wing_x_shift_m: 0.0,
             tail_scale: 1.0,
@@ -193,64 +169,77 @@ pub fn a320_200() -> AircraftPreset {
             airfoil_camber_scale: 1.0,
             ..DesignVector::default()
         },
+        airfoil_class_source: "Design-era declaration: the A320 wing (EIS 1988) is of the supercritical-section generation; manufacturer section data are not public. Drawn with NASA SC(2)-0610 root and SC(2)-0410 tip sections (Harris, NASA TP-2969, 1990).",
         geometry: GeometryConfig {
             wing: WingConfig {
-                // Places the leading edge of MAC 16.29 m aft of the nose, the
-                // value dimensioned on the Airbus plan view.
-                root_datum_x_m: 12.913,
+                // Places the leading edge of MAC 15.26 m aft of the nose, inside
+                // the 15.24-15.33 m that two-point statics give on the Airbus
+                // section 7-3-0 gear loads, and equal to the commonly quoted
+                // load-sheet H-arm 17.8015 m less the EASA.A.064 datum 2.540 m
+                // forward of the nose (that H-arm is not from a primary
+                // document). (The earlier 16.29 m anchor was a spanwise plan-view
+                // dimension, which had put the main gear at 34 %MAC, ahead of
+                // the 36.8 %MAC ground condition; it now sits at 58 %MAC.)
+                root_datum_x_m: 11.891,
+                // One dihedral across both panels, from the Airbus sharklet
+                // ground clearances (Figure 2-3-0-991-029-A01 sheet 2, MRW,
+                // aft CG): the sharklet bottom stands 4.009 m above the ground
+                // and the fuselage bottom 1.792 m, so the lower surface at the
+                // wing tip is 2.217 m above the belly, which sits 1.97 m below
+                // the +0.1 m cabin axis; the tip leading edge is half a 10 %
+                // section above that. From the centreline root 1.2 m below the
+                // axis this is 5.1 deg.
                 root_z_m: -1.2,
-                break_z_m: -0.2,
-                tip_z_m: 1.5,
+                break_z_m: -0.62,
+                tip_z_m: 0.33,
                 root_twist_deg: 3.0,
                 break_twist_deg: 1.0,
-                break_span_fraction: 0.34,
-                kink_span_fraction: Some(0.34),
+                break_span_fraction: 0.379_3,
+                kink_span_fraction: Some(0.379_3),
                 // The side-of-body station is the side of this body: half of
-                // the 3.95 m fuselage width over the 17.90 m semi-span. It is
+                // the 3.95 m fuselage width over the 17.05 m semi-span. It is
                 // where the exposed wing starts, and moving it off the body
                 // would make the exposed-panel aerodynamics answer for a
                 // chord the aeroplane does not have there.
-                side_of_body_span_fraction: Some(0.110_3),
-                // 6.067 m over the 7.333 m centreline chord: the chord the
-                // root-to-kink panel actually has where it leaves the body,
-                // and the 6.07 m Airbus dimensions on the plan view.
-                //
-                // Stating it is not decoration. Left derived, it is clipped by
-                // the rule that refuses an exposed trailing edge running
-                // forward of the kink, which on this planform takes 0.54 m off
-                // the chord and 3.3 m^2 off the reference area: the built
-                // wing came out at 119.31 m^2 against the published 122.6.
-                // The clip is guarding a real infidelity that this preset
-                // cannot remove: an A320's inboard trailing edge is unswept,
-                // which needs a leading-edge crank, and a product transport
-                // planform is deliberately held to one leading-edge sweep
-                // across both panels. Pinning the chord keeps the area, the
-                // mean aerodynamic chord and the exposed root honest and
-                // leaves the inboard trailing edge as the one place this
-                // planform disagrees with the aeroplane.
-                side_of_body_chord_ratio: Some(0.827_405),
+                side_of_body_span_fraction: Some(0.115_84),
+                // 5.864 m over the 6.875 m centreline chord: the root-to-kink
+                // chord where the wing leaves the body, stated so the exposed
+                // root keeps its own lofted section. From there the inboard
+                // trailing edge runs straight and unswept to the kink, as on
+                // the aeroplane, on the exposed and on the centreline edge.
+                side_of_body_chord_ratio: Some(0.852_98),
                 outboard_sweep_decrement_deg: 1.5,
                 root_airfoil: "sc20610".to_owned(),
                 tip_airfoil: "sc20410".to_owned(),
+                airfoil_class: crate::AirfoilClass::Supercritical,
                 ..WingConfig::default()
             },
-            // Both surfaces are sized to their published span and area, at the
-            // leading-edge sweep and taper the previous entry already carried:
-            // a 12.45 m tailplane closing 31.0 m^2, and a 5.87 m fin closing
-            // 21.5 m^2. The two spans are dimensioned on the Airbus front
-            // view; the two areas are the established published values, not
-            // read off that drawing, and the chords follow from the pair.
+            // Both surfaces are sized to their published span and area: a
+            // 12.45 m tailplane closing 31.0 m^2, and a 5.87 m fin closing
+            // 21.5 m^2 at the leading-edge sweep and taper the previous entry
+            // already carried. The two spans are dimensioned on the Airbus
+            // front view; the two areas are the established published values,
+            // not read off that drawing.
             empennage: EmpennageConfig {
                 tail_airfoil: "naca0012".to_owned(),
                 hstab_offset_from_tail_m: 5.5,
                 hstab_z_m: 0.8,
-                hstab_root_chord_m: 3.831,
-                hstab_tip_chord_m: 1.149,
+                // Figure 2-2-0-991-004-A01 sheet 2 (plan view, drawing read):
+                // 1.24 m tailplane tip chord, tip leading edge 3.31 m aft of
+                // the root's (28.0 deg); the root chord closes 31.0 m^2.
+                hstab_root_chord_m: 3.740,
+                hstab_tip_chord_m: 1.24,
                 hstab_root_twist_deg: -2.0,
                 hstab_tip_twist_deg: -2.0,
-                hstab_tip_le_m: (3.631, 6.225, 0.5),
+                hstab_tip_le_m: (3.31, 6.225, 0.5),
                 vstab_offset_from_tail_m: 6.5,
-                vstab_z_m: 1.2,
+                // The 5.87 m fin height of sheet 1 is measured from the
+                // fuselage top line, so the root line is the crown and the
+                // tip stands 11.80 m above the ground in the Figure
+                // 2-3-0-991-029-A01 state (VT 11.805 m; TCDS 11.76 m). The
+                // chords close the 21.5 m^2 over those 5.87 m; the builder
+                // carries the edges on down to the tail cone under the root.
+                vstab_z_m: 2.17,
                 vstab_root_chord_m: 5.444,
                 vstab_tip_chord_m: 1.884,
                 vstab_tip_le_m: (5.060, 0.0, 5.87),
@@ -266,16 +255,26 @@ pub fn a320_200() -> AircraftPreset {
                 cabin_z_m: 0.1,
                 tailcone_length_m: 7.5,
                 tail_z_m: 1.0,
+                // Solved so the tail-down angle about the main wheels on the static
+                // ground plane is the published 11.7 deg pitch to ground contact with
+                // the main gear compressed: Airbus, "Avoiding Tail Strike" (Operational Liaison Meeting, FBW; NTSB docket attachment "Airbus Material - Avoiding Tail Strike", PDF p.12).
+                // The belly then starts to rise 26.3 m aft of the nose.
+                belly_upsweep_length_m: Some(11.25),
                 ..FuselageConfig::default()
             },
             engine: EngineConfig {
                 // EASA.A.064 Issue 12, engine axis from aircraft centreline.
                 spanwise_positions_m: vec![5.755, -5.755],
-                // About 0.35 m of clearance under the wing lower surface,
-                // which is what a large-fan engine on a low-slung single-aisle
-                // has to live with.
-                z_m: -1.71,
-                inlet_x_offset_m: 2.5,
+                // Engine axis below the local wing leading edge. It puts the
+                // 1.0 m-radius nacelle's low point 0.577 m above the ground, the
+                // CFM56-5B nacelle clearance of Figure 2-3-0-991-029-A01 sheet 2
+                // in the same MRW, aft-CG state as the dihedral above.
+                z_m: -1.50,
+                // Puts the nacelle front 11.19 m aft of the nose, the CFM56
+                // dimension of Figure 2-2-0-991-004-A01 sheet 4: the 11.891 m
+                // root datum plus the 2.945 m the 27.1 deg leading edge runs
+                // aft by the engine station, less this offset.
+                inlet_x_offset_m: 3.646,
                 ..EngineConfig::default()
             },
             ..GeometryConfig::default()
@@ -298,202 +297,6 @@ pub fn a320_200() -> AircraftPreset {
             ..DesignRequirements::default()
         },
         mass_model: None,
-        performance: super::high_lift("modern_narrowbody"),
-    }
-}
-
-/// The smallest type in the registry, and the only one with its own mass model.
-pub fn a220_300() -> AircraftPreset {
-    AircraftPreset {
-        name: "A220-300",
-        display_name: "Airbus A220-300",
-        description: "BD-500-1A11 legacy-weight A220-300 with PW1521G-3 engines.",
-        identity: AircraftVariantIdentity {
-            model: "BD-500-1A11",
-            weight_variant: "legacy 149,000 lb MTOW",
-            engine_model: "PW1521G-3",
-            modification_state: "S/N 55001-59999 planning configuration",
-            tank_configuration: "standard integral tanks",
-        },
-        reference: AircraftReferenceData {
-            mrw_kg: Some(68_039.0),
-            mtow_kg: Some(67_585.0),
-            mlw_kg: Some(58_740.0),
-            mzfw_kg: Some(55_792.0),
-            oew_kg: crate::oew_reference::preset_reference_oew_kg("A220-300"),
-            usable_fuel_volume_l: Some(21_504.92),
-            usable_fuel_mass_kg: Some(17_395.27),
-            fuel_density_kg_l: Some(0.8089),
-            planning_seats: Some(140),
-            // EASA's BD-500 type-certificate data sheet sets 145 as the
-            // baseline maximum passenger seating capacity for the selected
-            // legacy S/N 55001-59999 configuration.  The optional 149-seat
-            // arrangement is a different exit installation and is therefore
-            // deliberately not folded into this preset.
-            certified_max_seats: Some(145),
-            certified_exit_layout: Some(A220_300_CERTIFIED_EXIT_LAYOUT),
-            partial_design_mission_evidence: vec![
-                PartialDesignMissionEvidence {
-                    kind: PartialMissionEvidenceKind::AdvertisedRange,
-                    range: Some(PublishedRange::NauticalMiles(3_400.0)),
-                    payload_kg: None,
-                    load_case: Some(PublishedMissionLoadCase::TakeoffMassesKg(vec![70_900.0])),
-                    profile_assumptions: None,
-                    reserve_assumptions: None,
-                    reserve_contract: None,
-                    applicability: "Airbus advertises up to 3,400 nm for the up-to-70.9 t product; that capability claim does not select payload or apply exactly to the preset's legacy 67,585 kg weight variant",
-                    configuration_applicability: MissionEvidenceApplicability::DifferentWeightVariant,
-                    missing: vec![
-                        MissingDesignMissionDatum::Payload,
-                        MissingDesignMissionDatum::Profile,
-                        MissingDesignMissionDatum::ReserveFuel,
-                    ],
-                    source: "Airbus A220 Digital Pamphlet FAI V5.2, July 2022, p.1",
-                },
-                PartialDesignMissionEvidence {
-                    kind: PartialMissionEvidenceKind::PayloadRangeChart,
-                    range: None,
-                    payload_kg: None,
-                    load_case: Some(PublishedMissionLoadCase::ZeroFuelWeightRangeEnvelope),
-                    profile_assumptions: Some("ISA conditions only"),
-                    reserve_assumptions: None,
-                    reserve_contract: None,
-                    applicability: "BD-500-1A11 S/N 55001-59999 ZFW/range chart; Airbus marks the publication superseded and the chart selects no legacy-weight design point",
-                    configuration_applicability: MissionEvidenceApplicability::ExactPreset,
-                    missing: vec![
-                        MissingDesignMissionDatum::Range,
-                        MissingDesignMissionDatum::Payload,
-                        MissingDesignMissionDatum::Profile,
-                        MissingDesignMissionDatum::ReserveFuel,
-                    ],
-                    source: "Airbus A220-300 APP Issue 031, 2023-10-19, data module BD500-A-J00-00-00-13AAB-030A-A pp.2-3, Figure 1",
-                },
-            ],
-            cg_evidence: CgEnvelopeEvidence::PublicPlanning,
-            reference_wing_area_m2: Some(112.3),
-            planning_cg_envelope: Some(super::cg_envelope::A220_300_PLANNING_CG_ENVELOPE),
-            sources: vec![
-                "Airbus A220 Aircraft Recovery Publication BD500-3AB48-10400-00, May 2026, J06-20-01 p.14 and J08-41-03-01 p.2",
-                "Airbus A220 ARP J07-40-00-06AAA-030A-A, 2019-10-22 p.2",
-                "Airbus A220 Aircraft Characteristics - Airport and Maintenance Planning, A220-ACP-Issue013-00-27Nov2025, DM BD500-A-J06-10-00-00AAA-030A-A Rev 2023-11-01, pp.150-156 (nominal nose-tip drawing frame; dimensions vary with weight/CG)",
-                "EASA.IM.A.570 BD-500 TCDS Issue 24, 2026-02-20, Section 2 BD-500-1A11 III.19 p.23 (baseline MPSC 145; Option C25631002 is required for 149)",
-            ],
-            ..AircraftReferenceData::default()
-        },
-        engine_name: "PW1500G",
-        n_engines: 2,
-        landing_gear: LandingGearConfig {
-            n_nlg_wheels: 2,
-            n_mlg_struts: 2,
-            wheels_per_mlg_strut: 2,
-            track_diameter_factor: 6.731 / 3.50,
-            // Airbus' ACP side/ground drawing gives the A220-300 nominal
-            // longitudinal anchors for S/N 55001-59999.  The dimensions
-            // originate at the geometric nose-tip extension, so retain that
-            // frame explicitly and normalize the stations before applying
-            // them to a resized active fuselage.  These are drawing/group
-            // centres, not certified WBM/AFM datum or attachment points.
-            reference_wheelbase_m: Some(15.23238),
-            reference_track_m: Some(6.731),
-            reference_station_frame: Some("nose_tip_drawing_reference".to_owned()),
-            reference_station_fuselage_length_m: Some(38.68928),
-            reference_nlg_x_fraction: Some(3.401568 / 38.68928),
-            reference_mlg_x_fractions: Some(vec![
-                18.633948 / 38.68928,
-                18.633948 / 38.68928,
-            ]),
-            mlg_strut_bogie_wheels: Some(vec![2, 2]),
-            ..LandingGearConfig::default()
-        },
-        design_vector: DesignVector {
-            span_m: 35.10,
-            root_chord_m: 5.80,
-            break_chord_m: 3.50,
-            tip_chord_m: 1.10,
-            sweep_deg: 25.0,
-            tip_twist_deg: -1.5,
-            wing_x_shift_m: 0.0,
-            tail_scale: 1.0,
-            fuselage_length_m: 38.70,
-            tail_x_shift_m: 0.0,
-            airfoil_thickness_scale: 1.0,
-            airfoil_camber_scale: 1.0,
-            ..DesignVector::default()
-        },
-        geometry: GeometryConfig {
-            wing: WingConfig {
-                root_datum_x_m: 13.30,
-                root_z_m: -1.0,
-                break_z_m: -0.2,
-                tip_z_m: 1.5,
-                root_twist_deg: 3.0,
-                break_twist_deg: 1.0,
-                break_span_fraction: 0.37,
-                kink_span_fraction: Some(0.382_736_255_076_680_5),
-                outboard_sweep_decrement_deg: 1.5,
-                root_airfoil: "SC2-0714".to_owned(),
-                tip_airfoil: "sc20410".to_owned(),
-                ..WingConfig::default()
-            },
-            empennage: EmpennageConfig {
-                tail_airfoil: "naca0012".to_owned(),
-                hstab_offset_from_tail_m: 5.0,
-                hstab_z_m: 0.7,
-                hstab_root_chord_m: 3.8,
-                hstab_tip_chord_m: 1.1,
-                hstab_root_twist_deg: -2.0,
-                hstab_tip_twist_deg: -2.0,
-                hstab_tip_le_m: (3.2, 5.5, 0.5),
-                vstab_offset_from_tail_m: 6.0,
-                vstab_z_m: 1.0,
-                vstab_root_chord_m: 5.0,
-                vstab_tip_chord_m: 1.6,
-                vstab_tip_le_m: (4.5, 0.0, 5.5),
-                ..EmpennageConfig::default()
-            },
-            fuselage: FuselageConfig {
-                diameter_m: 3.50,
-                nose_z_m: -0.2,
-                cabin_start_x_m: 3.2,
-                cabin_z_m: 0.1,
-                tailcone_length_m: 7.0,
-                tail_z_m: 0.8,
-                ..FuselageConfig::default()
-            },
-            engine: EngineConfig {
-                spanwise_positions_m: vec![5.2, -5.2],
-                z_m: -1.71,
-                inlet_x_offset_m: 2.3,
-                ..EngineConfig::default()
-            },
-            ..GeometryConfig::default()
-        },
-        requirements: DesignRequirements {
-            cruise_mach: 0.78,
-            cruise_altitude_m: 11278.0,
-            mtow_kg: 67_585.0,
-            max_wing_area_m2: 120.0,
-            min_wing_loading_kg_m2: 480.0,
-            cabin_preset: "Custom".to_owned(),
-            optimize_passenger_capacity: true,
-            num_passengers: 130,
-            cargo_payload_kg: 15_000.0,
-            // Airbus recovery publication: MZFW 55,792 kg less OEW 37,149 kg.
-            max_structural_payload_kg: 18_643.0,
-            dive_speed_m_s: 175.0,
-            ..DesignRequirements::default()
-        },
-        // Compatibility-only outcome calibration for the frozen
-        // ReferenceCompatibleFractions method: the published operating empty
-        // weight is 37.08 t while the global fractions predict about 34.3 t.
-        // These raised fractions close that gap; they are not source-backed
-        // A220 avionics or furnishings subsystem masses. A physical method
-        // must replace them only after its architecture inputs are declared.
-        mass_model: Some(MassModelConfig {
-            systems_mass_fraction: 0.13,
-            furnishings_mass_fraction: 0.12,
-            ..MassModelConfig::default()
-        }),
         performance: super::high_lift("modern_narrowbody"),
     }
 }

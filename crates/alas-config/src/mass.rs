@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/config/mass_config.py
-// Reference: alas @ rust-port-baseline.
 
 //! Mass architecture and parameters of the production and comparison builds.
 //!
@@ -100,13 +99,13 @@ pub struct MassModelConfig {
     )]
     pub flops_turboprop: FlopsTurbopropConfig,
 
-    /// Whether the product analysis places each mass group at its
-    /// geometry-derived station.
+    /// Whether other product mass groups use geometric stations. The wing always
+    /// uses its primary-box and secondary first moments, including when disabled.
     #[serde(default = "default_true", skip_serializing_if = "Clone::clone")]
     #[config(
         advanced,
         label = "Geometry-derived component stations",
-        help = "Place every mass group at the station the built geometry gives it: the integrated wingbox centroid, the tails at 42 percent of their mean chord, the gear at its nose and main stations, the engines at their nacelles and the fuel in its tanks. Disable to keep the frozen point placement of the reference implementation."
+        help = "Place mass groups at the built geometry stations: tails at 42 percent of their mean chord, gear at its nose and main stations, engines at their nacelles and fuel in its tanks. Disable to keep the other groups at the reference points. The complete wing always uses the sized box plus secondary first moment, shared with the item ledger."
     )]
     pub geometric_component_stations: bool,
 
@@ -217,9 +216,16 @@ pub struct MassModelConfig {
     /// Least weight the nose gear needs for steering authority.
     #[config(
         label = "Min nose-gear load fraction",
-        help = "Minimum fraction of weight that must be on the nose gear for adequate steering authority: sets the 'Min Nose Load' CG-envelope boundary (the aft-most safe CG at each weight)."
+        help = "Minimum fraction of weight that must be on the nose gear for adequate steering authority: sets the 'Min Nose Load' CG-envelope boundary (the aft-most safe CG at each weight). Raymer ch.11 / Torenbeek recommend roughly 6-8% minimum for steering/braking authority (8-15% preferred, <=20% max, see pct_load_nlg_max_handling); the shipped default was previously 2%, which left the boundary well inside the aerodynamic aft limit for most configured presets and so rarely governed anything."
     )]
     pub pct_load_nlg_min: f64,
+
+    /// Most weight the nose gear should carry for handling.
+    #[config(
+        label = "Max nose-gear handling-load fraction",
+        help = "Maximum fraction of current weight that should sit on the nose gear at the forward CG limit, for handling/steering reasons (excess nose-wheel steering and braking load, reduced main-wheel braking authority), independent of the nose tires' rated capacity. Raymer ch.11 / Torenbeek: ~20% is a common practical ceiling."
+    )]
+    pub pct_load_nlg_max_handling: f64,
 
     /// Maximum landing weight as a share of maximum takeoff weight.
     #[config(
@@ -281,6 +287,8 @@ struct MassModelConfigWire {
     pct_load_nlg_max: f64,
     pct_load_mlg_max: f64,
     pct_load_nlg_min: f64,
+    #[serde(default = "default_pct_load_nlg_max_handling")]
+    pct_load_nlg_max_handling: f64,
     mlw_fraction_mtow: f64,
     fuel_density_kg_m3: f64,
     fuel_tank_usable_fraction: f64,
@@ -316,6 +324,7 @@ impl Default for MassModelConfigWire {
             pct_load_nlg_max: defaults.pct_load_nlg_max,
             pct_load_mlg_max: defaults.pct_load_mlg_max,
             pct_load_nlg_min: defaults.pct_load_nlg_min,
+            pct_load_nlg_max_handling: defaults.pct_load_nlg_max_handling,
             mlw_fraction_mtow: defaults.mlw_fraction_mtow,
             fuel_density_kg_m3: defaults.fuel_density_kg_m3,
             fuel_tank_usable_fraction: defaults.fuel_tank_usable_fraction,
@@ -352,6 +361,7 @@ impl From<MassModelConfigWire> for MassModelConfig {
             pct_load_nlg_max: wire.pct_load_nlg_max,
             pct_load_mlg_max: wire.pct_load_mlg_max,
             pct_load_nlg_min: wire.pct_load_nlg_min,
+            pct_load_nlg_max_handling: wire.pct_load_nlg_max_handling,
             mlw_fraction_mtow: wire.mlw_fraction_mtow,
             fuel_density_kg_m3: wire.fuel_density_kg_m3,
             fuel_tank_usable_fraction: wire.fuel_tank_usable_fraction,
@@ -369,6 +379,11 @@ impl From<MassModelConfigWire> for MassModelConfig {
 
 const fn default_true() -> bool {
     true
+}
+
+/// Raymer/Torenbeek practical ceiling on nose-gear handling load.
+const fn default_pct_load_nlg_max_handling() -> f64 {
+    0.20
 }
 
 impl MassModelConfig {
@@ -481,8 +496,9 @@ impl Default for MassModelConfig {
             mlg_x_fraction_mac: 0.50,
             pct_load_nlg_max: 0.10,
             pct_load_mlg_max: 0.93,
-            pct_load_nlg_min: 0.02,
-            mlw_fraction_mtow: 0.92,
+            pct_load_nlg_min: 0.06, // Raymer/Torenbeek ~6-8% min.
+            pct_load_nlg_max_handling: default_pct_load_nlg_max_handling(),
+            mlw_fraction_mtow: crate::landing_mass_ratio::working_default_mlw_fraction_mtow(),
             fuel_density_kg_m3: 804.0,
             fuel_tank_usable_fraction: 0.85,
         }
@@ -504,6 +520,17 @@ mod tests {
         let config = MassModelConfig::default();
         assert!(config.pct_load_nlg_min < config.pct_load_nlg_max);
         assert!(config.pct_load_nlg_max + config.pct_load_mlg_max > 1.0);
+    }
+
+    #[test]
+    fn the_handling_ceiling_is_a_separate_and_larger_bound_than_the_steering_floor() {
+        // pct_load_nlg_max is a tire-capacity limit that an
+        // auto-sized layout always clears; pct_load_nlg_max_handling is the
+        // separate handling/steering ceiling this ordering exists to check.
+        let config = MassModelConfig::default();
+        assert!(config.pct_load_nlg_min < config.pct_load_nlg_max_handling);
+        assert!((config.pct_load_nlg_max_handling - 0.20).abs() < 1e-12);
+        assert!((config.pct_load_nlg_min - 0.06).abs() < 1e-12);
     }
 
     #[test]

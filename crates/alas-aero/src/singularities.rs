@@ -4,7 +4,6 @@
 // Ported from
 // native aerodynamic model/aerodynamics/aero_3D/singularities/uniform_strength_horseshoe_singularities.py
 // Upstream: native aerodynamic model 4.2.8, MIT.
-// Reference: alas @ rust-port-baseline.
 
 //! The induced-velocity kernel of a single horseshoe vortex:
 //! `calculate_induced_velocity_horseshoe`: the potential-flow element
@@ -43,7 +42,7 @@
 //! sites, into the constant `[1, 0, 0]` before calling in), so this function
 //! takes it as a required argument with no `Option` to unwrap.
 
-use crate::vector3::{cross3, dot3, norm3, sub3};
+use crate::vector3::{cross3, dot3, norm3, scale3, sub3};
 
 /// `1 / x`, smoothed near `x = 0` by a Kaufmann vortex core model when
 /// `vortex_core_radius != 0`: `smoothed_inv` in the upstream module,
@@ -108,11 +107,135 @@ pub fn calculate_induced_velocity_horseshoe(
     ]
 }
 
+/// Distance from `field` to the segment that starts at `start` and runs
+/// along `direction`: the whole segment `[start, start + direction]` when
+/// `finite`, the half-line from `start` otherwise.
+fn distance_to_leg(field: [f64; 3], start: [f64; 3], direction: [f64; 3], finite: bool) -> f64 {
+    let offset = sub3(field, start);
+    let length_squared = dot3(direction, direction);
+    if length_squared <= 0.0 {
+        return norm3(offset);
+    }
+    let mut parameter = (dot3(offset, direction) / length_squared).max(0.0);
+    if finite {
+        parameter = parameter.min(1.0);
+    }
+    norm3(sub3(offset, scale3(direction, parameter)))
+}
+
+/// Factor applied to one leg's velocity when `field` lies `distance` from
+/// it: a Rankine core, solid-body rotation inside `core_radius` (velocity
+/// proportional to `distance`) and the unmodified filament outside it. The
+/// factor is exactly `1` outside the core, so a field point that never
+/// enters a core reproduces [`calculate_induced_velocity_horseshoe`] to the
+/// bit.
+fn rankine_factor(distance: f64, core_radius: f64) -> f64 {
+    if distance >= core_radius {
+        1.0
+    } else {
+        let ratio = distance / core_radius;
+        ratio * ratio
+    }
+}
+
+/// [`calculate_induced_velocity_horseshoe`] with a Rankine core of radius
+/// `leg_core_radius` around each of the three legs (bound, left trailing,
+/// right trailing).
+///
+/// A field point that comes within `leg_core_radius` of a leg sees that
+/// leg's velocity scaled by `(distance / leg_core_radius)^2` rather than the
+/// `1 / distance` of a bare filament; every leg further away, and every leg
+/// when `leg_core_radius <= 0`, is evaluated by exactly the arithmetic of
+/// the uncored function. The intended use is a collocation point of one
+/// lifting surface passing close to a vortex leg of another, where the
+/// separation is an accident of how the two meshes were laid out rather than
+/// something the lattice resolves, and the unbounded `1 / distance` entry
+/// would otherwise dominate the influence matrix.
+pub fn calculate_induced_velocity_horseshoe_cored(
+    field: [f64; 3],
+    left: [f64; 3],
+    right: [f64; 3],
+    trailing_vortex_direction: [f64; 3],
+    gamma: f64,
+    vortex_core_radius: f64,
+    leg_core_radius: f64,
+) -> [f64; 3] {
+    let bare = calculate_induced_velocity_horseshoe(
+        field,
+        left,
+        right,
+        trailing_vortex_direction,
+        gamma,
+        vortex_core_radius,
+    );
+    if leg_core_radius <= 0.0 || !leg_core_radius.is_finite() {
+        return bare;
+    }
+    let u = trailing_vortex_direction;
+    let bound_factor = rankine_factor(
+        distance_to_leg(field, left, sub3(right, left), true),
+        leg_core_radius,
+    );
+    let left_factor = rankine_factor(distance_to_leg(field, left, u, false), leg_core_radius);
+    let right_factor = rankine_factor(distance_to_leg(field, right, u, false), leg_core_radius);
+    if bound_factor == 1.0 && left_factor == 1.0 && right_factor == 1.0 {
+        return bare;
+    }
+
+    let a = sub3(field, left);
+    let b = sub3(field, right);
+    let norm_a = norm3(a);
+    let norm_b = norm3(b);
+    let norm_a_inv = smoothed_inv(norm_a, vortex_core_radius);
+    let norm_b_inv = smoothed_inv(norm_b, vortex_core_radius);
+    let term1 =
+        (norm_a_inv + norm_b_inv) * smoothed_inv(norm_a * norm_b + dot3(a, b), vortex_core_radius);
+    let term2 = norm_a_inv * smoothed_inv(norm_a - dot3(a, u), vortex_core_radius);
+    let term3 = norm_b_inv * smoothed_inv(norm_b - dot3(b, u), vortex_core_radius);
+    let bound = scale3(cross3(a, b), term1);
+    let left_trailing = scale3(cross3(a, u), term2);
+    let right_trailing = scale3(cross3(b, u), -term3);
+
+    let constant = gamma / (4.0 * std::f64::consts::PI);
+    let mut velocity = bare;
+    for axis in 0..3 {
+        velocity[axis] += constant
+            * ((bound_factor - 1.0) * bound[axis]
+                + (left_factor - 1.0) * left_trailing[axis]
+                + (right_factor - 1.0) * right_trailing[axis]);
+    }
+    velocity
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     const TRAILING_X: [f64; 3] = [1.0, 0.0, 0.0];
+
+    #[test]
+    fn a_leg_core_bounds_the_velocity_of_a_field_point_beside_a_trailing_leg() {
+        let left = [0.0, -1.0, 0.0];
+        let right = [0.0, 1.0, 0.0];
+        let field = [5.0, 1.0, 0.001];
+        let bare = calculate_induced_velocity_horseshoe(field, left, right, TRAILING_X, 1.0, 1e-8);
+        let cored = calculate_induced_velocity_horseshoe_cored(
+            field, left, right, TRAILING_X, 1.0, 1e-8, 0.05,
+        );
+        assert!(norm3(cored) < 0.05 * norm3(bare), "{cored:?} vs {bare:?}");
+    }
+
+    #[test]
+    fn a_leg_core_changes_nothing_outside_it() {
+        let left = [0.0, -1.0, 0.0];
+        let right = [0.0, 1.0, 0.0];
+        let field = [0.7, 0.2, 0.3];
+        let bare = calculate_induced_velocity_horseshoe(field, left, right, TRAILING_X, 1.3, 1e-8);
+        let cored = calculate_induced_velocity_horseshoe_cored(
+            field, left, right, TRAILING_X, 1.3, 1e-8, 0.05,
+        );
+        assert_eq!(bare, cored);
+    }
 
     #[test]
     fn a_horseshoe_induces_no_velocity_on_a_field_point_infinitely_far_away() {

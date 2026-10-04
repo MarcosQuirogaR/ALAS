@@ -33,7 +33,7 @@
 //! # What the model is, and what it omits
 //!
 //! The solver is the incompressible, inviscid thin-surface vortex lattice.
-//! Its drag is the near-field induced (vortex) drag of the modelled surfaces
+//! Its drag is the Trefftz-plane induced drag of the modelled surfaces
 //! alone: no parasite drag, no viscous or profile drag, no wave drag, no
 //! Prandtl-Glauert or transonic correction. Mach number is recorded and used
 //! to derive true airspeed, never to scale a coefficient. Fuselage, nacelles,

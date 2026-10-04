@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-// Ported from alas/optimization/objective.py
-// Reference: alas @ rust-port-baseline.
-
 //! Recording evaluated design candidates and tracking convergence diagnostics.
 
 use std::collections::HashMap;
@@ -36,23 +33,31 @@ pub struct OptimizationHistory {
     /// Reason string for invalid designs (e.g. `"static_margin+cg_envelope"`).
     pub reject_reason: Vec<String>,
     /// Mission-sized objective value before normalization; `NaN` for a
-    /// legacy weighted-penalty evaluation.
+    /// weighted-penalty evaluation.
     #[serde(default)]
     pub objective_value: Vec<f64>,
-    /// Sized takeoff mass, kg; `NaN` for a legacy weighted-penalty evaluation.
+    /// Sized takeoff mass, kg; `NaN` for a weighted-penalty evaluation.
     #[serde(default)]
     pub takeoff_mass_kg: Vec<f64>,
-    /// Sized block fuel, kg; `NaN` for a legacy weighted-penalty evaluation.
+    /// Sized block fuel, kg; `NaN` for a weighted-penalty evaluation.
     #[serde(default)]
     pub block_fuel_kg: Vec<f64>,
-    /// Sum of normalized hard-constraint violations; `0.0` for a legacy
+    /// Sum of normalized hard-constraint violations; `0.0` for a
     /// weighted-penalty evaluation.
     #[serde(default)]
     pub hard_violation: Vec<f64>,
-    /// Sum of normalized soft-constraint violations; `0.0` for a legacy
+    /// Sum of normalized soft-constraint violations; `0.0` for a
     /// weighted-penalty evaluation.
     #[serde(default)]
     pub soft_violation: Vec<f64>,
+    /// Complete mission-profile integrations each candidate's sizing closure
+    /// flew (`SizedCandidate::work`); zero when it did not size.
+    #[serde(default)]
+    pub trip_flights: Vec<u64>,
+    /// Propulsion-deck evaluations of each candidate
+    /// (`SizedCandidate::work`); zero when it did not size.
+    #[serde(default)]
+    pub deck_evals: Vec<u64>,
 }
 
 impl OptimizationHistory {
@@ -62,7 +67,7 @@ impl OptimizationHistory {
     }
 
     /// Record a single evaluation step.
-    #[allow(clippy::too_many_arguments)]
+    #[allow(clippy::too_many_arguments)] // one positional field per history vector it appends to
     pub fn record(
         &mut self,
         dv: DesignVector,
@@ -85,21 +90,33 @@ impl OptimizationHistory {
         self.trim_ih_deg.push(trim_ih);
         self.reject_reason.push(reason.into());
         // Keeps the mission-sized vectors aligned with every other one even
-        // when the evaluation that just ran is a legacy weighted-penalty
+        // when the evaluation that just ran is a weighted-penalty
         // candidate that never computed them.
         self.objective_value.push(f64::NAN);
         self.takeoff_mass_kg.push(f64::NAN);
         self.block_fuel_kg.push(f64::NAN);
         self.hard_violation.push(0.0);
         self.soft_violation.push(0.0);
+        self.trip_flights.push(0);
+        self.deck_evals.push(0);
+    }
+
+    /// Overwrite the work counters of the last recorded evaluation.
+    pub(crate) fn record_sizing_work(&mut self, work: crate::mdo::SizingWork) {
+        if let Some(last) = self.trip_flights.last_mut() {
+            *last = work.trip_flights;
+        }
+        if let Some(last) = self.deck_evals.last_mut() {
+            *last = work.deck_evals;
+        }
     }
 
     /// Record a mission-sized evaluation step.
     ///
-    /// Pushes the same legacy fields [`Self::record`] does, then overwrites
+    /// Pushes the same fields [`Self::record`] does, then overwrites
     /// the sentinel it just pushed into the five mission-sized vectors with
     /// the real values, which is what keeps every vector's length identical
-    /// without duplicating the legacy push logic.
+    /// without duplicating the push logic.
     #[allow(clippy::too_many_arguments)] // mirrors `record`'s own arity plus the five mission-sized fields
     pub fn record_mission_sized(
         &mut self,
@@ -156,6 +173,8 @@ impl OptimizationHistory {
         self.block_fuel_kg.append(&mut other.block_fuel_kg);
         self.hard_violation.append(&mut other.hard_violation);
         self.soft_violation.append(&mut other.soft_violation);
+        self.trip_flights.append(&mut other.trip_flights);
+        self.deck_evals.append(&mut other.deck_evals);
     }
 
     /// Number of total evaluations recorded.
@@ -207,11 +226,13 @@ mod tests {
             history.block_fuel_kg.len(),
             history.hard_violation.len(),
             history.soft_violation.len(),
+            history.trip_flights.len(),
+            history.deck_evals.len(),
         ]
     }
 
     #[test]
-    fn a_legacy_record_pushes_sentinels_into_the_mission_sized_vectors() {
+    fn a_weighted_penalty_record_pushes_sentinels_into_the_mission_sized_vectors() {
         let mut history = OptimizationHistory::new();
         history.record(
             DesignVector::default(),

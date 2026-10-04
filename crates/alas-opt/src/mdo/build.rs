@@ -2,26 +2,25 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 //! The candidate's geometry, mass and trimmed aerodynamic operating point:
-//! the part of the legacy evaluation that does not depend on the takeoff
-//! mass, so it is built exactly once per candidate.
+//! the part of the evaluation that does not depend on the takeoff mass, so
+//! it is built exactly once per candidate.
 //!
-//! This reuses the same public crate calls, in the same order, as
-//! `crate::objective_evaluate`'s legacy path: geometry build, candidate
+//! This makes the same public crate calls, in the same order, as
+//! the earlier weighted-penalty objective's path: geometry build, candidate
 //! payload load case, a two-pass mass analysis with the payload layout
 //! summary, the cruise stall guard, and `stability_and_trim` followed by
 //! `AeroAnalysis::trimmed_performance`. A design vector that fails any of
 //! these is not a physically evaluable aircraft, independent of which
 //! mission quantity the search is minimising.
 
-use alas_config::design_variables::{DesignVector, SPECS};
-use alas_config::AlasConfig;
+use alas_config::design_variables::DesignVector;
+use alas_config::{AlasConfig, TailSizing};
 use alas_geom::aircraft::airplane::Airplane;
 use alas_geom::builder::AircraftBuilder;
 use alas_mass::breakdown::{
     run_mass_analysis_with_model_checked_product_with_gear, ComponentMassError, MassBreakdown,
     MassCoordinateModel, MassCoordinates, PayloadLayoutSummary,
 };
-use alas_mass::product_stations::product_mass_coordinates;
 use alas_mass::wingbox_feedback::{ReferenceWingMass, WingboxFeedback};
 use alas_payload::build::build_payload_layout;
 use alas_payload::layout::LayoutSummary;
@@ -29,6 +28,7 @@ use alas_payload::oew::oew_and_cg;
 
 use crate::objective::apply_candidate_payload_load_case;
 
+use super::tail_sizing;
 use super::types::{CandidateFailure, PayloadCapacity};
 
 /// Structural result retained between the initial mass pass and later MDA
@@ -85,6 +85,21 @@ pub(crate) fn build_geometry_with_fuselage_policy(
     x: &[f64],
     preserve_explicit_fuselage_length: bool,
 ) -> Result<(AlasConfig, DesignVector, Airplane), CandidateFailure> {
+    let (mut candidate_config, mut dv, tail_sizing) =
+        resolve_before_build(config, x, preserve_explicit_fuselage_length)?;
+    let plane = rebuild_airplane(&mut candidate_config, &mut dv, &tail_sizing)?;
+    Ok((candidate_config, dv, plane))
+}
+
+/// The steps before the candidate airplane is built: the candidate payload
+/// load case, the cabin-derived fuselage (unless preserved) and the tail
+/// sizing of a reference adaptation. Every consumer that needs the aircraft
+/// a candidate is evaluated as, without the evaluation, goes through here.
+pub(crate) fn resolve_before_build(
+    config: &AlasConfig,
+    x: &[f64],
+    preserve_explicit_fuselage_length: bool,
+) -> Result<(AlasConfig, DesignVector, TailSizing), CandidateFailure> {
     let mut dv = DesignVector::from_array(x).map_err(|_| geometry_build_failure())?;
     let mut candidate_config = config.clone();
     if apply_candidate_payload_load_case(&mut candidate_config, &dv).is_err() {
@@ -93,7 +108,23 @@ pub(crate) fn build_geometry_with_fuselage_policy(
     if !preserve_explicit_fuselage_length {
         size_fuselage_from_cabin(&candidate_config, &mut dv)?;
     }
-    let builder = AircraftBuilder::new(Some(candidate_config.geometry.clone()));
+    // A reference adaptation keeps the registered tail volume coefficients
+    // as the wing moves; see `tail_sizing`.
+    tail_sizing::apply(&mut candidate_config, &mut dv)?;
+    let tail_sizing = TailSizing::of(&candidate_config.geometry.empennage, &dv);
+    Ok((candidate_config, dv, tail_sizing))
+}
+
+/// Build the candidate airplane with the empennage scales `sizing`, written
+/// into `config` and `dv` first (`TailSizing::apply_to`), so the mass
+/// analysis, the trim and every later rebuild of the candidate see one tail.
+pub(crate) fn rebuild_airplane(
+    config: &mut AlasConfig,
+    dv: &mut DesignVector,
+    sizing: &TailSizing,
+) -> Result<Airplane, CandidateFailure> {
+    sizing.apply_to(&mut config.geometry.empennage, dv);
+    let builder = AircraftBuilder::new(Some(config.geometry.clone()));
     // The nacelles are part of the candidate, not a reporting embellishment:
     // `alas_mass::stations` places the propulsion group at the nacelle
     // mid-length when the bodies are drawn and falls back to the wing station
@@ -102,12 +133,12 @@ pub(crate) fn build_geometry_with_fuselage_policy(
     // the optimizer balance and trim a different aircraft from the one
     // `alas-pipeline`'s finalist report builds with `include_engines = true`.
     let plane = builder
-        .build(Some(&dv), true)
+        .build(Some(dv), true)
         .map_err(|_| geometry_build_failure())?;
     if plane.s_ref <= 0.0 || plane.c_ref <= 0.0 {
         return Err(geometry_build_failure());
     }
-    Ok((candidate_config, dv, plane))
+    Ok(plane)
 }
 
 /// Derive the shortest clean-sheet body that can carry the requested
@@ -128,16 +159,21 @@ pub(crate) fn size_fuselage_from_cabin(
         return Ok(());
     }
     let target = config.requirements.num_passengers.max(0);
-    let Some(spec) = SPECS.iter().find(|spec| spec.name == "fuselage_length_m") else {
-        return Err(geometry_build_failure());
-    };
-    let mut lower = spec.lower;
-    let mut upper = spec.upper;
+    // The global box for a registered or reference study, a derived or
+    // explicit clean-sheet interval otherwise.
+    let (interval_lower, interval_upper) = config.fuselage_sizing_interval_m();
+    let mut lower = interval_lower;
+    let mut upper = interval_upper;
 
+    // `build` takes `&self` and reads only `config.geometry`, which this
+    // bisection never mutates, so one builder is reused across every trial
+    // length instead of rebuilding it (and re-cloning the geometry config)
+    // on each call.
+    let builder = AircraftBuilder::new(Some(config.geometry.clone()));
     let capacity_at = |length_m: f64| -> Result<i64, CandidateFailure> {
         let mut trial = *design;
         trial.fuselage_length_m = length_m;
-        let plane = AircraftBuilder::new(Some(config.geometry.clone()))
+        let plane = builder
             .build(Some(&trial), false)
             .map_err(|_| geometry_build_failure())?;
         let layout =
@@ -160,7 +196,12 @@ pub(crate) fn size_fuselage_from_cabin(
         design.fuselage_length_m = lower;
         return Ok(());
     }
-    if capacity_at(upper)? < target {
+    // `upper` has not changed since the check above, and `capacity_at` is a
+    // pure function of its argument and the (unmutated) `design`/`config`
+    // captures, so its result is reused instead of rebuilding the same
+    // geometry and payload layout a second time.
+    let upper_capacity = capacity_at(upper)?;
+    if upper_capacity < target {
         return Err(geometry_build_failure());
     }
     // The detailed row packer is discrete: a small body-length change can
@@ -169,7 +210,7 @@ pub(crate) fn size_fuselage_from_cabin(
     // the fast bracketed solve for the usual case, but remember the capacity
     // of its selected endpoint so we never publish a vector that rebuilds one
     // seat short of the requested clean-sheet load case.
-    let mut selected_capacity = capacity_at(upper)?;
+    let mut selected_capacity = upper_capacity;
     for _ in 0..36 {
         let middle = 0.5 * (lower + upper);
         let capacity = capacity_at(middle)?;
@@ -186,16 +227,17 @@ pub(crate) fn size_fuselage_from_cabin(
     }
 
     // Rescue the rare non-monotone row-packing bracket.  Search the actual
-    // specification interval at a bounded 0.10 m resolution and select the
+    // sizing interval at a bounded 0.10 m resolution and select the
     // first sampled length that seats the complete requested load.  This is
     // deliberately a fallback after bisection so normal optimizer candidates
     // retain the cheap 36-evaluation path.  The returned length is a real
     // geometry value and is re-evaluated by the ordinary builder below.
     const DISCRETE_CAPACITY_SCAN_STEP_M: f64 = 0.10;
-    let span = spec.upper - spec.lower;
+    let span = interval_upper - interval_lower;
     let samples = (span / DISCRETE_CAPACITY_SCAN_STEP_M).ceil() as usize;
     for index in 0..=samples {
-        let length = (spec.lower + index as f64 * DISCRETE_CAPACITY_SCAN_STEP_M).min(spec.upper);
+        let length =
+            (interval_lower + index as f64 * DISCRETE_CAPACITY_SCAN_STEP_M).min(interval_upper);
         if capacity_at(length)? >= target {
             design.fuselage_length_m = length;
             return Ok(());
@@ -216,8 +258,10 @@ pub(crate) fn first_mass_pass(
     dv: &DesignVector,
     plane: &Airplane,
 ) -> Result<FirstMassPassOutput, CandidateFailure> {
+    // Both passes see one configuration, design and aircraft: one box.
+    let mut design_box = None;
     let (m1, c1, _cg1, _initial_feedback, reference, inventory) =
-        mass_analysis_with_structural_feedback(config, dv, plane, None, None)?;
+        mass_analysis_with_structural_feedback(config, dv, plane, None, None, &mut design_box)?;
     let (oew, x_oew) = oew_and_cg(&m1, &c1);
     let payload_layout =
         build_payload_layout(plane, config, oew, x_oew).map_err(|_| CandidateFailure {
@@ -242,8 +286,14 @@ pub(crate) fn first_mass_pass(
             carried_cargo_payload_kg: cargo.loaded_net_payload_t * 1_000.0,
         },
     };
-    let (masses, coords, cg, feedback, _, _) =
-        mass_analysis_with_structural_feedback(config, dv, plane, Some(&summary), reference)?;
+    let (masses, coords, cg, feedback, _, _) = mass_analysis_with_structural_feedback(
+        config,
+        dv,
+        plane,
+        Some(&summary),
+        reference,
+        &mut design_box,
+    )?;
     Ok((
         masses,
         coords,
@@ -268,16 +318,8 @@ type FirstMassPassOutput = (
     StructuralReference,
 );
 
-type StructuralMassAnalysis = (
-    MassBreakdown,
-    MassCoordinates,
-    [f64; 3],
-    WingboxFeedback,
-    Option<ReferenceWingMass>,
-    StructuralInventory,
-);
-
-include!("build_structural.rs");
+mod structural;
+pub(crate) use structural::mass_analysis_with_structural_feedback;
 
 #[cfg(test)]
 mod tests {

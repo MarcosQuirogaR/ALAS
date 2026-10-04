@@ -403,7 +403,7 @@ impl AppState {
                 self.active_preset.clear();
                 self.active_page = "inputs".to_owned();
                 self.run_options.optimize = true;
-                self.reset_design_space_bounds_to_mode();
+                self.keep_design_and_reset_bounds();
                 self.log(
                     tr("Sandbox promoted: the custom aircraft is now the guided baseline."),
                     LogKind::Info,

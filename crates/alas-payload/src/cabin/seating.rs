@@ -3,7 +3,6 @@
 
 // Ported from alas/physics/cabin_layout.py (`build_passenger_layout`, the
 // seating pass)
-// Reference: alas @ rust-port-baseline.
 
 //! Packing the seat rows into the decks, and carving out the bays that
 //! everything else is hung on.
@@ -33,11 +32,12 @@ use std::collections::VecDeque;
 
 use alas_config::{CertifiedExitLayout, PassengerCabinConfig, SeatClassConfig};
 
+use super::door_seating::place_declared_deck;
 use super::{
     abreast, abreast_and_aisles, cabin_deck_segments, ceil_div, effective_pair_capacity,
-    max_certifiable_capacity_reference_compatibility, max_certifiable_capacity_with_source_layout,
-    min_exit_pairs, seat_blocks, select_exit_type, Bay, DeckCapacities, MIN_PITCH, MIN_SEAT_WIDTH,
-    MONUMENT_LEN, SEAT_BOX_H,
+    largest_pair_rating, max_certifiable_capacity_reference_compatibility,
+    max_certifiable_capacity_with_source_layout, min_exit_pairs, seat_blocks, select_exit_type,
+    Bay, DeckCapacities, MIN_PITCH, MIN_SEAT_WIDTH, MONUMENT_LEN, SEAT_BOX_H,
 };
 use crate::geometry::CabinGeometry;
 use crate::layout::{DeckItem, ItemKind, ItemMeta, SeatMeta};
@@ -153,12 +153,7 @@ pub(super) fn place_seats(
     let segments = cabin_deck_segments(g);
     let exit_spec = select_exit_type(g.diameter_m);
     let est_cap = if let Some(source_exit_layout) = source_exit_layout {
-        source_exit_layout
-            .pairs
-            .iter()
-            .map(|pair| pair.capacity_per_pair)
-            .max()
-            .unwrap_or(1)
+        largest_pair_rating(&source_exit_layout)
     } else if product_exit_capacity {
         effective_pair_capacity(exit_spec, pax)
     } else {
@@ -173,9 +168,28 @@ pub(super) fn place_seats(
     let mut max_aisles = 1;
     let mut ci = 0usize;
 
-    for segment in &segments {
+    let total_pax: i64 = classes.iter().map(|class| class.remaining.max(0)).sum();
+    let main_deck_baggage = product_exit_capacity && crate::cargo::lacks_underfloor_hold(g);
+    for (deck_index, segment) in segments.iter().enumerate() {
         let deck = segment.deck;
         let deck_cap = deck_caps.for_deck(deck.name);
+
+        if deck_index == 0 && product_exit_capacity && !g.door_stations.is_empty() {
+            let declared = place_declared_deck(
+                g, deck, segment.x0, segment.x1, pax, classes, total_pax, aisle_w, deck_cap,
+            );
+            items.extend(declared.items);
+            bays.extend(declared.bays);
+            deck_utilization.push((deck.name, declared.utilization));
+            deck_seated.push((deck.name, declared.seated));
+            max_abreast = max_abreast.max(declared.max_abreast);
+            max_aisles = max_aisles.max(declared.max_aisles);
+            ci = classes
+                .iter()
+                .position(|class| class.remaining > 0)
+                .unwrap_or(classes.len());
+            continue;
+        }
 
         let (sim_len, sim_seated, sim_class_bays) = simulate_segment(
             g, classes, ci, aisle_w, deck_cap, segment.x0, segment.x1, deck,
@@ -208,7 +222,10 @@ pub(super) fn place_seats(
 
         let l_avail = segment.x1 - segment.x0 - 2.0 * MONUMENT_LEN;
         let seating_room = (l_avail - n_charged_bays as f64 * MONUMENT_LEN).max(0.0);
-        let pitch_stretch = if sim_len > 0.0 {
+        // A fuselage without an under-floor hold stows its baggage on the
+        // main deck, in the floor the seats leave: stretching the pitch over
+        // it would remove the compartments, so its seats keep their pitch.
+        let pitch_stretch = if sim_len > 0.0 && !main_deck_baggage {
             (seating_room / sim_len).max(1.0)
         } else {
             1.0
@@ -270,35 +287,20 @@ pub(super) fn place_seats(
             let class = &classes[ci];
             let (row_abreast, n_aisles) = abreast_and_aisles(&class.config, deck, g, aisle_w, x);
             let seats_row = row_abreast.min(class.remaining).min(deck_cap - seated_here);
-            let usable = g.usable_width(deck, x);
             let pitch = class.config.pitch_m.max(MIN_PITCH) * pitch_stretch;
-            let seat_w = class.config.width_m.max(MIN_SEAT_WIDTH);
-            let blocks = seat_blocks(row_abreast, n_aisles);
             max_abreast = max_abreast.max(row_abreast);
             max_aisles = max_aisles.max(n_aisles);
 
-            items.push(DeckItem {
-                kind: ItemKind::SeatRow,
-                deck: deck.name,
-                x: x + pitch / 2.0,
-                y: 0.0,
-                z: g.item_z(deck, x, SEAT_BOX_H),
-                length: pitch,
-                width: usable,
-                mass: seats_row as f64 * class.config.mass_per_pax_kg,
-                height: g.clamp_height(deck, x, SEAT_BOX_H),
-                label: class.name.to_owned(),
-                meta: ItemMeta::Seat(SeatMeta {
-                    cls: class.name,
-                    abreast: row_abreast,
-                    filled: seats_row,
-                    deck: deck.name,
-                    aisles: n_aisles,
-                    blocks,
-                    seat_w,
-                    aisle_w,
-                }),
-            });
+            items.push(seat_row_item(
+                g,
+                deck,
+                class,
+                x,
+                pitch,
+                seats_row,
+                (row_abreast, n_aisles),
+                aisle_w,
+            ));
 
             classes[ci].remaining -= seats_row;
             classes[ci].seated += seats_row;
@@ -306,10 +308,18 @@ pub(super) fn place_seats(
             x += pitch;
         }
 
+        // On a main deck that also stows the baggage, the aft monuments
+        // follow the last row and the floor behind them is the aft
+        // compartment's.
+        let aft_bay_x = if main_deck_baggage {
+            (x + MONUMENT_LEN / 2.0).min(segment.x1 - MONUMENT_LEN / 2.0)
+        } else {
+            segment.x1 - MONUMENT_LEN / 2.0
+        };
         bays.push(Bay::new(
-            segment.x1 - MONUMENT_LEN / 2.0,
+            aft_bay_x,
             deck.name,
-            g.usable_width(deck, segment.x1 - MONUMENT_LEN),
+            g.usable_width(deck, aft_bay_x - MONUMENT_LEN / 2.0),
         ));
         deck_seated.push((deck.name, seated_here));
     }
@@ -323,6 +333,43 @@ pub(super) fn place_seats(
         max_aisles,
         deck_caps,
         geometric_deck_caps,
+    }
+}
+
+/// One seat row of `class` starting at station `x0`, `pitch` long, with
+/// `seats` of its `abreast` places filled.
+#[allow(clippy::too_many_arguments)] // The row's frame, class and layout.
+pub(super) fn seat_row_item(
+    g: &CabinGeometry,
+    deck: &crate::geometry::DeckSpec,
+    class: &CabinClass,
+    x0: f64,
+    pitch: f64,
+    seats: i64,
+    (abreast, aisles): (i64, i64),
+    aisle_w: f64,
+) -> DeckItem {
+    DeckItem {
+        kind: ItemKind::SeatRow,
+        deck: deck.name,
+        x: x0 + pitch / 2.0,
+        y: 0.0,
+        z: g.item_z(deck, x0, SEAT_BOX_H),
+        length: pitch,
+        width: g.usable_width(deck, x0),
+        mass: seats as f64 * class.config.mass_per_pax_kg,
+        height: g.clamp_height(deck, x0, SEAT_BOX_H),
+        label: class.name.to_owned(),
+        meta: ItemMeta::Seat(SeatMeta {
+            cls: class.name,
+            abreast,
+            filled: seats,
+            deck: deck.name,
+            aisles,
+            blocks: seat_blocks(abreast, aisles),
+            seat_w: class.config.width_m.max(MIN_SEAT_WIDTH),
+            aisle_w,
+        }),
     }
 }
 

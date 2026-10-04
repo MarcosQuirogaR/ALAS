@@ -6,5 +6,15 @@
 // SceneElement's public fields are documented by their variant contracts; this keeps the graph under the repository's source-size limit.
 #![allow(missing_docs)]
 
-include!("scene_parts/part_01.rs");
-include!("scene_parts/part_02.rs");
+use crate::theme::Palette;
+mod camera;
+pub use camera::Camera3D;
+use serde::{Deserialize, Serialize};
+
+mod primitives;
+pub use primitives::*;
+mod text;
+pub use text::*;
+mod axes;
+#[cfg(test)]
+mod tests;

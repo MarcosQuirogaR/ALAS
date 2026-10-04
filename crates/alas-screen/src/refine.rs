@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-// Ported from alas/analysis/airfoil_screening.py
-// Reference: alas @ rust-port-baseline.
-
 //! Stage 2: 3-D wing re-simulation with stability and trim solve.
 
 use alas_aero::analysis::{AeroAnalysis, TrimPoint};
@@ -20,13 +17,12 @@ use crate::types::{
 
 /// Mass-coordinate path used by the 3-D screening refinement.
 ///
-/// The reference-compatible path is kept for the translated screening
-/// function and its frozen fixture. Product callers must select the
+/// The reference-compatible path replays the frozen screening fixture. Product callers must select the
 /// structural path explicitly; silently sharing a mass-coordinate choice
 /// would make a parity change alter the physical optimizer (or vice versa).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ScreeningMassModel {
-    /// Reproduce the Python screening calculation and its historical CG.
+    /// Reproduce the frozen screening fixture, including its CG.
     ReferenceCompatibility,
     /// Use the product structural wingbox centroid.
     StructuralWingbox,
@@ -57,7 +53,7 @@ pub fn refine_candidate_3d(
 }
 
 /// Re-simulate a candidate using the frozen reference-compatible screening
-/// geometry and mass coordinates. This is retained only for parity evidence;
+/// geometry and mass coordinates. It exists only for parity evidence;
 /// product callers use [`refine_candidate_3d`].
 pub fn refine_candidate_3d_reference_compatibility(
     candidate: &mut AirfoilCandidateResult,
@@ -81,7 +77,7 @@ pub fn refine_candidate_3d_reference_compatibility(
     );
 }
 
-// The translated solver inputs stay explicit at the parity/product mode seam.
+// The solver inputs stay explicit at the parity/product mode seam.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn refine_candidate_3d_with_mass_model(
     candidate: &mut AirfoilCandidateResult,
@@ -105,9 +101,9 @@ pub(crate) fn refine_candidate_3d_with_mass_model(
         cfg2.mass_model.mass_architecture =
             alas_config::MassArchitecture::LegacyReferenceCompatibleComparison;
         cfg2.mass_model.apply_architecture();
-        // The translated screening reference meshed at one panel in each
-        // direction; the product default has since moved to eight chordwise
-        // panels (see `alas_config::analysis`). Pin the frozen mesh here for
+        // The frozen screening reference meshed at one panel in each
+        // direction; the product default uses eight chordwise panels
+        // (see `alas_config::analysis`). Pin the frozen mesh here for
         // the same reason the two overrides above are pinned: a caller
         // starting from the product `AlasConfig` default must not silently
         // re-point this replay's VLM solves at a finer mesh and then call
@@ -129,7 +125,7 @@ pub(crate) fn refine_candidate_3d_with_mass_model(
         }
     };
     if matches!(geometry, ScreeningGeometry::ReferenceCompatibility) {
-        // The translated screening fixture historically normalized with the
+        // The frozen screening fixture normalizes with the
         // unfolded wing scales. Keep that choice local to the compatibility
         // path; product refinement uses the builder's projected references.
         if let Some(wing) = plane.wings.first() {
@@ -249,7 +245,7 @@ pub(crate) fn refine_candidate_3d_with_mass_model(
         return;
     }
 
-    // A finite fallback is not a closed trim.  The stability solve now
+    // A finite fallback is not a closed trim.  The stability solve
     // reports whether its 2x2 Jacobian was finite and nonsingular; screening
     // must carry that status through instead of admitting a pure-alpha or
     // singular fallback as a stable candidate.

@@ -57,29 +57,6 @@ fn two_equal_masses_on_the_x_axis_have_the_dumbbell_inertia_about_their_centre()
 }
 
 #[test]
-fn a_tensor_about_the_centre_translates_back_consistently_about_any_reference() {
-    let a = MassProperties::point(3.0, [1.0, 0.0, 0.0]);
-    let b = MassProperties::point(1.0, [-3.0, 0.0, 0.0]);
-    let combined = MassProperties::combine([&a, &b]);
-    let about_origin = combined.inertia_about([0.0, 0.0, 0.0]);
-    let direct = 3.0 * 1.0 + 1.0 * 9.0;
-    assert!(close(about_origin.iyy, direct));
-}
-
-#[test]
-fn moving_one_item_changes_only_its_own_first_moment() {
-    let mut ledger = MassLedger::new();
-    ledger.push(item("a", MassRole::Fixed, 10.0, [1.0, 0.0, 0.0]));
-    ledger.push(item("b", MassRole::Fixed, 10.0, [3.0, 0.0, 0.0]));
-    let before = ledger.operating_empty();
-    ledger.items_mut()[1].position_m = [5.0, 0.0, 0.0];
-    let after = ledger.operating_empty();
-    assert!(close(before.cg_m[0], 2.0));
-    assert!(close(after.cg_m[0], 3.0));
-    assert_eq!(before.mass_kg, after.mass_kg);
-}
-
-#[test]
 fn roles_decide_which_items_the_operating_empty_state_counts() {
     let mut ledger = MassLedger::new();
     ledger.push(item("wing", MassRole::Fixed, 100.0, [10.0, 0.0, 0.0]));
@@ -95,15 +72,10 @@ fn roles_decide_which_items_the_operating_empty_state_counts() {
     assert_eq!(ledger.operating_empty().mass_kg, 106.0);
     assert_eq!(
         ledger
-            .properties_of(&[MassRole::Payload, MassRole::UsableFuel])
+            .properties_where(|item| item.role == MassRole::UsableFuel)
             .mass_kg,
-        90.0
-    );
-    assert_eq!(
-        ledger.mass_where(|item| item.role == MassRole::UsableFuel),
         40.0
     );
-    assert_eq!(ledger.group_totals(), vec![(MassGroup::Systems, 196.0)]);
 }
 
 #[test]

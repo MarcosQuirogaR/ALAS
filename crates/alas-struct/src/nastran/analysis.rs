@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-// Ported from alas/integration/nastran_runner.py (run_nastran_analysis).
-// Reference: alas @ rust-port-baseline.
-
 //! Writing the decks, running each enabled solve, and reading what came back.
 //!
 //! [`run_nastran_analysis`] is the whole row in one call, and its contract is
@@ -44,10 +41,10 @@ use crate::mesh::{Deck, MeshNodeIndex};
 use crate::op2::{read_op2, Op2};
 
 use super::results::{
-    read_force_psd_rms, read_harmonic_response, read_modes, read_static, ModesResult,
-    NastranResults, ResultStatus, StaticResult, VibrationResult,
+    read_force_psd_rms, read_harmonic_response, read_modes, ModesResult, NastranResults,
+    ResultStatus, StaticResult, VibrationResult,
 };
-use super::run::{run_nastran_with_solver, NastranRunOutcome};
+use super::run::{run_nastran_with_memory, NastranRunOutcome};
 use super::{build_sol101_bulk, build_sol103_bulk, build_sol111_sine_bulk_msc, monitor_set};
 
 /// The mesh every solution includes, written once at the top of the work tree.
@@ -91,12 +88,21 @@ fn sol111_config(config: &StructuresConfig) -> StructuresConfig {
     config.clone()
 }
 
+const NOT_CONFIGURED_MESSAGE: &str = "NASTRAN executable not configured (Setup > External Tools); \
+     reporting analytical estimates only";
+
+/// Whether `message` is the "no solver configured" outcome: an optional tool
+/// that is simply absent, so the solve never ran and analytical estimates are
+/// all the report has. It is distinct from a configured solver that is missing
+/// or fails, which is a broken installation or a failed solve.
+pub fn is_solver_not_configured(message: &str) -> bool {
+    message == NOT_CONFIGURED_MESSAGE
+}
+
 /// Why a solve produced nothing, when the reason is not a run outcome.
 fn missing_executable_message(configured: &str) -> String {
     if configured.trim().is_empty() {
-        "NASTRAN executable not configured (Setup > External Tools); \
-         reporting analytical estimates only"
-            .to_owned()
+        NOT_CONFIGURED_MESSAGE.to_owned()
     } else if Path::new(configured).is_dir() {
         format!("NASTRAN installation incomplete at {configured}: executable launcher is missing")
     } else {
@@ -196,14 +202,20 @@ pub fn run_nastran_analysis(
         .map(|(&solution, path)| {
             (
                 solution,
-                run_nastran_with_solver(path, exe, solver_override, config.timeout_s),
+                run_nastran_with_memory(
+                    path,
+                    exe,
+                    solver_override,
+                    config.timeout_s,
+                    config.nastran_memory_mb,
+                ),
             )
         })
         .collect();
 
     if let Some(path) = written.get(&Solution::Sol101) {
         results.static_solve = match solved(path, outcomes.get(&Solution::Sol101)) {
-            Solved::Result(op2) => read_static(&op2, node_index, &cases),
+            Solved::Result(op2) => super::read_static_product(&op2, deck, node_index, &cases),
             Solved::Failed(detail) => StaticResult {
                 status: ResultStatus::Error,
                 error: Some(detail),
@@ -223,35 +235,29 @@ pub fn run_nastran_analysis(
         };
     }
 
-    let wants_vibration = config.run_sol_vibration_sine || config.run_sol_vibration_random;
-    if wants_vibration {
-        let sine = read_if_solved(
-            written.get(&Solution::Sol111Sine),
-            &outcomes,
-            Solution::Sol111Sine,
-        );
-        results.vibration = if let Some(sine) = sine {
-            let monitors = monitor_set(node_index);
-            let mut vibration = read_harmonic_response(&sine, monitors);
-            if config.run_sol_vibration_random {
-                match read_force_psd_rms(&sine, monitors, config.random_force_psd_n2_per_hz) {
-                    Ok(rms) => vibration.nastran_rms_m = rms,
-                    Err(detail) => vibration.random_response_error = Some(detail),
+    // A deck that could not be written already carries its reason from the
+    // write loop above, so only a written deck replaces the vibration result.
+    if let Some(path) = written.get(&Solution::Sol111Sine) {
+        results.vibration = match solved(path, outcomes.get(&Solution::Sol111Sine)) {
+            Solved::Result(sine) => {
+                let monitors = monitor_set(node_index);
+                let mut vibration = read_harmonic_response(&sine, monitors);
+                if config.run_sol_vibration_random {
+                    match read_force_psd_rms(&sine, monitors, config.random_force_psd_n2_per_hz) {
+                        Ok(rms) => vibration.nastran_rms_m = rms,
+                        Err(detail) => vibration.random_response_error = Some(detail),
+                    }
+                } else {
+                    vibration.random_response_error =
+                        Some(RANDOM_RESPONSE_NOT_REQUESTED.to_owned());
                 }
-            } else {
-                vibration.random_response_error = Some(RANDOM_RESPONSE_NOT_REQUESTED.to_owned());
+                vibration
             }
-            vibration
-        } else {
-            let mut details = Vec::new();
-            if let Some(outcome) = outcomes.get(&Solution::Sol111Sine) {
-                details.push(format!("SOL 111 sine: {}", outcome.detail));
-            }
-            VibrationResult {
+            Solved::Failed(detail) => VibrationResult {
                 status: ResultStatus::Error,
-                error: Some(details.join("\n")),
+                error: Some(format!("SOL 111 sine: {detail}")),
                 ..VibrationResult::default()
-            }
+            },
         };
     }
 
@@ -276,20 +282,6 @@ fn solved(bdf_path: &Path, outcome: Option<&NastranRunOutcome>) -> Solved {
         Ok(op2) => Solved::Result(Box::new(op2)),
         Err(detail) => Solved::Failed(detail),
     }
-}
-
-/// The same, for the two vibration solves, where an absent one is not an error
-/// on its own: the other may still have produced something.
-fn read_if_solved(
-    bdf_path: Option<&PathBuf>,
-    outcomes: &BTreeMap<Solution, NastranRunOutcome>,
-    solution: Solution,
-) -> Option<Op2> {
-    let path = bdf_path?;
-    if !outcomes.get(&solution)?.ok {
-        return None;
-    }
-    read_result_file(path).ok()
 }
 
 fn read_result_file(bdf_path: &Path) -> Result<Op2, String> {
@@ -399,11 +391,17 @@ mod tests {
     /// Write the decks without running anything, and return the work directory.
     fn write_only(label: &str, config: &StructuresConfig) -> (TempDir, NastranResults) {
         let work = TempDir::new(label);
+        let mut config = config.clone();
+        config.nastran95_dir_path = work
+            .path
+            .join("missing-nastran95")
+            .to_string_lossy()
+            .into_owned();
         let deck = Deck::new();
         let results = run_nastran_analysis(
             &deck,
             &node_index(),
-            config,
+            &config,
             &DesignRequirements::default(),
             &work.path,
             None,
@@ -523,6 +521,84 @@ mod tests {
         assert!(error.contains("SOL 111 sine:"), "{error}");
         assert!(results.vibration.nastran_rms_m.is_empty());
         assert!(results.vibration.miles_rms_m.is_empty());
+    }
+
+    /// A stand-in solver that exits cleanly after writing a print file with no
+    /// fatal message beside the deck it was given, and no `.op2`: the run
+    /// outcome is `ok`, yet there is nothing to read.
+    fn solver_that_writes_no_op2(directory: &Path) -> PathBuf {
+        #[cfg(windows)]
+        {
+            let path = directory.join("fake_nastran.cmd");
+            std::fs::write(
+                &path,
+                "@echo off\r\n>\"%~n1.f06\" echo * * * END OF JOB * * *\r\nexit /b 0\r\n",
+            )
+            .unwrap();
+            path
+        }
+        #[cfg(not(windows))]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let path = directory.join("fake_nastran.sh");
+            std::fs::write(
+                &path,
+                "#!/bin/sh\nprintf '%s\\n' '* * * END OF JOB * * *' > \"${1%.bdf}.f06\"\nexit 0\n",
+            )
+            .unwrap();
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+            path
+        }
+    }
+
+    #[test]
+    fn a_clean_vibration_solve_that_left_no_result_file_says_so_instead_of_ok() {
+        // The vibration solve is judged like the others: a clean exit with no
+        // `.op2` carries the missing file as its reason, not the run
+        // outcome's own "ok".
+        let config = config(true, [false, false, true, false], "configured.exe");
+        let work = TempDir::new("vibration_no_op2");
+        let solver_dir = TempDir::new("vibration_no_op2_solver");
+        let solver = solver_that_writes_no_op2(&solver_dir.path);
+
+        let results = run_nastran_analysis(
+            &Deck::new(),
+            &node_index(),
+            &config,
+            &DesignRequirements::default(),
+            &work.path,
+            Some(&solver),
+        );
+
+        assert!(work.path.join("sol111_sine/wing_sol111_sine.f06").exists());
+        assert_eq!(results.vibration.status, ResultStatus::Error);
+        let error = results.vibration.error.clone().unwrap();
+        assert!(error.starts_with("SOL 111 sine: "), "{error}");
+        assert!(error.contains("no .op2 was produced"), "{error}");
+    }
+
+    #[test]
+    fn an_unwritten_vibration_deck_keeps_its_write_error_after_the_solves() {
+        // A file where the deck directory belongs makes the deck unwritable.
+        let config = config(true, [false, false, true, false], "configured.exe");
+        let work = TempDir::new("vibration_unwritten");
+        std::fs::write(work.path.join("sol111_sine"), "not a directory").unwrap();
+
+        let results = run_nastran_analysis(
+            &Deck::new(),
+            &node_index(),
+            &config,
+            &DesignRequirements::default(),
+            &work.path,
+            Some(Path::new("no_such_nastran_executable_anywhere")),
+        );
+
+        assert_eq!(results.vibration.status, ResultStatus::Error);
+        let error = results.vibration.error.clone().unwrap();
+        assert!(
+            error.starts_with("cannot write the sol111_sine deck"),
+            "{error}"
+        );
     }
 
     #[test]

@@ -7,13 +7,51 @@ use super::{
     close_fullscreen_preview, fullscreen_camera_key, fullscreen_view_key, handle_camera_response,
     preview_scene_for_tab, show_aircraft_viewer_controls, show_cabin_legend,
 };
-use alas_report::scene::Scene;
+use alas_report::scene::{Camera3D, Scene};
 use alas_viz::SceneView;
-use egui::{vec2, Align, Color32, Frame, Key, Layout, RichText, ViewportBuilder};
+use egui::{vec2, Align, Color32, Frame, Id, Key, Layout, RichText, ViewportBuilder};
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
+use std::sync::Arc;
 
 use crate::native_viewport::show_native_viewport;
 use crate::state::{AppState, PreviewTab};
 use crate::views::tr;
+
+/// One built scene, kept alive across idle repaints.
+///
+/// A detached preview window redraws every frame (cursor blink, focus,
+/// unrelated animation) even though the aircraft is rebuilt from its
+/// configuration only when the camera, tab, theme, language or geometry
+/// actually changes. Rebuilding on every repaint reparses the typed
+/// configuration and remeshes the aircraft for no visible change; caching
+/// by that identity turns an idle frame into one `Arc` clone.
+#[derive(Clone)]
+struct CachedFullscreenScene {
+    key: u64,
+    scene: Option<Arc<Scene>>,
+}
+
+/// Identity of the rendered preview: the config/theme revision, the
+/// fullscreen camera, which figure is shown, and the active language (baked
+/// into figure titles). The exterior's model cache is camera-independent.
+fn fullscreen_scene_key(
+    revision: u64,
+    camera: Camera3D,
+    figure_id: &str,
+    tab: PreviewTab,
+    language: &str,
+) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    revision.hash(&mut hasher);
+    camera.elev_deg.to_bits().hash(&mut hasher);
+    camera.azim_deg.to_bits().hash(&mut hasher);
+    camera.zoom.to_bits().hash(&mut hasher);
+    figure_id.hash(&mut hasher);
+    (tab as u8).hash(&mut hasher);
+    language.hash(&mut hasher);
+    hasher.finish()
+}
 
 /// Render the detached guided 3-D preview in a native viewport.
 pub(super) fn show_fullscreen_preview(
@@ -26,15 +64,54 @@ pub(super) fn show_fullscreen_preview(
 ) {
     let fullscreen_view = fullscreen_view_key(view_key);
     let fullscreen_camera = fullscreen_camera_key(camera_id);
-    let camera = (*state.preview_camera_mut(&fullscreen_camera)).into();
+    let camera: Camera3D = (*state.preview_camera_mut(&fullscreen_camera)).into();
     let figure_id = match state.preview_tab {
         PreviewTab::Exterior => state.selected_preview_id.as_str(),
         PreviewTab::Cabin => "cabin_3d",
+    }
+    .to_owned();
+    let language = alas_i18n::get_language();
+    let scene_key = fullscreen_scene_key(
+        state.preview_scene_revision,
+        camera,
+        &figure_id,
+        state.preview_tab,
+        &language,
+    );
+    let cache_id = Id::new(("fullscreen_preview_scene_cache", view_key));
+    let cached = ctx.data(|data| data.get_temp::<CachedFullscreenScene>(cache_id));
+    let fullscreen_scene = match cached {
+        Some(cached) if cached.key == scene_key => cached.scene,
+        _ => {
+            let built = match state.preview_tab {
+                PreviewTab::Exterior => {
+                    crate::sandbox::scene::build_live_preview_scene(state, camera)
+                }
+                PreviewTab::Cabin => {
+                    crate::scene::build_page_preview_with_camera(state, &figure_id, Some(camera))
+                }
+            }
+            .map(Arc::new);
+            ctx.data_mut(|data| {
+                data.insert_temp(
+                    cache_id,
+                    CachedFullscreenScene {
+                        key: scene_key,
+                        scene: built.clone(),
+                    },
+                )
+            });
+            built
+        }
     };
-    let fullscreen_scene =
-        crate::scene::build_page_preview_with_camera(state, figure_id, Some(camera));
-    let active_scene = fullscreen_scene.as_ref().unwrap_or(scene).clone();
-    let active_scene = preview_scene_for_tab(active_scene, state.preview_tab);
+    let base_scene: &Scene = fullscreen_scene.as_deref().unwrap_or(scene);
+    let cabin_scene;
+    let active_scene: &Scene = if state.preview_tab == PreviewTab::Cabin {
+        cabin_scene = preview_scene_for_tab(base_scene.clone(), state.preview_tab);
+        &cabin_scene
+    } else {
+        base_scene
+    };
     let window_title = tr("3D Live Preview");
     let response = show_native_viewport(
         ctx,
@@ -69,16 +146,14 @@ pub(super) fn show_fullscreen_preview(
                     let available = vec2(available.x.max(320.0), available.y.max(180.0));
                     let scene_revision = state.preview_scene_revision;
                     let response = ui.add(
-                        SceneView::new(
-                            &active_scene,
-                            state.view_state_mut(fullscreen_view.clone()),
-                        )
-                        .desired_size(available)
-                        .orbit_only()
-                        .raster_scale(1.5)
-                        .show_toolbar(false)
-                        .cache_key(&fullscreen_view)
-                        .cache_revision(scene_revision),
+                        SceneView::new(active_scene, state.view_state_mut(fullscreen_view.clone()))
+                            .desired_size(available)
+                            .orbit_only()
+                            .vector_overlay(true)
+                            .raster_scale(1.5)
+                            .show_toolbar(false)
+                            .cache_key(&fullscreen_view)
+                            .cache_revision(scene_revision),
                     );
                     let response =
                         response.on_hover_text(tr("Drag to orbit the camera; scroll to zoom"));

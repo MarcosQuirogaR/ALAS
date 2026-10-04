@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/reporting/visualization.py:figure_control_surfaces (L1735-1991)
-// Reference: alas @ rust-port-baseline.
 
 use super::geometry::{
     cs_surface_area, cs_surface_patch, draw_planform_fill, draw_top_patch, fmt_volume_coef,
@@ -18,6 +17,17 @@ use alas_config::AlasConfig;
 use alas_geom::aircraft::wing::Wing;
 use alas_pipeline::full_analysis::AnalysisReport;
 use alas_stab::trim::tail_volume_coefficients;
+
+/// Tailplane volume-coefficient band the figure annotates `Vh` against
+/// (engineering estimate for jet transports; Raymer, *Aircraft Design: A
+/// Conceptual Approach*, AIAA, chapter 6 quotes about 1.0). It is a
+/// reading aid only; no search or feasibility check uses it.
+const HSTAB_VOLUME_BAND: (f64, f64) = (0.75, 1.25);
+
+/// Fin volume-coefficient band the figure annotates `Vv` against
+/// (engineering estimate for jet transports; Raymer, chapter 6 quotes
+/// about 0.09). A reading aid only.
+const VSTAB_VOLUME_BAND: (f64, f64) = (0.06, 0.13);
 
 /// Generate the control-surface layout and tail-volume sizing figure.
 pub fn figure_control_surfaces(
@@ -37,7 +47,6 @@ pub fn figure_control_surfaces(
     }
 
     let cs = &config.control_surfaces;
-    let w_opt = &config.optimizer.weights;
     let wing = &plane.wings[0];
     let hstab = plane.wings.get(1);
     let vstab = plane.wings.get(2);
@@ -166,18 +175,8 @@ pub fn figure_control_surfaces(
 
     let (vh, vv) = tail_volume_coefficients(plane);
     let info = [
-        fmt_volume_coef(
-            "Vh",
-            vh,
-            w_opt.min_hstab_volume_coef,
-            w_opt.max_hstab_volume_coef,
-        ),
-        fmt_volume_coef(
-            "Vv",
-            vv,
-            w_opt.min_vstab_volume_coef,
-            w_opt.max_vstab_volume_coef,
-        ),
+        fmt_volume_coef("Vh", vh, HSTAB_VOLUME_BAND.0, HSTAB_VOLUME_BAND.1),
+        fmt_volume_coef("Vv", vv, VSTAB_VOLUME_BAND.0, VSTAB_VOLUME_BAND.1),
     ];
     draw_info_text(&mut scene, &info, [60.0, 630.0], pal);
 

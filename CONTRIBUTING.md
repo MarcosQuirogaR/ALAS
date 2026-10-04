@@ -35,8 +35,25 @@ tests that use them are marked `#[ignore]` and run with
 
 ## Before you push
 
-1. `cargo xtask gate` passes. It runs formatting, lints, tests and the
-   repository checks described below, and it is what the pre-commit hook runs.
+1. The gate passes. It has three tiers:
+   - `cargo xtask gate --quick` on every change: the repository checks and
+     formatting, then lints and the fast tests of only the packages your
+     changes affect (and their dependents). The pre-commit hook runs this.
+     `--base <ref>` sets what "changed" is measured against (default
+     `origin/dev`).
+   - `cargo xtask gate` at phase integration and in CI: the repository checks,
+     formatting, lints, and every test in the workspace.
+   - `cargo xtask gate --slow`: only the slow tests, on their own.
+
+   The tiers need [cargo-nextest](https://nexte.st):
+   `cargo install cargo-nextest --locked`. `cargo nextest run` runs the fast
+   tier and `cargo nextest run --profile full` everything; the split is defined
+   in `.config/nextest.toml`. Without nextest the gate still works but falls
+   back to `cargo test` and cannot separate the slow tests.
+
+   Doctests are not used: the gate does not run them, and the repository checks
+   reject a doc example that rustdoc would run. Put the test in a unit test and
+   mark illustrative snippets `text` or `ignore`.
 2. If you touched anything numerical, say in the commit body **what changed in
    the output and why**. "No change expected" is a valid and useful claim; say
    it so a reviewer knows to verify it.
@@ -118,7 +135,7 @@ counter += 1;
 
 Specifically, **do not** write:
 
-- **Dates, version numbers, or session references.** `git log` and the commit
+- **Dates, version numbers, or references to tasks or working sessions.** `git log` and the commit
   message already record when something changed and why. A comment saying
   "previously this did X" becomes unreadable the moment someone reads the file
   without that history in front of them.
@@ -156,7 +173,6 @@ lines:
 ```rust
 // Ported from aerosandbox/atmosphere/_isa_atmo_functions.py
 // Upstream: AeroSandbox 4.2.8, MIT.
-// Reference: alas @ rust-port-baseline.
 ```
 
 This is what makes `THIRD-PARTY-NOTICES.md` auditable rather than aspirational.
@@ -180,8 +196,8 @@ provenance block is honest.
   is the policy, not a suggestion.
 - **No panics in library code.** `unwrap` and `expect` are denied outside
   tests. An analysis that cannot produce a number reports that through the
-  stage status contract in `alas-types`; a genuine invariant violation returns
-  an error and lets the caller decide.
+  typed status of that analysis (for example `NotRun` or `Error`); a genuine
+  invariant violation returns an error and lets the caller decide.
 - **Every `#[allow]` carries a comment saying why**, on the line above. An
   unexplained allow is an unreviewed decision.
 - **No module over 500 assembled production lines**, tests excluded. This is
@@ -265,13 +281,7 @@ caught it.
 
 ---
 
-## On tooling assistance
-
-Parts of this codebase are written with the help of AI coding tools. This is
-disclosed here and in any academic work that reports on this program.
-Contributors remain responsible for reviewing and validating what they
-submit, regardless of how it was drafted, and the conventions above apply
-equally to hand-written and generated code.
+## Numerical evidence
 
 What is not negotiable is the numerical evidence. No module is trusted because
 it looks right. It is trusted because it agrees with a reference to a stated

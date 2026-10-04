@@ -2,16 +2,12 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/config/materials.py
-// Reference: alas @ rust-port-baseline.
 
 //! Structural materials the wingbox sizing selects from by name.
 //!
-//! The table itself is not Rust source. `alas/config/materials.py` is a
-//! sequence of constructor calls registering immutable records of published
-//! material properties: data written as code because a constructor is the
-//! shortest thing to hand in Python, not because anything about it is
-//! executable. It lives here as `data/materials.json`, embedded in the crate
-//! and parsed the first time it is asked for, which keeps a table reviewable
+//! The table itself is not Rust source: it is a sequence of immutable
+//! records of published material properties. It lives here as
+//! `data/materials.json`, embedded in the crate and parsed the first time it is asked for, which keeps a table reviewable
 //! as a table and makes a corrected figure a one-line data change.
 //!
 //! That embedded copy is deliberately distinct from
@@ -23,6 +19,36 @@
 //! compression pair, which is the same simplification the reference scripts
 //! made. It is appropriate for a strength-based preliminary sizing pass and
 //! is not a certified stress analysis.
+//!
+//! `CFRP QI` is the product's wing-cover laminate proxy and carries a
+//! damage-tolerant design value, not a coupon strength: 220 MPa at its 55 GPa
+//! modulus is an ultimate strain of 0.40 %. Transport composite covers are
+//! designed to an ultimate strain of about 0.3-0.4 % (3,000-4,000 microstrain)
+//! set by compression after barely visible impact damage and open holes
+//! (M. C. Y. Niu, *Composite Airframe Structures*, Conmilit Press, 1992,
+//! design allowables; the damage-tolerance basis is that of CMH-17-3G,
+//! *Composite Materials Handbook* Vol. 3, SAE International, 2012). The
+//! upper end is taken. The former 450 MPa was a pristine value, 0.82 %
+//! strain, which sized the A220-300 and B787-9 wing boxes at about half the
+//! FLOPS wing. The reference implementation's table keeps 450 MPa; the
+//! divergence is declared in `tests/parity_databases.rs`. No frozen parity
+//! fixture sizes with this material (they use `CFRP UD`), so no fixture moves.
+//!
+//! `CFRP UD` keeps the reference 900 MPa for frozen sizing, analysis and mesh
+//! fixtures. It is a coupon tension figure. Product structural assessment
+//! caps all CFRP proxies at 0.40% ultimate strain in
+//! `alas_struct::allowables::bending_allowable_pa`, so the AVE/default cap
+//! selection uses 480 MPa while the database and reference fixtures stay fixed.
+//!
+//! `CFRP 60/30/10` is a declared balanced cap laminate: 60% 0, 30% +/-45,
+//! 10% 90 degree plies. Classical lamination theory gives longitudinal
+//! E = 91.595391044 GPa from the generic graphite/epoxy elastic constants in
+//! NASA-TM-104055 (1991), Table 1 (AS4/3501-6 lamina). See the declaration in
+//! `crate::preset_structures::cap_material_source`. The 0.004 design strain
+//! is a preliminary damage-tolerance assumption, not measured allowability.
+//! Density remains the 1580 kg/m^3 cover-proxy class assumption. Only axial
+//! and bending properties are represented: isotropic g() overstates this
+//! laminate's actual shear modulus and must not validate torsion or buckling.
 
 use std::sync::OnceLock;
 
@@ -50,7 +76,7 @@ pub struct UnknownMaterial {
 pub struct MaterialSpec {
     /// Display name, and the key the configuration selects it by.
     pub name: String,
-    /// `metallic` or `composite`. Informational: nothing branches on it.
+    /// `metallic` or `composite`; identifies composite proxy qualifications.
     pub category: String,
     /// Young's modulus, in pascals.
     pub e_pa: f64,
@@ -142,7 +168,7 @@ mod tests {
 
     #[test]
     fn the_embedded_table_parses_into_the_materials_the_reference_registers() {
-        assert_eq!(database().len(), 11);
+        assert_eq!(database().len(), 12);
         assert!(get("Al 7075-T6").is_ok());
     }
 
@@ -189,5 +215,30 @@ mod tests {
                 material.name
             );
         }
+    }
+
+    #[test]
+    fn longitudinal_cap_proxy_follows_sourced_clt_and_design_strain() {
+        // NASA-TM-104055 Table 1: AS4/3501-6 lamina. NASA-RP-1351
+        // Sec. V-B: Ny=0 extensional modulus of a balanced laminate.
+        let (e1, e2, g12, nu12) = (135.0e9, 11.0e9, 5.8e9, 0.301);
+        let denominator = 1.0 - nu12 * nu12 * e2 / e1;
+        let (q11, q22, q12, q66) = (
+            e1 / denominator,
+            e2 / denominator,
+            nu12 * e2 / denominator,
+            g12,
+        );
+        let q45 = 0.25 * (q11 + q22) + 0.5 * (q12 + 2.0 * q66);
+        let q45_12 = 0.25 * (q11 + q22 - 4.0 * q66) + 0.5 * q12;
+        let a11 = 0.6 * q11 + 0.3 * q45 + 0.1 * q22;
+        let a22 = 0.6 * q22 + 0.3 * q45 + 0.1 * q11;
+        let a12 = 0.7 * q12 + 0.3 * q45_12;
+        let ex = a11 - a12 * a12 / a22;
+        let cap = get("CFRP 60/30/10").unwrap();
+        assert!((cap.e_pa / ex - 1.0).abs() < 1.0e-10);
+        assert!((cap.nu - a12 / a22).abs() < 1.0e-9);
+        assert!((cap.f_allow_pa / cap.e_pa - 0.004).abs() < 1.0e-14);
+        assert!(cap.e_pa > get("CFRP QI").unwrap().e_pa);
     }
 }

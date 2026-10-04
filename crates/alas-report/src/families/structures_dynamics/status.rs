@@ -4,7 +4,6 @@
 // Ported from alas/reporting/visualization.py: figure_status_message
 // (L650-692), _structures_unavailable_message (L5565-5576), plt_cm_tab10
 // (L5815-5816).
-// Reference: alas @ rust-port-baseline.
 
 //! The shared "why is this figure blank" note, the availability check every
 //! figure in this family runs first, and the two small color tables they

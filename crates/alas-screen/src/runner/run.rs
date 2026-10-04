@@ -1,0 +1,390 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (C) 2026 Marcos Quiroga Rodriguez
+
+//! The staged sweep: 2-D surrogate scoring, 3-D trim re-simulation and MSES verification.
+
+use std::collections::{HashMap, HashSet};
+use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::thread;
+
+use alas_aero::neuralfoil::ModelSize;
+use alas_config::design_variables::DesignVector;
+use alas_config::AlasConfig;
+use alas_geom::aircraft::spacing::linspace;
+use alas_geom::airfoil_library::AirfoilLibrary;
+
+use super::blend::blend_scores;
+use super::filter::filter_names;
+use super::stage2;
+use super::workers::{mark_mses_not_configured, run_bounded_indexed};
+use crate::refine::{refine_candidate_3d_with_mass_model, ScreeningMassModel};
+use crate::score::{
+    cruise_condition_with_geometry, score_candidate_with_geometry, ScreeningGeometry,
+};
+use crate::types::{
+    AirfoilCandidateResult, AirfoilScreeningOptions, AirfoilScreeningResult, ScreeningFlowRegime,
+    REFERENCE_AIRFOILS, TRANSONIC_MACH_CAVEAT,
+};
+use crate::verify_mses::verify_candidate_mses;
+
+/// MSES runs are external processes; four workers keep the desktop responsive
+/// without creating an unbounded process fan-out on a many-core workstation.
+const MAX_MSES_WORKERS: usize = 4;
+
+// The private dispatcher carries the explicit parity/product mode seam.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn run_airfoil_screening_with_mass_model(
+    config: &AlasConfig,
+    dv: Option<&DesignVector>,
+    options: &AirfoilScreeningOptions,
+    mses_dir: Option<&Path>,
+    mut progress_callback: Option<&mut dyn FnMut(&str)>,
+    should_cancel: Option<&(dyn Fn() -> bool + Sync)>,
+    mass_model: ScreeningMassModel,
+) -> Result<AirfoilScreeningResult, String> {
+    if !options.alpha_min_deg.is_finite()
+        || !options.alpha_max_deg.is_finite()
+        || !options.alpha_step_deg.is_finite()
+        || options.alpha_step_deg <= 0.0
+        || options.alpha_max_deg < options.alpha_min_deg
+    {
+        return Err(
+            "screening alpha sweep requires finite ordered bounds and a positive step".to_owned(),
+        );
+    }
+    let geometry = match mass_model {
+        ScreeningMassModel::ReferenceCompatibility => ScreeningGeometry::ReferenceCompatibility,
+        ScreeningMassModel::StructuralWingbox => ScreeningGeometry::Product,
+    };
+    let dv_val = dv.copied().unwrap_or_default();
+    let (mach, reynolds, level_flight_cl, altitude) =
+        cruise_condition_with_geometry(config, &dv_val, geometry)?;
+    let section_mach = mach * dv_val.sweep_deg.to_radians().cos();
+    let cl_target = options.target_cl.unwrap_or(level_flight_cl);
+    if !cl_target.is_finite() || cl_target <= 0.0 {
+        return Err("screening target CL must be finite and positive".to_owned());
+    }
+    let flow_regime = ScreeningFlowRegime::from_section_mach(section_mach);
+    let (ld_weight, fuel_weight, robustness_weight) = options.objective.weights((
+        options.ld_weight,
+        options.fuel_weight,
+        options.robustness_weight,
+    ));
+
+    let all_names = AirfoilLibrary::get_available_airfoils();
+    let names = filter_names(&all_names, &options.name_filter);
+    let n_total = names.len();
+
+    let n_alpha = (((options.alpha_max_deg - options.alpha_min_deg)
+        / options.alpha_step_deg.max(0.1))
+    .round() as usize)
+        + 1;
+    let alphas_deg = linspace(options.alpha_min_deg, options.alpha_max_deg, n_alpha);
+
+    let model_size = ModelSize::from_name(&options.model_size).unwrap_or(ModelSize::Large);
+
+    let mut results: Vec<AirfoilCandidateResult> = Vec::new();
+    let mut errors: Vec<HashMap<String, String>> = Vec::new();
+    let mut cancelled = false;
+
+    // Stage 1: 2-D screening. Scoring one candidate touches nothing shared,
+    // so the sweep runs one candidate per core. The coordinator alone reports
+    // progress, and the results come back in library order by index, so the
+    // ranking does not depend on completion timing.
+    let stage1_workers = thread::available_parallelism().map_or(4, |n| n.get());
+    let mut n_completed = 0usize;
+    let mut n_ok = 0usize;
+    let mut n_err = 0usize;
+    let scored = run_bounded_indexed(
+        n_total,
+        stage1_workers,
+        Arc::new(AtomicBool::new(false)),
+        should_cancel,
+        |index| {
+            score_candidate_with_geometry(
+                &names[index],
+                config,
+                &dv_val,
+                section_mach,
+                reynolds,
+                cl_target,
+                config.mass_model.fuel_tank_usable_fraction,
+                &alphas_deg,
+                model_size,
+                options.min_tc,
+                options.max_tc,
+                options.cl_band,
+                geometry,
+            )
+        },
+        |_, cand| {
+            n_completed += 1;
+            if cand.status == "ok" {
+                n_ok += 1;
+            } else {
+                n_err += 1;
+            }
+            if let Some(cb) = progress_callback.as_mut() {
+                if n_completed % 50 == 0 || n_completed == n_total {
+                    let msg = format!(
+                        "Stage 1 (2-D): {n_completed}/{n_total} evaluated ({n_ok} ok, {n_err} errors)"
+                    );
+                    cb(&msg);
+                }
+            }
+        },
+    );
+    if scored.len() < n_total {
+        cancelled = true;
+    }
+    for (index, cand) in scored {
+        if cand.status == "ok" {
+            results.push(cand);
+        } else {
+            let mut err_map = HashMap::new();
+            err_map.insert("name".to_string(), names[index].clone());
+            err_map.insert(
+                "error".to_string(),
+                cand.error.unwrap_or_else(|| "unknown error".to_string()),
+            );
+            errors.push(err_map);
+        }
+    }
+
+    let n_ok_stage1 = results.len();
+
+    if !results.is_empty() {
+        blend_scores(
+            &mut results,
+            ld_weight,
+            fuel_weight,
+            robustness_weight,
+            |r| r.l_over_d.unwrap_or(0.0),
+            false,
+        );
+        results.sort_by(|a, b| b.score.unwrap_or(0.0).total_cmp(&a.score.unwrap_or(0.0)));
+    }
+
+    let reference_set: HashSet<&str> = REFERENCE_AIRFOILS.iter().copied().collect();
+    for r in &mut results {
+        if reference_set.contains(r.name.as_str()) {
+            r.is_reference = true;
+        }
+    }
+
+    // Stage 2: 3-D refinement
+    let mut n_refined = 0;
+    if options.refine_3d && !results.is_empty() && options.refine_top_n > 0 && !cancelled {
+        let top_n_limit = options.refine_top_n.min(results.len());
+        let shortlist_indices: Vec<usize> = (0..top_n_limit)
+            .chain((top_n_limit..results.len()).filter(|&index| results[index].is_reference))
+            .collect();
+
+        let refine = |candidate: &mut AirfoilCandidateResult| {
+            refine_candidate_3d_with_mass_model(
+                candidate,
+                config,
+                &dv_val,
+                mach,
+                altitude,
+                cl_target,
+                options.min_static_margin,
+                mass_model,
+                geometry,
+            )
+        };
+        let progress = &mut progress_callback;
+        cancelled |= stage2::refine_shortlist(
+            &mut results,
+            &shortlist_indices,
+            refine,
+            progress,
+            should_cancel,
+        );
+        n_refined = shortlist_indices
+            .iter()
+            .filter(|&&i| results[i].refined)
+            .count();
+
+        let mut refined_candidates: Vec<AirfoilCandidateResult> =
+            results.iter().filter(|r| r.refined).cloned().collect();
+
+        if !refined_candidates.is_empty() {
+            blend_scores(
+                &mut refined_candidates,
+                ld_weight,
+                fuel_weight,
+                robustness_weight,
+                |r| r.l_over_d_3d.unwrap_or(0.0),
+                true,
+            );
+
+            let refined_map: HashMap<String, f64> = refined_candidates
+                .into_iter()
+                .filter_map(|r| r.score_3d.map(|s| (r.name, s)))
+                .collect();
+
+            for r in &mut results {
+                if let Some(&s3d) = refined_map.get(&r.name) {
+                    r.score_3d = Some(s3d);
+                }
+            }
+        }
+
+        results.sort_by(|a, b| {
+            let key_a = (
+                a.refined,
+                a.score_3d.unwrap_or(-1.0),
+                a.score.unwrap_or(0.0),
+            );
+            let key_b = (
+                b.refined,
+                b.score_3d.unwrap_or(-1.0),
+                b.score.unwrap_or(0.0),
+            );
+            key_b
+                .partial_cmp(&key_a)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+    }
+
+    // Stage 3: MSES verification
+    let mut n_mses_verified = 0;
+    if options.verify_mses && !results.is_empty() && options.mses_top_n > 0 && !cancelled {
+        if let Some(dir) = mses_dir {
+            let refined_indices: Vec<usize> = results
+                .iter()
+                .enumerate()
+                .filter(|(_, r)| r.refined)
+                .map(|(i, _)| i)
+                .collect();
+
+            let mses_limit = options.mses_top_n.min(refined_indices.len());
+            let mses_indices: Vec<usize> = refined_indices[..mses_limit]
+                .iter()
+                .copied()
+                .chain(
+                    refined_indices[mses_limit..]
+                        .iter()
+                        .copied()
+                        .filter(|&index| results[index].is_reference),
+                )
+                .collect();
+
+            let cancellation = Arc::new(AtomicBool::new(false));
+            if should_cancel.is_some_and(|cancel_fn| cancel_fn()) {
+                cancellation.store(true, Ordering::Relaxed);
+                cancelled = true;
+            }
+            let mut completed_mses = 0;
+            let mut ordered_verified = vec![None; mses_indices.len()];
+            let completed = run_bounded_indexed(
+                mses_indices.len(),
+                MAX_MSES_WORKERS,
+                cancellation.clone(),
+                should_cancel,
+                |job_index| {
+                    let idx = mses_indices[job_index];
+                    let mut candidate = results[idx].clone();
+                    let worker_cancellation = cancellation.clone();
+                    verify_candidate_mses(
+                        &mut candidate,
+                        config,
+                        &dv_val,
+                        mach,
+                        altitude,
+                        cl_target,
+                        dir,
+                        Some(worker_cancellation.as_ref()),
+                    );
+                    candidate
+                },
+                |job_index, candidate| {
+                    ordered_verified[job_index] = Some(candidate.mses_verified);
+                    while completed_mses < ordered_verified.len() {
+                        let Some(verified) = ordered_verified[completed_mses].take() else {
+                            break;
+                        };
+                        completed_mses += 1;
+                        if verified {
+                            n_mses_verified += 1;
+                        }
+                        if let Some(ref mut cb) = progress_callback {
+                            let msg = format!(
+                                "Stage 3 (MSES): {}/{} verified ({} ok)",
+                                completed_mses,
+                                mses_indices.len(),
+                                n_mses_verified
+                            );
+                            cb(&msg);
+                        }
+                    }
+                    if should_cancel.is_some_and(|cancel_fn| cancel_fn()) {
+                        cancellation.store(true, Ordering::Relaxed);
+                    }
+                },
+            );
+            for (job_index, candidate) in completed {
+                results[mses_indices[job_index]] = candidate;
+            }
+            n_mses_verified = mses_indices
+                .iter()
+                .filter(|&&index| results[index].mses_verified)
+                .count();
+            if cancellation.load(Ordering::Relaxed) {
+                cancelled = true;
+            }
+
+            let mut verified: Vec<AirfoilCandidateResult> = results
+                .iter()
+                .filter(|r| r.mses_verified)
+                .cloned()
+                .collect();
+
+            if !verified.is_empty() {
+                verified.sort_by(|a, b| {
+                    b.l_over_d_mses
+                        .unwrap_or(0.0)
+                        .total_cmp(&a.l_over_d_mses.unwrap_or(0.0))
+                });
+                let verified_names: HashSet<String> =
+                    verified.iter().map(|r| r.name.clone()).collect();
+                let rest: Vec<AirfoilCandidateResult> = results
+                    .into_iter()
+                    .filter(|r| !verified_names.contains(&r.name))
+                    .collect();
+
+                results = verified;
+                results.extend(rest);
+            }
+        } else {
+            mark_mses_not_configured(&mut results);
+        }
+    }
+
+    let top_candidates: Vec<AirfoilCandidateResult> =
+        results.into_iter().take(options.top_n).collect();
+
+    Ok(AirfoilScreeningResult {
+        baseline_airfoil: config.geometry.wing.root_airfoil.clone(),
+        cruise_mach: mach,
+        cruise_reynolds: reynolds,
+        cruise_altitude_m: altitude,
+        cl_target,
+        uses_explicit_target_cl: options.target_cl.is_some(),
+        section_mach,
+        flow_regime,
+        transonic_caveat: section_mach >= TRANSONIC_MACH_CAVEAT,
+        refined_3d: options.refine_3d && n_refined > 0,
+        n_total,
+        n_ok: n_ok_stage1,
+        n_error: errors.len(),
+        n_refined,
+        n_mses_verified,
+        cancelled,
+        candidates: top_candidates,
+        errors: errors.into_iter().take(100).collect(),
+    })
+}

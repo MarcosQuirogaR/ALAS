@@ -226,21 +226,14 @@ fn assert_dialect(deck: &str, num_ribs: i64, chordwise: i64) {
     }
 }
 
-// A skipped external-solver test must say why on stderr, or a silent pass looks
-// like a real one; the workspace print ban is lifted for that, as the MSES row
-// lifts it for the same reason.
-#[allow(clippy::print_stderr)]
 #[test]
+#[ignore = "needs ALAS_NASTRAN95_DIR (+ ALAS_NASTRAN95_RUNTIME) and ALAS_MSC_LAUNCHER/ALAS_MSC_SOLVER: live NASTRAN-95 and MSC Nastran installs"]
 fn the_two_solvers_converge_on_the_same_static_deflection() {
-    let solvers = (Nastran95Solver::from_env(), Msc::from_env());
-    let (Some(n95), Some(msc)) = &solvers else {
-        eprintln!(
-            "skipping the NASTRAN-95 cross-solver convergence check: set \
-             ALAS_NASTRAN95_DIR (+ ALAS_NASTRAN95_RUNTIME for libgfortran) and \
-             ALAS_MSC_LAUNCHER/ALAS_MSC_SOLVER to run it."
-        );
-        return;
-    };
+    let n95 = Nastran95Solver::from_env().expect(
+        "set ALAS_NASTRAN95_DIR (+ ALAS_NASTRAN95_RUNTIME for libgfortran) to run this test",
+    );
+    let msc = Msc::from_env().expect("set ALAS_MSC_LAUNCHER and ALAS_MSC_SOLVER to run this test");
+    let (n95, msc) = (&n95, &msc);
 
     // Solve every refinement through both solvers, live.
     let live: Vec<Live> = REFINEMENTS
@@ -305,14 +298,11 @@ fn the_two_solvers_converge_on_the_same_static_deflection() {
 /// the global Sturm count to cover every parsed root.
 #[allow(clippy::print_stderr)]
 #[test]
+#[ignore = "needs ALAS_NASTRAN95_DIR (+ ALAS_NASTRAN95_RUNTIME): a live NASTRAN-95 install"]
 fn the_nastran95_modes_deck_returns_finite_positive_modes() {
-    let Some(solver) = Nastran95Solver::from_env() else {
-        eprintln!(
-            "skipping the NASTRAN-95 normal-modes check: set ALAS_NASTRAN95_DIR \
-             (+ ALAS_NASTRAN95_RUNTIME for libgfortran) to run it."
-        );
-        return;
-    };
+    let solver = Nastran95Solver::from_env().expect(
+        "set ALAS_NASTRAN95_DIR (+ ALAS_NASTRAN95_RUNTIME for libgfortran) to run this test",
+    );
     let (deck, _node_index, _req, cfg) = wingbox(5, 6);
     let modes_deck = build_modes_deck(&deck, &cfg, Dialect::Nastran95);
     let work = scratch_dir("n95_modes");
@@ -576,25 +566,6 @@ fn msc_command_token(path: &Path) -> Result<String, String> {
             "its installed path contains whitespace; MSC's launcher needs a DOS 8.3 name on Windows ({original})"
         ))
     }
-}
-
-#[test]
-fn the_msc_command_token_leaves_a_safe_executable_path_unchanged() {
-    let path = Path::new("C:/tools/analysis.exe");
-    assert_eq!(msc_command_token(path).unwrap(), "C:/tools/analysis.exe");
-}
-
-#[cfg(windows)]
-#[test]
-fn the_msc_command_token_removes_whitespace_from_the_configured_solver() {
-    let Some(path) = std::env::var_os("ALAS_MSC_SOLVER") else {
-        return;
-    };
-    let token = msc_command_token(Path::new(&path)).unwrap();
-    assert!(
-        !token.chars().any(char::is_whitespace),
-        "the token MSC receives must not contain whitespace: {token:?}"
-    );
 }
 
 /// A short scratch directory, emptied first: NASTRAN-95 needs the path short

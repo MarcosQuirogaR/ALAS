@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-// Ported from alas/pipeline.py
-// Reference: alas @ rust-port-baseline.
-
 //! Complete multi-stage aircraft design, analysis, optimization and export pipeline.
 //!
 //! [`DesignPipeline::run`] executes the full sequence:
@@ -17,7 +14,7 @@
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use alas_aero::mses::{
@@ -26,26 +23,22 @@ use alas_aero::mses::{
 };
 use alas_config::airports::get as get_airport;
 use alas_config::design_variables::DesignVector;
-use alas_config::presets;
 use alas_config::{AlasConfig, Severity};
 use alas_exec::storage::{mark_storage_root, StorageCategoryId};
-use alas_exec::{RunEnvironment, ToolLocator};
+use alas_exec::RunEnvironment;
 use alas_geom::aircraft::airplane::Airplane;
 use alas_mission::MissionResult;
 use alas_opt::OptimizationResult;
-use alas_route::planner::{
-    load_navdata_with_airway_coordinates, plan_route_with_max_stretch, RouteSources,
-};
 use alas_route::route::{Route, RouteSource};
 use alas_route::{fetch_route_with_status, SimbriefFetchStatus};
 use serde::{Deserialize, Serialize};
 
 use crate::acceptance::AcceptanceRoute;
-use crate::avl::{run_avl_takeoff_comparison, AvlAnalysisResult};
+use crate::avl::{run_avl_takeoff_comparison_cancellable, AvlAnalysisResult};
 use crate::baseline::{analyze_baseline, BaselineReport};
 use crate::cabin_scene::export_cabin_scene;
 use crate::cpacs::{
-    export_cpacs, export_cpacs_with_analysis, read_cpacs_file, write_cpacs_run_manifest,
+    export_cpacs_document, export_cpacs_with_analysis, read_cpacs, write_cpacs_run_manifest,
     CpacsDocument, CpacsExportResult,
 };
 use crate::cpacs_adapters::CpacsAircraftData;
@@ -59,41 +52,38 @@ use crate::feasibility::{
 };
 use crate::flowunsteady::{run_flowunsteady_analysis, FlowUnsteadyAnalysisResult};
 use crate::full_analysis::{AnalysisReport, FullAnalysis};
+use crate::mission_route::{plan_mission_route, route_endpoints};
 use crate::mission_stage::{self, SelectedLoadCase};
 use crate::openvsp::{export_openvsp_script, materialize_openvsp_project, OpenVspExportResult};
 use crate::payload_layout_export::export_payload_layout_artifact;
-use crate::runs::{RunEvent, RunEventKind, RunEventSeverity};
+use crate::runs::{RunEvent, RunEventSeverity};
 use crate::solver_mode::{AerodynamicSolverMode, OptimizationSolverMode};
 use crate::structural::StructuralAnalysisResult;
 use crate::vspaero::{run_vspaero_analysis, VspaeroAnalysisResult};
 
 mod curl_transport;
 use curl_transport::SystemCurlTransport;
-mod helpers;
-mod snapshots;
+mod events;
 #[cfg(test)]
-use helpers::optimizer_config;
+pub(crate) use events::optimization_stage_status;
+pub(crate) use events::{begin_component, finish_component};
+use events::{
+    begin_stage, emit_diagnostic, emit_diagnostic_with_severity, emit_tool_diagnostics,
+    finish_optimization_stage, finish_stage, warn_artifact_failure,
+};
+mod helpers;
+mod mission_payload_override;
+mod mses_condition;
+mod sized_finalist;
+mod snapshots;
 use helpers::{
-    add_manifest_artifact, add_manifest_artifact_if_exists, check_preset_policy,
+    add_manifest_artifact, add_manifest_artifact_if_exists, check_preset_policy, finite_range_text,
     persist_mses_polar_diagnostics, persist_mses_raw_exports, validate_bounds,
 };
+#[cfg(test)]
+use mses_condition::mean_induced_angle_deg;
+use mses_condition::mses_section_condition;
 use snapshots::SnapshotPublisher;
-
-/// The 2-D section condition sent to MSES for a 3-D swept-wing cruise case.
-///
-/// Reynolds number remains based on the freestream speed, while MSES receives
-/// the normal component of Mach. The incidence is a finite-wing exposed-root
-/// proxy: geometric body alpha plus the physical fuselage-edge setting, less
-/// the mean induced angle. It is not a substitute for a resolved spanwise
-/// viscous analysis.
-#[derive(Debug, Clone, Copy)]
-struct MsesSectionCondition {
-    mach: f64,
-    reynolds: f64,
-    alpha_deg: f64,
-}
-
-const PIPELINE_STAGE_COUNT: u8 = 7;
 
 fn check_cancelled(cancel: Option<&AtomicBool>) -> Result<(), String> {
     if cancel.is_some_and(|flag| flag.load(Ordering::Relaxed)) {
@@ -120,395 +110,26 @@ fn prepare_analysis_workspace(output_dir: Option<PathBuf>) -> Result<PathBuf, St
             .duration_since(UNIX_EPOCH)
             .map(|duration| duration.as_nanos())
             .unwrap_or_default();
-        std::env::temp_dir().join(format!("alas-analysis-{}-{nonce}", std::process::id()))
+        // The clock alone can repeat within one tick, so two runs started together
+        // in one process would otherwise share a workspace and overwrite each
+        // other's exports.
+        static SEQUENCE: AtomicU64 = AtomicU64::new(0);
+        let sequence = SEQUENCE.fetch_add(1, Ordering::Relaxed);
+        std::env::temp_dir().join(format!(
+            "alas-analysis-{}-{nonce}-{sequence}",
+            std::process::id()
+        ))
     });
     std::fs::create_dir_all(&analysis_dir)
         .map_err(|error| format!("analysis workspace creation failed: {error}"))?;
     if output_dir.is_some() {
-        let _ = mark_storage_root(StorageCategoryId::GeneratedOutputs, &analysis_dir);
+        // Without the claim the run's results are still valid; only Manage
+        // Storage loses the ability to recognize and reclaim the directory.
+        if let Err(error) = mark_storage_root(StorageCategoryId::GeneratedOutputs, &analysis_dir) {
+            tracing::warn!(%error, path = %analysis_dir.display(), "output directory could not be claimed for storage management");
+        }
     }
     Ok(analysis_dir)
-}
-
-fn emit_event(events: Option<&(dyn Fn(RunEvent) + Sync)>, run_clock: Instant, event: RunEvent) {
-    if let Some(callback) = events {
-        callback(RunEvent {
-            elapsed_ms: run_clock.elapsed().as_millis() as u64,
-            ..event
-        });
-    }
-}
-
-fn begin_stage(
-    events: Option<&(dyn Fn(RunEvent) + Sync)>,
-    run_clock: Instant,
-    index: u8,
-    stage: &str,
-    message: &str,
-) -> Instant {
-    emit_event(
-        events,
-        run_clock,
-        RunEvent {
-            stage: stage.to_owned(),
-            message: message.to_owned(),
-            fraction: Some(0.0),
-            kind: RunEventKind::StageStarted,
-            severity: RunEventSeverity::Info,
-            stage_index: Some(index),
-            stage_count: Some(PIPELINE_STAGE_COUNT),
-            elapsed_ms: 0,
-            duration_ms: None,
-        },
-    );
-    Instant::now()
-}
-
-fn finish_stage(
-    events: Option<&(dyn Fn(RunEvent) + Sync)>,
-    run_clock: Instant,
-    stage_clock: Instant,
-    index: u8,
-    stage: &str,
-) {
-    let duration_ms = stage_clock.elapsed().as_millis() as u64;
-    emit_event(
-        events,
-        run_clock,
-        RunEvent {
-            stage: stage.to_owned(),
-            message: format!("Completed in {:.3} s", duration_ms as f64 / 1_000.0),
-            fraction: Some(1.0),
-            kind: RunEventKind::StageCompleted,
-            severity: RunEventSeverity::Info,
-            stage_index: Some(index),
-            stage_count: Some(PIPELINE_STAGE_COUNT),
-            elapsed_ms: 0,
-            duration_ms: Some(duration_ms),
-        },
-    );
-}
-
-/// Start a detailed downstream component timer.
-///
-/// Component events intentionally do not carry the seven-stage index. They
-/// are children of the top-level `downstream` stage and are rendered as a
-/// separate, indented timing list by the desktop console.
-pub(crate) fn begin_component(
-    events: Option<&(dyn Fn(RunEvent) + Sync)>,
-    run_clock: Instant,
-    stage: &str,
-    message: &str,
-) -> Instant {
-    emit_event(
-        events,
-        run_clock,
-        RunEvent {
-            stage: stage.to_owned(),
-            message: message.to_owned(),
-            fraction: Some(0.0),
-            kind: RunEventKind::StageStarted,
-            severity: RunEventSeverity::Info,
-            stage_index: None,
-            stage_count: None,
-            elapsed_ms: 0,
-            duration_ms: None,
-        },
-    );
-    Instant::now()
-}
-
-/// Finish a detailed downstream component timer.
-pub(crate) fn finish_component(
-    events: Option<&(dyn Fn(RunEvent) + Sync)>,
-    run_clock: Instant,
-    stage_clock: Instant,
-    stage: &str,
-    status: &str,
-) {
-    let duration_ms = stage_clock.elapsed().as_millis() as u64;
-    let message = if status.eq_ignore_ascii_case("skipped") {
-        status.to_owned()
-    } else {
-        format!("{status} in {:.3} s", duration_ms as f64 / 1_000.0)
-    };
-    emit_event(
-        events,
-        run_clock,
-        RunEvent {
-            stage: stage.to_owned(),
-            message,
-            fraction: Some(1.0),
-            kind: RunEventKind::StageCompleted,
-            severity: RunEventSeverity::Info,
-            stage_index: None,
-            stage_count: None,
-            elapsed_ms: 0,
-            duration_ms: Some(duration_ms),
-        },
-    );
-}
-
-fn emit_diagnostic(
-    events: Option<&(dyn Fn(RunEvent) + Sync)>,
-    run_clock: Instant,
-    stage: &str,
-    message: &str,
-) {
-    emit_diagnostic_with_severity(events, run_clock, stage, message, RunEventSeverity::Info);
-}
-
-fn emit_diagnostic_with_severity(
-    events: Option<&(dyn Fn(RunEvent) + Sync)>,
-    run_clock: Instant,
-    stage: &str,
-    message: &str,
-    severity: RunEventSeverity,
-) {
-    emit_event(
-        events,
-        run_clock,
-        RunEvent {
-            stage: stage.to_owned(),
-            message: message.to_owned(),
-            fraction: None,
-            kind: RunEventKind::Diagnostic,
-            severity,
-            stage_index: None,
-            stage_count: Some(PIPELINE_STAGE_COUNT),
-            elapsed_ms: 0,
-            duration_ms: None,
-        },
-    );
-}
-
-// Coordinated analysis inputs are kept explicit at this integration boundary.
-#[allow(clippy::too_many_arguments)]
-fn emit_tool_diagnostics(
-    events: Option<&(dyn Fn(RunEvent) + Sync)>,
-    run_clock: Instant,
-    environment: &RunEnvironment,
-    openvsp: Option<&OpenVspExportResult>,
-    vspaero: Option<&VspaeroAnalysisResult>,
-    avl: Option<&AvlAnalysisResult>,
-    flowunsteady: Option<&FlowUnsteadyAnalysisResult>,
-    structures: Option<&StructuralAnalysisResult>,
-    mses: Option<&MsesPolarResult>,
-) {
-    let configured = [
-        ("OpenVSP", environment.openvsp_exe.as_deref()),
-        ("VSPAERO", environment.vspaero_exe.as_deref()),
-        ("AVL", environment.avl_exe.as_deref()),
-        ("FLOWUnsteady", environment.flowunsteady_exe.as_deref()),
-        ("MSES", environment.mses_dir.as_deref()),
-        ("Nastran", environment.nastran_exe.as_deref()),
-        ("MSC solver", environment.nastran_solver.as_deref()),
-        ("Patran", environment.patran_exe.as_deref()),
-    ];
-    for (tool, path) in configured {
-        let message = path.map_or_else(
-            || format!("{tool}: not configured"),
-            |path| format!("{tool}: resolved {}", path.display()),
-        );
-        emit_diagnostic_with_severity(
-            events,
-            run_clock,
-            "external_tools",
-            &message,
-            if path.is_some() {
-                RunEventSeverity::Info
-            } else {
-                RunEventSeverity::Warning
-            },
-        );
-    }
-    for (tool, status) in [
-        (
-            "OpenVSP",
-            openvsp.map(|value| {
-                status_with_detail(
-                    format!("{:?}", value.status),
-                    value.runtime_error.as_deref(),
-                )
-            }),
-        ),
-        (
-            "VSPAERO",
-            vspaero.map(|value| {
-                status_with_detail(format!("{:?}", value.status), value.error.as_deref())
-            }),
-        ),
-        (
-            "AVL",
-            avl.map(|value| {
-                status_with_detail(format!("{:?}", value.status), value.error.as_deref())
-            }),
-        ),
-        (
-            "FLOWUnsteady",
-            flowunsteady.map(|value| {
-                status_with_detail(format!("{:?}", value.status), value.error.as_deref())
-            }),
-        ),
-        (
-            "Structures",
-            structures
-                .map(|value| status_with_detail(value.status.clone(), value.error.as_deref())),
-        ),
-        (
-            "MSES",
-            mses.map(|value| {
-                status_with_detail(format!("{:?}", value.status), value.error.as_deref())
-            }),
-        ),
-    ] {
-        emit_diagnostic(
-            events,
-            run_clock,
-            "external_tools",
-            &format!(
-                "{tool}: {}",
-                status.unwrap_or_else(|| "not requested".to_owned())
-            ),
-        );
-    }
-
-    // The overall structural result stays `ok` when the analytical sizing
-    // succeeded; the individual native solver outcomes are surfaced as well
-    // so a missing MSC DLL is not hidden behind the analytical answer.
-    if let Some(structures) = structures {
-        for (tool, outcome) in [
-            (
-                "MSC Nastran SOL 101",
-                structures.nastran.as_ref().map(|result| {
-                    (
-                        result.static_solve.status,
-                        result.static_solve.error.as_deref(),
-                    )
-                }),
-            ),
-            (
-                "MSC Nastran SOL 103",
-                structures
-                    .nastran
-                    .as_ref()
-                    .map(|result| (result.modes.status, result.modes.error.as_deref())),
-            ),
-            (
-                "NASTRAN-95 SOL 101",
-                structures.nastran95.as_ref().map(|result| {
-                    (
-                        result.static_solve.status,
-                        result.static_solve.error.as_deref(),
-                    )
-                }),
-            ),
-            (
-                "NASTRAN-95 SOL 103",
-                structures
-                    .nastran95
-                    .as_ref()
-                    .map(|result| (result.modes.status, result.modes.error.as_deref())),
-            ),
-        ] {
-            if let Some((status, error)) = outcome {
-                emit_diagnostic_with_severity(
-                    events,
-                    run_clock,
-                    "external_tools",
-                    &format!(
-                        "{tool}: {}",
-                        status_with_detail(status.as_str().to_owned(), error)
-                    ),
-                    if status == alas_struct::nastran::ResultStatus::Ok {
-                        RunEventSeverity::Info
-                    } else {
-                        RunEventSeverity::Warning
-                    },
-                );
-            }
-        }
-        if let Some(patran) = structures.patran.as_ref() {
-            emit_diagnostic_with_severity(
-                events,
-                run_clock,
-                "external_tools",
-                &format!(
-                    "Patran: {}",
-                    status_with_detail(patran.status.clone(), patran.error.as_deref())
-                ),
-                if patran.status.eq_ignore_ascii_case("ok") {
-                    RunEventSeverity::Info
-                } else {
-                    RunEventSeverity::Warning
-                },
-            );
-        }
-    }
-}
-
-fn status_with_detail(status: String, error: Option<&str>) -> String {
-    let Some(error) = error.map(str::trim).filter(|error| !error.is_empty()) else {
-        return status;
-    };
-    const MAX_CHARS: usize = 1_000;
-    let detail = error.chars().take(MAX_CHARS).collect::<String>();
-    if detail.chars().count() < error.chars().count() {
-        format!("{status}: {detail} \u{2026}")
-    } else {
-        format!("{status}: {detail}")
-    }
-}
-
-fn mses_section_condition(config: &AlasConfig, report: &AnalysisReport) -> MsesSectionCondition {
-    let freestream_mach = config.requirements.cruise_mach;
-    let atmo = alas_atmo::Atmosphere::new(config.requirements.cruise_altitude_m);
-    let velocity = freestream_mach * atmo.speed_of_sound();
-    let inboard_section = config
-        .geometry
-        .wing
-        .inboard_aerodynamic_station(&report.design)
-        .ok();
-    let section_chord_m =
-        inboard_section.map_or(report.design.root_chord_m, |section| section.chord_m);
-    let section_twist_deg = inboard_section
-        .map_or(config.geometry.wing.root_twist_deg, |section| {
-            section.twist_deg
-        });
-    let reynolds =
-        (atmo.density() * velocity * section_chord_m) / atmo.dynamic_viscosity().max(1e-9);
-    let mach = freestream_mach * report.design.sweep_deg.to_radians().cos();
-    let body_alpha_deg = report
-        .trimmed_design_point
-        .map_or(report.design_point.alpha_deg, |trim| {
-            trim.geometric_body_alpha_deg
-        });
-    let induced_angle_deg = mean_induced_angle_deg(
-        report
-            .trimmed_design_point
-            .map_or(report.design_point.cl, |trim| trim.cl),
-        report.polar_fit.aspect_ratio,
-        report.polar_fit.oswald_e,
-    );
-    let alpha_deg = body_alpha_deg + section_twist_deg - induced_angle_deg;
-
-    MsesSectionCondition {
-        mach,
-        reynolds,
-        alpha_deg,
-    }
-}
-
-/// Mean finite-wing downwash angle used only to map a trimmed 3-D state onto
-/// the root-section MSES proxy. The lifting-line relation is deliberately
-/// bounded so malformed report data cannot manufacture an arbitrary section
-/// incidence.
-fn mean_induced_angle_deg(cl: f64, aspect_ratio: f64, oswald_e: f64) -> f64 {
-    let denominator = std::f64::consts::PI * aspect_ratio * oswald_e;
-    if !cl.is_finite() || !denominator.is_finite() || denominator <= 1e-9 {
-        return 0.0;
-    }
-    (cl / denominator).atan().to_degrees()
 }
 
 /// Controls which stages of the pipeline to run and execution parameters.
@@ -626,6 +247,16 @@ type MissionStageOutputs = (
     Option<SelectedLoadCase>,
 );
 
+/// The observation callbacks of one run, as [`DesignPipeline::run_inner`]
+/// receives them.
+#[derive(Clone, Copy)]
+struct RunCallbacks<'a> {
+    progress: Option<&'a (dyn Fn(&str) + Sync)>,
+    events: Option<&'a (dyn Fn(RunEvent) + Sync)>,
+    cancel: Option<&'a AtomicBool>,
+    snapshots: Option<&'a (dyn Fn(PipelineResult) + Sync)>,
+}
+
 #[derive(Debug, Clone)]
 struct PlannedRoute {
     route: Route,
@@ -651,6 +282,20 @@ pub struct PipelineExecutionStatus {
     pub quiet_requested: bool,
 }
 
+impl PipelineExecutionStatus {
+    fn for_options(options: &PipelineOptions, parallel_effective: bool) -> Self {
+        Self {
+            parallel_requested: options.parallel,
+            parallel_effective,
+            aerodynamic_solver: options.aerodynamic_solver,
+            optimization_solver: options.optimization_solver,
+            seed_requested: options.seed,
+            seed_applied: options.optimize && options.seed.is_some(),
+            quiet_requested: options.quiet,
+        }
+    }
+}
+
 /// Master pipeline coordinator.
 #[derive(Debug, Clone)]
 pub struct DesignPipeline {
@@ -663,6 +308,7 @@ pub struct DesignPipeline {
     /// aircraft. The public constructor keeps the existing configuration
     /// workflow unchanged.
     aircraft_override: Option<Airplane>,
+    mission_payload_override_kg: Option<f64>,
 }
 
 /// The three independently optional observation seams a design-space run can
@@ -671,7 +317,7 @@ pub struct DesignPipeline {
 /// single logical "how do you want to watch this run" input rather than three
 /// unrelated positional callbacks.
 pub struct RunObservers<'a> {
-    /// Typed per-stage lifecycle events, as reported by [`emit_diagnostic`].
+    /// Typed per-stage lifecycle events, timers and diagnostics.
     pub events: &'a (dyn Fn(RunEvent) + Sync),
     /// Cumulative, immutable [`PipelineResult`] snapshots published as report
     /// data becomes available.
@@ -681,12 +327,16 @@ pub struct RunObservers<'a> {
 }
 
 impl DesignPipeline {
-    /// Create a new design pipeline with `config`.
-    pub fn new(config: AlasConfig) -> Self {
+    fn based_on(config: AlasConfig, aircraft_override: Option<Airplane>) -> Self {
         Self {
             config,
-            aircraft_override: None,
+            aircraft_override,
+            mission_payload_override_kg: None,
         }
+    }
+    /// Create a new design pipeline with `config`.
+    pub fn new(config: AlasConfig) -> Self {
+        Self::based_on(config, None)
     }
 
     /// Create a pipeline whose aircraft geometry was imported from a generic
@@ -696,10 +346,7 @@ impl DesignPipeline {
     /// physics inputs. The imported CPACS aircraft remains authoritative for
     /// the geometry passed to the existing analysis formulas.
     pub fn new_with_airplane(config: AlasConfig, airplane: Airplane) -> Self {
-        Self {
-            config,
-            aircraft_override: Some(airplane),
-        }
+        Self::based_on(config, Some(airplane))
     }
 
     /// Create a pipeline from a validated CPACS 3.5 document.
@@ -793,11 +440,10 @@ impl DesignPipeline {
     /// Execute the same run as [`Self::run_with_environment`] while reporting
     /// typed lifecycle events.
     ///
-    /// The event stream is where a run's per-stage `elapsed_ms`/`duration_ms`
-    /// already live; before this seam existed only the desktop
-    /// design-space entry point could observe them, so a command-line run had
-    /// no record of where its wall time went. The run itself is unchanged:
-    /// the callback is the only added argument.
+    /// The event stream carries each stage's `elapsed_ms`/`duration_ms`, so a
+    /// command-line run can record where its wall time went. The run itself
+    /// is identical to [`Self::run_with_environment`]; the callback is the
+    /// only added argument.
     pub fn run_with_environment_and_events(
         &self,
         options: &PipelineOptions,
@@ -862,33 +508,6 @@ impl DesignPipeline {
             Some(*initial_design),
             Some(bounds),
             None,
-            None,
-            None,
-            None,
-        )
-    }
-
-    /// Execute a desktop-style design-space run while reporting stage and
-    /// downstream-component progress. The callback is deliberately
-    /// synchronous and typed: callers can forward it across their own worker
-    /// boundary without the pipeline depending on a GUI or logging
-    /// implementation.
-    pub fn run_with_design_space_and_progress(
-        &self,
-        options: &PipelineOptions,
-        environment: &RunEnvironment,
-        initial_design: &DesignVector,
-        bounds: &[(f64, f64)],
-        progress: &(dyn Fn(&str) + Sync),
-    ) -> Result<PipelineResult, String> {
-        validate_bounds(bounds)?;
-        self.run_inner(
-            options,
-            environment,
-            None,
-            Some(*initial_design),
-            Some(bounds),
-            Some(progress),
             None,
             None,
             None,
@@ -968,6 +587,67 @@ impl DesignPipeline {
         snapshots: Option<&(dyn Fn(PipelineResult) + Sync)>,
     ) -> Result<PipelineResult, String> {
         let run_clock = Instant::now();
+        check_cancelled(cancel)?;
+        validate_run_configuration(&self.config, initial_design.as_ref(), bounds)?;
+        // The route depends on the configuration, not on the design, so it
+        // is planned once, before anything else runs. Three consumers fly it:
+        // the search (through `MissionConfig::route_distance_m`, which this
+        // run records on the configuration it runs with), the optimizer's
+        // reporting-fidelity acceptance check and the mission stage. Planning
+        // it twice would also mean two SimBrief fetches per run.
+        let planned_route = if self.config.mission.enabled {
+            self.plan_active_route(dispatched_route)
+        } else {
+            None
+        };
+        let planned_distance_m = planned_route
+            .as_ref()
+            .map_or(0.0, |planned| planned.route.total_distance_m());
+        let recorded = DesignPipeline {
+            config: AlasConfig {
+                mission: alas_config::MissionConfig {
+                    route_distance_m: planned_distance_m,
+                    ..self.config.mission.clone()
+                },
+                ..self.config.clone()
+            },
+            ..self.clone()
+        };
+        recorded.run_planned(
+            options,
+            environment,
+            planned_route,
+            initial_design,
+            bounds,
+            run_clock,
+            RunCallbacks {
+                progress,
+                events,
+                cancel,
+                snapshots,
+            },
+        )
+    }
+
+    /// The run on the route [`Self::run_inner`] planned, with the planned
+    /// distance recorded on `self.config`.
+    #[allow(clippy::too_many_arguments)]
+    fn run_planned(
+        &self,
+        options: &PipelineOptions,
+        environment: &RunEnvironment,
+        planned_route: Option<PlannedRoute>,
+        initial_design: Option<DesignVector>,
+        bounds: Option<&[(f64, f64)]>,
+        run_clock: Instant,
+        callbacks: RunCallbacks<'_>,
+    ) -> Result<PipelineResult, String> {
+        let RunCallbacks {
+            progress,
+            events,
+            cancel,
+            snapshots,
+        } = callbacks;
         let report = |message: &str| {
             if let Some(callback) = progress {
                 callback(message);
@@ -1003,21 +683,9 @@ impl DesignPipeline {
         let nominal_design = initial_design.unwrap_or_else(|| self.configured_nominal_design());
         let fixed_design_review = bounds.is_some_and(bounds_are_fixed);
 
-        // The route depends on the configuration, not on the design, so plan
-        // it once here rather than inside the mission stage. Two callers now
-        // need it: the mission stage as before, and the optimizer's
-        // reporting-fidelity acceptance check, which has to fly the same
-        // route the published mission will. Planning it twice would also mean
-        // two SimBrief fetches per run.
-        let planned_route = if self.config.mission.enabled {
-            let planned = self.plan_active_route(dispatched_route);
-            if planned.is_some() {
-                emit_diagnostic(events, run_clock, "setup", "Route planned for this run");
-            }
-            planned
-        } else {
-            None
-        };
+        if planned_route.is_some() {
+            emit_diagnostic(events, run_clock, "setup", "Route planned for this run");
+        }
 
         // Stage 0: Baseline W&B + stability estimation.
         report("Stage 1/7: baseline weight, balance, and stability");
@@ -1080,7 +748,7 @@ impl DesignPipeline {
         // telemetry snapshot can say "the request arrived in the search" and
         // not merely "somewhere in the pipeline".
         alas_opt::CancelScope::attach(cancel).enter(alas_opt::CancelPhase::PipelineStage, 2);
-        let solver_optimizations = if options.optimize {
+        let mut solver_optimizations = if options.optimize {
             Some(run_solver_optimizations(
                 &self.config,
                 options.optimization_solver,
@@ -1096,7 +764,9 @@ impl DesignPipeline {
         } else {
             None
         };
-        let (optimized_design, optimization_result, branch_report) = if let Some(solutions) =
+        let (mut optimized_design, mut optimization_result, branch_report) = if let Some(
+            solutions,
+        ) =
             solver_optimizations.as_ref()
         {
             match solutions.selected(options.optimization_solver) {
@@ -1130,6 +800,21 @@ impl DesignPipeline {
         } else {
             (nominal_design, None, None)
         };
+        let selected_verification = solver_optimizations
+            .as_ref()
+            .and_then(|solutions| solutions.selected(options.optimization_solver).ok());
+        let native_verification = selected_verification
+            .and_then(|selected| selected.verification.as_ref())
+            .filter(|verified| {
+                self.aircraft_override.is_none()
+                    && self.mission_payload_override_kg.is_none()
+                    && verified.matches(&self.config, &optimized_design, acceptance_route.as_ref())
+            });
+        let baseline_verification = selected_verification
+            .and_then(|selected| selected.baseline_verification.as_ref())
+            .filter(|verified| {
+                verified.matches(&self.config, &nominal_design, acceptance_route.as_ref())
+            });
         // Say what the reporting-fidelity re-evaluation did, in the run log,
         // before any downstream stage speaks. A user who sees a converged
         // search and an infeasible aircraft is entitled to read which of the
@@ -1174,7 +859,7 @@ impl DesignPipeline {
             report(&message);
             emit_diagnostic_with_severity(events, run_clock, "optimization", &message, severity);
         }
-        finish_stage(events, run_clock, stage_clock, 2, "optimization");
+        finish_optimization_stage(events, run_clock, stage_clock, optimization_result.as_ref());
         check_cancelled(cancel)?;
 
         // Stage 2: Full analysis on optimized design.
@@ -1186,11 +871,7 @@ impl DesignPipeline {
             "full_analysis",
             "Full aircraft analysis",
         );
-        let full = if self.aircraft_override.is_some() {
-            FullAnalysis::new_preserving_engine_config(self.config.clone())
-        } else {
-            FullAnalysis::new(self.config.clone())
-        };
+        let full = FullAnalysis::new(self.config.clone());
         let mut optimized_report = match branch_report {
             Some(report) => report,
             None => match self.aircraft_override.as_ref() {
@@ -1205,67 +886,18 @@ impl DesignPipeline {
                 .geometry_summary
                 .contains_key("analysis_mass_basis_is_sized")
         {
-            // The optimizer's product objective closes the mass/dispatch
-            // fixed point below the configured MTOW limit.  A branch report
-            // built directly at `requirements.mtow_kg` would consequently
-            // calculate cruise lift, trim and component fuel for a heavier
-            // aircraft than the one that actually won the search.  Replay
-            // the typed finalist assessment and bind the report to its
-            // closed takeoff mass before any export or downstream tool sees
-            // it.  A disagreement is a real integration error, not a reason
-            // to silently fall back to the ceiling-mass report.
-            let assessment = alas_opt::assess_product_candidate(&self.config, &optimized_design)
-                .map_err(|error| {
-                    format!(
-                        "optimized finalist could not be re-evaluated at its exported design: {error}"
-                    )
-                })?;
-            if !assessment.hard_feasible {
-                let violations = assessment.violated_hard_ids().join(", ");
-                return Err(format!(
-                    "optimized finalist is not hard-feasible on replay: {}",
-                    if violations.is_empty() {
-                        "unidentified hard residual".to_owned()
-                    } else {
-                        violations
-                    }
-                ));
-            }
-            // Bind the report to the vector the assessment was *evaluated*
-            // on, not the one it was handed. A clean-sheet design space
-            // derives the fuselage coordinate from the cabin load case, so
-            // the two are the same vector for an optimizer finalist and can
-            // differ for any other supplied design (see
-            // `alas_opt::ResolvedProductState::design`). Reporting the
-            // caller's vector there would publish a different aeroplane from
-            // the one this gate just passed.
-            let assessed_design = assessment.resolved.design;
-            if assessed_design != optimized_design {
-                emit_diagnostic(
-                    events,
-                    run_clock,
-                    "full_analysis",
-                    &format!(
-                        "Finalist geometry re-derived by the design space: fuselage length {:.6} m evaluated against {:.6} m supplied; the report is bound to the evaluated aircraft",
-                        assessed_design.fuselage_length_m, optimized_design.fuselage_length_m,
-                    ),
-                );
-            }
-            optimized_report = full.run_at_sized_takeoff_mass(
-                &assessed_design,
-                true,
-                assessment.sized.takeoff_mass_kg,
-            )?;
-            emit_diagnostic(
+            // The optimizer closes the mass/dispatch fixed point below the
+            // configured MTOW limit, so a report built at that limit would
+            // describe a heavier aircraft than the finalist. Bind it to the
+            // sized mass, and publish the vector the replay evaluated.
+            (optimized_design, optimized_report) = sized_finalist::bind_sized_finalist(
+                &self.config,
+                &full,
+                optimized_design,
                 events,
                 run_clock,
-                "full_analysis",
-                &format!(
-                    "Finalist report bound to mission-sized takeoff mass {:.3} kg (MTOW limit {:.3} kg)",
-                    assessment.sized.takeoff_mass_kg,
-                    self.config.requirements.mtow_kg,
-                ),
-            );
+                cancel,
+            )?;
         }
         emit_diagnostic(
             events,
@@ -1283,8 +915,12 @@ impl DesignPipeline {
         // boundary. Publish it before CPACS/export/downstream work starts so
         // the desktop can render the same report gallery it will keep after
         // the run, while the remaining stages continue in the worker.
+        // Every stage bound to the delivered report resolves its landing gear
+        // where that report's aircraft has it: a redesigned candidate's main
+        // gear is placed by the search, not at the published stations.
+        let delivered = crate::gear_stations::report_config(&self.config, &optimized_report);
         let live_results = SnapshotPublisher::new(snapshots, || PipelineResult {
-            config: self.config.clone(),
+            config: delivered.clone(),
             optimized_design: Some(optimized_design),
             optimized_report: Some(optimized_report.clone()),
             optimization_result: optimization_result.clone(),
@@ -1307,15 +943,7 @@ impl DesignPipeline {
             vspaero_result: None,
             avl_result: None,
             flowunsteady_result: None,
-            execution: PipelineExecutionStatus {
-                parallel_requested: options.parallel,
-                parallel_effective: false,
-                aerodynamic_solver: options.aerodynamic_solver,
-                optimization_solver: options.optimization_solver,
-                seed_requested: options.seed,
-                seed_applied: options.optimize && options.seed.is_some(),
-                quiet_requested: options.quiet,
-            },
+            execution: PipelineExecutionStatus::for_options(options, false),
         });
         finish_stage(events, run_clock, stage_clock, 3, "full_analysis");
         check_cancelled(cancel)?;
@@ -1332,12 +960,13 @@ impl DesignPipeline {
             "CPACS export and geometry canonicalization",
         );
         let cpacs_path = analysis_dir.join("cpacs/optimized_aircraft.cpacs.xml");
-        let cpacs_export = Some(
-            export_cpacs(&optimized_report, &self.config, &cpacs_path)
-                .map_err(|error| format!("CPACS export failed: {error}"))?,
-        );
-        if let Some(export) = cpacs_export.as_ref() {
-            let document = read_cpacs_file(&export.path)
+        let (export, xml) = export_cpacs_document(&optimized_report, &delivered, &cpacs_path)
+            .map_err(|error| format!("CPACS export failed: {error}"))?;
+        let cpacs_export = Some(export);
+        {
+            // Parse the XML just written, not the file: another run sharing the
+            // output directory may already have replaced it.
+            let document = read_cpacs(&xml)
                 .map_err(|error| format!("CPACS canonicalization read failed: {error}"))?;
             optimized_report.airplane = document
                 .to_airplane()
@@ -1350,17 +979,34 @@ impl DesignPipeline {
         finish_stage(events, run_clock, stage_clock, 4, "geometry_export");
         check_cancelled(cancel)?;
 
-        let openvsp_export = if self.config.downstream.openvsp {
+        let openvsp_export = if delivered.downstream.openvsp {
             let af_path = analysis_dir.join("airfoils/optimized_root.dat");
             let openvsp_path = analysis_dir.join("openvsp/optimized_aircraft.vspscript");
-            let _ = export_airfoil_dat(&optimized_report, &self.config, &af_path, "ALAS_Optimized");
-            match export_openvsp_script(&optimized_report, &self.config, &openvsp_path) {
+            if let Err(error) =
+                export_airfoil_dat(&optimized_report, &delivered, &af_path, "ALAS_Optimized")
+            {
+                warn_artifact_failure(
+                    events,
+                    run_clock,
+                    "geometry_export",
+                    "Root airfoil Selig file",
+                    &error,
+                );
+            }
+            match export_openvsp_script(&optimized_report, &delivered, &openvsp_path) {
                 Ok(export) => Some(match environment.openvsp_exe.as_deref() {
                     Some(executable) => materialize_openvsp_project(export, executable, 120.0),
                     None => export,
                 }),
                 Err(error) => {
-                    tracing::warn!(%error, "OpenVSP geometry script export failed");
+                    // VSPAERO consumes this geometry and is skipped without it.
+                    warn_artifact_failure(
+                        events,
+                        run_clock,
+                        "geometry_export",
+                        "OpenVSP geometry script",
+                        &error,
+                    );
                     None
                 }
             }
@@ -1368,7 +1014,7 @@ impl DesignPipeline {
             None
         };
         live_results.update(|snapshot| snapshot.openvsp_export = openvsp_export.clone());
-        let avl_requested = self.config.downstream.avl
+        let avl_requested = delivered.downstream.avl
             && matches!(
                 options.aerodynamic_solver,
                 AerodynamicSolverMode::Avl | AerodynamicSolverMode::Both
@@ -1376,7 +1022,7 @@ impl DesignPipeline {
         let run_vspaero = || {
             let stage_clock =
                 begin_component(events, run_clock, "downstream/vspaero", "VSPAERO analysis");
-            if !self.config.downstream.vspaero {
+            if !delivered.downstream.vspaero {
                 finish_component(
                     events,
                     run_clock,
@@ -1389,7 +1035,7 @@ impl DesignPipeline {
             let result = openvsp_export.as_ref().map(|openvsp| {
                 run_vspaero_analysis(
                     &optimized_report,
-                    &self.config,
+                    &delivered,
                     openvsp,
                     environment.vspaero_exe.as_deref(),
                     // A five-minute wall clock cut the installed A380-like
@@ -1423,12 +1069,13 @@ impl DesignPipeline {
                 finish_component(events, run_clock, stage_clock, "downstream/avl", "Skipped");
                 return None;
             }
-            let result = Some(run_avl_takeoff_comparison(
+            let result = Some(run_avl_takeoff_comparison_cancellable(
                 &optimized_report,
-                &self.config,
+                &delivered,
                 &analysis_dir,
                 environment.avl_exe.as_deref(),
-                300.0,
+                delivered.analysis.avl_timeout_s,
+                cancel,
             ));
             live_results.update(|snapshot| snapshot.avl_result = result.clone());
             finish_component(
@@ -1447,7 +1094,7 @@ impl DesignPipeline {
                 "downstream/flowunsteady",
                 "FLOWUnsteady analysis",
             );
-            if !self.config.downstream.flowunsteady {
+            if !delivered.downstream.flowunsteady {
                 finish_component(
                     events,
                     run_clock,
@@ -1459,7 +1106,7 @@ impl DesignPipeline {
             }
             let result = Some(run_flowunsteady_analysis(
                 &optimized_report,
-                &self.config,
+                &delivered,
                 &analysis_dir,
                 environment.flowunsteady_exe.as_deref(),
                 900.0,
@@ -1503,7 +1150,10 @@ impl DesignPipeline {
                 );
                 (Some(optimized_report.clone()), None)
             } else {
-                let result = match full.run(&nominal_design, true) {
+                let baseline = baseline_verification
+                    .map(|verified| Ok(verified.verification().report.clone()))
+                    .unwrap_or_else(|| full.run(&nominal_design, true));
+                let result = match baseline {
                     Ok(report) => (Some(report), None),
                     Err(error) => (None, Some(error)),
                 };
@@ -1528,7 +1178,11 @@ impl DesignPipeline {
                 "downstream/mission",
                 "Mission and route analysis",
             );
-            let result = self.evaluate_active_mission(&optimized_report, planned_route.as_ref());
+            let result = self.evaluate_active_mission(
+                &optimized_report,
+                planned_route.as_ref(),
+                native_verification,
+            );
             if let Ok((route, status, mission, load_case)) = &result {
                 live_results.update(|snapshot| {
                     snapshot.route = route.clone();
@@ -1536,13 +1190,21 @@ impl DesignPipeline {
                     snapshot.mission_result = mission.clone();
                     snapshot.mission_load_case = load_case.clone();
                 });
+                if let Some(error) = load_case.as_ref().and_then(|l| l.native_error.as_ref()) {
+                    emit_diagnostic(
+                        events,
+                        run_clock,
+                        "downstream/mission",
+                        &format!("native mission telemetry unavailable: {error}"),
+                    );
+                }
             }
             finish_component(
                 events,
                 run_clock,
                 stage_clock,
                 "downstream/mission",
-                if self.config.mission.enabled {
+                if delivered.mission.enabled {
                     "Completed"
                 } else {
                     "Skipped"
@@ -1563,12 +1225,9 @@ impl DesignPipeline {
             let polar_summary = polar.as_ref().map_or_else(
                 || "unavailable".to_owned(),
                 |value| {
-                    let alpha_range = finite_range(&value.alpha_deg)
-                        .map_or_else(|| "none".to_owned(), |(lo, hi)| format!("{lo:.3}..{hi:.3}"));
-                    let cl_range = finite_range(&value.cl)
-                        .map_or_else(|| "none".to_owned(), |(lo, hi)| format!("{lo:.4}..{hi:.4}"));
-                    let cd_range = finite_range(&value.cd)
-                        .map_or_else(|| "none".to_owned(), |(lo, hi)| format!("{lo:.5}..{hi:.5}"));
+                    let alpha_range = finite_range_text(&value.alpha_deg, 3);
+                    let cl_range = finite_range_text(&value.cl, 4);
+                    let cd_range = finite_range_text(&value.cd, 5);
                     format!(
                         "{}/{} alpha points, status={}, OSMAP={}, alpha={alpha_range} deg, CL={cl_range}, CD={cd_range}",
                         value.converged_alpha_count,
@@ -1581,10 +1240,8 @@ impl DesignPipeline {
             let pressure_summary = pressure.as_ref().map_or_else(
                 || "unavailable".to_owned(),
                 |value| {
-                    let mach_range = finite_range(&value.field_mach)
-                        .map_or_else(|| "none".to_owned(), |(lo, hi)| format!("{lo:.3}..{hi:.3}"));
-                    let cp_range = finite_range(&value.field_cp)
-                        .map_or_else(|| "none".to_owned(), |(lo, hi)| format!("{lo:.4}..{hi:.4}"));
+                    let mach_range = finite_range_text(&value.field_mach, 3);
+                    let cp_range = finite_range_text(&value.field_cp, 4);
                     format!(
                         "status={}, upper={}, lower={}, Mach field={}, Cp field={}, Mach={mach_range}, Cp={cp_range}, OSMAP={} ({})",
                         value.status.as_str(),
@@ -1608,7 +1265,7 @@ impl DesignPipeline {
                 run_clock,
                 stage_clock,
                 "downstream/mses",
-                if self.config.mses.enabled {
+                if delivered.mses.enabled {
                     "Completed"
                 } else {
                     "Skipped"
@@ -1623,23 +1280,24 @@ impl DesignPipeline {
                 "downstream/structural",
                 "Structural sizing and analysis",
             );
-            if self.config.structures.enabled {
+            if delivered.structures.enabled {
                 let work_dir = Some(analysis_dir.join("structures"));
-                // Structural load cards are sized against the same takeoff
-                // mass that built the selected report.  For a mission-sized
-                // finalist the configured MTOW remains the upper limit, but
-                // using that larger limit here would make the wingbox and
-                // NASTRAN deck describe a different aircraft than the mass,
-                // CG and mission records above.
-                let structural_config = config_for_report_mass(&self.config, &optimized_report);
+                // Loads use the mass the report was evaluated at (the sized
+                // takeoff mass of a sized finalist); a registered aircraft keeps
+                // its declared design gross weight, so a light dispatch does not
+                // resize its box.
+                let structural_config =
+                    crate::feasibility::structure::design_config(&delivered, &optimized_report);
                 emit_diagnostic(
                     events,
                     run_clock,
                     "downstream/structural",
                     &format!(
-                        "Structural loads use report mass basis {:.3} kg (configured MTOW limit {:.3} kg)",
-                        report_mass_basis_kg(&optimized_report, self.config.requirements.mtow_kg),
-                        self.config.requirements.mtow_kg,
+                        "Structural loads use design gross mass {:.3} kg (configured MTOW limit {:.3} kg)",
+                        alas_opt::mdo::structural_feasibility::structural_design_mass_kg(
+                            &structural_config
+                        ),
+                        delivered.requirements.mtow_kg,
                     ),
                 );
                 let result = Some(
@@ -1776,19 +1434,43 @@ impl DesignPipeline {
             "feasibility",
             "Physical feasibility assessment",
         );
-        let feasibility = assess_physical_feasibility_with_load_case(
-            &self.config,
+        let mut feasibility = native_verification
+            .map(|verified| verified.verification().feasibility.clone())
+            .unwrap_or_else(|| {
+                assess_physical_feasibility_with_load_case(
+                    &delivered,
+                    &optimized_design,
+                    &optimized_report,
+                    mission_result.as_ref(),
+                    mission_load_case.as_ref(),
+                )
+            });
+        crate::feasibility::structure::append_delivery(
+            &delivered,
             &optimized_design,
             &optimized_report,
-            mission_result.as_ref(),
-            mission_load_case.as_ref(),
+            structural_result.as_ref(),
+            &mut feasibility.findings,
         );
+        if delivered.optimizer.solver.method == alas_config::optimizer::PRODUCT_DE_METHOD {
+            if let Some(message) = crate::feasibility::structure::revoke_delivery(
+                &feasibility.findings,
+                optimization_result.as_mut(),
+            ) {
+                emit_diagnostic(events, run_clock, "feasibility", &message);
+            }
+            crate::feasibility::structure::sync_selected_delivery(
+                solver_optimizations.as_mut(),
+                options.optimization_solver,
+                optimization_result.as_ref(),
+            );
+        }
         finish_stage(events, run_clock, stage_clock, 6, "feasibility");
         check_cancelled(cancel)?;
         if let Some(export) = cpacs_export.as_ref() {
             export_cpacs_with_analysis(
                 &optimized_report,
-                &self.config,
+                &delivered,
                 Some(&feasibility),
                 mission_result.as_ref(),
                 &export.path,
@@ -1823,7 +1505,7 @@ impl DesignPipeline {
                 || {
                     crate::export::export_json_with_feasibility(
                         &optimized_report,
-                        &self.config,
+                        &delivered,
                         &feasibility,
                         &path,
                     )
@@ -1831,7 +1513,7 @@ impl DesignPipeline {
                 |cpacs| {
                     export_json_with_feasibility_and_cpacs(
                         &optimized_report,
-                        &self.config,
+                        &delivered,
                         &feasibility,
                         cpacs,
                         &path,
@@ -1840,7 +1522,13 @@ impl DesignPipeline {
             ) {
                 Ok(database) => Some(database),
                 Err(error) => {
-                    tracing::warn!(%error, "design database export failed");
+                    warn_artifact_failure(
+                        events,
+                        run_clock,
+                        "finalization",
+                        "Design database",
+                        &error,
+                    );
                     None
                 }
             }
@@ -1848,20 +1536,32 @@ impl DesignPipeline {
         let payload_layout_artifact = options.output_dir.as_ref().and_then(|out_dir| {
             let layout = optimized_report.payload_layout.as_ref()?;
             let path = out_dir.join("payload_layout.json");
-            match export_payload_layout_artifact(&self.config, optimized_design, layout, &path) {
+            match export_payload_layout_artifact(&delivered, optimized_design, layout, &path) {
                 Ok(_) => Some(path),
                 Err(error) => {
-                    tracing::warn!(%error, "payload-layout render artifact export failed");
+                    warn_artifact_failure(
+                        events,
+                        run_clock,
+                        "finalization",
+                        "Payload-layout render artifact",
+                        &error,
+                    );
                     None
                 }
             }
         });
         let cabin_scene_artifact = options.output_dir.as_ref().and_then(|out_dir| {
             let path = out_dir.join("cabin_scene_v2.json");
-            match export_cabin_scene(&self.config, &optimized_report, &path) {
+            match export_cabin_scene(&delivered, &optimized_report, &path) {
                 Ok(_) => Some(path),
                 Err(error) => {
-                    tracing::warn!(%error, "cabin-scene v2 export failed");
+                    warn_artifact_failure(
+                        events,
+                        run_clock,
+                        "finalization",
+                        "Cabin scene v2",
+                        &error,
+                    );
                     None
                 }
             }
@@ -1869,12 +1569,24 @@ impl DesignPipeline {
 
         if let (Some(out_dir), Some(polar)) = (options.output_dir.as_deref(), &mses_result) {
             if let Err(error) = persist_mses_polar_diagnostics(polar, out_dir) {
-                tracing::warn!(%error, "MSES polar-diagnostic retention failed");
+                warn_artifact_failure(
+                    events,
+                    run_clock,
+                    "downstream/mses",
+                    "MSES polar diagnostics",
+                    &error,
+                );
             }
         }
         if let (Some(out_dir), Some(pressure)) = (options.output_dir.as_deref(), &mses_pressure) {
             if let Err(error) = persist_mses_raw_exports(pressure, out_dir) {
-                tracing::warn!(%error, "MSES raw-output retention failed");
+                warn_artifact_failure(
+                    events,
+                    run_clock,
+                    "downstream/mses",
+                    "MSES raw output",
+                    &error,
+                );
             }
         }
 
@@ -1919,33 +1631,19 @@ impl DesignPipeline {
                 }
                 if let Some(result) = &structural_result {
                     stages.insert("structures".to_owned(), result.status.clone());
-                    if let Some(nastran) = result.nastran.as_ref() {
-                        stages.insert(
-                            "msc_nastran_sol101".to_owned(),
-                            nastran.static_solve.status.as_str().to_owned(),
-                        );
-                        stages.insert(
-                            "msc_nastran_sol103".to_owned(),
-                            nastran.modes.status.as_str().to_owned(),
-                        );
-                        stages.insert(
-                            "msc_nastran_sol111".to_owned(),
-                            nastran.vibration.status.as_str().to_owned(),
-                        );
-                    }
-                    if let Some(nastran95) = result.nastran95.as_ref() {
-                        stages.insert(
-                            "nastran95_sol101".to_owned(),
-                            nastran95.static_solve.status.as_str().to_owned(),
-                        );
-                        stages.insert(
-                            "nastran95_sol103".to_owned(),
-                            nastran95.modes.status.as_str().to_owned(),
-                        );
-                        stages.insert(
-                            "nastran95_sol111".to_owned(),
-                            nastran95.vibration.status.as_str().to_owned(),
-                        );
+                    for (prefix, solver) in [
+                        ("msc_nastran", result.nastran.as_ref()),
+                        ("nastran95", result.nastran95.as_ref()),
+                    ] {
+                        let Some(solver) = solver else { continue };
+                        for (solution, status) in [
+                            ("sol101", solver.static_solve.status),
+                            ("sol103", solver.modes.status),
+                            ("sol111", solver.vibration.status),
+                        ] {
+                            stages
+                                .insert(format!("{prefix}_{solution}"), status.as_str().to_owned());
+                        }
                     }
                     if let Some(patran) = result.patran.as_ref() {
                         stages.insert("patran".to_owned(), patran.status.clone());
@@ -2146,7 +1844,7 @@ impl DesignPipeline {
         finish_stage(events, run_clock, stage_clock, 7, "finalization");
         check_cancelled(cancel)?;
         Ok(PipelineResult {
-            config: self.config.clone(),
+            config: delivered.clone(),
             optimized_design: Some(optimized_design),
             optimized_report: Some(optimized_report),
             optimization_result,
@@ -2169,35 +1867,27 @@ impl DesignPipeline {
             vspaero_result,
             avl_result,
             flowunsteady_result,
-            execution: PipelineExecutionStatus {
-                parallel_requested: options.parallel,
-                parallel_effective,
-                aerodynamic_solver: options.aerodynamic_solver,
-                optimization_solver: options.optimization_solver,
-                seed_requested: options.seed,
-                seed_applied: options.optimize && options.seed.is_some(),
-                quiet_requested: options.quiet,
-            },
+            execution: PipelineExecutionStatus::for_options(options, parallel_effective),
         })
     }
 
     fn configured_nominal_design(&self) -> DesignVector {
-        if self.config.preset.is_empty() {
-            return DesignVector::default();
-        }
-        match presets::get(&self.config.preset) {
-            Ok(preset) => preset.design_vector,
-            Err(error) => {
-                tracing::warn!(%error, "configured preset has no registered design vector");
-                DesignVector::default()
+        // A derived clean sheet is analysed as the evaluator builds it (its
+        // fuselage sized by the cabin); a registered vector stays verbatim.
+        if self.config.derives_clean_sheet_start() {
+            match alas_opt::configured_nominal_design(&self.config) {
+                Ok(design) => return design,
+                Err(error) => tracing::warn!(%error, "clean-sheet start could not be sized"),
             }
         }
+        self.config.configured_nominal_design()
     }
 
     fn evaluate_active_mission(
         &self,
         report: &AnalysisReport,
         planned_route: Option<&PlannedRoute>,
+        verified: Option<&crate::acceptance::VerifiedAnalysis>,
     ) -> Result<MissionStageOutputs, String> {
         if !self.config.mission.enabled {
             return Ok((None, None, None, None));
@@ -2210,35 +1900,34 @@ impl DesignPipeline {
         let planned = planned_route
             .cloned()
             .ok_or_else(|| "mission is enabled but route planning produced no route".to_owned())?;
-        let selected_origin = get_airport(&self.config.departure_airport)
-            .map_err(|error| format!("mission departure airport could not be resolved: {error}"))?;
-        let selected_destination = get_airport(&self.config.arrival_airport)
-            .map_err(|error| format!("mission arrival airport could not be resolved: {error}"))?;
-        let origin = planned
-            .route
-            .origin_airport
-            .as_ref()
-            .unwrap_or(selected_origin);
-        let destination = planned
-            .route
-            .dest_airport
-            .as_ref()
-            .unwrap_or(selected_destination);
+        if let Some(verified) = verified {
+            return Ok((
+                Some(planned.route),
+                Some(planned.status),
+                verified.verification().mission.clone(),
+                verified.verification().load_case.clone(),
+            ));
+        }
+        let (origin, destination) = route_endpoints(&self.config, &planned.route)?;
+        let overridden = self
+            .mission_payload_override_kg
+            .map(|kg| mission_payload_override::report_with_payload_override(report, kg));
         let (mission, load) = mission_stage::evaluate(
             &self.config,
-            report,
+            overridden.as_ref().unwrap_or(report),
             origin,
             destination,
             planned.route.total_distance_m(),
         )
-        .map_err(|error| format!("native mission stage failed: {error}"))?;
+        .map_err(|error| format!("mission stage failed: {error}"))?;
         let (route, status) = (Some(planned.route), Some(planned.status));
-        Ok((route, status, Some(mission), Some(load)))
+        Ok((route, status, mission, Some(load)))
     }
 
     fn plan_active_route(&self, dispatched_route: Option<Route>) -> Option<PlannedRoute> {
         let origin = get_airport(&self.config.departure_airport).ok()?;
         let dest = get_airport(&self.config.arrival_airport).ok()?;
+        // The dispatch service is the one tier the sandbox never queries.
         let (dispatched_route, simbrief) = if let Some(route) = dispatched_route {
             (Some(route), SimbriefFetchStatus::SuppliedByCaller)
         } else {
@@ -2252,25 +1941,7 @@ impl DesignPipeline {
             );
             (outcome.route, outcome.status)
         };
-        let locator = ToolLocator::for_current_process();
-        let routes_dir = locator.resolve_data_path(Path::new(&self.config.mission.routes_dir));
-        let navdata_dir = locator.resolve_data_path(Path::new(&self.config.mission.navdata_dir));
-        let navdata = load_navdata_with_airway_coordinates(
-            &navdata_dir,
-            self.config.mission.use_airway_endpoint_coordinates,
-        );
-        let sources = RouteSources {
-            dispatched: dispatched_route,
-            routes_dir: Some(routes_dir.as_path()),
-            navdata: navdata.as_ref(),
-            great_circle_points: self.config.mission.great_circle_points.max(1) as usize,
-        };
-        let route = plan_route_with_max_stretch(
-            origin,
-            dest,
-            sources,
-            self.config.mission.max_airway_stretch,
-        );
+        let route = plan_mission_route(&self.config, dispatched_route)?;
         Some(PlannedRoute {
             status: RoutePlanningStatus {
                 selected_source: route.source,
@@ -2290,43 +1961,47 @@ impl DesignPipeline {
             return (None, None);
         }
         let condition = mses_section_condition(&self.config, report);
-        let dir = match mses_dir {
-            Some(d) => d,
-            None => {
-                let error = "MSES executables not configured (Setup > External Tools)".to_owned();
-                let airfoil_name = report
-                    .airplane
-                    .wings
-                    .first()
-                    .and_then(|wing| wing.xsecs.first())
-                    .map(|section| section.airfoil.name.clone())
-                    .filter(|name| !name.is_empty())
-                    .unwrap_or_else(|| "optimized_root_section".to_owned());
-                return (
-                    Some(MsesPolarResult {
-                        status: alas_aero::mses::MsesStatus::Absent,
-                        error: Some(error.clone()),
-                        airfoil_name,
-                        mach: condition.mach,
-                        reynolds: condition.reynolds,
-                        ..MsesPolarResult::default()
-                    }),
-                    Some(MsesPressureResult {
-                        status: alas_aero::mses::MsesStatus::Absent,
-                        error: Some(error),
-                        alpha_deg: condition.alpha_deg,
-                        ..MsesPressureResult::default()
-                    }),
-                );
-            }
+        let root_airfoil = report
+            .airplane
+            .wings
+            .first()
+            .and_then(|wing| wing.xsecs.first())
+            .map(|section| &section.airfoil);
+        // An enabled stage that cannot run still returns typed results, so
+        // the run log and manifest say why instead of "not requested".
+        let unavailable = |status, error: &str| {
+            let airfoil_name = root_airfoil
+                .map(|airfoil| airfoil.name.clone())
+                .filter(|name| !name.is_empty())
+                .unwrap_or_else(|| "optimized_root_section".to_owned());
+            (
+                Some(MsesPolarResult {
+                    status,
+                    error: Some(error.to_owned()),
+                    airfoil_name,
+                    mach: condition.mach,
+                    reynolds: condition.reynolds,
+                    ..MsesPolarResult::default()
+                }),
+                Some(MsesPressureResult {
+                    status,
+                    error: Some(error.to_owned()),
+                    alpha_deg: condition.alpha_deg,
+                    ..MsesPressureResult::default()
+                }),
+            )
         };
-        let wing = match report.airplane.wings.first() {
-            Some(w) => w,
-            None => return (None, None),
+        let Some(dir) = mses_dir else {
+            return unavailable(
+                alas_aero::mses::MsesStatus::Absent,
+                "MSES executables not configured (Setup > External Tools)",
+            );
         };
-        let root_airfoil = match wing.xsecs.first() {
-            Some(x) => &x.airfoil,
-            None => return (None, None),
+        let Some(root_airfoil) = root_airfoil else {
+            return unavailable(
+                alas_aero::mses::MsesStatus::NotRun,
+                "the analyzed aircraft has no main-wing root section to send to MSES",
+            );
         };
 
         let polar = run_mses_polar_with_cancel(
@@ -2365,47 +2040,6 @@ impl DesignPipeline {
             None => "No analysis report available.".to_owned(),
         }
     }
-}
-
-/// Read the report's explicit mass provenance without treating a missing or
-/// malformed value as a new mass limit. `fallback_kg` is the configured
-/// MTOW, which is the appropriate basis for reference and fixed requirement
-/// reports.
-fn report_mass_basis_kg(report: &AnalysisReport, fallback_kg: f64) -> f64 {
-    let is_sized = report
-        .geometry_summary
-        .get("analysis_mass_basis_is_sized")
-        .is_some_and(|value| value.is_finite() && *value > 0.5);
-    let sized = report
-        .geometry_summary
-        .get("analysis_mass_basis_kg")
-        .copied()
-        .filter(|value| value.is_finite() && *value > 0.0);
-    if is_sized {
-        if let Some(value) = sized {
-            return value;
-        }
-    }
-    fallback_kg
-}
-
-/// Clone the public configuration for a downstream discipline that consumes
-/// the report's actual mass. The configured MTOW is retained by the caller as
-/// a limit and remains in the final result; only the structural load cards
-/// need the closed mission-sized value as their working mass.
-fn config_for_report_mass(config: &AlasConfig, report: &AnalysisReport) -> AlasConfig {
-    config.at_closure_mass(report_mass_basis_kg(report, config.requirements.mtow_kg))
-}
-
-fn finite_range(values: &[f64]) -> Option<(f64, f64)> {
-    let mut finite = values.iter().copied().filter(|value| value.is_finite());
-    let first = finite.next()?;
-    let mut range = (first, first);
-    for value in finite {
-        range.0 = range.0.min(value);
-        range.1 = range.1.max(value);
-    }
-    Some(range)
 }
 
 /// Whether a design-space call pins every coordinate to one literal value.
@@ -2452,5 +2086,4 @@ fn validate_run_configuration(
 #[cfg(test)]
 // Failed expectations and unwraps here are failed test assertions.
 #[allow(clippy::unwrap_used, clippy::expect_used)]
-#[path = "pipeline_tests.rs"]
 mod tests;

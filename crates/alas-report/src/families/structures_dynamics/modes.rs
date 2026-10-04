@@ -3,7 +3,6 @@
 
 // Ported from alas/reporting/visualization.py: figure_structures_modes
 // (L5969-6080) and _nearest_freq_index (L5954-5966).
-// Reference: alas @ rust-port-baseline.
 
 //! Rayleigh-versus-MSC/NASTRAN-95 normal-mode frequencies and spanwise shapes.
 //!

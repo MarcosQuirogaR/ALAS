@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/sidecar/schema.py
-// Reference: alas @ rust-port-baseline.
 
 //! The description a configuration struct gives of its own fields.
 //!
@@ -26,6 +25,9 @@
 
 use serde::ser::{SerializeMap, Serializer};
 use serde::Serialize;
+
+mod option_source;
+pub use option_source::OptionSource;
 
 /// One configuration struct's fields, in declaration order.
 #[derive(Debug, Clone, PartialEq)]
@@ -67,6 +69,10 @@ pub enum Entry {
 pub struct LeafField {
     /// Which editor the interface should use.
     pub kind: Kind,
+    /// The declared type inside an `Option<T>`, even while its value is null.
+    /// This is GUI-only metadata and is deliberately absent from the
+    /// serialized schema, whose established wire format reports only `kind`.
+    pub optional_value_kind: Option<OptionalValueKind>,
     /// The current value.
     pub value: serde_json::Value,
     /// The smallest accepted value, if the field states one.
@@ -81,6 +87,10 @@ pub struct LeafField {
     pub readonly_unless: Option<ReadonlyUnless>,
     /// Where this field's accepted values come from.
     pub options: Option<OptionSource>,
+    /// What a value of zero means, for a whole-number field whose zero is a
+    /// setting rather than a count. GUI-only metadata, absent from the
+    /// serialized schema like `optional_value_kind`.
+    pub zero_means: Option<ZeroMeaning>,
 }
 
 /// A bound, which keeps whether it was written as an integer.
@@ -156,178 +166,33 @@ pub enum Kind {
     Unsupported,
 }
 
-/// Where a string field's accepted values come from.
-///
-/// Most of these lists are owned by crates that sit above this one (the
-/// airfoil library, the engine deck, the material database) so this names
-/// the list and something that can see both resolves it. The lists that
-/// depend on nothing are resolved by [`OptionSource::options`] here.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum OptionSource {
-    /// The airfoil library, which also accepts names it does not list: any
-    /// NACA 4-digit code resolves without being in it.
-    Airfoil,
-    /// The engine registry.
-    Engine,
-    /// The material database.
-    Material,
-    /// The landing-gear strut materials, which are their own list and not
-    /// the general material database.
-    StrutMaterial,
-    /// The tire database.
-    TireClass,
-    /// Which trailing-edge ribs the structural mesh generates.
-    TeRibMode,
-    /// The differential-evolution strategy names.
-    Strategy,
-    /// The top-level aircraft optimization algorithms.
-    OptimizerMethod,
-    /// Whether the aircraft carries passengers or freight.
-    AircraftType,
-    /// The cabin layout presets, which differ by aircraft type.
-    CabinPreset,
-    /// The one method that owns every production mass group.
-    MassArchitecture,
-    /// What kind of knowledge a family of declared FLOPS inputs rests on.
-    FlopsInputEvidence,
-    /// Versioned systems-and-equipment mass method.
-    SystemsMassMethod,
-    /// Versioned structural-group mass method.
-    StructuralMassMethod,
-    /// Versioned propulsion-group mass method.
-    PropulsionMassMethod,
-    /// Which method prices the engine pylons FLOPS itself omits.
-    PylonMassMethod,
-    /// Which method prices the cabin equipment and operating items.
-    CabinEquipmentMethod,
-    /// Which LTH operating-item relation an aircraft takes.
-    OperatingHaulClass,
-    /// Which FLOPS wing bending-material factor is evaluated.
-    FlopsWingBendingMethod,
-    /// Whether the FLOPS engine starter is inside the declared baseline mass.
-    FlopsStarterScope,
-    /// Whether the FLOPS engine nozzle is inside the declared baseline mass.
-    FlopsNozzleScope,
-    /// Blade material and pitch-change hardware of a turboprop propeller.
-    PropellerConstruction,
-    /// Whether the cargo compartments are loose-loaded or take unit load
-    /// devices.
-    CargoHoldLoading,
-    /// The operating rule a design mission's reserves are sized under.
-    FuelScheme,
-    /// The container or pallet loaded on the main cargo deck.
-    MainDeckUld,
-    /// The lower-hold container format, including the physical auto-selector.
-    LowerDeckUld,
-    /// How the cargo loader distributes payload between available positions.
-    CargoLoadingStrategy,
-    /// The scalar the mission-sized design search minimises.
-    ObjectiveKind,
-    /// Whether the takeoff mass is a fixed input, closed by the mission up
-    /// to it, or closed by the mission with it used only to seed the first
-    /// pass.
-    MtowSizing,
-    /// How a family of requirements takes part in the ranking.
-    ConstraintPolicy,
-    /// How the optimizer treats the aircraft geometry it starts from.
-    DesignMode,
+/// What zero stands for in a whole-number field that declares it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ZeroMeaning {
+    /// Every logical thread the machine reports
+    /// (`std::thread::available_parallelism`).
+    AllThreads,
 }
 
-impl OptionSource {
-    /// The accepted values, when this crate can name them.
-    ///
-    /// `None` means the list is owned elsewhere and has to be resolved by a
-    /// crate that can see its owner.
-    pub fn options(self) -> Option<&'static [&'static str]> {
-        match self {
-            Self::TeRibMode => Some(&["all", "none", "alternate", "inboard", "outboard"]),
-            Self::Strategy => Some(&[
-                "best1bin",
-                "best1exp",
-                "rand1bin",
-                "rand1exp",
-                "best2bin",
-                "best2exp",
-                "rand2bin",
-                "rand2exp",
-                "randtobest1bin",
-                "randtobest1exp",
-                "currenttobest1bin",
-                "currenttobest1exp",
-            ]),
-            Self::OptimizerMethod => Some(&["differential_evolution"]),
-            Self::AircraftType => Some(&["passenger", "cargo"]),
-            Self::MassArchitecture => Some(&[
-                "pure_flops_transport_v1",
-                "legacy_reference_compatible_comparison",
-            ]),
-            Self::FlopsInputEvidence => Some(&[
-                "source_backed",
-                "user_declared",
-                "published_flops_default",
-                "uncertain_engineering_estimate",
-            ]),
-            Self::SystemsMassMethod => {
-                Some(&["reference_compatible_fractions", "flops_transport_v1"])
-            }
-            Self::StructuralMassMethod | Self::PropulsionMassMethod => {
-                Some(&["reference_compatible", "flops_transport_v1"])
-            }
-            Self::FlopsWingBendingMethod => Some(&["simplified", "detailed"]),
-            Self::PylonMassMethod => Some(&["none", "lth_box_beam_v1"]),
-            Self::FlopsStarterScope => Some(&[
-                "separate_equation_89",
-                "included_in_baseline",
-                "hardware_included_system_unresolved",
-                "unknown_conservative_separate",
-            ]),
-            Self::FlopsNozzleScope => Some(&[
-                "included_in_baseline",
-                "separate_equation_78",
-                "outside_unmodelled",
-                "unknown",
-            ]),
-            Self::CabinEquipmentMethod => Some(&["flops_transport_v1", "lth_civil_transport_v1"]),
-            Self::OperatingHaulClass => Some(&["short_medium_haul", "long_haul"]),
-            Self::PropellerConstruction => Some(&[
-                "aluminium_double_acting",
-                "aluminium_single_acting",
-                "composite",
-            ]),
-            Self::CargoHoldLoading => Some(&["bulk", "containerized", "mixed"]),
-            Self::FuelScheme => Some(&[
-                "easa_basic",
-                "faa_domestic",
-                "faa_flag_supplemental",
-                "study_convention",
-                "trip_fuel_only",
-            ]),
-            Self::CargoLoadingStrategy => {
-                Some(&["target_cg", "min_pallets", "door_proximity", "uniform"])
-            }
-            Self::ObjectiveKind => Some(&[
-                "block_fuel",
-                "takeoff_mass",
-                "operating_empty_mass",
-                "fuel_per_seat_kilometre",
-            ]),
-            Self::MtowSizing => Some(&["fixed_requirement", "sized_by_mission", "unconstrained"]),
-            Self::ConstraintPolicy => Some(&["hard", "soft", "diagnostic", "off"]),
-            Self::DesignMode => Some(&["clean_sheet", "reference_adaptation", "baseline_sandbox"]),
-            _ => None,
-        }
-    }
-
-    /// Whether a value outside the list is still accepted.
-    ///
-    /// Only the airfoil field is: the geometry layer resolves names the
-    /// library does not carry, so a strict list would reject valid input.
-    /// Everywhere else the list is the valid set, and free text could only
-    /// produce a lookup failure later.
-    pub fn editable(self) -> bool {
-        self == Self::Airfoil
-    }
+/// The declared scalar type of an optional leaf. `Kind::Optional` describes
+/// its *current value*, so it cannot tell an editor whether text entered into
+/// an empty field must be serialized as a number, boolean, or string.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OptionalValueKind {
+    /// Optional boolean.
+    Bool,
+    /// Optional signed 64-bit integer.
+    I64,
+    /// Optional unsigned 32-bit integer.
+    U32,
+    /// Optional platform-sized unsigned integer.
+    Usize,
+    /// Optional 64-bit floating-point number.
+    Float,
+    /// Optional UTF-8 string.
+    String,
+    /// Custom or aggregate optional leaf without a scalar editor.
+    Other,
 }
 
 impl Node {

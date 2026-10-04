@@ -16,8 +16,8 @@ use alas_geom::wing_structure::WingStructureGeometry;
 use crate::loads::{self, LoadCase, WingInertiaRelief};
 
 use super::law::{
-    cap_taper, gradient_unit, linspace, rib_count_from_max_spacing, root_cap_dimensions,
-    station_cap_dimensions, trapezoid, SizingLaw,
+    cap_taper, gradient_unit, linspace, rib_count_from_max_spacing, station_cap_dimensions,
+    trapezoid, SizingLaw,
 };
 use super::types::{CompositeProxyDeclaration, MassBreakdown, SparSizing, WingboxSizing};
 
@@ -125,6 +125,13 @@ pub(super) fn size_wingbox_with_law(
         .map(|h| (0..n).map(|j| h[j] / h_sum[j]).collect())
         .collect();
 
+    // Skin fixed at the configured minimum (no torsional shear-flow upsizing,
+    // the same fidelity the analytical model uses).
+    let t_skin = cfg.t_skin_min_m;
+
+    // Only the frozen law retains its historical root shear reserve. Product
+    // webs start at manufacturing gauge and are coupled to bending strength
+    // and clear-panel shear buckling in product_strength.
     let tau_allow_web = web_mat.f_allow_pa / (2.0 * 3.0_f64.sqrt());
     let taper = cap_taper(&eta, cfg.cap_taper_eta_lock, cfg.cap_taper_tip_fraction);
 
@@ -137,50 +144,20 @@ pub(super) fn size_wingbox_with_law(
         let frac_m = &frac_moment_all[i];
         let h_eff: Vec<f64> = h_i.iter().map(|&h| h * 0.85).collect();
 
-        // Root cap: MS = 0 by construction.
+        // The frozen law retains its historical effective lever arm. Product
+        // caps start at manufacturing gauge and are sized as one compatible
+        // section after the covers and webs have been assembled below.
         let h_eff0 = h_eff[0].max(1e-6);
         let a_cap0 = (frac_m[0] * m0) / (cap_mat.f_allow_pa * h_eff0);
-        let (w_cap0, t_cap0) = match law {
-            SizingLaw::Product => root_cap_dimensions(a_cap0, chord[0], h_i[0]),
-            SizingLaw::Frozen => {
-                let w_cap0 = (0.5 * chord[0]).min(h_i[0] * 0.6).max(1e-6);
-                (w_cap0, (a_cap0 / w_cap0).min(h_i[0] * 0.20))
-            }
-        };
-
-        // Outboard section.
-        //
-        // The product law sizes every station the way the root is sized: the
-        // local bending demand over the local effective depth, turned into a
-        // flange by [`root_cap_dimensions`], and floored at the minimum
-        // practical cover gauge. The frozen law instead ramps the root flange
-        // down by the taper and only raises a station that falls short.
-        //
-        // The distinction matters, and it is the taper that is wrong as a
-        // mass law. `cap_taper_eta_lock` exists to hold stiffness inboard
-        // (its own help text says so) and `cap_taper_tip_fraction` leaves a
-        // fifth of the root flange at the tip: on a large transport that is a
-        // 20 mm flange carrying a moment a tenth of what it can. Averaged over
-        // the span the tapered section is about 1.4 times the section strength
-        // demands, and a stiffness ramp charged as a strength floor is mass
-        // the aircraft does not have. A real cover does have an outboard
-        // floor, but it is an absolute manufacturing gauge, not a fraction of
-        // a root flange that grows with the aeroplane; `t_skin_min_m` is the
-        // practical cover gauge this configuration already declares for the
-        // class, so it is what the caps are floored at too.
+        let w_cap0 = (0.5 * chord[0]).min(h_i[0] * 0.6).max(1e-6);
+        let t_cap0 = (a_cap0 / w_cap0).min(h_i[0] * 0.20);
         let min_cap_thickness = cfg.t_skin_min_m.max(0.0);
         let mut t_cap = Vec::with_capacity(n);
         let mut w_cap = Vec::with_capacity(n);
         for j in 0..n {
-            let demand = (frac_m[j] * m_sizing[j]).abs();
             let (w, t) = match law {
                 SizingLaw::Product => {
-                    let a_req = if demand > 1.0 {
-                        demand / (cap_mat.f_allow_pa * h_eff[j].max(1e-6))
-                    } else {
-                        0.0
-                    };
-                    station_cap_dimensions(a_req, chord[j], h_i[j], min_cap_thickness)
+                    station_cap_dimensions(0.0, chord[j], h_i[j], min_cap_thickness)
                 }
                 SizingLaw::Frozen => {
                     let t = (t_cap0 * taper[j]).min(h_i[j] / 3.0);
@@ -193,10 +170,12 @@ pub(super) fn size_wingbox_with_law(
         }
         let a_cap: Vec<f64> = (0..n).map(|j| w_cap[j] * t_cap[j]).collect();
 
-        // Web: uniform thickness sized from root shear.
-        let t_web = cfg
-            .t_web_min_m
-            .max((frac_m[0] * v0) / (tau_allow_web * h_eff0));
+        let t_web = match law {
+            SizingLaw::Product => cfg.t_web_min_m,
+            SizingLaw::Frozen => cfg
+                .t_web_min_m
+                .max((frac_m[0] * v0) / (tau_allow_web * h_eff0)),
+        };
 
         // Margin of safety at every station.
         let margin_of_safety: Vec<f64> = (0..n)
@@ -222,10 +201,6 @@ pub(super) fn size_wingbox_with_law(
             margin_of_safety,
         });
     }
-
-    // Skin fixed at the configured minimum (no torsional shear-flow upsizing,
-    // the same fidelity the analytical model uses).
-    let t_skin = cfg.t_skin_min_m;
 
     // Rib spacing: Euler panel-buckling on the skin between the outermost two
     // spars.
@@ -307,11 +282,11 @@ pub(super) fn size_wingbox_with_law(
 
     let composite_declaration = if any_composite {
         Some(CompositeProxyDeclaration {
-            source: "Open source gap: the real wing box is composite, but no source has been \
-                     recorded that states it. Assigned as an effective isotropic proxy, not a \
-                     verified material.",
+            source: "Open source gap: aircraft-specific ply schedule and measured laminate design \
+                     allowables are unavailable. Assigned as an effective isotropic proxy, not a \
+                     verified aircraft material.",
             applicability: "Effective isotropic proxy for a laminate wing box. f_allow is a single \
-                            strength-based design allowable, not a laminate allowable; no ply schedule, \
+                            axial design allowable, not a full laminate failure envelope; no ply schedule, \
                             stacking sequence, compression-after-impact knockdown, inter-laminar check \
                             or aeroelastic tailoring is modelled. Not a certified laminate analysis. \
                             Gauge is a declared class assumption, not a measured gauge.",
@@ -323,7 +298,7 @@ pub(super) fn size_wingbox_with_law(
         None
     };
 
-    WingboxSizing {
+    let mut result = WingboxSizing {
         y_stations: y,
         eta_stations: eta,
         chord,
@@ -341,5 +316,48 @@ pub(super) fn size_wingbox_with_law(
         total_mass_kg: total,
         sizing_load_case: worst_case.name,
         composite_declaration,
+    };
+    if matches!(law, SizingLaw::Product) {
+        let envelope: Vec<_> = (0..n)
+            .map(|station| {
+                case_moments
+                    .iter()
+                    .map(|(_, moment)| moment[station].abs())
+                    .fold(0.0_f64, f64::max)
+            })
+            .collect();
+        let case_shears: Vec<_> = case_moments
+            .iter()
+            .zip(&cases)
+            .map(|((q, _), case)| {
+                let mut shear = loads::cantilever_shear_moment(&result.y_stations, q).0;
+                loads::apply_point_mass_shear_relief(
+                    &result.y_stations,
+                    &mut shear,
+                    case.load_factor,
+                    req.gravity_m_s2,
+                    &relief.point_masses_kg,
+                );
+                shear
+            })
+            .collect();
+        let shear_envelope: Vec<_> = (0..n)
+            .map(|station| {
+                case_shears
+                    .iter()
+                    .map(|shear| shear[station].abs())
+                    .fold(0.0_f64, f64::max)
+            })
+            .collect();
+        super::product_strength::size(
+            &mut result,
+            &envelope,
+            &shear_envelope,
+            cfg,
+            skin_mat,
+            web_mat,
+            cap_mat,
+        );
     }
+    result
 }

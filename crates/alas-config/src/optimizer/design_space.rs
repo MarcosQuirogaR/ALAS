@@ -11,6 +11,8 @@
 //! around it, and the window is recorded with the run so a "redesigned A320"
 //! can be traced back to the envelope that produced it.
 
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 
 use crate::design_variables::{DesignVariableSpec, DesignVector, SPECS};
@@ -104,9 +106,11 @@ pub struct DesignSpaceConfig {
     pub engine_scale_upper: f64,
 
     /// Design variables held at their reference value in reference mode.
+    ///
+    /// The default is [`DEFAULT_REFERENCE_FIXED_VARIABLES`].
     #[config(
         label = "Fixed variables (reference mode)",
-        help = "Comma-separated design-variable names that reference adaptation holds at the registered aircraft's values, for example 'fuselage_length_m, tail_scale, tail_x_shift_m'. Every other variable moves inside the windows below."
+        help = "Comma-separated design-variable names that reference adaptation holds at the registered aircraft's values. The default holds the fuselage length, the tail position and every variable whose effect on block fuel is below 0.1 % per full window width on the A320-200, B787-9 and A380-800, which today is only the rear lower Hicks-Henne bump. Remove a name to let the search move it again. The tail scale is always derived from the wing in reference adaptation, so the tails keep the registered tail volume coefficients. Every other variable moves inside the windows below."
     )]
     pub reference_fixed_variables: String,
 
@@ -141,6 +145,36 @@ pub struct DesignSpaceConfig {
         help = "Half-width of the search window around the reference Hicks-Henne bump amplitudes."
     )]
     pub reference_bump_half_width: f64,
+
+    /// Explicit clean-sheet start values, by design-variable name.
+    ///
+    /// Entries replace the derived (or preset) start of a clean-sheet run
+    /// variable by variable; other modes ignore them.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    #[config(skip)]
+    pub initial_design: BTreeMap<String, f64>,
+
+    /// Explicit clean-sheet search bounds, by design-variable name, as
+    /// `[lower, upper]` in the variable's own units.
+    ///
+    /// Entries replace the derived (or global) box of a clean-sheet run
+    /// variable by variable; the fuselage-length entry of a cabin-sized run
+    /// is the interval its length is solved in. Other modes ignore them.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    #[config(skip)]
+    pub bounds: BTreeMap<String, (f64, f64)>,
+
+    /// Whether a preset-less configuration is a clean-sheet brief whose
+    /// start, box, dependent geometry, cabin and exits are derived from it
+    /// (`alas_config::clean_sheet`). Loading a file without a preset marks it
+    /// true when the brief departs from the shipped reference aircraft's in
+    /// clean-sheet mode, and the mark is saved, so a reload keeps the
+    /// decision; a file may state it explicitly, an explicit false included,
+    /// which is kept. Unset (`None`) means undecided: a registered preset, the
+    /// reference brief, or a configuration built in code.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[config(skip)]
+    pub clean_sheet_brief: Option<bool>,
 }
 
 impl Default for DesignSpaceConfig {
@@ -151,14 +185,38 @@ impl Default for DesignSpaceConfig {
             engine_scale_enabled: false,
             engine_scale_lower: 0.7,
             engine_scale_upper: 1.4,
-            reference_fixed_variables: "fuselage_length_m, tail_scale, tail_x_shift_m".to_owned(),
+            reference_fixed_variables: DEFAULT_REFERENCE_FIXED_VARIABLES.to_owned(),
             reference_fraction_half_width: 0.10,
             reference_angle_half_width_deg: 3.0,
             reference_shift_half_width_m: 1.0,
             reference_bump_half_width: 0.002,
+            initial_design: BTreeMap::new(),
+            bounds: BTreeMap::new(),
+            clean_sheet_brief: None,
         }
     }
 }
+
+/// The variables a reference adaptation holds at the registered aircraft's
+/// values unless the user lists otherwise.
+///
+/// The fuselage length and tail position belong to the registered fuselage
+/// and empennage layout. Every other variable is held only if its
+/// first-order effect on block fuel at the registered design is below 0.1 %
+/// of block fuel per full window width on all three of the A320-200, B787-9
+/// and A380-800, measured by central differences at +-5 % of the window.
+/// Only `bump_lower_rear` qualifies (0.06, 0.03, 0.09). The other three
+/// bumps read 0.19-0.83 on the wide-bodies, `sweep_deg` 0.08 on the A320-200
+/// but 1.7-8.7 on the wide-bodies and `break_chord_m` 0.12 on the B787-9 but
+/// 1.5-2.2 elsewhere, so they stay free. The full table is in
+/// `docs/optimizer-design-vector.md`. Removing a name re-enables it.
+pub const DEFAULT_REFERENCE_FIXED_VARIABLES: &str =
+    "fuselage_length_m, tail_x_shift_m, bump_lower_rear";
+
+/// The variable a reference adaptation derives from the wing instead of
+/// searching: the optimizer's tail auto-sizing sets it so the tails keep the
+/// registered aircraft's volume coefficients.
+const TAIL_SCALE_VARIABLE: &str = "tail_scale";
 
 /// How a variable's reference window is measured.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -247,7 +305,62 @@ impl DesignSpaceConfig {
                 return Err(format!("fixed variable '{name}' is not a design variable"));
             }
         }
+        self.validate_explicit_space()
+    }
+
+    /// Reject explicit start values and bounds that name no design variable,
+    /// are not finite, are inverted, or put a start outside its own bound.
+    fn validate_explicit_space(&self) -> Result<(), String> {
+        let known = |name: &str| SPECS.iter().any(|spec| spec.name == name);
+        for (name, value) in &self.initial_design {
+            if !known(name) || !value.is_finite() {
+                return Err(format!(
+                    "design space initial_design entry '{name}' must name a design variable and be finite"
+                ));
+            }
+        }
+        for (name, &(lower, upper)) in &self.bounds {
+            if !known(name) || !lower.is_finite() || !upper.is_finite() || lower > upper {
+                return Err(format!(
+                    "design space bounds entry '{name}' must name a design variable with finite lower <= upper"
+                ));
+            }
+            // The guardrails every registered aircraft's window respects
+            // bound an explicit box too.
+            if let Some(spec) = SPECS.iter().find(|spec| spec.name == name) {
+                if lower < spec.preset_lower || upper > spec.preset_upper {
+                    return Err(format!(
+                        "design space bounds entry '{name}' [{lower}, {upper}] leaves the design-variable guardrails [{}, {}]",
+                        spec.preset_lower, spec.preset_upper
+                    ));
+                }
+            }
+            if let Some(value) = self.initial_design.get(name) {
+                if *value < lower || *value > upper {
+                    return Err(format!(
+                        "design space initial_design entry '{name}' lies outside its explicit bounds"
+                    ));
+                }
+            }
+        }
         Ok(())
+    }
+
+    /// `design` with the explicit start values applied, and every variable
+    /// with an explicit bound clamped into it.
+    pub fn apply_explicit_start(&self, design: DesignVector) -> DesignVector {
+        let mut values = design.to_array();
+        for (index, spec) in SPECS.iter().enumerate() {
+            if let Some(value) = self.initial_design.get(spec.name) {
+                values[index] = *value;
+            }
+            if let Some(&(lower, upper)) = self.bounds.get(spec.name) {
+                if lower <= upper {
+                    values[index] = values[index].clamp(lower, upper);
+                }
+            }
+        }
+        DesignVector::from_array(&values).unwrap_or(design)
     }
 
     /// The per-variable envelope the search runs over, from `nominal`.
@@ -270,7 +383,8 @@ impl DesignSpaceConfig {
                     self.clean_sheet_envelope(spec, value, fixed)
                 }
                 DesignMode::ReferenceAdaptation => {
-                    self.reference_envelope(spec, value, fixed.contains(&spec.name))
+                    let derived = spec.name == TAIL_SCALE_VARIABLE;
+                    self.reference_envelope(spec, value, derived || fixed.contains(&spec.name))
                 }
                 DesignMode::BaselineSandbox => VariableEnvelope {
                     name: spec.name,
@@ -377,6 +491,40 @@ mod tests {
     }
 
     #[test]
+    fn reference_mode_holds_only_the_flat_bump_by_default_and_frees_it_on_request() {
+        let nominal = DesignVector {
+            bump_upper_rear: 0.001,
+            bump_lower_rear: 0.001,
+            ..DesignVector::default()
+        };
+        let bump = |config: &DesignSpaceConfig, name: &str| {
+            config
+                .envelope(&nominal)
+                .into_iter()
+                .find(|v| v.name == name)
+                .unwrap()
+        };
+        let default = DesignSpaceConfig {
+            mode: DesignMode::ReferenceAdaptation,
+            ..Default::default()
+        };
+        let held = bump(&default, "bump_lower_rear");
+        assert!(held.fixed && held.lower == 0.001 && held.upper == 0.001);
+        let free = bump(&default, "bump_upper_rear");
+        assert!(!free.fixed && free.lower < 0.001 && free.upper > 0.001);
+        let freed = bump(
+            &DesignSpaceConfig {
+                mode: DesignMode::ReferenceAdaptation,
+                reference_fixed_variables: "fuselage_length_m, tail_x_shift_m".to_owned(),
+                ..Default::default()
+            },
+            "bump_lower_rear",
+        );
+        assert!(!freed.fixed && freed.lower < 0.001 && freed.upper > 0.001);
+        assert!(DesignSpaceConfig::default().validate().is_ok());
+    }
+
+    #[test]
     fn reference_mode_windows_the_planform_and_fixes_the_listed_variables() {
         let config = DesignSpaceConfig {
             mode: DesignMode::ReferenceAdaptation,
@@ -420,6 +568,26 @@ mod tests {
             .unwrap();
         assert!(fuselage.lower < 37.57 && fuselage.upper > 37.57);
         assert!(fuselage.lower >= 20.0);
+    }
+
+    #[test]
+    fn reference_mode_derives_the_tail_scale_and_clean_sheet_searches_it() {
+        let reference = DesignSpaceConfig {
+            mode: DesignMode::ReferenceAdaptation,
+            reference_fixed_variables: String::new(),
+            ..Default::default()
+        };
+        let tail = |config: &DesignSpaceConfig| {
+            config
+                .envelope(&DesignVector::default())
+                .into_iter()
+                .find(|v| v.name == "tail_scale")
+                .unwrap()
+        };
+        let fixed = tail(&reference);
+        assert!(fixed.fixed && fixed.lower == fixed.upper);
+        let clean = tail(&DesignSpaceConfig::default());
+        assert!(!clean.fixed && clean.lower < clean.upper);
     }
 
     #[test]

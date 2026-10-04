@@ -55,6 +55,7 @@ fn sample_report() -> AnalysisReport {
         },
         polar_fit: PolarFit {
             cd0: 0.0185,
+            c1: 0.0,
             k: 0.042,
             oswald_e: 0.86,
             aspect_ratio: 9.8,
@@ -70,6 +71,8 @@ fn sample_report() -> AnalysisReport {
         geometry_summary: HashMap::new(),
         payload_layout: None,
         cg_envelope_ok: Some(true),
+        neutral_point_conditions: None,
+        fuel: Default::default(),
     };
     report.component_masses.insert("Wing".to_owned(), 8500.0);
     report

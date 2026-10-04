@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/reporting/design_report.py
-// Reference: alas @ rust-port-baseline.
 
 //! Design database export to JSON, Selig `.dat` airfoil coordinate files, and summary reports.
 //!
@@ -55,6 +54,7 @@ mod tests {
             },
             polar_fit: PolarFit {
                 cd0: 0.018,
+                c1: 0.0,
                 k: 0.045,
                 oswald_e: 0.85,
                 aspect_ratio: 9.5,
@@ -70,6 +70,8 @@ mod tests {
             geometry_summary: HashMap::new(),
             payload_layout: None,
             cg_envelope_ok: Some(true),
+            neutral_point_conditions: None,
+            fuel: Default::default(),
         };
         report.component_masses.insert("Wing".to_owned(), 5000.0);
         report.geometry_summary.insert("span_m".to_owned(), 35.0);

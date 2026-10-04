@@ -2,20 +2,19 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/reporting/visualization.py (figure_structures_sizing, L5706-5818).
-// Reference: alas @ rust-port-baseline.
 
 //! Wingbox planform (spar lines + faint rib-station lines), the semi-wing
-//! mass breakdown as a pie chart, and a FEM-vs-Torenbeek wing mass
-//! comparison bar chart: a read-only accuracy check against
-//! `physics.mass`'s own Torenbeek estimate for this same design, not a
-//! feedback loop.
+//! mass breakdown as a pie chart, and a wing mass bar chart: the primary
+//! wingbox mass (FE deck, else native beam) beside the FLOPS complete-wing
+//! estimate, both read from the shared `WingMassComparison` the findings panel
+//! uses. Read-only, not a feedback loop.
 
 use std::f64::consts::TAU;
 
 use crate::chart_kit::{draw_axes_without_x_tick_labels, draw_title};
 use crate::scene::{Axes2D, Color, Fill, Scene, SceneElement, Stroke, TextAlign, TextBaseline};
 use crate::theme::{get_palette, Palette};
-use alas_pipeline::structural::StructuralAnalysisResult;
+use alas_pipeline::structural::{PrimaryMassSource, StructuralAnalysisResult, WingMassComparison};
 
 use super::{
     chord_bounds, draw_wing_outline, format_thousands, linspace, mass_breakdown_items,
@@ -181,18 +180,49 @@ pub fn figure_structures_sizing(
         bold: true,
     });
 
-    // right: FEM vs Torenbeek bar chart
-    let fem_full_wing = 2.0 * sizing.total_mass_kg;
-    let torenbeek = result.torenbeek_wing_mass_kg;
-    draw_fem_torenbeek_bars(
-        &mut scene,
-        pal,
-        (960.0, 60.0, 300.0, 400.0),
-        fem_full_wing,
-        torenbeek,
-    );
+    // right: primary structure vs FLOPS complete wing
+    let bar_rect = (960.0, 60.0, 300.0, 400.0);
+    match result.wing_mass.as_ref() {
+        Some(masses) => draw_wing_mass_bars(&mut scene, pal, bar_rect, &wing_mass_bars(masses)),
+        None => scene.add(SceneElement::Text {
+            text: "Wing mass comparison unavailable".to_owned(),
+            pos: [bar_rect.0, bar_rect.1 - 6.0],
+            font_size: 11.0,
+            color: Color::from_hex(pal.title),
+            align: TextAlign::Left,
+            baseline: TextBaseline::Bottom,
+            angle_deg: 0.0,
+            bold: true,
+        }),
+    }
 
     scene
+}
+
+/// Heading of the wing mass chart; it states the scopes differ and carries no
+/// error percentage.
+const BAR_TITLE: &str = "Wing mass by model (different scopes)";
+
+/// The two bars of the wing mass chart: `(label, kg, color)`.
+///
+/// The first bar is the primary-structure mass, from the FE (Nastran) deck
+/// when it exists and otherwise from the native beam, and says which. The
+/// second is the FLOPS complete-wing estimate. Both values are read from the
+/// shared [`WingMassComparison`] unchanged.
+fn wing_mass_bars(masses: &WingMassComparison) -> [(&'static str, f64, &'static str); 2] {
+    let (source, primary_kg) = masses.primary();
+    let primary_label = match source {
+        PrimaryMassSource::FiniteElement => "FE (Nastran)\nprimary wingbox",
+        PrimaryMassSource::NativeBeam => "Native beam\n(primary structure)",
+    };
+    [
+        (primary_label, primary_kg, "tab:blue"),
+        (
+            "FLOPS estimate\ncomplete wing",
+            masses.flops_complete_wing_kg,
+            "tab:red",
+        ),
+    ]
 }
 
 /// The pie chart: one wedge per `(label, value)` entry, tab-colored in
@@ -265,30 +295,24 @@ fn draw_pie(
     }
 }
 
-/// The FEM(both wings)-vs-Torenbeek bar chart, with the value labelled above
-/// each bar and a delta-percent title when the Torenbeek estimate is a
-/// finite positive number (matching `np.isfinite(torenbeek) and torenbeek >
-/// 0`).
-fn draw_fem_torenbeek_bars(
+/// The wing mass bar chart (both wings), with each value labelled above its
+/// bar and the scope of each bar in its label. No error percentage is shown:
+/// the primary wingbox and the complete wing are different inventories.
+fn draw_wing_mass_bars(
     scene: &mut Scene,
     pal: &Palette,
     rect: (f64, f64, f64, f64),
-    fem_full_wing: f64,
-    torenbeek: f64,
+    bars: &[(&str, f64, &str); 2],
 ) {
-    let max_val = fem_full_wing.max(if torenbeek.is_finite() {
-        torenbeek
-    } else {
-        0.0
-    });
+    let max_val = bars
+        .iter()
+        .map(|bar| bar.1)
+        .filter(|value| value.is_finite())
+        .fold(0.0, f64::max);
     let y_max = (max_val * 1.45).max(1.0);
     let axes = Axes2D::new(rect, (0.0, 2.0), (0.0, y_max));
     draw_axes_without_x_tick_labels(&axes, scene, pal, None, Some("Mass [kg]"));
 
-    let bars = [
-        ("FEM wingbox\n(both wings)", fem_full_wing, "tab:blue"),
-        ("Torenbeek\nestimate", torenbeek, "tab:red"),
-    ];
     for (i, &(label, value, color)) in bars.iter().enumerate() {
         if !value.is_finite() {
             continue;
@@ -332,14 +356,8 @@ fn draw_fem_torenbeek_bars(
         });
     }
 
-    let title = if torenbeek.is_finite() && torenbeek > 0.0 {
-        let err_pct = (fem_full_wing - torenbeek) / torenbeek * 100.0;
-        format!("FEM vs Torenbeek wing mass  (delta = {err_pct:+.0}%)")
-    } else {
-        "FEM vs Torenbeek wing mass".to_owned()
-    };
     scene.add(SceneElement::Text {
-        text: title,
+        text: BAR_TITLE.to_owned(),
         pos: [rect.0, rect.1 - 6.0],
         font_size: 11.0,
         color: Color::from_hex(pal.title),
@@ -379,6 +397,7 @@ mod tests {
         )
         .expect("two full-span spars is a valid configuration");
         let sizing = size_wingbox(&wsg, &cfg, &req, skin, web, cap, rib);
+        let native_kg = 2.0 * sizing.total_mass_kg;
         StructuralAnalysisResult {
             status: "ok".to_owned(),
             error: None,
@@ -390,7 +409,28 @@ mod tests {
             nastran95: None,
             patran: None,
             torenbeek_wing_mass_kg: 15000.0,
+            wing_mass: Some(WingMassComparison::new(native_kg, Some(31_000.0), 15_000.0)),
+            evaluation_inputs: None,
         }
+    }
+
+    fn texts(scene: &Scene) -> Vec<&str> {
+        scene
+            .elements
+            .iter()
+            .filter_map(|element| match element {
+                SceneElement::Text { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn with_fe(fe: Option<f64>) -> StructuralAnalysisResult {
+        let mut result = sample_result();
+        if let Some(masses) = result.wing_mass.as_mut() {
+            masses.fe_primary_kg = fe;
+        }
+        result
     }
 
     #[test]
@@ -432,7 +472,7 @@ mod tests {
             .iter()
             .filter(|e| matches!(e, SceneElement::Rect { fill: Some(_), .. }))
             .count();
-        assert_eq!(rects, 2, "one bar for FEM, one for Torenbeek");
+        assert_eq!(rects, 2, "one bar per wing mass inventory");
         let visible_planform_lines = scene
             .elements
             .iter()
@@ -451,39 +491,58 @@ mod tests {
         assert!(title.contains(result.sizing.expect("sizing present").sizing_load_case));
     }
 
-    #[test]
-    fn comparison_bar_categories_are_wrapped_below_numeric_ticks() {
-        let result = sample_result();
-        let scene = figure_structures_sizing(Some(&result), None);
-        let labels = scene.elements.iter().filter_map(|element| match element {
-            SceneElement::Text { text, pos, .. }
-                if text == "FEM wingbox\n(both wings)" || text == "Torenbeek\nestimate" =>
-            {
-                Some(pos)
-            }
-            _ => None,
-        });
-        assert_eq!(labels.count(), 2);
-        assert!(!scene.elements.iter().any(
-            |element| matches!(element, SceneElement::Text { text, .. } if text == "Estimate")
-        ));
+    fn value_label(kg: f64) -> String {
+        format!("{} kg", format_thousands(kg))
     }
 
     #[test]
-    fn the_bar_chart_title_reports_the_real_delta_percent() {
-        let mut result = sample_result();
-        result.torenbeek_wing_mass_kg = result
-            .sizing
-            .as_ref()
-            .expect("sizing present")
-            .total_mass_kg;
-        // FEM full wing is 2x the semi-wing sizing mass; with Torenbeek set
-        // to the semi-wing mass exactly, delta = 2x - 1x = +100%.
+    fn the_bar_values_are_the_shared_mass_result_fields() {
+        let result = with_fe(Some(31_000.0));
+        let masses = result.wing_mass.expect("wing mass present");
         let scene = figure_structures_sizing(Some(&result), None);
-        let has_delta = scene
-            .elements
-            .iter()
-            .any(|e| matches!(e, SceneElement::Text { text, .. } if text.contains("+100%")));
-        assert!(has_delta);
+        let shown = texts(&scene);
+        assert!(shown.contains(&value_label(masses.fe_primary_kg.expect("fe")).as_str()));
+        assert!(shown.contains(&value_label(masses.flops_complete_wing_kg).as_str()));
+        assert!(!shown.contains(&value_label(masses.native_primary_kg).as_str()));
+    }
+
+    #[test]
+    fn with_an_fe_result_the_beam_mass_is_not_presented_as_fe() {
+        let result = with_fe(Some(31_000.0));
+        let beam = result
+            .wing_mass
+            .expect("wing mass present")
+            .native_primary_kg;
+        let scene = figure_structures_sizing(Some(&result), None);
+        let shown = texts(&scene);
+        assert!(shown.iter().any(|t| t.contains("FE (Nastran)")));
+        assert!(!shown.iter().any(|t| t.contains("Native beam")));
+        assert!(!shown.contains(&value_label(beam).as_str()));
+    }
+
+    #[test]
+    fn without_an_fe_result_the_beam_mass_is_labelled_as_beam() {
+        let result = with_fe(None);
+        let beam = result
+            .wing_mass
+            .expect("wing mass present")
+            .native_primary_kg;
+        let scene = figure_structures_sizing(Some(&result), None);
+        let shown = texts(&scene);
+        assert!(shown.contains(&value_label(beam).as_str()));
+        assert!(shown.contains(&"Native beam\n(primary structure)"));
+        assert!(!shown.iter().any(|t| t.contains("FE (Nastran)")));
+    }
+
+    #[test]
+    fn differing_scopes_carry_scope_labels_and_no_delta_headline() {
+        for fe in [Some(31_000.0), None] {
+            let scene = figure_structures_sizing(Some(&with_fe(fe)), None);
+            let shown = texts(&scene);
+            assert!(shown.contains(&"FLOPS estimate\ncomplete wing"));
+            assert!(!shown.iter().any(|t| t.to_lowercase().contains("delta")
+                || t.contains('%') && t.contains("FLOPS")
+                || t.contains("Torenbeek")));
+        }
     }
 }

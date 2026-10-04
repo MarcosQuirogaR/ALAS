@@ -5,150 +5,102 @@
 //! optional external solvers, consolidated in one place rather than spread
 //! across their own Advanced Settings pages.
 //!
-//! A port of the reference desktop app's `SetupScreen`. Navigation data is
+//! Navigation data is
 //! downloaded through the shared windowless curl boundary in `alas-exec`, so
 //! the setup page and headless CLI use the same HTTPS, retry, atomic-install,
 //! and size-validation policy.
 
 use alas_exec::ExecutableDiscovery;
-use egui::{RichText, ScrollArea, TextEdit, Ui};
+use egui::{RichText, ScrollArea, Ui};
 use serde_json::Value;
 
 use crate::path_picker::{PathSelection, ToolPathTarget};
 use crate::state::AppState;
+use crate::views::external_tool_catalog::ExternalToolConfig;
 use crate::views::{tr, tr_fields};
 
 mod cards;
 mod cfd;
+mod layout;
 mod status;
+
+use layout::{card, card_row, section_heading, split_body, sub_heading, text_row};
 
 pub(crate) use cfd::save_cfd_environment_preferences;
 
 /// Render the External Tools page.
 pub fn show_tools_view(state: &mut AppState, ui: &mut Ui) {
     apply_completed_path_selection(state);
-    ui.heading(tr("External Tools"));
-    ui.label(
-        RichText::new(tr(
-            "Integration paths and credentials for the optional external tools ALAS can drive \
-             during a run. Set once; saved in user preferences.",
-        ))
-        .weak(),
-    );
+    ui.heading(tr("External Tools")).on_hover_text(tr(
+        "Integration paths and credentials for the optional external tools ALAS can drive \
+         during a run. Set once; saved in user preferences.",
+    ));
     ui.add_space(6.0);
 
     ScrollArea::vertical()
         .auto_shrink([false, false])
         .show(ui, |ui| {
+            // Cards are grouped by discipline. Paired cards share one height
+            // and wide cards split their own body, so a wide window is used
+            // across its width instead of leaving ragged gaps.
             section_heading(ui, "Mission routing and data");
             cards::routing_card(state, ui);
-            ui.add_space(8.0);
 
-            section_heading(ui, "External solvers");
-            if ui.available_width() >= 920.0 {
-                ui.columns(2, |columns| {
-                    let (left, right) = columns.split_at_mut(1);
-                    cards::nastran_card(state, &mut left[0]);
-                    cards::patran_card(state, &mut right[0]);
-                });
-                ui.add_space(8.0);
-                ui.columns(2, |columns| {
-                    let (left, right) = columns.split_at_mut(1);
-                    cards::mses_card(state, &mut left[0]);
-                    cards::openvsp_card(state, &mut right[0]);
-                });
-                ui.add_space(8.0);
-                cards::openfoam_card(state, ui);
-            } else {
-                cards::nastran_card(state, ui);
-                ui.add_space(8.0);
-                cards::patran_card(state, ui);
-                ui.add_space(8.0);
-                cards::mses_card(state, ui);
-                ui.add_space(8.0);
-                cards::openvsp_card(state, ui);
-                ui.add_space(8.0);
-                cards::openfoam_card(state, ui);
-            }
+            section_heading(ui, "Structural solvers");
+            cards::nastran_card(state, ui);
             ui.add_space(8.0);
-            cards::avl_card(state, ui);
+            cards::patran_card(state, ui);
+
+            section_heading(ui, "Aerodynamic solvers");
+            card_row(
+                ui,
+                "mses_openvsp",
+                state,
+                cards::mses_card,
+                cards::openvsp_card,
+            );
             ui.add_space(8.0);
-            cards::flowunsteady_card(state, ui);
-            ui.add_space(8.0);
+            card_row(
+                ui,
+                "avl_flowunsteady",
+                state,
+                cards::avl_card,
+                cards::flowunsteady_card,
+            );
+
+            section_heading(ui, "CFD");
+            cards::openfoam_card(state, ui);
 
             section_heading(ui, "Availability for the next run");
             status_card(state, ui);
         });
 }
 
-fn card(ui: &mut Ui, title: &str, link: &str, body: impl FnOnce(&mut Ui)) {
-    crate::theme::card_frame(ui).show(ui, |ui| {
-        ui.set_min_width(ui.available_width());
-        ui.horizontal(|ui| {
-            ui.label(
-                RichText::new(tr(title))
-                    .strong()
-                    .size(16.0)
-                    .color(ui.visuals().hyperlink_color),
-            );
-            ui.hyperlink_to(tr("Documentation"), link);
-        });
-        ui.add_space(4.0);
-        body(ui);
-    });
-}
-
-fn section_heading(ui: &mut Ui, title: &str) {
-    ui.label(
-        RichText::new(tr(title))
-            .strong()
-            .size(16.0)
-            .color(ui.visuals().hyperlink_color),
-    );
-    ui.add_space(4.0);
-}
-
-fn text_row(
-    state: &mut AppState,
-    ui: &mut Ui,
-    label: &str,
-    value: &mut String,
-    directory: bool,
-    picker_target: Option<ToolPathTarget>,
-) -> bool {
-    let mut changed = false;
-    ui.horizontal_wrapped(|ui| {
-        ui.add_sized([170.0, 18.0], egui::Label::new(tr(label)));
-        changed = ui
-            .add(TextEdit::singleline(value).desired_width(360.0))
-            .changed();
-        if let Some(target) = picker_target {
-            let pending = state.path_picker_pending(target);
-            if ui
-                .add_enabled(!pending, egui::Button::new(tr("Browse...")).small())
-                .on_hover_text(tr(
-                    "Choose the directory or executable with the native file picker. The selected location is saved in this user's preferences.",
-                ))
-                .clicked()
-            {
-                state.begin_path_picker(target, directory);
-            }
-            if !value.trim().is_empty()
-                && ui
-                    .small_button(tr("Open folder"))
-                    .on_hover_text(tr("Show this exact location in the system file explorer."))
-                    .clicked()
-            {
-                if let Err(error) = open_in_file_explorer(value, directory) {
-                    state.log(error, crate::state::LogKind::Warn);
-                }
-            }
+/// Render the existing configuration card for one tool inside the detached
+/// manager. Tools sharing an installation environment use the same card.
+pub(crate) fn show_tool_configuration(state: &mut AppState, ui: &mut Ui, tool: ExternalToolConfig) {
+    match tool {
+        ExternalToolConfig::All => {
+            show_tools_view(state, ui);
+            return;
         }
-    });
-    changed
+        ExternalToolConfig::Mses => cards::mses_card(state, ui),
+        ExternalToolConfig::MscNastran | ExternalToolConfig::Nastran95 => {
+            cards::nastran_card(state, ui)
+        }
+        ExternalToolConfig::MscPatran => cards::patran_card(state, ui),
+        ExternalToolConfig::OpenVsp => cards::openvsp_card(state, ui),
+        ExternalToolConfig::OpenFoam | ExternalToolConfig::Gmsh | ExternalToolConfig::ParaView => {
+            cards::openfoam_card(state, ui)
+        }
+        ExternalToolConfig::FlowUnsteady => cards::flowunsteady_card(state, ui),
+    }
+    ui.add_space(10.0);
+    section_heading(ui, "Availability for the next run");
+    status_card(state, ui);
 }
 
-fn apply_completed_path_selection(state: &mut AppState) {
+pub(crate) fn apply_completed_path_selection(state: &mut AppState) {
     let Some(PathSelection { target, result }) = state.take_path_selection() else {
         return;
     };
@@ -471,6 +423,61 @@ mod tests {
         assert!(!select_file);
 
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    fn painted_text(shape: &egui::Shape, texts: &mut Vec<(String, egui::Rect)>) {
+        match shape {
+            egui::Shape::Vec(shapes) => shapes.iter().for_each(|s| painted_text(s, texts)),
+            egui::Shape::Text(text) => texts.push((
+                text.galley.text().to_owned(),
+                egui::Rect::from_min_size(text.pos, text.galley.size()),
+            )),
+            _ => {}
+        }
+    }
+
+    #[test]
+    fn no_text_on_the_external_tools_page_overlaps_at_wide_or_narrow_widths() {
+        for width in [1500.0, 700.0] {
+            let mut state = crate::state::AppState::default();
+            let ctx = egui::Context::default();
+            let mut output = None;
+            for _ in 0..4 {
+                output = Some(ctx.run(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(width, 4000.0),
+                        )),
+                        ..Default::default()
+                    },
+                    |ctx| {
+                        egui::CentralPanel::default().show(ctx, |ui| {
+                            super::show_tools_view(&mut state, ui);
+                        });
+                    },
+                ));
+            }
+            let mut texts = Vec::new();
+            for clipped in &output.expect("rendered page").shapes {
+                let first = texts.len();
+                painted_text(&clipped.shape, &mut texts);
+                // Only the visible part counts: a long path is clipped to its box.
+                for (_, rect) in &mut texts[first..] {
+                    *rect = rect.intersect(clipped.clip_rect);
+                }
+            }
+            assert!(texts.iter().any(|(text, _)| text == "Structural solvers"));
+            for (i, (text_a, a)) in texts.iter().enumerate() {
+                for (text_b, b) in &texts[i + 1..] {
+                    let overlap = a.intersect(*b);
+                    assert!(
+                        overlap.width() <= 0.5 || overlap.height() <= 0.5,
+                        "at {width} px {text_a:?} {a:?} overlaps {text_b:?} {b:?}"
+                    );
+                }
+            }
+        }
     }
 
     #[test]

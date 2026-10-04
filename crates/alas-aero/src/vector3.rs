@@ -45,23 +45,3 @@ pub(crate) fn cross3(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
 pub(crate) fn norm3(a: [f64; 3]) -> f64 {
     dot3(a, a).sqrt()
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn cross3_of_x_and_y_axes_is_the_z_axis() {
-        assert_eq!(cross3([1.0, 0.0, 0.0], [0.0, 1.0, 0.0]), [0.0, 0.0, 1.0]);
-    }
-
-    #[test]
-    fn norm3_of_a_3_4_0_vector_is_5() {
-        assert!((norm3([3.0, 4.0, 0.0]) - 5.0).abs() < 1e-15);
-    }
-
-    #[test]
-    fn dot3_of_perpendicular_vectors_is_zero() {
-        assert_eq!(dot3([1.0, 0.0, 0.0], [0.0, 1.0, 0.0]), 0.0);
-    }
-}

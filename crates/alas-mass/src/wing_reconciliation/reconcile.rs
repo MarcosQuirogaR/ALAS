@@ -1,6 +1,74 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
+//! Strength-sizing of the primary wing box and its reconciliation with the secondary structure.
+
+use alas_config::design_variables::DesignVector;
+use alas_config::optimizer::DesignMode;
+use alas_config::AlasConfig;
+use alas_geom::aircraft::airplane::Airplane;
+use alas_geom::aircraft::wing::Wing;
+use alas_geom::builder::AircraftBuilder;
+use alas_struct::sizing::WingboxSizing;
+
+use crate::breakdown::{
+    run_mass_analysis_with_model_checked_product_with_gear, MassCoordinateModel,
+};
+use crate::torenbeek::{
+    mass_wing_with_control_surface_area, wing_secondary_mass_breakdown_with_control_surface_area,
+};
+use crate::wing_inventory::{
+    build_wing_inventory, MovableSurface, TorenbeekWingGroup, WingInventoryInputs,
+    WingMovableSurfaces, WingNonBoxInventory,
+};
+use crate::wingbox_feedback::{
+    reconcile_clean_sheet_wing, ReferenceWingMass, SizedWingboxMass, WingboxFeedback,
+};
+
+use super::geometry::{
+    configured_surface_area, fixed_non_box_structure, flops_wing_inputs, surface_centroid,
+    validate_secondary_breakdown,
+};
+use super::support::{design_requirements, reconcile_against_reference, StructuralInventory};
+use super::{declared_integral_wing_fuel_kg_m, design_gross_mass_kg, WingReconciliationError};
+
+#[path = "reference_cache.rs"]
+mod reference_cache;
+
+/// The candidate's primary box, strength- and stiffness-sized once at the
+/// governing structural design mass ([`super::structural_design_mass_kg`]).
+///
+/// The structural reconciliation and the complete-wing first moment of the
+/// product stations both read this one box. They used to size it separately
+/// from identical inputs; a consumer holding one evaluation's box passes it to
+/// both, which halves the sizing work and cannot let the two disagree.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DesignWingBox {
+    /// Complete-wing primary mass and its sized first moment.
+    pub primary: SizedWingboxMass,
+    /// Composite proxy declaration of the sized section, when one applies.
+    pub declaration: Option<alas_struct::sizing::CompositeProxyDeclaration>,
+}
+
+/// Size `dv`'s primary box on `plane` at the governing structural design mass
+/// of `config`: the box every product consumer of one evaluation shares.
+///
+/// # Errors
+///
+/// [`WingReconciliationError::StructuralSizing`] as [`sized_primary_wing`].
+pub fn size_design_wing_box(
+    config: &AlasConfig,
+    dv: &DesignVector,
+    plane: &Airplane,
+) -> Result<DesignWingBox, WingReconciliationError> {
+    reference_cache::candidate_design_box(prepare_primary_wing(
+        config,
+        dv,
+        plane,
+        &design_requirements(config),
+    )?)
+}
+
 /// Size the candidate's primary wing structure and reconcile it with the
 /// secondary structure of its design mode: the clean-sheet inventory, or the
 /// frozen reference aircraft's wing mass.
@@ -11,9 +79,9 @@
 /// box never partially applied.
 pub fn reconcile_structural_wing(
     config: &AlasConfig,
-    dv: &DesignVector,
     plane: &Airplane,
     reference: Option<ReferenceWingMass>,
+    design_box: DesignWingBox,
 ) -> Result<
     (
         WingboxFeedback,
@@ -23,9 +91,8 @@ pub fn reconcile_structural_wing(
     ),
     WingReconciliationError,
 > {
-    let (candidate_primary, sizing) =
-        sized_primary_wing(config, dv, plane, &design_requirements(config))?;
-    let primary_declaration = sizing.composite_declaration;
+    let candidate_primary = design_box.primary;
+    let primary_declaration = design_box.declaration;
     match config.optimizer.design_space.mode {
         DesignMode::CleanSheet => {
             let wing = main_wing(plane).ok_or(WingReconciliationError::StructuralSizing)?;
@@ -57,12 +124,22 @@ pub fn reconcile_structural_wing(
 /// structural centroid from the same geometry/material/load inputs. The
 /// sizing crate reports one symmetric semispan; the feedback boundary makes
 /// that extent explicit before any total-wing mass is formed.
+/// Identical prepared inputs reuse one fully sized state per thread.
 pub fn sized_primary_wing(
     config: &AlasConfig,
     dv: &DesignVector,
     plane: &Airplane,
     requirements: &alas_config::DesignRequirements,
 ) -> Result<(SizedWingboxMass, WingboxSizing), WingReconciliationError> {
+    reference_cache::candidate_sizing(prepare_primary_wing(config, dv, plane, requirements)?)
+}
+
+fn prepare_primary_wing<'a>(
+    config: &'a AlasConfig,
+    dv: &DesignVector,
+    plane: &Airplane,
+    requirements: &'a alas_config::DesignRequirements,
+) -> Result<reference_cache::PreparedSizing<'a>, WingReconciliationError> {
     // `structures.enabled` gates the optional downstream NASTRAN/report
     // solve only (see `alas_config::StructuresConfig::enabled`'s own help
     // text: "the configured spars, materials, and gauges still define the
@@ -76,8 +153,14 @@ pub fn sized_primary_wing(
         return Err(WingReconciliationError::StructuralSizing);
     }
     let (spar_fractions, spar_full_span) = config.structures.resolved_spars();
-    let root = wing.xsecs.first().ok_or(WingReconciliationError::StructuralSizing)?;
-    let tip = wing.xsecs.last().ok_or(WingReconciliationError::StructuralSizing)?;
+    let root = wing
+        .xsecs
+        .first()
+        .ok_or(WingReconciliationError::StructuralSizing)?;
+    let tip = wing
+        .xsecs
+        .last()
+        .ok_or(WingReconciliationError::StructuralSizing)?;
     let geometry = alas_geom::wing_structure::WingStructureGeometry::new(
         dv,
         &config.geometry.wing,
@@ -109,7 +192,7 @@ pub fn sized_primary_wing(
     // aircraft that can reach its design mass at the maximum structural payload
     // holds only `DG - MZFW` of it. `requirements` is already the design-gross
     // mass form, so the bound and the load case read one mass.
-    let declared_fuel = fuel_relief::declared_integral_wing_fuel_kg_m(
+    let declared_fuel = declared_integral_wing_fuel_kg_m(
         config,
         dv,
         requirements,
@@ -123,55 +206,22 @@ pub fn sized_primary_wing(
         &config.mass_model,
         requirements,
     );
-    let sizing = alas_struct::sizing::size_wingbox_with_wing_carried_mass(
-        &geometry,
-        &config.structures,
+    let uses_declared_fuel = declared_fuel.is_some();
+    let fuel = declared_fuel.unwrap_or_else(|| {
+        alas_struct::tanks::integral_fuel_running_mass_kg_m(&geometry, &stations, front, rear)
+    });
+    Ok(reference_cache::PreparedSizing {
+        geometry,
+        structures: &config.structures,
         requirements,
-        skin,
-        web,
-        cap,
-        rib,
-        declared_fuel.as_deref(),
-        &wing_mounted,
-    );
-    // A station sized to a margin of exactly zero can report one or two units
-    // in the last place below it, because the reported margin recomputes the
-    // equality the sizing solved and that round trip is not exact in binary
-    // floating point. That is arithmetic, not a strength deficit, and
-    // `alas_struct::sizing::MARGIN_NUMERICAL_ZERO` states the band and derives
-    // it from the four inexact operations involved.
-    //
-    // This seam used to carry its own `-1.0e-10`, six orders of magnitude
-    // wider than the arithmetic needs and with no stated basis. Reading the
-    // shared constant **tightens** the gate rather than widening it, and puts
-    // this caller and `alas-pipeline`'s own structural gate on one predicate,
-    // so a wingbox cannot be feasible for mass and infeasible for the
-    // structural solve on the same numbers.
-    let strength_margins_ok = sizing
-        .spars
-        .iter()
-        .flat_map(|spar| spar.margin_of_safety.iter())
-        .all(|margin| alas_struct::sizing::margin_is_structurally_non_negative(*margin));
-    if !sizing.total_mass_kg.is_finite()
-        || sizing.total_mass_kg <= 0.0
-        || !strength_margins_ok
-        || !sizing.rib_spacing_pass()
-        || [
-            sizing.mass_breakdown_kg.spar_caps,
-            sizing.mass_breakdown_kg.spar_webs,
-            sizing.mass_breakdown_kg.skin,
-            sizing.mass_breakdown_kg.ribs,
-        ]
-        .iter()
-        .any(|mass| !mass.is_finite() || *mass < 0.0)
-    {
-        return Err(WingReconciliationError::StructuralSizing);
-    }
-    let centroid =
-        crate::wing_centroid::wing_structural_centroid(wing, requirements, &config.structures)
-            .map_err(|_| WingReconciliationError::StructuralSizing)?;
-    let primary = SizedWingboxMass::symmetric_semiwing(sizing.total_mass_kg, centroid.xyz_m);
-    Ok((primary, sizing))
+        engine: &config.geometry.engine,
+        mass_model: &config.mass_model,
+        materials: [skin, web, cap, rib],
+        declared_fuel: uses_declared_fuel,
+        fuel,
+        wing_mounted,
+        root_x_m: root.xyz_le[0],
+    })
 }
 
 /// The wing named `Main Wing`, which is the one the reconciliation sizes.
@@ -198,12 +248,9 @@ fn reference_wing(config: &AlasConfig) -> Result<ReferenceWingMass, WingReconcil
     let reference_plane = AircraftBuilder::new(Some(config.geometry.clone()))
         .build(Some(&reference_dv), false)
         .map_err(|_| WingReconciliationError::StructuralSizing)?;
-    let (reference_primary, _) = sized_primary_wing(
-        config,
-        &reference_dv,
-        &reference_plane,
-        &design_requirements(config),
-    )?;
+    let requirements = design_requirements(config);
+    let prepared = prepare_primary_wing(config, &reference_dv, &reference_plane, &requirements)?;
+    let reference_primary = reference_cache::reference_primary(prepared)?;
     let analysis_mass_model = config.analysis_mass_model(config.requirements.mtow_kg);
     let (masses, coords, _) = run_mass_analysis_with_model_checked_product_with_gear(
         &reference_plane,
@@ -245,6 +292,12 @@ pub fn clean_sheet_secondary(
 ) -> Result<WingNonBoxInventory, WingReconciliationError> {
     let mm = &config.mass_model;
     let control = &config.control_surfaces;
+    let (fractions, full_span) = config.structures.resolved_spars();
+    let rear_spar = fractions
+        .iter()
+        .zip(full_span)
+        .filter_map(|(fraction, full)| full.then_some(*fraction))
+        .fold(0.0, f64::max);
     let flap_area = configured_surface_area(
         wing,
         control.flap_span_start_frac,
@@ -339,7 +392,11 @@ pub fn clean_sheet_secondary(
                 wing,
                 control.spoiler_span_start_frac,
                 control.spoiler_span_end_frac,
-                (0.5 * control.spoiler_chord_fraction).clamp(0.0, 1.0),
+                // Declared placement: spoilers lie immediately ahead of the
+                // rear spar, rather than ahead of the front spar. The width
+                // is configured; this is a geometry assumption, not a
+                // manufacturer-specific hinge location (Torenbeek, App. C).
+                (rear_spar - 0.5 * control.spoiler_chord_fraction).clamp(0.0, 1.0),
             ),
         },
     };
@@ -357,4 +414,3 @@ pub fn clean_sheet_secondary(
     };
     build_wing_inventory(&inputs).map_err(|_| WingReconciliationError::StructuralSizing)
 }
-

@@ -4,7 +4,6 @@
 // Ported from MINPACK-1's hybrd.f.
 // Upstream: MINPACK-1 (Argonne National Laboratory, 1980), public domain,
 // as vendored in SciPy 1.11.4 and reached through scipy.optimize.fsolve.
-// Reference: alas @ rust-port-baseline.
 
 //! MINPACK's modified Powell hybrid method: the root finder every mission
 //! segment converges through.

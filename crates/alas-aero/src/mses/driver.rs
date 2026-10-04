@@ -5,7 +5,6 @@
 // alas/physics/mses_analysis.py (run_mses_polar, run_mses_pressure_distribution),
 // scoped to the polar-sweep and single-point pressure paths this program drives.
 // Upstream: native aerodynamic model 4.2.8, MIT.
-// Reference: alas @ rust-port-baseline.
 
 //! The [`Mses`] driver: mesh once, solve each angle in turn, read the result.
 //!
@@ -25,5 +24,32 @@
 //! entry points turn into the same "did not converge" outcome upstream produces
 //! from that raise.
 
-include!("driver_parts/part_01.rs");
-include!("driver_parts/part_02.rs");
+use super::exec::{self, RunError, WorkDir};
+use super::{
+    deck, parse, MsesConvergedCheckpoint, MsesOsmapStatus, MsesPolarPointDiagnostic,
+    MsesPolarPointStatus, MsesPolarResult, MsesPressureResult, MsesSolverAttempt, MsesStatus,
+};
+use alas_config::MsesConfig;
+use alas_geom::aircraft::airfoil::Airfoil;
+use std::collections::HashMap;
+use std::ffi::OsStr;
+use std::fs::File;
+use std::io::Read;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+
+mod osmap;
+use osmap::*;
+mod case;
+mod session;
+pub use session::*;
+mod polar_io;
+use polar_io::*;
+// Test fixtures use `expect`/`expect_err` so malformed cases fail at the
+// assertion site; this allowance is intentionally scoped to the test module.
+#[allow(clippy::expect_used)]
+#[cfg(test)]
+mod tests;
+
+#[path = "driver/sweep.rs"]
+mod sweep;

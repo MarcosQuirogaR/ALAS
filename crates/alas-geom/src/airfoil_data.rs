@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-// Ported from alas/data/airfoil_data.py.
-// Reference: alas @ rust-port-baseline.
-
 //! Reference airfoil coordinate data.
 //!
 //! This module holds *reference* airfoil geometries (raw section

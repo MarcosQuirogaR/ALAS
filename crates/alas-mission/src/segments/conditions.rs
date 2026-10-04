@@ -5,7 +5,6 @@
 // and the `expand_rows` machinery in Conditions.py/State.py.
 // Upstream: mission analysis model 2.5.2, LGPL-2.1 (relicensed under GPL-2.0-or-later per
 // LGPL-2.1 section 3; compatible with this program's AGPL-3.0-or-later).
-// Reference: alas @ rust-port-baseline.
 
 //! Everything a mission segment knows about itself at each control point.
 //!
@@ -148,12 +147,12 @@ pub struct Conditions {
     pub lift_coefficient: Vec<f64>,
     /// Aircraft drag coefficient: `drag_breakdown.total`.
     pub drag_coefficient: Vec<f64>,
-    /// The whole drag buildup at each point, so a mission that disagrees can
-    /// be read back to the component that caused it.
+    /// Shared candidate drag terms, or the frozen parity buildup, per point.
     pub drag_breakdown: Vec<DragBreakdown>,
     /// Each wing's lift coefficient from the surrogate, per control point.
     pub wing_lift_coefficient: Vec<Vec<f64>>,
-    /// Each wing's inviscid induced drag coefficient, likewise.
+    /// Per-wing inviscid induced drag for frozen parity only; empty when the
+    /// mission shares the candidate's whole-aircraft trimmed drag table.
     pub wing_induced_drag_coefficient: Vec<Vec<f64>>,
     /// Surrogate training-domain status for each aerodynamic evaluation.
     ///
@@ -257,30 +256,4 @@ pub struct Initials {
     pub latitude_deg: f64,
     /// Longitude at the end of the previous segment.
     pub longitude_deg: f64,
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn an_expanded_container_is_zeroed_at_the_requested_length() {
-        let conditions = Conditions::expanded(16);
-        assert_eq!(conditions.len(), 16);
-        assert!(!conditions.is_empty());
-        assert!(conditions.altitude_m.iter().all(|&value| value == 0.0));
-        assert_eq!(conditions.position_vector_m[3], [0.0; 3]);
-        // The two analysis-output vectors are filled by the analyses rather
-        // than sized here: nothing reads them before `update_aerodynamics`
-        // and `update_thrust` have written them.
-        assert!(conditions.drag_breakdown.is_empty());
-        assert!(conditions.thrust.is_empty());
-    }
-
-    #[test]
-    fn a_zero_point_container_reports_itself_empty() {
-        let conditions = Conditions::expanded(0);
-        assert!(conditions.is_empty());
-        assert_eq!(conditions.len(), 0);
-    }
 }

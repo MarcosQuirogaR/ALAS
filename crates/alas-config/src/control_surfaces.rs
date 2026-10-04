@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/config/control_surfaces_config.py
-// Reference: alas @ rust-port-baseline.
 
 //! Where the control surfaces sit on the wing and tail.
 //!

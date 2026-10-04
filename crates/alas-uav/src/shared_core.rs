@@ -10,5 +10,17 @@
 //! operating point are explicit inputs because neither can be inferred from a
 //! retail component catalogue.
 
-include!("shared_core_parts/part_01.rs");
-include!("shared_core_parts/part_02.rs");
+use crate::optimizer::{GeneratedGeometry, OptimizedUav, TopologyOptimizedUav};
+use crate::topology::{TopologyUnavailableReason, UavAnalysisPath, UavTopology};
+use alas_aero::operating_point::OperatingPoint;
+use alas_aero::vlm::{self, VlmResult};
+use alas_atmo::Atmosphere;
+use alas_geom::aircraft::airfoil::Airfoil;
+use alas_geom::aircraft::airplane::Airplane;
+use alas_geom::aircraft::fuselage::{Fuselage, FuselageXSec, FuselageXSecError, DEFAULT_SHAPE};
+use alas_geom::aircraft::wing::{Wing, WingXSec};
+
+mod assessment;
+pub use assessment::*;
+mod airframe;
+use airframe::*;

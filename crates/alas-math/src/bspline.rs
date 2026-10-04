@@ -8,12 +8,11 @@
 //! native aerodynamic model's `Atmosphere` class has two altitude models and defaults to
 //! the one that is *not* the closed-form ISA: `"differentiable"`, a cubic
 //! B-spline fitted through the ISA at thirty-eight altitudes, built so that a
-//! gradient-based optimizer sees a smooth function. Every module in the
-//! reference implementation that writes `Atmosphere(altitude=...)`
-//! without naming a method: the turbofan cycle, the performance envelope,
+//! gradient-based optimizer sees a smooth function. Every module that builds an
+//! `Atmosphere` without naming a method: the turbofan cycle, the performance envelope,
 //! the aerodynamic analysis, stability: flies against that fit and not
-//! against the ISA. The two disagree by up to 1% in temperature, so a port
-//! that substituted the closed form would be wrong by four thousand times the
+//! against the ISA. The two disagree by up to 1% in temperature, so
+//! substituting the closed form would be wrong by four thousand times the
 //! `closed` tier before any physics had happened. This module is what makes
 //! reproducing the fit possible; `alas-atmo::differentiable` is the fit
 //! itself.
@@ -218,14 +217,13 @@ pub(crate) fn knot_vector(values: &[f64]) -> Vec<f64> {
 /// polynomial rather than an index out of bounds. The returned span always
 /// lies in `DEGREE ..= count - 1`, so the basis functions it names are
 /// `span - DEGREE ..= span`, all of which index a real coefficient.
+///
+/// The span is the last knot in that range at or below `arg`, found by
+/// bisection over the non-decreasing knots `t[DEGREE + 1 .. count]`. A NaN
+/// argument compares false against every knot and takes the first span.
 pub(crate) fn span_and_basis(t: &[f64], count: usize, arg: f64) -> (usize, [f64; ORDER]) {
     let arg = arg.clamp(t[DEGREE], t[count]);
-
-    let mut span = DEGREE;
-    while span < count - 1 && arg >= t[span + 1] {
-        span += 1;
-    }
-
+    let span = DEGREE + t[DEGREE + 1..count].partition_point(|&knot| knot <= arg);
     (span, basis(t, span, arg))
 }
 
@@ -287,6 +285,40 @@ mod tests {
             knots,
             vec![0.0, 0.0, 0.0, 0.0, 1.0, 2.0, 4.0, 4.0, 4.0, 4.0]
         );
+    }
+
+    #[test]
+    fn the_bisected_span_is_the_one_a_linear_scan_finds() {
+        fn linear_span(t: &[f64], count: usize, arg: f64) -> usize {
+            let arg = arg.clamp(t[DEGREE], t[count]);
+            let mut span = DEGREE;
+            while span < count - 1 && arg >= t[span + 1] {
+                span += 1;
+            }
+            span
+        }
+        for values in [
+            vec![1.0, 2.0, 3.0, 4.0],
+            vec![0.0, 0.5, 1.0, 2.0, 3.5, 4.0],
+            (0..38).map(|i| f64::from(i).powf(1.7)).collect(),
+        ] {
+            let knots = knot_vector(&values);
+            let count = values.len();
+            let low = values[0] - 1.0;
+            let high = values[count - 1] + 1.0;
+            let mut probes: Vec<f64> = (0..=400)
+                .map(|step| low + (high - low) * f64::from(step) / 400.0)
+                .collect();
+            probes.extend_from_slice(&knots);
+            for arg in probes {
+                assert_eq!(
+                    span_and_basis(&knots, count, arg).0,
+                    linear_span(&knots, count, arg),
+                    "arg {arg}"
+                );
+            }
+            assert_eq!(span_and_basis(&knots, count, f64::NAN).0, DEGREE);
+        }
     }
 
     #[test]

@@ -4,7 +4,7 @@
 //! Shared finalization for mass and balance analyses.
 //!
 //! Keeping payload replacement and fuel recomputation in one private helper
-//! prevents the legacy and checked product seams from drifting.
+//! prevents the Torenbeek-comparison and FLOPS product seams from drifting.
 //!
 //! # The two arms are one loading definition priced on two passenger counts
 //!
@@ -20,8 +20,7 @@
 //!   the capacity the cabin engine resolves from the candidate's own geometry,
 //!   at that cabin's mass-weighted centroid.
 //!
-//! Measured on four registered aircraft
-//! (`alas-payload/examples/payload_placement_divergence.rs`), the layout total
+//! Measured on four registered aircraft, the layout total
 //! is `seated_pax * passenger_mass_kg` **exactly**, `unseated_pax` is zero
 //! throughout, and the non-occupant share is `0.0 kg` on three of the four:
 //!
@@ -40,8 +39,8 @@
 //! "Passenger capacity is always recomputed for each candidate shell", and
 //! `resolves_payload_from_candidate_geometry` returns `true` unconditionally.
 //! The geometry-resolved count is therefore the authoritative one and
-//! `num_passengers` is a seed, so the `None` arm prices a count the product has
-//! already declared superseded.
+//! `num_passengers` is a seed, so the `None` arm prices a count the product
+//! treats as superseded.
 //!
 //! What this function cannot do is say afterwards which arm it applied: it
 //! overwrites `masses.payload`, `masses.fuel` and `coordinates.payload` in

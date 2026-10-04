@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/config/cabin_config.py
-// Reference: alas @ rust-port-baseline.
 
 //! What the aircraft carries, and where in the fuselage it sits.
 //!
@@ -22,7 +21,7 @@ mod cargo;
 mod seat_class;
 
 use allocation::proportional_integer_allocation;
-pub use cargo::CargoDeckConfig;
+pub use cargo::{BaggagePolicy, CargoDeckConfig, HoldCompartmentConfig, HoldDeck};
 pub use seat_class::SeatClassConfig;
 
 use serde::{Deserialize, Serialize};

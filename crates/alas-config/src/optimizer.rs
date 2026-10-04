@@ -2,12 +2,11 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/config/optimizer_config.py
-// Reference: alas @ rust-port-baseline.
 
 //! What the design search is looking for, and how hard it looks.
 //!
 //! The halves are deliberately separate. [`ObjectiveConfig`] says what a
-//! good aircraft is: the mission quantity minimised and the policy of every
+//! good aircraft is: the mission quantity minimised and every hard
 //! requirement family that bounds it, and changing one of those changes
 //! which design the search converges on. [`SolverSettings`] says how the
 //! search is run, and changing one of those changes how thoroughly the same
@@ -15,25 +14,29 @@
 //! solver settings are answering the same question; two that differ in the
 //! objective are not, and a comparison between them means nothing.
 //!
-//! [`ObjectiveWeights`] is the penalty table of the frozen Python objective.
-//! The product search reads only its failure cost and tail-volume window;
-//! the rest is replayed by the parity fixtures and kept so a saved
-//! configuration still round-trips.
+//! [`ObjectiveWeights`] holds the transport-planform thresholds and the failure
+//! cost the mission-sized search reads.
 
+mod aerodrome_code;
 pub mod design_space;
+pub mod mtow_plan;
 mod objective;
 pub mod plausibility;
-pub mod policy_review;
-pub mod relaxation;
 mod solver;
 mod weights;
 
+pub use aerodrome_code::{AerodromeReferenceCode, SPAN_CODE_MARGIN_M};
 pub use design_space::{DesignMode, DesignSpaceConfig, VariableEnvelope};
-pub use objective::{ConstraintPolicy, MtowSizing, ObjectiveConfig, ObjectiveKind};
+pub use mtow_plan::{
+    DesignMission, DesignPayloadSource, DesignRange, MtowPlan, StructuralBasis,
+    UNBOUNDED_DISPATCH_MTOW_KG,
+};
+pub use objective::{MtowSizing, ObjectiveConfig, ObjectiveKind, DEFAULT_MTOW_BAND_FRACTION};
 pub use plausibility::PlausibilityLimits;
-pub use policy_review::{review_for, reviewed_limits, RelaxationReview, ReviewedLimit};
-pub use relaxation::{ConstraintRelaxation, RelaxableLimit, NON_RELAXABLE_RESIDUAL_IDS};
-pub use solver::{SolverSettings, LEGACY_METHOD_TOKENS};
+pub use solver::{
+    SeedOutOfRange, SolverSettings, StageBudget, LEGACY_METHOD_TOKENS, MAXIMUM_STAGE_TIME_LIMIT_S,
+    PRODUCT_DE_METHOD,
+};
 pub use weights::ObjectiveWeights;
 
 use serde::{Deserialize, Serialize};
@@ -47,22 +50,22 @@ pub struct OptimizerConfig {
     /// What the search rewards and what it penalizes.
     #[config(
         nested,
-        help = "Penalty table of the frozen reference objective, replayed by the parity fixtures. The mission-sized search reads only the failure cost and the tail-volume window from this group; every other weight is inert for product runs."
+        help = "Transport-planform thresholds and the failure cost the mission-sized search reads."
     )]
     pub weights: ObjectiveWeights,
 
     /// How the search is run.
     #[config(
         nested,
-        help = "Which optimization method runs, how long and wide its population is, and where in the design space it starts."
+        help = "Which complete optimization profile runs, how long and wide its population is, and where in the design space it starts."
     )]
     pub solver: SolverSettings,
 
-    /// What the mission-sized search minimises, and which requirements bound it.
-    #[serde(default, skip_serializing_if = "ObjectiveConfig::is_default")]
+    /// What the mission-sized product search minimises, and which requirements bound it.
+    #[serde(default)]
     #[config(
         nested,
-        help = "The mission-sized objective (block fuel, takeoff mass, empty mass or fuel per seat-kilometre over the design range under the fuel policy) the takeoff-mass closure, and the hard, soft or diagnostic policy of every requirement family that bounds it."
+        help = "Used by the mission-sized differential_evolution profile: select block fuel, takeoff mass, empty mass or fuel per seat-kilometre over the design range, plus the takeoff-mass closure and hard requirements."
     )]
     pub objective: ObjectiveConfig,
 
@@ -82,22 +85,30 @@ pub struct OptimizerConfig {
     #[config(
         nested,
         label = "Model validity domain",
-        help = "The window of shapes this program's own mass, drag and stability correlations were fitted for. These are not performance requirements: a design outside one of them is a result the correlations cannot be trusted to have computed, which is why every window is set wider than every registered aircraft. They reach the search as named Geometry residuals and follow that family's policy."
+        help = "The window of shapes this program's own mass, drag and stability correlations were fitted for. These are not performance requirements: a design outside one of them is a result the correlations cannot be trusted to have computed, which is why every window is set wider than every registered aircraft. They reach the search as hard Geometry residuals."
     )]
     pub plausibility: PlausibilityLimits,
+}
 
-    /// Whether, and how far, an overconstrained problem may miss a limit.
-    ///
-    /// Strict as shipped; see [`relaxation::ConstraintRelaxation`] for the
-    /// D01-D03 rules and [`policy_review`] for the review that decides which
-    /// limits may ever be listed.
-    #[serde(default, skip_serializing_if = "ConstraintRelaxation::is_default")]
-    #[config(
-        nested,
-        label = "Controlled constraint relaxation",
-        help = "Off by default, so every Mass, Balance, Performance and Geometry limit is hard. The engineering review behind it currently admits no limit at all, so switching it on changes nothing until a reviewed tolerance with a primary source exists."
-    )]
-    pub relaxation: ConstraintRelaxation,
+impl OptimizerConfig {
+    /// Blocking issues in the objective and model-validity windows.
+    pub(crate) fn validation_issues(&self) -> Vec<crate::validation::ValidationIssue> {
+        [
+            ("optimizer.plausibility", self.plausibility.validate()),
+            ("optimizer.objective", self.objective.validate()),
+        ]
+        .into_iter()
+        .filter_map(|(path, result)| {
+            result
+                .err()
+                .map(|message| crate::validation::ValidationIssue {
+                    field_path: path.to_owned(),
+                    message,
+                    severity: crate::validation::Severity::Error,
+                })
+        })
+        .collect()
+    }
 }
 
 // A test asserts on values it constructed here directly, so a failed unwrap
@@ -114,8 +125,7 @@ mod tests {
         // count are not comparable, and the form is where that distinction
         // has to be visible. The mission-sized objective is a third question:
         // what is being minimised at all, and gets its own group. The
-        // validity domain and the relaxation policy are two more: where the
-        // model stops being trustworthy, and whether a limit may be missed.
+        // validity domain defines where the model stops being trustworthy.
         let schema = OptimizerConfig::default().schema();
         let names: Vec<&str> = schema.fields.iter().map(|field| field.name).collect();
         assert_eq!(
@@ -126,7 +136,6 @@ mod tests {
                 "objective",
                 "design_space",
                 "plausibility",
-                "relaxation"
             ]
         );
         for field in &schema.fields {
@@ -140,14 +149,25 @@ mod tests {
         assert_eq!(config.weights, ObjectiveWeights::default());
         assert_eq!(config.solver, SolverSettings::default());
         assert_eq!(config.design_space, DesignSpaceConfig::default());
-        assert_eq!(config.relaxation, ConstraintRelaxation::default());
     }
 
     #[test]
-    fn the_shipped_optimizer_relaxes_nothing() {
-        // A user who never opens the relaxation form must get exactly the
-        // strict behaviour every measurement in this product was taken with.
-        let config = OptimizerConfig::default();
-        assert!(!config.relaxation.is_active());
+    fn registered_preset_preserves_explicit_mission_sizing_on_save() {
+        let mut config = crate::AlasConfig::from_value(&serde_json::json!({
+            "preset": "A320-200"
+        }))
+        .unwrap();
+        assert_eq!(
+            config.optimizer.objective.mtow_sizing,
+            MtowSizing::FixedRequirement
+        );
+        config.optimizer.objective = ObjectiveConfig::default();
+        let document = serde_json::to_value(&config).unwrap();
+        assert_eq!(
+            document["optimizer"]["objective"]["mtow_sizing"],
+            "sized_by_mission"
+        );
+        let loaded = crate::AlasConfig::from_value(&document).unwrap();
+        assert_eq!(loaded.optimizer.objective, config.optimizer.objective);
     }
 }

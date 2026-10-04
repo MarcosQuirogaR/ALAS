@@ -13,6 +13,11 @@
 //! $env:ALAS_GMSH = 'C:/.../gmsh.exe'
 //! cargo run -p alas-cfd --example run_airfoil_case -- out/airfoil-run naca0012 0
 //! ```
+//!
+//! Set `ALAS_CFD_CONFIG` to a JSON study configuration to reproduce all controls
+//! instead of the example's coarse defaults. Optional `ALAS_CFD_AIRFOIL_DAT`
+//! registers a custom benchmark geometry. `--list-airfoils` prints the sampling
+//! population without launching external programs.
 
 use std::env;
 use std::path::PathBuf;
@@ -28,6 +33,12 @@ use alas_exec::openfoam::{OpenFoamAdapter, OpenFoamBackend, OpenFoamPreferences}
 // of library logging.
 #[allow(clippy::print_stdout, clippy::print_stderr)]
 fn main() {
+    if env::args().nth(1).as_deref() == Some("--list-airfoils") {
+        for name in alas_geom::airfoil_library::AirfoilLibrary::get_available_airfoils() {
+            println!("{name}");
+        }
+        return;
+    }
     let mut args = env::args_os().skip(1);
     let case_dir = args
         .next()
@@ -42,14 +53,40 @@ fn main() {
         .and_then(|value| value.into_string().ok())
         .and_then(|value| value.parse::<f64>().ok());
 
-    let mut config = CfdStudyConfig {
-        airfoil_name: airfoil,
-        ..CfdStudyConfig::default()
+    let config_path = env::var_os("ALAS_CFD_CONFIG");
+    let mut config = if let Some(path) = &config_path {
+        let text = std::fs::read_to_string(path).unwrap_or_else(|error| {
+            eprintln!("Cannot read ALAS_CFD_CONFIG: {error}");
+            std::process::exit(2);
+        });
+        serde_json::from_str::<CfdStudyConfig>(&text).unwrap_or_else(|error| {
+            eprintln!("Invalid ALAS_CFD_CONFIG: {error}");
+            std::process::exit(2);
+        })
+    } else {
+        CfdStudyConfig {
+            airfoil_name: airfoil,
+            ..CfdStudyConfig::default()
+        }
     };
     if let Some(angle_of_attack_deg) = angle_of_attack_deg {
         config.angle_of_attack_deg = angle_of_attack_deg;
     }
-    config.mesh.preset = MeshPreset::Coarse;
+    if config_path.is_none() {
+        config.mesh.preset = MeshPreset::Coarse;
+    }
+    if let Some(path) = env::var_os("ALAS_CFD_AIRFOIL_DAT") {
+        let imported =
+            alas_geom::airfoil_io::import_dat(PathBuf::from(path)).unwrap_or_else(|error| {
+                eprintln!("Cannot import benchmark geometry: {error}");
+                std::process::exit(2);
+            });
+        config.airfoil_name = imported.airfoil.name.clone();
+        alas_geom::airfoil_io::register(imported).unwrap_or_else(|error| {
+            eprintln!("Cannot register benchmark geometry: {error}");
+            std::process::exit(2);
+        });
+    }
     let max_iterations_was_set = if let Some(value) = env::var("ALAS_CFD_MAX_ITERATIONS")
         .ok()
         .and_then(|value| value.parse::<u32>().ok())

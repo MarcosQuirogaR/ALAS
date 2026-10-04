@@ -12,11 +12,12 @@ use alas_geom::aircraft::airplane::Airplane;
 use crate::analysis::complete_mass_analysis;
 use crate::wing_centroid::WingCentroidError;
 
+use super::components::{mean, wing_named_or_first};
+use super::types::AERODYNAMIC_CENTER_CHORD_FRACTION;
 use super::{
-    calculate_component_masses, calculate_component_masses_checked,
-    calculate_component_masses_checked_with_gear, calculate_flops_mass_buildup, mean,
-    wing_named_or_first, ComponentMassError, FlopsMassBuildup, MassBreakdown, MassCoordinateModel,
-    MassCoordinates, PayloadLayoutSummary, ProductMassBuildup, AERODYNAMIC_CENTER_CHORD_FRACTION,
+    calculate_component_masses, calculate_component_masses_checked_with_gear,
+    calculate_flops_mass_buildup, ComponentMassError, FlopsMassBuildup, MassBreakdown,
+    MassCoordinateModel, MassCoordinates, PayloadLayoutSummary, ProductMassBuildup,
 };
 
 /// Determine the X, Y, Z physical locations of the centroid of each component:
@@ -24,18 +25,16 @@ use super::{
 ///
 /// The three cabin groups (systems, furnishings and the lumped planning
 /// payload) are all placed as fractions of the **installed cabin**, because
-/// all three are distributed over the same floor. See `x_payload` below for why
-/// the payload no longer sits at the centre of a block beginning at the forward
-/// bulkhead, and what that was worth per aircraft.
+/// all three are distributed over the same floor. See `x_payload` below for
+/// the payload placement.
 pub fn define_mass_coordinates(
     plane: &Airplane,
     geometry_config: &GeometryConfig,
     requirements: Option<&DesignRequirements>,
     mass_model: Option<&MassModelConfig>,
 ) -> MassCoordinates {
-    // Retained so the signature and every call site stay unchanged while the
-    // cabin groups are placed from geometry alone; the payload's linear density
-    // is still what `alas_mass::stations` uses for the payload station's
+    // The cabin groups are placed from geometry alone; the payload's linear
+    // density is what `alas_mass::stations` uses for the payload station's
     // spatial extent.
     let _ = (requirements, mass_model);
 
@@ -64,50 +63,16 @@ pub fn define_mass_coordinates(
     // Furnishings (seats, galleys, etc.) and operational items, also installed
     // over the whole cabin, for the same reason.
     let x_furn = cabin_start + 0.50 * cabin_len;
-    // Payload CG at the centre of the cabin it is distributed over.
-    //
-    // The tempting form is `cabin_start + 0.50 * occupied_len`, the centre of a
-    // block that always begins at the FORWARD BULKHEAD. Whenever the payload
-    // does not fill the cabin that is the aircraft's forward loading extreme
-    // applied as if it were the neutral case, and it is asymmetric against the
-    // two lines directly above: `x_systems` and `x_furn` are placed as
-    // fractions of the installed cabin, because that is where installed
-    // equipment sits. A lumped planning payload is distributed over the same
-    // floor and an operator trims it into the certified envelope; it is not
-    // loaded nose first.
-    //
-    // Measured (`alas-mass/examples/payload_station_matrix.rs`), the forward-
-    // bulkhead form put the centroid this far forward of the cabin centre, and
-    // moved the centre of gravity at maximum take-off mass by:
-    //
-    //   ATR72-600  fill 0.495  4.583 m forward  ->  1.435 m of CG
-    //   A220-300   fill 0.570  6.125 m          ->  1.178 m
-    //   A320-200   fill 0.706  3.910 m          ->  0.752 m
-    //   AVE        fill 0.771  6.485 m          ->  0.633 m
-    //   A340-300   fill 0.785  4.955 m          ->  0.553 m
-    //   B787-9     fill 0.800  4.530 m          ->  0.516 m
-    //   DC-10      fill 0.811  3.650 m          ->  0.352 m
-    //   A380-800   fill 1.000  0.000 m          ->  0.000 m
-    //
-    // On the ATR 72-600 that 1.435 m is 57.4 % of its 2.499 m mean aerodynamic
-    // chord. The correction consults no centre-of-gravity target and adds no
-    // coefficient: it is the one symmetric placement available, and on an
-    // aircraft whose payload fills its cabin it is exactly the previous value.
-    //
-    // The retired comment's concern was that a fuselage stretched beyond the
-    // payload's need would shift the payload centre of gravity aft "for free",
-    // so the optimizer "must pay a CG-mismatch penalty for unrealistic
-    // stretch". That is an optimizer-stability argument, not a physical one: a
-    // longer cabin carrying the same payload over a uniformly loaded floor does
-    // move its centroid aft, exactly as `x_systems` and `x_furn` already do. An
-    // implausible stretch is the geometry plausibility windows' to reject (the
-    // fuselage fineness window exists for it), not something to suppress by
-    // placing mass where it is not.
-    //
-    // The occupied length itself is no longer needed here: it describes the
-    // payload's spatial EXTENT, which these lumped coordinates do not carry.
-    // `alas_mass::stations::ComponentStations::payload_fallback` still reports
-    // it, as that station's `extent_m`, which is the field that means it.
+    // Payload CG at the centre of the cabin it is distributed over. A lumped
+    // planning payload sits on the same floor as the systems and furnishings
+    // above, so it takes the same installed-cabin reference rather than the
+    // centre of a block that starts at the forward bulkhead, which would apply
+    // the aircraft's forward loading extreme as if it were the neutral case
+    // whenever the payload does not fill the cabin. A longer cabin carrying the
+    // same payload moves its centroid aft exactly as `x_systems` and `x_furn`
+    // do; an implausible stretch is for the geometry plausibility windows to
+    // reject, not for the mass placement to suppress. The payload's spatial
+    // extent is reported by `alas_mass::stations` as `extent_m`.
     let x_payload = cabin_start + 0.50 * cabin_len;
 
     let mut coords = MassCoordinates {
@@ -131,11 +96,9 @@ pub fn define_mass_coordinates(
         fuel: [w_ac[0], 0.0, w_root_z],
     };
 
-    // Upstream wraps this block in a bare `try/except Exception: pass`. Every
-    // step here (filtering by substring, indexing the first/last xsec of a
-    // non-empty nacelle) is bounds-respecting once the `!nacelles.is_empty()`
-    // guard has been checked, so nothing in a direct translation can panic
-    // and there is no Rust equivalent of the swallowed exception to write.
+    // Every step here (filtering by substring, indexing the first/last xsec of
+    // a non-empty nacelle) is bounds-respecting once the `!nacelles.is_empty()`
+    // guard has been checked, so nothing below can panic.
     let nacelles: Vec<&_> = plane
         .fuselages
         .iter()
@@ -161,11 +124,12 @@ pub fn define_mass_coordinates(
 
 /// Determine component coordinates using an explicit coordinate model.
 ///
-/// The reference-compatible path preserves the frozen forward-loaded payload
-/// convention. The product path uses the installed-cabin centroid and reports invalid wingbox
-/// geometry or material configuration as a typed error; it never silently
-/// falls back to the legacy point, because that would make an apparently
-/// physical CG depend on an unreported compatibility behavior.
+/// The reference-compatible path uses the reference aircraft's forward-loaded
+/// payload convention. The product path uses the installed-cabin centroid and
+/// reports invalid wingbox geometry or material configuration as a typed
+/// error; it never silently falls back to the reference-compatible point,
+/// because that would make an apparently physical CG depend on an unreported
+/// compatibility behavior.
 pub fn define_mass_coordinates_with_model(
     plane: &Airplane,
     geometry_config: &GeometryConfig,
@@ -201,8 +165,9 @@ pub fn define_mass_coordinates_with_model(
     Ok(coordinates)
 }
 
-/// Frozen Python replay only. Product planning payloads remain centered in
-/// the installed cabin; detailed layouts replace this coordinate afterwards.
+/// Reference-compatible analysis only. Product planning payloads remain
+/// centered in the installed cabin; detailed layouts replace this coordinate
+/// afterwards.
 fn restore_reference_payload_coordinate(
     coordinates: &mut MassCoordinates,
     plane: &Airplane,
@@ -231,8 +196,8 @@ pub fn calculate_physical_cg(masses: &MassBreakdown, coords: &MassCoordinates) -
     let mut total_mass = 0.0;
     for ((name, reported_mass), (_, xyz)) in masses.as_pairs().into_iter().zip(coords.as_pairs()) {
         // Fuel is a signed MTOW-closure diagnostic in `MassBreakdown`. Only a
-        // checked, nonnegative value is a physical load. Other legacy
-        // component estimates retain the established nonnegative clamp.
+        // checked, nonnegative value is a physical load. Every other
+        // component is clamped to be nonnegative.
         let mass = if name == super::FUEL {
             masses.physical_fuel_mass_kg().unwrap_or(0.0)
         } else {
@@ -277,44 +242,16 @@ pub fn run_mass_analysis(
     complete_mass_analysis(masses, coordinates, requirements, payload_layout)
 }
 
-/// Execute weight and balance through the selected systems-mass method. The
-/// legacy [`run_mass_analysis`] remains the frozen compatibility path.
-pub fn run_mass_analysis_checked(
-    plane: &Airplane,
-    requirements: &DesignRequirements,
-    geometry_config: &GeometryConfig,
-    cabin_config: &CabinConfig,
-    control_surfaces: &ControlSurfacesConfig,
-    mass_model: Option<&MassModelConfig>,
-    payload_layout: Option<&PayloadLayoutSummary>,
-) -> Result<(MassBreakdown, MassCoordinates, [f64; 3]), ComponentMassError> {
-    let masses = calculate_component_masses_checked(
-        plane,
-        requirements,
-        geometry_config,
-        cabin_config,
-        control_surfaces,
-        mass_model,
-    )?;
-    let coordinates =
-        define_mass_coordinates(plane, geometry_config, Some(requirements), mass_model);
-    Ok(complete_mass_analysis(
-        masses,
-        coordinates,
-        requirements,
-        payload_layout,
-    ))
-}
-
 /// Execute weight and balance with an explicit mass-coordinate model.
 ///
-/// Use [`MassCoordinateModel::ReferenceCompatibility`] when replaying the
-/// frozen Python fixture and [`MassCoordinateModel::StructuralWingbox`] for a
-/// physical product analysis. For one fixed aircraft input, both coordinate
-/// paths share that run's component masses and detailed-payload replacement;
-/// the main-wing and fallback payload coordinates differ. This does not mean different
-/// presets have identical masses: systems/furnishings scale with their
-/// selected mass model and MTOW (or with declared FLOPS architecture).
+/// Use [`MassCoordinateModel::ReferenceCompatibility`] for the
+/// reference-aircraft coordinate convention and
+/// [`MassCoordinateModel::StructuralWingbox`] for a physical product analysis.
+/// For one fixed aircraft input, both coordinate paths share that run's
+/// component masses and detailed-payload replacement; the main-wing and
+/// fallback payload coordinates differ. This does not mean different presets
+/// have identical masses: systems/furnishings scale with their selected mass
+/// model and MTOW (or with declared FLOPS architecture).
 pub fn run_mass_analysis_with_model(
     plane: &Airplane,
     requirements: &DesignRequirements,
@@ -337,34 +274,6 @@ pub fn run_mass_analysis_with_model(
         requirements,
         payload_layout,
     ))
-}
-
-/// Execute checked weight and balance with a selected main-wing coordinate model.
-// The checked seam mirrors `run_mass_analysis_with_model` and must carry the
-// same explicit physical inputs; bundling them would obscure compatibility
-// with the existing public analysis API.
-#[allow(clippy::too_many_arguments)]
-pub fn run_mass_analysis_with_model_checked(
-    plane: &Airplane,
-    requirements: &DesignRequirements,
-    geometry_config: &GeometryConfig,
-    cabin_config: &CabinConfig,
-    control_surfaces: &ControlSurfacesConfig,
-    mass_model: Option<&MassModelConfig>,
-    payload_layout: Option<&PayloadLayoutSummary>,
-    coordinate_model: MassCoordinateModel<'_>,
-) -> Result<(MassBreakdown, MassCoordinates, [f64; 3]), ComponentMassError> {
-    run_mass_analysis_with_model_checked_with_gear(
-        plane,
-        requirements,
-        geometry_config,
-        cabin_config,
-        control_surfaces,
-        mass_model,
-        payload_layout,
-        coordinate_model,
-        &LandingGearConfig::default(),
-    )
 }
 
 /// Execute checked weight and balance with a selected gear architecture.

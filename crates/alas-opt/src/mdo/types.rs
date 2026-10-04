@@ -9,16 +9,26 @@
 //! with its own physical units, and [`CandidateAssessment`] carries the whole
 //! table rather than only the scalar it folds into.
 
+use std::sync::Arc;
+
 use alas_config::design_variables::DesignVector;
-use alas_config::ConstraintPolicy;
+use alas_config::TailSizing;
 use alas_mass::breakdown::{MassBreakdown, MassCoordinates};
 use alas_mass::dispatch::DispatchSolution;
 
+/// Fixed meaning of an evaluated residual in candidate ranking.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResidualRole {
+    /// A violation invalidates the candidate.
+    Constraint,
+    /// A study preference contributes to cost without changing feasibility.
+    Preference,
+    /// A reported measurement that does not contribute to ranking.
+    Diagnostic,
+}
 /// Which requirement family a [`ConstraintResidual`] belongs to.
 ///
-/// Ordered so that the relaxation policy can count *distinct* violated
-/// discipline groups deterministically (clarified ledger D01). The order is
-/// the declaration order and carries no severity meaning.
+/// Declaration order carries no severity meaning.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ConstraintFamily {
     /// Fuel capacity, the takeoff-mass ceiling and the sizing closure.
@@ -29,6 +39,8 @@ pub enum ConstraintFamily {
     Performance,
     /// Planform, wing-loading and accommodation requirements.
     Geometry,
+    /// Strength, stiffness and the validity of the structural response model.
+    Structure,
 }
 
 /// One requirement, evaluated as a typed residual rather than folded into a
@@ -38,7 +50,7 @@ pub enum ConstraintFamily {
 /// physical units as `actual` and `limit`. `normalized_violation` is what
 /// `mdo::cost` actually sums: `max(raw_residual, 0) / scale`, dimensionless,
 /// so a mass residual and an angle residual can be added together.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ConstraintResidual {
     /// Stable identifier, joined with `+` in a rejected candidate's reason.
     pub id: &'static str,
@@ -55,7 +67,9 @@ pub struct ConstraintResidual {
     /// `max(raw_residual, 0) / scale`, dimensionless.
     pub normalized_violation: f64,
     /// How this family takes part in the ranking.
-    pub policy: ConstraintPolicy,
+    pub role: ResidualRole,
+    /// Model or input failure context; does not alter the residual's ranking.
+    pub detail: Option<String>,
 }
 
 /// Relative violation below which a scaled residual counts as met.
@@ -67,258 +81,30 @@ pub struct ConstraintResidual {
 /// order of magnitude below any model's fidelity.
 const NUMERICAL_SLACK: f64 = 1.0e-5;
 
-impl ConstraintResidual {
-    /// Build a residual whose normalized violation is `raw_residual` scaled
-    /// by the magnitude of `limit`: the convention every scaled residual in
-    /// `mdo::residuals` uses, so a limit near zero cannot divide the
-    /// violation toward infinity. Violations below [`NUMERICAL_SLACK`] of
-    /// the limit are reported in `raw_residual` but not counted.
-    pub(crate) fn scaled(
-        id: &'static str,
-        family: ConstraintFamily,
-        actual: f64,
-        limit: f64,
-        unit: &'static str,
-        raw_residual: f64,
-        policy: ConstraintPolicy,
-    ) -> Self {
-        let scale = limit.abs().max(1e-9);
-        let normalized_violation = (raw_residual / scale - NUMERICAL_SLACK).max(0.0);
-        Self {
-            id,
-            family,
-            actual,
-            limit,
-            unit,
-            raw_residual,
-            normalized_violation,
-            policy,
-        }
-    }
+mod external;
+mod fuel;
+mod residual;
 
-    /// Build a residual whose normalized violation is supplied directly, for
-    /// a source (the CG envelope, an evaluation failure) that already
-    /// carries its own normalization.
-    #[allow(clippy::too_many_arguments)] // one named field per physical quantity of the residual; a struct would only rename them once
-    pub(crate) fn direct(
-        id: &'static str,
-        family: ConstraintFamily,
-        actual: f64,
-        limit: f64,
-        unit: &'static str,
-        raw_residual: f64,
-        normalized_violation: f64,
-        policy: ConstraintPolicy,
-    ) -> Self {
-        Self {
-            id,
-            family,
-            actual,
-            limit,
-            unit,
-            raw_residual,
-            normalized_violation,
-            policy,
-        }
-    }
-
-    /// Whether this residual is on the infeasible side of its limit.
-    fn violated(&self) -> bool {
-        self.normalized_violation > 0.0
-    }
-
-    /// The signed, dimensionless constraint value a gradient-based driver
-    /// works with: the counted violation when the requirement is missed,
-    /// and the negative margin over the limit's magnitude when it is met,
-    /// so the value crosses zero exactly at the limit.
-    pub fn signed_normalized(&self) -> f64 {
-        if self.normalized_violation > 0.0 {
-            self.normalized_violation
-        } else if self.limit == 0.0 {
-            // A limit of exactly zero has no magnitude to take a relative
-            // margin from, and dividing by the `1e-9` floor below would hand
-            // a gradient driver a margin nine orders of magnitude out of
-            // scale with every other constraint. A residual built against a
-            // zero bound already reports `raw_residual` in the unit its
-            // violation is counted in (the boolean sentinels, and the
-            // washout window in `mdo::residuals_geometry`), so that value is
-            // the signed one.
-            self.raw_residual.min(0.0)
-        } else {
-            (self.raw_residual / self.limit.abs().max(1e-9)).min(0.0)
-        }
-    }
-}
-
-/// How closely an [`ExternalPolar`] must have been evaluated at a
-/// candidate's own cruise condition to be flown by it.
-///
-/// The defaults are numerical-identity tolerances, not modelling slack: the
-/// external run is expected to have been commanded at exactly the condition
-/// being sized, so anything larger than solver round-tripping noise means a
-/// different operating point.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct PolarConditionTolerance {
-    /// Absolute Mach tolerance, dimensionless. `1e-9` admits only the
-    /// text round-trip of a commanded Mach through a solver input deck.
-    pub mach: f64,
-    /// Absolute altitude tolerance, m. One metre changes ISA density by
-    /// about `1e-4` relative at cruise, already below the drag model's
-    /// fidelity, and no solver deck carries sub-metre altitude.
-    pub altitude_m: f64,
-    /// Relative reference-area tolerance, dimensionless. The geometry
-    /// builder's own rounding moves the built area by about `7e-6` relative
-    /// at the default design (see [`NUMERICAL_SLACK`]), so `1e-5` accepts a
-    /// rebuild of the same design and rejects a different wing.
-    pub relative_area: f64,
-}
-
-impl Default for PolarConditionTolerance {
-    fn default() -> Self {
-        Self {
-            mach: 1.0e-9,
-            altitude_m: 1.0,
-            relative_area: 1.0e-5,
-        }
-    }
-}
-
-/// A cruise drag polar supplied by an external aerodynamic solver, so the
-/// sizing loop can close a candidate around aerodynamics it did not trim
-/// itself. `induced_factor_k` is the parabolic-polar factor
-/// `(cd - cd0) / cl^2` at the cruise lift coefficient.
-///
-/// The coefficients are meaningless without the state they were solved at,
-/// so the evaluation condition (`mach`, `altitude_m`, `reference_area_m2`,
-/// `target_cl`) and the solver identity travel with them: a polar solved for
-/// one wing area cannot be non-dimensionally reused on another.
-///
-/// Units: areas m^2, altitudes m (ISA geometric), angles degrees, stations m
-/// in geometry axes (x positive aft); Mach and every coefficient are
-/// dimensionless.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct ExternalPolar {
-    /// Zero-lift drag coefficient at the cruise point.
-    pub cd0: f64,
-    /// Induced-drag factor `k`, positive.
-    pub induced_factor_k: f64,
-    /// Wave-drag coefficient at the external solver's design Mach and lift.
-    /// It remains separate from `induced_factor_k` so the shared mission
-    /// model can omit transonic wave drag during takeoff, climb, descent and
-    /// landing phases.
-    pub wave_drag_cd: f64,
-    /// Lift-to-drag ratio at the required cruise lift.
-    pub lift_to_drag: f64,
-    /// Angle of attack at that point, degrees, for the history.
-    pub alpha_deg: f64,
-    /// Stabilizer incidence the point was evaluated at, degrees.
-    pub incidence_deg: f64,
-    /// Neutral-point station in geometry axes, m, for the balance family.
-    pub x_np: f64,
-    /// Free-stream Mach the external solver evaluated the point at.
-    /// Subsonic: the linear panel methods this admits are invalid at `M >= 1`.
-    pub mach: f64,
-    /// ISA geometric altitude the point is referred to, m. A panel solver
-    /// carries no atmosphere itself, so this is the altitude the required
-    /// lift coefficient and the parasite build-up were computed at.
-    pub altitude_m: f64,
-    /// Wing reference area the coefficients are non-dimensionalized by, m^2.
-    pub reference_area_m2: f64,
-    /// Lift coefficient the polar was evaluated/interpolated at, positive.
-    pub target_cl: f64,
-    /// Identity of the solver that produced the point, e.g. `"avl"`.
-    pub source: &'static str,
-    /// Whether `target_cl` fell inside the solved polar's lift range, so the
-    /// point is an interpolation rather than an extrapolation.
-    pub bracketed: bool,
-}
-
-impl ExternalPolar {
-    /// Whether every term is finite, physically usable, and carries a
-    /// complete, non-extrapolated evaluation identity.
-    pub fn is_valid(&self) -> bool {
-        self.cd0.is_finite()
-            && self.cd0 > 0.0
-            && self.induced_factor_k.is_finite()
-            && self.induced_factor_k > 0.0
-            && self.wave_drag_cd.is_finite()
-            && self.wave_drag_cd >= 0.0
-            && self.lift_to_drag.is_finite()
-            && self.lift_to_drag > 0.0
-            && self.alpha_deg.is_finite()
-            && self.incidence_deg.is_finite()
-            && self.x_np.is_finite()
-            && self.mach.is_finite()
-            && self.mach > 0.0
-            && self.mach < 1.0
-            && self.altitude_m.is_finite()
-            && self.reference_area_m2.is_finite()
-            && self.reference_area_m2 > 0.0
-            && self.target_cl.is_finite()
-            && self.target_cl > 0.0
-            && !self.source.is_empty()
-            && self.bracketed
-    }
-
-    /// Whether this polar was evaluated at the condition a candidate is being
-    /// sized at.
-    ///
-    /// # Errors
-    ///
-    /// A human-readable description naming the mismatched quantity, both
-    /// values and the tolerance, when the Mach, altitude or reference area
-    /// differs by more than `tolerance`. A polar reused across conditions
-    /// silently rescales every coefficient, so this is a rejection rather
-    /// than a warning.
-    pub fn matches_condition(
-        &self,
-        mach: f64,
-        altitude_m: f64,
-        reference_area_m2: f64,
-        tolerance: PolarConditionTolerance,
-    ) -> Result<(), String> {
-        if !mach.is_finite() || !altitude_m.is_finite() || !reference_area_m2.is_finite() {
-            return Err(format!(
-                "candidate condition is not finite: mach={mach}, altitude_m={altitude_m}, reference_area_m2={reference_area_m2}"
-            ));
-        }
-        if (self.mach - mach).abs() > tolerance.mach {
-            return Err(format!(
-                "polar mach {} does not match candidate mach {mach} within {}",
-                self.mach, tolerance.mach
-            ));
-        }
-        if (self.altitude_m - altitude_m).abs() > tolerance.altitude_m {
-            return Err(format!(
-                "polar altitude {} m does not match candidate altitude {altitude_m} m within {} m",
-                self.altitude_m, tolerance.altitude_m
-            ));
-        }
-        let area_scale = reference_area_m2.abs().max(1e-9);
-        if (self.reference_area_m2 - reference_area_m2).abs() / area_scale > tolerance.relative_area
-        {
-            return Err(format!(
-                "polar reference area {} m2 does not match candidate area {reference_area_m2} m2 within {} relative",
-                self.reference_area_m2, tolerance.relative_area
-            ));
-        }
-        Ok(())
-    }
-}
+pub use external::{ExternalPolar, PolarConditionTolerance};
+pub use fuel::{CandidateDrag, CandidateFuelArtifacts, DeckKey, SizingControls, SizingWork};
 
 /// One design candidate closed against the sizing mission.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SizedCandidate {
-    /// Analysis takeoff mass, kg: the mission-closed dispatch mass for the
-    /// two mission-sized modes, the declared MTOW for `FixedRequirement`; the
-    /// dispatch plan keeps the mission-required mass for the ceiling check.
+    /// Physical analysis takeoff mass, kg. Hard MTOW carries the maximum
+    /// fuel the weight and volume budgets admit; other modes use dispatch.
     pub takeoff_mass_kg: f64,
+    /// Maximum available fuel loading under Hard MTOW, including the
+    /// governing weight/volume limit; absent for mission-closed modes.
+    pub takeoff_loading: Option<alas_mass::loading::MtowFuelLoading>,
     /// `fixed_aircraft` or `coupled` (`alas_config::MassSizingBasis`).
     pub sizing_basis: &'static str,
     /// FLOPS design gross mass `DG` the components were evaluated at, kg.
     pub design_gross_mass_kg: f64,
     /// Design landing mass `WLDG` the gear was evaluated at, kg.
     pub design_landing_mass_kg: f64,
+    /// What the takeoff-mass sizing plan adds to the closure.
+    pub mtow: super::mtow_modes::MtowPlanOutcome,
     /// Operating empty mass at the closed takeoff mass, kg.
     pub operating_empty_mass_kg: f64,
     /// Zero-fuel mass (operating empty plus payload) at closure, kg.
@@ -339,7 +125,9 @@ pub struct SizedCandidate {
     pub takeoff_fuel_kg: f64,
     /// Fuel loaded at the ramp, kg.
     pub ramp_fuel_kg: f64,
-    /// Usable fuel-tank capacity, kg, or `NaN` when the configured tank
+    /// Usable fuel capacity the dispatch is bounded by, kg
+    /// ([`super::usable_fuel_capacity`]: published for an unchanged preset,
+    /// else the resolved tank layout), or `NaN` when the configured tank
     /// arrangement could not be resolved on the built geometry.
     pub usable_capacity_kg: f64,
     /// Still-air distance the mission was sized over, m.
@@ -355,21 +143,35 @@ pub struct SizedCandidate {
     /// Horizontal distance consumed by non-cruise climb/descent profile
     /// phases, m. A shorter requested mission is infeasible for this model.
     pub minimum_profile_range_m: f64,
-    /// Trimmed cruise lift-to-drag ratio. This is the aerodynamic operating
-    /// point evaluated once for the candidate and does not vary with the
-    /// sized mass.
+    /// Trimmed lift-to-drag ratio at the sizing cruise Mach and altitude and
+    /// the lift coefficient of [`Self::takeoff_mass_kg`], read from the
+    /// candidate's cruise drag ([`CandidateDrag::cd`]).
     pub lift_to_drag: f64,
+    /// Reserve-inclusive takeoff fuel of the mission the takeoff mass was
+    /// closed on (the design mission when the plan declares one, otherwise
+    /// the route), kg: the plan's `takeoff_fuel_kg`.
+    pub design_mission_fuel_kg: f64,
+    /// Trip fuel of that mission, kg.
+    pub design_mission_trip_fuel_kg: f64,
+    /// The drag, deck, frozen plan and tail sizing the closure flew.
+    pub fuel_artifacts: Arc<CandidateFuelArtifacts>,
+    /// Work the closure spent.
+    pub work: SizingWork,
     /// The dispatch closure this candidate was sized by.
     pub dispatch: DispatchSolution,
     /// Outer sizing passes taken (fixed-point iterations of empty mass, fuel
     /// and takeoff mass; always `1` under `MtowSizing::FixedRequirement`,
-    /// up to the configured iteration limit under `MtowSizing::SizedByMission`
-    /// and `MtowSizing::Unconstrained`).
+    /// up to the configured iteration limit under every mission-closed mode).
     pub sizing_iterations: usize,
     /// Whether the outer sizing loop closed within its iteration budget.
     pub sizing_closed: bool,
+    /// Whether the outer takeoff-mass iteration settled within tolerance,
+    /// whatever limit the dispatch met; [`Self::sizing_closed`] also
+    /// requires a converged dispatch.
+    pub takeoff_mass_settled: bool,
     /// Re-trims after the first, each triggered by a CG shift beyond the
-    /// configured re-trim tolerance.
+    /// configured re-trim tolerance (a mass change alone never re-trims:
+    /// the drag table spans the lift range).
     pub retrim_count: usize,
     /// CG shift, percent MAC, between the last trim and the converged state.
     pub cg_shift_pct_mac: f64,
@@ -382,6 +184,42 @@ pub struct SizedCandidate {
     /// Reconciled non-box wing inventory represented in the complete wing,
     /// kg.
     pub structural_secondary_mass_kg: f64,
+}
+
+impl SizedCandidate {
+    /// The dispatch of the route the aircraft is flown over: the off-design
+    /// route flight when the closure flew another mission, else the
+    /// closure's own. Its takeoff and landing are the flown load the
+    /// reporting verdict checks.
+    #[must_use]
+    pub fn flown_dispatch(&self) -> &DispatchSolution {
+        self.mtow
+            .offdesign
+            .as_ref()
+            .map_or(&self.dispatch, |flight| &flight.dispatch)
+    }
+
+    /// Start-of-cruise mass, kg: the takeoff mass with the climb burn not
+    /// deducted, so an upper bound of the heaviest cruise state. Reported
+    /// beside the gated mid-cruise point, never gated.
+    #[must_use]
+    pub fn start_of_cruise_mass_kg(&self) -> f64 {
+        self.takeoff_mass_kg
+    }
+
+    /// Mid-cruise mass, kg, of the design mission flown from this
+    /// candidate's takeoff loading ([`Self::takeoff_mass_kg`] carrying
+    /// [`Self::takeoff_fuel_kg`]) with the reserves of the dispatch it was
+    /// closed on; see [`super::cruise_mass`] for the definition, which is
+    /// the same under every MTOW mode.
+    #[must_use]
+    pub fn mid_cruise_mass_kg(&self) -> f64 {
+        super::cruise_mass::mid_cruise_mass_of_loading_kg(
+            self.takeoff_mass_kg,
+            self.takeoff_fuel_kg,
+            &self.dispatch.plan,
+        )
+    }
 }
 
 /// Where a [`ResolvedProductState`] came from, so a consumer can say which
@@ -406,9 +244,8 @@ impl ProductStateProvenance {
 /// The converged physical state a candidate's feasibility was actually
 /// decided on.
 ///
-/// [`CandidateAssessment`] previously carried only scalars, so a downstream
-/// report had no way to reuse the balance state the search accepted and had
-/// to rebuild its own. Two independent rebuilds of "the same" aircraft can
+/// A downstream report reuses the balance state the search accepted rather
+/// than rebuilding its own. Two independent rebuilds of "the same" aircraft can
 /// disagree about where it balances while agreeing on its takeoff mass, which
 /// is exactly how a hard-feasible finalist could be printed as physically
 /// infeasible. Carrying the state itself makes the two comparable, and the
@@ -430,9 +267,14 @@ pub struct ResolvedProductState {
     /// A report bound to this assessment must build on **this** vector.
     /// Building on the caller's instead describes a different aeroplane from
     /// the one the feasibility gate passed: on the r5 fixture at
-    /// `AlasConfig::default()` the two bodies differ by 4.25 m, which is
-    /// 2 406 kg of fuselage and 1.237 m of payload station.
+    /// `AlasConfig::default()` the bodies differ by 4.25 m (2 406 kg, 1.237 m).
     pub design: DesignVector,
+    /// Solved tail sizing; a replay applies it with [`TailSizing::apply_to`].
+    pub tail_sizing: TailSizing,
+    /// Solved main-gear group translation of a redesigned candidate
+    /// (`alas_config::LandingGearConfig::derived_main_gear`); `None` keeps
+    /// the configured stations. A replay writes it into its configuration.
+    pub main_gear_placement: Option<alas_config::DerivedMainGearStation>,
     /// Component masses at the closed takeoff mass, kg.
     pub masses: MassBreakdown,
     /// Component centroids the balance was evaluated at, m.
@@ -449,38 +291,6 @@ pub struct ResolvedProductState {
     pub provenance: ProductStateProvenance,
 }
 
-/// What the controlled-relaxation policy made of one candidate's violated
-/// hard residuals (clarified ledger D01-D03).
-///
-/// Empty and `rejected: false` for a strictly feasible candidate, which is
-/// every candidate under the shipped strict policy. A candidate with a
-/// non-empty `relaxed_ids` is *relaxed*, never fully feasible, and every
-/// reader that reports feasibility has to say so.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct RelaxationOutcome {
-    /// Limits that were missed inside their own declared tolerance.
-    pub relaxed_ids: Vec<&'static str>,
-    /// Distinct discipline groups carrying a relaxed miss (D01 counts
-    /// groups, not limits).
-    pub violated_groups: usize,
-    /// Whether the candidate is rejected despite the policy: a miss outside
-    /// its tolerance, a limit that is not eligible, or more violated groups
-    /// than the policy allows.
-    pub rejected: bool,
-}
-
-impl RelaxationOutcome {
-    /// The outcome of a candidate that needed no relaxation at all.
-    pub fn strict() -> Self {
-        Self::default()
-    }
-
-    /// Whether this candidate was admitted only by the relaxation policy.
-    pub fn is_relaxed(&self) -> bool {
-        !self.relaxed_ids.is_empty() && !self.rejected
-    }
-}
-
 /// The residual table and scalar cost for one evaluated candidate.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CandidateAssessment {
@@ -491,17 +301,11 @@ pub struct CandidateAssessment {
     pub resolved: ResolvedProductState,
     /// Every evaluated requirement, as a typed residual.
     pub residuals: Vec<ConstraintResidual>,
-    /// Whether the candidate is admissible: every hard-policy residual
-    /// satisfied, or every miss admitted by the controlled-relaxation policy.
-    /// Check [`CandidateAssessment::is_strictly_feasible`] before reporting
-    /// an aircraft as feasible.
+    /// Whether every hard requirement is satisfied.
     pub hard_feasible: bool,
-    /// What the relaxation policy made of the violated hard residuals.
-    /// Empty under the shipped strict policy.
-    pub relaxation: RelaxationOutcome,
-    /// Sum of normalized violations across hard-policy residuals.
+    /// Sum of normalized violations across hard-role residuals.
     pub hard_violation_sum: f64,
-    /// Sum of normalized violations across soft-policy residuals.
+    /// Sum of normalized violations across soft-role residuals.
     pub soft_violation_sum: f64,
     /// The configured mission quantity, before normalization.
     pub objective_value: f64,
@@ -510,23 +314,32 @@ pub struct CandidateAssessment {
 }
 
 impl CandidateAssessment {
-    /// Whether every hard-policy residual is met with nothing relaxed.
-    ///
-    /// This is the question a feasibility report has to ask. `hard_feasible`
-    /// admits a relaxed candidate on purpose, so that the search can rank it;
-    /// reporting one as feasible would be exactly the silent relabelling the
-    /// relaxation policy forbids.
+    /// Whether every hard requirement is satisfied.
     pub fn is_strictly_feasible(&self) -> bool {
-        self.hard_feasible && !self.relaxation.is_relaxed()
+        self.hard_feasible
     }
 
-    /// Identifiers of every violated hard-policy residual, in evaluation
+    /// Identifiers of every violated hard-role residual, in evaluation
     /// order, joined with `+` for a rejected candidate's history entry.
     pub fn violated_hard_ids(&self) -> Vec<&'static str> {
         self.residuals
             .iter()
-            .filter(|residual| residual.policy == ConstraintPolicy::Hard && residual.violated())
+            .filter(|residual| residual.role == ResidualRole::Constraint && residual.violated())
             .map(|residual| residual.id)
+            .collect()
+    }
+
+    /// Violated hard requirements with model-failure context for reports.
+    pub fn violated_hard_details(&self) -> Vec<String> {
+        self.residuals
+            .iter()
+            .filter(|row| row.role == ResidualRole::Constraint && row.violated())
+            .map(|row| {
+                row.detail.as_ref().map_or_else(
+                    || row.id.to_owned(),
+                    |detail| format!("{}: {detail}", row.id),
+                )
+            })
             .collect()
     }
 }
@@ -563,12 +376,12 @@ pub(crate) struct PayloadCapacity {
 /// has `x` at hand to rebuild the vector only in the failure path that
 /// actually needs it for a history entry.
 ///
-/// The reason is one of the legacy objective's own evaluation-failure labels
+/// The reason is one of the weighted-penalty objective's own evaluation-failure labels
 /// (`geometry_build`, `mass_coordinates`, `payload_layout`, `trim_solve`;
-/// see `crate::objective_evaluate`), which is what lets
+/// see `crate::objective`), which is what lets
 /// `OptimizationHistory::reject_reason_counts` and the differential-evolution
 /// reject-reason grouping read a mission-sized failure the same way as a
-/// legacy one.
+/// weighted-penalty one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct CandidateFailure {
     pub reason: &'static str,
@@ -580,6 +393,49 @@ pub(crate) struct CandidateFailure {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unavailable_constraint_measurements_never_become_satisfied() {
+        for invalid in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            for (actual, limit, raw) in [
+                (invalid, 1.0, 0.0),
+                (1.0, invalid, 0.0),
+                (1.0, 1.0, invalid),
+            ] {
+                let residual = ConstraintResidual::scaled(
+                    "test",
+                    ConstraintFamily::Structure,
+                    actual,
+                    limit,
+                    "m",
+                    raw,
+                    ResidualRole::Constraint,
+                );
+                assert!(residual.violated());
+            }
+            let residual = ConstraintResidual::direct(
+                "test",
+                ConstraintFamily::Structure,
+                1.0,
+                1.0,
+                "m",
+                0.0,
+                invalid,
+                ResidualRole::Constraint,
+            );
+            assert!(residual.violated());
+        }
+        let satisfied = ConstraintResidual::scaled(
+            "test",
+            ConstraintFamily::Structure,
+            0.5,
+            1.0,
+            "m",
+            -0.5,
+            ResidualRole::Constraint,
+        );
+        assert!(!satisfied.violated());
+    }
 
     /// A transport-like cruise polar at M 0.78 / 11 000 m over 120 m^2, with
     /// every validity gate satisfied, for the rejection tests to perturb one

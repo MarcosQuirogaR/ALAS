@@ -10,71 +10,74 @@ use egui::ComboBox;
 /// workflow.  Detection runs in the CFD worker; this card only edits and
 /// persists explicit paths.
 pub(crate) fn openfoam_card(state: &mut AppState, ui: &mut Ui) {
-    card(ui, "OpenFOAM CFD", "https://www.openfoam.com/", |ui| {
-        ui.label(
-            RichText::new(tr(
-                "Configure the OpenFOAM backend, native project/bin directories and optional Gmsh and ParaView viewers. Connection probing and CFD solves run outside the user-interface thread.",
-            ))
-            .weak()
-            .small(),
-        );
+    card(ui, "OpenFOAM CFD", "https://www.openfoam.com/", &[
+        "Configure the OpenFOAM backend, native project/bin directories and optional Gmsh and ParaView viewers. Connection probing and CFD solves run outside the user-interface thread.",
+        "The study selects simpleFoam below Mach 0.3 and rhoSimpleFoam with perfect-gas thermodynamics and bounded shock-safe schemes at higher Mach. Missing utilities or unsupported regimes stop before a solver result is presented.",
+    ], |ui| split_body(ui, state, openfoam_settings_rows, openfoam_connection_rows));
+}
 
-        ui.horizontal_wrapped(|ui| {
-            ui.label(RichText::new(tr("Backend")).strong());
-            let mut backend = state.cfd.openfoam_preferences.backend;
-            ComboBox::from_id_salt("openfoam_backend")
-                .selected_text(tr(backend.display_name()))
-                .show_ui(ui, |ui| {
-                    for candidate in [
-                        OpenFoamBackend::Auto,
-                        OpenFoamBackend::Native,
-                        OpenFoamBackend::Wsl2,
-                    ] {
-                        ui.selectable_value(&mut backend, candidate, tr(candidate.display_name()));
-                    }
-                });
-            if backend != state.cfd.openfoam_preferences.backend {
-                state.cfd.openfoam_preferences.backend = backend;
-                save_cfd_environment_preferences(state);
-            }
-        });
-
-        let backend = state.cfd.openfoam_preferences.backend;
-        if backend != OpenFoamBackend::Wsl2 {
-            show_native_rows(state, ui);
-        }
-        if backend != OpenFoamBackend::Native {
-            show_wsl_rows(state, ui);
-        }
-
-        let mut gmsh = state.cfd.gmsh_executable.clone().unwrap_or_default();
-        if text_row(
-            state,
-            ui,
-            "Gmsh executable",
-            &mut gmsh,
-            false,
-            Some(ToolPathTarget::GmshExecutable),
-        ) {
-            state.cfd.gmsh_executable = (!gmsh.trim().is_empty()).then_some(gmsh.clone());
-            state.cfd.openfoam_preferences.gmsh_executable = state.cfd.gmsh_executable.clone();
+/// Backend and installation paths (left column of a wide card).
+fn openfoam_settings_rows(state: &mut AppState, ui: &mut Ui) {
+    ui.horizontal_wrapped(|ui| {
+        ui.label(RichText::new(tr("Backend")).weak());
+        let mut backend = state.cfd.openfoam_preferences.backend;
+        ComboBox::from_id_salt("openfoam_backend")
+            .selected_text(tr(backend.display_name()))
+            .show_ui(ui, |ui| {
+                for candidate in [
+                    OpenFoamBackend::Auto,
+                    OpenFoamBackend::Native,
+                    OpenFoamBackend::Wsl2,
+                ] {
+                    ui.selectable_value(&mut backend, candidate, tr(candidate.display_name()));
+                }
+            });
+        if backend != state.cfd.openfoam_preferences.backend {
+            state.cfd.openfoam_preferences.backend = backend;
             save_cfd_environment_preferences(state);
         }
+    });
 
-        let mut paraview = state.cfd.paraview_executable.clone().unwrap_or_default();
-        if text_row(
-            state,
-            ui,
-            "ParaView executable",
-            &mut paraview,
-            false,
-            Some(ToolPathTarget::ParaViewExecutable),
-        ) {
-            state.cfd.paraview_executable = (!paraview.trim().is_empty()).then_some(paraview);
-            save_cfd_environment_preferences(state);
-        }
+    let backend = state.cfd.openfoam_preferences.backend;
+    if backend != OpenFoamBackend::Wsl2 {
+        show_native_rows(state, ui);
+    }
+    if backend != OpenFoamBackend::Native {
+        show_wsl_rows(state, ui);
+    }
 
-        ui.horizontal_wrapped(|ui| {
+    let mut gmsh = state.cfd.gmsh_executable.clone().unwrap_or_default();
+    if text_row(
+        state,
+        ui,
+        "Gmsh executable",
+        &mut gmsh,
+        false,
+        Some(ToolPathTarget::GmshExecutable),
+    ) {
+        state.cfd.gmsh_executable = (!gmsh.trim().is_empty()).then_some(gmsh.clone());
+        state.cfd.openfoam_preferences.gmsh_executable = state.cfd.gmsh_executable.clone();
+        save_cfd_environment_preferences(state);
+    }
+
+    let mut paraview = state.cfd.paraview_executable.clone().unwrap_or_default();
+    if text_row(
+        state,
+        ui,
+        "ParaView executable",
+        &mut paraview,
+        false,
+        Some(ToolPathTarget::ParaViewExecutable),
+    ) {
+        state.cfd.paraview_executable = (!paraview.trim().is_empty()).then_some(paraview);
+        save_cfd_environment_preferences(state);
+    }
+}
+
+/// Connection test and detected capabilities (right column of a wide card).
+fn openfoam_connection_rows(state: &mut AppState, ui: &mut Ui) {
+    sub_heading(ui, "Connection");
+    ui.horizontal(|ui| {
             if ui
                 .add_enabled(!state.cfd.probing && !state.cfd.running, egui::Button::new(tr("Connection test")))
                 .on_hover_text(tr("Probe the configured backend, OpenFOAM version and required utilities in a background worker."))
@@ -85,18 +88,10 @@ pub(crate) fn openfoam_card(state: &mut AppState, ui: &mut Ui) {
             if state.cfd.probing {
                 ui.spinner();
             }
-            ui.label(RichText::new(tr(&state.cfd.status)).weak());
         });
+    ui.label(RichText::new(tr(&state.cfd.status)).weak());
 
-        show_capabilities(state, ui);
-        ui.label(
-            RichText::new(tr(
-                "The study selects simpleFoam below Mach 0.3 and rhoSimpleFoam with perfect-gas thermodynamics and bounded shock-safe schemes at higher Mach. Missing utilities or unsupported regimes stop before a solver result is presented.",
-            ))
-            .weak()
-            .small(),
-        );
-    });
+    show_capabilities(state, ui);
 }
 
 fn show_native_rows(state: &mut AppState, ui: &mut Ui) {
@@ -196,13 +191,6 @@ fn show_wsl_rows(state: &mut AppState, ui: &mut Ui) {
             (!bin_dir.trim().is_empty()).then_some(bin_dir.clone());
         save_cfd_environment_preferences(state);
     }
-    ui.label(
-        RichText::new(tr(
-            "The launcher receives each utility and its arguments inside WSL2, for example openfoam2306 from the openfoam.com Ubuntu packages. Without it, WSL runs the utilities without the OpenFOAM environment and a bin directory alone does not load their libraries.",
-        ))
-        .weak()
-        .small(),
-    );
 }
 
 fn show_capabilities(state: &AppState, ui: &mut Ui) {
@@ -210,8 +198,15 @@ fn show_capabilities(state: &AppState, ui: &mut Ui) {
         ui.label(RichText::new(tr("Connection not tested yet.")).weak());
         return;
     };
-    ui.label(RichText::new(capabilities.summary()).strong());
-    ui.label(RichText::new(capabilities.detail.as_str()).weak().small());
+    ui.label(RichText::new(capabilities.summary()).strong())
+        .on_hover_text(capabilities.detail.as_str());
+    if !capabilities.available {
+        ui.label(
+            RichText::new(capabilities.detail.as_str())
+                .color(ui.visuals().error_fg_color)
+                .small(),
+        );
+    }
     let support_color = match capabilities.version_support.level {
         OpenFoamSupportLevel::Supported => crate::theme::success_color(ui.visuals()),
         OpenFoamSupportLevel::Untested => ui.visuals().warn_fg_color,
@@ -219,13 +214,16 @@ fn show_capabilities(state: &AppState, ui: &mut Ui) {
     };
     ui.horizontal_wrapped(|ui| {
         ui.label(RichText::new(tr("Version support")).strong());
-        ui.colored_label(support_color, capabilities.support_summary());
+        ui.colored_label(support_color, capabilities.support_summary())
+            .on_hover_text(capabilities.version_support.reason.as_str());
     });
-    ui.label(
-        RichText::new(capabilities.version_support.reason.as_str())
-            .weak()
-            .small(),
-    );
+    if capabilities.version_support.level == OpenFoamSupportLevel::Unsupported {
+        ui.label(
+            RichText::new(capabilities.version_support.reason.as_str())
+                .color(ui.visuals().error_fg_color)
+                .small(),
+        );
+    }
     egui::Grid::new("openfoam_capabilities")
         .num_columns(2)
         .spacing([12.0, 3.0])

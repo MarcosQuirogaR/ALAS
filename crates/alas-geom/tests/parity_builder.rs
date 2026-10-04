@@ -4,7 +4,7 @@
 //! Compares `alas-geom::builder` against `alas.geometry.aircraft_builder`,
 //! via `golden/generators/gen_geom_builder.py`.
 //!
-//! This is Phase 3's centerpiece check: the fixture is the actual nominal
+//! This is the central check of the crate: the fixture is the actual nominal
 //! aircraft (`AircraftBuilder(GeometryConfig()).build(dv=None, ...)`), so
 //! comparing against it exercises every other module in this crate together,
 //! all three of `AirfoilLibrary::get`'s name-resolution branches, the

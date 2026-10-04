@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/config/cabin_config.py (`CargoDeckConfig`)
-// Reference: alas @ rust-port-baseline.
 
 //! Which decks carry freight, in what containers, and how it is distributed.
 //!
@@ -14,16 +13,86 @@
 //!
 //! Zero means "work it out" for every position field: a door position of zero
 //! is not a door at the nose, it is a door the layout places. That convention
-//! is upstream's and is reproduced, including its one sharp edge: a target
+//! has one sharp edge: a target
 //! centre of gravity at or below zero means the centre of the envelope, so
 //! there is no way to ask for a trim point at the datum itself.
-//!
-//! None of these fields declares an explanation upstream; the ones here are
-//! this port's, as CONTRIBUTING.md requires, and they change no value.
 
 use serde::{Deserialize, Serialize};
 
 use crate::ConfigNode;
+
+/// How checked baggage is divided between the hold compartments.
+///
+/// No regulation prescribes the split; operators either load in proportion to
+/// compartment volume or trim to a balance target (engineering estimate).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BaggagePolicy {
+    /// Trim the split within the compartment limits toward the balance target.
+    #[default]
+    TargetCg,
+    /// Split in proportion to compartment volume, ignoring balance.
+    VolumeProportional,
+}
+
+impl BaggagePolicy {
+    /// Whether this is the default policy, which serialization omits.
+    pub fn is_default(&self) -> bool {
+        *self == Self::TargetCg
+    }
+}
+
+/// Which deck a declared compartment is on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HoldDeck {
+    /// Under the cabin floor.
+    #[default]
+    Lower,
+    /// On the passenger main deck, outside the seat and monument extent.
+    Main,
+}
+
+/// One declared baggage compartment. A non-empty declared list replaces the
+/// compartments derived from the geometry.
+///
+/// Stations are metres aft of the nose tip; volume is cubic metres and the
+/// optional net-mass limit is kilograms.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HoldCompartmentConfig {
+    /// Display name.
+    pub name: String,
+    /// Forward station, m.
+    pub x_start_m: f64,
+    /// Aft station, m.
+    pub x_end_m: f64,
+    /// Usable volume, m3, when the source publishes it; `None` takes the
+    /// enclosed volume of the built deck over the declared extent.
+    #[serde(default)]
+    pub volume_m3: Option<f64>,
+    /// Structural net-mass limit, kg, when one is published.
+    #[serde(default)]
+    pub max_net_kg: Option<f64>,
+    /// Which deck the compartment is on.
+    #[serde(default)]
+    pub deck: HoldDeck,
+}
+
+impl HoldCompartmentConfig {
+    /// Whether the extent, volume and limit are finite and physical.
+    pub fn is_valid(&self) -> bool {
+        self.x_start_m.is_finite()
+            && self.x_end_m.is_finite()
+            && self.x_end_m > self.x_start_m
+            && self
+                .volume_m3
+                .is_none_or(|volume| volume.is_finite() && volume > 0.0)
+            && self
+                .max_net_kg
+                .is_none_or(|limit| limit.is_finite() && limit >= 0.0)
+    }
+}
 
 /// Cargo loading configuration.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ConfigNode)]
@@ -91,6 +160,23 @@ pub struct CargoDeckConfig {
         help = "Iteration cap for the centre-of-gravity trim. A very large aircraft moving a small step per iteration can need more than the default; raise this rather than the step if the trim is not converging."
     )]
     pub cg_trim_max_iterations: i64,
+
+    /// How checked baggage is split between compartments.
+    #[serde(default, skip_serializing_if = "BaggagePolicy::is_default")]
+    #[config(
+        hidden,
+        options = BaggagePolicy,
+        help = "How checked baggage is divided between hold compartments: 'target_cg' trims the split toward the balance target within each compartment's limit, 'volume_proportional' splits it in proportion to compartment volume."
+    )]
+    pub baggage_policy: BaggagePolicy,
+
+    /// Declared hold compartments, replacing the derived ones.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[config(
+        hidden,
+        help = "Declared baggage compartments with station extent, volume and optional net-mass limit. Empty means the compartments are derived from the fuselage geometry."
+    )]
+    pub hold_compartments: Vec<HoldCompartmentConfig>,
 }
 
 impl Default for CargoDeckConfig {
@@ -106,6 +192,8 @@ impl Default for CargoDeckConfig {
             aft_door_x_m: 0.0,
             cg_trim_step_kg: 50.0,
             cg_trim_max_iterations: 2000,
+            baggage_policy: BaggagePolicy::TargetCg,
+            hold_compartments: Vec::new(),
         }
     }
 }
@@ -123,6 +211,70 @@ mod tests {
         assert_eq!(config.main_door_x_m, 0.0);
         assert_eq!(config.fwd_door_x_m, 0.0);
         assert_eq!(config.aft_door_x_m, 0.0);
+    }
+
+    #[test]
+    fn an_older_cargo_config_without_the_baggage_fields_still_loads() {
+        let mut value = serde_json::to_value(CargoDeckConfig::default()).unwrap();
+        let object = value.as_object_mut().unwrap();
+        assert!(!object.contains_key("baggage_policy"));
+        assert!(!object.contains_key("hold_compartments"));
+        let loaded: CargoDeckConfig = serde_json::from_value(value).unwrap();
+        assert_eq!(loaded, CargoDeckConfig::default());
+    }
+
+    #[test]
+    fn non_default_baggage_fields_round_trip_in_snake_case() {
+        let config = CargoDeckConfig {
+            baggage_policy: BaggagePolicy::VolumeProportional,
+            hold_compartments: vec![HoldCompartmentConfig {
+                name: "Aft".to_owned(),
+                x_start_m: 22.0,
+                x_end_m: 24.0,
+                volume_m3: Some(4.0),
+                max_net_kg: Some(600.0),
+                deck: HoldDeck::Main,
+            }],
+            ..CargoDeckConfig::default()
+        };
+        let value = serde_json::to_value(&config).unwrap();
+        assert_eq!(value["baggage_policy"], "volume_proportional");
+        assert_eq!(value["hold_compartments"][0]["deck"], "main");
+        let loaded: CargoDeckConfig = serde_json::from_value(value).unwrap();
+        assert_eq!(loaded, config);
+    }
+
+    #[test]
+    fn a_compartment_needs_a_positive_extent_and_volume() {
+        let good = HoldCompartmentConfig {
+            name: "Fwd".to_owned(),
+            x_start_m: 3.0,
+            x_end_m: 4.0,
+            volume_m3: Some(2.0),
+            max_net_kg: None,
+            deck: HoldDeck::Lower,
+        };
+        assert!(good.is_valid());
+        for bad in [
+            HoldCompartmentConfig {
+                x_end_m: 3.0,
+                ..good.clone()
+            },
+            HoldCompartmentConfig {
+                volume_m3: Some(0.0),
+                ..good.clone()
+            },
+            HoldCompartmentConfig {
+                volume_m3: Some(f64::NAN),
+                ..good.clone()
+            },
+            HoldCompartmentConfig {
+                max_net_kg: Some(-1.0),
+                ..good.clone()
+            },
+        ] {
+            assert!(!bad.is_valid());
+        }
     }
 
     #[test]

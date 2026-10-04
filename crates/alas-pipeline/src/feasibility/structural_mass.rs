@@ -11,7 +11,7 @@ use alas_mass::breakdown::{OEW_KEYS, PAYLOAD};
 
 use crate::full_analysis::AnalysisReport;
 
-use super::{error, FindingCode, FuelLoadingAssessment, PhysicalFinding};
+use super::{error, warning, FindingCode, FuelLoadingAssessment, PhysicalFinding};
 
 /// Difference between the two operating-empty masses beyond which the mass
 /// closure is reported as not having closed on the modeled buildup, in kg.
@@ -21,7 +21,7 @@ use super::{error, FindingCode, FuelLoadingAssessment, PhysicalFinding};
 const OEW_CLOSURE_RESIDUAL_TOLERANCE_KG: f64 = 1.0;
 
 /// The two operating-empty masses a completed run carries, which are not the
-/// same number and were previously published as if they were.
+/// same number.
 ///
 /// See [`modeled_operating_empty_mass`] for why the distinction matters.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -35,13 +35,15 @@ pub(super) struct OperatingEmptyMassReconciliation {
     /// Which mass architecture produced [`Self::modeled_kg`].
     ///
     /// Carried because an operating-empty mass is meaningless without it: the
-    /// production FLOPS buildup and the legacy reference-compatible one are
+    /// production FLOPS buildup and the reference-compatible one are
     /// different models of the same aeroplane and answer differently. The
     /// ATR 72-600's 12,014.6 kg figure in `docs/aircraft-parity.md` and the
-    /// 15,257 kg the 2026-09-22 baseline reports are both real outputs of
-    /// this workspace; neither document states which architecture produced
-    /// it, which is why they cannot currently be reconciled. Every figure
-    /// this function returns now states it.
+    /// 15,257 kg of an earlier preset acceptance baseline are both outputs of
+    /// this workspace at different model states; neither states which
+    /// architecture produced it, so they cannot be reconciled from the
+    /// figures alone. Neither is a reference: the published ATR 72-600
+    /// typical in-service OEW is 13,450 kg [S ATR factsheet]. Every figure
+    /// this function returns states its architecture.
     pub(super) architecture: MassArchitecture,
 }
 
@@ -111,6 +113,31 @@ pub(super) fn append_structural_mass_findings(
     let tolerance = config.requirements.mtow_kg.abs().max(1.0) * 1.0e-10;
 
     let payload_kg = report.component_masses.get(PAYLOAD).copied();
+    // The route payload was capped at the structural payload limit (the
+    // published MZFW less the modeled OEW): the analysis flies the capped
+    // load, and the requested load it could not carry is stated here.
+    if let (Some(&offloaded_kg), Some(&limit_kg)) = (
+        report
+            .geometry_summary
+            .get(crate::full_analysis::ROUTE_PAYLOAD_OFFLOADED_KEY),
+        report
+            .geometry_summary
+            .get("effective_structural_payload_limit_kg"),
+    ) {
+        if offloaded_kg.is_finite() && offloaded_kg > 0.0 {
+            findings.push(warning(
+                FindingCode::StructuralPayloadLimitViolation,
+                format!(
+                    "the laid-out payload exceeds the structural payload limit (published MZFW \
+                     less modeled OEW) by {offloaded_kg:.1} kg; the route carries the limit, with \
+                     every seat and hold position offloaded by the same fraction"
+                ),
+                Some(limit_kg + offloaded_kg),
+                Some(limit_kg),
+                "kg",
+            ));
+        }
+    }
     let structural_limit_kg = config.requirements.max_structural_payload_kg;
     if structural_limit_kg.is_finite() && structural_limit_kg > 0.0 {
         if let Some(payload_kg) = payload_kg {
@@ -197,6 +224,37 @@ pub(super) fn append_structural_mass_findings(
     }
 }
 
+/// True when this design's `component_masses` carries nonzero propulsion
+/// mass but no measured nacelle station exists on the built geometry, so
+/// `alas_mass::stations::ComponentStations::propulsion_station_fallback`
+/// placed it at the wing centroid instead. That makes
+/// `super::FeasibilityReport::model_cg` and every %MAC/CG figure this run
+/// publishes not physical evidence for this design. Not a `FindingCode`
+/// (that enum is exhaustively, deliberately matched by `alas-gui`, which
+/// this crate must not edit); a plain report field carries the verdict
+/// instead. Re-resolves the same stations `station_coordinates_for` placed.
+pub(super) fn propulsion_fallback_station(config: &AlasConfig, report: &AnalysisReport) -> bool {
+    let propulsion_mass_kg = report
+        .component_masses
+        .get(alas_mass::breakdown::PROPULSION)
+        .copied()
+        .unwrap_or(0.0);
+    if !(propulsion_mass_kg.is_finite() && propulsion_mass_kg > 0.0) {
+        return false;
+    }
+    let Ok(stations) = alas_mass::stations::component_stations_with_gear(
+        &report.airplane,
+        &config.geometry,
+        &config.requirements,
+        &config.mass_model,
+        &config.structures,
+        &config.landing_gear,
+    ) else {
+        return false;
+    };
+    stations.propulsion_station_fallback()
+}
+
 // Tests assert on the fixtures they built here, so a failed expect is the
 // assertion failing rather than a library invariant breaking.
 #[allow(clippy::expect_used)]
@@ -208,7 +266,7 @@ mod tests {
     };
 
     /// The eight modeled component masses of the ATR 72-600 as the
-    /// 2026-09-22 eight-preset baseline recorded them
+    /// eight-preset acceptance baseline recorded them
     /// (`preset-validation-harness/baseline/preset_acceptance_matrix.json`,
     /// `ATR72-600.model_audit.mass_balance.component_masses_kg`). They sum to
     /// the 15,257 kg the matrix table prints in its OEW column.
@@ -229,7 +287,7 @@ mod tests {
     }
 
     /// The reconciliation under the production architecture, which is what
-    /// the 2026-09-22 baseline ran.
+    /// the acceptance baseline ran.
     fn reconcile(
         component_masses: &HashMap<String, f64>,
         zero_fuel_mass_kg: f64,

@@ -24,7 +24,7 @@ use alas_config::MassModelConfig;
 use crate::breakdown::{FlopsMassBuildup, MassBreakdown};
 use crate::flops_transport::FlopsTransportBreakdown;
 use crate::inertia::RadiiOfGyration;
-use crate::ledger::{LedgerError, MassGroup, MassItem, MassLedger, MassMethod, MassProperties};
+use crate::ledger::{LedgerError, MassItem, MassLedger, MassMethod, MassProperties};
 use crate::stations::ComponentStations;
 
 /// Which mass method actually produced each replaceable ledger group.
@@ -68,7 +68,7 @@ impl LedgerMethods {
     /// gear together, while its propulsion result owns the installed engines
     /// and nacelles. Keeping this as one constructor prevents a caller that
     /// supplies the FLOPS subsystem buildup from accidentally retaining the
-    /// legacy labels on the other groups.
+    /// Torenbeek-comparison labels on the other groups.
     pub const fn pure_flops() -> Self {
         Self {
             structure: MassMethod::Correlation("FLOPS"),
@@ -179,6 +179,15 @@ pub struct MassStatementInputs<'a> {
     /// The verified FLOPS systems/operating-items buildup, when the
     /// selected systems-mass method produced one.
     pub flops: Option<&'a FlopsTransportBreakdown>,
+    /// The FLOPS structural group's own `(main_gear_kg, nose_gear_kg)` split
+    /// when the selected architecture produced one:
+    /// [`crate::breakdown::FlopsMassBuildup::gear_split_kg`].
+    ///
+    /// `None` falls back to the fixed nose-gear mass fraction (an assumed
+    /// static-load split); `Some` places the two gear items at
+    /// the FLOPS-resolved masses instead of an assumed fraction of the
+    /// combined [`MassBreakdown::gear`] total.
+    pub flops_gear_split_kg: Option<(f64, f64)>,
 }
 
 /// The item-level mass ledger plus the fuel loads it is combined with.
@@ -251,6 +260,7 @@ impl MassStatement {
             inputs.payload_items,
             inputs.unusable_fuel_items,
             inputs.flops,
+            inputs.flops_gear_split_kg,
             methods,
         )?;
         ledger.validate()?;
@@ -329,30 +339,6 @@ impl MassStatement {
             ratio,
         }
     }
-
-    /// Mass of each ledger group present in `state`, in first-appearance order.
-    pub fn group_totals(&self, state: LoadState) -> Vec<(MassGroup, f64)> {
-        let mut totals = match state {
-            LoadState::OperatingEmpty => {
-                group_totals_where(&self.ledger, |item| item.role.is_operating_empty())
-            }
-            LoadState::ZeroFuel | LoadState::Takeoff | LoadState::Landing => {
-                self.ledger.group_totals()
-            }
-        };
-        let fuel_items: &[MassItem] = match state {
-            LoadState::Takeoff => &self.takeoff_fuel,
-            LoadState::Landing => &self.landing_fuel,
-            LoadState::OperatingEmpty | LoadState::ZeroFuel => &[],
-        };
-        if !fuel_items.is_empty() {
-            totals.push((
-                MassGroup::Fuel,
-                fuel_items.iter().map(|item| item.mass_kg).sum(),
-            ));
-        }
-        totals
-    }
 }
 
 /// `numerator / denominator`, or `0.0` rather than `NaN`/`inf` when the
@@ -363,21 +349,6 @@ fn safe_ratio(numerator: f64, denominator: f64) -> f64 {
     } else {
         0.0
     }
-}
-
-/// Mass of each group among the items `include` selects, first-appearance order.
-fn group_totals_where(
-    ledger: &MassLedger,
-    include: impl Fn(&MassItem) -> bool,
-) -> Vec<(MassGroup, f64)> {
-    let mut totals: Vec<(MassGroup, f64)> = Vec::new();
-    for item in ledger.items().iter().filter(|item| include(item)) {
-        match totals.iter_mut().find(|(group, _)| *group == item.group) {
-            Some((_, total)) => *total += item.mass_kg,
-            None => totals.push((item.group, item.mass_kg)),
-        }
-    }
-    totals
 }
 
 #[cfg(test)]

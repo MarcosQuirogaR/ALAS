@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! The sandbox's reduced, in-process Quick Analysis.
+//! The sandbox's in-process Quick Analysis.
 //!
 //! Everything here runs in Rust on the calling thread and never launches a
 //! process: the dependency set is the geometry builder, the mass and fuel
@@ -12,6 +12,11 @@
 //!
 //! # Model basis (fixed geometry)
 //!
+//! Two stages. The initial stage is the mission-sized closure of the fixed
+//! aircraft; the extended stage is the full baseline analysis the sandbox's
+//! Full Analysis runs (`FullAnalysis::run` under [`sandbox_config`]), so
+//! every extended value is that analysis' own number.
+//!
 //! The drawn aircraft is never resized. The takeoff mass is the closure of
 //! empty mass, carried payload and the mission fuel the declared route needs
 //! (`assess_product_candidate` under the fixed-aircraft mass basis), so
@@ -19,80 +24,88 @@
 //! brief, reported next to the declared MTOW requirement. Capacities are
 //! reported separately from carried loads.
 //!
-//! * Lift-to-drag: the sized closure's cruise value (two vortex-lattice
-//!   probes on the in-loop mesh plus the Raymer/Korn drag build-up).
-//! * Range: Breguet cruise range at the requested cruise Mach and altitude
-//!   with the closure lift-to-drag and the catalogue cruise TSFC, from the
-//!   takeoff-mass estimate down to the mass with only reserve fuel left.
-//!   Climb and descent are not credited separately.
-//! * Fuel burn: the closure's block fuel for the declared route.
-//! * Cruise speed and ceiling: thrust available from the catalogue deck at
-//!   the maximum-climb rating against the wave-free base polar fitted to
-//!   the reduced sweep's parasite-plus-induced drag, plus one Korn wave term
-//!   at the flight Mach, at the takeoff-mass estimate. The service
+//! * Lift-to-drag and static margin: the full baseline analysis' trimmed
+//!   cruise L/D and fine-lattice static margin, the values its summary
+//!   reports.
+//! * Range: the largest still-air distance whose reserve-inclusive fuel
+//!   plan fits the closure's carried fuel at the closure's takeoff mass,
+//!   flown on the closure's own mission model (trimmed drag table, deck,
+//!   climb, cruise levels and descent; `alas_mass::payload_range`).
+//! * Fuel burn: the closure's block fuel for the design mission (the
+//!   great circle), and the planned route's (airways where the navigation
+//!   data is installed) flown off-design by the full analysis' mission
+//!   stage on its report (`route`), the route fuel the full analysis reports.
+//! * Cruise speed and ceiling: maximum-climb thrust of the full analysis'
+//!   fuel-model deck against its trimmed drag table (`CD(CL, M, h)`, the
+//!   drag the mission and the payload-range corners fly), at the
+//!   takeoff-mass estimate. The service
 //!   ceiling is the altitude where the excess-power rate of climb falls to
 //!   0.508 m/s (100 ft/min) at the best-climb Mach, bounded by the deck
 //!   domain (13 716 m, Mach 0.9). The achievable Mach is the highest
-//!   thrust-equals-drag Mach at the requested altitude, capped at 0.895.
+//!   thrust-equals-drag Mach at the requested altitude, capped at the
+//!   smaller of 0.895 and the drag table's upper Mach node.
 //! * Payload capacity: the estimated achievable payload of the fixed
 //!   aircraft, the declared structural cap bounded by the preset MZFW-derived
 //!   limit and by `MTOW - OEW`; the declared cap is the requested value.
-//! * Payload-range: the same corner convention as the report figure (max
-//!   payload with fuel to MTOW, max fuel with payload traded, ferry), with
-//!   the maximum payload bounded as above so no corner exceeds MTOW; an
-//!   empty mass at or above MTOW fails the diagram instead of drawing it.
-//!   Turboprop ranges scale the two-engine catalogue fuel-flow anchor by the
-//!   installed engine count.
-//! * Feasibility: the physical feasibility assessment of the reduced full
+//! * Fuel capacity: the usable capacity the full baseline analysis applies
+//!   (`assess_fuel_capacity`): the published usable fuel of an unchanged
+//!   preset, else the resolved tank layout. The closure's own dispatch is
+//!   bounded by the same capacity (`alas_opt::mdo::usable_fuel_capacity`).
+//! * Payload-range: the full baseline analysis' corners
+//!   ([`payload_range_corners`] on its report; max payload with fuel to MTOW,
+//!   max fuel with payload traded, ferry), with the maximum payload bounded
+//!   as above so no corner exceeds MTOW; an empty mass at or above MTOW
+//!   fails the diagram instead of drawing it.
+//! * Feasibility: the physical feasibility assessment of the full baseline
 //!   analysis without a flown mission, plus the closure's dispatch flags.
 //!
-//! Every value is an initial estimate for design iteration, not a validated
-//! performance figure.
+//! [`QuickMetric::basis`] states, per metric, whether the value is the Full
+//! Analysis' own or an estimate, and the measured bound of the closure
+//! estimates against it. No value is a validated performance figure.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 
-use alas_config::optimizer::DesignMode;
 use alas_config::AlasConfig;
-use alas_geom::builder::AircraftBuilder;
 use alas_mass::breakdown::OEW_KEYS;
-use alas_mass::dispatch::DispatchStatus;
 use alas_opt::assess_product_candidate;
 
-use crate::feasibility::{assess_physical_feasibility, FindingSeverity};
-use crate::full_analysis::{effective_structural_payload_limit_kg, FullAnalysis};
+use crate::feasibility::{
+    assess_airplane_fuel_capacity, assess_physical_feasibility, FindingSeverity,
+};
+use crate::full_analysis::{effective_structural_payload_limit_kg, AnalysisReport, FullAnalysis};
 
-mod breguet;
+pub mod band;
+pub mod corners;
 mod cruise;
+mod dispatch_flags;
+mod payload_range;
+mod route;
 mod types;
 
-pub use breguet::{
-    payload_capacity_estimate, payload_range_corners, PayloadCapacityEstimate,
+pub use cruise::{CruiseDrag, CruiseSolve, SERVICE_CEILING_CLIMB_RATE_M_S};
+use dispatch_flags::{dispatch_flags_of, dispatch_status_text};
+use payload_range::quick_range;
+pub use payload_range::{
+    fuel_capacity_basis, payload_capacity_estimate, payload_range_corners, PayloadCapacityEstimate,
     PayloadRangeUnavailable, QuickPayloadRange,
 };
-pub use cruise::{CruiseSolve, SERVICE_CEILING_CLIMB_RATE_M_S};
 pub use types::{
-    QuickAnalysisRequest, QuickAnalysisSummary, QuickEvent, QuickFeasibility, QuickFlag,
-    QuickMetric, QuickOutcome, QuickStage, QuickValue, QUICK_ANALYSIS_VERSION,
+    QuickAnalysisRequest, QuickAnalysisSummary, QuickBasis, QuickEvent, QuickFeasibility,
+    QuickFlag, QuickMetric, QuickOutcome, QuickRouteFuel, QuickStage, QuickValue,
+    QUICK_ANALYSIS_VERSION,
 };
 
-/// The reduced-resolution analysis settings the extended stage runs with.
-///
-/// The fine sweep collapses to the in-loop lattice with at most nine sweep
-/// points; the geometry, masses and requirements are unchanged and the mass
-/// basis is the fixed aircraft.
-pub fn reduced_config(config: &AlasConfig) -> AlasConfig {
-    let mut reduced = config.clone();
-    reduced.optimizer.design_space.mode = DesignMode::BaselineSandbox;
-    let analysis = &mut reduced.analysis;
-    analysis.fine_spanwise_resolution = analysis
-        .fine_spanwise_resolution
-        .min(analysis.spanwise_resolution.max(1));
-    analysis.fine_chordwise_resolution = analysis
-        .fine_chordwise_resolution
-        .min(analysis.chordwise_resolution.max(1));
-    analysis.sweep_n_points = analysis.sweep_n_points.clamp(3, 9);
-    reduced
+/// The configuration both stages analyse: the request's own, closed as the
+/// baseline analysis closes it ([`alas_opt::mdo::baseline_closure_config`]:
+/// the fixed-aircraft design mode the sandbox's Full Analysis runs with, the
+/// route closed on its own takeoff mass under the declared MTOW). The
+/// extended stage is that analysis, the closure never resizes the drawn
+/// aircraft, and the closure the initial stage publishes is the one the
+/// Full Analysis' fuel model carries. Geometry, masses, requirements and
+/// resolutions are unchanged.
+pub fn sandbox_config(config: &AlasConfig) -> AlasConfig {
+    alas_opt::mdo::baseline_closure_config(config)
 }
 
 struct Publisher<'a> {
@@ -137,28 +150,29 @@ impl Publisher<'_> {
     }
 }
 
-const INITIAL_METRICS: [QuickMetric; 10] = [
+const INITIAL_METRICS: [QuickMetric; 8] = [
     QuickMetric::TakeoffMass,
     QuickMetric::OperatingEmptyMass,
     QuickMetric::PayloadCapacity,
     QuickMetric::CarriedPayload,
     QuickMetric::FuelCapacity,
     QuickMetric::CarriedFuel,
-    QuickMetric::CruiseLiftToDrag,
     QuickMetric::Range,
     QuickMetric::FuelBurn,
-    QuickMetric::StaticMargin,
 ];
 
-const EXTENDED_METRICS: [QuickMetric; 5] = [
+const EXTENDED_METRICS: [QuickMetric; 8] = [
+    QuickMetric::CruiseLiftToDrag,
+    QuickMetric::StaticMargin,
     QuickMetric::CruiseSpeed,
     QuickMetric::CruiseAltitude,
     QuickMetric::ServiceCeiling,
     QuickMetric::PayloadRange,
+    QuickMetric::RouteFuelBurn,
     QuickMetric::Feasibility,
 ];
 
-/// Run the reduced analysis, streaming every metric's terminal state.
+/// Run the Quick Analysis, streaming every metric's terminal state.
 ///
 /// Every metric in [`QuickMetric::ALL`] terminates exactly once unless the
 /// run is cancelled, in which case the remaining metrics are left to the
@@ -174,29 +188,13 @@ pub fn run_quick_analysis(
         sink,
         summary: QuickAnalysisSummary::default(),
     };
-    let reduced = reduced_config(&request.config);
-    let requirements = &reduced.requirements;
-
-    let plane = match AircraftBuilder::new(Some(reduced.geometry.clone()))
-        .build(Some(&request.design), true)
-    {
-        Ok(plane) => plane,
-        Err(error) => {
-            let message = format!("geometry does not build: {error:?}");
-            publisher.fail_all(&INITIAL_METRICS, &message);
-            publisher.fail_all(&EXTENDED_METRICS, &message);
-            return publisher.summary;
-        }
-    };
-    if cancel.load(Ordering::Relaxed) {
-        publisher.summary.cancelled = true;
-        return publisher.summary;
-    }
+    let sandbox = sandbox_config(&request.config);
+    let requirements = &sandbox.requirements;
 
     // Stage 1: the fixed-geometry mass and mission closure.
     let mut takeoff_mass_estimate_kg = requirements.mtow_kg;
     let mut dispatch_flags = Vec::new();
-    match assess_product_candidate(&reduced, &request.design) {
+    match assess_product_candidate(&sandbox, &request.design) {
         Ok(assessment) => {
             let sized = &assessment.sized;
             takeoff_mass_estimate_kg = sized.takeoff_mass_kg;
@@ -220,7 +218,7 @@ pub fn run_quick_analysis(
             let payload_capacity = payload_capacity_estimate(
                 requirements.max_structural_payload_kg,
                 effective_structural_payload_limit_kg(
-                    &reduced,
+                    &sandbox,
                     &request.design,
                     sized.operating_empty_mass_kg,
                 ),
@@ -249,49 +247,50 @@ pub fn run_quick_analysis(
                     sized.cargo_capacity_kg
                 ),
             );
-            publisher.value(
-                QuickMetric::FuelCapacity,
-                sized.usable_capacity_kg,
-                None,
-                "usable tank capacity of the resolved tank layout",
-            );
+            // The capacity the full baseline analysis prices fuel against: the
+            // published usable fuel of an unchanged preset, else the resolved
+            // tank layout.
+            let capacity = FullAnalysis::new(sandbox.clone())
+                .build_airplane(&request.design, true)
+                .ok()
+                .map(|plane| assess_airplane_fuel_capacity(&sandbox, &request.design, &plane))
+                .and_then(|capacity| capacity.capacity_kg.map(|kg| (kg, capacity.evidence)));
+            match capacity {
+                Some((capacity_kg, evidence)) => publisher.value(
+                    QuickMetric::FuelCapacity,
+                    capacity_kg,
+                    None,
+                    &format!(
+                        "usable fuel capacity the full baseline analysis applies: {}",
+                        fuel_capacity_basis(evidence)
+                    ),
+                ),
+                None => publisher.publish(
+                    QuickMetric::FuelCapacity,
+                    QuickOutcome::Unsupported(
+                        "usable fuel capacity is unavailable for this design".to_owned(),
+                    ),
+                ),
+            }
             publisher.value(
                 QuickMetric::CarriedFuel,
                 sized.takeoff_fuel_kg,
-                Some(sized.usable_capacity_kg),
+                capacity.map(|(capacity_kg, _)| capacity_kg),
                 "takeoff fuel for the declared route including reserves",
             );
-            publisher.value(
-                QuickMetric::CruiseLiftToDrag,
-                sized.lift_to_drag,
-                None,
-                "in-loop vortex lattice with Raymer/Korn drag build-up at the closure cruise CL",
-            );
-            let reserve_kg = sized.dispatch.plan.reserve_fuel_kg();
-            let usable_for_range_kg = (sized.takeoff_mass_kg - sized.zero_fuel_mass_kg)
-                .min(sized.usable_capacity_kg)
-                .max(0.0);
-            match breguet::range_model(&reduced, sized.lift_to_drag) {
-                Some(model) => {
-                    let end_mass_kg =
-                        sized.takeoff_mass_kg - (usable_for_range_kg - reserve_kg).max(0.0);
-                    let range_m = model.range_m(sized.takeoff_mass_kg, end_mass_kg);
-                    publisher.value(
-                        QuickMetric::Range,
-                        range_m,
-                        sized.mission_distance_known.then_some(sized.design_range_m),
-                        &format!(
-                            "Breguet cruise at the requested Mach/altitude with the carried fuel less {reserve_kg:.0} kg reserves; {}",
-                            model.note
-                        ),
-                    );
-                }
-                None => publisher.publish(
+            match quick_range(&sandbox, sized) {
+                Ok((range_m, reserve_kg)) => publisher.value(
                     QuickMetric::Range,
-                    QuickOutcome::Unsupported(
-                        "no cruise fuel-flow anchor for the selected propulsion model".to_owned(),
+                    range_m,
+                    sized.mission_distance_known.then_some(sized.design_range_m),
+                    &format!(
+                        "still-air range of the carried fuel on the closure's mission model, {reserve_kg:.0} kg reserves held back under scheme {}",
+                        sandbox.fuel_policy.scheme.as_str()
                     ),
                 ),
+                Err(reason) => {
+                    publisher.publish(QuickMetric::Range, QuickOutcome::Unsupported(reason))
+                }
             }
             publisher.value(
                 QuickMetric::FuelBurn,
@@ -302,22 +301,6 @@ pub fn run_quick_analysis(
                     sized.design_range_m / 1000.0
                 ),
             );
-            let resolved = &assessment.resolved;
-            if resolved.mac_m.is_finite() && resolved.mac_m > 0.0 {
-                let margin_pct =
-                    (resolved.x_neutral_point_m - resolved.cg_x_m) / resolved.mac_m * 100.0;
-                publisher.value(
-                    QuickMetric::StaticMargin,
-                    margin_pct,
-                    Some(requirements.min_physical_static_margin * 100.0),
-                    "neutral point from the in-loop lattice at the closure centre of gravity",
-                );
-            } else {
-                publisher.publish(
-                    QuickMetric::StaticMargin,
-                    QuickOutcome::Failed("mean aerodynamic chord is not finite".to_owned()),
-                );
-            }
             dispatch_flags = dispatch_flags_of(sized);
         }
         Err(error) => publisher.fail_all(&INITIAL_METRICS, &error),
@@ -327,13 +310,17 @@ pub fn run_quick_analysis(
         return publisher.summary;
     }
 
-    // Stage 2: the reduced full analysis and the thrust-limited envelope.
-    let report = match FullAnalysis::new(reduced.clone()).run(&request.design, true) {
+    // Stage 2: the full baseline analysis the sandbox's Full Analysis runs
+    // (`FullAnalysis::run` on the drawn aircraft at the declared design
+    // weights, its fuel priced on the baseline fuel model), then the
+    // thrust-limited envelope.
+    let design = request.design;
+    let report = match FullAnalysis::new(sandbox.clone()).run(&design, true) {
         Ok(report) => report,
         Err(error) => {
             publisher.fail_all(
                 &EXTENDED_METRICS,
-                &format!("reduced full analysis failed: {error}"),
+                &format!("full baseline analysis failed: {error}"),
             );
             return publisher.summary;
         }
@@ -343,26 +330,31 @@ pub fn run_quick_analysis(
         return publisher.summary;
     }
 
-    match CruiseSolve::new(
-        &reduced,
-        &plane,
-        &request.design,
-        &report,
-        takeoff_mass_estimate_kg,
-    ) {
+    publish_cruise_point(&mut publisher, &sandbox, &report);
+
+    match CruiseSolve::new(&sandbox, &report, takeoff_mass_estimate_kg) {
         Ok(solve) => {
             let requested_tas = solve.requested_tas_m_s();
             match solve.achievable_mach_at_requested_altitude() {
-                Ok(mach) => publisher.value(
-                    QuickMetric::CruiseSpeed,
-                    solve.tas_at_requested_altitude(mach),
-                    Some(requested_tas),
-                    &format!(
-                        "thrust-equals-drag Mach {mach:.3} at the requested altitude and {takeoff_mass_estimate_kg:.0} kg, maximum-climb rating; requested Mach {:.3}",
-                        requirements.cruise_mach
-                    ),
-                ),
-                Err(message) => publisher.publish(QuickMetric::CruiseSpeed, QuickOutcome::Failed(message)),
+                Ok(mach) => {
+                    let point = if mach >= solve.mach_cap() {
+                        format!("Mach {mach:.3}, the drag table's upper Mach node, with thrust to spare")
+                    } else {
+                        format!("thrust-equals-drag Mach {mach:.3}")
+                    };
+                    publisher.value(
+                        QuickMetric::CruiseSpeed,
+                        solve.tas_at_requested_altitude(mach),
+                        Some(requested_tas),
+                        &format!(
+                            "{point} at the requested altitude and {takeoff_mass_estimate_kg:.0} kg, maximum-climb rating; requested Mach {:.3}",
+                            requirements.cruise_mach
+                        ),
+                    )
+                }
+                Err(message) => {
+                    publisher.publish(QuickMetric::CruiseSpeed, QuickOutcome::Failed(message))
+                }
             }
             match solve.service_ceiling_m() {
                 Ok(ceiling_m) => {
@@ -401,7 +393,7 @@ pub fn run_quick_analysis(
         }
     }
 
-    match payload_range_corners(&reduced, &report) {
+    match payload_range_corners(&sandbox, &report) {
         Ok(corners) => publisher.publish(
             QuickMetric::PayloadRange,
             QuickOutcome::PayloadRange(corners),
@@ -414,7 +406,13 @@ pub fn run_quick_analysis(
         }
     }
 
-    let feasibility = assess_physical_feasibility(&reduced, &request.design, &report, None);
+    // The planned route, flown off-design by the mission stage's own call.
+    publisher.publish(
+        QuickMetric::RouteFuelBurn,
+        route::route_fuel(&sandbox, &report),
+    );
+
+    let feasibility = assess_physical_feasibility(&sandbox, &design, &report, None);
     let mut flags: Vec<QuickFlag> = feasibility
         .findings
         .iter()
@@ -430,61 +428,51 @@ pub fn run_quick_analysis(
         QuickMetric::Feasibility,
         QuickOutcome::Feasibility(QuickFeasibility { feasible, flags }),
     );
-    let _ = OEW_KEYS;
     publisher.summary
 }
 
-fn dispatch_status_text(status: &DispatchStatus) -> String {
-    match status {
-        DispatchStatus::Converged => "converged".to_owned(),
-        DispatchStatus::MtowLimited { shortfall_kg } => {
-            format!("MTOW-limited by {shortfall_kg:.0} kg")
-        }
-        DispatchStatus::TankLimited { shortfall_kg } => {
-            format!("tank-limited by {shortfall_kg:.0} kg")
-        }
-        DispatchStatus::NotConverged { last_change_kg } => {
-            format!("not converged (last change {last_change_kg:.0} kg)")
-        }
-        DispatchStatus::ModelFailed(message) => format!("model failed: {message}"),
-    }
-}
-
-fn dispatch_flags_of(sized: &alas_opt::SizedCandidate) -> Vec<QuickFlag> {
-    let mut flags = Vec::new();
-    match &sized.dispatch.status {
-        DispatchStatus::Converged => {}
-        other => flags.push(QuickFlag {
-            code: "Dispatch".to_owned(),
-            blocking: true,
-            message: dispatch_status_text(other),
-        }),
-    }
-    if sized.dispatch.landing_mass_exceeds_mlw {
-        flags.push(QuickFlag {
-            code: "LandingMassLimit".to_owned(),
-            blocking: true,
-            message: "destination landing mass exceeds the landing mass limit".to_owned(),
-        });
-    }
-    if sized.dispatch.zero_fuel_mass_exceeds_mzfw {
-        flags.push(QuickFlag {
-            code: "ZeroFuelMassLimit".to_owned(),
-            blocking: true,
-            message: "zero-fuel mass exceeds the maximum zero-fuel mass".to_owned(),
-        });
-    }
-    if !sized.sizing_closed {
-        flags.push(QuickFlag {
-            code: "SizingNotClosed".to_owned(),
-            blocking: false,
-            message: format!(
-                "takeoff-mass closure stopped after {} iterations",
-                sized.sizing_iterations
+/// The cruise lift-to-drag ratio and static margin the Full Analysis summary
+/// reports for `report`: the trimmed cruise point's L/D (the untrimmed
+/// design point when trim did not converge) and `report.static_margin`, the
+/// fine-lattice neutral point at the report's centre of gravity.
+fn publish_cruise_point(
+    publisher: &mut Publisher<'_>,
+    config: &AlasConfig,
+    report: &AnalysisReport,
+) {
+    let (l_over_d, basis) = report
+        .trimmed_design_point
+        .as_ref()
+        .map(|point| (point.l_over_d, "trimmed"))
+        .unwrap_or((report.design_point.l_over_d, "untrimmed"));
+    if l_over_d.is_finite() && l_over_d > 0.0 {
+        publisher.value(
+            QuickMetric::CruiseLiftToDrag,
+            l_over_d,
+            None,
+            &format!(
+                "{basis} cruise point of the full baseline analysis: fine vortex lattice with the Raymer/Korn drag build-up"
             ),
-        });
+        );
+    } else {
+        publisher.publish(
+            QuickMetric::CruiseLiftToDrag,
+            QuickOutcome::Failed(format!("cruise L/D {l_over_d} is not usable")),
+        );
     }
-    flags
+    if report.static_margin.is_finite() {
+        publisher.value(
+            QuickMetric::StaticMargin,
+            report.static_margin * 100.0,
+            Some(config.requirements.min_physical_static_margin * 100.0),
+            "fine-lattice neutral point of the full baseline analysis at its centre of gravity",
+        );
+    } else {
+        publisher.publish(
+            QuickMetric::StaticMargin,
+            QuickOutcome::Failed("static margin is not finite".to_owned()),
+        );
+    }
 }
 
 /// Operating empty mass summed from a report's component masses.

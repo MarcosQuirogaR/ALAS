@@ -21,6 +21,41 @@ fn warnings_do_not_turn_a_report_into_an_infeasible_aircraft() {
     assert!(report.contains(FindingCode::WingAreaLimit));
 }
 
+/// A run
+/// built with no nacelle geometry (`include_engines = false`) but the
+/// registered aircraft's real propulsion mass places that mass at the
+/// no-nacelle fallback station, which must surface as a typed warning
+/// rather than be published as an ordinary CG verdict.
+#[test]
+fn a_no_engine_build_flags_its_propulsion_station_as_a_fallback() {
+    let preset = presets::get("A320-200").expect("registered A320 preset");
+    let config = AlasConfig::from_value(&serde_json::json!({ "preset": "A320-200" }))
+        .expect("A320-200 config");
+    let report = crate::full_analysis::FullAnalysis::new(config.clone())
+        .run(&preset.design_vector, false)
+        .expect("A320 full analysis without engines");
+    assert!(
+        report
+            .component_masses
+            .get(PROPULSION)
+            .copied()
+            .unwrap_or(0.0)
+            > 0.0
+    );
+
+    let feasibility = assess_physical_feasibility(&config, &preset.design_vector, &report, None);
+    assert!(feasibility.propulsion_station_fallback);
+
+    // The same aircraft built with its engines keeps a real nacelle station
+    // and must not raise the flag.
+    let report_with_engines = crate::full_analysis::FullAnalysis::new(config.clone())
+        .run(&preset.design_vector, true)
+        .expect("A320 full analysis with engines");
+    let feasibility_with_engines =
+        assess_physical_feasibility(&config, &preset.design_vector, &report_with_engines, None);
+    assert!(!feasibility_with_engines.propulsion_station_fallback);
+}
+
 #[test]
 fn cruise_equilibrium_reports_scalar_and_inertial_force_residuals() {
     use alas_mission::segments::{Segment, SegmentKind, SegmentSpec};
@@ -262,7 +297,7 @@ fn tank_limited_model_cg_uses_the_analyzed_fuel_and_names_the_load_case_honestly
     let fuel_loading = plan_fuel_loading(&config, &preset.design_vector, &report);
 
     assert!(fuel_loading.mtow_closure_fuel_kg > fuel_loading.analyzed_carried_fuel_kg);
-    let assessment = model_cg_assessment(&config, &report, &fuel_loading)
+    let assessment = model_cg_assessment(&config, &report, &fuel_loading, None)
         .expect("fuel-capped model CG assessment");
     let takeoff = assessment
         .loading_states
@@ -272,17 +307,13 @@ fn tank_limited_model_cg_uses_the_analyzed_fuel_and_names_the_load_case_honestly
 
     assert_eq!(takeoff.state.label(), "analyzed TOW");
     // `model_cg_assessment` builds its `MassBreakdown` from exactly the ten
-    // named OEW/payload/fuel fields (`crates/alas-mass/src/breakdown_parts/part_01.rs`'s
-    // `OEW_KEYS` plus payload and fuel); there is no eleventh "unusable
-    // fuel" slot, so `takeoff.mass_kg` here is OEW(narrow) + payload +
-    // analyzed usable fuel, the same quantity `fuel_loading.analyzed_takeoff_mass_kg`
-    // held before the MTOW/unusable-fuel closure. That closure made
-    // `analyzed_takeoff_mass_kg` the physically complete takeoff mass by
-    // reserving and re-adding the tank layout's unusable fuel
-    // (`fuel_loading.unusable_fuel_kg`), which `model_cg_assessment`'s CG
-    // envelope does not carry at all. The two are expected to differ by
-    // exactly that reserved mass now; this is not a double count, it is two
-    // distinct, intentionally-scoped totals.
+    // named OEW/payload/fuel fields; there is no eleventh "unusable fuel"
+    // slot, so `takeoff.mass_kg` here is OEW(narrow) + payload + analyzed
+    // usable fuel. `fuel_loading.analyzed_takeoff_mass_kg` is the physically
+    // complete takeoff mass, which also carries the tank layout's unusable
+    // fuel (`fuel_loading.unusable_fuel_kg`) that the CG envelope does not.
+    // The two differ by exactly that reserved mass: two distinct,
+    // intentionally-scoped totals, not a double count.
     let unusable_fuel_kg = fuel_loading
         .unusable_fuel_kg
         .expect("A320's tank layout resolves for this fixture");
@@ -291,4 +322,48 @@ fn tank_limited_model_cg_uses_the_analyzed_fuel_and_names_the_load_case_honestly
             < 1.0e-9
     );
     assert!(takeoff.mass_kg < config.requirements.mtow_kg);
+}
+
+/// A propeller aircraft's cruise thrust margin comes from the propeller
+/// model at its maximum-cruise rating, not from the jet form's static rating
+/// times the configured take-off lapse. The jet form put the ATR 72-600 about
+/// 32 % short (static T/W 0.211 against 0.308); the propeller model puts it a
+/// few percent short at take-off mass, a model finding inside the lapse
+/// relation's scatter, reported rather than hidden. A turbofan keeps the jet
+/// form and is given no propeller cruise thrust at all.
+#[test]
+fn a_propeller_aircraft_gets_its_cruise_thrust_margin_from_the_propeller_model() {
+    let preset = presets::get("ATR72-600").expect("registered ATR preset");
+    let config = AlasConfig::from_value(&serde_json::json!({ "preset": "ATR72-600" }))
+        .expect("ATR72-600 config");
+    let available_n = static_thrust::propeller_cruise_thrust_n(&config)
+        .expect("a turboprop has a propeller cruise thrust")
+        .expect("the propeller model evaluates at the design cruise point");
+    // Two engines at maximum-cruise power, FL170, M0.44: about 2 x 6.7 kN.
+    assert!((12_000.0..16_000.0).contains(&available_n), "{available_n}");
+
+    let report = crate::full_analysis::FullAnalysis::new(config.clone())
+        .run(&preset.design_vector, true)
+        .expect("ATR full analysis");
+    let feasibility = assess_physical_feasibility(&config, &preset.design_vector, &report, None);
+    for finding in feasibility
+        .findings
+        .iter()
+        .filter(|finding| finding.code == FindingCode::ThrustMarginViolation)
+    {
+        assert!(
+            finding.message.contains("maximum-cruise thrust"),
+            "{}",
+            finding.message
+        );
+        let (actual, limit) = (
+            finding.actual.expect("actual"),
+            finding.limit.expect("limit"),
+        );
+        assert!(actual / limit > 0.95, "{}", finding.message);
+    }
+
+    let jet = AlasConfig::from_value(&serde_json::json!({ "preset": "A320-200" }))
+        .expect("A320-200 config");
+    assert!(static_thrust::propeller_cruise_thrust_n(&jet).is_none());
 }

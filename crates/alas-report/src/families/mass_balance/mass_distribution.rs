@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/reporting/visualization.py (`figure_mass_distribution`)
-// Reference: alas @ rust-port-baseline.
 
 //! Plan-view component centroids, scaled by the mass they represent.
 

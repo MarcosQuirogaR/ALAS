@@ -6,6 +6,7 @@
 //! real geometry (VLM-solvable, unlike an empty [`Airplane`]) without
 //! rebuilding one from scratch per file.
 
+// Test code: a failed unwrap on a fixture it builds is the assertion failing.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use std::collections::HashMap;
@@ -117,6 +118,7 @@ pub fn probe_report(airplane: Airplane) -> AnalysisReport {
         },
         polar_fit: PolarFit {
             cd0: 0.02,
+            c1: 0.0,
             k: 0.04,
             oswald_e: 0.85,
             aspect_ratio: 9.0,
@@ -143,6 +145,8 @@ pub fn probe_report(airplane: Airplane) -> AnalysisReport {
             cm_residual: 0.0,
         }),
         cg_envelope_ok: None,
+        neutral_point_conditions: None,
+        fuel: Default::default(),
         airplane,
     }
 }

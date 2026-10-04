@@ -3,7 +3,6 @@
 
 // Ported from neuralfoil/main.py (the module-level parameter loading).
 // Upstream: NeuralFoil 0.3.x, MIT. Trained parameters (c) Peter Sharpe.
-// Reference: alas @ rust-port-baseline.
 
 //! The trained parameters: five networks and the statistics of the data they
 //! were trained on.

@@ -33,6 +33,11 @@ impl FuelTankLayout {
     /// carries the reference's total calibration factor, as it would on the
     /// reference itself.
     ///
+    /// `reconcile_to_l`, when given, is the published inventory the reference
+    /// cells are first reconciled onto
+    /// ([`FuelTankLayout::reconciled_to_published_volume`]), so the candidate
+    /// reproduces that inventory at the reference design.
+    ///
     /// # Errors
     ///
     /// Any [`TankLayoutError`] from resolving the reference or the candidate,
@@ -48,8 +53,9 @@ impl FuelTankLayout {
         policy: &FuelPolicyConfig,
         density_kg_m3: f64,
         published_total_usable_volume_l: Option<f64>,
+        reconcile_to_l: Option<f64>,
     ) -> Result<Self, TankLayoutError> {
-        let published = Self::resolve(
+        let resolved = Self::resolve(
             reference,
             geometry,
             structures,
@@ -58,6 +64,10 @@ impl FuelTankLayout {
             density_kg_m3,
             published_total_usable_volume_l,
         )?;
+        let published = match reconcile_to_l {
+            Some(litres) => resolved.reconciled_to_published_volume(litres)?,
+            None => resolved,
+        };
         let geometric_config = geometric_only(config);
         let reference_geometric = Self::resolve(
             reference,
@@ -120,6 +130,7 @@ fn geometric_only(config: &FuelTankLayoutConfig) -> FuelTankLayoutConfig {
         &mut geometric.outer_wing,
     ] {
         cell.published_usable_volume_l = None;
+        cell.feed.published_usable_volume_l = None;
     }
     geometric.center.published_usable_volume_l = None;
     geometric.trim.published_usable_volume_l = None;

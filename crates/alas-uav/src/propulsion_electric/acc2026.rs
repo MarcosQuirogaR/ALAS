@@ -216,14 +216,14 @@ fn check_measured_point(
     }
 }
 
-fn failure(requirement: &'static str, message: String) -> Acc2026ElectricalFinding {
+pub(super) fn failure(requirement: &'static str, message: String) -> Acc2026ElectricalFinding {
     Acc2026ElectricalFinding::Failure {
         requirement,
         message,
     }
 }
 
-fn unverified(requirement: &'static str, message: String) -> Acc2026ElectricalFinding {
+pub(super) fn unverified(requirement: &'static str, message: String) -> Acc2026ElectricalFinding {
     Acc2026ElectricalFinding::Unverified {
         requirement,
         message,

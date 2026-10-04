@@ -3,8 +3,6 @@
 
 //! The Setup > Design Space page: the optimizer's search variables, each with
 //! an editable initial value and lower/upper bound.
-//!
-//! A port of the reference desktop app's `DesignSpaceTable`.
 
 use alas_config::{DesignMode, VariableEnvelope, DESIGN_VARIABLE_SPECS};
 use egui::{DragValue, RichText, ScrollArea, Ui};
@@ -42,32 +40,32 @@ fn display_name(spec: &alas_config::DesignVariableSpec) -> String {
 
 /// Render the Design Space page.
 pub fn show_design_space_view(state: &mut AppState, ui: &mut Ui) {
-    ui.heading(tr("Design Space"));
-    ui.label(
-        RichText::new(
-            tr("The starting design and the optimization choice on Inputs set the study. Each row shows the starting design and the limits handed to the optimizer."),
-        )
-        .weak(),
-    );
+    ui.heading(tr("Design Space")).on_hover_text(tr(
+        "The starting design and the optimization choice on Inputs set the study. Each row shows the starting design and the limits handed to the optimizer.",
+    ));
     ui.add_space(6.0);
     let mode = state.design_mode();
-    crate::theme::card_frame(ui).show(ui, |ui| {
-        ui.set_min_width(ui.available_width());
-        show_design_mode_settings(state, ui, mode);
-    });
-    ui.add_space(8.0);
 
     // Fixed rows are enforced at the view boundary as well as immediately
     // before a run. This keeps the editor honest when a user returns from an
     // advanced page after changing a requirement or loading a file.
     state.enforce_design_space_fixed_variables();
-    let config = state.typed_config().unwrap_or_default();
-    let nominal = state.current_design().unwrap_or_default();
-    let envelopes = config.optimizer.design_space.envelope(&nominal);
 
+    // The mode card scrolls with the table: it is taller than a short
+    // window, and above the scroll area it would push the whole table out
+    // of reach.
     ScrollArea::vertical()
         .auto_shrink([false, false])
         .show(ui, |ui| {
+            crate::theme::card_frame(ui).show(ui, |ui| {
+                ui.set_min_width(ui.available_width());
+                show_design_mode_settings(state, ui, mode);
+            });
+            ui.add_space(8.0);
+            // Read after the mode card, whose edits change the envelope.
+            let config = state.typed_config().unwrap_or_default();
+            let nominal = state.current_design().unwrap_or_default();
+            let envelopes = config.design_envelope(&nominal);
             show_design_constraints(state, ui);
             ui.add_space(8.0);
             let columns = design_space_column_count(ui.available_width());
@@ -134,28 +132,22 @@ fn show_design_mode_settings(state: &mut AppState, ui: &mut Ui, mode: DesignMode
         })
         .unwrap_or_default();
 
-    if fields.is_empty() {
-        if mode == DesignMode::BaselineSandbox {
-            ui.label(
-                RichText::new(tr(
-                    "All design variables are fixed at the selected reference values for this run.",
-                ))
-                .weak()
-                .small(),
-            );
-        }
-        return;
-    }
-
-    ui.add_space(6.0);
     let title = match mode {
         DesignMode::CleanSheet => "Clean-sheet options",
         DesignMode::ReferenceAdaptation => "Reference envelope controls",
         DesignMode::BaselineSandbox => "Baseline options",
     };
-    ui.label(RichText::new(tr(title)).strong());
+    let heading = ui.label(RichText::new(tr(title)).strong());
+    if mode == DesignMode::BaselineSandbox {
+        heading.on_hover_text(tr(
+            "All design variables are fixed at the selected reference values for this run.",
+        ));
+    }
+    if fields.is_empty() {
+        return;
+    }
+    ui.add_space(6.0);
     let lang = Some(state.language.code());
-    let show_help = state.help_verbose;
     let error_fields: std::collections::HashSet<String> = state
         .validation_findings
         .iter()
@@ -172,7 +164,7 @@ fn show_design_mode_settings(state: &mut AppState, ui: &mut Ui, mode: DesignMode
     let values = object
         .entry("design_space".to_owned())
         .or_insert_with(|| serde_json::json!({}));
-    let edits = dynamic_form(ui, &fields, values, &error_fields, lang, show_help);
+    let edits = dynamic_form(ui, &fields, values, &error_fields, lang, false);
     if !edits.is_empty() {
         // Changing a window or the clean-sheet cabin-sizing policy changes the
         // declared envelope. Rebuild run bounds from that same source.
@@ -221,7 +213,6 @@ fn show_design_constraints(state: &mut AppState, ui: &mut Ui) {
         .map(str::to_owned)
         .collect();
     let lang = Some(state.language.code());
-    let show_help = state.help_verbose;
     let mut edits = Vec::new();
     crate::theme::card_frame(ui).show(ui, |ui| {
         ui.set_min_width(ui.available_width());
@@ -229,13 +220,6 @@ fn show_design_constraints(state: &mut AppState, ui: &mut Ui) {
             .id_salt("design_space::constraints")
             .default_open(true)
             .show(ui, |ui| {
-                ui.label(
-                    RichText::new(tr(
-                        "Limits and stability targets used to score candidates. Their values are kept in the Input configuration and are not optimizer variables.",
-                    ))
-                    .weak()
-                    .small(),
-                );
                 if let Some(values) = state.group_mut("requirements") {
                     edits.extend(dynamic_form(
                         ui,
@@ -243,10 +227,14 @@ fn show_design_constraints(state: &mut AppState, ui: &mut Ui) {
                         values,
                         &error_fields,
                         lang,
-                        show_help,
+                        false,
                     ));
                 }
-            });
+            })
+            .header_response
+            .on_hover_text(tr(
+                "Limits and stability targets used to score candidates. Their values are kept in the Input configuration and are not optimizer variables.",
+            ));
     });
     if !edits.is_empty() {
         state.on_config_modified();
@@ -398,6 +386,66 @@ mod tests {
             design_mode_display_name(DesignMode::BaselineSandbox),
             "Analyze reference"
         );
+    }
+
+    /// Top edge of the last painted text equal to `label`, if any is visible.
+    fn visible_label_top(output: &egui::FullOutput, label: &str) -> Option<f32> {
+        output
+            .shapes
+            .iter()
+            .rev()
+            .find_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) if text.galley.text() == label => {
+                    let rect = text.galley.rect.translate(text.pos.to_vec2());
+                    shape.clip_rect.contains_rect(rect).then_some(rect.top())
+                }
+                _ => None,
+            })
+    }
+
+    #[test]
+    fn every_design_variable_is_reachable_by_scrolling_a_short_window() {
+        let mut state = AppState::default();
+        state.load_preset("A220-300");
+        state.set_design_mode(DesignMode::ReferenceAdaptation);
+        let ctx = egui::Context::default();
+        crate::theme::apply_theme(crate::theme::AppTheme::Light, &ctx);
+        ctx.style_mut(|style| style.animation_time = 0.0);
+        let size = egui::vec2(600.0, 420.0);
+        let last = DESIGN_VARIABLE_SPECS.last().expect("design variables");
+        let label = crate::views::tr(&display_name(last));
+        let mut found = false;
+        for frame in 0..80 {
+            let events = if frame < 2 {
+                Vec::new()
+            } else {
+                vec![
+                    egui::Event::PointerMoved(egui::pos2(300.0, 300.0)),
+                    egui::Event::MouseWheel {
+                        unit: egui::MouseWheelUnit::Point,
+                        delta: egui::vec2(0.0, -200.0),
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                ]
+            };
+            let output = ctx.run(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+                    events,
+                    ..Default::default()
+                },
+                |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        super::show_design_space_view(&mut state, ui);
+                    });
+                },
+            );
+            if visible_label_top(&output, &label).is_some_and(|top| top < size.y) {
+                found = true;
+                break;
+            }
+        }
+        assert!(found, "{label} never scrolled into view");
     }
 
     #[test]

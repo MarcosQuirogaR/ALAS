@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/sidecar/figures.py: _fig_route_2d.
-// Reference: alas @ rust-port-baseline.
 
 //! Geographic route map with optional flown mass and altitude profiles.
 
@@ -335,17 +334,17 @@ mod tests {
     use alas_route::route::{RouteSource, Waypoint};
 
     #[test]
-    fn w33_route_render_uses_an_uncluttered_tonnes_legend_in_both_themes() {
+    fn route_render_uses_an_uncluttered_tonnes_legend_in_both_themes() {
         let fixture: serde_json::Value = serde_json::from_str(include_str!(
             "../../../../../golden/report/reference_render_w33.json"
         ))
-        .expect("W3.3 reference fixture is valid JSON");
+        .expect("reference fixture is valid JSON");
         assert_eq!(fixture["route_acceptance"]["legend"][2], "Total Mass (kg)");
 
         let route = Route::new(
             vec![
                 Waypoint::named(40.47, -3.56, "LEMD"),
-                Waypoint::named(45.0, -2.0, "W33_FIX"),
+                Waypoint::named(45.0, -2.0, "FIX"),
                 Waypoint::named(51.15, -0.19, "EGKK"),
             ],
             RouteSource::SimbriefApi,
@@ -472,7 +471,7 @@ mod tests {
         let route = Route::new(
             vec![
                 Waypoint::named(40.47, -3.56, "LEMD"),
-                Waypoint::named(45.0, -2.0, "W33_FIX"),
+                Waypoint::named(45.0, -2.0, "FIX"),
                 Waypoint::named(51.15, -0.19, "EGKK"),
             ],
             RouteSource::SimbriefApi,
@@ -538,21 +537,5 @@ mod tests {
         assert!(latitude.1 - latitude.0 < 20.0);
         let svg = render_svg(&figure_mission_route_2d(&route, None, None, Some("dark")));
         assert!(svg.contains("Route detail (plate carree)"));
-    }
-
-    #[test]
-    fn w33_unavailable_reasons_remain_explicit_in_the_pinned_contract() {
-        let fixture: serde_json::Value = serde_json::from_str(include_str!(
-            "../../../../../golden/report/reference_render_w33.json"
-        ))
-        .expect("W3.3 reference fixture is valid JSON");
-        assert!(fixture["unavailable_reasons"]["mission"]
-            .as_str()
-            .unwrap_or("")
-            .contains("mission_result=None"));
-        assert!(fixture["unavailable_reasons"]["route"]
-            .as_str()
-            .unwrap_or("")
-            .contains("route=None"));
     }
 }

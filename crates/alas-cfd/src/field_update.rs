@@ -1,33 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! Direct evidence that a solved field is still being updated.
+//! Compare persisted internal fields at the last two written times.
 //!
-//! An outer residual is not the quantity of interest.  What the convergence
-//! gate needs to know about a frozen equation is whether the solver is still
-//! *updating its field*, and OpenFOAM writes exactly that: the field itself, at
-//! every `writeInterval`.  Comparing the last two written times answers the
-//! question directly, with no threshold and no inference from residual
-//! behaviour.
-//!
-//! Why this replaced a residual-depth heuristic.  Measured on this host, over
-//! the last written interval of each case:
-//!
-//! | case | `k` cells changed | `omega` cells changed | `p` cells changed |
-//! |---|---:|---:|---:|
-//! | `V1-inletoutlet-coarse` | 99.88 % | 99.90 % | live |
-//! | `P1-fine-preltol001` | 99.94 % | 99.95 % | 100 % |
-//! | `G3-fine-p404` | **0 of 436 389** | **0 of 436 389** | 99.99 % |
-//! | `L2-medium-le2` | **0 of 183 721** | **0 of 183 721** | 100 % |
-//! | `T3-gradfree-wallsolve` | **0 of 82 993** | **0 of 82 993** | 100 % |
-//!
-//! The separation is total and it is not a threshold: either the solver wrote a
-//! different field or it wrote the same one.  Residual depth below the inner
-//! solver tolerance does **not** separate those populations (`G3`'s omega sits
-//! at `1.00x` the floor and `T3`'s at `9.8e-6x`, yet both fields are equally
-//! frozen), which is why the depth factor that briefly stood here was withdrawn
-//! rather than retuned.
-
+//! Equality is limited by ASCII write precision and excludes boundary values.
+//! It does not establish a broken equation or distinguish exact stationarity
+//! from sub-precision updates. The classifier uses it as a conservative
+//! certification gate, retaining the observation and its precision explicitly.
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};

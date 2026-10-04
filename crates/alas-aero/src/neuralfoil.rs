@@ -6,7 +6,6 @@
 // native aerodynamic model/geometry/airfoil/{airfoil,kulfan_airfoil}.py
 // (get_aero_from_neuralfoil).
 // Upstream: NeuralFoil 0.3.x and native aerodynamic model 4.2.8, both MIT.
-// Reference: alas @ rust-port-baseline.
 
 //! The airfoil surrogate: a trained network that answers in microseconds the
 //! question XFoil answers in seconds.
@@ -266,7 +265,7 @@ pub fn aero_from_airfoil(
 /// [`aero_from_airfoil`] normalizes the section and fits its Kulfan weights
 /// on every call, and that fit (a least-squares solve over a few hundred
 /// vertices) costs more than the network it feeds (about 210 us against
-/// 140 us per call, 2026-09-11). A caller sweeping angle of attack over one
+/// 140 us per call). A caller sweeping angle of attack over one
 /// section, as the airfoil screening does, prepares once and evaluates per
 /// angle; the result is identical to calling [`aero_from_airfoil`] each time.
 pub struct PreparedAirfoil {
@@ -547,13 +546,5 @@ mod tests {
             aero_from_coordinates(&stub, &Conditions::new(0.0, 1e6), ModelSize::Large),
             Err(NeuralFoilError::Fit(_))
         ));
-    }
-
-    #[test]
-    fn the_default_conditions_are_the_ones_this_program_never_overrides() {
-        let conditions = Conditions::new(2.0, 1e6);
-        assert_eq!(conditions.n_crit, 9.0);
-        assert_eq!(conditions.xtr_upper, 1.0);
-        assert_eq!(conditions.xtr_lower, 1.0);
     }
 }

@@ -56,7 +56,7 @@ fn point_is_finite(point: &VspaeroPolarPoint) -> bool {
     .all(f64::is_finite)
 }
 
-fn add_markers(scene: &mut Scene, axes: &Axes2D, points: &[(f64, f64)], color: Color) {
+pub(super) fn add_markers(scene: &mut Scene, axes: &Axes2D, points: &[(f64, f64)], color: Color) {
     for &(x, y) in points {
         scene.add(SceneElement::Circle {
             center: axes.map_point(x, y),

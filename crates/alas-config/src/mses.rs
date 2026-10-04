@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/config/mses_config.py
-// Reference: alas @ rust-port-baseline.
 
 //! Settings for the MSES two-dimensional section analysis.
 //!

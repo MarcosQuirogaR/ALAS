@@ -20,9 +20,9 @@ alas-config = { path = "../alas-config" }
 # `Wing::mesh_thin_surface`/`subdivide_sections` are the meshing this solver
 # runs on every call, not duplicated here.
 alas-geom = { path = "../alas-geom" }
-# The AIC matrix's dense solve is `alas-math::linalg::solve`, the same
-# Gaussian elimination the spline modules use, moved there once this crate
-# became its second caller.
+# The AIC matrix is factored once per geometry by `alas-math::linalg`'s
+# `DenseMatrix`/`LuFactorization` (a faer partial-pivot LU) and back-solved
+# per operating point; the spline modules share the same kernel.
 alas-math = { path = "../alas-math" }
 # `mses` spawns the external mset/mses/mplot binaries through this crate's
 # windowless-spawn helper: the subprocess foundation the ledger sets aside for

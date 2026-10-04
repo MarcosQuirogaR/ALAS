@@ -3,8 +3,6 @@
 
 //! The Setup > Inputs page: preset + engine selectors, the mission-requirements
 //! form, the route airports, and the per-run toggles.
-//!
-//! A port of the reference desktop app's `InputsScreen`.
 
 use alas_config::airport_dataset::{self, FieldSource, RunwayDataKind};
 use alas_config::{AlasConfig, DesignMode};
@@ -30,6 +28,7 @@ pub fn show_inputs_view(state: &mut AppState, ui: &mut Ui) {
             ui.add_space(8.0);
             show_requirements_card(state, ui);
             ui.add_space(8.0);
+            crate::views::inputs_mtow::show_mtow_card(state, ui);
             show_route_card(state, ui);
             ui.add_space(8.0);
             crate::views::mission_profile_inputs::show_mission_profile_inputs(state, ui);
@@ -38,7 +37,7 @@ pub fn show_inputs_view(state: &mut AppState, ui: &mut Ui) {
         });
 }
 
-fn card(ui: &mut Ui, title: &str, body: impl FnOnce(&mut Ui)) -> egui::Response {
+pub(super) fn card(ui: &mut Ui, title: &str, body: impl FnOnce(&mut Ui)) -> egui::Response {
     crate::theme::card_frame(ui)
         .show(ui, |ui| {
             ui.set_min_width(ui.available_width());
@@ -69,6 +68,8 @@ const STARTING_DESIGN_BUTTON_HEIGHT: f32 = 44.0;
 fn show_starting_design_card(state: &mut AppState, ui: &mut Ui) {
     let _ = card(ui, "Starting design", |ui| {
         let choice = state.starting_design();
+        let custom_baseline_active =
+            choice == StartingDesign::CleanSheet && state.has_custom_design();
         let state_targets_sandbox = state.walkthrough_targets(TourTarget::SandboxEntry);
         let mut open_wizard = false;
         let mut open_sandbox = false;
@@ -77,7 +78,7 @@ fn show_starting_design_card(state: &mut AppState, ui: &mut Ui) {
             open_wizard |= starting_design_button(
                 ui,
                 "Design Wizard",
-                "Analyse or adapt a registered aircraft; its defining geometry stays protected from manual edits.",
+                tr("Analyse or adapt a registered aircraft; its defining geometry stays protected from manual edits."),
                 choice == StartingDesign::PresetAircraft,
             )
             .clicked();
@@ -86,7 +87,7 @@ fn show_starting_design_card(state: &mut AppState, ui: &mut Ui) {
             let response = starting_design_button(
                 ui,
                 "Sandbox Mode",
-                "Open the sandbox: the first time from the AVE reference, afterwards resuming the last sandbox or custom design.",
+                tr("Open the sandbox: the first time from the AVE reference, afterwards resuming the last sandbox or custom design."),
                 choice == StartingDesign::CleanSheet,
             );
             if state_targets_sandbox {
@@ -118,25 +119,27 @@ fn show_starting_design_card(state: &mut AppState, ui: &mut Ui) {
         if open_sandbox {
             state.enter_sandbox(false);
         }
-        if choice == StartingDesign::CleanSheet && state.has_custom_design() {
-            ui.label(
-                RichText::new(tr("A custom baseline promoted from the sandbox is active."))
-                    .weak()
-                    .small(),
-            );
+        if custom_baseline_active {
+            ui.label(RichText::new(tr("Custom baseline active")).weak().small())
+                .on_hover_text(tr("A custom baseline promoted from the sandbox is active."));
         }
     });
 }
 
 /// One full-width starting-design action, sized so both buttons share the
 /// card's whole width between them.
-fn starting_design_button(ui: &mut Ui, label: &str, hover: &str, selected: bool) -> egui::Response {
+fn starting_design_button(
+    ui: &mut Ui,
+    label: &str,
+    hover: String,
+    selected: bool,
+) -> egui::Response {
     let size = egui::vec2(ui.available_width(), STARTING_DESIGN_BUTTON_HEIGHT);
     ui.add_sized(
         size,
         crate::theme::selectable_button(RichText::new(tr(label)).strong().size(16.0), selected),
     )
-    .on_hover_text(tr(hover))
+    .on_hover_text(hover)
 }
 
 fn show_aircraft_card(state: &mut AppState, ui: &mut Ui) {
@@ -238,7 +241,7 @@ fn show_requirements_card(state: &mut AppState, ui: &mut Ui) {
             })
             .unwrap_or_default()
             .into_iter()
-            .filter(|field| !field.advanced)
+            .filter(|field| !field.advanced && field.name != "mtow_kg")
             .collect::<Vec<_>>();
         let error_fields: std::collections::HashSet<String> = state
             .validation_findings
@@ -253,9 +256,8 @@ fn show_requirements_card(state: &mut AppState, ui: &mut Ui) {
             })
             .collect();
         let lang = Some(state.language.code());
-        let show_help = state.help_verbose;
         if let Some(values) = state.group_mut("requirements") {
-            let edits = dynamic_form(ui, &fields, values, &error_fields, lang, show_help);
+            let edits = dynamic_form(ui, &fields, values, &error_fields, lang, false);
             if !edits.is_empty() {
                 state.on_config_modified();
                 for edit in edits {
@@ -300,14 +302,10 @@ fn show_custom_cabin_passenger_target(state: &mut AppState, ui: &mut Ui) {
         .unwrap_or_default()
         .clamp(1, 5_000);
     ui.separator();
-    ui.label(RichText::new(tr("Custom cabin passenger count")).strong());
-    ui.label(
-        RichText::new(tr(
+    ui.label(RichText::new(tr("Custom cabin passenger count")).strong())
+        .on_hover_text(tr(
             "Starting passenger count for a hand-edited Custom cabin. Every other cabin preset resolves its own capacity from the class-mix percentages and the candidate's geometry.",
-        ))
-        .weak()
-        .small(),
-    );
+        ));
     let changed = ui
         .add(
             DragValue::new(&mut target)
@@ -361,7 +359,6 @@ fn show_cargo_capacity_objective(state: &mut AppState, ui: &mut Ui) {
     };
 
     let lang = Some(state.language.code());
-    let show_help = state.help_verbose;
     // No validation rule rejects a cargo objective: any positive mass is a
     // legitimate request, and a request the aeroplane cannot meet is a
     // ranking outcome, not an invalid input.
@@ -369,7 +366,7 @@ fn show_cargo_capacity_objective(state: &mut AppState, ui: &mut Ui) {
     ui.separator();
     let mut edits = Vec::new();
     if let Some(values) = state.group_mut("requirements") {
-        edits = dynamic_form(ui, &[field], values, &no_errors, lang, show_help);
+        edits = dynamic_form(ui, &[field], values, &no_errors, lang, false);
     }
     if !edits.is_empty() {
         state.on_config_modified();
@@ -597,7 +594,6 @@ fn route_column_count(available_width: f32) -> usize {
 fn show_run_options_card(state: &mut AppState, ui: &mut Ui) {
     let _ = card(ui, "Run options", |ui| {
         show_run_content_options(state, ui);
-        crate::views::inputs_relaxation::show_constraint_policy(state, ui);
     });
 }
 
@@ -621,8 +617,7 @@ fn apply_optimize_choice(state: &mut AppState, optimize: bool) {
 
 fn show_run_content_options(state: &mut AppState, ui: &mut Ui) {
     ui.label(RichText::new(tr("Run contents")).strong());
-    let mut optimize =
-        state.run_options.optimize && state.design_mode() != DesignMode::BaselineSandbox;
+    let mut optimize = crate::views::inputs_mtow::optimize_active(state);
     if ui
         .checkbox(&mut optimize, tr("Optimize design space"))
         .on_hover_text(tr(
@@ -649,19 +644,14 @@ fn show_run_content_options(state: &mut AppState, ui: &mut Ui) {
         .map(|path| path.display().to_string())
         .unwrap_or_else(|| "outputs".to_owned());
     ui.horizontal(|ui| {
-        ui.label(tr("Output directory"));
+        ui.label(tr("Output directory")).on_hover_text(tr(
+            "Choose a separate writable folder when a previous CPACS export is open in another program.",
+        ));
         let response = ui.text_edit_singleline(&mut output_dir);
         if response.changed() && !output_dir.trim().is_empty() {
             state.pipeline_options.output_dir = Some(output_dir.trim().into());
         }
     });
-    ui.label(
-        RichText::new(tr(
-            "Choose a separate writable folder when a previous CPACS export is open in another program.",
-        ))
-        .weak()
-        .small(),
-    );
 }
 
 /// The solver backend selections, shown in the Advanced Settings window.
@@ -938,9 +928,9 @@ mod tests {
     #[test]
     fn passenger_count_input_is_only_available_for_a_custom_cabin() {
         // Eligibility tracks the cabin scheme, not clean-sheet-vs-registered
-        // status: the AVE default (a clean-sheet-eligible synthetic
-        // aircraft) still carries the "Ryanair" percentage-mix cabin, so the
-        // hand-edit input stays hidden even once the study goes clean-sheet.
+        // status. The AVE default seeds the Custom cabin of its declared
+        // 777-9 arrangement, so the input stays available once the study
+        // goes clean-sheet.
         let mut state = AppState::default();
         assert_eq!(state.active_preset, "AVE");
         state.set_design_mode(DesignMode::CleanSheet);
@@ -951,13 +941,20 @@ mod tests {
                 .expect("default config")
                 .requirements
                 .cabin_preset,
-            "Ryanair"
+            "Custom"
         );
-        assert!(!custom_cabin_passenger_target_eligible(
+        assert!(custom_cabin_passenger_target_eligible(
             &state.typed_config().expect("default config")
         ));
 
-        // Switching the cabin scheme to Custom makes the input available.
+        // A named airline profile hides the hand-edit input, and switching
+        // the scheme back to Custom makes it available again.
+        if let Some(values) = state.group_mut("requirements") {
+            values["cabin_preset"] = serde_json::Value::String("Ryanair".to_owned());
+        }
+        assert!(!custom_cabin_passenger_target_eligible(
+            &state.typed_config().expect("airline cabin config")
+        ));
         if let Some(values) = state.group_mut("requirements") {
             values["cabin_preset"] = serde_json::Value::String("Custom".to_owned());
         }

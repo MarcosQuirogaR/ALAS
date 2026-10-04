@@ -15,33 +15,32 @@
 
 use alas_config::{AlasConfig, DesignVector};
 use alas_mass::breakdown::{
-    calculate_physical_cg, MassBreakdown, MassCoordinates, FUEL, FURNISHINGS, FUSELAGE, GEAR,
-    H_STAB, PAYLOAD, PROPULSION, SYSTEMS, V_STAB, WING,
+    calculate_physical_cg, FlopsMassBuildup, MassBreakdown, MassCoordinates, FUEL, FURNISHINGS,
+    FUSELAGE, GEAR, H_STAB, PAYLOAD, PROPULSION, SYSTEMS, V_STAB, WING,
 };
-use alas_mass::ledger::{MassItem, MassProperties};
+use alas_mass::ledger::MassProperties;
+use alas_mass::product_stations::{product_component_stations, ProductStationError};
 use alas_mass::statement::{
     LedgerMethods, LoadState, MassStatement, MassStatementInputs, PayloadItemSummary,
 };
-use alas_mass::stations::{component_stations_with_gear, StationError};
-use alas_mass::tanks::FuelTankLayout;
+use alas_mass::stations::StationError;
+use alas_mass::tanks::resolve_product_layout;
 
 use crate::full_analysis::AnalysisReport;
 
 mod summaries;
 pub use summaries::{LedgerItemSummary, MassBalanceAssessment, MassStateSummary, TankSummary};
 
-use super::{
-    report_mass_basis_kg, FindingCode, FindingSeverity, FuelLoadingAssessment, PhysicalFinding,
-};
+use super::{FindingCode, FindingSeverity, FuelLoadingAssessment, PhysicalFinding};
 
 /// Fraction of the takeoff fuel assumed to remain at landing when no flown
 /// mission supplies a landing mass; the same operational-reserve convention
 /// the model CG envelope uses for its reserve loading state.
 const FALLBACK_LANDING_FUEL_FRACTION: f64 = 0.10;
 
-/// Difference in percent MAC beyond which the ledger and the lumped model
-/// are reported as disagreeing about the takeoff centre of gravity.
-const CG_DISAGREEMENT_PCT_MAC: f64 = 5.0;
+/// Ledger-vs-lumped takeoff CG disagreement band, percent MAC. The gate
+/// prefers the ledger itself, so the band only flags a lumped-model mismatch.
+const CG_DISAGREEMENT_PCT_MAC: f64 = 1.0;
 
 /// Fuel-load steps of the reported centre-of-gravity travel curve.
 const FUEL_CG_CURVE_STEPS: usize = 24;
@@ -74,61 +73,55 @@ pub(super) fn assess_mass_balance(
             unit: "",
         });
     };
-    let stations = match component_stations_with_gear(
-        &report.airplane,
-        &config.geometry,
-        &config.requirements,
-        &config.mass_model,
-        &config.structures,
-        &config.landing_gear,
-    ) {
-        Ok(stations) => stations,
-        Err(
-            error @ StationError::MainGearStationNotMeasured {
-                wing_root_z_m,
-                fuselage_crown_z_m,
-            },
-        ) => {
-            // A missing main-gear datum is not a ledger that degraded to the
-            // lumped model: it is a component this aircraft has no measured
-            // station for. Reported as a warning the run stays feasible under
-            // it, so the design would be published with its ground reactions
-            // silently taken from a station the mass model refused. It is an
-            // error finding, which `FeasibilityReport::is_feasible` fails on.
-            //
-            // The two heights are kept as the finding's own measured pair
-            // (geometry frame, z up, m): the wing root leading edge, and the
-            // fuselage crown at that station that the wing-mounted fallback
-            // rule requires it to lie at or below.
-            findings.push(PhysicalFinding {
-                code: FindingCode::MassLedgerUnavailable,
-                severity: FindingSeverity::Error,
-                message: format!("component stations could not be placed: {error}"),
-                actual: Some(wing_root_z_m),
-                limit: Some(fuselage_crown_z_m),
-                unit: "m",
-            });
-            return None;
-        }
-        Err(error) => {
-            warn(
-                findings,
-                FindingCode::MassLedgerUnavailable,
-                format!("component stations could not be placed: {error}"),
-            );
-            return None;
-        }
+    let Some(masses) = lumped_masses(report) else {
+        warn(
+            findings,
+            FindingCode::MassLedgerUnavailable,
+            "the analysis report carries no complete component mass breakdown".to_owned(),
+        );
+        return None;
     };
-    let (density_kg_m3, published_total_l) = tank_reference(config, design);
-    let resolved_tanks = match FuelTankLayout::resolve(
-        &report.airplane,
-        &config.geometry,
-        &config.structures,
-        &config.fuel_tanks,
-        &config.fuel_policy,
-        density_kg_m3,
-        published_total_l,
-    ) {
+    let station_config = super::design_mass_config(config, report);
+    let stations =
+        match product_component_stations(&station_config, design, &report.airplane, &masses) {
+            Ok(stations) => stations,
+            Err(ProductStationError::Component(
+                error @ StationError::MainGearStationNotMeasured {
+                    wing_root_z_m,
+                    fuselage_crown_z_m,
+                },
+            )) => {
+                // A missing main-gear datum is not a ledger that degraded to the
+                // lumped model: it is a component this aircraft has no measured
+                // station for. Reported as a warning the run stays feasible under
+                // it, so the design would be published with its ground reactions
+                // silently taken from a station the mass model refused. It is an
+                // error finding, which `FeasibilityReport::is_feasible` fails on.
+                //
+                // The two heights are kept as the finding's own measured pair
+                // (geometry frame, z up, m): the wing root leading edge, and the
+                // fuselage crown at that station that the wing-mounted fallback
+                // rule requires it to lie at or below.
+                findings.push(PhysicalFinding {
+                    code: FindingCode::MassLedgerUnavailable,
+                    severity: FindingSeverity::Error,
+                    message: format!("component stations could not be placed: {error}"),
+                    actual: Some(wing_root_z_m),
+                    limit: Some(fuselage_crown_z_m),
+                    unit: "m",
+                });
+                return None;
+            }
+            Err(error) => {
+                warn(
+                    findings,
+                    FindingCode::MassLedgerUnavailable,
+                    format!("component stations could not be placed: {error}"),
+                );
+                return None;
+            }
+        };
+    let resolved_tanks = match resolve_product_layout(config, design, &report.airplane) {
         Ok(tanks) => tanks,
         Err(error) => {
             warn(
@@ -143,10 +136,8 @@ pub(super) fn assess_mass_balance(
     // equation 121.  Keep the resolved tank positions and capacities, but
     // make their per-tank unusable rows sum to that same total so the ledger
     // cannot compare a policy fraction with the FLOPS operating-item slot.
-    let flops_groups = report
-        .flops_mass_buildup
-        .as_deref()
-        .map(|buildup| &buildup.systems_and_operating_items);
+    let flops_buildup = report.flops_mass_buildup.as_deref();
+    let flops_groups = flops_buildup.map(|buildup| &buildup.systems_and_operating_items);
     if config.mass_model.mass_architecture.is_pure_flops() && flops_groups.is_none() {
         warn(
             findings,
@@ -173,43 +164,51 @@ pub(super) fn assess_mass_balance(
     } else {
         resolved_tanks
     };
-    let Some(masses) = lumped_masses(report) else {
-        warn(
-            findings,
-            FindingCode::MassLedgerUnavailable,
-            "the analysis report carries no complete component mass breakdown".to_owned(),
-        );
-        return None;
-    };
     let payload_items = payload_items(report);
     let capacity_kg = tanks.usable_capacity_kg();
-    let takeoff_fuel_kg = fuel_loading
-        .analyzed_carried_fuel_kg
-        .max(0.0)
-        .min(capacity_kg);
+    // The flown states follow the dispatched route; the sized design loading
+    // is the separate maximum-fuel state below.
+    let flown_fuel_kg = fuel_loading
+        .flown_carried_fuel_kg
+        .unwrap_or(fuel_loading.analyzed_carried_fuel_kg);
+    let takeoff_fuel_kg = match tanks.loadable_fuel_kg(flown_fuel_kg) {
+        Ok(kg) => kg,
+        Err(error) => {
+            warn(
+                findings,
+                FindingCode::FuelTankLayoutUnavailable,
+                format!("the analyzed carried fuel cannot be loaded into the tanks: {error}"),
+            );
+            return None;
+        }
+    };
     let landing_fuel_kg = fuel_loading
         .analyzed_landing_mass_kg
         .map(|mass| (mass - fuel_loading.zero_fuel_mass_kg).max(0.0))
         .unwrap_or(FALLBACK_LANDING_FUEL_FRACTION * takeoff_fuel_kg)
         .min(takeoff_fuel_kg);
-    let fuel_items = |fuel_kg: f64| -> Result<Vec<MassItem>, String> {
-        tanks
-            .distribute(fuel_kg)
-            .map(|state| state.mass_items(&tanks))
-            .map_err(|error| error.to_string())
+    // Landing is a *burn* from takeoff, not a fresh `distribute`.
+    let Ok(takeoff_state) = tanks.distribute(takeoff_fuel_kg) else {
+        warn(
+            findings,
+            FindingCode::FuelTankLayoutUnavailable,
+            "the analyzed fuel could not be placed in the tanks".to_owned(),
+        );
+        return None;
     };
-    let (takeoff_fuel_items, landing_fuel_items) =
-        match (fuel_items(takeoff_fuel_kg), fuel_items(landing_fuel_kg)) {
-            (Ok(takeoff), Ok(landing)) => (takeoff, landing),
-            (Err(error), _) | (_, Err(error)) => {
-                warn(
-                    findings,
-                    FindingCode::FuelTankLayoutUnavailable,
-                    format!("the analyzed fuel could not be placed in the tanks: {error}"),
-                );
-                return None;
-            }
-        };
+    let burn_kg = (takeoff_fuel_kg - landing_fuel_kg).max(0.0);
+    let Ok(landing_state) = takeoff_state.burned(&tanks, burn_kg) else {
+        warn(
+            findings,
+            FindingCode::FuelTankLayoutUnavailable,
+            "the analyzed landing fuel could not be burned down".to_owned(),
+        );
+        return None;
+    };
+    let (takeoff_fuel_items, landing_fuel_items) = (
+        takeoff_state.mass_items(&tanks),
+        landing_state.mass_items(&tanks),
+    );
     // The lumped breakdown this stage receives carries whichever methods the
     // configuration selected.  A pure FLOPS report also carries the grouped
     // evaluation that produced those slots; pass that same object through so
@@ -223,8 +222,9 @@ pub(super) fn assess_mass_balance(
             landing_fuel_items,
             unusable_fuel_items: tanks.unusable_items(),
             flops: flops_groups,
+            flops_gear_split_kg: flops_buildup.and_then(FlopsMassBuildup::gear_split_kg),
         },
-        report.flops_mass_buildup.as_deref().map_or_else(
+        flops_buildup.map_or_else(
             || LedgerMethods::from_mass_model(&config.mass_model),
             LedgerMethods::from_buildup,
         ),
@@ -255,9 +255,10 @@ pub(super) fn assess_mass_balance(
     };
     let maximum_fuel_kg =
         capacity_kg.min((config.requirements.mtow_kg - fuel_loading.zero_fuel_mass_kg).max(0.0));
-    let maximum_fuel_state = fuel_items(maximum_fuel_kg)
+    let maximum_fuel_state = tanks
+        .distribute(maximum_fuel_kg)
         .ok()
-        .map(|items| statement.with_fuel_items(&items));
+        .map(|state| statement.with_fuel_items(&state.mass_items(&tanks)));
     let takeoff = statement.state(LoadState::Takeoff);
     let mut states = vec![
         summarize(
@@ -288,16 +289,13 @@ pub(super) fn assess_mass_balance(
         findings.push(PhysicalFinding {
             code: FindingCode::MassModelDisagreement,
             severity: FindingSeverity::Warning,
-            // Naming which path fed which consumer is the part that makes
-            // this actionable rather than merely noted: the hard model CG and
-            // gear constraints that decide feasibility are evaluated on the
-            // lumped coordinates, while the states published in this
-            // statement (the weight-and-balance evidence a reader acts on)
-            // are the ledger's. While the two disagree by more than the
-            // reporting band, the feasibility verdict and the delivered
-            // balance evidence are not about the same centre of gravity.
+            // The gate prefers this same ledger whenever one builds, so this
+            // is not a mismatch between what decides feasibility and what
+            // this statement shows. Still a
+            // warning: the lumped model (the gate's fallback basis) itself
+            // diverges from the ledger by more than the reporting band.
             message: format!(
-                "at {takeoff_fuel_kg:.0} kg of fuel the item ledger places the takeoff centre of gravity at {ledger_takeoff_cg_pct_mac:.1} percent MAC and the lumped model at {lumped_takeoff_cg_pct_mac:.1}; the tank fill order and the detailed payload sit differently from the lumped fuel and payload points. The hard model CG and gear constraints are evaluated on the lumped coordinates and the states below are the ledger's, so while the two disagree by {:.1} percent MAC the feasibility verdict and this balance statement do not describe the same centre of gravity",
+                "at {takeoff_fuel_kg:.0} kg of fuel the item ledger places the takeoff centre of gravity at {ledger_takeoff_cg_pct_mac:.1} percent MAC and the lumped model at {lumped_takeoff_cg_pct_mac:.1}, a {:.1} percent MAC disagreement; the tank fill order and the detailed payload sit differently from the lumped fuel and payload points. The hard model CG and gear gate now prefers this same ledger when one builds, so this no longer splits the feasibility verdict from the balance evidence below, but the lumped model (its fallback basis) still disagrees by more than the reporting band",
                 (ledger_takeoff_cg_pct_mac - lumped_takeoff_cg_pct_mac).abs()
             ),
             actual: Some(ledger_takeoff_cg_pct_mac),
@@ -357,36 +355,20 @@ pub(super) fn assess_mass_balance(
 
 /// The takeoff mass properties of a report from its ledger, for consumers
 /// such as the dynamic-mode figure that need an inertia tensor and no
-/// findings. The fuel is the largest load the tanks and the takeoff-mass
-/// limit admit.
+/// findings. The fuel is the analyzed carried fuel; `None` when the tanks
+/// cannot hold it.
 pub fn takeoff_mass_properties(
     config: &AlasConfig,
     report: &AnalysisReport,
 ) -> Option<MassProperties> {
-    let stations = component_stations_with_gear(
-        &report.airplane,
-        &config.geometry,
-        &config.requirements,
-        &config.mass_model,
-        &config.structures,
-        &config.landing_gear,
-    )
-    .ok()?;
-    let (density_kg_m3, published_total_l) = tank_reference(config, &report.design);
-    let resolved_tanks = FuelTankLayout::resolve(
-        &report.airplane,
-        &config.geometry,
-        &config.structures,
-        &config.fuel_tanks,
-        &config.fuel_policy,
-        density_kg_m3,
-        published_total_l,
-    )
-    .ok()?;
-    let flops_groups = report
-        .flops_mass_buildup
-        .as_deref()
-        .map(|buildup| &buildup.systems_and_operating_items);
+    let masses = lumped_masses(report)?;
+    let station_config = super::design_mass_config(config, report);
+    let stations =
+        product_component_stations(&station_config, &report.design, &report.airplane, &masses)
+            .ok()?;
+    let resolved_tanks = resolve_product_layout(config, &report.design, &report.airplane).ok()?;
+    let flops_buildup = report.flops_mass_buildup.as_deref();
+    let flops_groups = flops_buildup.map(|buildup| &buildup.systems_and_operating_items);
     if config.mass_model.mass_architecture.is_pure_flops() && flops_groups.is_none() {
         return None;
     }
@@ -397,12 +379,11 @@ pub fn takeoff_mass_properties(
     } else {
         resolved_tanks
     };
-    let masses = lumped_masses(report)?;
-    let mass_basis_kg = report_mass_basis_kg(config, report);
+    let mass_basis_kg = report.loaded_takeoff_mass_kg(config.requirements.mtow_kg);
     let zero_fuel_mass_kg = mass_basis_kg - masses.fuel;
     let fuel_kg = tanks
-        .usable_capacity_kg()
-        .min((mass_basis_kg - zero_fuel_mass_kg).max(0.0));
+        .loadable_fuel_kg((mass_basis_kg - zero_fuel_mass_kg).max(0.0))
+        .ok()?;
     let fuel_items = tanks.distribute(fuel_kg).ok()?.mass_items(&tanks);
     let payload_items = payload_items(report);
     let statement = MassStatement::build_with_methods(
@@ -414,8 +395,9 @@ pub fn takeoff_mass_properties(
             landing_fuel_items: Vec::new(),
             unusable_fuel_items: tanks.unusable_items(),
             flops: flops_groups,
+            flops_gear_split_kg: flops_buildup.and_then(FlopsMassBuildup::gear_split_kg),
         },
-        report.flops_mass_buildup.as_deref().map_or_else(
+        flops_buildup.map_or_else(
             || LedgerMethods::from_mass_model(&config.mass_model),
             LedgerMethods::from_buildup,
         ),
@@ -424,16 +406,8 @@ pub fn takeoff_mass_properties(
     Some(statement.state(LoadState::Takeoff))
 }
 
-/// Density and published total volume for the tank resolution: the
-/// registered aircraft's own when the design is the unchanged preset, the
-/// configured density and no published total otherwise.
-///
-/// The rule itself lives in [`alas_mass::product_stations`] so the
-/// optimizer's search-time fuel placement resolves the same tanks this
-/// report does.
-pub(crate) use alas_mass::product_stations::tank_reference;
-
-fn lumped_masses(report: &AnalysisReport) -> Option<MassBreakdown> {
+/// Read the report's ten mass groups for item-level statement assembly.
+pub(super) fn lumped_masses(report: &AnalysisReport) -> Option<MassBreakdown> {
     let mass = |name: &str| report.component_masses.get(name).copied();
     Some(MassBreakdown {
         wing: mass(WING)?,
@@ -465,7 +439,7 @@ fn lumped_coordinates(report: &AnalysisReport) -> Option<MassCoordinates> {
     })
 }
 
-fn payload_items(report: &AnalysisReport) -> Vec<PayloadItemSummary> {
+pub(super) fn payload_items(report: &AnalysisReport) -> Vec<PayloadItemSummary> {
     report
         .payload_layout
         .as_ref()
@@ -488,17 +462,14 @@ fn payload_items(report: &AnalysisReport) -> Vec<PayloadItemSummary> {
 
 /// Leading edge of the model MAC and the MAC itself, the frame every
 /// percent-MAC figure in the report uses.
-fn mac_reference(report: &AnalysisReport) -> (f64, f64) {
-    let mac_m = report.airplane.c_ref.max(1.0e-3);
-    let mac_le_x_m = report
-        .airplane
-        .wings
-        .iter()
-        .find(|wing| wing.name == "Main Wing")
-        .or_else(|| report.airplane.wings.first())
-        .map(|wing| wing.aerodynamic_center(0.25)[0] - 0.25 * mac_m)
-        .unwrap_or(0.0);
-    (mac_le_x_m, mac_m)
+pub(super) fn mac_reference(report: &AnalysisReport) -> (f64, f64) {
+    // Canonical MAC frame: the main wing's own `mac_station()` leading
+    // edge, never an `aerodynamic_center(0.25) - 0.25 * c_ref`
+    // reconstruction.
+    match report.airplane.mac_frame() {
+        Some(frame) => (frame.x_lemac_m, frame.chord_m.max(1.0e-3)),
+        None => (0.0, report.airplane.c_ref.max(1.0e-3)),
+    }
 }
 
 fn capacity_source_label(source: alas_mass::tanks::CapacitySource) -> &'static str {
@@ -580,11 +551,10 @@ mod tests {
     /// A refused main-gear station is an error finding, not a warning, and
     /// the low-wing fallback case beside it is untouched.
     ///
-    /// Before this phase both halves returned `None` with a
-    /// `FindingSeverity::Warning`, so an aircraft the mass model refused to
-    /// place a main gear on was reported as a run that merely lacked an item
-    /// ledger, and `FeasibilityReport::is_feasible`, which fails only on
-    /// error findings, could still call it feasible. The lumped model is not
+    /// A warning would report an aircraft the mass model refused to place a
+    /// main gear on as a run that merely lacked an item ledger, and
+    /// `FeasibilityReport::is_feasible`, which fails only on error findings,
+    /// could still call it feasible. The lumped model is not
     /// a fallback here: its gear point is the same refused station.
     ///
     /// The two halves share one analysis run. The ATR half substitutes the

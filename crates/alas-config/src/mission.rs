@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/config/mission_config.py
-// Reference: alas @ rust-port-baseline.
 
 //! Whether a run flies its mission, and how its native mission is configured.
 //!
@@ -19,7 +18,8 @@
 mod profile;
 
 pub use profile::{
-    resolve_true_airspeed_m_s, MissionProfileConfig, SpeedReference, CAS_SPEED_SUBDIVISIONS,
+    resolve_true_airspeed_m_s, CruiseAltitudePolicy, MissionProfileConfig, SpeedReference,
+    CAS_SPEED_SUBDIVISIONS,
 };
 
 use serde::{Deserialize, Serialize};
@@ -112,6 +112,37 @@ pub struct MissionConfig {
         help = "The climb, cruise and descent speeds, rates and altitudes the mission flies."
     )]
     pub profile: MissionProfileConfig,
+
+    /// Still-air distance of the route planned for this run, m; zero when
+    /// none was planned.
+    ///
+    /// A run plans its route once, before the search, and writes the
+    /// planned distance here so the search flies the route the published
+    /// mission and the delivery check fly, rather than the great circle.
+    /// The sizing loop reads it in place of the great-circle distance
+    /// between the configured airports; a declared design range still sizes
+    /// a mission-closed aircraft, which then flies this route off-design.
+    #[serde(default, skip_serializing_if = "is_unset_distance")]
+    #[config(
+        hidden,
+        help = "Still-air distance of the route this run planned, in metres. Written by the run itself so the optimizer flies the same route as the reported mission; zero means the great circle between the selected airports."
+    )]
+    pub route_distance_m: f64,
+}
+
+/// Whether no planned route distance is recorded.
+#[allow(clippy::trivially_copy_pass_by_ref)] // serde passes the field by reference
+fn is_unset_distance(distance_m: &f64) -> bool {
+    *distance_m == 0.0
+}
+
+impl MissionConfig {
+    /// The planned route's still-air distance, m, when one is recorded.
+    #[must_use]
+    pub fn planned_route_distance_m(&self) -> Option<f64> {
+        (self.route_distance_m.is_finite() && self.route_distance_m > 0.0)
+            .then_some(self.route_distance_m)
+    }
 }
 
 impl Default for MissionConfig {
@@ -129,6 +160,7 @@ impl Default for MissionConfig {
             simbrief_timeout_s: 15.0,
             simbrief_overrides_airports: true,
             profile: MissionProfileConfig::default(),
+            route_distance_m: 0.0,
         }
     }
 }

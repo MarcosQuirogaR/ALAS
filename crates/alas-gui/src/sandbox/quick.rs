@@ -3,7 +3,7 @@
 
 //! Quick Analysis results and the worker that produces them.
 //!
-//! One background thread runs the reduced pipeline model; every event it
+//! One background thread runs the Quick Analysis; every event it
 //! streams carries the configuration revision it was requested for. Events
 //! for any other revision are dropped, so a late result can never fill the
 //! panel for newer geometry. A model-affecting edit marks the shown results
@@ -232,7 +232,7 @@ impl QuickEstimates {
             let message = if summary.cancelled {
                 "cancelled before this estimate was reached"
             } else {
-                "the reduced model ended without producing this estimate"
+                "the Quick Analysis ended without producing this estimate"
             };
             self.terminate_pending(message);
             self.summary = Some(summary);
@@ -355,7 +355,7 @@ mod tests {
         // Metrics the job never reached terminate honestly; shown ones stay.
         assert_eq!(
             failure(&estimates, QuickMetric::FuelCapacity),
-            Some("the reduced model ended without producing this estimate")
+            Some("the Quick Analysis ended without producing this estimate")
         );
         assert_eq!(
             achieved(&estimates, QuickMetric::TakeoffMass),

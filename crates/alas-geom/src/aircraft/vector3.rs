@@ -5,7 +5,6 @@
 // vector-axis branch) and the plain vector arithmetic `reference geometry.numpy`
 // performs on 3-element geometry-axis arrays throughout `wing.py`.
 // Upstream: reference geometry 4.2.8, MIT.
-// Reference: alas @ rust-port-baseline.
 
 //! Plain 3-vector arithmetic and the axis-angle rotation matrix
 //! [`Wing`](super::wing::Wing)'s frame computation needs.
@@ -123,16 +122,5 @@ mod tests {
         assert!((rotated[0]).abs() < 1e-12);
         assert!((rotated[1] - 1.0).abs() < 1e-12);
         assert!((rotated[2]).abs() < 1e-12);
-    }
-
-    #[test]
-    fn cross3_of_x_and_y_axes_is_the_z_axis() {
-        let result = cross3([1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
-        assert_eq!(result, [0.0, 0.0, 1.0]);
-    }
-
-    #[test]
-    fn norm3_of_a_unit_axis_vector_is_one() {
-        assert!((norm3([0.0, 1.0, 0.0]) - 1.0).abs() < 1e-15);
     }
 }

@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/physics/propulsion.py
-// Reference: alas @ rust-port-baseline.
 
 //! Parametric sweeps over the on-design cycle.
 //!

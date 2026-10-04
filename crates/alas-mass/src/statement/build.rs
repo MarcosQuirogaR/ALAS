@@ -31,6 +31,14 @@ use super::{LedgerMethods, PayloadItemSummary};
 /// split (roughly 8-15% nose for a tricycle transport). This is a mass
 /// split assumption, not a measured load: [`crate::stations`]'s gear
 /// stations already carry the geometric x/z placement this module reuses.
+///
+/// Documented fallback only: a pure FLOPS buildup carries its own
+/// `main_gear_kg`/`nose_gear_kg` split (FLOPS equations 63/64, which give the
+/// A320 preset 11.2% nose rather than 15%), passed to [`push_gear`] as
+/// `flops_gear_split_kg` and used instead whenever it is `Some`. This fraction
+/// remains the split for every path that has no FLOPS structural evaluation
+/// to read it from (the Torenbeek-comparison buildup and any other lumped
+/// [`MassBreakdown::gear`] source).
 const NOSE_GEAR_MASS_FRACTION: f64 = 0.15;
 
 /// Build the complete, unvalidated ledger for one mass statement.
@@ -44,11 +52,12 @@ pub(super) fn build_ledger(
     payload_items: &[PayloadItemSummary],
     unusable_fuel_items: Vec<MassItem>,
     flops: Option<&FlopsTransportBreakdown>,
+    flops_gear_split_kg: Option<(f64, f64)>,
     methods: LedgerMethods,
 ) -> Result<MassLedger, LedgerError> {
     let mut ledger = MassLedger::new();
     push_structure(&mut ledger, masses, stations, methods);
-    push_gear(&mut ledger, masses, stations, methods);
+    push_gear(&mut ledger, masses, stations, flops_gear_split_kg, methods);
     push_propulsion(&mut ledger, masses, stations, methods);
     match flops {
         Some(flops) => push_flops_systems_and_operating_items(
@@ -90,7 +99,7 @@ pub(super) fn closure_tolerance(reference_kg: f64) -> f64 {
 }
 
 /// The nacelle mid-length points [`crate::stations::component_stations`]
-/// resolved, or the single legacy no-nacelle point (the wing station,
+/// resolved, or the single no-nacelle point (the wing station,
 /// `define_mass_coordinates`'s own `w_root_z - 1.0` offset) when there is no
 /// nacelle geometry to place engines at.
 pub(super) fn propulsion_positions(stations: &ComponentStations) -> Vec<[f64; 3]> {
@@ -176,15 +185,36 @@ fn push_structure(
     });
 }
 
-/// Nose and main gear, split by [`NOSE_GEAR_MASS_FRACTION`], as point masses:
-/// no strut geometry is modelled, so a shape-based tensor would be invented.
+/// Nose and main gear, split by the FLOPS structural group's own resolved
+/// masses when `flops_gear_split_kg` is `Some((main_kg, nose_kg))`, or by
+/// [`NOSE_GEAR_MASS_FRACTION`] otherwise, as point masses: no strut geometry
+/// is modelled, so a shape-based tensor would be invented.
+///
+/// The FLOPS split is read as a *fraction* of `main_kg + nose_kg`, then
+/// applied to [`MassBreakdown::gear`], rather than taking `main_kg`/`nose_kg`
+/// as absolute masses directly: `masses.gear` is this ledger's authoritative
+/// total (the split changes how it is divided, never its value), and the
+/// two are the same number on the pure-FLOPS path this split is sourced
+/// from (`main_gear_kg + nose_gear_kg` is exactly what becomes
+/// `MassBreakdown::gear`, `crate::breakdown::flops_methods`), so this is
+/// exact there and a defined fallback (the fraction, not a mismatched
+/// absolute mass) anywhere `masses.gear` came from a different total.
 fn push_gear(
     ledger: &mut MassLedger,
     masses: &MassBreakdown,
     stations: &ComponentStations,
+    flops_gear_split_kg: Option<(f64, f64)>,
     methods: LedgerMethods,
 ) {
-    let nose_mass = masses.gear * NOSE_GEAR_MASS_FRACTION;
+    let nose_fraction = match flops_gear_split_kg {
+        Some((main_kg, nose_kg))
+            if (main_kg + nose_kg).is_finite() && (main_kg + nose_kg) > 0.0 =>
+        {
+            nose_kg / (main_kg + nose_kg)
+        }
+        _ => NOSE_GEAR_MASS_FRACTION,
+    };
+    let nose_mass = masses.gear * nose_fraction;
     let main_mass = masses.gear - nose_mass;
     ledger.push(MassItem {
         id: "nose_gear".to_owned(),
@@ -206,7 +236,7 @@ fn push_gear(
     });
 }
 
-/// Propulsion mass split equally across nacelles (or the single legacy
+/// Propulsion mass split equally across nacelles (or the single
 /// point with no nacelle geometry), each as a solid-cylinder item.
 fn push_propulsion(
     ledger: &mut MassLedger,

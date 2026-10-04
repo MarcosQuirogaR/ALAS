@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/routing/navdata_graph.py
-// Reference: alas @ rust-port-baseline.
 
 //! Enroute routing along real jet airways, from the open navigation data.
 //!
@@ -84,20 +83,12 @@ pub struct Fix {
 
 /// Whether a directory holds both files this module needs.
 pub fn navdata_available(navdata_dir: &Path) -> bool {
-    let Some(fix) = crate::assets::NAVDATA_FILES
-        .iter()
-        .find(|file| file.name == FIX_FILE)
-    else {
-        return false;
-    };
-    let Some(airway) = crate::assets::NAVDATA_FILES
-        .iter()
-        .find(|file| file.name == AIRWAY_FILE)
-    else {
-        return false;
-    };
-    crate::assets::navdata_file_is_usable(navdata_dir, fix)
-        && crate::assets::navdata_file_is_usable(navdata_dir, airway)
+    [FIX_FILE, AIRWAY_FILE].iter().all(|name| {
+        crate::assets::NAVDATA_FILES
+            .iter()
+            .find(|file| file.name == *name)
+            .is_some_and(|file| crate::assets::navdata_file_is_usable(navdata_dir, file))
+    })
 }
 
 /// The parsed waypoint and airway network.

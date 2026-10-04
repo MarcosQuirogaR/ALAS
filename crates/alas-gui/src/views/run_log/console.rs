@@ -5,6 +5,9 @@
 
 use crate::state::{AppState, LogKind, LogLine};
 use crate::views::{tr, tr_fields};
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub(super) struct RenderedLine {
@@ -16,8 +19,79 @@ pub(super) struct RenderedLine {
     pub(super) plaintext: String,
 }
 
-pub(super) fn rendered_visible_lines(state: &AppState) -> Vec<RenderedLine> {
-    let query = state.run_log_search.trim().to_lowercase();
+/// Everything a change to the rendered console rows depends on. Reused
+/// across frames while unchanged instead of re-formatting, translating and
+/// lowercasing every line (up to [`crate::state::MAX_LOG_LINES`]) on every
+/// repaint, including idle ones.
+#[derive(Clone, PartialEq)]
+struct LinesCacheKey {
+    fingerprint: u64,
+    show_info: bool,
+    show_warn: bool,
+    show_error: bool,
+    search: String,
+    language: String,
+}
+
+#[derive(Clone)]
+struct RenderedLinesCache {
+    key: LinesCacheKey,
+    lines: Arc<Vec<RenderedLine>>,
+}
+
+/// A stand-in for the log content: every line's identity, hashed. `logs`
+/// saturates at [`crate::state::MAX_LOG_LINES`] and then evicts its oldest
+/// entry on every push, so neither its length nor its ends identify the
+/// content (pushing a repeated message can leave both unchanged while every
+/// row shifts). Hashing about a hundred kilobytes costs well under the
+/// formatting, translation and lowercasing this key lets a frame skip.
+fn logs_fingerprint(logs: &[LogLine]) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    logs.len().hash(&mut hasher);
+    for line in logs {
+        line.run_id.hash(&mut hasher);
+        (line.kind as u8).hash(&mut hasher);
+        line.elapsed.hash(&mut hasher);
+        line.text.hash(&mut hasher);
+    }
+    hasher.finish()
+}
+
+/// The visible console rows for the current filters, search text and
+/// language, memoized in `ctx`'s memory behind [`LinesCacheKey`].
+pub(super) fn rendered_visible_lines(
+    ctx: &egui::Context,
+    state: &AppState,
+) -> Arc<Vec<RenderedLine>> {
+    let key = LinesCacheKey {
+        fingerprint: logs_fingerprint(&state.logs),
+        show_info: state.run_log_show_info,
+        show_warn: state.run_log_show_warn,
+        show_error: state.run_log_show_error,
+        search: state.run_log_search.clone(),
+        language: alas_i18n::get_language(),
+    };
+    let id = egui::Id::new("run_log_rendered_lines_cache");
+    if let Some(cached) = ctx.data(|data| data.get_temp::<RenderedLinesCache>(id)) {
+        if cached.key == key {
+            return cached.lines;
+        }
+    }
+    let lines = Arc::new(compute_visible_lines(state, &key.search));
+    ctx.data_mut(|data| {
+        data.insert_temp(
+            id,
+            RenderedLinesCache {
+                key,
+                lines: lines.clone(),
+            },
+        )
+    });
+    lines
+}
+
+pub(super) fn compute_visible_lines(state: &AppState, raw_search: &str) -> Vec<RenderedLine> {
+    let query = raw_search.trim().to_lowercase();
     state
         .logs
         .iter()
@@ -142,4 +216,61 @@ pub(super) fn localize_log_text(text: &str) -> String {
         }
     }
     text.to_owned()
+}
+
+#[cfg(test)]
+mod cache_tests {
+    use super::rendered_visible_lines;
+    use crate::state::{AppState, LogKind, LogLine};
+    use std::sync::Arc;
+
+    fn push(state: &mut AppState, text: &str) {
+        state.logs.push(LogLine {
+            text: text.to_owned(),
+            kind: LogKind::Info,
+            elapsed: None,
+            run_id: 0,
+        });
+    }
+
+    #[test]
+    fn a_repeat_call_with_unchanged_logs_reuses_the_cached_rows() {
+        let ctx = egui::Context::default();
+        let mut state = AppState::default();
+        push(&mut state, "Ready.");
+
+        let first = rendered_visible_lines(&ctx, &state);
+        let second = rendered_visible_lines(&ctx, &state);
+
+        assert!(Arc::ptr_eq(&first, &second));
+    }
+
+    #[test]
+    fn a_new_log_line_invalidates_the_cache() {
+        let ctx = egui::Context::default();
+        let mut state = AppState::default();
+        push(&mut state, "Ready.");
+        let first = rendered_visible_lines(&ctx, &state);
+
+        push(&mut state, "Working.");
+        let second = rendered_visible_lines(&ctx, &state);
+
+        assert!(!Arc::ptr_eq(&first, &second));
+        assert_eq!(second.len(), first.len() + 1);
+    }
+
+    #[test]
+    fn a_search_text_change_invalidates_the_cache() {
+        let ctx = egui::Context::default();
+        let mut state = AppState::default();
+        push(&mut state, "Ready.");
+        push(&mut state, "Working.");
+        let first = rendered_visible_lines(&ctx, &state);
+
+        state.run_log_search = "working".to_owned();
+        let second = rendered_visible_lines(&ctx, &state);
+
+        assert!(!Arc::ptr_eq(&first, &second));
+        assert_eq!(second.len(), 1);
+    }
 }

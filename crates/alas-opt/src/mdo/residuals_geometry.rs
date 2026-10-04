@@ -3,43 +3,50 @@
 
 //! The planform, wing-loading and accommodation requirement family.
 
+use crate::mdo::ResidualRole;
+
 use alas_config::design_variables::DesignVector;
-use alas_config::{AlasConfig, ConstraintPolicy, ObjectiveWeights};
+use alas_config::{AlasConfig, ObjectiveWeights};
 use alas_geom::aircraft::airplane::Airplane;
-use alas_stab::trim::tail_volume_coefficients;
 
 use super::sizing::SizingOutcome;
 use super::types::ConstraintFamily::Geometry;
 use super::types::ConstraintResidual;
 
+mod measure;
+#[path = "residuals_planform.rs"]
+mod planform;
+use measure::{max_washin_rise_deg, tip_washout_deg};
+
 /// The span limit, wing-area cap, wing-loading floor, transport body-attitude
-/// window, tail-volume window and passenger/cargo-capacity shortfall.
+/// window and passenger/cargo-capacity shortfall.
 pub(super) fn geometry_residuals(
     outcome: &SizingOutcome,
     config: &AlasConfig,
     weights: &ObjectiveWeights,
-    policy: ConstraintPolicy,
+    role: ResidualRole,
     target_num_passengers: i64,
     target_cargo_payload_kg: f64,
 ) -> Vec<ConstraintResidual> {
-    if policy == ConstraintPolicy::Off {
-        return Vec::new();
-    }
     let req = &config.requirements;
-    let objective = &config.optimizer.objective;
     let dv: DesignVector = outcome.history.dv;
     let plane: &Airplane = &outcome.plane;
     let mut residuals = Vec::new();
+    residuals.extend(planform::residuals(plane, &dv, config, role));
 
-    if objective.max_span_m > 0.0 {
+    // The aerodrome reference code's wingspan band (ICAO Annex 14 Vol. I,
+    // Table 1-1): the registered aircraft's own letter in a reference
+    // adaptation, the user's choice in a clean sheet. The band is open at its
+    // top, which `max_design_span_m` expresses as a one-centimetre margin.
+    if let Some(max_span_m) = config.max_design_span_m() {
         residuals.push(ConstraintResidual::scaled(
             "span",
             Geometry,
             dv.span_m,
-            objective.max_span_m,
+            max_span_m,
             "m",
-            dv.span_m - objective.max_span_m,
-            policy,
+            dv.span_m - max_span_m,
+            role,
         ));
     }
 
@@ -50,7 +57,7 @@ pub(super) fn geometry_residuals(
         req.max_wing_area_m2,
         "m^2",
         plane.s_ref - req.max_wing_area_m2,
-        policy,
+        role,
     ));
 
     // The requirement is a design wing loading, MTOW over area: the design
@@ -66,7 +73,7 @@ pub(super) fn geometry_residuals(
         req.min_wing_loading_kg_m2,
         "kg/m^2",
         req.min_wing_loading_kg_m2 - wing_loading_kg_m2,
-        policy,
+        role,
     ));
 
     // The clean-sheet transport search must keep the aircraft body attitude
@@ -74,7 +81,7 @@ pub(super) fn geometry_residuals(
     // three-dimensional trimmed aircraft, not a guessed local MSES alpha
     // limit: the pipeline still maps this solved body angle through the
     // section twist and downwash explicitly.  Registered aircraft retain
-    // their measured body attitude for parity/audit reporting; applying a
+    // their measured body attitude for parity reporting; applying a
     // generic 2 to 4 degree design target to them would rewrite the reference
     // aircraft rather than test it.
     if config.optimizer.design_space.mode == alas_config::DesignMode::CleanSheet
@@ -85,46 +92,16 @@ pub(super) fn geometry_residuals(
             outcome.geometric_body_alpha_deg,
             weights.geometric_body_alpha_min_deg,
             weights.geometric_body_alpha_max_deg,
-            policy,
+            role,
         ));
     }
 
-    // A tail-volume window is a plausibility band, not a requirement: the
-    // surveyed tools rank it as a preference (internal research note,
-    // 2026-09-05, tier S), and the legacy objective scores it as a
-    // quadratic add-on. Under a hard family
-    // it is therefore ranked soft; diagnostic and off follow the family.
-    let preference = match policy {
-        ConstraintPolicy::Hard => ConstraintPolicy::Soft,
-        other => other,
-    };
-    let (vh, vv) = tail_volume_coefficients(plane);
-    if let Some(vh) = vh {
-        residuals.push(tail_volume_residual(
-            "tail_volume_h",
-            vh,
-            weights.min_hstab_volume_coef,
-            weights.max_hstab_volume_coef,
-            preference,
-        ));
-    }
-    if let Some(vv) = vv {
-        residuals.push(tail_volume_residual(
-            "tail_volume_v",
-            vv,
-            weights.min_vstab_volume_coef,
-            weights.max_vstab_volume_coef,
-            preference,
-        ));
-    }
-
-    residuals.extend(plausibility_residuals(outcome, config, policy));
+    residuals.extend(plausibility_residuals(outcome, config, role));
 
     if req.aircraft_type == "cargo" {
-        // Clarified ledger App Features 2, decision D10: the entered cargo
-        // mass is a *target to match*, not a floor to clear and not a licence
+        // The entered cargo mass is a *target to match*, not a floor to clear and not a licence
         // to load without limit. It is therefore reported as a two-sided
-        // deviation from the target under the Soft policy, which is a cost
+        // deviation from the target under the Soft role, which is a cost
         // contribution rather than a rejection: a candidate that cannot reach
         // the requested payload is ranked worse than one that can, and so is
         // one that only reaches it by carrying more than was asked for, while
@@ -132,15 +109,12 @@ pub(super) fn geometry_residuals(
         // belongs, in the mass, balance and volume residuals that measure the
         // physical limits.
         //
-        // The pair is normalized by the target itself and enters the scalar
-        // cost through the objective's existing `soft_penalty_weight`
-        // (`mdo::cost::assemble`), so no new weight or coefficient is
-        // introduced and every other cost term keeps its meaning.
+        // Normalize each preference by the target itself.
         residuals.extend(cargo_target_residuals(
             outcome.sized.carried_cargo_payload_kg,
             target_cargo_payload_kg,
-            match policy {
-                ConstraintPolicy::Hard => ConstraintPolicy::Soft,
+            match role {
+                ResidualRole::Constraint => ResidualRole::Preference,
                 other => other,
             },
         ));
@@ -158,7 +132,7 @@ pub(super) fn geometry_residuals(
             target_num_passengers as f64,
             "passengers",
             (target_num_passengers - outcome.sized.carried_passengers) as f64,
-            policy,
+            role,
         ));
     }
 
@@ -179,18 +153,29 @@ const AC_CHORD_FRACTION: f64 = 0.25;
 /// a tail the fuselage cannot carry) is visible here. Each limit and its
 /// rationale is documented on
 /// [`alas_config::optimizer::PlausibilityLimits`]. They enter the Geometry
-/// family and therefore follow its configured policy and the
-/// constraint-relaxation rules; they are not a separate rejection path.
+/// family and follow its hard-constraint rules.
 ///
 /// Units: aspect ratio, fineness, chord ratios and thickness ratios are
 /// dimensionless; the tail-arm fraction is metres over metres, positive aft.
 fn plausibility_residuals(
     outcome: &SizingOutcome,
     config: &AlasConfig,
-    policy: ConstraintPolicy,
+    role: ResidualRole,
 ) -> Vec<ConstraintResidual> {
     let limits = &config.optimizer.plausibility;
-    if !limits.enabled || limits.validate().is_err() {
+    if limits.validate().is_err() {
+        return vec![ConstraintResidual::direct(
+            "plausibility_configuration_invalid",
+            Geometry,
+            1.0,
+            0.0,
+            "bool",
+            1.0,
+            1.0,
+            ResidualRole::Constraint,
+        )];
+    }
+    if !limits.enabled {
         return Vec::new();
     }
     let plane: &Airplane = &outcome.plane;
@@ -207,7 +192,7 @@ fn plausibility_residuals(
         limits.min_aspect_ratio,
         limits.max_aspect_ratio,
         "-",
-        policy,
+        role,
     ));
 
     // Fuselage fineness: overall length over the largest equivalent diameter
@@ -220,7 +205,7 @@ fn plausibility_residuals(
             limits.min_fuselage_fineness,
             limits.max_fuselage_fineness,
             "-",
-            policy,
+            role,
         ));
     }
 
@@ -236,7 +221,7 @@ fn plausibility_residuals(
                 limits.min_tail_arm_fraction,
                 limits.max_tail_arm_fraction,
                 "-",
-                policy,
+                role,
             ));
         }
     }
@@ -250,7 +235,7 @@ fn plausibility_residuals(
             limits.min_tip_root_chord_ratio,
             limits.max_tip_root_chord_ratio,
             "-",
-            policy,
+            role,
         ));
         if limits.require_monotonic_planform_break {
             // The raw residual is the larger of the two orderings' misses, in
@@ -265,7 +250,7 @@ fn plausibility_residuals(
                 dv.root_chord_m,
                 "m",
                 below_tip.max(above_root),
-                policy,
+                role,
             ));
         }
     }
@@ -279,12 +264,20 @@ fn plausibility_residuals(
     // a +4 degree root as wash-in when it is three degrees of washout. The
     // trim phase rotates every section of the surface by the same incidence,
     // so the difference taken here is unchanged by it.
-    if let Some(washout_deg) = tip_washout_deg(plane) {
+    //
+    // The root-to-tip difference alone cannot see an outboard panel that
+    // turns to wash-in while the wing as a whole is still washed out, so the
+    // worst tip-ward twist increase over any pair of sections is bounded too:
+    // the break must not be set above the root, nor the tip above the break.
+    if let (Some(washout_deg), Some(washin_rise_deg)) =
+        (tip_washout_deg(plane), max_washin_rise_deg(plane))
+    {
         residuals.extend(twist_window_residuals(
             washout_deg,
+            washin_rise_deg,
             limits.min_tip_washout_deg,
             limits.max_tip_washout_deg,
-            policy,
+            role,
         ));
     }
 
@@ -298,7 +291,7 @@ fn plausibility_residuals(
             limits.min_root_thickness_ratio,
             limits.max_root_thickness_ratio,
             "-",
-            policy,
+            role,
         ));
     }
 
@@ -345,7 +338,7 @@ fn fuselage_fineness(plane: &Airplane) -> Option<f64> {
 fn cargo_target_residuals(
     carried_kg: f64,
     target_kg: f64,
-    policy: ConstraintPolicy,
+    role: ResidualRole,
 ) -> Vec<ConstraintResidual> {
     if !(target_kg.is_finite() && target_kg > 0.0) || !carried_kg.is_finite() {
         return Vec::new();
@@ -360,7 +353,7 @@ fn cargo_target_residuals(
             target_kg,
             "kg",
             shortfall,
-            policy,
+            role,
         ),
         ConstraintResidual::scaled(
             "cargo_target_excess",
@@ -369,24 +362,9 @@ fn cargo_target_residuals(
             target_kg,
             "kg",
             excess,
-            policy,
+            role,
         ),
     ]
-}
-
-/// Geometric twist of the main wing's tip section relative to its root,
-/// degrees, negative for washout.
-///
-/// Read from the built sections. `WingXSec::twist` is mutated in place by the
-/// trim phase, which applies one incidence to the whole surface, so the
-/// difference taken here is the geometric twist distribution and not the
-/// trimmed attitude.
-fn tip_washout_deg(plane: &Airplane) -> Option<f64> {
-    let wing = plane.wings.first()?;
-    let root = wing.xsecs.first()?;
-    let tip = wing.xsecs.last()?;
-    let washout = tip.twist - root.twist;
-    washout.is_finite().then_some(washout)
 }
 
 /// Degrees of twist that count as one unit of violation.
@@ -405,20 +383,46 @@ const TWIST_VIOLATION_SCALE_DEG: f64 = 1.0;
 /// ulp the wrong way would reject the reference aircraft.
 const TWIST_NUMERICAL_SLACK_DEG: f64 = 1.0e-5;
 
-/// The two-sided washout residual, scaled in degrees.
+/// The smallest washout every spanwise run must carry, degrees, negative for
+/// washout: zero, so no outboard section may sit at a higher incidence than
+/// an inboard one.
+///
+/// No sourced minimum washout exists: transport wings carry a few degrees of
+/// geometric washout, but that describes practice, not a requirement a design
+/// fails by missing, and no primary source states a minimum. The constraint is
+/// therefore monotonicity and nothing stronger (an engineering choice, not a
+/// certification limit).
+const MIN_PANEL_WASHOUT_DEG: f64 = 0.0;
+
+/// The washout residuals, scaled in degrees: the two-sided root-to-tip
+/// window and the one-sided panel check on the worst wash-in rise.
 ///
 /// `ConstraintResidual::scaled` divides by the magnitude of the limit, which
 /// is zero on the upper bound of this window, so the normalization is stated
 /// explicitly here instead.
 fn twist_window_residuals(
     washout_deg: f64,
+    washin_rise_deg: f64,
     minimum_deg: f64,
     maximum_deg: f64,
-    policy: ConstraintPolicy,
+    role: ResidualRole,
 ) -> Vec<ConstraintResidual> {
     let over = washout_deg - maximum_deg;
     let under = minimum_deg - washout_deg;
+    // Twist is nose-up positive, so a required washout is a negative bound
+    // on the outboard rise: `rise <= MIN_PANEL_WASHOUT_DEG`.
+    let rise_over = washin_rise_deg - MIN_PANEL_WASHOUT_DEG;
     vec![
+        ConstraintResidual::direct(
+            "panel_washout_max",
+            Geometry,
+            washin_rise_deg,
+            MIN_PANEL_WASHOUT_DEG,
+            "deg",
+            rise_over,
+            ((rise_over - TWIST_NUMERICAL_SLACK_DEG) / TWIST_VIOLATION_SCALE_DEG).max(0.0),
+            role,
+        ),
         ConstraintResidual::direct(
             "tip_washout_max",
             Geometry,
@@ -427,7 +431,7 @@ fn twist_window_residuals(
             "deg",
             over,
             ((over - TWIST_NUMERICAL_SLACK_DEG) / TWIST_VIOLATION_SCALE_DEG).max(0.0),
-            policy,
+            role,
         ),
         ConstraintResidual::direct(
             "tip_washout_min",
@@ -437,7 +441,7 @@ fn twist_window_residuals(
             "deg",
             under,
             ((under - TWIST_NUMERICAL_SLACK_DEG) / TWIST_VIOLATION_SCALE_DEG).max(0.0),
-            policy,
+            role,
         ),
     ]
 }
@@ -462,7 +466,7 @@ fn window_residuals(
     minimum: f64,
     maximum: f64,
     unit: &'static str,
-    policy: ConstraintPolicy,
+    role: ResidualRole,
 ) -> Vec<ConstraintResidual> {
     if !value.is_finite() {
         // A non-finite geometric quantity is a failed build, which the
@@ -479,7 +483,7 @@ fn window_residuals(
             maximum,
             unit,
             value - maximum,
-            policy,
+            role,
         ),
         ConstraintResidual::scaled(
             min_id,
@@ -488,7 +492,7 @@ fn window_residuals(
             minimum,
             unit,
             minimum - value,
-            policy,
+            role,
         ),
     ]
 }
@@ -516,7 +520,7 @@ fn body_alpha_window_residual(
     actual_deg: f64,
     min_deg: f64,
     max_deg: f64,
-    policy: ConstraintPolicy,
+    role: ResidualRole,
 ) -> ConstraintResidual {
     let (limit_deg, raw_residual) = if actual_deg < min_deg {
         (min_deg, min_deg - actual_deg)
@@ -541,32 +545,9 @@ fn body_alpha_window_residual(
         limit_deg,
         "deg",
         raw_residual,
-        policy,
+        role,
     )
 }
 
-/// A two-sided window residual: violated below `min_coef` or above
-/// `max_coef`, and otherwise reported against whichever bound is nearer with
-/// a negative (compliant) raw residual.
-fn tail_volume_residual(
-    id: &'static str,
-    value: f64,
-    min_coef: f64,
-    max_coef: f64,
-    policy: ConstraintPolicy,
-) -> ConstraintResidual {
-    let (limit, raw_residual) = if value < min_coef {
-        (min_coef, min_coef - value)
-    } else if value > max_coef {
-        (max_coef, value - max_coef)
-    } else {
-        let slack_to_min = value - min_coef;
-        let slack_to_max = max_coef - value;
-        if slack_to_min < slack_to_max {
-            (min_coef, -slack_to_min)
-        } else {
-            (max_coef, -slack_to_max)
-        }
-    };
-    ConstraintResidual::scaled(id, Geometry, value, limit, "-", raw_residual, policy)
-}
+#[cfg(test)]
+mod tests;

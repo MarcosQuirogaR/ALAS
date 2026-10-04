@@ -47,7 +47,7 @@ pub(crate) fn mission_range_m(
 }
 
 /// Resolve a design range from an explicit still-air range or two airport
-/// coordinates.  This is kept separate from the legacy curated-airport
+/// coordinates.  This is kept separate from the curated-airport
 /// helper so an imported record may provide route geometry without being
 /// promoted to a declared takeoff/landing performance distance.
 pub(crate) fn mission_range_from_coordinates(

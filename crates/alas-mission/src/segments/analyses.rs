@@ -7,9 +7,10 @@
 // mission analysis model.Analyses.Atmospheric.US_Standard_1976 and mission analysis model.Analyses.Planets.Planet.
 // Upstream: mission analysis model 2.5.2, LGPL-2.1 (relicensed under GPL-2.0-or-later per
 // LGPL-2.1 section 3; compatible with this program's AGPL-3.0-or-later).
-// Reference: alas @ rust-port-baseline.
 
 //! The analysis stack a mission segment evaluates against.
+//! Product missions receive the sizing pipeline's candidate drag table.
+//! The vehicle-based Fidelity_Zero buildup below is frozen parity only.
 //!
 //! `base_analysis` attaches six analyses to every configuration: weights,
 //! aerodynamics, stability, energy, a planet and an atmosphere. Four of them
@@ -19,16 +20,15 @@
 //! force or any exported column reads, and the weights analysis is reached
 //! for exactly one number, the takeoff mass the first segment starts at.
 //!
-//! # Why the vehicle arrives as data
+//! # Frozen parity vehicle inputs
 //!
-//! Every field here is read off the *built* mission analysis model vehicle after
+//! Frozen parity fields come from the *built* mission analysis model vehicle after
 //! `simple_sizing` and `finalize` have run, and the fixture records it. There
 //! is no port of `vehicle_builder.py`: it is the reference's own external
 //! runner rather than a module of the program under translation, and
 //! reproducing it would put an untranslated, unchecked geometry assembly
 //! underneath every mission number. This is the arrangement
-//! `alas-mass::transport_weight`, `alas-aero::drag_buildup` and
-//! `alas-aero::vorlax` already use, for the reason `drag_buildup`'s row
+//! `alas-aero::drag_buildup` and `alas-aero::vorlax` already use, for the reason `drag_buildup`'s row
 //! records at length: a parity test must be handed the inputs the reference
 //! used rather than re-derive them through a second model.
 //!
@@ -43,20 +43,19 @@ use alas_aero::drag_buildup::{
     NacelleParams, WingParams,
 };
 use alas_aero::lift_surrogate::{
-    aircraft_lift_coefficient, LiftSolution, LiftSurrogate, SurrogateDomainError,
-    SurrogateDomainStatus,
+    aircraft_lift_coefficient, LiftSolution, LiftSurrogate, SurrogateDomainStatus,
 };
-use alas_atmo::{us1976_compute_values, us1976_try_compute_values, Us1976Error, Us1976Values};
+use alas_atmo::{us1976_compute_values, Us1976Values};
 use alas_prop::mission_turbofan::{
     evaluate_thrust, freestream_from_atmosphere, ThrustOutput, TurbofanInputs, VehicleBuilderParams,
 };
 use alas_prop::system::{
     FailureState, OperatingMode, PropulsionDemand, PropulsionError, PropulsionLoads,
-    PropulsionOrchestrator, PropulsionRating, PropulsionRequest, PropulsionResult, PropulsionState,
-    ResourceKind, TechnologyTrace,
+    PropulsionOrchestrator, PropulsionRequest, PropulsionResult, PropulsionState, ResourceKind,
+    TechnologyTrace,
 };
 
-use crate::operating::ThrustRating;
+use super::drag::MissionDragSource;
 
 /// The name every propulsion technology gives the active limit it raises when
 /// a normalized-force command would deliver less than flight-idle thrust.
@@ -77,7 +76,8 @@ pub struct AeroSolution {
     pub drag: DragBreakdown,
     /// Each wing's lift coefficient, in the vehicle's wing order.
     pub wing_lift_coefficient: Vec<f64>,
-    /// Each wing's inviscid induced drag coefficient, likewise.
+    /// Each wing's inviscid induced drag coefficient for frozen parity only.
+    /// Empty for shared candidate drag, which includes whole-aircraft trim.
     pub wing_induced_drag_coefficient: Vec<f64>,
     /// Whether the surrogate query was inside its trained rectangle.
     ///
@@ -115,12 +115,8 @@ pub struct MissionAnalyses {
     /// `settings.fuselage_lift_correction`, the 1.14 the wings-only lift is
     /// multiplied by.
     pub fuselage_lift_correction: f64,
-    /// Scale applied to per-wing VLM lift and induced-drag coefficients before
-    /// the drag buildup. The product currently leaves this at `1.0`: the
-    /// SUAVE Fidelity-Zero fuselage correction belongs to the aircraft lift
-    /// balance, and must not be squared into VLM induced drag without a
-    /// separately calibrated load model. Frozen compatibility also sets this
-    /// to `1.0`.
+    /// Frozen parity scale applied to per-wing lift and induced drag.
+    /// Ignored by the shared candidate drag source.
     pub induced_drag_lift_correction: f64,
     /// Whether the product solver uses the signed longitudinal force residual
     /// for cruise. The frozen compatibility path retains SUAVE's historical
@@ -134,18 +130,18 @@ pub struct MissionAnalyses {
     /// the reference solver's converged flag even where its historical engine
     /// sizing produces throttle above one.
     pub enforce_throttle_envelope: bool,
-    /// The drag chain's settings.
+    /// The authoritative candidate drag source, or an explicit parity fixture.
+    pub drag_source: MissionDragSource,
+    /// Frozen SUAVE-parity drag settings; ignored by shared candidate drag.
     pub drag_settings: DragSettings,
-    /// The wings. The two lift fields of each are placeholders: they are
-    /// overwritten from the surrogate at every evaluation, because that is
-    /// where `induced_drag_aircraft` and `compressibility_drag_wing` read
-    /// them from upstream.
+    /// Frozen parity wings; surrogate lift and induced drag replace the two
+    /// placeholders before each parity-only buildup evaluation.
     pub wings: Vec<WingParams>,
-    /// The fuselages.
+    /// Frozen parity fuselages.
     pub fuselages: Vec<FuselageParams>,
-    /// The nacelles.
+    /// Frozen parity nacelles.
     pub nacelles: Vec<NacelleParams>,
-    /// How many propulsion networks the vehicle carries.
+    /// Frozen parity propulsion-network count for the drag buildup.
     pub network_count: usize,
     /// The trained vortex-lattice surrogate.
     pub surrogate: LiftSurrogate,
@@ -160,32 +156,15 @@ pub struct MissionAnalyses {
 }
 
 impl MissionAnalyses {
-    /// Whether named ratings still need the historical scalar schedule.
-    pub(crate) fn uses_legacy_propulsion_schedule(&self) -> bool {
-        self.legacy_turbofan.is_some()
-    }
-
     /// `US_Standard_1976.compute_values` at one altitude.
     pub fn atmosphere(&self, altitude_m: f64, temperature_deviation_k: f64) -> Us1976Values {
         us1976_compute_values(altitude_m, temperature_deviation_k)
     }
 
-    /// Checked US1976 atmosphere for callers that cannot accept the legacy
-    /// edge-clamping behavior of [`Self::atmosphere`].
-    pub fn atmosphere_checked(
-        &self,
-        altitude_m: f64,
-        temperature_deviation_k: f64,
-    ) -> Result<Us1976Values, Us1976Error> {
-        us1976_try_compute_values(altitude_m, temperature_deviation_k)
-    }
-
-    /// `Fidelity_Zero`'s whole `compute` chain at one flight condition.
+    /// Lift and the supplied candidate drag at one flight condition.
     ///
-    /// Lift first, because the drag chain reads it. Aircraft lift and induced
-    /// drag use separate policy inputs: frozen SUAVE evidence corrects the
-    /// aircraft lift but consumes VLM induced drag unchanged, while product
-    /// callers can opt into a corrected induced load.
+    /// The shared drag source reads the aircraft lift coefficient. Only the
+    /// explicitly selected frozen SUAVE-parity source reads surrogate drag.
     pub fn aerodynamics(
         &self,
         angle_of_attack_rad: f64,
@@ -197,19 +176,6 @@ impl MissionAnalyses {
         self.aerodynamics_from_lift(lift, mach, temperature_k, reynolds_number_per_m)
     }
 
-    /// Checked variant of [`Self::aerodynamics`] that refuses to use the
-    /// surrogate's edge-clamped value outside its trained rectangle.
-    pub fn aerodynamics_checked(
-        &self,
-        angle_of_attack_rad: f64,
-        mach: f64,
-        temperature_k: f64,
-        reynolds_number_per_m: f64,
-    ) -> Result<AeroSolution, SurrogateDomainError> {
-        let lift = self.surrogate.evaluate_checked(angle_of_attack_rad, mach)?;
-        Ok(self.aerodynamics_from_lift(lift, mach, temperature_k, reynolds_number_per_m))
-    }
-
     fn aerodynamics_from_lift(
         &self,
         lift: LiftSolution,
@@ -217,6 +183,22 @@ impl MissionAnalyses {
         temperature_k: f64,
         reynolds_number_per_m: f64,
     ) -> AeroSolution {
+        let lift_coefficient = aircraft_lift_coefficient(
+            lift.inviscid_lift_coefficient,
+            self.fuselage_lift_correction,
+        );
+        if let MissionDragSource::SharedCandidate(model) = &self.drag_source {
+            return AeroSolution {
+                lift_coefficient,
+                drag: model
+                    .coefficients(lift_coefficient, mach, reynolds_number_per_m)
+                    .breakdown(),
+                wing_lift_coefficient: lift.wing_lift_coefficient,
+                wing_induced_drag_coefficient: Vec::new(),
+                surrogate_domain: lift.domain,
+            };
+        }
+        // The following Fidelity_Zero buildup is frozen SUAVE parity only.
         let lift_scale = self.fuselage_lift_correction;
         let drag_lift_scale = self.induced_drag_lift_correction;
         let induced_drag_scale = drag_lift_scale * drag_lift_scale;
@@ -375,50 +357,6 @@ impl MissionAnalyses {
                 rejected_thrust_output()
             });
         (output, idle_floor_limited)
-    }
-
-    /// Evaluate a phase rating through the technology-neutral model.
-    ///
-    /// Legacy turbofans have no named schedules, so their established rating
-    /// fraction is supplied explicitly by the mission configuration. Typed
-    /// technologies receive the named rating without reinterpretation.
-    #[allow(clippy::too_many_arguments)] // mirrors the existing mission thrust boundary plus rating
-    pub fn thrust_for_rating(
-        &self,
-        atmosphere: &Us1976Values,
-        altitude_m: f64,
-        velocity_m_s: f64,
-        mach: f64,
-        gravity_m_s2: f64,
-        rating: ThrustRating,
-        legacy_rating_fraction: f64,
-    ) -> Result<ThrustOutput, PropulsionError> {
-        let freestream =
-            freestream_from_atmosphere(atmosphere, altitude_m, velocity_m_s, mach, gravity_m_s2);
-        let demand = if self.uses_legacy_propulsion_schedule() {
-            PropulsionDemand::NormalizedForce(legacy_rating_fraction)
-        } else {
-            PropulsionDemand::RatedFraction {
-                rating: match rating {
-                    ThrustRating::TakeoffGoAround => PropulsionRating::TakeoffGoAround,
-                    ThrustRating::MaximumClimb => PropulsionRating::MaximumClimb,
-                    ThrustRating::MaximumContinuous => PropulsionRating::MaximumContinuous,
-                    ThrustRating::FlightIdle => PropulsionRating::FlightIdle,
-                    ThrustRating::Cruise => PropulsionRating::Cruise,
-                },
-                fraction: legacy_rating_fraction,
-            }
-        };
-        let result = self.propulsion.evaluate(&PropulsionRequest {
-            flight: (&freestream).into(),
-            demand,
-            mode: OperatingMode::Normal,
-            failure: FailureState::None,
-            loads: PropulsionLoads::default(),
-            state: PropulsionState::default(),
-            time_step_s: None,
-        })?;
-        self.project_propulsion_result(result, velocity_m_s, gravity_m_s2)
     }
 
     fn project_propulsion_result(

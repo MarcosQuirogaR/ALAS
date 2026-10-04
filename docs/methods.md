@@ -103,7 +103,11 @@ own, each published cell becomes a per-cell factor between its published
 volume and the geometric estimate on the preset's geometry, applied to the
 candidate's own spar box (`FuelTankLayout::resolve_scaled`), so the optimizer
 sees fuel volume grow and shrink with the wing. Fuel is loaded in the reverse of the
-burn order and burned centre first, outer wing last; unusable fuel (CS
+burn order and burned centre first, outer wing last. A trim tank is a CG
+control tank: it is filled after every other tank and emptied first,
+standing for the forward transfer that empties it before landing on the
+A330, A340 and A380 (`alas-mass::tanks::order`; secondary source, the
+in-flight transfer path is not modelled); unusable fuel (CS
 25.959) is part of the empty mass and expansion space (CS 25.969, at least
 two percent) is excluded from the usable volume.
 
@@ -137,10 +141,8 @@ the takeoff-mass limit and by the usable tanks less the taxi fuel; the
 shortfall beyond either bound is a reported finding, and the mission is
 flown at the admissible mass.
 
-Every product search minimises a mission quantity; the frozen weighted
-lift-to-drag objective of the Python reference is replayed only by the
-parity fixtures and is not selectable. The mission-sized objective
-(`optimizer.objective`) ranks candidates feasibility first: a candidate that violates a hard requirement family
+The search minimises a mission quantity through `optimizer.objective` and ranks
+candidates feasibility first: a candidate that violates a hard requirement family
 costs more than any feasible one and infeasible candidates order by their
 normalised violation; soft families rank behind feasibility and ahead of the
 objective; diagnostic families are reported only. Tail-volume windows are
@@ -220,6 +222,18 @@ does not renormalise when the stations stop short of the tip. This is
 implementation verification against the published equations as FLOPS
 evaluates them, not physical validation against weighed aircraft.
 
+## The optimizer
+
+The one method is `optimizer.solver.method = differential_evolution`. A saved
+file that names a retired method (`scipy_legacy` included) loads as this one,
+with a load note.
+
+Set `optimizer.solver.method = differential_evolution` to select the current
+mission-sized profile. Its evaluation chain and optimizer are described
+below: mission sizing, explicit requirement policies, a screening stage, a
+diverse elite, the refinement kernel under epsilon constraints, and bounded
+feasibility restoration.
+
 # Multidisciplinary sizing loop and the L-SHADE epsilon-constrained driver
 
 `alas-opt::mdo::mda` closes each candidate as a converged multidisciplinary
@@ -251,34 +265,48 @@ penalty; and `cost` assembles that table into the scalar the search
 minimises, ranking feasibility ahead of the objective value. Every candidate
 the search ranks, including the reported winner, went through this whole
 chain; nothing downstream of `build` is skipped or approximated for a
-"cheap" evaluation inside the search (the reduced-fidelity Stage A screening
-described below is explicitly excluded from ever becoming the winner).
+"cheap" evaluation inside the search. The screening stage evaluates through
+a declared `ScreeningFidelity`, which today is the full model; a cheaper
+descriptor must first rank candidates like the full model in the
+`screening_rank_correlation` experiment, and a screening score only ever
+chooses where the refinement starts.
 
-`optimizer.solver.method = differential_evolution` is the only search this
-build runs, over the design vector, with every candidate a converged
-aircraft from the chain above: **L-SHADE differential evolution under the
-epsilon-constrained method** (`alas-opt::search_methods::lshade_de`).
+Under the mission-sized `differential_evolution` profile, every candidate is
+a converged aircraft from the chain above: **current-to-pbest/1/bin
+differential evolution under the epsilon-constrained method**
+(`alas-opt::search_methods::lshade_de`), with static `F = 0.5`, `CR = 0.9`
+(R. Tanabe and A. S. Fukunaga, "Reviewing and Benchmarking Parameter Control
+Methods in Differential Evolution," IEEE Trans. Cybern. 50(3), 2020, DOI
+10.1109/TCYB.2019.2892735: static beats adaptation within 800 D evaluations)
+and L-SHADE success-history adaptation as a switch.
 
 - **L-SHADE**: R. Tanabe and A. S. Fukunaga, "Improving the Search
   Performance of SHADE Using Linear Population Size Reduction," IEEE
   Congress on Evolutionary Computation (CEC) 2014, DOI
   10.1109/CEC.2014.6900380. Success-history parameter adaptation for the
-  mutation factor `F` and crossover rate `CR` (weighted Lehmer/arithmetic
-  means into a circular memory), `current-to-pbest/1` mutation with an
+  mutation factor `F` and crossover rate `CR` (weighted Lehmer means into a
+  circular memory; off by default), `current-to-pbest/1` mutation with an
   external archive (J. Zhang and A. C. Sanderson, "JADE: Adaptive
   Differential Evolution With Optional External Archive," IEEE Trans. Evol.
   Comput. 13(5), 2009, DOI 10.1109/TEVC.2009.2014613), and linear population
-  size reduction from an initial population (`population_size` times the
-  sixteen design variables) down to a small floor as the generation budget
-  (`max_iterations`) is spent.
+  size reduction in evaluations from `clamp(B / 10, 24, 6 D)` for refinement
+  budget `B` down to eight; with adaptation on, both memories take the
+  weighted Lehmer mean and the crossover rate has its terminal value.
 - **Epsilon-constrained method**: T. Takahama and S. Sakai, "Constrained
   Optimization by the epsilon Constrained Differential Evolution with
   Gradient-Based Mutation and Feasible Elites," CEC 2006, DOI
   10.1109/CEC.2006.1688283, and "...with an Archive and Gradient-Based
-  Mutation," CEC 2010, DOI 10.1109/CEC.2010.5586484. Two candidates within a
-  shrinking `epsilon` of feasible are ranked by objective alone, otherwise
-  the less-violating one wins; `epsilon` decays to exactly zero at a fifth of
-  the generation budget, after which the comparison is exactly Deb's
+  Mutation," CEC 2010, DOI 10.1109/CEC.2010.5586484. Two closed-infeasible
+  candidates within a shrinking `epsilon` are ranked by objective alone,
+  otherwise the less-violating one wins. Two engineering deviations from the
+  paper: a strictly feasible candidate always ranks ahead of an
+  epsilon-feasible one, and `epsilon(0)` is the 0.2 quantile of the
+  closed-infeasible initial violations only (not-closed and pre-gated
+  candidates carry barrier values, not physical misses). With adaptation on,
+  the memory weights are each parent's relative improvement, a tier change
+  counting as one, where L-SHADE uses the absolute objective change.
+  `epsilon` decays to exactly zero at a fifth of
+  the evaluation budget, after which the comparison is exactly Deb's
   feasibility rule (K. Deb, CMAME 186(2-4), 2000). This lets the search
   explore past a locally-blocking hard limit early on without ever reporting
   a candidate that violates one: `Outcome::winner` is tracked as the
@@ -288,21 +316,182 @@ epsilon-constrained method** (`alas-opt::search_methods::lshade_de`).
 - **Bound handling**: midpoint-to-parent repair - a mutant component that
   leaves its bound is placed halfway between the bound it crossed and the
   parent's own value there, rather than reflected or clamped to the bound.
-- **Convergence**: the population's normalised design-space spread and the
-  best feasible cost's relative improvement both have to fall below
-  `tolerance` for `convergence_stagnation_generations` consecutive
-  generations, and only once a feasible design has been found; a run
-  reports exactly one of `converged`, `iteration_limit` or `cancelled`.
+- **Termination**: with a feasible best whose relative improvement stays
+  below 1e-4 for `convergence_stagnation_generations` generations, the run
+  stops as `converged` when the normalised spread is below `tolerance` and
+  as `stagnated` otherwise; else it stops on `evaluation_budget`,
+  `time_budget` (checked at generation boundaries, the first right after
+  the initial population) or `cancelled`.
 - **Determinism**: one generation's trial vectors are built in fixed index
-  order from the seeded stream, then evaluated as a single batch; the
-  worker count changes only how that batch is spread across threads, never
-  which points are evaluated or the winner, so a seeded run replays
-  bit-identically at any `optimizer.solver.workers`.
+  order from the seeded stream, then evaluated as a single batch whose
+  scores return in index order, so a seeded run that stops on its
+  evaluation budgets replays bit-identically at any
+  `optimizer.solver.workers`. Time-limited: the stopping point depends on
+  machine speed and worker count; replay with the recorded evaluation counts
+  (`replay_evaluations` per stage) for a bit-identical result at any worker
+  count, or set `stop_on_evaluations_only`.
 
-A low-resolution Stage A scan seeds the population's first individual (see
-`alas-opt::search::staged`); it never selects the winner, since the search
-still decides it from the seed by the rule above. The frozen weighted
-lift-to-drag objective of the Python reference, and the SciPy-parity DE loop
-that replays it, remain reachable only through
-`DesignOptimizer::new_reference_compatibility` for the parity fixtures; no
-product or GUI path constructs it.
+A screening stage evaluates seeded Latin-hypercube batches of the design box
+plus the baseline with the full in-loop model; a diverse elite of it, its
+best point and the baseline seed the refinement's initial population
+(`alas-opt::search::screening` and `::elite`). It never selects the winner
+directly: every screened point the refinement keeps is scored again under
+the refinement's rule, as an exact cache hit when the models agree.
+
+# Passenger cabin: exits, door stations and monuments
+
+Implemented in `alas-payload::cabin`. Frame: x in metres aft of the nose tip.
+
+- **Exit ceiling.** A registered aircraft declares its exit pairs by CS 25.807
+  type letter only (`alas_config::CertifiedExitLayout`). The seat ceiling is
+  the sum of the CS 25.807(g) pair ratings of those letters (Type A 110,
+  B 75, C 55, I 45, II 40, III 35, IV 9); a source maximum (`certified_max_seats`)
+  and, in a fixed-aircraft basis, the planning seats bound it further. A body
+  without a declared arrangement keeps the generic diameter and pair-spacing
+  proxy.
+- **Door stations.** Where the source prints door stations with the body
+  length they are measured on, the main deck runs from one monument bay ahead
+  of the first door's cross-aisle to one behind the last, and no seat row may
+  overlap a door cross-aisle (the door's CS 25.807(a) opening width). On a body
+  of another length, the first door keeps its nose distance, the last its tail
+  distance, and the doors between are spaced in proportion; an inconsistent
+  mapping falls back to the generic frame. Sources: Boeing 787 ACAP
+  D6-58333 Rev Q section 2.7.1 (787-9), Boeing 777X ACAP D6-86073 Rev G
+  Table 2-3 (777-9, flown on AVE).
+- **Monuments.** On a declared cabin, galleys and lavatories (counts from the
+  provisioning ratios, one lavatory per 45 and one galley per 100 passengers
+  plus one, unless configured) stand side by side across bays that leave the
+  aisles open. The bays at both ends and at each class boundary come with the
+  cabin; further bays are charged at the intermediate doors. A bay is
+  0.813 m long, the 32 in lavatory of D6-86073 Rev G Figure 2-4, which also
+  covers a galley stowing a 0.81 m full-size ATLAS trolley (secondary source).
+  No service length is reserved beyond these bays; the calibrated
+  `service_reserve_len` remains only on a cabin whose doors are unknown.
+- **Main-deck baggage.** A fuselage whose lower deck has less than 0.9 m of
+  clear height mid-cabin stows its baggage on the main deck, so its seats keep
+  their declared pitch and the floor they leave becomes the forward and aft
+  compartments, instead of the pitch being stretched over it.
+
+These are geometric screens, not an evacuation demonstration (CS 25.803) or an
+approved LOPA.
+
+# Propulsion-specific field performance
+
+`performance.legacy_field_correlations = false` selects the corrected field
+method. Jet takeoff retains Raymer's FAR-25 TOP correlation (5th edition,
+section 5.4, Fig. 5.4): 37.7 TOP in ft with wing loading in psf. It already
+estimates field length; its BFL proxy receives no additional 1.15 multiplier.
+[CS/FAR 25.113](https://www.govinfo.gov/content/pkg/CFR-2025-title14-vol1/pdf/CFR-2025-title14-vol1-sec25-113.pdf)
+applies 1.15 to an all-engine takeoff-distance candidate, compared with the
+engine-out distance. It does not multiply a balanced field length by 1.15.
+The historical low-level APIs and the explicit replay selection preserve the
+translated correlation, speed schedule and BFL multiplier for parity.
+
+Propeller distances use Torenbeek, *Synthesis of Subsonic Airplane Design*
+(1982), sections 5.4.5-5.4.6, pp. 167-170, equations 5-73/74, 5-89 and
+5-93/94, with Appendix K defining the separate takeoff phases. The ground
+balance is integrated with installed thrust evaluated at each true airspeed
+and the actual ambient density. The active engine model supplies normal AEO
+power and the declared reserve rating after one engine fails. Clean field drag
+comes from the shared candidate model, with the existing high-lift increment
+added; gear drag is omitted. A positive linear lift term is bounded over the
+field lift range. Unconfigured failed-engine and asymmetric drag are explicit
+zero assumptions, rather than aircraft-specific evidence.
+
+The BFL approximation uses the energy-equivalent acceleration over 0..V2 in
+place of the source's mean over 0..V1, plus its 200/sqrt(sigma) inertia
+allowance and 0.37 g stopping deceleration. The OEI gradient at V2 substitutes
+for the source's equivalent gradient over phases 1..2. The required takeoff
+field is the
+larger of this approximation and 1.15 times the AEO screen-distance estimate.
+Rotation is instantaneous in that AEO estimate. This extension retains
+propeller thrust lapse but does not solve critical V1 or independently certify
+accelerate-stop performance. Single-engine aircraft and nonpositive OEI climb
+gradients are outside this BFL method's domain and report an error.
+
+Propeller actual landing distance is the air-phase energy distance from 50 ft
+plus the touchdown kinetic-energy braking distance. The sourced conceptual
+inputs are mean excess drag/weight 0.10 and mean deceleration 0.40 g (within
+Torenbeek's 0.35-0.45 g turboprop range without reverse). Mean deceleration
+already includes inertia; no second braking delay is added. The field schedule
+uses Vref = 1.23 VS1g under [25.125](https://www.govinfo.gov/content/pkg/CFR-2025-title14-vol1/pdf/CFR-2025-title14-vol1-sec25-125.pdf),
+taking the certified reference stall speed equal to the modeled one-g stall
+speed. Published preset speeds recover effective gross-area CLmax inputs,
+with mass variants, IAS/CAS assumptions and chart-read uncertainties recorded
+in `alas-config::presets::PublishedLandingReference`. Reconstructing those
+speeds verifies the inputs; it is not independent speed validation.
+
+The ATR factsheet additionally supplies V2 min = 116 KCAS at MTOW. Its
+registered takeoff coefficient is model-equivalent under the retained
+V2/VS1g = 1.20 convention, with the 23,000 kg option selected explicitly;
+the family-wide speed line does not identify which MTOW option applies.
+Neither this inversion nor the existing preliminary V2/VMC schedule establishes
+measured takeoff CLmax or certification compliance. The source speed is an
+input independent of the published distance, rather than a distance fit.
+
+Actual landing distance and airport dispatch field length are separate.
+[CAT.POL.A.230(a)](https://www.easa.europa.eu/en/document-library/easy-access-rules/online-publications/easy-access-rules-air-operations?erules-id=ERULES-1963177438-18821)
+uses 60% of LDA for turbojets and 70% for turboprops. The latter is configurable
+through `propeller_dry_landing_distance_share`; select 0.60 for the general
+[FAR 121.195(b)](https://www.ecfr.gov/current/title-14/chapter-I/subchapter-G/part-121/subpart-I/section-121.195)
+turbine-aircraft convention. Corrected feasibility and runway figures compare
+the factored dispatch distance with LDA. The legacy feasibility boundary uses
+actual distance for reproducibility.
+
+The full CADO comparison is reproducible with `tools/field_fleet_before.ps1`,
+`cargo run -p alas-pipeline --profile test --example field_fleet_check`, and
+`tools/field_fleet_compare.ps1`. All 288 rows are inspected, with supported
+metric cohorts and exclusions retained. CADO field lengths and speeds are
+comparison targets, never coefficient-fitting inputs. Aircraft lacking an
+installed model use a declared ideal actuator-disk thrust envelope based on
+CADO shaft rating and rotor diameter, with 0.85 effective-power sensitivity.
+The published preset audit uses the actual installed propulsion model. Neither
+comparison establishes certificated performance.
+
+# Take-off rotation forward-CG limit
+
+`alas-opt::envelope::rotation` places the most-forward centre of gravity at
+which the nose wheel can still be lifted at V_R, from the moment balance about
+the main-gear contact P (Sadraey, *Aircraft Design: A Systems Engineering
+Approach*, Wiley 2012, sec. 9.6.2, eqs. 9.36-9.54a):
+
+```text
+I_P th'' = L_wf (x_P - x_ac) + M_ac + L_h (x_P - x_h) - W (x_P - x_cg)
+           + T (h_cg - h_T) - mu (W - L) h_cg
+I_P      = I_yy,cg + m [(x_P - x_cg)^2 + h_cg^2]          (eq. 9.53)
+```
+
+Heights are above the shared ground plane, x is aft, nose-up is positive.
+Every moment is divided by W = q_R S CL_R (V_R = 1.10 V_S), so with
+d = x_P - x_cg and kappa = th''/g the balance is `kappa d^2 + d - r = 0`,
+r = A - kappa (k_y^2 + h_cg^2), A the non-weight moments over W. The forward
+limit is the larger root, evaluated as `d = 2 r / (1 + sqrt(1 + 4 kappa r))`.
+k_y is the mass ledger's takeoff pitch radius of gyration (Raymer's
+jet-transport 0.38 L/2 without a ledger); th'' is 7 deg/s^2 for every class
+(Torenbeek/Roskam 6-8 deg/s^2 midpoint; Sadraey's Table 9.6 class values could
+not be confirmed from an accessible source). Both are overridable with the
+optional `landing_gear.rotation_pitch_acceleration_deg_s2` and
+`landing_gear.pitch_radius_of_gyration_frac_mac`.
+
+The tail lift at rotation follows sec. 12.6 (eqs. 12.55-12.76),
+`CL_h = a_h (alpha + i_h - epsilon + tau_e delta_e)`, with the fuselage level
+(alpha = 0), the built tail incidence, the DATCOM lift-curve slope of the
+built tail, the wing downwash `2 CL_g / (pi A)` reduced by Wieselsberger's
+ground-effect factor at the wing height, the thin-airfoil effectiveness
+`tau = 1 - (theta_f - sin theta_f)/pi` of the configured elevator chord
+fraction, reduced by the empirical plain-flap large-deflection correction
+(USAF DATCOM sec. 6.1.1.1 / Raymer, 0.60 at 25 deg, intermediate anchors
+not digitised from the figure), times its span fraction, and
+delta_e,max = -25 deg (Sadraey Table 12.3), one class-generic documented
+assumption. The download is limited to the tail section's stall,
+`CL_h,max = 0.9 c_l,max cos(Lambda_c/4)` (Raymer; c_l,max of the symmetric
+NACA tail section from Abbott and von Doenhoff). No take-off stabiliser trim
+beyond the built incidence is credited. Drag is
+omitted; its moment `D (h_D - h_cg)` is bounded by about 1 %MAC.
+
+These are implementation and plausibility checks: the derived CL_h of the
+registered presets is now -0.85 to -0.97 (the thin-airfoil upper bound gave
+-1.22 to -1.42), the section cap does not bind, and the rotation boundaries
+lie forward of the A220 certified (18.4) and A320 ACAP (17) limits (9.2 and
+-3.0 %MAC) but aft of the A340 ACAP 20.3 (28.3 %MAC), a known residual. These
+are checks, not calibration targets, and not a validation of the boundary.

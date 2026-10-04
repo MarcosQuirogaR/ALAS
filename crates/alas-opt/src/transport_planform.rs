@@ -7,8 +7,7 @@
 //! the inboard box carries bending load and fuel, and the trailing edge must
 //! retain room for high-lift devices. These metrics are intentionally simple
 //! geometric guards, not substitutes for detailed structures, fuel-system, or
-//! landing-gear design. The physical rationale and source boundary are in
-//! `docs/PHYSICS_SOLVER_FLOW.md`.
+//! landing-gear design.
 
 use alas_config::{
     AlasConfig, ControlSurfacesConfig, DesignVector, MainWingStation, ObjectiveWeights,
@@ -115,78 +114,26 @@ pub fn assess_product_transport_planform(
     )
 }
 
-/// Cost contribution from a transport-planform assessment and trimmed body angle.
+/// Angle of the built wing's exposed trailing edge, side-of-body to kink, to
+/// the aft fuselage axis, degrees; `None` when the planform does not resolve.
 ///
-/// Returns `None` when the configured limits are not internally consistent or
-/// an input is non-finite, so the objective can reject the candidate loudly.
-pub fn transport_planform_penalty(
-    assessment: TransportPlanformAssessment,
-    geometric_body_alpha_deg: f64,
-    _mtow_fuel_allowance_kg: f64,
-    _fuel_density_kg_m3: f64,
-    _usable_fuel_fraction: f64,
-    weights: &ObjectiveWeights,
-) -> Option<f64> {
-    let mut penalty = angle_bound_penalty(
-        geometric_body_alpha_deg,
-        weights.geometric_body_alpha_min_deg,
-        weights.geometric_body_alpha_max_deg,
-        weights.geometric_body_alpha_penalty_scale,
-    )?;
-
-    if weights.transport_shape_priors_enabled {
-        for (available, required) in [
-            (
-                assessment.root_wingbox_depth_m,
-                weights.min_root_wingbox_depth_m,
-            ),
-            (
-                assessment.kink_wingbox_depth_m,
-                weights.min_break_wingbox_depth_m,
-            ),
-            (
-                assessment.kink_wingbox_width_m,
-                weights.min_break_wingbox_width_m,
-            ),
-        ] {
-            penalty +=
-                deficit_penalty(available, required, weights.wingbox_packaging_penalty_scale)?;
-        }
-
-        penalty += deficit_penalty(
-            assessment.flap_area_fraction,
-            weights.min_flap_area_fraction,
-            weights.flap_area_penalty_scale,
-        )?;
-        penalty += excess_penalty(
-            assessment.root_bending_box_slenderness,
-            weights.max_root_bending_box_slenderness,
-            weights.bending_slenderness_penalty_scale,
-        )?;
-        penalty += angle_bound_penalty(
-            assessment.inboard_trailing_edge_sweep_deg,
-            weights.min_inboard_te_sweep_deg,
-            weights.max_inboard_te_sweep_deg,
-            weights.te_root_angle_penalty_scale,
-        )?;
-        penalty += bounded_penalty(
-            assessment.break_root_chord_ratio,
-            weights.min_break_root_chord_ratio,
-            weights.max_break_root_chord_ratio,
-            weights.taper_realism_penalty_scale,
-        )?;
-        penalty += deficit_penalty(
-            assessment.tip_root_chord_ratio,
-            weights.min_tip_root_chord_ratio,
-            weights.taper_realism_penalty_scale,
-        )?;
-    }
-
-    // Tankable volume remains an assessed packaging metric. It is not scored
-    // against the MTOW closure remainder: that remainder is a mass allowance,
-    // not mission-required fuel. A future mission/reserve constraint supplies
-    // the defensible required usable fuel for a capacity check.
-    Some(penalty)
+/// 90 degrees is an unswept edge; more is an edge running forward. The inboard
+/// end is the side-of-body section when the builder lofts one (a pinned
+/// `side_of_body_chord_ratio`, the only case the built wing has that station)
+/// and the centreline root otherwise, which is then the built inboard station.
+/// It needs only the planform stations, not a built aircraft, so a pre-gate
+/// can call it on a design vector and the wing configuration.
+pub fn exposed_te_angle_deg(wing: &alas_config::WingConfig, design: &DesignVector) -> Option<f64> {
+    let planform = wing.transport_planform(design).ok()?;
+    let inboard = planform
+        .side_of_body
+        .filter(|_| wing.side_of_body_chord_ratio.is_some())
+        .unwrap_or(planform.root);
+    let te_x = |s: &MainWingStation| s.leading_edge_x_m + s.chord_m;
+    let angle = (planform.kink.y_m - inboard.y_m)
+        .atan2(te_x(&planform.kink) - te_x(&inboard))
+        .to_degrees();
+    angle.is_finite().then_some(angle)
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -352,80 +299,6 @@ fn assessment_is_finite(assessment: TransportPlanformAssessment) -> bool {
     .all(f64::is_finite)
 }
 
-fn deficit_penalty(available: f64, required: f64, scale: f64) -> Option<f64> {
-    if !available.is_finite()
-        || !required.is_finite()
-        || !scale.is_finite()
-        || required <= 0.0
-        || scale < 0.0
-    {
-        return None;
-    }
-    let deficit = ((required - available) / required).max(0.0);
-    Some(deficit.powi(2) * scale)
-}
-
-fn excess_penalty(actual: f64, maximum: f64, scale: f64) -> Option<f64> {
-    if !actual.is_finite()
-        || !maximum.is_finite()
-        || !scale.is_finite()
-        || maximum <= 0.0
-        || scale < 0.0
-    {
-        return None;
-    }
-    let excess = ((actual - maximum) / maximum).max(0.0);
-    Some(excess.powi(2) * scale)
-}
-
-fn bounded_penalty(value: f64, minimum: f64, maximum: f64, scale: f64) -> Option<f64> {
-    if !value.is_finite()
-        || !minimum.is_finite()
-        || !maximum.is_finite()
-        || !scale.is_finite()
-        || minimum >= maximum
-        || scale < 0.0
-    {
-        return None;
-    }
-    let exceedance = if value < minimum {
-        (minimum - value) / (maximum - minimum)
-    } else if value > maximum {
-        (value - maximum) / (maximum - minimum)
-    } else {
-        0.0
-    };
-    Some(exceedance.powi(2) * scale)
-}
-
-fn angle_bound_penalty(value: f64, minimum: f64, maximum: f64, scale: f64) -> Option<f64> {
-    if !value.is_finite()
-        || !minimum.is_finite()
-        || !maximum.is_finite()
-        || !scale.is_finite()
-        || minimum >= maximum
-        || scale < 0.0
-    {
-        return None;
-    }
-    let exceedance_deg = if value < minimum {
-        minimum - value
-    } else if value > maximum {
-        value - maximum
-    } else {
-        0.0
-    };
-    if exceedance_deg > 0.0 {
-        // A stated attitude or angular feasibility boundary is not a scalar
-        // preference the aerodynamic reward may buy through. The fixed term
-        // gives feasible candidates priority; the quadratic term still tells
-        // an all-infeasible population which direction approaches feasibility.
-        Some((1.0 + exceedance_deg.powi(2)) * scale)
-    } else {
-        Some(0.0)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -465,86 +338,54 @@ mod tests {
         assert!(assessment.root_bending_box_slenderness > 0.0);
     }
 
-    #[test]
-    fn the_geometric_body_alpha_window_uses_the_raw_trim_angle() {
-        let (assessment, weights) = nominal_assessment();
-        let compliant = transport_planform_penalty(assessment, 3.0, 1.0, 800.0, 0.85, &weights)
-            .expect("a compliant raw body angle is evaluable");
-        let low_attitude = transport_planform_penalty(assessment, 1.0, 1.0, 800.0, 0.85, &weights)
-            .expect("an off-window raw body angle is evaluable");
-
-        assert!(low_attitude > compliant);
+    fn te_angle_of(preset: &str) -> f64 {
+        let registered = alas_config::presets::get(preset).expect("preset");
+        exposed_te_angle_deg(&registered.geometry.wing, &registered.design_vector)
+            .expect("planform resolves")
     }
 
     #[test]
-    fn a_poorly_packaged_wing_accumulates_more_penalty_than_the_nominal_one() {
-        let (nominal, mut weights) = nominal_assessment();
-        weights.transport_shape_priors_enabled = true;
-        let constrained = TransportPlanformAssessment {
-            root_wingbox_depth_m: 0.5 * weights.min_root_wingbox_depth_m,
-            kink_wingbox_depth_m: 0.5 * weights.min_break_wingbox_depth_m,
-            kink_wingbox_width_m: 0.5 * weights.min_break_wingbox_width_m,
-            tankable_wingbox_volume_m3: 0.1,
-            flap_area_fraction: 0.5 * weights.min_flap_area_fraction,
-            root_bending_box_slenderness: 2.0 * weights.max_root_bending_box_slenderness,
-            inboard_trailing_edge_sweep_deg: weights.max_inboard_te_sweep_deg + 10.0,
-            break_root_chord_ratio: 0.5 * weights.min_break_root_chord_ratio,
-            tip_root_chord_ratio: 0.5 * weights.min_tip_root_chord_ratio,
-        };
-        let nominal_penalty = transport_planform_penalty(nominal, 3.0, 1.0, 800.0, 0.85, &weights)
-            .expect("the nominal planform is evaluable");
-        let constrained_penalty =
-            transport_planform_penalty(constrained, 3.0, 10_000.0, 800.0, 0.85, &weights)
-                .expect("the constrained planform is evaluable");
-
-        assert!(constrained_penalty > nominal_penalty);
-    }
-
-    #[test]
-    fn a_forward_exposed_trailing_edge_receives_a_dominant_penalty() {
-        let (mut assessment, mut weights) = nominal_assessment();
-        weights.transport_shape_priors_enabled = true;
-        assessment.inboard_trailing_edge_sweep_deg = -1.0;
-
-        let penalty = transport_planform_penalty(assessment, 3.0, 1.0, 800.0, 0.85, &weights)
-            .expect("the finite assessment is evaluable");
-
-        assert!(penalty >= weights.te_root_angle_penalty_scale);
-    }
-
-    #[test]
-    fn subjective_shape_priors_do_not_condition_the_default_product_search() {
-        let (nominal, weights) = nominal_assessment();
-        let unconventional = TransportPlanformAssessment {
-            root_wingbox_depth_m: 0.5 * weights.min_root_wingbox_depth_m,
-            kink_wingbox_depth_m: 0.5 * weights.min_break_wingbox_depth_m,
-            kink_wingbox_width_m: 0.5 * weights.min_break_wingbox_width_m,
-            flap_area_fraction: 0.5 * weights.min_flap_area_fraction,
-            root_bending_box_slenderness: 2.0 * weights.max_root_bending_box_slenderness,
-            inboard_trailing_edge_sweep_deg: weights.max_inboard_te_sweep_deg + 10.0,
-            break_root_chord_ratio: 0.5 * weights.min_break_root_chord_ratio,
-            tip_root_chord_ratio: 0.5 * weights.min_tip_root_chord_ratio,
-            ..nominal
-        };
-
-        let nominal_penalty = transport_planform_penalty(nominal, 3.0, 0.0, 800.0, 0.85, &weights)
-            .expect("the nominal planform is evaluable");
-        let unconventional_penalty =
-            transport_planform_penalty(unconventional, 3.0, 0.0, 800.0, 0.85, &weights)
-                .expect("the unconventional planform is evaluable");
-
-        assert_eq!(nominal_penalty, unconventional_penalty);
-    }
-
-    #[test]
-    fn mtow_fuel_allowance_does_not_change_the_planform_score() {
-        let (assessment, weights) = nominal_assessment();
-        let low_allowance =
-            transport_planform_penalty(assessment, 3.0, 1_000.0, 800.0, 0.85, &weights)
-                .expect("finite planform");
-        let high_allowance =
-            transport_planform_penalty(assessment, 3.0, 100_000.0, 800.0, 0.85, &weights)
-                .expect("finite planform");
-        assert_eq!(low_allowance, high_allowance);
+    fn the_exposed_edge_angle_is_the_side_of_body_to_kink_geometry_of_the_built_wing() {
+        for name in ["A380-800", "ATR72-600", "A320-200", "B787-9"] {
+            let registered = alas_config::presets::get(name).expect("preset");
+            let plane = AircraftBuilder::new(Some(registered.geometry.clone()))
+                .build(Some(&registered.design_vector), false)
+                .expect("builds");
+            let planform = registered
+                .geometry
+                .wing
+                .transport_planform(&registered.design_vector)
+                .expect("planform");
+            let inboard_y = if registered.geometry.wing.side_of_body_chord_ratio.is_some() {
+                planform.side_of_body.expect("pinned station").y_m
+            } else {
+                planform.root.y_m
+            };
+            let at = |y: f64| {
+                plane.wings[0]
+                    .xsecs
+                    .iter()
+                    .min_by(|a, b| (a.xyz_le[1] - y).abs().total_cmp(&(b.xyz_le[1] - y).abs()))
+                    .expect("sections")
+            };
+            let (inboard, kink) = (at(inboard_y), at(planform.kink.y_m));
+            let built = (kink.xyz_le[1] - inboard.xyz_le[1])
+                .atan2((kink.xyz_le[0] + kink.chord) - (inboard.xyz_le[0] + inboard.chord))
+                .to_degrees();
+            let angle = te_angle_of(name);
+            assert!((built - angle).abs() < 1e-6, "{name}: {built}");
+            // Whether a preset's nominal meets the limit is a property of its
+            // registered geometry, reported here rather than asserted.
+            let verdict = if angle <= crate::mdo::TE_ANGLE_LIMIT_DEG {
+                "within"
+            } else {
+                "beyond"
+            };
+            // The test log is where the verdict is reported.
+            #[allow(clippy::print_stderr)]
+            {
+                eprintln!("{name}: exposed trailing edge {angle:.3} deg, {verdict} the limit");
+            }
+        }
     }
 }

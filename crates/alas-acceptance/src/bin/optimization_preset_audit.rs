@@ -8,8 +8,8 @@
 //!
 //! This is deliberately separate from `preset_audit` (baseline, `optimize:
 //! false`), which it reuses for its own purpose and does not reimplement. The
-//! optimizer has no wall-clock timeout of its own (only a deterministic
-//! evaluation-count budget), so a `--timeout-s` guard here is external. On
+//! optimizer has separate screening and refinement deadlines and evaluation
+//! ceilings. A `--timeout-s` guard here bounds the entire pipeline. On
 //! expiry the guard sets the run's cooperative cancellation flag, which
 //! `DesignPipeline::run_cancellable` threads into the active search's own
 //! generation and poll loops, and then *joins* the worker: no thread is
@@ -51,7 +51,7 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use alas_config::{presets, solver_presets, AlasConfig, DesignMissionEvidence, SolverSettings};
+use alas_config::{presets, AlasConfig, DesignMissionEvidence, MtowSizing, SolverSettings};
 use alas_exec::{RunEnvironment, ToolLocator, ToolPreferences};
 use alas_opt::{CancelSnapshot, CancelWatch, StopReason};
 use alas_pipeline::{
@@ -64,6 +64,24 @@ use serde_json::{json, Value};
 #[path = "optimization_preset_audit/comparison.rs"]
 mod comparison;
 use comparison::{baseline_comparison, design_gross_mass_kg};
+#[path = "optimization_preset_audit/configuration.rs"]
+mod configuration;
+use configuration::Configuration;
+#[path = "optimization_preset_audit/controls.rs"]
+mod controls;
+#[path = "optimization_preset_audit/diagnostics.rs"]
+mod diagnostics;
+#[path = "optimization_preset_audit/exposure.rs"]
+mod exposure;
+use diagnostics::dependency_gaps;
+#[path = "optimization_preset_audit/preparation.rs"]
+mod preparation;
+#[path = "optimization_preset_audit/route_profile.rs"]
+mod route_profile;
+#[path = "optimization_preset_audit/search_evidence.rs"]
+mod search_evidence;
+#[path = "optimization_preset_audit/snapshot_evidence.rs"]
+mod snapshot_evidence;
 
 /// Fixed recorded seed for every optimization run in this harness. A fixed
 /// constant, not a "representative" or hidden default: recorded verbatim in
@@ -102,7 +120,9 @@ fn main() -> io::Result<()> {
         Some("matrix") => run_matrix(&args[1..]),
         _ => {
             eprintln!(
-                "usage:\n  optimization_preset_audit measure --preset <NAME> --output-dir <DIR> [--seed N] [--solver-preset NAME] [--timeout-s N] [--experiment LABEL --max-iterations N --population-size N]\n  optimization_preset_audit matrix --output-dir <DIR> [--seed N] [--solver-preset NAME] [--timeout-s N]\n\n  --experiment LABEL marks a measurement/engineering-budget run. It is required before\n  --max-iterations or --population-size may change the registered solver preset's search\n  effort, and the label is recorded in every row and artefact the run writes. It changes\n  numerical search effort only: no requirement, constraint, mission, design space or\n  acceptance clause is reachable from it."
+                "usage:\n  optimization_preset_audit measure --preset <NAME> --output-dir <DIR> [--seed N] [--solver-preset NAME] [--timeout-s N] [--native-only | --external-tools] [--mtow-mode MODE] [--experiment LABEL [--time-limit S] [--max-evaluations N] [--screening-time-limit S] [--screening-max-evaluations N] [--replay-evaluations S,R[,P[,Q]]] [--stop-on-evaluations] [--workers N]]\n  optimization_preset_audit matrix --output-dir <DIR> [--seed N] [--solver-preset NAME] [--timeout-s N] [--native-only | --external-tools] [--mtow-mode MODE] [--time-limit S] [--max-evaluations N]\n\n  Native execution is the default; --external-tools allows configured host tools.
+
+  --mtow-mode accepts the user-facing modes fixed_requirement, mtow_band and payload_adjusted.\n  The mode is recorded in the row. --time-limit and\n  --max-evaluations are refused until the solver settings carry such a budget.\n\n  --experiment LABEL marks a measurement/engineering-budget run. It is required before\n  the stage budget flags (refinement --time-limit and --max-evaluations, and their\n  screening counterparts) may change the registered solver preset's search\n  effort, and the label is recorded in every row and artefact the run writes. It changes\n  numerical search effort only. --replay-evaluations S,R,P,Q replays the stage replay_evaluations\n  S,R, refinement planned_evaluations P and restoration_evaluations Q a time-limited run recorded (row field optimizer.stages), bit-identically at any worker count;\n  --stop-on-evaluations ignores both time limits; --workers N sets the native worker threads. No requirement, constraint, mission, design space or\n  acceptance clause is reachable from it."
             );
             std::process::exit(2);
         }
@@ -116,128 +136,26 @@ struct Args {
     timeout_s: Option<u64>,
     preset: Option<String>,
     experiment: Option<String>,
-    max_iterations: Option<i64>,
-    population_size: Option<i64>,
-}
-
-/// How a run's solver settings were arrived at.
-///
-/// A registered preset and a hand-sized search effort are different claims
-/// about a result, and a row that cannot tell them apart is how a reduced
-/// budget gets read as `quick_draft`. Every artefact this harness writes
-/// carries one of these two, and the experiment variant carries its label.
-#[derive(Debug, Clone)]
-enum Configuration {
-    /// Exactly the registered solver preset, unmodified.
-    RegisteredPreset { name: String },
-    /// The registered preset with its *numerical search effort* overridden
-    /// under an explicit label.
-    Experiment {
-        label: String,
-        derived_from: String,
-        overrides: Vec<(&'static str, i64, i64)>,
-    },
-}
-
-impl Configuration {
-    /// Apply the requested search-effort overrides to a registered preset's
-    /// settings, rejecting an override that was not labelled.
-    fn resolve(args: &Args) -> io::Result<(Self, SolverSettings)> {
-        let mut settings = resolve_settings(&args.solver_preset)?;
-        let mut overrides = Vec::new();
-        if let Some(value) = args.max_iterations {
-            overrides.push(("max_iterations", settings.max_iterations, value));
-            settings.max_iterations = value;
-        }
-        if let Some(value) = args.population_size {
-            overrides.push(("population_size", settings.population_size, value));
-            settings.population_size = value;
-        }
-        let Some(label) = args.experiment.as_ref() else {
-            if overrides.is_empty() {
-                return Ok((
-                    Self::RegisteredPreset {
-                        name: args.solver_preset.clone(),
-                    },
-                    settings,
-                ));
-            }
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "--max-iterations and --population-size change the registered preset's search \
-                 effort and require an explicit --experiment <LABEL>, so the run cannot be read \
-                 as the preset it was derived from",
-            ));
-        };
-        // A label that collides with a registered preset name would reproduce
-        // exactly the confusion the label exists to prevent.
-        if solver_presets::get(label).is_ok() {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                format!(
-                    "--experiment label {label:?} is the name of a registered solver preset; \
-                     choose a label that cannot be mistaken for one"
-                ),
-            ));
-        }
-        Ok((
-            Self::Experiment {
-                label: label.clone(),
-                derived_from: args.solver_preset.clone(),
-                overrides,
-            },
-            settings,
-        ))
-    }
-
-    /// The token a row reports in `solver_preset`.
-    ///
-    /// An experiment reports its own label there, never the preset it was
-    /// derived from: that field is what a reader compares runs by.
-    fn reported_name(&self) -> &str {
-        match self {
-            Self::RegisteredPreset { name } => name,
-            Self::Experiment { label, .. } => label,
-        }
-    }
-
-    /// The provenance block a row carries.
-    fn provenance(&self) -> Value {
-        match self {
-            Self::RegisteredPreset { name } => json!({
-                "kind": "registered_solver_preset",
-                "solver_preset": name,
-                "search_effort_overrides": [],
-            }),
-            Self::Experiment {
-                label,
-                derived_from,
-                overrides,
-            } => json!({
-                "kind": "experiment",
-                "experiment_label": label,
-                "derived_from_solver_preset": derived_from,
-                "search_effort_overrides": overrides
-                    .iter()
-                    .map(|(field, before, after)| json!({
-                        "setting": field,
-                        "registered_value": before,
-                        "experiment_value": after,
-                    }))
-                    .collect::<Vec<_>>(),
-                "what_this_changes": "numerical search effort only: how many candidates the \
-                                      search evaluates and over how many generations",
-                "what_this_does_not_change": "the registered aircraft preset, its requirements, \
-                                              design mission, design space and bounds, every \
-                                              physical constraint and limit, the reporting-fidelity \
-                                              re-evaluation, and every feasibility clause in this \
-                                              row. None of them is reachable from these flags.",
-                "not_a_substitute_for": "the registered quick_draft/balanced/thorough presets, a \
-                                         clean-sheet search, the reference baseline, or the \
-                                         all-preset acceptance matrix",
-            }),
-        }
-    }
+    native_only: bool,
+    /// `--mtow-mode`: the takeoff-mass sizing mode, a modelling choice
+    /// recorded in the row rather than a search-effort setting.
+    mtow_mode: Option<MtowSizing>,
+    /// `--time-limit` (seconds) and `--max-evaluations`: the refinement
+    /// stage's limits.
+    time_limit_s: Option<u64>,
+    max_evaluations: Option<u64>,
+    /// `--screening-time-limit` and `--screening-max-evaluations`: the
+    /// screening stage's limits.
+    screening_time_limit_s: Option<u64>,
+    screening_max_evaluations: Option<u64>,
+    /// `--replay-evaluations S,R,P,Q`: the stage replay counts, refinement
+    /// planned budget and restoration count a run recorded, replayed exactly.
+    replay_evaluations: Option<(u64, u64, Option<u64>, Option<u64>)>,
+    /// `--stop-on-evaluations`: ignore both stage time limits.
+    stop_on_evaluations: bool,
+    /// `--workers N`: the native worker threads, to check that a replay is
+    /// bit-identical at any worker count.
+    workers: Option<u64>,
 }
 
 fn parse_args(values: &[String]) -> io::Result<Args> {
@@ -247,11 +165,35 @@ fn parse_args(values: &[String]) -> io::Result<Args> {
     let mut timeout_s = None;
     let mut preset = None;
     let mut experiment = None;
-    let mut max_iterations = None;
-    let mut population_size = None;
+    let mut native_only = true;
+    let mut mtow_mode = None;
+    let mut time_limit_s = None;
+    let mut max_evaluations = None;
+    let mut screening_time_limit_s = None;
+    let mut screening_max_evaluations = None;
+    let mut replay_evaluations = None;
+    let mut stop_on_evaluations = false;
+    let mut workers = None;
     let mut index = 0;
     while index < values.len() {
         match values[index].as_str() {
+            "--native-only" => native_only = true,
+            "--external-tools" => native_only = false,
+            "--mtow-mode" => {
+                index += 1;
+                mtow_mode = Some(controls::parse_mtow_mode(values.get(index))?);
+            }
+            "--time-limit" => {
+                index += 1;
+                time_limit_s = Some(controls::parse_count("--time-limit", values.get(index))?);
+            }
+            "--max-evaluations" => {
+                index += 1;
+                max_evaluations = Some(controls::parse_count(
+                    "--max-evaluations",
+                    values.get(index),
+                )?);
+            }
             "--output-dir" => {
                 index += 1;
                 output_dir = values.get(index).map(PathBuf::from);
@@ -296,27 +238,23 @@ fn parse_args(values: &[String]) -> io::Result<Args> {
                 })?;
                 experiment = Some(label);
             }
-            "--max-iterations" => {
+            flag @ ("--screening-time-limit" | "--screening-max-evaluations") => {
                 index += 1;
-                max_iterations = Some(values.get(index).and_then(|v| v.parse().ok()).ok_or_else(
-                    || {
-                        io::Error::new(
-                            io::ErrorKind::InvalidInput,
-                            "--max-iterations requires an integer",
-                        )
-                    },
-                )?);
+                let value = Some(controls::parse_count(flag, values.get(index))?);
+                if flag == "--screening-time-limit" {
+                    screening_time_limit_s = value;
+                } else {
+                    screening_max_evaluations = value;
+                }
             }
-            "--population-size" => {
+            "--replay-evaluations" => {
                 index += 1;
-                population_size = Some(values.get(index).and_then(|v| v.parse().ok()).ok_or_else(
-                    || {
-                        io::Error::new(
-                            io::ErrorKind::InvalidInput,
-                            "--population-size requires an integer",
-                        )
-                    },
-                )?);
+                replay_evaluations = Some(controls::parse_replay(values.get(index))?);
+            }
+            "--stop-on-evaluations" => stop_on_evaluations = true,
+            "--workers" => {
+                index += 1;
+                workers = Some(controls::parse_count("--workers", values.get(index))?);
             }
             other => {
                 return Err(io::Error::new(
@@ -336,15 +274,16 @@ fn parse_args(values: &[String]) -> io::Result<Args> {
         timeout_s,
         preset,
         experiment,
-        max_iterations,
-        population_size,
+        native_only,
+        mtow_mode,
+        time_limit_s,
+        max_evaluations,
+        screening_time_limit_s,
+        screening_max_evaluations,
+        replay_evaluations,
+        stop_on_evaluations,
+        workers,
     })
-}
-
-fn resolve_settings(name: &str) -> io::Result<SolverSettings> {
-    solver_presets::get(name)
-        .map(|preset| preset.settings.clone())
-        .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error.to_string()))
 }
 
 fn run_measure(values: &[String]) -> io::Result<()> {
@@ -377,6 +316,8 @@ fn run_measure(values: &[String]) -> io::Result<()> {
         &configuration,
         &settings,
         args.timeout_s.map(Duration::from_secs),
+        args.native_only,
+        args.mtow_mode,
     );
 
     fs::write(
@@ -416,6 +357,8 @@ fn run_matrix(values: &[String]) -> io::Result<()> {
             &configuration,
             &settings,
             args.timeout_s.map(Duration::from_secs),
+            args.native_only,
+            args.mtow_mode,
         );
         let is_timeout = row["status"] == Value::String("timeout".to_owned());
         rows.push(row);
@@ -438,6 +381,7 @@ fn run_matrix(values: &[String]) -> io::Result<()> {
         .all(|row| row["status"] == Value::String("success".to_owned()));
     let document = json!({
         "mode": "optimization",
+        "execution_scope": preparation::execution_scope(args.native_only),
         "seed": args.seed,
         "solver_preset": configuration.reported_name(),
         "configuration": configuration.provenance(),
@@ -472,11 +416,11 @@ fn run_matrix(values: &[String]) -> io::Result<()> {
 
 fn settings_json(settings: &SolverSettings) -> Value {
     json!({
-        "strategy": settings.strategy,
-        "max_iterations": settings.max_iterations,
-        "population_size": settings.population_size,
+        "screening": settings.screening,
+        "refinement": settings.refinement,
         "tolerance": settings.tolerance,
         "workers": settings.workers,
+        "resolved_workers": settings.resolved_workers(),
         "seed": settings.seed,
     })
 }
@@ -540,9 +484,32 @@ fn run_with_timeout(
     let (tx, rx) = mpsc::channel();
     let handle = thread::spawn(move || {
         let start = Instant::now();
+        let snapshots = snapshot_evidence::SnapshotEvidence::start(options.output_dir.as_deref());
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            DesignPipeline::new(config).run_cancellable(&options, &environment, worker_watch.flag())
+            let on_event = |event: alas_pipeline::runs::RunEvent| {
+                eprintln!(
+                    "[stage] {}",
+                    serde_json::to_string(&event).unwrap_or_default()
+                );
+            };
+            let preset = presets::get(&config.preset).map_err(|e| e.to_string())?;
+            let design = preset.design_vector;
+            let bounds = alas_opt::DesignOptimizer::new(config.clone())
+                .resolved_bounds(None, Some(&design))
+                .map_err(|error| error.to_string())?;
+            DesignPipeline::new(config).run_with_design_space_events_and_snapshots(
+                &options,
+                &environment,
+                &design,
+                &bounds,
+                alas_pipeline::RunObservers {
+                    events: &on_event,
+                    snapshots: &|snapshot| snapshots.publish(snapshot),
+                    cancel: worker_watch.flag(),
+                },
+            )
         }));
+        snapshots.finish();
         let elapsed = start.elapsed();
         let _ = tx.send((result, elapsed));
     });
@@ -574,6 +541,7 @@ fn run_with_timeout(
         };
     };
 
+    let guarded_start = Instant::now();
     match rx.recv_timeout(limit) {
         Ok((result, elapsed)) => {
             let telemetry = Box::new(watch.snapshot());
@@ -596,7 +564,7 @@ fn run_with_timeout(
     // Records the phase and evaluation in flight, then sets the flag.
     watch.request_cancellation();
     let signalled = Instant::now();
-    let (result, observed) = loop {
+    let (result, _worker_elapsed) = loop {
         match rx.recv_timeout(JOIN_NOTICE_INTERVAL) {
             Ok(value) => break value,
             Err(mpsc::RecvTimeoutError::Timeout) => {
@@ -656,7 +624,7 @@ fn run_with_timeout(
     );
     RunOutcome::Cancelled {
         limit,
-        observed,
+        observed: guarded_start.elapsed(),
         detail,
         panicked,
         telemetry: Box::new(watch.snapshot()),
@@ -675,6 +643,44 @@ fn evaluate_preset_optimization(
     configuration: &Configuration,
     settings: &SolverSettings,
     timeout: Option<Duration>,
+    native_only: bool,
+    mtow_mode: Option<MtowSizing>,
+) -> Value {
+    let result_dir = output_root.join(name).join("optimize");
+    let evidence_error = search_evidence::prepare(&result_dir);
+    let mut row = evaluate_preset_optimization_inner(
+        name,
+        output_root,
+        locator,
+        preferences,
+        seed,
+        configuration,
+        settings,
+        timeout,
+        native_only,
+        mtow_mode,
+    );
+    search_evidence::attach(&mut row, &result_dir, evidence_error.as_deref());
+    row["baseline_execution_scope"] = json!("native_only");
+    row["baseline_external_completion_claimed"] = json!(false);
+    preparation::record_scope(&mut row, native_only);
+    row
+}
+
+// Keep the inner measurement inputs explicit, matching the scope-recording wrapper.
+// Each argument records an independent audit input; keep their provenance explicit.
+#[allow(clippy::too_many_arguments)]
+fn evaluate_preset_optimization_inner(
+    name: &str,
+    output_root: &Path,
+    locator: &ToolLocator,
+    preferences: &ToolPreferences,
+    seed: u64,
+    configuration: &Configuration,
+    settings: &SolverSettings,
+    timeout: Option<Duration>,
+    native_only: bool,
+    mtow_mode: Option<MtowSizing>,
 ) -> Value {
     let result_dir = output_root.join(name).join("optimize");
     let Ok(preset) = presets::get(name) else {
@@ -699,13 +705,28 @@ fn evaluate_preset_optimization(
     // Selected through the same JSON-preset boundary the CLI and GUI use, not
     // reassembled field-by-field: a hand-built config silently drops the
     // cabin seed and the engine binding (see `evaluate_preset` in
-    // `matrix_parts/part_01.rs`, which this mirrors for the optimization case
+    // `matrix/evaluate.rs`, which this mirrors for the optimization case
     // it does not cover).
     let mut config = match AlasConfig::from_value(&json!({ "preset": preset.name })) {
         Ok(config) => config,
         Err(error) => return error_row(name, &result_dir, seed, configuration, &error.to_string()),
     };
     config.optimizer.solver = settings.clone();
+    if let Some(mode) = mtow_mode {
+        config.optimizer.objective.mtow_sizing = mode;
+    }
+    preparation::apply_machine_preferences(&mut config, preferences);
+    preparation::initialize_route_profile(&mut config);
+    preparation::apply_execution_scope(&mut config, native_only);
+    let scope = preparation::execution_scope(native_only);
+    eprintln!("[scope] preset={name} execution_scope={scope}; native-only does not certify external-solver completion");
+    let _ = fs::write(
+        result_dir.join("input_config.audit.json"),
+        serde_json::to_vec_pretty(&json!({"execution_scope": scope,
+            "config_file": "input_config.json",
+            "optional_external_execution_requested": !native_only}))
+        .unwrap_or_default(),
+    );
 
     if let Err(error) = fs::write(
         result_dir.join("input_config.json"),
@@ -714,13 +735,17 @@ fn evaluate_preset_optimization(
         eprintln!("[warn] could not persist input config for {name}: {error}");
     }
 
-    let environment = locator.resolve_environment(
-        Path::new(&config.mses.mses_dir),
-        Path::new(&config.structures.nastran_exe_path),
-        Path::new(&config.structures.patran_exe_path),
-        Path::new(preferences.openvsp_dir.as_deref().unwrap_or("")),
-        Path::new(preferences.avl_exe.as_deref().unwrap_or("")),
-    );
+    let environment = if native_only {
+        RunEnvironment::default()
+    } else {
+        locator.resolve_environment(
+            Path::new(&config.mses.mses_dir),
+            Path::new(&config.structures.nastran_exe_path),
+            Path::new(&config.structures.patran_exe_path),
+            Path::new(preferences.openvsp_dir.as_deref().unwrap_or("")),
+            Path::new(preferences.avl_exe.as_deref().unwrap_or("")),
+        )
+    };
 
     let options = PipelineOptions {
         optimize: true,
@@ -734,6 +759,8 @@ fn evaluate_preset_optimization(
         quiet: true,
     };
 
+    let baseline_config = config.clone();
+    let baseline_environment = environment.clone();
     let outcome = run_with_timeout(config, options, environment, timeout);
     let (run_result, wall_time, telemetry) = match outcome {
         RunOutcome::Cancelled {
@@ -760,12 +787,9 @@ fn evaluate_preset_optimization(
                 "output_dir": result_dir.display().to_string(),
                 "timeout_s": limit.as_secs(),
                 "wall_time_s": observed.as_secs_f64(),
-                // How long the run took to reach a cancellation boundary after
-                // the flag was set. Cooperative cancellation is bounded, not
-                // immediate, and this is the size of that bound as measured.
-                // Kept for continuity with the pre-change row; the telemetry
-                // below splits it into acknowledgement and drain.
-                "cancellation_latency_s": observed.as_secs_f64() - limit.as_secs_f64(),
+                // Use the watch's request-to-join interval; worker start and
+                // coordinator guard have different origins under contention.
+                "cancellation_latency_s": telemetry.join_latency_s,
                 "cancellation": cancellation_json(&telemetry),
                 "acknowledgement_contract_s": ACKNOWLEDGEMENT_CONTRACT_S,
                 "acknowledgement_contract_met": acknowledged,
@@ -775,6 +799,7 @@ fn evaluate_preset_optimization(
                 // the search was stopped from outside before it decided
                 // anything.
                 "execution_passed": false,
+                "full_analysis_completed": false,
                 "physical_passed": false,
                 "optimizer_converged": false,
                 "optimizer_feasible": false,
@@ -817,6 +842,18 @@ fn evaluate_preset_optimization(
         }
     };
 
+    let baseline_run = controls::run_baseline_pipeline(
+        baseline_config,
+        baseline_environment,
+        seed,
+        &result_dir,
+        timeout,
+    );
+    let exposure = exposure::Exposure {
+        preset_design: &preset.design_vector,
+        baseline_run: baseline_run.as_ref().ok(),
+        baseline_run_error: baseline_run.as_ref().err().map(String::as_str),
+    };
     build_success_row(
         name,
         &result_dir,
@@ -826,6 +863,7 @@ fn evaluate_preset_optimization(
         wall_time,
         &pipeline_result,
         &telemetry,
+        &exposure,
     )
 }
 
@@ -923,6 +961,9 @@ fn error_row(
     json!({
         "preset": name,
         "status": "error",
+        "execution_passed": false,
+        "full_analysis_completed": false,
+        "physical_passed": false,
         "status_detail": detail,
         "seed": seed,
         "solver_preset": configuration.reported_name(),
@@ -943,6 +984,7 @@ fn build_success_row(
     wall_time: Duration,
     result: &PipelineResult,
     telemetry: &CancelSnapshot,
+    exposure: &exposure::Exposure<'_>,
 ) -> Value {
     if let Ok(yaml) = serde_yaml::to_string(&result.config) {
         let _ = fs::write(result_dir.join("effective_config.yaml"), yaml);
@@ -1100,16 +1142,22 @@ fn build_success_row(
         "optimizer": {
             // The kernel that actually executed, as the optimizer reports it,
             // not the method token the configuration requested: the two differ
-            // for the legacy population names, which have no kernel behind
+            // for the older population names, which have no kernel behind
             // them and run mesh adaptive direct search.
             "method": optimization.map(|o| o.method.clone()),
             "requested_method": settings.method.clone(),
             "strategy": optimization.map(|o| o.strategy.clone()),
             "termination": optimization.map(|o| o.termination.clone()),
+            // Per stage: replay with `--replay-evaluations S,R,P,Q`.
+            "stages": optimization
+                .and_then(|o| o.search_diagnostics.as_ref())
+                .map(exposure::stages_json),
             "cancelled": optimizer_cancelled,
             "converged": optimizer_converged,
             "delivered_feasible": optimizer_feasible,
             "best_valid": optimizer_best_valid,
+            "total_full_fidelity_valid": optimization.map(|o| exposure::full_fidelity_valid(&o.history)),
+            "valid_candidate_definition": "Distinct design vectors in the full in-loop history with valid=true, zero hard violation, and finite objective and ranking cost. Separate screening scores are excluded; reporting mesh verification is recorded for the delivered finalist.",
             "best_cost": optimization.map(|o| o.best_cost),
             "reported_wall_time_s": optimization.map(|o| o.wall_time_s),
         },
@@ -1118,7 +1166,11 @@ fn build_success_row(
         // that was allowed to work.
         "cancellation": cancellation_json(telemetry),
         "baseline_vs_optimized": baseline_comparison(result),
+        "like_for_like": exposure::exposure_json(result, exposure),
+        "mtow_mode": result.config.optimizer.objective.mtow_sizing.as_str(),
         "execution_passed": execution_passed,
+        "full_analysis_completed": diagnostics::full_analysis_completed(result),
+        "analysis_evidence": diagnostics::evidence(result),
         "physical_passed": physical_passed,
         "feasibility_blockers": feasibility_blockers,
         "design_mission_status": design_mission_status,
@@ -1130,6 +1182,12 @@ fn build_success_row(
         "static_margin": static_margin,
         "metric_conventions": metric_conventions(),
         "public_planning_cg_status": format!("{:?}", result.feasibility.cg_envelope.planning_status),
+        // The delivered report's own model CG verdict line, so a feasible
+        // delivery that prints a failing hard constraint is visible here.
+        "model_cg_status": alas_pipeline::format_feasibility(&result.feasibility)
+            .lines()
+            .find(|line| line.starts_with("Model CG status"))
+            .map(str::to_owned),
         "governing_error_findings": governing_error_findings
             .iter()
             .map(|f| format_finding(f))
@@ -1213,51 +1271,15 @@ fn format_finding(finding: &PhysicalFinding) -> String {
     }
 }
 
-/// Downstream external-tool stages this preset's config reached but for which
-/// no executable was discovered on this host, distinct from a stage that ran
-/// and failed. Only the "not discovered" variants are gaps; a launch failure
-/// or solver failure is a real error surfaced elsewhere in the row.
-fn dependency_gaps(result: &PipelineResult) -> Vec<String> {
-    let mut gaps = Vec::new();
-    if let Some(openvsp) = &result.openvsp_export {
-        if openvsp.status == OpenVspExportStatus::ScriptWrittenRuntimeUnverified {
-            gaps.push("openvsp: script written, no installed runtime discovered".to_owned());
-        }
-    }
-    if let Some(vspaero) = &result.vspaero_result {
-        if vspaero.status == VspaeroAnalysisStatus::NotConfigured {
-            gaps.push("vspaero: no native executable configured or discovered".to_owned());
-        }
-    }
-    if let Some(avl) = &result.avl_result {
-        if avl.status == AvlAnalysisStatus::NotConfigured {
-            gaps.push("avl: no solver executable available".to_owned());
-        }
-    }
-    if let Some(mses) = &result.mses_result {
-        use alas_aero::mses::MsesStatus;
-        match mses.status {
-            MsesStatus::Absent => gaps.push("mses: no MSES directory found".to_owned()),
-            MsesStatus::Incomplete => {
-                gaps.push("mses: directory present but missing one or more programs".to_owned())
-            }
-            _ => {}
-        }
-    }
-    if let Some(flowunsteady) = &result.flowunsteady_result {
-        if flowunsteady.status == FlowUnsteadyAnalysisStatus::NotConfigured {
-            gaps.push("flowunsteady: no adapter executable configured".to_owned());
-        }
-    }
-    gaps
-}
-
 fn format_matrix_report(document: &Value) -> String {
     let mut text = String::new();
     text.push_str("ALAS OPTIMIZATION-MODE PRESET ACCEPTANCE MATRIX\n");
     text.push_str(&format!(
-        "seed={} solver_preset={} timeout_s={:?}\n\n",
-        document["seed"], document["solver_preset"], document["timeout_s"]
+        "seed={} solver_preset={} timeout_s={:?} execution_scope={}\n\n",
+        document["seed"],
+        document["solver_preset"],
+        document["timeout_s"],
+        document["execution_scope"]
     ));
     text.push_str(
         "Preset       | Status               | Wall(s) | Kernel               | Term                 | Exec | Conv | Feas | Phys | Mission\n",
@@ -1337,120 +1359,6 @@ fn format_matrix_report(document: &Value) -> String {
     text
 }
 
-// Tests assert on values they construct here, so a failed expect is the
-// assertion failing, not a library invariant being broken.
-#[allow(clippy::unwrap_used, clippy::expect_used)]
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn args() -> Args {
-        Args {
-            output_dir: PathBuf::from("."),
-            seed: DEFAULT_SEED,
-            solver_preset: "quick_draft".to_owned(),
-            timeout_s: None,
-            preset: Some("A320-200".to_owned()),
-            experiment: None,
-            max_iterations: None,
-            population_size: None,
-        }
-    }
-
-    #[test]
-    fn an_unmodified_run_reports_the_registered_preset_and_its_settings_verbatim() {
-        let (configuration, settings) =
-            Configuration::resolve(&args()).expect("quick_draft is registered");
-        assert_eq!(configuration.reported_name(), "quick_draft");
-        assert_eq!(
-            configuration.provenance()["kind"],
-            "registered_solver_preset"
-        );
-        let registered = resolve_settings("quick_draft").expect("quick_draft is registered");
-        assert_eq!(settings.max_iterations, registered.max_iterations);
-        assert_eq!(settings.population_size, registered.population_size);
-        assert_eq!(settings.tolerance, registered.tolerance);
-    }
-
-    /// The rule the whole mechanism exists for: search effort cannot be
-    /// reduced without a label, so a reduced-budget run can never be read as
-    /// the preset it was derived from.
-    #[test]
-    fn an_unlabelled_search_effort_override_is_refused() {
-        let mut generations_only = args();
-        generations_only.max_iterations = Some(2);
-        let error = Configuration::resolve(&generations_only)
-            .expect_err("an unlabelled override must not resolve");
-        assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
-        assert!(
-            error.to_string().contains("--experiment"),
-            "the refusal must name the flag that would make the run honest: {error}"
-        );
-
-        let mut population_only = args();
-        population_only.population_size = Some(1);
-        assert!(Configuration::resolve(&population_only).is_err());
-    }
-
-    #[test]
-    fn an_experiment_label_may_not_impersonate_a_registered_preset() {
-        let mut request = args();
-        request.max_iterations = Some(2);
-        request.experiment = Some("balanced".to_owned());
-        let error =
-            Configuration::resolve(&request).expect_err("a registered name is not a valid label");
-        assert!(error.to_string().contains("registered solver preset"));
-    }
-
-    #[test]
-    fn a_labelled_experiment_reports_its_label_its_origin_and_every_override() {
-        let mut request = args();
-        request.max_iterations = Some(2);
-        request.population_size = Some(1);
-        request.experiment = Some("a320-finite-measurement-2026-09-22".to_owned());
-        let (configuration, settings) =
-            Configuration::resolve(&request).expect("a labelled override resolves");
-
-        assert_eq!(settings.max_iterations, 2);
-        assert_eq!(settings.population_size, 1);
-        // Everything the flags do not reach is still the registered preset's.
-        let registered = resolve_settings("quick_draft").expect("quick_draft is registered");
-        assert_eq!(settings.tolerance, registered.tolerance);
-        assert_eq!(settings.strategy, registered.strategy);
-        assert_eq!(settings.method, registered.method);
-
-        assert_eq!(
-            configuration.reported_name(),
-            "a320-finite-measurement-2026-09-22",
-            "the row must never report this run as the preset it was derived from"
-        );
-        let provenance = configuration.provenance();
-        assert_eq!(provenance["kind"], "experiment");
-        assert_eq!(provenance["derived_from_solver_preset"], "quick_draft");
-        let overrides = provenance["search_effort_overrides"]
-            .as_array()
-            .expect("the overrides are a list");
-        assert_eq!(overrides.len(), 2);
-        assert_eq!(overrides[0]["setting"], "max_iterations");
-        assert_eq!(overrides[0]["registered_value"], registered.max_iterations);
-        assert_eq!(overrides[0]["experiment_value"], 2);
-    }
-
-    #[test]
-    fn the_acknowledgement_bound_is_the_largest_uninterruptible_unit() {
-        let watch = CancelWatch::new();
-        let scope = alas_opt::CancelScope::attach(Some(watch.flag()));
-        assert!(acknowledgement_bound(&watch.snapshot()).is_none());
-        scope.evaluation(|| std::thread::sleep(Duration::from_millis(2)));
-        scope.block(8, || std::thread::sleep(Duration::from_millis(20)));
-        let snapshot = watch.snapshot();
-        let bound = acknowledgement_bound(&snapshot).expect("both units were timed");
-        assert_eq!(
-            bound,
-            snapshot
-                .longest_block_s
-                .expect("the block was the longer unit")
-        );
-        assert!(bound > snapshot.longest_evaluation_s.unwrap_or(0.0));
-    }
-}
+#[path = "optimization_preset_audit/tests.rs"]
+mod tests;

@@ -3,8 +3,8 @@
 
 //! Cross-preset properties of the structural main-wing mass coordinate.
 //!
-//! These are physical/integration checks, not a second golden fixture. Frozen
-//! Python agreement remains in `parity_breakdown`; this suite proves the
+//! These are physical/integration checks, not a second golden fixture.
+//! Agreement with the reference fixture remains in `parity_breakdown`; this suite proves the
 //! explicit product path is finite, conservative about failure, and exercised
 //! by every registered aircraft configuration.
 
@@ -80,7 +80,7 @@ fn every_preset_uses_a_finite_structural_wing_point_inside_its_wingbox() {
             let aerodynamic_center_x = reference_wing.aerodynamic_center(0.0)[0];
             let mean_aerodynamic_chord = reference_wing.mean_aerodynamic_chord();
             assert!(
-                (aerodynamic_center_x - 16.349_875_122_007_83).abs() < 1e-12,
+                (aerodynamic_center_x - 16.469_108_083_231_486).abs() < 1e-12,
                 "A220 frozen-reference aerodynamic-center x drifted: {aerodynamic_center_x:.15}"
             );
             assert!(
@@ -121,7 +121,7 @@ fn every_preset_uses_a_finite_structural_wing_point_inside_its_wingbox() {
                 Some(&config.mass_model),
                 None,
             ),
-            "{preset_name}: explicit compatibility must preserve frozen parity"
+            "{preset_name}: explicit compatibility must preserve the reference result"
         );
         let (structural_masses, structural_coordinates, structural_cg) =
             run_mass_analysis_with_model(

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! Dispatch-time preset barrier (App Features 1.2, decision D09).
+//! Dispatch-time preset barrier.
 //!
 //! In preset mode the run leaves the GUI with the registered preset's locked
 //! geometry and initial design point, and with optimizer bounds anchored to
@@ -10,6 +10,7 @@
 //! bypassed buffer is visible instead of surfacing as a pipeline rejection.
 
 use alas_config::{preset_policy, presets, AlasConfig, DesignVector, DESIGN_VARIABLE_SPECS};
+use alas_opt::DesignOptimizer;
 
 use crate::state::{AppState, LogKind};
 use crate::views::tr_fields;
@@ -44,21 +45,22 @@ impl AppState {
         let Ok(preset) = presets::get(&config.preset) else {
             return;
         };
-        let envelope = config
-            .optimizer
-            .design_space
-            .envelope(&preset.design_vector);
-        let anchored: Option<Vec<(f64, f64)>> = DESIGN_VARIABLE_SPECS
-            .iter()
-            .map(|spec| {
-                envelope
-                    .iter()
-                    .find(|variable| variable.name == spec.name)
-                    .map(|variable| (variable.lower, variable.upper))
-            })
-            .collect();
-        let Some(anchored) = anchored else {
-            return;
+        // The optimizer owns the envelope derivation; asking it with no bounds
+        // returns the box a headless run searches for this preset.
+        let anchored = match DesignOptimizer::new(config.clone())
+            .resolved_bounds(None, Some(&preset.design_vector))
+        {
+            Ok(anchored) => anchored,
+            Err(error) => {
+                self.log(
+                    tr_fields(
+                        "Preset bound anchoring was skipped ({error}); the run uses the Design Space bounds as entered.",
+                        &[("error", error.to_string())],
+                    ),
+                    LogKind::Warn,
+                );
+                return;
+            }
         };
         let differing = anchored
             .iter()
@@ -116,6 +118,32 @@ mod tests {
         assert!(state.logs.iter().any(|line| line
             .text
             .contains("anchored to the preset reference envelope")));
+    }
+
+    #[test]
+    fn a_failed_bound_derivation_is_logged_instead_of_silently_skipped() {
+        let mut state = AppState::default();
+        let preset_key = state
+            .preset_names
+            .first()
+            .map(|(key, _)| key.clone())
+            .expect("a registered preset");
+        state.load_preset(&preset_key);
+        state.set_design_mode(alas_config::DesignMode::ReferenceAdaptation);
+        let mut config = state.typed_config().expect("valid config");
+        let mut design = state.current_design().expect("design");
+        let mut bounds = state.current_design_bounds().expect("bounds");
+        config.mass_model.mass_architecture =
+            alas_config::MassArchitecture::LegacyReferenceCompatibleComparison;
+        let logged_before = state.logs.len();
+        state.apply_preset_dispatch_policy(&mut config, &mut design, &mut bounds);
+        assert!(
+            state.logs[logged_before..]
+                .iter()
+                .any(|line| line.text.contains("anchoring was skipped")
+                    && line.text.contains("pure_flops_transport_v1")),
+            "the skipped anchoring must be visible"
+        );
     }
 
     #[test]

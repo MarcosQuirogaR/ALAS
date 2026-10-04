@@ -4,6 +4,10 @@
 //! Optional graphics process. Its failure must never reject a valid solver export.
 use super::*;
 
+/// Wall-clock bound on one native screenshot: far above a healthy capture,
+/// short enough that a hung renderer does not hold the export open.
+const PREVIEW_TIMEOUT: Duration = Duration::from_secs(30);
+
 pub(super) fn capture(export: &OpenVspExportResult, runner: &Path) -> Result<(), String> {
     let python = std::env::var_os("ALAS_OPENVSP_PREVIEW_PYTHON")
         .map(PathBuf::from)
@@ -45,18 +49,15 @@ pub(super) fn capture(export: &OpenVspExportResult, runner: &Path) -> Result<(),
     let mut child =
         alas_exec::SupervisedSpawn::spawn_supervised(&mut command, "OpenVSP native preview")
             .map_err(|e| e.to_string())?;
-    let deadline = Instant::now() + Duration::from_secs(30);
-    let status = loop {
-        match child.try_wait() {
-            Ok(Some(status)) => break status,
-            Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(25)),
-            other => {
-                kill_process_tree(child.id());
-                let _ = child.wait();
-                return Err(format!(
-                    "Native preview stopped after timeout or process error: {other:?}"
-                ));
-            }
+    let status = match wait_with_timeout(&mut child, PREVIEW_TIMEOUT) {
+        DeadlineWait::Exited(status) => status,
+        DeadlineWait::TimedOut => {
+            return Err("Native preview stopped after the 30 s timeout".to_owned());
+        }
+        DeadlineWait::PollFailed(error) => {
+            return Err(format!(
+                "Native preview stopped after a process error: {error}"
+            ));
         }
     };
     let stdout = fs::read_to_string(stdout_path).unwrap_or_default();

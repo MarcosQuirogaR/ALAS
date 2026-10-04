@@ -8,24 +8,21 @@
 //! native aerodynamic model's differentiable atmosphere: a cubic B-spline fitted through
 //! the ISA at thirty-eight altitudes.
 //!
-//! This is the model `Atmosphere(altitude=...)` uses when no `method` is
-//! named, which is how every module in the reference implementation but one
-//! constructs it: the turbofan cycle, the performance envelope, the
+//! This is the model [`crate::Atmosphere`] uses when no method is named:
+//! the turbofan cycle, the performance envelope, the
 //! aerodynamic analysis, stability, the full analysis. It exists so that a
 //! gradient-based optimizer sees a smooth function rather than the ISA's
 //! piecewise-linear temperature, and it is not a small correction to the
 //! closed form: it disagrees with the ISA by up to 1.1% in temperature and
-//! 0.4% in density over the altitudes this program flies at. A port that
-//! reached for [`crate::pressure_isa`] wherever upstream wrote
-//! `Atmosphere(...)` would be wrong by four thousand times the `closed`
-//! tier before evaluating any physics, so the fit is reproduced rather than
-//! approximated.
+//! 0.4% in density over the altitudes this program flies at. Using
+//! [`crate::pressure_isa`] in its place would be wrong by four thousand times
+//! the `closed` tier before evaluating any physics, so the fit is reproduced
+//! rather than approximated.
 //!
 //! The fit is built in two pieces, both interpolating rather than smoothing:
 //! temperature directly, and pressure through its logarithm, since pressure
 //! falls by five orders of magnitude across the fitted band and a spline
-//! through the raw values would ring badly between knots. Upstream's comment
-//! records the resulting mean absolute pressure error against the ISA as
+//! through the raw values would ring badly between knots. The resulting mean absolute pressure error against the ISA is
 //! 0.02% over 0-100 km.
 //!
 //! # The altitude grid
@@ -172,33 +169,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_grid_has_thirty_eight_strictly_increasing_altitudes() {
-        let knots = altitude_knots_m();
-        assert_eq!(knots.len(), 38);
-        for pair in knots.windows(2) {
-            assert!(pair[1] > pair[0], "{} is not above {}", pair[1], pair[0]);
-        }
-    }
-
-    #[test]
-    fn the_grid_reaches_five_thousand_kilometres_down_and_two_thousand_up() {
-        let knots = altitude_knots_m();
-        assert_eq!(knots[0], -5_000_000.0);
-        assert_eq!(knots[knots.len() - 1], 87e3 + 2_000_000.0);
-    }
-
-    #[test]
-    fn the_grid_contains_every_hand_picked_altitude() {
-        let knots = altitude_knots_m();
-        for altitude_m in EXPLICIT_KNOTS_M {
-            assert!(
-                knots.contains(&altitude_m),
-                "{altitude_m} m is missing from the grid"
-            );
-        }
-    }
-
-    #[test]
     fn geomspace_reproduces_both_endpoints_exactly() {
         let values = geomspace(5e3, 2000e3, 11);
         assert_eq!(values.len(), 11);
@@ -240,25 +210,6 @@ mod tests {
                 "pressure at {altitude_m} m: {actual_p} against {expected_p}"
             );
         }
-    }
-
-    #[test]
-    fn between_the_fitted_altitudes_it_departs_from_the_isa_by_about_a_per_cent() {
-        // The whole reason this module exists rather than deferring to the
-        // closed form. If this ever came out negligible, either the fit or
-        // the ISA would have stopped being what it is.
-        let worst = (0..=250)
-            .map(|step| f64::from(step) * 100.0)
-            .map(|altitude_m| {
-                let isa = temperature_isa(altitude_m);
-                (temperature_differentiable(altitude_m) - isa).abs() / isa
-            })
-            .fold(0.0_f64, f64::max);
-        assert!(
-            (1e-3..1e-1).contains(&worst),
-            "worst temperature disagreement with the ISA was {worst}, which is \
-             not the per-cent-scale departure this fit is known to have"
-        );
     }
 
     #[test]

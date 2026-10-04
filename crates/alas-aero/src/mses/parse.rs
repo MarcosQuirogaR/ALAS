@@ -5,7 +5,6 @@
 // (parse_unformatted_data_output, which mses.py reuses) and
 // alas/physics/mses_analysis.py (the BL-dump and flowfield readers).
 // Upstream: native aerodynamic model 4.2.8, MIT.
-// Reference: alas @ rust-port-baseline.
 
 //! Reading MSES/mplot output back into numbers.
 //!

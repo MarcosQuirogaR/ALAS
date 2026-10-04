@@ -240,7 +240,7 @@ pub(super) static RECORDS: &[OewReference] = &[
             uncertainty_kg: Some(1_500.0),
             residual_mismatch: &[
                 "inclusion list of the 41,052 kg empty weight not stated",
-                "wingtip-fence span 34.10 m not applied to the geometry (wing sensitivity -455 kg recorded)",
+                "wingtip fences here, sharklets on the preset: the preset's 34.10 m planar wing models neither device's mass",
                 "operator interior, catering and equipment unknown",
             ],
         }),
@@ -342,9 +342,9 @@ pub(super) static RECORDS: &[OewReference] = &[
     },
     OewReference {
         preset: "ATR72-600",
-        // The model is no longer unsupported: the shaft-power propulsion
+        // The shaft-power propulsion
         // group evaluates this aircraft through the production path, so a
-        // prediction now exists and the record must say what it may be
+        // prediction exists and the record must say what it may be
         // compared with. It is still not a validation anchor - the factsheet
         // does not state the definition's inclusion list, and the two
         // published bases differ by 440 kg.

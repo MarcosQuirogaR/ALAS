@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-// Ported from the legacy mission-builder boundary.
-// Reference: alas @ rust-port-baseline.
-
 //! Native mission orchestration for the design pipeline.
 //!
 //! The old desktop path stopped after route planning and left
@@ -15,16 +12,15 @@
 use std::f64::consts::PI;
 
 use alas_aero::drag_buildup::{DragSettings, FuselageParams, NacelleParams, WingParams};
-use alas_aero::lift_surrogate::{LiftSurrogate, TrainingGrid};
-use alas_aero::vorlax::{VlmGeometry, VlmSettings, VlmWing};
+use alas_aero::vorlax::{VlmGeometry, VlmWing};
 use alas_config::airports::Airport;
 use alas_config::{ActiveEngineModel, AlasConfig};
 #[cfg(test)]
 use alas_mission::segments::SegmentKind;
-use alas_mission::segments::{LegacyTurbofanCompatibility, MissionAnalyses};
+use alas_mission::segments::{LegacyTurbofanCompatibility, MissionAnalyses, MissionDragSource};
+use alas_mission::MissionResult;
 #[cfg(test)]
-use alas_mission::Mission;
-use alas_mission::{build_mission_request, MissionResult};
+use alas_mission::{build_mission_request, Mission};
 #[cfg(test)]
 use alas_prop::mission_turbofan::PartPowerModel;
 use alas_prop::mission_turbofan::{size_turbofan, TurbofanInputs, VehicleBuilderParams};
@@ -39,15 +35,21 @@ use crate::feasibility::plan_fuel_loading;
 use crate::full_analysis::AnalysisReport;
 
 pub mod dispatch;
+mod drag_inputs;
+mod drag_model;
 mod flight;
 mod guidance;
 mod schedule;
+mod tail_geometry;
 
 pub(crate) use dispatch::{LoadCaseSelection, SelectedLoadCase};
+use drag_inputs::{main_quarter_chord_sweep, main_thickness, tail_thickness};
+use drag_model::{candidate_drag_source, mission_lift_surrogate};
 use guidance::{adapt_failed_climb, adapt_failed_cruise, adapt_failed_descent};
 use schedule::build_schedule;
 #[cfg(test)]
 use schedule::schedule_horizontal_distance;
+use tail_geometry::{tail_span, tail_surfaces};
 
 const METRES_PER_SECOND_TO_FEET_PER_MINUTE: f64 = 3.28084 * 60.0;
 
@@ -64,24 +66,27 @@ pub(crate) fn evaluate(
     origin: &Airport,
     destination: &Airport,
     route_distance_m: f64,
-) -> Result<(MissionResult, SelectedLoadCase), String> {
-    let request = build_mission_request(config, origin, destination, route_distance_m);
-    let schedule = build_schedule(&request)?;
-    let mut analyses = build_analyses(config, report)?;
-    let fuel_loading = plan_fuel_loading(config, &report.design, report);
-    let load_case = dispatch::select_load_case(
-        config,
-        report,
-        &fuel_loading,
-        &mut analyses,
-        &request,
-        &schedule,
-    )?;
-    let result = flight::fly_with_guidance(schedule, &request, &analyses)?;
+) -> Result<(Option<MissionResult>, SelectedLoadCase), String> {
+    let (request, mut load_case) =
+        dispatch::select_route_load_case(config, report, origin, destination, route_distance_m)?;
+    // The one native flight, at the selected mass: telemetry beside the
+    // route the segment model priced; its failure never stops the stage.
+    let native = (|| {
+        let mut analyses = build_analyses(config, report)?;
+        analyses.takeoff_mass_kg = load_case.takeoff_mass_kg;
+        analyses.minimum_mass_kg = Some(load_case.zero_fuel_mass_kg);
+        flight::fly_with_guidance(build_schedule(&request)?, &request, &analyses)
+    })();
+    let result = native
+        .map_err(|error| load_case.native_error = Some(error))
+        .ok();
+    if let Some(summary) = result.as_ref().and_then(MissionResult::completed_summary) {
+        load_case.record_native_trip(summary.trip_fuel_kg);
+    }
     Ok((result, load_case))
 }
 
-// The compatibility variant is only used by the in-crate W6.4 evidence tests.
+// The compatibility variant is only used by the in-crate SUAVE boundary tests.
 #[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum MissionReferenceMode {
@@ -97,13 +102,13 @@ fn build_analyses(config: &AlasConfig, report: &AnalysisReport) -> Result<Missio
     build_analyses_with_mode(config, report, MissionReferenceMode::Product)
 }
 
-/// Build the mission input boundary used by frozen W6.4/SUAVE evidence.
+/// Build the mission input boundary used by the frozen SUAVE reference.
 ///
 /// This is deliberately separate from [`build_analyses`]. The historical
 /// vehicle fixture sizes its turbofan from cruise-required thrust and uses the
 /// unfolded compatibility area; allowing those values to leak into the
 /// product path would reintroduce throttle commands above one.
-#[allow(dead_code)] // Called from the cfg(test) W6.4 module, not product builds.
+#[allow(dead_code)] // Called from the cfg(test) SUAVE boundary module, not product builds.
 fn build_analyses_reference_compatibility(
     config: &AlasConfig,
     report: &AnalysisReport,
@@ -117,13 +122,7 @@ fn build_analyses_with_mode(
     reference_mode: MissionReferenceMode,
 ) -> Result<MissionAnalyses, String> {
     let vlm_geometry = vlm_geometry(config, report, reference_mode)?;
-    let surrogate = LiftSurrogate::train(
-        &vlm_geometry,
-        &VlmSettings::default(),
-        &TrainingGrid::default(),
-    )
-    .map_err(|error| format!("mission lift surrogate failed: {error}"))?;
-
+    let surrogate = mission_lift_surrogate(&vlm_geometry)?;
     let engine = &config.geometry.engine;
     let n_engines = engine.spanwise_positions_m.len();
     if n_engines == 0 {
@@ -151,9 +150,9 @@ fn build_analyses_with_mode(
         {
             // The historical vehicle fixture sizes its turbofan from
             // cruise-required thrust with the frozen compatibility parameters;
-            // the legacy scalar evaluator has no per-unit moment model, so its
+            // the scalar evaluator has no per-unit moment model, so its
             // equivalent thrust line runs through the mission reference point.
-            let legacy_installation = PropulsionInstallation {
+            let scalar_installation = PropulsionInstallation {
                 unit_positions_m: engine
                     .spanwise_positions_m
                     .iter()
@@ -181,7 +180,7 @@ fn build_analyses_with_mode(
             let params = VehicleBuilderParams::reference_compatibility();
             let sized = size_turbofan(&inputs, &params);
             let flow = sized.compressor_nondimensional_massflow;
-            let legacy_model = LegacyTurbofanModel::new(
+            let scalar_model = LegacyTurbofanModel::new(
                 inputs,
                 params,
                 flow,
@@ -194,11 +193,11 @@ fn build_analyses_with_mode(
                     sources: vec![payload.part_power_source.clone()],
                 },
                 Vec::new(),
-                legacy_installation,
+                scalar_installation,
             )
             .map_err(|error| format!("mission propulsion construction failed: {error}"))?;
             (
-                PropulsionOrchestrator::new(legacy_model),
+                PropulsionOrchestrator::new(scalar_model),
                 Some(LegacyTurbofanCompatibility {
                     inputs,
                     params,
@@ -247,9 +246,9 @@ fn build_analyses_with_mode(
         MissionReferenceMode::Product => report.airplane.s_ref,
         MissionReferenceMode::ReferenceCompatibility => geometry_value(report, "wing_area_m2")?,
     };
-    let drag_settings = match reference_mode {
-        MissionReferenceMode::Product => DragSettings::default(),
-        MissionReferenceMode::ReferenceCompatibility => DragSettings::reference_compatibility(),
+    let drag_source = match reference_mode {
+        MissionReferenceMode::Product => candidate_drag_source(config, report)?,
+        MissionReferenceMode::ReferenceCompatibility => MissionDragSource::FrozenSuaveParity,
     };
     if !reference_area_m2.is_finite() || reference_area_m2 <= 0.0 {
         return Err("mission aircraft has no positive finite reference area".to_owned());
@@ -261,19 +260,11 @@ fn build_analyses_with_mode(
         takeoff_mass_kg: fuel_loading.analyzed_takeoff_mass_kg,
         minimum_mass_kg: Some(fuel_loading.zero_fuel_mass_kg),
         fuselage_lift_correction: alas_aero::lift_surrogate::FUSELAGE_LIFT_CORRECTION,
-        induced_drag_lift_correction: match reference_mode {
-            // SUAVE's Fidelity_Zero `fuselage_lift_correction` multiplies the
-            // aircraft lift used for force balance. It does not say to scale
-            // each VLM wing's induced drag, and `MissionAnalyses` squares this
-            // field before the drag buildup. Keeping this at unity avoids an
-            // unsupported CDi bias; a future calibrated wing-load model can
-            // opt in explicitly at this boundary.
-            MissionReferenceMode::Product => 1.0,
-            MissionReferenceMode::ReferenceCompatibility => 1.0,
-        },
+        induced_drag_lift_correction: 1.0,
         signed_cruise_force_residual: matches!(reference_mode, MissionReferenceMode::Product),
         enforce_throttle_envelope: matches!(reference_mode, MissionReferenceMode::Product),
-        drag_settings,
+        drag_source,
+        drag_settings: DragSettings::reference_compatibility(),
         wings,
         fuselages: vec![fuselage],
         nacelles,
@@ -346,7 +337,6 @@ fn mission_wings(
     reference_mode: MissionReferenceMode,
 ) -> Result<Vec<WingParams>, String> {
     let geometry = &config.geometry;
-    let empennage = &geometry.empennage;
     let (wing_area, hstab_area, vstab_area, main_aspect_ratio) = match reference_mode {
         MissionReferenceMode::Product => {
             let hstab = report
@@ -376,20 +366,10 @@ fn mission_wings(
             geometry_value(report, "aspect_ratio")?,
         ),
     };
-    let hstab_span =
-        2.0 * hstab_area / (empennage.hstab_root_chord_m + empennage.hstab_tip_chord_m);
-    let vstab_span =
-        2.0 * vstab_area / (empennage.vstab_root_chord_m + empennage.vstab_tip_chord_m);
-    let hstab_sweep = if empennage.hstab_tip_le_m.1 == 0.0 {
-        0.0
-    } else {
-        empennage.hstab_tip_le_m.0.atan2(empennage.hstab_tip_le_m.1)
-    };
-    let vstab_sweep = if empennage.vstab_tip_le_m.2 == 0.0 {
-        0.0
-    } else {
-        empennage.vstab_tip_le_m.0.atan2(empennage.vstab_tip_le_m.2)
-    };
+    let wing_x_m = geometry.wing.root_datum_x_m + report.design.wing_x_shift_m;
+    let (hstab, vstab) = tail_surfaces(config, report, reference_mode, wing_x_m)?;
+    let hstab_span = tail_span(&hstab, hstab_area, reference_mode);
+    let vstab_span = tail_span(&vstab, vstab_area, reference_mode);
     let wing = |mean_aerodynamic_chord_m,
                 quarter_chord_sweep_rad,
                 thickness_to_chord,
@@ -409,22 +389,22 @@ fn mission_wings(
     Ok(vec![
         wing(
             geometry_value(report, "mean_aerodynamic_chord_m")?,
-            report.design.sweep_deg.to_radians(),
-            0.12 * report.design.airfoil_thickness_scale,
+            main_quarter_chord_sweep(report, reference_mode),
+            main_thickness(report, reference_mode),
             wing_area,
             main_aspect_ratio,
         ),
         wing(
-            (empennage.hstab_root_chord_m + empennage.hstab_tip_chord_m) / 2.0,
-            hstab_sweep,
-            0.10,
+            hstab.mean_aerodynamic_chord_m,
+            hstab.sweep_rad,
+            tail_thickness(report, reference_mode, "Horizontal Stabilizer", 0.10),
             hstab_area,
             hstab_span * hstab_span / hstab_area,
         ),
         wing(
-            (empennage.vstab_root_chord_m + empennage.vstab_tip_chord_m) / 2.0,
-            vstab_sweep,
-            0.08,
+            vstab.mean_aerodynamic_chord_m,
+            vstab.sweep_rad,
+            tail_thickness(report, reference_mode, "Vertical Stabilizer", 0.08),
             vstab_area,
             vstab_span * vstab_span / vstab_area,
         ),
@@ -462,12 +442,11 @@ fn vlm_geometry(
     report: &AnalysisReport,
     reference_mode: MissionReferenceMode,
 ) -> Result<VlmGeometry, String> {
-    // This deliberately follows `vehicle_builder.build_vehicle`, not the
-    // display mesh in `report.airplane`. The two aircraft share areas, but the
-    // mission model gives its tails different origins and uses
-    // the design-vector quarter-chord sweep instead of the cranked mesh's
-    // measured mean sweep. Feeding the latter into VORLAX changes the mission
-    // surrogate before a segment has begun to iterate.
+    // The main wing keeps the design-vector quarter-chord sweep instead of the
+    // cranked mesh's measured mean sweep. Tail chords, spans, sweeps and
+    // origins come from the built airplane in the product path (see
+    // `tail_geometry`); the frozen reference path keeps its configuration
+    // derived tail as a separate branch.
     let design = &report.design;
     let geometry = &config.geometry;
     let wing = &geometry.wing;
@@ -513,8 +492,9 @@ fn vlm_geometry(
         return Err("mission reduced geometry has no positive vertical-stabilizer area".to_owned());
     }
     let wing_x = wing.root_datum_x_m + design.wing_x_shift_m;
-    let hstab_span = 2.0 * hstab_area / (tail.hstab_root_chord_m + tail.hstab_tip_chord_m);
-    let vstab_span = 2.0 * vstab_area / (tail.vstab_root_chord_m + tail.vstab_tip_chord_m);
+    let (hstab_geo, vstab_geo) = tail_surfaces(config, report, reference_mode, wing_x)?;
+    let hstab_span = tail_span(&hstab_geo, hstab_area, reference_mode);
+    let vstab_span = tail_span(&vstab_geo, vstab_area, reference_mode);
     let mission_hstab_incidence_deg = match reference_mode {
         MissionReferenceMode::Product => report
             .trimmed_design_point
@@ -544,7 +524,7 @@ fn vlm_geometry(
                 design.span_m * design.span_m / main_area
             }
         },
-        sweep_quarter_chord_rad: design.sweep_deg.to_radians(),
+        sweep_quarter_chord_rad: main_quarter_chord_sweep(report, reference_mode),
         sweep_leading_edge_rad: None,
         twist_root_rad: wing.root_twist_deg.to_radians(),
         twist_tip_rad: design.tip_twist_deg.to_radians(),
@@ -558,26 +538,20 @@ fn vlm_geometry(
         vertical: false,
         vortex_lift: false,
         span_projected_m: hstab_span,
-        chord_root_m: tail.hstab_root_chord_m,
-        chord_tip_m: tail.hstab_tip_chord_m,
-        taper: tail.hstab_tip_chord_m / tail.hstab_root_chord_m,
+        chord_root_m: hstab_geo.root_chord_m,
+        chord_tip_m: hstab_geo.tip_chord_m,
+        taper: hstab_geo.tip_chord_m / hstab_geo.root_chord_m,
         aspect_ratio: hstab_span * hstab_span / hstab_area,
-        sweep_quarter_chord_rad: tail.hstab_tip_le_m.0.atan2(tail.hstab_tip_le_m.1),
+        sweep_quarter_chord_rad: hstab_geo.sweep_rad,
         sweep_leading_edge_rad: None,
-        // The full analysis solves the cruise pitching-moment trim before the
-        // mission surrogate is trained. A fixed trimmed incidence is the
-        // closest available cruise surrogate; the point-mass mission itself
-        // has no elevator or Cm residual, so phase-specific trim remains a
-        // declared fidelity limit rather than being implied here.
+        // Fixed design incidence supplies the alpha-to-CL lift mapping.
+        // Product drag reads the candidate's separately trimmed CDi(CL)
+        // table; this point-mass trajectory has no elevator or Cm state.
         twist_root_rad: mission_hstab_incidence_deg.to_radians(),
         twist_tip_rad: mission_hstab_incidence_deg.to_radians(),
         dihedral_rad: 0.0,
         area_reference_m2: hstab_area,
-        origin_m: [
-            wing_x + tail.hstab_offset_from_tail_m + design.tail_x_shift_m,
-            0.0,
-            tail.hstab_z_m,
-        ],
+        origin_m: [hstab_geo.origin_xz_m[0], 0.0, hstab_geo.origin_xz_m[1]],
     };
     let vstab = VlmWing {
         tag: "vertical_stabilizer".to_owned(),
@@ -585,21 +559,17 @@ fn vlm_geometry(
         vertical: true,
         vortex_lift: false,
         span_projected_m: vstab_span,
-        chord_root_m: tail.vstab_root_chord_m,
-        chord_tip_m: tail.vstab_tip_chord_m,
-        taper: tail.vstab_tip_chord_m / tail.vstab_root_chord_m,
+        chord_root_m: vstab_geo.root_chord_m,
+        chord_tip_m: vstab_geo.tip_chord_m,
+        taper: vstab_geo.tip_chord_m / vstab_geo.root_chord_m,
         aspect_ratio: vstab_span * vstab_span / vstab_area,
-        sweep_quarter_chord_rad: tail.vstab_tip_le_m.0.atan2(tail.vstab_tip_le_m.2),
+        sweep_quarter_chord_rad: vstab_geo.sweep_rad,
         sweep_leading_edge_rad: None,
         twist_root_rad: 0.0,
         twist_tip_rad: 0.0,
         dihedral_rad: 0.0,
         area_reference_m2: vstab_area,
-        origin_m: [
-            wing_x + tail.vstab_offset_from_tail_m + design.tail_x_shift_m,
-            0.0,
-            tail.vstab_z_m,
-        ],
+        origin_m: [vstab_geo.origin_xz_m[0], 0.0, vstab_geo.origin_xz_m[1]],
     };
 
     // `vehicle_builder` never sets this property. VORLAX therefore takes its
@@ -897,10 +867,9 @@ mod tests {
             .map(|point| point.l_over_d)
             .unwrap_or(reference_report.design_point.l_over_d);
         let expected_reference_thrust_n = config.requirements.mtow_kg * 9.81 / reference_l_over_d;
-        let reference_legacy = reference
-            .legacy_turbofan
-            .as_ref()
-            .unwrap_or_else(|| panic!("reference mission retains legacy compatibility inputs"));
+        let reference_legacy = reference.legacy_turbofan.as_ref().unwrap_or_else(|| {
+            panic!("reference mission retains scalar-turbofan compatibility inputs")
+        });
         assert!(
             (reference_legacy.inputs.design_thrust_total_n - expected_reference_thrust_n).abs()
                 < 1.0e-9
@@ -914,7 +883,14 @@ mod tests {
             reference_legacy.params.part_power_model,
             PartPowerModel::LegacyLinear
         );
-        assert!(product.drag_settings.area_weighted_compressibility);
+        assert!(matches!(
+            product.drag_source,
+            MissionDragSource::SharedCandidate(_)
+        ));
+        assert!(matches!(
+            reference.drag_source,
+            MissionDragSource::FrozenSuaveParity
+        ));
         assert!(!reference.drag_settings.area_weighted_compressibility);
         assert!(product
             .wings
@@ -1091,6 +1067,8 @@ mod tests {
 
         let (result, load_case) = evaluate(&config, &report, origin, destination, 5_000_000.0)
             .unwrap_or_else(|error| panic!("default report flies: {error}"));
+        let result =
+            result.unwrap_or_else(|| panic!("native flight: {:?}", load_case.native_error));
         assert!((result.initial_mass_kg() - load_case.takeoff_mass_kg).abs() < 1.0e-6);
         assert_eq!(result.solutions.len(), result.scheduled_segment_count);
         assert!(result
@@ -1116,4 +1094,4 @@ mod tests {
 }
 
 #[cfg(test)]
-mod w64;
+mod suave_boundary;

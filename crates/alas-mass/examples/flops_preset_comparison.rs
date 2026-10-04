@@ -5,7 +5,7 @@
 //! aircraft presets.
 //!
 //! The production column is evaluated first through the same complete FLOPS
-//! product entry point used by mass analysis. The legacy column is a
+//! product entry point used by mass analysis. The Torenbeek comparison column is a
 //! separately selected comparison control and never supplies a production
 //! fallback. The record keeps manufacturer/reference fields beside the
 //! result, but does not turn a published OEW into an accuracy claim.
@@ -365,7 +365,7 @@ fn production_json(
         Ok(ProductMassBuildup::LegacyComparison(_)) => Ok(json!({
             "status": "invalid_production_result",
             "mass_architecture": config.mass_model.mass_architecture.as_str(),
-            "error": "production entry point returned the legacy comparison variant",
+            "error": "production entry point returned the Torenbeek comparison variant",
         })),
         Err(ComponentMassError::FlopsUnverified { reasons, partial }) => Ok(json!({
             "status": "unsupported_or_unverified",
@@ -386,28 +386,28 @@ fn production_json(
     }
 }
 
-fn legacy_json(
+fn comparison_json(
     plane: &alas_geom::aircraft::airplane::Airplane,
     config: &AlasConfig,
     preset: &AircraftPreset,
     evidence: Option<&Value>,
 ) -> Value {
-    let mut legacy_config = config.clone();
-    legacy_config.mass_model.mass_architecture =
+    let mut comparison_config = config.clone();
+    comparison_config.mass_model.mass_architecture =
         MassArchitecture::LegacyReferenceCompatibleComparison;
-    legacy_config.mass_model.apply_architecture();
+    comparison_config.mass_model.apply_architecture();
     let masses = calculate_component_masses(
         plane,
-        &legacy_config.requirements,
-        &legacy_config.geometry,
-        Some(&legacy_config.mass_model),
+        &comparison_config.requirements,
+        &comparison_config.geometry,
+        Some(&comparison_config.mass_model),
     );
     json!({
         "status": "evaluated_comparison_control",
         "mass_architecture": MassArchitecture::LegacyReferenceCompatibleComparison.as_str(),
         "physical_validation": "not_performed",
         "masses_kg": masses_json(&masses),
-        "ledger": ledger_json(&masses, legacy_config.requirements.mtow_kg, preset, evidence),
+        "ledger": ledger_json(&masses, comparison_config.requirements.mtow_kg, preset, evidence),
     })
 }
 
@@ -417,7 +417,7 @@ fn aircraft_row(name: &str, evidence: Option<&Value>) -> Result<Value, Box<dyn E
     let plane = AircraftBuilder::new(Some(config.geometry.clone()))
         .build(Some(&preset.design_vector), true)?;
     let production = production_json(&plane, &config, preset, evidence)?;
-    let legacy = legacy_json(&plane, &config, preset, evidence);
+    let comparison = comparison_json(&plane, &config, preset, evidence);
     Ok(json!({
         "preset": name,
         "display_name": preset.display_name,
@@ -431,7 +431,7 @@ fn aircraft_row(name: &str, evidence: Option<&Value>) -> Result<Value, Box<dyn E
         },
         "reference": reference_json(preset, evidence),
         "production": production,
-        "legacy_comparison": legacy,
+        "legacy_comparison": comparison,
     }))
 }
 

@@ -68,6 +68,11 @@ fn generated_transonic_case_contains_a_real_perfect_gas_contract() {
     config.mesh.preset = MeshPreset::Coarse;
     let case_dir = scratch_dir("case");
     let generated = generate_case(&config, &case_dir).expect("transonic case generation");
+    // linearUpwind reads its named gradient scheme, not automatically grad(U).
+    // A missing `limited` entry silently falls back to unlimited Gauss linear,
+    // including for energy, and can generate nonphysical temperature near shocks.
+    let schemes = fs::read_to_string(case_dir.join("system/fvSchemes")).expect("schemes");
+    assert!(schemes.contains("limited cellLimited Gauss linear 1;"));
     assert_eq!(generated.simulation.solver, CfdSolverKind::RhoSimpleFoam);
     assert!(generated.simulation.compressible);
 
@@ -122,4 +127,86 @@ fn generated_transonic_case_contains_a_real_perfect_gas_contract() {
     );
 
     let _ = fs::remove_dir_all(case_dir);
+}
+
+#[test]
+fn supersonic_streamwise_boundaries_follow_normal_mach_and_match_provenance() {
+    for (mach, alpha, supersonic) in [(0.729, 2.31, false), (1.35, 0.0, true), (1.01, 20.0, false)]
+    {
+        let mut config = CfdStudyConfig::default();
+        config.speed_m_s = mach * config.speed_of_sound_m_s();
+        config.angle_of_attack_deg = alpha;
+        assert_eq!(config.has_supersonic_streamwise_boundaries(), supersonic);
+        let dir = scratch_dir("normal-mach");
+        generate_case(&config, &dir).expect("case");
+        for field in ["U", "p", "T"] {
+            let text = fs::read_to_string(dir.join(format!("0/{field}"))).expect("field");
+            if supersonic {
+                assert!(text.contains("inlet { type fixedValue;"), "{text}");
+                assert!(text.contains("outlet { type zeroGradient; }"), "{text}");
+            } else {
+                let kind = match field {
+                    "U" => "freestreamVelocity",
+                    "p" => "freestreamPressure",
+                    _ => "inletOutlet",
+                };
+                assert!(text.contains(&format!("inlet {{ type {kind};")), "{text}");
+                assert!(text.contains(&format!("outlet {{ type {kind};")), "{text}");
+            }
+            let lateral = match field {
+                "U" => "freestreamVelocity",
+                "p" => "freestreamPressure",
+                _ => "inletOutlet",
+            };
+            assert!(
+                text.contains(&format!("farField {{ type {lateral};")),
+                "{text}"
+            );
+        }
+        let effective = config.effective_configuration();
+        let inlet = effective
+            .boundaries
+            .iter()
+            .find(|p| p.patch == "inlet")
+            .expect("inlet");
+        let outlet = effective
+            .boundaries
+            .iter()
+            .find(|p| p.patch == "outlet")
+            .expect("outlet");
+        assert_eq!(
+            inlet.pressure,
+            if supersonic {
+                "fixedValue"
+            } else {
+                "freestreamPressure"
+            }
+        );
+        assert_eq!(
+            outlet.pressure,
+            if supersonic {
+                "zeroGradient"
+            } else {
+                "freestreamPressure"
+            }
+        );
+        let _ = fs::remove_dir_all(dir);
+    }
+}
+
+#[test]
+fn supersonic_pressure_guard_does_not_clip_normal_shock_pressure() {
+    let mut config = CfdStudyConfig::default();
+    config.speed_m_s = 2.0 * config.speed_of_sound_m_s();
+    let factor = config.compressible_pressure_upper_factor();
+    assert!((factor - 7.824449066867263).abs() < 1e-12);
+    assert!(factor > 4.5, "M=2 normal shock has p2/p1=4.5");
+    let dir = scratch_dir("pressure-bound");
+    generate_case(&config, &dir).expect("case");
+    let solution = fs::read_to_string(dir.join("system/fvSolution")).expect("solution");
+    assert!(
+        solution.contains(&format!("pMaxFactor {factor:.16e};")),
+        "{solution}"
+    );
+    let _ = fs::remove_dir_all(dir);
 }

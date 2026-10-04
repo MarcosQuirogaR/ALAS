@@ -1,13 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! Headless regression tests for the Medium and Low findings of the
-//! 2026-09-17 native screenshot review.
+//! Headless regression tests for view colour, placement and composition.
 //!
-//! Each test renders the real view and inspects the shapes egui emits, which
-//! is the same evidence the review measured on the captured bitmaps. These are
-//! headless renders, not desktop screenshots: they prove colour, placement and
-//! composition, not typography.
+//! Each test renders the real view and inspects the shapes egui emits. These
+//! are headless renders, not desktop screenshots: they prove colour, placement
+//! and composition, not typography.
 
 use alas_gui::state::AppState;
 use egui::{vec2, Color32, Context, FullOutput, Pos2, RawInput, Rect, Shape};
@@ -106,7 +104,7 @@ fn run_frame(size: (f32, f32), add: impl FnMut(&mut egui::Ui)) -> (FullOutput, C
     (output, ctx)
 }
 
-/// F-11: a preset-locked page dimmed its own headings and labels.
+/// A preset-locked page dimmed its own headings and labels.
 #[test]
 fn a_locked_page_keeps_its_title_and_labels_at_full_contrast() {
     let page = alas_gui::nav::page("control_surfaces").expect("the control-surface page exists");
@@ -130,16 +128,16 @@ fn a_locked_page_keeps_its_title_and_labels_at_full_contrast() {
             "locked page {what} {color:?} measures {ratio:.2}:1 on {panel:?}"
         );
     }
-    // The prose is identical whether or not the page is locked: only the
-    // editors are disabled.
+    // The page title keeps its contrast whether or not its editors are locked.
     assert_eq!(
         color_of(&open_colors, "Control Surfaces"),
         Some(title),
         "an unlocked page must paint its title the same way"
     );
-    // ... and the lock notice is drawn on the locked page only.
-    assert!(color_of(&locked_colors, "Preset geometry is protected").is_some());
-    assert!(color_of(&open_colors, "Preset geometry is protected").is_none());
+    // Only the short lock status is painted; its explanation is hover help.
+    assert!(color_of(&locked_colors, "Preset geometry locked").is_some());
+    assert!(color_of(&open_colors, "Preset geometry locked").is_none());
+    assert!(color_of(&locked_colors, "Preset geometry is protected").is_none());
 }
 
 /// The negative control for the test above: the previous structure wrapped the
@@ -192,7 +190,7 @@ fn line_bounds(scene: &alas_report::scene::Scene) -> Option<(f64, f64, f64, f64)
     bounds
 }
 
-/// F-13: the live preview's model must be centred in, and fill, its canvas.
+/// The live preview's model must be centred in, and fill, its canvas.
 #[test]
 fn the_exterior_preview_centres_and_fills_its_own_canvas() {
     let state = AppState::default();
@@ -222,7 +220,7 @@ fn the_exterior_preview_centres_and_fills_its_own_canvas() {
     );
 }
 
-/// F-13: the dock's canvas must stay inside the panel that hosts it.
+/// The dock's canvas must stay inside the panel that hosts it.
 #[test]
 fn the_preview_dock_canvas_stays_inside_its_panel() {
     let mut state = AppState::default();

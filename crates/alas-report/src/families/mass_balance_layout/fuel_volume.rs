@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/reporting/visualization.py:figure_fuel_volume_check (L3018-3087)
-// Reference: alas @ rust-port-baseline.
 
 use crate::chart_kit::{draw_horizontal_legend_columns, draw_title, LegendMarker};
 use crate::scene::{Axes2D, Color, Fill, Scene, SceneElement, Stroke, TextAlign, TextBaseline};

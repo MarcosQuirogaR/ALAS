@@ -5,7 +5,6 @@
 // mission analysis model/Methods/Aerodynamics/Common/Fidelity_Zero/Helper_Functions/
 //   compressible_mixed_flat_plate.py and compressible_turbulent_flat_plate.py
 // Upstream: mission analysis model 2.5.2, LGPL-2.1.
-// Reference: alas @ rust-port-baseline.
 
 //! Flat-plate skin friction, with the compressibility and Reynolds
 //! corrections every parasite-drag component applies.

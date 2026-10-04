@@ -172,7 +172,11 @@ fn push_flops_operating_items(
             if flops.cabin_equipment_method
                 == alas_config::CabinEquipmentMethod::LthCivilTransportV1
             {
-                MassMethod::Correlation("LTH civil transport cabin")
+                if id == "operating-passenger_service" {
+                    MassMethod::Correlation("LTH civil transport cabin")
+                } else {
+                    MassMethod::Correlation("FLOPS crew allocation within LTH total")
+                }
             } else {
                 MassMethod::Correlation("FLOPS")
             },
@@ -284,14 +288,18 @@ pub(super) fn push_flops_systems_and_operating_items(
         ledger,
         reduced_furnishings_kg,
         stations,
-        if flops.cabin_equipment_method == alas_config::CabinEquipmentMethod::LthCivilTransportV1 {
-            if relieved_unusable_kg == 0.0 && allocated_unusable_kg > 0.0 {
-                MassMethod::Correlation("LTH furnishings + FLOPS unusable fuel")
-            } else {
-                MassMethod::Correlation("LTH civil transport cabin")
+        match flops.cabin_equipment_method {
+            alas_config::CabinEquipmentMethod::LthCivilTransportV1 => {
+                if relieved_unusable_kg == 0.0 && allocated_unusable_kg > 0.0 {
+                    MassMethod::Correlation("LTH furnishings + FLOPS unusable fuel")
+                } else {
+                    MassMethod::Correlation("LTH civil transport cabin")
+                }
             }
-        } else {
-            MassMethod::Correlation("FLOPS")
+            alas_config::CabinEquipmentMethod::RegionalTurbopropV1 => {
+                MassMethod::Correlation("Torenbeek regional turboprop systems residual")
+            }
+            alas_config::CabinEquipmentMethod::FlopsTransportV1 => MassMethod::Correlation("FLOPS"),
         },
     );
     Ok(())

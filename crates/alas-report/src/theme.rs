@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/reporting/theme.py
-// Reference: alas @ rust-port-baseline.
 
 //! Shared color palette and theme definitions for ALAS figures and reports.
 //!

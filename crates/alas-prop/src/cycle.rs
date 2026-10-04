@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/physics/propulsion.py
-// Reference: alas @ rust-port-baseline.
 
 //! Separate-flow, two-spool turbofan on-design cycle.
 //!

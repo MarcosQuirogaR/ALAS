@@ -12,16 +12,11 @@
 #[cfg(test)]
 use alas_config::CgEnvelopeEvidence;
 use alas_config::{AlasConfig, DesignVector};
-use alas_mass::breakdown::{
-    calculate_physical_cg, MassBreakdown, MassCoordinates, FUEL, FURNISHINGS, FUSELAGE, GEAR,
-    H_STAB, PAYLOAD, PROPULSION, SYSTEMS, V_STAB, WING,
-};
+#[cfg(test)]
+use alas_mass::breakdown::{FUEL, PROPULSION};
 use alas_mission::MissionResult;
-use alas_opt::{assess_model_cg_envelope, ModelCgConstraint, ModelCgEnvelopeAssessment};
 use alas_perf::performance::{
-    assess_oei_climb, compute_field_performance_at_masses, compute_v_speeds_at_masses,
-    density_ratio, far25_oei_gradient, tw_cruise_constraint, tw_takeoff_constraint,
-    ws_landing_limit, OeiClimbStatus, OeiV2Condition,
+    compute_v_speeds_at_masses, density_ratio, OeiClimbAssessment, OeiClimbStatus,
 };
 
 use crate::full_analysis::AnalysisReport;
@@ -29,14 +24,23 @@ use crate::mission_stage::SelectedLoadCase;
 
 mod acceptance;
 mod cruise_equilibrium;
+mod design_mass;
 mod dispatch;
+mod field;
 mod fuel;
 mod mass_balance;
+mod mission_fuel;
+mod model_cg;
+mod oei_drag;
+mod operational_envelope;
+mod payload_findings;
+mod phase_limits;
 mod planning;
 mod report_format;
 mod reported_attitude;
 mod static_thrust;
 mod structural_mass;
+pub(crate) mod structure;
 mod types;
 
 pub use acceptance::{
@@ -44,16 +48,25 @@ pub use acceptance::{
 };
 pub(crate) use cruise_equilibrium::assess as assess_cruise_equilibrium;
 pub use cruise_equilibrium::CruiseEquilibriumAssessment;
-pub use dispatch::{DispatchAssessment, DispatchOutcome};
-pub use fuel::{
-    assess_fuel_capacity, CarriedFuelBasis, FuelCapacityAssessment, FuelCapacityEvidence,
-    FuelLoadingAssessment, MissionFuelAssessment, MissionFuelStatus,
+pub use design_mass::{
+    design_mass_config, design_vn_diagram, design_vn_mass_kg, landing_mass_limit_kg,
 };
-pub(crate) use fuel::{plan_fuel_loading, report_mass_basis_kg};
+pub use dispatch::{DispatchAssessment, DispatchOutcome};
+pub(crate) use fuel::plan_fuel_loading;
+pub use fuel::{
+    assess_airplane_fuel_capacity, assess_fuel_capacity, CarriedFuelBasis, FuelCapacityAssessment,
+    FuelCapacityEvidence, FuelLoadingAssessment,
+};
 pub use mass_balance::{
     takeoff_mass_properties, LedgerItemSummary, MassBalanceAssessment, MassStateSummary,
     TankSummary,
 };
+pub use mission_fuel::{MissionFuelAssessment, MissionFuelStatus, NativeMissionTelemetry};
+pub use operational_envelope::{
+    append_envelope_findings, assess_operational_envelope, balance_index, CheckedPoint,
+    OperationalEnvelopeAssessment,
+};
+pub use phase_limits::CheckedPhase;
 use planning::assess_public_cg_reference;
 #[cfg(test)]
 use planning::{assess_reference_limits, planning_cg_pct_mac};
@@ -77,122 +90,29 @@ fn error(
     }
 }
 
-fn model_cg_assessment(
-    config: &AlasConfig,
-    report: &AnalysisReport,
-    fuel_loading: &FuelLoadingAssessment,
-) -> Result<ModelCgEnvelopeAssessment, String> {
-    let mass = |name: &str| {
-        report
-            .component_masses
-            .get(name)
-            .copied()
-            .ok_or_else(|| format!("model CG assessment is missing {name} mass"))
-    };
-    let coordinate = |name: &str| {
-        report
-            .mass_coordinates
-            .get(name)
-            .copied()
-            .ok_or_else(|| format!("model CG assessment is missing {name} coordinates"))
-    };
-    let mut masses = MassBreakdown {
-        wing: mass(WING)?,
-        h_stab: mass(H_STAB)?,
-        v_stab: mass(V_STAB)?,
-        fuselage: mass(FUSELAGE)?,
-        gear: mass(GEAR)?,
-        propulsion: mass(PROPULSION)?,
-        systems: mass(SYSTEMS)?,
-        furnishings: mass(FURNISHINGS)?,
-        payload: mass(PAYLOAD)?,
-        fuel: mass(FUEL)?,
-    };
-    let coordinates = MassCoordinates {
-        wing: coordinate(WING)?,
-        h_stab: coordinate(H_STAB)?,
-        v_stab: coordinate(V_STAB)?,
-        fuselage: coordinate(FUSELAGE)?,
-        gear: coordinate(GEAR)?,
-        propulsion: coordinate(PROPULSION)?,
-        systems: coordinate(SYSTEMS)?,
-        furnishings: coordinate(FURNISHINGS)?,
-        payload: coordinate(PAYLOAD)?,
-        fuel: coordinate(FUEL)?,
-    };
-    masses.fuel = fuel_loading.analyzed_carried_fuel_kg;
-    let analyzed_cg = calculate_physical_cg(&masses, &coordinates);
-    assess_model_cg_envelope(
-        &report.airplane,
-        &masses,
-        &coordinates,
-        analyzed_cg[0],
-        report.x_neutral_point,
-        report.airplane.c_ref,
-        config,
-    )
-    .map_err(|error| error.to_string())
+/// Same shape as [`error`], severity [`FindingSeverity::Warning`]: for
+/// findings against a configured/assumed requirement rather than a physical
+/// limit (e.g. `ModelCgConstraint::MinimumUsableCgRange`'s configured
+/// `cg_range_pct_mac`), which must not reject an otherwise-feasible design
+/// on the strength of an assumption alone.
+fn warning(
+    code: FindingCode,
+    message: impl Into<String>,
+    actual: Option<f64>,
+    limit: Option<f64>,
+    unit: &'static str,
+) -> PhysicalFinding {
+    PhysicalFinding {
+        code,
+        severity: FindingSeverity::Warning,
+        message: message.into(),
+        actual,
+        limit,
+        unit,
+    }
 }
 
-fn append_model_cg_findings(
-    findings: &mut Vec<PhysicalFinding>,
-    assessment: &ModelCgEnvelopeAssessment,
-) {
-    let constraints = [
-        ModelCgConstraint::StaticStabilityFloor,
-        ModelCgConstraint::ConfiguredForwardCgRange,
-        ModelCgConstraint::NoseGearStrength,
-        ModelCgConstraint::MainGearStrength,
-        ModelCgConstraint::MinimumNoseGearLoad,
-    ];
-    for constraint in constraints {
-        let worst = assessment
-            .loading_states
-            .iter()
-            .flat_map(|state| {
-                state
-                    .constraints
-                    .iter()
-                    .filter(move |item| item.constraint == constraint && item.violated)
-                    .map(move |item| (state.state, item))
-            })
-            .max_by(|(_, left), (_, right)| {
-                left.normalized_exceedance
-                    .total_cmp(&right.normalized_exceedance)
-            });
-        let Some((state, result)) = worst else {
-            continue;
-        };
-        let code = match constraint {
-            ModelCgConstraint::StaticStabilityFloor => FindingCode::InsufficientStaticMargin,
-            ModelCgConstraint::ConfiguredForwardCgRange => {
-                FindingCode::ModelCgForwardRangeViolation
-            }
-            ModelCgConstraint::NoseGearStrength => FindingCode::NoseGearStrengthViolation,
-            ModelCgConstraint::MainGearStrength => FindingCode::MainGearStrengthViolation,
-            ModelCgConstraint::MinimumNoseGearLoad => FindingCode::MinimumNoseGearLoadViolation,
-        };
-        findings.push(error(
-            code,
-            format!(
-                "{} loading state violates the model {} constraint",
-                state.label(),
-                constraint.label()
-            ),
-            Some(result.actual),
-            Some(result.limit),
-            constraint.unit(),
-        ));
-    }
-    // The aft-boundary governance diagnostic that explains a nose-load
-    // violation is carried on the typed assessment itself
-    // (`ModelCgEnvelopeAssessment::aft_limit_governance`) and reported by
-    // `report_format` and `acceptance`. It is deliberately not a
-    // `PhysicalFinding`: `FindingCode` is an interface whose exhaustive
-    // consumers live outside this crate's ownership boundary, and the
-    // diagnostic changes no verdict: a layout whose gear cannot carry the
-    // envelope still fails `MinimumNoseGearLoadViolation` above.
-}
+use model_cg::{append_model_cg_findings, design_model_cg_assessment, model_cg_assessment};
 
 /// Evaluate conservation laws and configured limits on a completed run.
 ///
@@ -218,13 +138,11 @@ pub fn assess_physical_feasibility_with_load_case(
     mission: Option<&MissionResult>,
     load_case: Option<&SelectedLoadCase>,
 ) -> FeasibilityReport {
+    // The verdict describes the report's aircraft, gear included.
+    let config = &crate::gear_stations::report_config(config, report);
     let mut findings = Vec::new();
-    let envelope = alas_perf::performance::build_vn_diagram(
-        report.airplane.s_ref,
-        &config.requirements,
-        &config.performance,
-        config.requirements.cruise_altitude_m,
-    );
+    structure::append_native(config, design, report, &mut findings);
+    let envelope = design_vn_diagram(config, report);
     if let Err(message) = envelope.validate_speed_order() {
         findings.push(error(
             FindingCode::InvalidEnvelopeSpeedOrder,
@@ -247,27 +165,32 @@ pub fn assess_physical_feasibility_with_load_case(
 
     let mut fuel_loading = plan_fuel_loading(config, design, report);
     dispatch::apply_load_case(&mut fuel_loading, load_case, &mut findings);
-    fuel_loading.analyzed_landing_mass_kg = mission
-        .and_then(MissionResult::completed_summary)
-        .map(|summary| summary.landing_mass_kg);
+    // The arrival mass is the route's on the unified model's frozen plan:
+    // takeoff mass less trip, which for a settled dispatch is the zero-fuel
+    // mass plus reserves, extra and the taxi-in budget. The native flight is
+    // telemetry and never sets it.
+    fuel_loading.analyzed_landing_mass_kg = fuel_loading.dispatch.and_then(|dispatch| {
+        dispatch
+            .plan
+            .map(|plan| dispatch.takeoff_mass_kg - plan.trip.kg)
+    });
     let cruise_equilibrium = mission.map(assess_cruise_equilibrium);
     if let Some(assessment) = &cruise_equilibrium {
         if !assessment.is_finite() {
-            findings.push(error(
+            findings.push(warning(
                 FindingCode::InvalidCruiseForceBalance,
-                "cruise force-balance record contains no finite solved control point",
+                "native mission cruise force-balance record contains no finite solved control point (telemetry only)",
                 None,
                 None,
                 "",
             ));
         }
     }
-    // Public planning limits apply to the load actually carried: a mass-closure
-    // remainder can exceed usable tank capacity, so `report.physical_cg` would
-    // compare a capped mass case against a CG still holding uncarried fuel.
-    let cg_envelope =
-        assess_public_cg_reference(config, report, fuel_loading.analyzed_carried_fuel_kg);
-    fuel_loading.mission = fuel::assess_mission_fuel(config.mission.enabled, mission);
+    fuel_loading.mission = mission_fuel::assess_mission_fuel(
+        config.mission.enabled,
+        fuel_loading.dispatch.as_ref(),
+        mission,
+    );
     findings.extend(fuel::findings(config.requirements.mtow_kg, &fuel_loading));
     structural_mass::append_structural_mass_findings(
         config,
@@ -277,7 +200,16 @@ pub fn assess_physical_feasibility_with_load_case(
         &mut findings,
     );
 
-    let model_cg = match model_cg_assessment(config, report, &fuel_loading) {
+    // Built before the model CG assessment: when the ledger
+    // exists, `model_cg_assessment` reads its OEW/ZFW/TOW points instead of
+    // the lumped ten-group model's, so the hard gate evaluates the same
+    // tank-fill-order, detailed-payload centre of gravity this statement
+    // shows a reviewer. `assess_mass_balance` depends only on `config`,
+    // `design`, `report` and the already-finalized `fuel_loading` above, so
+    // moving it ahead of `model_cg_assessment` changes no result of its own.
+    let mass_balance =
+        mass_balance::assess_mass_balance(config, design, report, &fuel_loading, &mut findings);
+    let model_cg = match model_cg_assessment(config, report, &fuel_loading, mass_balance.as_ref()) {
         Ok(assessment) => {
             append_model_cg_findings(&mut findings, &assessment);
             Some(assessment)
@@ -293,44 +225,59 @@ pub fn assess_physical_feasibility_with_load_case(
             None
         }
     };
-
-    if let Some(alas_payload::layout::LayoutSummary::Passenger(summary)) =
-        report.payload_layout.as_ref().map(|layout| &layout.summary)
-    {
-        if summary.unseated_pax > 0 {
-            findings.push(error(
-                FindingCode::PassengerCapacityShortfall,
-                format!(
-                    "passenger payload leaves {} requested passengers without seats",
-                    summary.unseated_pax
-                ),
-                Some(summary.seated_pax as f64),
-                Some(summary.total_pax as f64),
-                "passengers",
-            ));
+    let design_model_cg = match design_model_cg_assessment(
+        config,
+        report,
+        &fuel_loading,
+        mass_balance.as_ref(),
+        model_cg.as_ref(),
+    ) {
+        Ok(assessment) => {
+            if fuel_loading.design_takeoff_loading.is_some() {
+                if let Some(assessment) = &assessment {
+                    let first = findings.len();
+                    append_model_cg_findings(&mut findings, assessment);
+                    for finding in &mut findings[first..] {
+                        finding.message.insert_str(0, "Design loading: ");
+                    }
+                }
+            }
+            assessment
         }
-    }
-    if let Some(alas_payload::layout::LayoutSummary::Cargo(summary)) =
-        report.payload_layout.as_ref().map(|layout| &layout.summary)
-    {
-        let requested_net_kg = summary.requested_net_payload_t * 1_000.0;
-        let loaded_net_kg = summary.loaded_net_payload_t * 1_000.0;
-        if requested_net_kg.is_finite()
-            && loaded_net_kg.is_finite()
-            && loaded_net_kg + 1.0e-6 < requested_net_kg
-        {
+        Err(message) => {
             findings.push(error(
-                FindingCode::CargoCapacityShortfall,
-                format!(
-                    "cargo layout delivers {:.1} kg net against {:.1} kg requested",
-                    loaded_net_kg, requested_net_kg
-                ),
-                Some(loaded_net_kg),
-                Some(requested_net_kg),
-                "kg net",
+                FindingCode::ModelCgAssessmentUnavailable,
+                message,
+                None,
+                None,
+                "",
             ));
+            None
         }
-    }
+    };
+    let operational_envelope = model_cg.as_ref().and_then(|assessment| {
+        operational_envelope::assess_operational_envelope(config, report, assessment)
+    });
+    operational_envelope::append_envelope_findings(operational_envelope.as_ref(), &mut findings);
+    // Public planning limits apply to the load actually carried: a mass-closure
+    // remainder can exceed usable tank capacity, so `report.physical_cg` would
+    // compare a capped mass case against a CG still holding uncarried fuel.
+    //
+    // Computed after `model_cg`/`operational_envelope` : the
+    // planning-curve sweep needs every named loading state and every
+    // potato/fuel-vector extreme those two already built, not just the one
+    // analyzed point the frozen single-point comparison used.
+    let cg_envelope = assess_public_cg_reference(
+        config,
+        report,
+        // The dispatched route's loaded CG, as the search evaluates it.
+        fuel_loading
+            .flown_carried_fuel_kg
+            .unwrap_or(fuel_loading.analyzed_carried_fuel_kg),
+        model_cg.as_ref(),
+        operational_envelope.as_ref(),
+    );
+    payload_findings::append_payload_findings(report, &mut findings);
 
     if matches!(
         cg_envelope.planning_status,
@@ -431,15 +378,14 @@ pub fn assess_physical_feasibility_with_load_case(
         .copied()
         .or(Some(report.airplane.s_ref))
         .unwrap_or(f64::NAN);
-    let mtow_kg = config.requirements.mtow_kg;
     let takeoff_mass_kg = fuel_loading.analyzed_takeoff_mass_kg;
     let gravity_m_s2 = config.requirements.gravity_m_s2;
     // The installed sea-level reference thrust, taken from whichever physical
     // model the aircraft actually has: the certificated jet rating for a
     // turbofan, the propeller model's ground-roll mean thrust for a
-    // turboprop. The jet rating stays exactly zero for a shaft-power engine,
-    // so a propeller aircraft no longer arrives here with nothing, and it is
-    // the roll mean rather than the static value because a propeller's thrust
+    // turboprop. The jet rating is exactly zero for a shaft-power engine, so
+    // a propeller aircraft needs the propeller model's value, and it is the
+    // roll mean rather than the static value because a propeller's thrust
     // falls through the roll. See `static_thrust`.
     //
     // The propeller branch needs the lift-off speed the roll mean is taken
@@ -478,7 +424,7 @@ pub fn assess_physical_feasibility_with_load_case(
             unit: "fraction weight",
         });
     }
-    let mlw_limit_kg = config.landing_mass_limit_kg(mtow_kg);
+    let mlw_limit_kg = landing_mass_limit_kg(config, report);
     let landing_mass_kg = fuel_loading
         .analyzed_landing_mass_kg
         .unwrap_or(mlw_limit_kg.min(takeoff_mass_kg));
@@ -497,10 +443,6 @@ pub fn assess_physical_feasibility_with_load_case(
     let wing_loading_pa = takeoff_mass_kg * gravity_m_s2 / wing_area_m2;
     let matching_inputs_are_finite = wing_loading_pa.is_finite()
         && wing_loading_pa > 0.0
-        && report.polar_fit.cd0.is_finite()
-        && report.polar_fit.k.is_finite()
-        && report.polar_fit.cd0 >= 0.0
-        && report.polar_fit.k >= 0.0
         && config.requirements.cruise_mach.is_finite()
         && config.requirements.cruise_mach > 0.0
         && config.requirements.cruise_altitude_m.is_finite()
@@ -522,64 +464,29 @@ pub fn assess_physical_feasibility_with_load_case(
         ));
     }
     if matching_inputs_are_finite && static_tw.is_finite() && static_tw > 0.0 {
-        let cruise_required_tw = tw_cruise_constraint(
-            &[wing_loading_pa],
-            report.polar_fit.cd0,
-            report.polar_fit.k,
-            config.requirements.cruise_mach,
-            config.requirements.cruise_altitude_m,
-            config.performance.thrust_lapse,
-        )
-        .first()
-        .copied()
-        .unwrap_or(f64::NAN);
-        let n_engines_i64 = config.geometry.engine.spanwise_positions_m.len() as i64;
-        let certified_oei_gradient = far25_oei_gradient(n_engines_i64);
-        let oei_condition = alas_config::airports::get(&config.departure_airport)
-            .ok()
-            .map(|departure| {
-                let speeds = compute_v_speeds_at_masses(
-                    takeoff_mass_kg,
-                    takeoff_mass_kg,
-                    wing_area_m2,
-                    departure,
-                    config.performance.cl_max_to,
-                    config.performance.cl_max_land,
-                    &config.performance,
-                );
-                OeiV2Condition {
-                    departure_elevation_m: departure.elevation_m,
-                    departure_isa_deviation_c: departure.isa_deviation_c,
-                    v2_over_vstall: speeds.v2_ms / speeds.v_stall_to_ms,
-                    condition_to_sls_thrust_ratio: config
-                        .performance
-                        .oei_condition_to_sls_thrust_ratio,
-                    asymmetric_trim_cd: config.performance.oei_asymmetric_trim_cd,
-                    windmilling_cd: config.performance.oei_windmilling_cd,
+        let oei_assessment = oei_drag::assess(config, report, takeoff_mass_kg, wing_area_m2)
+            .unwrap_or_else(|reason| {
+                findings.push(error(
+                    FindingCode::FieldPerformanceUnavailable,
+                    format!("OEI drag could not be assessed: {reason}"),
+                    None,
+                    None,
+                    "",
+                ));
+                OeiClimbAssessment {
+                    status: OeiClimbStatus::EvidenceGap,
+                    required_inflight_tw: None,
+                    required_sls_tw: None,
+                    diagnostic: "OEI shared candidate drag is unavailable; no SLS floor is scored.",
                 }
             });
-        let oei_assessment = assess_oei_climb(
-            report.polar_fit.cd0,
-            report.polar_fit.k,
-            n_engines_i64,
-            certified_oei_gradient.unwrap_or(config.performance.oei_gradient),
-            config.performance.oei_climb_cl,
-            config.performance.oei_climb_delta_cd,
-            config.performance.cl_max_to,
-            oei_condition,
-        );
-        if cruise_required_tw.is_finite() && static_tw < cruise_required_tw {
-            findings.push(error(
-                FindingCode::ThrustMarginViolation,
-                format!(
-                    "cruise requires static T/W {:.4}, but the configured rating provides {:.4}",
-                    cruise_required_tw, static_tw
-                ),
-                Some(static_tw),
-                Some(cruise_required_tw),
-                "T/W",
-            ));
-        }
+        findings.extend(static_thrust::cruise_thrust_margin(
+            config,
+            report,
+            static_tw,
+            wing_loading_pa,
+            takeoff_mass_kg * gravity_m_s2,
+        ));
         // An in-flight OEI estimate is useful as a diagnostic, but it is not
         // dimensionally comparable with the SLS axis used here. Only the
         // shared assessor's condition-specific SLS result may create a hard
@@ -612,244 +519,71 @@ pub fn assess_physical_feasibility_with_load_case(
             });
         }
     }
-    for (airport_name, role) in [
-        (&config.departure_airport, "departure"),
-        (&config.arrival_airport, "arrival"),
-    ] {
-        let airport = match alas_config::airports::get(airport_name) {
-            Ok(airport) => airport,
-            Err(airport_error) => {
-                findings.push(error(
-                    FindingCode::FieldPerformanceUnavailable,
-                    format!("{role} airport cannot be resolved: {airport_error}"),
-                    None,
-                    None,
-                    "",
-                ));
-                continue;
-            }
-        };
-        // Report the input that actually failed. This guard covers three
-        // different quantities but used to publish `wing_area_m2` as the
-        // finding's `actual` whichever one of them was at fault, so the ATR
-        // 72-600 - whose wing area is a perfectly healthy 61.0 m2 - reported
-        // "inputs are not finite and positive (actual 61.000 m^2, limit
-        // 0.000 m^2)". A reader cannot act on that, and the quantity really
-        // at fault there is the static thrust-to-weight ratio.
-        let unusable = |value: f64| !value.is_finite() || value <= 0.0;
-        let failure = if unusable(wing_area_m2) {
-            Some(("wing reference area", wing_area_m2, "m^2"))
-        } else if unusable(takeoff_mass_kg) {
-            Some(("analyzed take-off mass", takeoff_mass_kg, "kg"))
-        } else if role == "departure" && unusable(static_tw) {
-            Some((
-                "static thrust-to-weight ratio",
-                static_tw,
-                "fraction weight",
-            ))
-        } else {
-            None
-        };
-        if let Some((quantity, value, unit)) = failure {
-            // When it is the thrust that is missing, the propulsion model
-            // already said why in its own terms; repeat that rather than
-            // implying the geometry is malformed. A turboprop no longer
-            // reaches this on a zero jet rating, because the propeller deck
-            // supplies the static thrust, so an unavailable thrust here means
-            // the deck itself could not be built or evaluated.
-            let thrust_reason = match &sea_level_static_thrust.source {
-                static_thrust::StaticThrustSource::Unavailable { reason }
-                    if quantity == "static thrust-to-weight ratio" =>
-                {
-                    format!("; {reason}")
-                }
-                _ => String::new(),
-            };
-            findings.push(error(
-                FindingCode::FieldPerformanceUnavailable,
-                format!(
-                    "{role} field performance could not be evaluated: \
-                     {quantity} is not finite and positive{thrust_reason}"
-                ),
-                Some(value),
-                Some(0.0),
-                unit,
-            ));
-            continue;
-        }
-        let field = compute_field_performance_at_masses(
-            takeoff_mass_kg,
-            landing_mass_kg,
-            wing_area_m2,
-            airport,
-            config.performance.cl_max_to,
-            config.performance.cl_max_land,
-            static_tw.max(1.0e-6),
-            config.performance.k_land,
-            config.performance.bfl_factor,
-            &config.performance,
-        );
-        let sigma = density_ratio(airport.elevation_m, airport.isa_deviation_c);
-        let takeoff_required_tw = tw_takeoff_constraint(
-            &[wing_loading_pa],
-            airport.toda_m,
-            sigma,
-            config.performance.cl_max_to,
-        )
-        .first()
-        .copied()
-        .unwrap_or(f64::NAN);
-        let mut landing_constraint_violation = false;
-        if role == "departure" {
-            if !field.to_feasible() {
-                findings.push(error(
-                    FindingCode::FieldTakeoffDistanceViolation,
-                    format!(
-                        "departure TODR {:.1} m exceeds TODA {:.1} m",
-                        field.todr_m,
-                        field.toda_m()
-                    ),
-                    Some(field.todr_m),
-                    Some(field.toda_m()),
-                    "m",
-                ));
-            }
-            if takeoff_required_tw.is_finite() && static_tw < takeoff_required_tw {
-                findings.push(error(
-                    FindingCode::ThrustMarginViolation,
-                    format!(
-                        "departure static T/W {:.4} is below field requirement {:.4}",
-                        static_tw, takeoff_required_tw
-                    ),
-                    Some(static_tw),
-                    Some(takeoff_required_tw),
-                    "T/W",
-                ));
-            }
-        } else {
-            let landing_wing_loading_pa = landing_mass_kg * gravity_m_s2 / wing_area_m2;
-            let landing_limit_pa = ws_landing_limit(
-                airport.lda_m,
-                sigma,
-                config.performance.cl_max_land,
-                config.performance.k_land,
-            );
-            if landing_wing_loading_pa.is_finite()
-                && landing_limit_pa.is_finite()
-                && landing_wing_loading_pa > landing_limit_pa
-            {
-                landing_constraint_violation = true;
-                findings.push(error(
-                    FindingCode::FieldLandingDistanceViolation,
-                    format!(
-                        "arrival wing loading {:.1} Pa exceeds landing limit {:.1} Pa",
-                        landing_wing_loading_pa, landing_limit_pa
-                    ),
-                    Some(landing_wing_loading_pa),
-                    Some(landing_limit_pa),
-                    "Pa",
-                ));
-            }
-        }
-        if role == "arrival" && !landing_constraint_violation && !field.land_feasible() {
-            findings.push(error(
-                FindingCode::FieldLandingDistanceViolation,
-                format!(
-                    "arrival LDR {:.1} m exceeds LDA {:.1} m at landing mass {:.1} kg",
-                    field.ldr_m,
-                    field.lda_m(),
-                    field.landing_mass_kg
-                ),
-                Some(field.ldr_m),
-                Some(field.lda_m()),
-                "m",
-            ));
-        }
-    }
+    field::assess_airports(
+        config,
+        report,
+        &mut findings,
+        wing_area_m2,
+        takeoff_mass_kg,
+        landing_mass_kg,
+        static_tw,
+        &sea_level_static_thrust,
+    );
 
+    // The route is judged on the unified segment mission model, on the plan
+    // frozen for it: the dispatch already reports an unpriced policy
+    // (`FuelPolicyUnavailable`), an unsettled closure (`DispatchNotConverged`)
+    // and trip plus reserves above the loadable fuel (`ReserveFuelShortfall`).
+    // What is added here is a requested mission with no route result at all,
+    // a trip that does not fit in the loadable fuel, and a non-physical trip.
+    // The native pseudospectral flight is telemetry
+    // (`fuel_loading.mission.native`) and never gates.
     if config.mission.enabled {
-        match mission {
-            None => findings.push(error(
+        let route = &fuel_loading.mission;
+        if fuel_loading.dispatch.is_none() {
+            findings.push(error(
                 FindingCode::MissionUnavailable,
-                "mission analysis was requested but produced no telemetry",
+                "mission analysis was requested but the route was not flown",
                 None,
                 None,
                 "",
-            )),
-            Some(result) => {
-                if let Some(exhaustion) = &result.fuel_exhaustion {
-                    findings.push(error(
-                        FindingCode::MissionFuelShortfall,
-                        format!(
-                            "usable fuel was exhausted during mission segment {}",
-                            exhaustion.segment_tag
-                        ),
-                        Some(exhaustion.burned_fuel_kg),
-                        Some(exhaustion.available_fuel_kg),
-                        "kg",
-                    ));
-                }
-                if result.solutions.is_empty()
-                    || result.solutions.iter().any(|solution| !solution.converged)
-                {
-                    findings.push(error(
-                        FindingCode::MissionNotConverged,
-                        "at least one native mission segment did not converge",
-                        None,
-                        None,
-                        "",
-                    ));
-                }
-                if result
-                    .solutions
-                    .iter()
-                    .any(|solution| solution.throttle_limited)
-                {
-                    findings.push(error(
-                        FindingCode::MissionThrottleLimitViolation,
-                        "mission reached the available 1.000 throttle boundary before force balance converged",
-                        Some(1.0),
-                        Some(1.0),
-                        "fraction",
-                    ));
-                }
-                let burned_kg = fuel_loading
-                    .mission
-                    .burned_fuel_kg
-                    .unwrap_or_else(|| result.fuel_burned_kg());
-                if !burned_kg.is_finite() || burned_kg <= 0.0 {
-                    findings.push(error(
-                        FindingCode::InvalidMissionFuelBurn,
-                        "mission fuel burn is not a positive finite quantity",
-                        Some(burned_kg),
-                        Some(0.0),
-                        "kg",
-                    ));
-                } else if result.fuel_exhaustion.is_none()
-                    && fuel_loading.analyzed_carried_fuel_kg.is_finite()
-                    && burned_kg > fuel_loading.analyzed_carried_fuel_kg
-                {
-                    findings.push(error(
-                        FindingCode::MissionFuelShortfall,
-                        "mission fuel burn exceeds the fuel carried in this load case",
-                        Some(burned_kg),
-                        Some(fuel_loading.analyzed_carried_fuel_kg),
-                        "kg",
-                    ));
-                }
+            ));
+        } else if route.status == MissionFuelStatus::Exhausted {
+            let required_kg = fuel_loading
+                .dispatch
+                .and_then(|dispatch| dispatch.plan)
+                .map(|plan| plan.trip.kg);
+            findings.push(error(
+                FindingCode::MissionFuelShortfall,
+                "the route's trip fuel on the segment mission model exceeds the loadable fuel",
+                required_kg,
+                route.burned_fuel_kg,
+                "kg",
+            ));
+        } else if let Some(trip_kg) = route.required_trip_fuel_kg {
+            if !trip_kg.is_finite() || trip_kg <= 0.0 {
+                findings.push(error(
+                    FindingCode::InvalidMissionFuelBurn,
+                    "route trip fuel on the segment mission model is not a positive finite quantity",
+                    Some(trip_kg),
+                    Some(0.0),
+                    "kg",
+                ));
             }
         }
     }
 
-    let mass_balance =
-        mass_balance::assess_mass_balance(config, design, report, &fuel_loading, &mut findings);
     FeasibilityReport {
         findings,
         cg_envelope,
         model_cg,
+        design_model_cg,
         fuel_loading,
         cruise_equilibrium,
         mass_balance,
+        propulsion_station_fallback: structural_mass::propulsion_fallback_station(config, report),
+        operational_envelope,
+        native_mission_error: load_case.and_then(|case| case.native_error.clone()),
     }
 }
 

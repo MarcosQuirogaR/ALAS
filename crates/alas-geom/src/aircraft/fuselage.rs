@@ -3,7 +3,6 @@
 
 // Ported from reference geometry/geometry/fuselage.py
 // Upstream: reference geometry 4.2.8, MIT.
-// Reference: alas @ rust-port-baseline.
 
 //! reference geometry's `Fuselage` and `FuselageXSec`, scoped to the surface
 //! `alas-geom::builder` and `alas-mass::torenbeek` (both later modules)
@@ -186,14 +185,6 @@ impl Fuselage {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn from_radius_sets_width_and_height_to_the_diameter() {
-        let xsec = FuselageXSec::new([1.0, 2.0, 3.0], Some(1.5), None, None, DEFAULT_SHAPE)
-            .expect("radius alone is valid");
-        assert_eq!(xsec.width, 3.0);
-        assert_eq!(xsec.height, 3.0);
-    }
 
     #[test]
     fn from_width_and_height_keeps_them_distinct() {

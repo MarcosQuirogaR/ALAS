@@ -14,8 +14,12 @@
 //! limit covers the intended transport-engine cycle range without implying a
 //! dissociation or equilibrium-combustion model.
 
-include!("turbofan_physics_parts/part_01.rs");
-include!("turbofan_physics_parts/part_02.rs");
+use std::fmt;
+
+mod gas;
+pub use gas::*;
+mod nozzle;
+pub use nozzle::*;
 
 #[cfg(test)]
 // Test fixtures assert successful construction through unwrap.

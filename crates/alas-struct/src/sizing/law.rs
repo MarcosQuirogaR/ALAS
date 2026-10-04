@@ -9,19 +9,10 @@
 //! and has to apply the same law to do it.
 
 /// NumPy `linspace(start, stop, n)` with `endpoint=True`: `n` evenly spaced
-/// points, the last pinned exactly to `stop`.
-pub(super) fn linspace(start: f64, stop: f64, n: usize) -> Vec<f64> {
-    if n == 0 {
-        return Vec::new();
-    }
-    if n == 1 {
-        return vec![start];
-    }
-    let step = (stop - start) / (n - 1) as f64;
-    let mut values: Vec<f64> = (0..n).map(|i| start + i as f64 * step).collect();
-    values[n - 1] = stop;
-    values
-}
+/// points, the last pinned exactly to `stop`. The geometry crate's function is
+/// the one the wingbox geometry is sampled with, so the sizing grid shares its
+/// arithmetic rather than carrying a copy of it.
+pub(super) use alas_geom::aircraft::spacing::linspace;
 
 /// NumPy `gradient(f)` at unit spacing, `edge_order=1`: central differences
 /// interior, one-sided at the two ends. For a uniform `y` this is the constant
@@ -43,7 +34,7 @@ pub(crate) fn gradient_unit(f: &[f64]) -> Vec<f64> {
 
 /// NumPy `trapezoid(y, x)`: the trapezoidal integral of `y` over the sample
 /// points `x`.
-pub(super) fn trapezoid(y: &[f64], x: &[f64]) -> f64 {
+pub(crate) fn trapezoid(y: &[f64], x: &[f64]) -> f64 {
     let mut acc = 0.0;
     for i in 0..y.len().saturating_sub(1) {
         acc += (x[i + 1] - x[i]) * (y[i + 1] + y[i]) / 2.0;
@@ -127,14 +118,52 @@ pub(super) fn station_cap_dimensions(
     }
 }
 
+/// The cover skin area, m^2 per cover, that works with each spar's cap in
+/// bending at one station, in the order of `chord_fractions`.
+///
+/// The upper and lower covers between the spars sit at the same lever arm as
+/// the caps and carry the same bending stress, so their skin is bending
+/// material and not a passive fairing. The standard boom idealization lumps a
+/// skin panel of thickness `t` and width `b` between two booms into those
+/// booms as `t b / 6 (2 + sigma_2 / sigma_1)` each (T. H. G. Megson,
+/// *Aircraft Structures for Engineering Students*, 4th ed., Butterworth-
+/// Heinemann, 2007, ch. 20 "Structural idealization"). The strength law sizes
+/// every cap to the same allowable, so the two boom stresses are equal and
+/// each boom receives `t b / 2` of every panel beside it. This test helper
+/// verifies that equal-stress special case; the product section uses the
+/// unequal-depth, compatible-strain expression in `super::section`.
+///
+/// A spar with no depth at this station (a partial-span spar outboard of its
+/// break) is not a boom; the panel then runs between its neighbours.
+#[cfg(test)]
+pub(crate) fn cover_skin_boom_areas_m2(
+    chord_fractions: &[f64],
+    heights_m: &[f64],
+    chord_m: f64,
+    t_skin_m: f64,
+) -> Vec<f64> {
+    let mut areas = vec![0.0; chord_fractions.len()];
+    let mut active: Vec<usize> = (0..chord_fractions.len().min(heights_m.len()))
+        .filter(|&i| heights_m[i] > 0.0)
+        .collect();
+    active.sort_by(|&a, &b| chord_fractions[a].total_cmp(&chord_fractions[b]));
+    let t = t_skin_m.max(0.0);
+    for pair in active.windows(2) {
+        let width = (chord_fractions[pair[1]] - chord_fractions[pair[0]]).max(0.0) * chord_m;
+        let half_panel = 0.5 * t * width;
+        areas[pair[0]] += half_panel;
+        areas[pair[1]] += half_panel;
+    }
+    areas
+}
+
 /// Which cap-sizing law a solve applies.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum SizingLaw {
-    /// Every station carries its own bending moment: the root flange widens
-    /// when its thickness clip binds and an outboard station whose tapered
-    /// flange falls short of the local moment is sized up to it. The box is
-    /// sized against the relieved load and its skin and ribs span the
-    /// structural box, not the whole chord.
+    /// Every station obeys compatible section strain under its relieved
+    /// resultants. Caps grow from their manufacturing floor within geometric
+    /// limits; covers and webs participate in the same EI and each material
+    /// obeys its own allowable. Skin and ribs span the structural box.
     Product,
     /// The frozen reference law: the root cap alone is sized, its thickness
     /// clipped at a fifth of the spar height, and the outboard caps follow the

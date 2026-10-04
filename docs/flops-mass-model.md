@@ -122,6 +122,35 @@ are explicit metadata and configuration choices, so a certified dry-engine
 mass is not silently assumed to include a complete installation. Unresolved
 equipment scope remains an uncertainty, not a manufactured mass correction.
 
+## Regional turboprop systems and furnishings
+
+A shaft-power aircraft with a maximum takeoff mass below 40 t selects
+`regional_turboprop_v1` (`CabinEquipmentMethod::for_civil_transport_size`).
+The LTH relations are fitted on four turbofans of 52-233 t and contain no
+turboprop, so their seat clause is not applied to one; the 40 t boundary is the
+LTH statement's own mass figure used as an engineering-estimate class boundary.
+Shaft-power aircraft of 40 t or more keep the LTH selection; jets are unchanged.
+
+The systems-and-furnishings group is Torenbeek's
+`W_sys = 0.11 MTOW + 0.768 k_fc MTOW^(2/3)` (kg, `k_fc = 0.88`, the
+flight-control factor for a transport of the ATR class) plus 15 kg per seat,
+taken from D. Scholz, HAW Hamburg aircraft design lecture notes, Sect. 8.2,
+eq. 8.2.18 and 8.2.20 (a secondary source after E. Torenbeek, *Synthesis of
+Subsonic Airplane Design*, 1982; the primary source was not verified). The
+FLOPS operating items are kept.
+
+`W_sys` replaces the whole FLOPS systems group, furnishings included. The eight
+non-furnishings FLOPS terms remain ledger rows as computed, and the furnishings
+row is `W_sys + 15 n_seats` minus their sum, so the group total is independent
+of them: **the furnishings row absorbs every change in the other eight terms**.
+A negative remainder is an error, not a clamp. Implementation:
+`crates/alas-mass/src/flops_transport/equations/regional_cabin.rs`.
+
+Not included: fuselage pressurisation (deferred) and a sponson-gear oleo length
+term (no general sourced relation found; an engineering-estimate gap on the ATR
+gear group). The residual against the published operating empty mass is
+reported, not tuned.
+
 ## Conventions chosen where the source is ambiguous
 
 ### `SFLAP` is wing-only

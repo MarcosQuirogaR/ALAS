@@ -187,7 +187,7 @@ fn the_empirical_drag_buildup_matches_python() {
     }
 
     let analysis = aero(&plane, &fixture, reference_mesh());
-    let kappa = analysis.drag.korn_technology_factor;
+    let kappa = analysis.korn_technology_factor();
     let thickness = analysis.section_thickness();
     for name in names(&fixture.wave) {
         let case = &fixture.wave[name];
@@ -269,7 +269,7 @@ fn an_aircraft_with_no_wing_falls_back_to_pythons_own_section_thickness() {
         "cd_wave",
         analysis.wave_drag(0.86, 0.9, None),
         corrected_wave_drag(
-            analysis.drag.korn_technology_factor,
+            analysis.korn_technology_factor(),
             fixture.sweep_deg,
             analysis.section_thickness(),
             0.86,
@@ -298,7 +298,7 @@ fn the_vortex_lattice_fed_estimates_match_python() {
             &fixture,
             analysis_config(case.inputs.spanwise, case.inputs.chordwise),
         );
-        let kappa = analysis.drag.korn_technology_factor;
+        let kappa = analysis.korn_technology_factor();
         let thickness = analysis.section_thickness();
         let quick = analysis
             .quick_performance(
@@ -350,7 +350,7 @@ fn the_vortex_lattice_fed_estimates_match_python() {
         // term, evaluated at the trim solve's own settled CL (already
         // pinned within Linalg tolerance by the `cl` comparison below), and
         // substitute the corrected one. See the module-level note.
-        let kappa = analysis.drag.korn_technology_factor;
+        let kappa = analysis.korn_technology_factor();
         let thickness = analysis.section_thickness();
         let old_wave = superseded_wave_drag(
             kappa,
@@ -400,7 +400,7 @@ fn the_vortex_lattice_fed_estimates_match_python() {
             ..reference_mesh()
         };
         let sweep_analysis = aero(&plane, &fixture, config);
-        let kappa = sweep_analysis.drag.korn_technology_factor;
+        let kappa = sweep_analysis.korn_technology_factor();
         let thickness = sweep_analysis.section_thickness();
         let polar = sweep_analysis
             .run_sweep(case.inputs.mach, case.inputs.altitude)

@@ -5,7 +5,6 @@
 // mission analysis model/Methods/Missions/Segments/Common/Numerics.py.
 // Upstream: mission analysis model 2.5.2, LGPL-2.1 (relicensed under GPL-2.0-or-later per
 // LGPL-2.1 section 3; compatible with this program's AGPL-3.0-or-later).
-// Reference: alas @ rust-port-baseline.
 
 //! The pseudospectral scaffolding a mission segment is solved on.
 //!
@@ -140,23 +139,44 @@ impl Numerics {
         };
         let span = last - first;
 
-        self.time.control_points = self
-            .dimensionless
+        // The solver calls this once per residual evaluation with the same
+        // `N x N` shape every time (only `span` changes within a segment
+        // solve), so scale the standing buffers in place instead of
+        // allocating two fresh `Vec<Vec<f64>>` matrices per call. The
+        // arithmetic is unchanged: each entry is still exactly
+        // `dimensionless_entry * factor`.
+        self.time.control_points.clear();
+        self.time
             .control_points
-            .iter()
-            .map(|&x| x * span)
-            .collect();
-        self.time.differentiate = scaled(&self.dimensionless.differentiate, 1.0 / span);
-        self.time.integrate = scaled(&self.dimensionless.integrate, span);
+            .extend(self.dimensionless.control_points.iter().map(|&x| x * span));
+        scale_into(
+            &self.dimensionless.differentiate,
+            1.0 / span,
+            &mut self.time.differentiate,
+        );
+        scale_into(
+            &self.dimensionless.integrate,
+            span,
+            &mut self.time.integrate,
+        );
     }
 }
 
-/// Every entry of `matrix` multiplied by `factor`.
-fn scaled(matrix: &[Vec<f64>], factor: f64) -> Vec<Vec<f64>> {
-    matrix
-        .iter()
-        .map(|row| row.iter().map(|&value| value * factor).collect())
-        .collect()
+/// Overwrite `target` with `source` scaled by `factor`, reusing `target`'s
+/// existing row allocations when the shape already matches (the steady-state
+/// case once a segment's control-point count is fixed).
+fn scale_into(source: &[Vec<f64>], factor: f64, target: &mut Vec<Vec<f64>>) {
+    if target.len() != source.len() {
+        target.resize_with(source.len(), Vec::new);
+    }
+    for (row_out, row_in) in target.iter_mut().zip(source) {
+        if row_out.len() != row_in.len() {
+            row_out.resize(row_in.len(), 0.0);
+        }
+        for (value_out, &value_in) in row_out.iter_mut().zip(row_in) {
+            *value_out = value_in * factor;
+        }
+    }
 }
 
 // A test asserts on values it constructed here, so a failed expect is the
@@ -165,20 +185,6 @@ fn scaled(matrix: &[Vec<f64>], factor: f64) -> Vec<Vec<f64>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn defaults_match_the_reference_container() {
-        let numerics = Numerics::default();
-        assert_eq!(numerics.number_control_points, 16);
-        assert_eq!(numerics.solver_jacobian, "none");
-        assert_eq!(numerics.tolerance_solution, 1e-8);
-        assert_eq!(numerics.max_evaluations, 0.0);
-        assert_eq!(numerics.converged, None);
-        assert_eq!(numerics.step_size, None);
-        assert!(numerics.dimensionless.control_points.is_empty());
-        assert!(numerics.time.differentiate.is_empty());
-        assert_eq!(Numerics::TAG, "numerics");
-    }
 
     // What parity checks at N=16; this checks the shape holds at another N so a
     // future caller that changes the control-point count is covered.

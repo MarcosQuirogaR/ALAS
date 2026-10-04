@@ -3,7 +3,6 @@
 
 // Ported from alas/reporting/visualization.py (`figure_span_loading`,
 // `figure_vlm_flow`)
-// Reference: alas @ rust-port-baseline.
 
 //! Report figures that consume the per-panel VLM result, including the wake.
 

@@ -157,7 +157,7 @@ mod registry;
 mod validation;
 
 pub use parser::{import_dat, parse_dat, parse_dat_with_provenance, read_dat, write_dat};
-pub use registry::{get, names, records, register, registered, replace_records};
+pub use registry::{generation, get, names, records, register, registered, replace_records};
 pub use validation::validate_coordinates;
 
 #[cfg(test)]

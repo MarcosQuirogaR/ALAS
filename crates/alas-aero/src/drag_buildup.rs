@@ -5,25 +5,18 @@
 // process chain and the methods it names in
 // mission analysis model/Methods/Aerodynamics/Common/Fidelity_Zero/Drag/.
 // Upstream: mission analysis model 2.5.2, LGPL-2.1.
-// Reference: alas @ rust-port-baseline.
 
-//! mission analysis model's `Fidelity_Zero` drag buildup: the drag polar the mission flies on.
+//! Frozen SUAVE-parity-only `Fidelity_Zero` drag buildup.
 //!
-//! Without this, a mission has lift and no drag, so no throttle setting, no
-//! fuel burn and no range. It is an empirical buildup rather than a solve:
+//! This empirical buildup reproduces reference fixtures:
 //! flat-plate skin friction marked up by a component form factor, plus the
 //! lift-dependent terms, plus a transonic rise, plus a fixed allowance for
 //! everything a component breakdown cannot see.
 //!
-//! **This is not `alas-aero::analysis`.** That row is this program's *own*
-//! Raymer/Korn buildup, over an native aerodynamic model geometry, reached from
-//! `alas/physics/aerodynamics.py`. This one is mission analysis model's, over a mission analysis model vehicle,
-//! and the only thing in the whole reference that reaches it is the mission
-//! runner's `mission_builder.py:85-87`, which attaches
-//! `mission analysis model.Analyses.Aerodynamics.Fidelity_Zero()` to an assembled vehicle and
-//! sets nothing on it. The two answer the same question with different
-//! correlations and are deliberately not unified, exactly as
-//! `alas-prop::mission_turbofan` is not unified with `alas-prop::cycle`.
+//! Product missions use the candidate's shared trimmed drag table, combining
+//! [`crate::analysis`]'s Raymer parasite buildup, trimmed Trefftz-plane
+//! induced drag and Korn/Lock wave drag. This module is retained only for
+//! the frozen SUAVE-parity fixtures and their explicitly selected analyses.
 //!
 //! # What this row takes as input, and why
 //!
@@ -45,9 +38,8 @@
 //! `drag_breakdown.induced.inviscid_wings[tag]`, which
 //! `mission analysis model.Analyses.Aerodynamics.Vortex_Lattice` writes; there is no
 //! closed-form fallback on the path this program takes. So the lift solution
-//! arrives as data, the same arrangement `alas-mass::transport_weight` uses for
-//! `sealevel_static_thrust`. `alas-aero::lift_surrogate` is what will supply
-//! it; until then the fixture does.
+//! arrives as data from [`crate::lift_surrogate`] on the parity path or
+//! directly from a frozen fixture.
 //!
 //! # Scope
 //!
@@ -177,7 +169,8 @@ pub fn evaluate(
         components::compressibility_drag_total_unweighted(&compressible_wings)
     };
 
-    let miscellaneous = components::miscellaneous_drag_aircraft_esdu(vehicle);
+    let miscellaneous =
+        components::miscellaneous_drag_aircraft_esdu(vehicle, settings.clamp_excrescence_fit);
 
     let untrimmed = parasite_total + induced.total + compressible_total + miscellaneous.total;
     let trim_corrected = settings.trim_drag_correction_factor * untrimmed;

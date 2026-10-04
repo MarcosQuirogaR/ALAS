@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/reporting/visualization.py (figure_structures_designer_preview, L5634-5705).
-// Reference: alas @ rust-port-baseline.
 
 //! Narrow live preview for the Structural Analysis
 //! Advanced Settings tab: the same relationship as

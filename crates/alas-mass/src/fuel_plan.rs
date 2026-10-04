@@ -22,13 +22,25 @@ use std::fmt;
 
 use alas_config::FuelScheme;
 
+/// Taxi-in ground time after landing, minutes, at ground idle (ICAO 7 %
+/// thrust). ICAO Annex 16 Vol. II fixes the LTO taxi/ground-idle mode at
+/// 26 min; ICAO Doc 9889, Airport Air Quality Manual (2011), splits that
+/// reference time into 19 min taxi-out and 7 min taxi-in. The landing
+/// ground roll after touchdown is flown at idle and is counted inside this
+/// ground time; reverse thrust, which the LTO cycle excludes, is not
+/// modelled. Taxi-out stays the policy's operator time.
+pub const TAXI_IN_TIME_MIN: f64 = 7.0;
+
 /// The rule that produced one quantity of a plan.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum FuelRule {
     /// Idle fuel flow for a ground time.
     TaxiTime {
-        /// Ground time, minutes.
+        /// Taxi-out ground time priced into the quantity, minutes.
         minutes: f64,
+        /// Ground-idle fuel flow with every engine running, kg/s. It also
+        /// prices the taxi-in after landing ([`FuelPlan::taxi_in_fuel_kg`]).
+        idle_fuel_flow_kg_s: f64,
     },
     /// The integrated burn of the design mission from takeoff to landing.
     TripBurn,
@@ -109,7 +121,11 @@ pub struct FuelPlan {
 }
 
 impl FuelPlan {
-    /// Fuel on board at brake release: everything but taxi fuel.
+    /// Fuel on board at brake release: everything loaded but the taxi-out
+    /// fuel, so trip, every reserve, extra fuel and the taxi-in budget
+    /// ([`Self::taxi_in_fuel_kg`]), which is carried through the flight and
+    /// burned only after landing. The dispatch closure's takeoff mass is the
+    /// zero-fuel mass plus this.
     pub fn takeoff_fuel_kg(&self) -> f64 {
         self.trip.kg
             + self.contingency.kg
@@ -117,19 +133,42 @@ impl FuelPlan {
             + self.final_reserve.kg
             + self.additional.kg
             + self.extra.kg
+            + self.taxi_in_fuel_kg()
     }
 
-    /// Fuel loaded at the ramp: takeoff fuel plus taxi fuel.
+    /// Fuel loaded at the ramp: taxi-out fuel and takeoff fuel, which holds
+    /// the taxi-in budget. It bounds [`Self::block_fuel_kg`] under every
+    /// scheme, because fuel burned must have been loaded.
     pub fn ramp_fuel_kg(&self) -> f64 {
         self.takeoff_fuel_kg() + self.taxi.kg
     }
 
-    /// Fuel consumed by the nominal flight: taxi plus trip.
-    pub fn block_fuel_kg(&self) -> f64 {
-        self.taxi.kg + self.trip.kg
+    /// Fuel burned taxiing in after landing at the destination: the
+    /// ground-idle flow of the taxi quantity for [`TAXI_IN_TIME_MIN`]. It is
+    /// part of block fuel and is carried in the takeoff fuel under every
+    /// scheme. No operating rule plans it as a separate quantity (ICAO Annex
+    /// 6 Part I 4.3.6.3 taxi fuel is the fuel before takeoff), but fuel
+    /// burned must have been loaded, and it is on board from brake release
+    /// to the destination. It leaves every reserve unchanged and is part of
+    /// the fuel remaining on landing, beside the reserves.
+    pub fn taxi_in_fuel_kg(&self) -> f64 {
+        match self.taxi.rule {
+            FuelRule::TaxiTime {
+                idle_fuel_flow_kg_s,
+                ..
+            } => idle_fuel_flow_kg_s * TAXI_IN_TIME_MIN * 60.0,
+            _ => 0.0,
+        }
     }
 
-    /// Fuel remaining on landing at the destination in the nominal flight.
+    /// Fuel consumed by the nominal flight, gate to gate: taxi-out, trip and
+    /// taxi-in.
+    pub fn block_fuel_kg(&self) -> f64 {
+        self.taxi.kg + self.trip.kg + self.taxi_in_fuel_kg()
+    }
+
+    /// Fuel remaining on landing at the destination in the nominal flight:
+    /// the reserves, extra fuel and the taxi-in budget.
     pub fn destination_landing_fuel_kg(&self) -> f64 {
         self.takeoff_fuel_kg() - self.trip.kg
     }
@@ -170,6 +209,8 @@ pub struct LegEstimate {
 /// Why a burn model could not price a quantity.
 #[derive(Debug, Clone, PartialEq)]
 pub enum FuelModelError {
+    /// Work stopped by the caller; no physical feasibility conclusion exists.
+    Cancelled,
     /// The mass asked for lies outside the model's validity.
     MassOutOfRange {
         /// The mass, kg.
@@ -199,6 +240,7 @@ pub enum FuelModelError {
 impl fmt::Display for FuelModelError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::Cancelled => write!(formatter, "fuel evaluation cancelled"),
             Self::MassOutOfRange { mass_kg } => {
                 write!(
                     formatter,
@@ -231,6 +273,16 @@ impl std::error::Error for FuelModelError {}
 /// Every method takes the mass at the start of what it prices, because fuel
 /// flow at a given speed depends on the lift the aircraft has to make.
 pub trait FuelBurnModel {
+    /// Opt in only when identical inputs give identical answers for this fixed
+    /// model throughout a dispatch solve. Mutable/stochastic models keep false.
+    fn deterministic_for_dispatch(&self) -> bool {
+        false
+    }
+    /// Checked before dispatch evaluations, including exact memoized hits.
+    fn check_cancellation(&self) -> Result<(), FuelModelError> {
+        Ok(())
+    }
+
     /// Fuel and time from takeoff to landing over `range_m`, starting at
     /// `takeoff_mass_kg`.
     fn trip(&self, takeoff_mass_kg: f64, range_m: f64) -> Result<LegEstimate, FuelModelError>;
@@ -287,6 +339,31 @@ mod tests {
         assert_eq!(plan.destination_landing_fuel_kg(), 3_300.0);
         assert_eq!(plan.reserve_fuel_kg(), 3_000.0);
         assert!(plan.is_finite_and_nonnegative());
+    }
+
+    /// Taxi-in fuel is on board from brake release to the gate: it is part
+    /// of the takeoff fuel and of the fuel remaining on landing, and what is
+    /// loaded but not burned gate to gate is exactly the reserves and extra.
+    #[test]
+    fn the_taxi_in_budget_is_carried_from_brake_release_to_the_gate() {
+        let mut plan = plan();
+        plan.taxi = FuelQuantity {
+            kg: 200.0,
+            rule: FuelRule::TaxiTime {
+                minutes: 10.0,
+                idle_fuel_flow_kg_s: 200.0 / 600.0,
+            },
+        };
+        let taxi_in_kg = 200.0 / 600.0 * TAXI_IN_TIME_MIN * 60.0;
+        assert_eq!(plan.taxi_in_fuel_kg(), taxi_in_kg);
+        assert_eq!(plan.takeoff_fuel_kg(), 13_300.0 + taxi_in_kg);
+        assert_eq!(plan.ramp_fuel_kg(), plan.takeoff_fuel_kg() + 200.0);
+        assert_eq!(plan.destination_landing_fuel_kg(), 3_300.0 + taxi_in_kg);
+        assert!(
+            (plan.ramp_fuel_kg() - plan.block_fuel_kg() - plan.reserve_fuel_kg() - plan.extra.kg)
+                .abs()
+                < 1e-9
+        );
     }
 
     #[test]

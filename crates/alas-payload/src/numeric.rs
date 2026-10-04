@@ -72,15 +72,15 @@ pub(crate) fn floor_div(a: f64, b: f64) -> f64 {
     }
 }
 
-/// Python's `round(x)` with no digit count: nearest integer, halves to even:
-/// `float.__round__`, reproduced as the two steps it takes.
+/// Python's `round(x)` with no digit count: nearest integer, halves to even.
+///
+/// CPython's `float.__round__` rounds half away from zero and then corrects
+/// an exact half to `2 * round(x / 2)`. Every step of that is exact (a tie
+/// needs `|x| < 2^52`, where both the subtraction and the halving are exact),
+/// so it is the IEEE round-to-nearest-even that `f64::round_ties_even`
+/// computes, signed zero, infinities and NaN included.
 pub(crate) fn round_half_even(x: f64) -> f64 {
-    let rounded = x.round();
-    if (x - rounded).abs() == 0.5 {
-        2.0 * (x / 2.0).round()
-    } else {
-        rounded
-    }
+    x.round_ties_even()
 }
 
 /// Python's `round(x, ndigits)`: the value correctly rounded to `ndigits`
@@ -136,6 +136,45 @@ mod tests {
         assert_eq!(round_half_even(2.5), 2.0);
         assert_eq!(round_half_even(-0.5), -0.0);
         assert_eq!(round_half_even(-1.5), -2.0);
+    }
+
+    #[test]
+    fn rounding_is_bit_identical_to_cpythons_two_step_algorithm() {
+        // `float.__round__` as CPython writes it: round half away from zero,
+        // then correct an exact half.
+        fn cpython(x: f64) -> f64 {
+            let rounded = x.round();
+            if (x - rounded).abs() == 0.5 {
+                2.0 * (x / 2.0).round()
+            } else {
+                rounded
+            }
+        }
+        let mut samples = vec![
+            0.0,
+            -0.0,
+            0.49999999999999994,
+            4_503_599_627_370_495.5,
+            4_503_599_627_370_496.0,
+            f64::MAX,
+            f64::MIN_POSITIVE,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+        ];
+        for step in -4000..=4000 {
+            let x = f64::from(step) * 0.25;
+            samples.extend([x, x + 1e-9, x - 1e-9]);
+        }
+        for x in samples {
+            assert_eq!(round_half_even(x).to_bits(), cpython(x).to_bits(), "{x}");
+            assert_eq!(
+                round_half_even(-x).to_bits(),
+                cpython(-x).to_bits(),
+                "{}",
+                -x
+            );
+        }
+        assert!(round_half_even(f64::NAN).is_nan());
     }
 
     #[test]

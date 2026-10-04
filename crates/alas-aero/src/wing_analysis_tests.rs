@@ -121,6 +121,10 @@ fn an_elliptic_wing_matches_the_lifting_line_slope_and_the_elliptic_induced_drag
 
     let efficiency = outcome.span_efficiency.expect("a lifting point has one");
     assert!(
+        efficiency <= 1.0,
+        "planar elliptic span efficiency {efficiency}"
+    );
+    assert!(
         (efficiency - 1.0).abs() < 0.05,
         "elliptic span efficiency {efficiency:.4} should sit at the ideal 1.0"
     );
@@ -132,6 +136,17 @@ fn an_elliptic_wing_matches_the_lifting_line_slope_and_the_elliptic_induced_drag
         outcome.cd_induced,
         drag_error * 100.0
     );
+    let dynamic_force = outcome.condition.dynamic_pressure_pa * outcome.reference.area_m2;
+    assert_eq!(outcome.induced_drag_n, outcome.cd_induced * dynamic_force);
+    for point in &outcome.sweep {
+        assert!(
+            point.cd_induced >= 0.0,
+            "alpha {}: CDi {}",
+            point.alpha_deg,
+            point.cd_induced
+        );
+        assert!(point.cl * point.cl <= PI * aspect_ratio * point.cd_induced);
+    }
 }
 
 #[test]

@@ -254,22 +254,6 @@ pub struct SizingScope {
     pub solve_omissions: Vec<NotAvailable>,
 }
 
-/// Point masses relieve the bending moment but not the shear.
-///
-/// [`crate::loads::apply_point_mass_relief`] subtracts the moment a wing-mounted
-/// item relieves; the shear the webs are sized from is integrated from the net
-/// distributed load only, so it still carries the item's inertia across the
-/// root. Webs are a small part of the box, and leaving them unrelieved makes
-/// them heavier, not lighter.
-pub const POINT_MASS_SHEAR_RELIEF: NotAvailable = NotAvailable {
-    quantity: "shear relief from wing-mounted point masses, N",
-    reason: "crate::loads::apply_point_mass_relief acts on the bending moment only. The root \
-             shear the web thickness is sized from is integrated from the net distributed load, \
-             so a wing-mounted engine relieves the caps but not the webs.",
-    resolved_by: "applying the same point loads to the shear integral as to the moment",
-    direction: OmissionDirection::Heavier,
-};
-
 /// Wing-mounted landing gear is not given to the sizing entry points.
 pub const WING_MOUNTED_GEAR_RELIEF: NotAvailable = NotAvailable {
     quantity: "wing-mounted landing-gear installation mass and station, kg at m",
@@ -375,13 +359,7 @@ mod tests {
     }
 
     #[test]
-    fn the_two_solve_level_omissions_are_both_conservative() {
-        // Both leave the box heavier; if either flips, the predicate that
-        // separates conservative from unconservative gaps has to be revisited.
-        assert_eq!(
-            POINT_MASS_SHEAR_RELIEF.direction,
-            OmissionDirection::Heavier
-        );
+    fn the_unresolved_wing_mounted_gear_relief_is_conservative() {
         assert_eq!(
             WING_MOUNTED_GEAR_RELIEF.direction,
             OmissionDirection::Heavier

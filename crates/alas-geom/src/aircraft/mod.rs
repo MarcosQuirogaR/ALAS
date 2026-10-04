@@ -11,8 +11,10 @@
 pub mod airfoil;
 pub mod airplane;
 pub mod fuselage;
+pub mod mac_frame;
 pub mod mesh;
 pub mod section_outline;
+mod segment_integrals;
 // The spacing helper has its own endpoint-fixup behavior, so it stays in this
 // tree rather than moving to
 // `alas-math`, which is documented as holding primitives with no upstream

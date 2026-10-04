@@ -169,6 +169,7 @@ fn case_summary(
             OpenVspExportStatus::ScriptWrittenRuntimeUnverified => "script_written_runtime_unverified",
             OpenVspExportStatus::RuntimeLaunchFailed => "runtime_launch_failed",
             OpenVspExportStatus::RuntimeTimedOut => "runtime_timed_out",
+            OpenVspExportStatus::InvalidTimeout => "invalid_timeout",
             OpenVspExportStatus::RuntimeRejected => "runtime_rejected",
             OpenVspExportStatus::Vsp3Materialized => "vsp3_materialized",
         },

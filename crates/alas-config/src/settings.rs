@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/config/settings.py
-// Reference: alas @ rust-port-baseline.
 
 //! The one object that fully specifies a run.
 //!
@@ -262,20 +261,11 @@ impl AlasConfig {
     pub fn from_value_with_notes(
         data: &serde_json::Value,
     ) -> Result<(Self, ConfigLoadNotes), OverlayError> {
-        // A workspace file carries the desktop session envelope next to the
-        // aircraft configuration. The envelope is not aircraft data, so it is
-        // removed before the strict overlay sees the document; a file with no
-        // envelope is unchanged by this step.
-        let without_envelope;
-        let data = match data.as_object() {
-            Some(map) if map.contains_key(WORKSPACE_ENVELOPE_KEY) => {
-                let mut map = map.clone();
-                map.remove(WORKSPACE_ENVELOPE_KEY);
-                without_envelope = serde_json::Value::Object(map);
-                &without_envelope
-            }
-            _ => data,
-        };
+        // The strict overlay must not see the desktop session envelope or the
+        // optimizer keys this build retired; see `aircraft_document`.
+        let retired_keys = crate::RetiredKeysDropped::of(data);
+        let (document, legacy_budget) = load_notes::aircraft_document(data);
+        let data = &*document;
         let mut instance = Self::default();
 
         if let Some(name) = data.get("preset").and_then(serde_json::Value::as_str) {
@@ -290,6 +280,7 @@ impl AlasConfig {
                     // every downstream solver must preserve verbatim.
                     instance.geometry.engine.apply_engine_spec();
                     instance.requirements = preset.requirements.clone();
+                    instance.optimizer.objective.mtow_sizing = crate::MtowSizing::FixedRequirement;
                     // A preset's published passenger target is a load-case
                     // input, not an operator LOPA. Seed the generic cabin
                     // with the profile that can physically represent that
@@ -352,32 +343,8 @@ impl AlasConfig {
                     instance.departure_airport = operational.departure_airport.to_owned();
                     instance.arrival_airport = operational.arrival_airport.to_owned();
                     instance.mission.profile = operational.profile;
-                    // Naming a registered aircraft means adapting *that*
-                    // aircraft, so the design space defaults to its own
-                    // reference envelope rather than to a clean sheet.
-                    //
-                    // The two are genuinely different studies and the
-                    // distinction is kept, not blurred: `CleanSheet` re-derives
-                    // the fuselage from the cabin load case and searches the
-                    // global box, `ReferenceAdaptation` holds the preset's
-                    // declared geometry and searches the D09 +/-10 % window
-                    // around it. What was wrong was which of them a bare
-                    // `{"preset": "..."}` document selected. It selected the
-                    // clean sheet, so loading an ATR 72-600 and pressing run
-                    // produced a cabin-derived body of fineness 23.5 against
-                    // the aircraft's own 9.8, and the plausibility window then
-                    // correctly rejected it - measured on the shipped path as
-                    // `fuselage_fineness_max` on 509 of 623 ATR 72-600
-                    // candidates and 646 of 668 A220-300 candidates, with the
-                    // mission and mass residuals cascading behind it. The
-                    // product answered a question nobody asked and then
-                    // reported that it had no answer.
-                    //
-                    // This widens nothing. The D09 envelope, the frozen
-                    // reference variables and every hard residual are
-                    // untouched; a document that explicitly asks for
-                    // `clean_sheet` still gets it, because the file overlay
-                    // below is applied after this and remains authoritative.
+                    // Registered aircraft use their reference design envelope;
+                    // the file overlay can explicitly select a clean sheet.
                     instance.optimizer.design_space.mode =
                         crate::optimizer::DesignMode::ReferenceAdaptation;
                 }
@@ -385,6 +352,13 @@ impl AlasConfig {
                     tracing::debug!(%error, "configuration names an unregistered preset");
                 }
             }
+        }
+        if data
+            .get("preset")
+            .and_then(serde_json::Value::as_str)
+            .is_none_or(str::is_empty)
+        {
+            crate::clean_sheet::seed_preset_less_defaults(&mut instance, data)?;
         }
 
         // `MassModelConfig`'s serde representation repairs its derived group
@@ -460,8 +434,10 @@ impl AlasConfig {
         // without the hidden schema-version field is already making an
         // explicit version-2 selection (as the settings form does), so it
         // must remain selectable rather than being mistaken for an old file.
-        let migration = loaded.mass_model.normalize_architecture();
-        Ok(load_notes::finish(loaded, migration, data))
+        let migration = crate::landing_mass_ratio::finish_loaded_mass_model(&mut loaded, data);
+        let (loaded, mut notes) = load_notes::finish(loaded, migration, data, legacy_budget);
+        notes.retired_keys = retired_keys;
+        Ok((loaded, notes))
     }
 
     /// The maximum landing mass to enforce for `candidate_mtow_kg`.
@@ -824,6 +800,61 @@ mod tests {
     }
 
     #[test]
+    fn registered_presets_default_to_the_declared_hard_mtow() {
+        for name in crate::presets::available() {
+            let preset = crate::presets::get(name).unwrap();
+            let config = AlasConfig::from_value(&json!({"preset": name})).unwrap();
+            assert_eq!(
+                config.optimizer.objective.mtow_sizing,
+                crate::MtowSizing::FixedRequirement
+            );
+            assert_eq!(
+                config.requirements.mtow_kg, preset.requirements.mtow_kg,
+                "{name}"
+            );
+            if let Some(reference_mtow_kg) = preset.reference.mtow_kg {
+                assert_eq!(config.requirements.mtow_kg, reference_mtow_kg, "{name}");
+            }
+        }
+    }
+
+    #[test]
+    fn an_explicit_mtow_mode_overrides_the_registered_preset_default() {
+        let config = AlasConfig::from_value(&json!({
+            "preset": "A320-200",
+            "optimizer": {"objective": {"mtow_sizing": "sized_by_mission"}}
+        }))
+        .unwrap();
+        assert_eq!(
+            config.optimizer.objective.mtow_sizing,
+            crate::MtowSizing::SizedByMission
+        );
+        assert_eq!(
+            AlasConfig::default().optimizer.objective.mtow_sizing,
+            crate::MtowSizing::SizedByMission
+        );
+    }
+
+    #[test]
+    fn saved_preset_without_mtow_mode_uses_hard_mass_and_explicit_mode_is_authoritative() {
+        for mode in [None, Some("fixed_requirement"), Some("sized_by_mission")] {
+            let mut document = json!({"preset": "A320-200", "optimizer": {"objective": {
+                "design_range_nmi": 500.0, "mass_constraints": "hard"
+            }}});
+            if let Some(mode) = mode {
+                document["optimizer"]["objective"]["mtow_sizing"] = json!(mode);
+            }
+            let config = AlasConfig::from_value(&document).unwrap();
+            let expected = if mode == Some("sized_by_mission") {
+                crate::MtowSizing::SizedByMission
+            } else {
+                crate::MtowSizing::FixedRequirement
+            };
+            assert_eq!(config.optimizer.objective.mtow_sizing, expected);
+        }
+    }
+
+    #[test]
     fn a_preset_replaces_the_geometry_and_the_requirements() {
         let config = AlasConfig::from_value(&json!({"preset": "A380-800"})).unwrap();
         let preset = crate::presets::get("A380-800").unwrap();
@@ -842,13 +873,22 @@ mod tests {
         assert_eq!(narrowbody.cabin.passenger.business.share_pct, 0.0);
         assert_eq!(narrowbody.cabin.passenger.economy.share_pct, 100.0);
 
+        // Boeing D6-58333 Rev Q section 2.1.2: 28 business and 262 economy
+        // of the 290-seat typical cabin, seeded as seat shares.
         let widebody = AlasConfig::from_value(&json!({"preset": "B787-9"})).unwrap();
-        assert_eq!(widebody.cabin.passenger.business.share_pct, 15.0);
-        assert_eq!(widebody.cabin.passenger.economy.share_pct, 85.0);
+        assert!((widebody.cabin.passenger.business.share_pct - 100.0 * 28.0 / 290.0).abs() < 1e-9);
+        assert!((widebody.cabin.passenger.economy.share_pct - 100.0 * 262.0 / 290.0).abs() < 1e-9);
 
+        // ATR 72-600 factsheet p.22: 72 seats at 29 in. The exit ceiling
+        // comes from the declared exit types, not from a pair spacing.
         let regional = AlasConfig::from_value(&json!({"preset": "ATR72-600"})).unwrap();
         assert_eq!(regional.requirements.num_passengers, 72);
-        assert_eq!(regional.cabin.passenger.min_exit_pair_spacing_m, 9.5);
+        assert_eq!(regional.cabin.passenger.economy.share_pct, 100.0);
+        assert!((regional.cabin.passenger.economy.pitch_m - 29.0 * 0.0254).abs() < 1e-12);
+        assert_eq!(
+            regional.cabin.passenger.min_exit_pair_spacing_m,
+            crate::PassengerCabinConfig::default().min_exit_pair_spacing_m
+        );
     }
 
     #[test]
@@ -1038,7 +1078,7 @@ mod tests {
         let b787 = AlasConfig::from_value(&json!({"preset": "B787-9"})).unwrap();
         assert_eq!(b787.structures.skin_material, "CFRP QI");
         assert_eq!(b787.structures.spar_web_material, "CFRP QI");
-        assert_eq!(b787.structures.spar_cap_material, "CFRP QI");
+        assert_eq!(b787.structures.spar_cap_material, "CFRP 60/30/10");
 
         let ave = AlasConfig::from_value(&json!({"preset": "AVE"})).unwrap();
         assert_eq!(ave.structures, StructuresConfig::default());

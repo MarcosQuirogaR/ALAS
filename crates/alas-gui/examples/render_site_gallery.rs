@@ -2,8 +2,8 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 //! Regenerate the documentation gallery (`site/docs-site/docs/assets/ave-*`)
-//! as light and dark PNGs from one AVE pipeline run of the default
-//! configuration, through the same dispatch the CLI `--plots` path and the
+//! as light and dark PNGs from one AVE pipeline run with native analyses,
+//! through the same dispatch the CLI `--plots` path and the
 //! GUI results view use (`alas_gui::scene::build_result_figure`).
 //!
 //! Figures this cannot reproduce are left to their own sources and must not
@@ -14,6 +14,7 @@
 //! Usage (writes only to the two directories named):
 //!   cargo run --release -p alas-gui --example render_site_gallery -- \
 //!       --seed 42 --output <run-dir> --figures-out <png-dir>
+//! Add `--allow-msc` to permit installed MSC Nastran and Patran execution.
 
 #![allow(clippy::print_stdout, clippy::print_stderr)]
 
@@ -21,7 +22,7 @@ use std::error::Error;
 use std::path::PathBuf;
 
 use alas_config::AlasConfig;
-use alas_exec::ToolLocator;
+use alas_exec::{RunEnvironment, ToolLocator};
 use alas_gui::scene::build_result_figure;
 use alas_gui::AppState;
 use alas_pipeline::{DesignPipeline, PipelineOptions};
@@ -84,6 +85,15 @@ fn write_png(path: &std::path::Path, scene: alas_report::Scene) -> Result<(), Bo
     Ok(())
 }
 
+fn gallery_config(args: &[String]) -> AlasConfig {
+    let allow_msc = args.iter().any(|arg| arg == "--allow-msc");
+    let mut config = AlasConfig::default();
+    config.structures.run_nastran = allow_msc;
+    config.structures.run_patran_export = allow_msc;
+    config.mses.enabled = false;
+    config
+}
+
 fn main() -> Result<(), Box<dyn Error>> {
     let args: Vec<String> = std::env::args().collect();
     let no_optimize = args.iter().any(|a| a == "--no-optimize");
@@ -108,7 +118,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     std::fs::create_dir_all(&output_dir)?;
     std::fs::create_dir_all(&figures_out)?;
 
-    let config = AlasConfig::default();
+    let config = gallery_config(&args);
     let pipeline = DesignPipeline::new(config.clone());
     let options = PipelineOptions {
         optimize: !no_optimize,
@@ -122,14 +132,17 @@ fn main() -> Result<(), Box<dyn Error>> {
         quiet: false,
     };
 
-    let locator = ToolLocator::for_current_process();
-    let environment = locator.resolve_environment(
-        std::path::Path::new(""),
-        std::path::Path::new(""),
-        std::path::Path::new(""),
-        std::path::Path::new(""),
-        std::path::Path::new(""),
-    );
+    let environment = if config.structures.run_nastran {
+        ToolLocator::for_current_process().resolve_environment(
+            std::path::Path::new(""),
+            std::path::Path::new(""),
+            std::path::Path::new(""),
+            std::path::Path::new(""),
+            std::path::Path::new(""),
+        )
+    } else {
+        RunEnvironment::default()
+    };
 
     eprintln!(
         "Running pipeline (optimize={}, compare_baseline=true)...",
@@ -196,4 +209,22 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::gallery_config;
+
+    #[test]
+    fn gallery_requires_explicit_permission_for_msc_execution() {
+        assert!(alas_config::AlasConfig::default().structures.run_nastran);
+        let native = gallery_config(&[]);
+        assert!(native.structures.enabled);
+        assert!(!native.structures.run_nastran);
+        assert!(!native.structures.run_patran_export);
+        assert!(!native.mses.enabled);
+        let external = gallery_config(&["--allow-msc".to_owned()]);
+        assert!(external.structures.run_nastran);
+        assert!(external.structures.run_patran_export);
+    }
 }

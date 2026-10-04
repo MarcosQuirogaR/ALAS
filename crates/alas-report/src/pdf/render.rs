@@ -3,5 +3,14 @@
 
 //! PDF object and content-stream serialization for report scenes.
 
-include!("render_parts/part_01.rs");
-include!("render_parts/part_02.rs");
+use super::win_ansi::pdf_literal;
+use super::{PdfFigure, PdfSection};
+use crate::scene::{
+    text_line_center_offsets, wrap_text_to_width, Color, Fill, Point2D, Scene, SceneElement,
+    Stroke, TextAlign, TextBaseline, CSS_PIXELS_PER_POINT, TEXT_LINE_HEIGHT_EM,
+};
+
+mod pages;
+pub(super) use pages::*;
+mod assemble;
+use assemble::*;

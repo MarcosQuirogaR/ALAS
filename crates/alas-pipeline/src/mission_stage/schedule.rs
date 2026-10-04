@@ -563,7 +563,12 @@ mod tests {
                 }
             }
         }
-        assert!(vertical >= 8, "{vertical} vertical legs");
+        // `apply_atr72_600_speed_schedule` (`alas-config` speed schedules)
+        // configures a single climb + single cruise leg, so the minimum
+        // vertical-leg count is takeoff, initial_climb, four descent rungs
+        // and final_landing: 7, not the 9 a 3-leg cruise-climb schedule
+        // would produce.
+        assert!(vertical >= 7, "{vertical} vertical legs");
         // The takeoff leg starts at the field elevation, MSL, and its top is
         // the configured gain above that field, not above sea level.
         let takeoff = &schedule[0];
@@ -580,7 +585,7 @@ mod tests {
     // The closed route distance is the distance the native segments then fly.
     // In calibrated mode the footprint is a quadrature over a varying true
     // airspeed; using the segments' own operator makes the two agree to
-    // rounding, not to a discretization tolerance. The legacy true-airspeed
+    // rounding, not to a discretization tolerance. The plain true-airspeed
     // mode closes identically.
     #[test]
     fn a_calibrated_schedule_closes_on_the_distance_the_native_segments_fly() {
@@ -649,9 +654,12 @@ mod tests {
                 LEMD_M,
                 LEPA_M,
                 61.0,
-                0.03,
-                0.045,
-                0.0,
+                std::sync::Arc::new(alas_opt::mdo::mission_model::ParabolicPolar::new(
+                    0.03,
+                    0.045,
+                    0.0,
+                    config.requirements.cruise_mach,
+                )),
                 config.requirements.gravity_m_s2,
                 LEPA_M + 457.2,
                 PhaseAeroLimits::from_config(&config),
@@ -670,6 +678,15 @@ mod tests {
             let refined_m = refined.climb_footprint_m + refined.descent_footprint_m;
             let production_error = (production_m - native_m).abs() / native_m;
             let refined_error = (refined_m - native_m).abs() / native_m;
+            // The ATR schedule sets `initial_climb_altitude_fraction` to
+            // 0.999 and disables the second and third cruise legs (zero
+            // distance share), so the native schedule stops climbing at that
+            // fraction and cruises wherever it ends, never reaching the
+            // literal declared cruise altitude. `ProfileGeometry` gates each
+            // climb band on the same `cruise_2_distance_fraction`/
+            // `cruise_3_distance_fraction` activity `build_schedule` uses
+            // (see `climb_bands::bands`/`top_m`) and flies cruise/descent
+            // from that same ladder top, matching the native schedule.
             assert!(
                 production_error < 5.0e-4,
                 "ISA{isa_deviation_c:+}: 8 sub-rungs: MDO {production_m} m vs native {native_m} m ({production_error:e})"
@@ -678,7 +695,10 @@ mod tests {
                 refined_error < 1.0e-6,
                 "ISA{isa_deviation_c:+}: 4096 sub-rungs: MDO {refined_m} m vs native {native_m} m ({refined_error:e})"
             );
-            assert!(refined_error < production_error);
+            assert!(
+                refined_error < production_error,
+                "ISA{isa_deviation_c:+}: refinement did not shrink the error: production {production_error:e}, refined {refined_error:e}"
+            );
         }
     }
 
@@ -704,9 +724,12 @@ mod tests {
             LEMD_M,
             LEPA_M,
             61.0,
-            0.03,
-            0.045,
-            0.0,
+            std::sync::Arc::new(alas_opt::mdo::mission_model::ParabolicPolar::new(
+                0.03,
+                0.045,
+                0.0,
+                config.requirements.cruise_mach,
+            )),
             config.requirements.gravity_m_s2,
             LEPA_M + 457.2,
             PhaseAeroLimits::from_config(&config),

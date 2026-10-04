@@ -19,7 +19,6 @@
 //! total field thickness to the geometric sum of the requested layers.
 
 use std::collections::BTreeMap;
-use std::fmt;
 #[cfg(test)]
 use std::fs;
 
@@ -43,7 +42,9 @@ use super::{AirfoilSnapshot, CfdStudyConfig};
 /// of every `v5` mesh.  A `v5` mesh of the same case is geometrically the same
 /// section at the same resolution; only the local topology behind the trailing
 /// edge differs.
-pub const GMSH_TEMPLATE_VERSION: &str = "alas-airfoil-gmsh-openfoam-v6";
+/// `v7` additionally fans every acute convex solid corner, including sharp
+/// leading edges, without altering the exact polygon or layer sizing.
+pub const GMSH_TEMPLATE_VERSION: &str = "alas-airfoil-gmsh-openfoam-v7";
 
 /// Expansion ratio used by the generated boundary-layer field.
 pub const BOUNDARY_LAYER_EXPANSION_RATIO: f64 = 1.2;
@@ -83,34 +84,23 @@ const EDGE_X_TOLERANCE: f64 = 1.0e-10;
 const CLOSURE_TOLERANCE: f64 = 1.0e-10;
 
 /// A meshing input or converted-case validation error.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum MeshError {
     /// The snapshot or mesh controls contain invalid values.
+    #[error("invalid meshing input: {0}")]
     InvalidInput(String),
     /// The coordinate loop is finite but outside this module's supported
     /// single-section topology.
+    #[error("unsupported airfoil geometry: {0}")]
     UnsupportedGeometry(String),
     /// A converted boundary file could not be read or written.
+    #[error("mesh file I/O error: {0}")]
     Io(String),
     /// A boundary file was readable but did not contain the required patch
     /// dictionary structure.
+    #[error("mesh file parse error: {0}")]
     Parse(String),
 }
-
-impl fmt::Display for MeshError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::InvalidInput(message) => write!(formatter, "invalid meshing input: {message}"),
-            Self::UnsupportedGeometry(message) => {
-                write!(formatter, "unsupported airfoil geometry: {message}")
-            }
-            Self::Io(message) => write!(formatter, "mesh file I/O error: {message}"),
-            Self::Parse(message) => write!(formatter, "mesh file parse error: {message}"),
-        }
-    }
-}
-
-impl std::error::Error for MeshError {}
 
 /// Whether an edge has one sharp endpoint or a finite blunt face.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -349,7 +339,7 @@ mod tests {
         assert!(artifact.source.contains("Physical Surface(\"airfoil\")"));
         assert!(artifact.source.contains("Field[1] = BoundaryLayer;"));
         assert!(artifact.source.contains("Field[1].Thickness"));
-        // Both edge kinds fan now.  Excluding a blunt edge was measured to be
+        // Both edge kinds fan.  Excluding a blunt edge was measured to be
         // the cause of the worst face and the worst cell in every generated
         // mesh; see the emitter for the before/after numbers.  A sharp edge
         // fans its single closing point, a blunt edge its two corners.
@@ -425,7 +415,7 @@ mod tests {
             derived.requested_wall_distance_m,
             config.mesh.first_layer_height_m
         );
-        // The whole point: the estimate now lands on the configured target
+        // The whole point: the estimate lands on the configured target
         // instead of wherever the raw length happened to fall.
         assert!(
             (derived.estimated_y_plus - config.mesh.target_y_plus).abs() < 1.0e-9,
@@ -495,6 +485,32 @@ mod tests {
         assert_eq!(sizing.total_thickness_m, 0.0);
         assert_eq!(sizing.boundary_layer_coverage_ratio, 0.0);
         assert!(sizing.estimated_boundary_layer_thickness_m > 0.0);
+    }
+
+    #[test]
+    fn diamond_fans_both_sharp_tips_without_changing_geometry() {
+        let mut coordinates = Vec::new();
+        for i in 0..=100 {
+            let x = 1.0 - f64::from(i) / 100.0;
+            coordinates.push((x, 0.06 * x.min(1.0 - x)));
+        }
+        for i in 1..=100 {
+            let x = f64::from(i) / 100.0;
+            coordinates.push((x, -0.06 * x.min(1.0 - x)));
+        }
+        let name = "diamond".to_owned();
+        let airfoil = AirfoilSnapshot {
+            coordinate_hash: coordinate_hash(&name, &coordinates),
+            name,
+            coordinates,
+        };
+        let artifact = build_gmsh_geo(&CfdStudyConfig::default(), &airfoil)
+            .unwrap_or_else(|e| panic!("diamond mesh: {e}"));
+        assert!(artifact
+            .source
+            .contains("Field[1].FanPointsList = {5, 105};"));
+        assert!(artifact.report.exact_polygon_geometry);
+        assert_eq!(artifact.report.geometry_resampling_error_m, 0.0);
     }
 
     #[test]

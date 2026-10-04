@@ -63,7 +63,7 @@ fn zero_belly_cargo_request_carries_no_revenue_freight_even_with_large_structura
     let (config, plane) = b787_config();
     assert_eq!(config.cabin.passenger.belly_cargo_kg, 0.0);
     // The preset's own structural cap is tens of tonnes above seats + bags,
-    // which is exactly the headroom the bug used to auto-fill.
+    // which is the headroom a zero request must not auto-fill.
     assert!(config.requirements.max_structural_payload_kg > 40_000.0);
 
     let layout = build_payload_layout(&plane, &config, 0.0, 0.0).expect("B787-9 layout builds");

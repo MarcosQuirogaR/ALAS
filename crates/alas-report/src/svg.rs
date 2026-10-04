@@ -6,9 +6,14 @@
 //! Generates standalone, valid SVG documents from backend-neutral scenes
 //! without requiring any external drawing or graphical library dependencies.
 
+use std::fmt::{self, Write};
+use std::sync::OnceLock;
+
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+
 use crate::scene::{
-    text_line_center_offsets, visual_title, wrap_text_to_width, Fill, Scene, SceneElement, Stroke,
-    TextAlign, TextBaseline, CSS_PIXELS_PER_POINT, TEXT_LINE_HEIGHT_EM,
+    text_line_center_offsets, visual_title, wrap_text_to_width, Color, Fill, Point2D, Scene,
+    SceneElement, Stroke, TextAlign, TextBaseline, CSS_PIXELS_PER_POINT, TEXT_LINE_HEIGHT_EM,
 };
 
 /// Explicit family stack shared by SVG exports and the GUI rasterizer.
@@ -17,90 +22,89 @@ use crate::scene::{
 /// fallback keeps exported SVG text readable when it is opened elsewhere.
 const SVG_FONT_FAMILY: &str = "'Noto Sans', 'Noto Sans Math', sans-serif";
 
+/// Source identifier of the bundled NASA Blue Marble texture.
+const BLUE_MARBLE_SOURCE: &str = "embedded://nasa-blue-marble";
+
 /// Render a complete [`Scene`] to a standalone XML SVG string.
 pub fn render_svg(scene: &Scene) -> String {
     let mut out = String::with_capacity(4096);
+    // Formatting into a `String` cannot fail: its `fmt::Write` impl is
+    // infallible and every `Display` used here is a number or a `&str`.
+    let _ = write_svg(&mut out, scene);
+    out
+}
 
-    out.push_str(&format!(
+fn write_svg(out: &mut String, scene: &Scene) -> fmt::Result {
+    writeln!(
+        out,
         r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {w:.1} {h:.1}" width="{w:.1}" height="{h:.1}">"#,
         w = scene.width,
         h = scene.height
-    ));
-    out.push('\n');
+    )?;
 
     // Background rect if specified and this layer should paint it (a scene
     // composited over pre-drawn raster content keeps `background` set for
     // `visual_title`'s contrast decision while suppressing the opaque rect
     // that would otherwise hide that content).
     if let (true, Some(bg)) = (scene.paint_background, scene.background) {
-        out.push_str(&format!(
+        writeln!(
+            out,
             r#"  <rect width="{w:.1}" height="{h:.1}" fill="{fill}" fill-opacity="{alpha:.3}"/>"#,
             w = scene.width,
             h = scene.height,
             fill = bg.to_hex_rgb(),
             alpha = bg.alpha_f64()
-        ));
-        out.push('\n');
+        )?;
     }
 
     if let Some(title) = &scene.title {
-        out.push_str(&format!("  <title>{}</title>\n", escape_xml(title)));
+        out.push_str("  <title>");
+        push_escaped_xml(out, title);
+        out.push_str("</title>\n");
     }
 
     if let Some(title) = visual_title(scene) {
-        render_element(&mut out, &title);
+        write_element(out, &title)?;
         out.push('\n');
     }
 
     for elem in &scene.elements {
-        render_element(&mut out, elem);
+        write_element(out, elem)?;
         out.push('\n');
     }
 
     out.push_str("</svg>\n");
-    out
+    Ok(())
 }
 
-fn render_element(out: &mut String, elem: &SceneElement) {
+fn write_element(out: &mut String, elem: &SceneElement) -> fmt::Result {
     match elem {
         SceneElement::Line { p1, p2, stroke } => {
-            out.push_str(&format!(
-                r#"  <line x1="{:.2}" y1="{:.2}" x2="{:.2}" y2="{:.2}" {}/>"#,
-                p1[0],
-                p1[1],
-                p2[0],
-                p2[1],
-                format_stroke(stroke)
-            ));
+            write!(
+                out,
+                r#"  <line x1="{:.2}" y1="{:.2}" x2="{:.2}" y2="{:.2}" "#,
+                p1[0], p1[1], p2[0], p2[1],
+            )?;
+            write_stroke(out, stroke)?;
+            out.push_str("/>");
         }
         SceneElement::Polyline { points, stroke } => {
-            let pts_str = points
-                .iter()
-                .map(|p| format!("{:.2},{:.2}", p[0], p[1]))
-                .collect::<Vec<_>>()
-                .join(" ");
-            out.push_str(&format!(
-                r#"  <polyline points="{}" fill="none" {}/>"#,
-                pts_str,
-                format_stroke(stroke)
-            ));
+            out.push_str(r#"  <polyline points=""#);
+            write_points(out, points)?;
+            out.push_str(r#"" fill="none" "#);
+            write_stroke(out, stroke)?;
+            out.push_str("/>");
         }
         SceneElement::Polygon {
             points,
             fill,
             stroke,
         } => {
-            let pts_str = points
-                .iter()
-                .map(|p| format!("{:.2},{:.2}", p[0], p[1]))
-                .collect::<Vec<_>>()
-                .join(" ");
-            out.push_str(&format!(
-                r#"  <polygon points="{}" {} {}/>"#,
-                pts_str,
-                format_fill(fill),
-                format_opt_stroke(stroke)
-            ));
+            out.push_str(r#"  <polygon points=""#);
+            write_points(out, points)?;
+            out.push_str("\" ");
+            write_paint(out, fill.as_ref(), stroke.as_ref())?;
+            out.push_str("/>");
         }
         SceneElement::Rect {
             x,
@@ -111,16 +115,12 @@ fn render_element(out: &mut String, elem: &SceneElement) {
             fill,
             stroke,
         } => {
-            out.push_str(&format!(
-                r#"  <rect x="{:.2}" y="{:.2}" width="{:.2}" height="{:.2}" rx="{:.2}" {} {}/>"#,
-                x,
-                y,
-                width,
-                height,
-                rx,
-                format_fill(fill),
-                format_opt_stroke(stroke)
-            ));
+            write!(
+                out,
+                r#"  <rect x="{x:.2}" y="{y:.2}" width="{width:.2}" height="{height:.2}" rx="{rx:.2}" "#
+            )?;
+            write_paint(out, fill.as_ref(), stroke.as_ref())?;
+            out.push_str("/>");
         }
         SceneElement::Circle {
             center,
@@ -128,14 +128,13 @@ fn render_element(out: &mut String, elem: &SceneElement) {
             fill,
             stroke,
         } => {
-            out.push_str(&format!(
-                r#"  <circle cx="{:.2}" cy="{:.2}" r="{:.2}" {} {}/>"#,
-                center[0],
-                center[1],
-                radius,
-                format_fill(fill),
-                format_opt_stroke(stroke)
-            ));
+            write!(
+                out,
+                r#"  <circle cx="{:.2}" cy="{:.2}" r="{radius:.2}" "#,
+                center[0], center[1]
+            )?;
+            write_paint(out, fill.as_ref(), stroke.as_ref())?;
+            out.push_str("/>");
         }
         SceneElement::Image {
             source,
@@ -145,7 +144,7 @@ fn render_element(out: &mut String, elem: &SceneElement) {
             height,
             source_rect,
         } => {
-            render_image(out, source, *x, *y, *width, *height, *source_rect);
+            write_image(out, source, [*x, *y, *width, *height], *source_rect)?;
         }
         SceneElement::SphericalImage {
             center,
@@ -156,20 +155,25 @@ fn render_element(out: &mut String, elem: &SceneElement) {
             // The silhouette carries the same viewport bound as the texture
             // layer, so a zoomed globe does not paint over the surrounding
             // title and colorbar in a headless SVG either.
-            let (open, close) = match clip {
+            let close = match clip {
                 Some([x, y, width, height]) => {
                     let id = format!("globe-clip-{x:.0}-{y:.0}-{width:.0}-{height:.0}");
-                    out.push_str(&format!(
-                        r##"  <clipPath id="{id}"><rect x="{x:.2}" y="{y:.2}" width="{width:.2}" height="{height:.2}"/></clipPath>"##
-                    ));
-                    (format!(r##"<g clip-path="url(#{id})">"##), "</g>")
+                    write!(
+                        out,
+                        r##"  <clipPath id="{id}"><rect x="{x:.2}" y="{y:.2}" width="{width:.2}" height="{height:.2}"/></clipPath>  <g clip-path="url(#{id})">"##
+                    )?;
+                    "</g>"
                 }
-                None => (String::new(), ""),
+                None => {
+                    out.push_str("  ");
+                    ""
+                }
             };
-            out.push_str(&format!(
-                r##"  {open}<circle cx="{:.2}" cy="{:.2}" r="{:.2}" fill="#08213d"/>{close}"##,
-                center[0], center[1], radius
-            ));
+            write!(
+                out,
+                r##"<circle cx="{:.2}" cy="{:.2}" r="{radius:.2}" fill="#08213d"/>{close}"##,
+                center[0], center[1]
+            )?;
         }
         SceneElement::Text {
             text,
@@ -186,38 +190,17 @@ fn render_element(out: &mut String, elem: &SceneElement) {
                 TextAlign::Center => "middle",
                 TextAlign::Right => "end",
             };
-            let weight = if *bold { r#" font-weight="bold""# } else { "" };
-            let rot = if angle_deg.abs() > 1e-3 {
-                format!(
-                    r#" transform="rotate({:.1} {:.2} {:.2})""#,
-                    angle_deg, pos[0], pos[1]
-                )
-            } else {
-                String::new()
-            };
-
-            let lines = text.split('\n').collect::<Vec<_>>();
-            let line_height = font_size * CSS_PIXELS_PER_POINT * TEXT_LINE_HEIGHT_EM;
-            let centers = text_line_center_offsets(lines.len(), line_height, *baseline);
-            out.push_str(&format!(
-                r#"  <text font-family="{}" font-size="{:.1}pt" fill="{}" fill-opacity="{:.3}" text-anchor="{}" dominant-baseline="central"{}{}>"#,
-                SVG_FONT_FAMILY,
-                font_size,
-                color.to_hex_rgb(),
-                color.alpha_f64(),
-                anchor,
-                weight,
-                rot,
-            ));
-            for (line, center) in lines.iter().zip(centers) {
-                out.push_str(&format!(
-                    r#"<tspan x="{:.2}" y="{:.2}">{}</tspan>"#,
-                    pos[0],
-                    pos[1] + center,
-                    escape_xml(line),
-                ));
+            write_text_open(out, *font_size, *color, anchor, *bold)?;
+            if angle_deg.abs() > 1e-3 {
+                write!(
+                    out,
+                    r#" transform="rotate({angle_deg:.1} {:.2} {:.2})""#,
+                    pos[0], pos[1]
+                )?;
             }
-            out.push_str("</text>");
+            out.push('>');
+            let lines = text.split('\n').collect::<Vec<_>>();
+            write_tspans(out, &lines, *pos, *font_size, *baseline)?;
         }
         SceneElement::TextBlock {
             text,
@@ -229,140 +212,188 @@ fn render_element(out: &mut String, elem: &SceneElement) {
         } => {
             // SVG has no metric-aware wrapping the viewer applies itself, so
             // reflow with the conservative budget and emit one row per line.
-            let weight = if *bold { r#" font-weight="bold""# } else { "" };
             let wrapped = wrap_text_to_width(text, *font_size, *width);
             let lines = wrapped.lines().collect::<Vec<_>>();
-            let line_height = font_size * CSS_PIXELS_PER_POINT * TEXT_LINE_HEIGHT_EM;
-            let centers = text_line_center_offsets(lines.len(), line_height, TextBaseline::Top);
-            out.push_str(&format!(
-                r#"  <text font-family="{}" font-size="{:.1}pt" fill="{}" fill-opacity="{:.3}" text-anchor="start" dominant-baseline="central"{}>"#,
-                SVG_FONT_FAMILY,
-                font_size,
-                color.to_hex_rgb(),
-                color.alpha_f64(),
-                weight,
-            ));
-            for (line, center) in lines.iter().zip(centers) {
-                out.push_str(&format!(
-                    r#"<tspan x="{:.2}" y="{:.2}">{}</tspan>"#,
-                    pos[0],
-                    pos[1] + center,
-                    escape_xml(line),
-                ));
-            }
-            out.push_str("</text>");
+            write_text_open(out, *font_size, *color, "start", *bold)?;
+            out.push('>');
+            write_tspans(out, &lines, *pos, *font_size, TextBaseline::Top)?;
         }
     }
+    Ok(())
 }
 
-fn format_stroke(stroke: &Stroke) -> String {
-    let mut s = format!(
+/// Opening `<text` tag up to (not including) its closing `>`, so a caller can
+/// append a transform.
+fn write_text_open(
+    out: &mut String,
+    font_size: f64,
+    color: Color,
+    anchor: &str,
+    bold: bool,
+) -> fmt::Result {
+    write!(
+        out,
+        r#"  <text font-family="{SVG_FONT_FAMILY}" font-size="{font_size:.1}pt" fill="{}" fill-opacity="{:.3}" text-anchor="{anchor}" dominant-baseline="central""#,
+        color.to_hex_rgb(),
+        color.alpha_f64(),
+    )?;
+    if bold {
+        out.push_str(r#" font-weight="bold""#);
+    }
+    Ok(())
+}
+
+/// One `<tspan>` per line, vertically placed by the shared line model, then
+/// the closing `</text>`.
+fn write_tspans(
+    out: &mut String,
+    lines: &[&str],
+    pos: Point2D,
+    font_size: f64,
+    baseline: TextBaseline,
+) -> fmt::Result {
+    let line_height = font_size * CSS_PIXELS_PER_POINT * TEXT_LINE_HEIGHT_EM;
+    let centers = text_line_center_offsets(lines.len(), line_height, baseline);
+    for (line, center) in lines.iter().zip(centers) {
+        write!(
+            out,
+            r#"<tspan x="{:.2}" y="{:.2}">"#,
+            pos[0],
+            pos[1] + center
+        )?;
+        push_escaped_xml(out, line);
+        out.push_str("</tspan>");
+    }
+    out.push_str("</text>");
+    Ok(())
+}
+
+fn write_points(out: &mut String, points: &[Point2D]) -> fmt::Result {
+    for (index, p) in points.iter().enumerate() {
+        if index > 0 {
+            out.push(' ');
+        }
+        write!(out, "{:.2},{:.2}", p[0], p[1])?;
+    }
+    Ok(())
+}
+
+fn write_stroke(out: &mut String, stroke: &Stroke) -> fmt::Result {
+    write!(
+        out,
         r#"stroke="{}" stroke-width="{:.2}" stroke-opacity="{:.3}""#,
         stroke.color.to_hex_rgb(),
         stroke.width,
         stroke.color.alpha_f64()
-    );
+    )?;
     if let Some(dash) = &stroke.dash_array {
-        let d_str = dash
-            .iter()
-            .map(|v| format!("{v:.1}"))
-            .collect::<Vec<_>>()
-            .join(",");
-        s.push_str(&format!(r#" stroke-dasharray="{d_str}""#));
+        out.push_str(r#" stroke-dasharray=""#);
+        for (index, value) in dash.iter().enumerate() {
+            if index > 0 {
+                out.push(',');
+            }
+            write!(out, "{value:.1}")?;
+        }
+        out.push('"');
     }
-    s
+    Ok(())
 }
 
-fn render_image(
+/// `fill` then `stroke` attributes, separated by one space, each `none` when
+/// absent.
+fn write_paint(out: &mut String, fill: Option<&Fill>, stroke: Option<&Stroke>) -> fmt::Result {
+    match fill {
+        Some(f) => write!(
+            out,
+            r#"fill="{}" fill-opacity="{:.3}""#,
+            f.color.to_hex_rgb(),
+            f.color.alpha_f64()
+        )?,
+        None => out.push_str(r#"fill="none""#),
+    }
+    out.push(' ');
+    match stroke {
+        Some(s) => write_stroke(out, s),
+        None => {
+            out.push_str(r#"stroke="none""#);
+            Ok(())
+        }
+    }
+}
+
+fn write_image(
     out: &mut String,
     source: &str,
-    x: f64,
-    y: f64,
-    width: f64,
-    height: f64,
+    [x, y, width, height]: [f64; 4],
     source_rect: Option<[f64; 4]>,
-) {
-    let href = image_href(source);
+) -> fmt::Result {
     if let Some([left, top, crop_width, crop_height]) = source_rect {
         let left = left.clamp(0.0, 1.0);
         let top = top.clamp(0.0, 1.0);
         let crop_width = crop_width.clamp(0.0, 1.0 - left);
         let crop_height = crop_height.clamp(0.0, 1.0 - top);
         if crop_width <= f64::EPSILON || crop_height <= f64::EPSILON {
-            return;
+            return Ok(());
         }
-        out.push_str(&format!(
-            r#"  <svg x="{x:.2}" y="{y:.2}" width="{width:.2}" height="{height:.2}" viewBox="{left:.8} {top:.8} {crop_width:.8} {crop_height:.8}" preserveAspectRatio="none" overflow="hidden"><image href="{href}" x="0" y="0" width="1" height="1" preserveAspectRatio="none"/></svg>"#
-        ));
+        write!(
+            out,
+            r#"  <svg x="{x:.2}" y="{y:.2}" width="{width:.2}" height="{height:.2}" viewBox="{left:.8} {top:.8} {crop_width:.8} {crop_height:.8}" preserveAspectRatio="none" overflow="hidden"><image href=""#
+        )?;
+        push_image_href(out, source);
+        out.push_str(r#"" x="0" y="0" width="1" height="1" preserveAspectRatio="none"/></svg>"#);
     } else {
-        out.push_str(&format!(
-            r#"  <image href="{href}" x="{x:.2}" y="{y:.2}" width="{width:.2}" height="{height:.2}" preserveAspectRatio="xMidYMid meet"/>"#
-        ));
+        out.push_str(r#"  <image href=""#);
+        push_image_href(out, source);
+        write!(
+            out,
+            r#"" x="{x:.2}" y="{y:.2}" width="{width:.2}" height="{height:.2}" preserveAspectRatio="xMidYMid meet"/>"#
+        )?;
+    }
+    Ok(())
+}
+
+fn push_image_href(out: &mut String, source: &str) {
+    if source == BLUE_MARBLE_SOURCE {
+        out.push_str(blue_marble_data_uri());
+    } else {
+        push_escaped_xml(out, source);
     }
 }
 
-fn image_href(source: &str) -> String {
-    if source == "embedded://nasa-blue-marble" {
+/// The bundled texture as a PNG data URI, encoded once per process: the PNG
+/// is about 7 MB, and a route figure references it from more than one
+/// element.
+fn blue_marble_data_uri() -> &'static str {
+    static URI: OnceLock<String> = OnceLock::new();
+    URI.get_or_init(|| {
         let bytes = include_bytes!("../../../assets/textures/earth_blue_marble.png");
-        return format!("data:image/png;base64,{}", encode_base64(bytes));
-    }
-    escape_xml(source)
+        let mut uri = String::from("data:image/png;base64,");
+        BASE64.encode_string(bytes, &mut uri);
+        uri
+    })
 }
 
-fn encode_base64(bytes: &[u8]) -> String {
-    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut output = String::with_capacity(bytes.len().div_ceil(3) * 4);
-    for chunk in bytes.chunks(3) {
-        let a = chunk[0];
-        let b = *chunk.get(1).unwrap_or(&0);
-        let c = *chunk.get(2).unwrap_or(&0);
-        output.push(TABLE[(a >> 2) as usize] as char);
-        output.push(TABLE[(((a & 0b0000_0011) << 4) | (b >> 4)) as usize] as char);
-        output.push(if chunk.len() >= 2 {
-            TABLE[(((b & 0b0000_1111) << 2) | (c >> 6)) as usize] as char
-        } else {
-            '='
-        });
-        output.push(if chunk.len() == 3 {
-            TABLE[(c & 0b0011_1111) as usize] as char
-        } else {
-            '='
-        });
-    }
-    output
-}
-
-fn format_opt_stroke(stroke: &Option<Stroke>) -> String {
-    match stroke {
-        Some(s) => format_stroke(s),
-        None => r#"stroke="none""#.to_owned(),
-    }
-}
-
-fn format_fill(fill: &Option<Fill>) -> String {
-    match fill {
-        Some(f) => format!(
-            r#"fill="{}" fill-opacity="{:.3}""#,
-            f.color.to_hex_rgb(),
-            f.color.alpha_f64()
-        ),
-        None => r#"fill="none""#.to_owned(),
-    }
-}
-
-fn escape_xml(s: &str) -> String {
-    let mut escaped = String::with_capacity(s.len());
+/// Append `s` with the five XML special characters replaced by entities, so
+/// the result is valid both as element content and inside a double- or
+/// single-quoted attribute.
+///
+/// C0 control characters other than tab, line feed and carriage return are
+/// not allowed anywhere in an XML 1.0 document, not even as character
+/// references, and one of them in solver text would make the whole figure
+/// unparseable; they become U+FFFD.
+fn push_escaped_xml(out: &mut String, s: &str) {
     for c in s.chars() {
         match c {
-            '&' => escaped.push_str("&amp;"),
-            '<' => escaped.push_str("&lt;"),
-            '>' => escaped.push_str("&gt;"),
-            '"' => escaped.push_str("&quot;"),
-            '\'' => escaped.push_str("&apos;"),
-            other => escaped.push(other),
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&apos;"),
+            '\t' | '\n' | '\r' => out.push(c),
+            c if c.is_ascii_control() && c != '\u{7f}' => out.push('\u{fffd}'),
+            other => out.push(other),
         }
     }
-    escaped
 }
 
 #[cfg(test)]
@@ -439,6 +470,37 @@ mod tests {
         let svg = render_svg(&scene);
         assert!(svg.contains("<image href=\"C:/renders/a &amp; b.png\""));
         assert!(svg.contains("preserveAspectRatio=\"xMidYMid meet\""));
+    }
+
+    #[test]
+    fn xml_forbidden_control_characters_are_replaced_not_emitted() {
+        let mut scene = Scene::new(200.0, 100.0, None);
+        scene.title = Some("solver\u{1b}[0m log\u{0}".to_owned());
+        let svg = render_svg(&scene);
+        assert!(svg.contains("<title>solver\u{fffd}[0m log\u{fffd}</title>"));
+        assert!(!svg.chars().any(|c| c.is_ascii_control() && c != '\n'));
+    }
+
+    #[test]
+    fn the_bundled_texture_is_embedded_as_a_base64_png_data_uri() {
+        use base64::Engine as _;
+        let mut scene = Scene::new(200.0, 100.0, None);
+        scene.add(SceneElement::Image {
+            source: BLUE_MARBLE_SOURCE.to_owned(),
+            x: 0.0,
+            y: 0.0,
+            width: 200.0,
+            height: 100.0,
+            source_rect: Some([0.25, 0.0, 0.5, 1.0]),
+        });
+        let svg = render_svg(&scene);
+        let start = svg.find("data:image/png;base64,").unwrap() + 22;
+        let end = start + svg[start..].find('"').unwrap();
+        let png = BASE64.decode(&svg[start..end]).unwrap();
+        assert_eq!(
+            png,
+            include_bytes!("../../../assets/textures/earth_blue_marble.png")
+        );
     }
 
     #[test]

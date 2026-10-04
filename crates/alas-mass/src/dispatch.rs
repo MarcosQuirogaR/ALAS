@@ -20,7 +20,9 @@
 use alas_config::{FuelPolicyConfig, FuelScheme};
 
 use crate::fuel_plan::{FuelBurnModel, FuelModelError, FuelPlan, FuelQuantity};
-use crate::fuel_policy::plan_fuel;
+#[path = "dispatch_plan_cache.rs"]
+mod plan_cache;
+use plan_cache::PlanEvaluator;
 
 /// The first takeoff-mass guess is a multiple of the zero-fuel mass, not a
 /// physical constant: a Picard iteration on a well-posed fuel closure
@@ -56,6 +58,8 @@ pub struct DispatchLimits {
 /// How a dispatch iteration ended.
 #[derive(Debug, Clone, PartialEq)]
 pub enum DispatchStatus {
+    /// The caller cancelled the burn model; this is not a physical rejection.
+    Cancelled,
     /// The takeoff-mass update fell below `tolerance_kg` without hitting
     /// MTOW or the tank.
     Converged,
@@ -196,102 +200,19 @@ pub fn solve_dispatch_with_initial_guess(
         failed_solution(
             policy.scheme,
             zero_fuel_mass_kg,
-            DispatchStatus::ModelFailed(reason),
+            match reason {
+                DispatchSolveError::Cancelled => DispatchStatus::Cancelled,
+                DispatchSolveError::Failed(message) => DispatchStatus::ModelFailed(message),
+            },
         )
     })
 }
 
-/// Whether `error` is a mass-dependent rating/energy shortfall that a
-/// *different takeoff mass* can plausibly resolve, as opposed to a route,
-/// polar/validity, or invalid-input failure that no mass in the bracket
-/// fixes.
-///
-/// Only [`FuelModelError::NotConverged`] is ever bracketable, and only when
-/// its message names a rating or energy deficit; the enum's other typed
-/// variants (`RouteTooShort`, `InvalidDistance`, `MassOutOfRange`,
-/// `InvalidModel`) are never mass-dependent in this sense and are excluded
-/// outright. Within `NotConverged`, a `"polar validity"` or `"speed schedule
-/// not attained"` rejection is excluded too: those are validity/schedule
-/// breaches at the flown condition, not a power margin the search should
-/// paper over by quietly flying a different mass.
-fn is_mass_bracketable(error: &FuelModelError) -> bool {
-    match error {
-        FuelModelError::NotConverged(reason) => {
-            (reason.contains("deficit") || reason.contains("rating"))
-                && !reason.contains("polar validity")
-                && !reason.contains("speed schedule not attained")
-        }
-        FuelModelError::RouteTooShort { .. }
-        | FuelModelError::InvalidDistance { .. }
-        | FuelModelError::MassOutOfRange { .. }
-        | FuelModelError::InvalidModel(_) => false,
-    }
-}
-
-/// Evaluate the plan at `candidate_kg`, or, if the burn model fails there
-/// with a mass-bracketable error (see [`is_mass_bracketable`]), at the
-/// highest mass between `zero_fuel_mass_kg` and `candidate_kg` where it
-/// succeeds, by bisection.
-///
-/// This never invents a feasible point beyond what the model itself
-/// supports, and never bisects past a non-mass-dependent failure: it only
-/// stops a rating/energy shortfall strictly above a feasible root (an
-/// overshoot during the Picard iteration, or a seed placed in an
-/// unevaluable region) from blocking that root. A route, polar/validity, or
-/// invalid-input failure (at the candidate or anywhere the bisection
-/// probes) is returned immediately as that typed failure, not silently
-/// treated as "too heavy, try lighter".
-///
-/// The bisection assumes the evaluable set is a single contiguous region
-/// reaching down from `zero_fuel_mass_kg` (a heavier aircraft needs no less
-/// power margin than a lighter one at the same condition, so a mass-
-/// dependent deficit above some threshold does not reappear below it). It
-/// does not sample every mass in `[zero_fuel_mass_kg, candidate_kg]`, so a
-/// failure at both endpoints is read *under that assumption* (not as an
-/// exhaustive proof the model is unevaluable at every point in between)
-/// and reported as such.
-fn evaluate_bracketed(
-    policy: &FuelPolicyConfig,
-    model: &dyn FuelBurnModel,
-    zero_fuel_mass_kg: f64,
-    candidate_kg: f64,
-    range_m: f64,
-) -> Result<(f64, FuelPlan), String> {
-    if candidate_kg <= zero_fuel_mass_kg {
-        return plan_fuel(policy, model, candidate_kg, range_m)
-            .map(|plan| (candidate_kg, plan))
-            .map_err(|error| error.to_string());
-    }
-    let candidate_error = match plan_fuel(policy, model, candidate_kg, range_m) {
-        Ok(plan) => return Ok((candidate_kg, plan)),
-        Err(error) => error,
-    };
-    if !is_mass_bracketable(&candidate_error) {
-        return Err(candidate_error.to_string());
-    }
-    let mut low = zero_fuel_mass_kg;
-    let mut low_plan = plan_fuel(policy, model, low, range_m).map_err(|error| {
-        format!(
-            "burn model failed at both ends of the {low:.1}-{candidate_kg:.1} kg search bracket ({error} at the zero-fuel mass, {candidate_error} at {candidate_kg:.1} kg); assuming a single contiguous evaluable region reaching down from the zero-fuel mass, this bracket has none, though every intermediate mass was not sampled"
-        )
-    })?;
-    let mut high = candidate_kg;
-    for _ in 0..EVALUATION_BRACKET_ITERATIONS {
-        if high - low <= EVALUATION_BRACKET_RESOLUTION_KG {
-            break;
-        }
-        let mid = 0.5 * (low + high);
-        match plan_fuel(policy, model, mid, range_m) {
-            Ok(plan) => {
-                low = mid;
-                low_plan = plan;
-            }
-            Err(error) if is_mass_bracketable(&error) => high = mid,
-            Err(error) => return Err(error.to_string()),
-        }
-    }
-    Ok((low, low_plan))
-}
+#[path = "dispatch_bracket.rs"]
+mod bracket;
+#[cfg(test)]
+use bracket::is_mass_bracketable;
+use bracket::{evaluate_bracketed, DispatchSolveError};
 
 // The bracketed solve takes the same separately reported dispatch inputs as
 // its public caller, plus the bracket itself.
@@ -305,7 +226,7 @@ fn try_solve(
     limits: &DispatchLimits,
     max_iterations: usize,
     tolerance_kg: f64,
-) -> Result<DispatchSolution, String> {
+) -> Result<DispatchSolution, DispatchSolveError> {
     validate_inputs(
         zero_fuel_mass_kg,
         initial_guess_kg,
@@ -315,6 +236,7 @@ fn try_solve(
         tolerance_kg,
     )?;
 
+    let mut plans = PlanEvaluator::new(policy, model, range_m);
     let mut takeoff_mass_kg = initial_guess_kg.min(limits.mtow_kg);
     let mut iterates = Vec::with_capacity(max_iterations);
     let mut previous_change_kg: Option<f64> = None;
@@ -322,7 +244,7 @@ fn try_solve(
 
     for _ in 0..max_iterations {
         let (evaluated_mass_kg, plan) =
-            evaluate_bracketed(policy, model, zero_fuel_mass_kg, takeoff_mass_kg, range_m)?;
+            evaluate_bracketed(&mut plans, zero_fuel_mass_kg, takeoff_mass_kg)?;
         takeoff_mass_kg = evaluated_mass_kg;
         let required_takeoff_fuel_kg = plan.takeoff_fuel_kg();
         let target_kg = (zero_fuel_mass_kg + required_takeoff_fuel_kg).min(limits.mtow_kg);
@@ -363,7 +285,7 @@ fn try_solve(
     // this point: recompute the actual closure residual at whatever mass
     // was evaluated and classify convergence from that, not from the flag.
     let (resolved_after_loop_kg, plan_after_loop) =
-        evaluate_bracketed(policy, model, zero_fuel_mass_kg, takeoff_mass_kg, range_m)?;
+        evaluate_bracketed(&mut plans, zero_fuel_mass_kg, takeoff_mass_kg)?;
     let mut resolved_takeoff_mass_kg = resolved_after_loop_kg;
     let mut plan = plan_after_loop;
     let required_unclamped_kg = zero_fuel_mass_kg + plan.takeoff_fuel_kg();
@@ -384,7 +306,7 @@ fn try_solve(
         // failure, not a demonstrated structural limit, and is reported as
         // the typed `ModelFailed` every other unrecoverable failure is.
         let (mtow_evaluated_kg, mtow_plan) =
-            evaluate_bracketed(policy, model, zero_fuel_mass_kg, limits.mtow_kg, range_m)?;
+            evaluate_bracketed(&mut plans, zero_fuel_mass_kg, limits.mtow_kg)?;
         let mtow_boundary_evaluable =
             (limits.mtow_kg - mtow_evaluated_kg).abs() <= EVALUATION_BRACKET_RESOLUTION_KG;
         let mtow_required_unclamped_kg = zero_fuel_mass_kg + mtow_plan.takeoff_fuel_kg();
@@ -404,7 +326,7 @@ fn try_solve(
             return Err(format!(
                 "MTOW boundary at {:.1} kg is not evaluable, and the best mass the model supports below it ({mtow_evaluated_kg:.1} kg) does not itself demonstrate a requirement over MTOW",
                 limits.mtow_kg
-            ));
+            ).into());
         }
     } else if let Some(capacity_kg) = limits
         .usable_capacity_kg
@@ -535,9 +457,19 @@ mod tests {
     use super::*;
     use crate::fuel_plan::{FuelBurnModel, FuelModelError, LegEstimate};
 
+    /// Taxi-in budget of the toy models' 0.05 kg/s ground-idle flow over the
+    /// ICAO Doc 9889 7 min, kg: carried from brake release to the gate.
+    const TAXI_IN_KG: f64 = 0.05 * crate::fuel_plan::TAXI_IN_TIME_MIN * 60.0;
+
+    /// The trip-fuel-only fixed point of a linear toy model,
+    /// `TOW = ZFW + trip_fraction TOW + taxi-in`, kg.
+    fn closed_form_takeoff_mass_kg(zero_fuel_mass_kg: f64, trip_fraction: f64) -> f64 {
+        (zero_fuel_mass_kg + TAXI_IN_KG) / (1.0 - trip_fraction)
+    }
+
     /// A linear toy model: trip fuel is a fixed fraction of the takeoff
     /// mass it starts from, which makes the fixed point closed-form
-    /// (`TOW = ZFW / (1 - trip_fraction)`) and the convergence check exact.
+    /// ([`closed_form_takeoff_mass_kg`]) and the convergence check exact.
     struct ToyModel {
         trip_fraction: f64,
         cruise_speed_m_s: f64,
@@ -609,8 +541,22 @@ mod tests {
             .abs()
                 < 1e-2
         );
-        // Closed form: TOW = ZFW / (1 - trip_fraction).
-        assert!((solution.takeoff_mass_kg - 50_000.0 / 0.70).abs() < 1e-1);
+        assert!(
+            (solution.takeoff_mass_kg - closed_form_takeoff_mass_kg(50_000.0, 0.30)).abs() < 1e-1
+        );
+        // With no reserves the aircraft lands with exactly the taxi-in
+        // budget on board: landing mass = ZFW + reserves + taxi-in.
+        assert!(
+            (solution.destination_landing_mass_kg
+                - (solution.zero_fuel_mass_kg
+                    + solution.plan.reserve_fuel_kg()
+                    + solution.plan.extra.kg
+                    + TAXI_IN_KG))
+                .abs()
+                < 1e-2,
+            "{}",
+            solution.destination_landing_mass_kg
+        );
     }
 
     #[test]
@@ -837,16 +783,16 @@ mod tests {
     }
 
     /// ZFW 50 t, model valid through 75 t only, true MTOW 100 t. The fixed
-    /// point (`TOW = ZFW / (1 - trip_fraction)`) is 70 t, strictly below the
+    /// point ([`closed_form_takeoff_mass_kg`]) is 70.03 t, strictly below the
     /// model's failure ceiling and far below MTOW. The default seed
     /// (1.25 x ZFW = 62.5 t) never even enters the failing region here, so
-    /// this is the baseline: closure must converge normally, at 70 t, with
+    /// this is the baseline: closure must converge normally, at 70.03 t, with
     /// `limits.mtow_kg` untouched and no false `MtowLimited`.
     #[test]
     fn a_feasible_root_below_the_models_failure_ceiling_converges_normally() {
         let policy = trip_fuel_only_policy();
         let model = FailAboveMassModel {
-            trip_fraction: 2.0 / 7.0, // root: 50_000 / (1 - 2/7) = 70_000
+            trip_fraction: 2.0 / 7.0, // root: (50_000 + 21) / (1 - 2/7) = 70_029.4
             cruise_speed_m_s: 200.0,
             fail_above_kg: 75_000.0,
         };
@@ -862,7 +808,8 @@ mod tests {
         assert_eq!(limits, original_limits, "DispatchLimits must never mutate");
         assert_eq!(solution.status, DispatchStatus::Converged);
         assert!(
-            (solution.takeoff_mass_kg - 70_000.0).abs() < 1.0,
+            (solution.takeoff_mass_kg - closed_form_takeoff_mass_kg(50_000.0, 2.0 / 7.0)).abs()
+                < 1.0,
             "{}",
             solution.takeoff_mass_kg
         );
@@ -882,7 +829,7 @@ mod tests {
     /// that then lowered `limits.mtow_kg` to dodge it would have gone on to
     /// report a false `MtowLimited` against that fictitious ceiling instead
     /// of the real one. This proves the fixed closure instead recovers by
-    /// bisecting `limits` unchanged and finds the same 70 t root.
+    /// bisecting `limits` unchanged and finds the same 70.03 t root.
     #[test]
     fn seeding_inside_the_failure_region_still_finds_the_feasible_root() {
         let policy = trip_fuel_only_policy();
@@ -916,7 +863,8 @@ mod tests {
             "a seed inside the unevaluable region must not report ModelFailed or a false MtowLimited"
         );
         assert!(
-            (solution.takeoff_mass_kg - 70_000.0).abs() < 1.0,
+            (solution.takeoff_mass_kg - closed_form_takeoff_mass_kg(50_000.0, 2.0 / 7.0)).abs()
+                < 1.0,
             "{}",
             solution.takeoff_mass_kg
         );
@@ -930,7 +878,7 @@ mod tests {
     }
 
     /// A control case: an explicit seed strictly *below* the feasible root
-    /// (60 t, between the 50 t ZFW and the 70 t root) must converge to the
+    /// (60 t, between the 50 t ZFW and the 70.03 t root) must converge to the
     /// same root by ordinary Picard contraction, with no bracket recovery
     /// needed and no false limit reported.
     #[test]
@@ -962,7 +910,8 @@ mod tests {
         assert_eq!(limits, original_limits, "DispatchLimits must never mutate");
         assert_eq!(solution.status, DispatchStatus::Converged);
         assert!(
-            (solution.takeoff_mass_kg - 70_000.0).abs() < 1.0,
+            (solution.takeoff_mass_kg - closed_form_takeoff_mass_kg(50_000.0, 2.0 / 7.0)).abs()
+                < 1.0,
             "{}",
             solution.takeoff_mass_kg
         );
@@ -1189,5 +1138,49 @@ mod tests {
         let solution = solve_dispatch(50_000.0, 1_000_000.0, &policy, &model, &limits, 30, 1e-3);
         assert!(solution.zero_fuel_mass_exceeds_mzfw);
         assert!(solution.landing_mass_exceeds_mlw);
+    }
+}
+
+#[cfg(test)]
+mod cancellation_tests {
+    use super::*;
+    use crate::fuel_plan::LegEstimate;
+    struct CancelledModel;
+    impl FuelBurnModel for CancelledModel {
+        fn trip(&self, _: f64, _: f64) -> Result<LegEstimate, FuelModelError> {
+            Err(FuelModelError::Cancelled)
+        }
+        fn diversion(&self, _: f64, _: f64) -> Result<LegEstimate, FuelModelError> {
+            Err(FuelModelError::Cancelled)
+        }
+        fn holding_fuel_flow_kg_s(&self, _: f64, _: f64) -> Result<f64, FuelModelError> {
+            Err(FuelModelError::Cancelled)
+        }
+        fn cruise_fuel_flow_kg_s(&self, _: f64) -> Result<f64, FuelModelError> {
+            Err(FuelModelError::Cancelled)
+        }
+        fn taxi_fuel_flow_kg_s(&self) -> Result<f64, FuelModelError> {
+            Err(FuelModelError::Cancelled)
+        }
+    }
+    #[test]
+    fn cancelled_fuel_model_stops_dispatch_without_rebracketing_or_physical_rejection() {
+        assert!(!is_mass_bracketable(&FuelModelError::Cancelled));
+        let result = solve_dispatch(
+            19500.0,
+            627000.0,
+            &FuelPolicyConfig::default(),
+            &CancelledModel,
+            &DispatchLimits {
+                mtow_kg: 23000.0,
+                mzfw_kg: None,
+                mlw_kg: None,
+                usable_capacity_kg: None,
+            },
+            30,
+            0.1,
+        );
+        assert_eq!(result.status, DispatchStatus::Cancelled);
+        assert!(result.iterates.is_empty());
     }
 }

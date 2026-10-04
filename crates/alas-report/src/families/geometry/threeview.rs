@@ -5,24 +5,12 @@
 // and its aircraft `Airplane.draw_three_view` routine,
 // `style="wireframe"` branch)
 // Upstream: native aerodynamic model 4.2.8, MIT.
-// Reference: alas @ rust-port-baseline.
 
 //! The four-panel top/front/side/isometric wireframe three-view.
 //!
-//! The reference `figure_threeview` calls `Airplane.draw_three_view(show=False)`
-//! at its default `style="shaded"`, a full lit `Poly3DCollection` render,
-//! not reproducible by this crate's line/polygon SVG scene graph, and not a
-//! numeric quantity a fixture could hold either way (`draw_three_view`
-//! returns Matplotlib axes, not data). This port instead exercises the
-//! `style="wireframe"` branch of that same upstream method: four
-//! [`crate::scene::Camera3D`] projections of the real airplane, at the four
-//! preset view angles `draw_three_view` itself uses (`"XZ"` top, `"-YZ"`
-//! front, `"XY"` side, `"left_isometric"`), reusing
-//! [`super::wireframe::draw_wing_wireframe`]/`draw_fuselage_wireframe`:
-//! the same reachable wireframe content [`super::wireframe`]'s isolated
-//! component figures draw, and the same geometry every panel here shares one
-//! frame for, so the four views stay to scale with each other.
-
+//! Four orthographic/isometric projections share the actual airfoil section
+//! grid and bulkhead geometry, with the live preview's component colors.
+//! Each panel fits the resolved geometry to its available plotting area.
 use alas_geom::aircraft::airplane::Airplane;
 
 use crate::chart_kit::{draw_title, LegendMarker};
@@ -34,6 +22,7 @@ use super::shared::airplane_bbox;
 use super::wireframe::{
     airplane_fit_points, draw_fuselage_wireframe, draw_wing_wireframe, framing,
 };
+use super::SceneComponent;
 
 /// One panel: a preset camera and where its label goes.
 struct Panel {
@@ -120,17 +109,13 @@ pub fn figure_threeview(plane: &Airplane, theme: Option<&str>) -> Scene {
             bold: true,
         });
 
-        for (index, wing) in plane.wings.iter().enumerate() {
-            let color = match index {
-                0 => Color::from_hex("#2563eb"),
-                1 => Color::from_hex("#e67e22"),
-                _ => Color::from_hex("#16a085"),
-            };
+        for wing in &plane.wings {
+            let color = SceneComponent::of_wing(wing).color();
             draw_wing_wireframe(
                 &mut scene, &cam, center, panel_span, panel.rect, wing, color,
             );
         }
-        for fus in &plane.fuselages {
+        for (index, fus) in plane.fuselages.iter().enumerate() {
             draw_fuselage_wireframe(
                 &mut scene,
                 &cam,
@@ -138,7 +123,7 @@ pub fn figure_threeview(plane: &Airplane, theme: Option<&str>) -> Scene {
                 panel_span,
                 panel.rect,
                 fus,
-                Color::from_hex("#9b59b6"),
+                SceneComponent::of_fuselage(index, fus).color(),
             );
         }
     }
@@ -149,19 +134,19 @@ pub fn figure_threeview(plane: &Airplane, theme: Option<&str>) -> Scene {
         &[
             (
                 "Main wing".to_owned(),
-                LegendMarker::Line(Stroke::new(Color::from_hex("#2563eb"), 1.5)),
+                LegendMarker::Line(Stroke::new(SceneComponent::Wing.color(), 1.5)),
             ),
             (
                 "Horizontal stabilizer".to_owned(),
-                LegendMarker::Line(Stroke::new(Color::from_hex("#e67e22"), 1.5)),
+                LegendMarker::Line(Stroke::new(SceneComponent::HorizontalTail.color(), 1.5)),
             ),
             (
                 "Vertical stabilizer".to_owned(),
-                LegendMarker::Line(Stroke::new(Color::from_hex("#16a085"), 1.5)),
+                LegendMarker::Line(Stroke::new(SceneComponent::VerticalTail.color(), 1.5)),
             ),
             (
                 "Fuselage".to_owned(),
-                LegendMarker::Line(Stroke::new(Color::from_hex("#9b59b6"), 1.5)),
+                LegendMarker::Line(Stroke::new(SceneComponent::Fuselage.color(), 1.5)),
             ),
         ],
         pal,
@@ -287,7 +272,7 @@ mod tests {
             .iter()
             .filter(|e| matches!(e, SceneElement::Text { .. }))
             .count();
-        // Each panel title remains present; Axes2D now also emits numeric
+        // Each panel title remains present; Axes2D also emits numeric
         // tick labels so the result is readable when exported standalone.
         assert!(texts >= 4);
         assert!(

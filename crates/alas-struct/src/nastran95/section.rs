@@ -25,16 +25,16 @@
 //! for the convergence tier to absorb rather than papered over with a shear-area
 //! guess this solver would apply differently anyway.
 
-/// A symmetric I-section's beam constants.
+/// A doubly symmetric section's beam constants, in SI.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct BarConstants {
-    /// Cross-sectional area.
+    /// Cross-sectional area, m^2.
     pub area: f64,
-    /// Second moment about axis 1 (the strong axis, in the plane of the web).
+    /// Second moment for bending in element plane 1, m^4.
     pub i1: f64,
-    /// Second moment about axis 2 (the weak axis, through the web).
+    /// Second moment for bending in element plane 2, m^4.
     pub i2: f64,
-    /// Torsional constant, the thin-open-section estimate.
+    /// Saint-Venant torsional constant, m^4; thin-open estimate for reference I.
     pub j: f64,
 }
 
@@ -74,6 +74,35 @@ pub fn i_section(dim: &[f64]) -> Option<BarConstants> {
     let j = (2.0 * b * s.powi(3) + h * t.powi(3)) / 3.0;
 
     Some(BarConstants { area, i1, i2, j })
+}
+
+/// Rectangle `[width, thickness]` in PBARL BAR convention (metres).
+/// I1 = width * thickness^3 / 12, I2 = thickness * width^3 / 12 (m^4).
+/// Torsion uses the Saint-Venant rectangular-section series, 100 odd terms;
+/// the neglected relative series remainder is below 1e-9 for a square and
+/// smaller for slender caps. This avoids using the open-I thin-wall estimate
+/// for a solid rectangle. Source: MSC Nastran Reference Guide, BAR section.
+pub fn rectangle(dim: &[f64]) -> Option<BarConstants> {
+    let &[width, thickness] = dim else {
+        return None;
+    };
+    if !width.is_finite() || !thickness.is_finite() || width <= 0.0 || thickness <= 0.0 {
+        return None;
+    }
+    let (a, b) = (width.max(thickness), width.min(thickness));
+    let pi = std::f64::consts::PI;
+    let series: f64 = (0..100)
+        .map(|i| {
+            let n = (2 * i + 1) as f64;
+            (n * pi * a / (2.0 * b)).tanh() / n.powi(5)
+        })
+        .sum();
+    Some(BarConstants {
+        area: width * thickness,
+        i1: width * thickness.powi(3) / 12.0,
+        i2: thickness * width.powi(3) / 12.0,
+        j: a * b.powi(3) / 3.0 * (1.0 - 192.0 * b * series / (pi.powi(5) * a)),
+    })
 }
 
 #[cfg(test)]

@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/translations/es.py
-// Reference: alas @ rust-port-baseline.
 
 //! The Spanish string catalog: every English source string the reference
 //! implementation's UI shows, mapped to its Spanish translation.
@@ -32,7 +31,6 @@ const CATALOG_JSON: &str =
     include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/data/es_catalog.json"));
 
 // Ported from desktop/frontend/src/lib/translations.es.ts.
-// Reference: alas @ rust-port-baseline.
 const DESKTOP_CATALOG_JSON: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/data/es_desktop_catalog.json"
@@ -118,14 +116,14 @@ pub fn native_desktop_catalog() -> &'static HashMap<String, String> {
 /// it behaves exactly as if Spanish had no catalog at all, which is the safe
 /// default [`crate::t`] already falls back to.
 pub fn install() {
+    // One registration of the combined table: replacing the catalog with the
+    // base entries and extending it afterwards would let a concurrent lookup
+    // see the base table without the desktop entries in between.
     let entries = catalog()
         .iter()
+        .chain(desktop_catalog().iter())
         .map(|(key, value)| (key.clone(), value.clone()));
     crate::register_catalog("es", entries);
-    let desktop_entries = desktop_catalog()
-        .iter()
-        .map(|(key, value)| (key.clone(), value.clone()));
-    crate::extend_catalog("es", desktop_entries);
 }
 
 #[cfg(test)]
@@ -250,5 +248,32 @@ mod tests {
                 .map(String::as_str),
             Some("Zoom autom\u{e1}tico")
         );
+    }
+
+    #[test]
+    fn optimizer_settings_translate_units_and_runtime_worker_count() {
+        let catalog = native_desktop_catalog();
+        let automatic = &catalog["Automatic (all {count} threads)"];
+        assert_eq!(automatic.matches("{count}").count(), 1);
+        assert!(!automatic.replace("{count}", "16").contains('{'));
+        for key in [
+            "Evaluation ceiling",
+            "Hard MTOW constraint (preset default)",
+            "Preference weight",
+        ] {
+            assert_ne!(catalog[key], key);
+        }
+        for (key, unit) in [
+            ("Time limit [s]", "[s]"),
+            ("Block fuel [kg]", "[kg]"),
+            ("Takeoff mass [kg]", "[kg]"),
+            ("Operating empty mass [kg]", "[kg]"),
+            (
+                "Fuel per seat-kilometre [kg/(seat km)]",
+                "[kg/(asiento km)]",
+            ),
+        ] {
+            assert!(catalog[key].ends_with(unit), "{key}");
+        }
     }
 }
