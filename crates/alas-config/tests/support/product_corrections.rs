@@ -333,6 +333,9 @@ pub fn retired_reference_key(path: &str, key: &str) -> bool {
 pub fn native_field(path: &str, key: &str) -> bool {
     performance_fields::is_native_field(path, key)
         || (matches!(key, "fuel_policy" | "fuel_tanks" | "downstream") && !path.contains('.'))
+        // Optional belly-upsweep length; the frozen schema has no such field.
+        || (key == "belly_upsweep_length_m"
+            && (path.ends_with("FuselageConfig") || path.ends_with(".fuselage")))
         || (path.ends_with(".landing_gear")
             && matches!(
                 key,
@@ -357,6 +360,8 @@ pub fn native_field(path: &str, key: &str) -> bool {
                     // configuration has no field for them at all.
                     | "rotation_pitch_acceleration_deg_s2"
                     | "pitch_radius_of_gyration_frac_mac"
+                    | "takeoff_stabilizer_nose_up_deg"
+                    | "elevator_up_travel_deg"
                     | "cl_ground_attitude_frac_of_cl_max_to"
                     | "rotation_rolling_friction_coefficient"
             ))

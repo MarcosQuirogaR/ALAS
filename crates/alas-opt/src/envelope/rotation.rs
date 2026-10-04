@@ -35,20 +35,34 @@ use alas_config::AlasConfig;
 use alas_geom::aircraft::airplane::Airplane;
 use alas_mass::inertia::RadiiOfGyration;
 
-/// Required pitch acceleration at rotation, deg/s^2, for every aircraft
-/// class: the midpoint of the 6-8 deg/s^2 transport-category range cited by
-/// Torenbeek and Roskam, and the value this model used before the class split.
-/// A class requirement [E], not an aircraft value. Sadraey's class values
-/// (4-6 deg/s^2 large, 6-8 deg/s^2 small transport, attributed to his
-/// Table 9.6) are not used: the table could not be confirmed from an
-/// accessible source, so no class split is applied. Overridden by
+/// Required pitch acceleration at rotation, deg/s^2, for a transport: the
+/// midpoint of Sadraey's transport range. Sadraey, *Aircraft Design: A
+/// Systems Engineering Approach*, Wiley, 2012, ch. 12, sec. 12.3 (elevator
+/// design, takeoff rotation requirement): "in a transport aircraft, the
+/// acceptable value for the take-off rotation time is 3-5 seconds. The
+/// equivalent value for the angular rotation rate to achieve such
+/// requirement is 4-6 deg/sec2". A class requirement [E], not an aircraft
+/// value; the earlier 7 deg/s^2 (a recalled Torenbeek/Roskam 6-8 range) had
+/// no retrieved source. Overridden by
 /// `landing_gear.rotation_pitch_acceleration_deg_s2`.
-pub(super) const ROTATION_PITCH_ACCELERATION_DEG_S2: f64 = 7.0;
+pub(super) const ROTATION_PITCH_ACCELERATION_DEG_S2: f64 = 5.0;
 /// Maximum elevator deflection at rotation, degrees, trailing edge up
 /// (negative): Sadraey's typical maximum up-elevator deflection of a
 /// transport, -25 deg (Sadraey 2012, sec. 12.6, Table 12.3). One class-generic
 /// value for every aircraft [E]: no aircraft carries a published one.
 pub(super) const MAX_ELEVATOR_UP_DEFLECTION_DEG: f64 = -25.0;
+
+/// The full up-elevator deflection at rotation, deg, trailing edge up
+/// (negative): `-landing_gear.elevator_up_travel_deg` when it is set
+/// (finite and positive), else [`MAX_ELEVATOR_UP_DEFLECTION_DEG`].
+#[must_use]
+pub(super) fn elevator_up_deflection_deg(config: &AlasConfig) -> f64 {
+    config
+        .landing_gear
+        .elevator_up_travel_deg
+        .filter(|deg| deg.is_finite() && *deg > 0.0)
+        .map_or(MAX_ELEVATOR_UP_DEFLECTION_DEG, |deg| -deg)
+}
 
 /// The required pitch acceleration at rotation, deg/s^2: the user's
 /// `landing_gear.rotation_pitch_acceleration_deg_s2` when it is set (finite
@@ -126,33 +140,61 @@ pub(super) fn elevator_effectiveness(chord_fraction: f64) -> f64 {
 /// Empirical large-deflection correction to the plain-flap (elevator) lift
 /// effectiveness: the ratio of the real to the linear (thin-airfoil)
 /// angle-of-attack effectiveness at trailing-edge deflection `|delta|` in
-/// degrees. USAF DATCOM section 6.1.1.1 (and Raymer's plain-flap
-/// treatment, which follows it) corrects the linear `tau delta` lift
-/// increment of a plain flap for the loss of effectiveness at large
-/// deflection (separation, viscous displacement) with an empirical factor
-/// that falls from 1 at small deflection to about 0.5-0.65 near 25 deg.
+/// degrees, for a flap (elevator) of chord fraction `c_f / c`.
 ///
-/// Piecewise-linear anchors (|delta| deg, factor): (0, 1.00), (10, 0.85),
-/// (25, 0.60), (40, 0.45); constant beyond 40 deg. The 25 deg anchor sits
-/// inside the stated 0.5-0.65 band; the other anchors are a smooth
-/// bracket [E], NOT digitised from the DATCOM figure, which was not
-/// accessible when this was written. Verify against the figure before
-/// treating the intermediate values as sourced. The factor lowers the
-/// tail's download authority, so it can only tighten the forward limit.
+/// Source: USAF Stability and Control DATCOM (Finck, AFWAL-TR-83-3048,
+/// 1978 revision), sec. 6.1.1.1, Fig. 6.1.1.1-40, "Empirical correction for
+/// lift effectiveness of plain trailing-edge flaps at high flap deflections"
+/// (K'). Digitised by eye from the DTIC ADB072483 scan (leaf n1909), about
+/// +/-0.03 (+/-0.05 between 15 and 25 deg), at c_f/c = 0.25, 0.30, 0.40:
+///
+/// | delta deg | 0.25 | 0.30 | 0.40 |
+/// |---|---|---|---|
+/// | 0-10 | 1.00 | 1.00 | 1.00 |
+/// | 15 | 0.97 | 0.96 | 0.94 |
+/// | 20 | 0.85 | 0.82 | 0.77 |
+/// | 25 | 0.74 | 0.72 | 0.68 |
+/// | 30 | 0.66 | 0.65 | 0.62 |
+/// | 40 | 0.57 | 0.56 | 0.53 |
+///
+/// Linear in both deflection and chord fraction, clamped to the tabulated
+/// chord range and constant beyond 40 deg.
 #[must_use]
-pub(super) fn large_deflection_effectiveness_factor(deflection_deg: f64) -> f64 {
-    const ANCHORS: [(f64, f64); 4] = [(0.0, 1.00), (10.0, 0.85), (25.0, 0.60), (40.0, 0.45)];
-    let delta = deflection_deg.abs();
-    if !delta.is_finite() {
-        return ANCHORS[ANCHORS.len() - 1].1;
-    }
-    for pair in ANCHORS.windows(2) {
-        let ((d0, f0), (d1, f1)) = (pair[0], pair[1]);
-        if delta <= d1 {
-            return f0 + (f1 - f0) * (delta - d0) / (d1 - d0);
+pub(super) fn large_deflection_effectiveness_factor(
+    deflection_deg: f64,
+    chord_fraction: f64,
+) -> f64 {
+    const DEFLECTIONS: [f64; 7] = [0.0, 10.0, 15.0, 20.0, 25.0, 30.0, 40.0];
+    const CHORDS: [f64; 3] = [0.25, 0.30, 0.40];
+    const FACTORS: [[f64; 7]; 3] = [
+        [1.00, 1.00, 0.97, 0.85, 0.74, 0.66, 0.57],
+        [1.00, 1.00, 0.96, 0.82, 0.72, 0.65, 0.56],
+        [1.00, 1.00, 0.94, 0.77, 0.68, 0.62, 0.53],
+    ];
+    fn interpolate(xs: &[f64], ys: &[f64], x: f64) -> f64 {
+        let x = x.clamp(xs[0], xs[xs.len() - 1]);
+        for i in 1..xs.len() {
+            if x <= xs[i] {
+                return ys[i - 1] + (ys[i] - ys[i - 1]) * (x - xs[i - 1]) / (xs[i] - xs[i - 1]);
+            }
         }
+        ys[ys.len() - 1]
     }
-    ANCHORS[ANCHORS.len() - 1].1
+    let delta = if deflection_deg.is_finite() {
+        deflection_deg.abs()
+    } else {
+        DEFLECTIONS[DEFLECTIONS.len() - 1]
+    };
+    let by_chord: Vec<f64> = FACTORS
+        .iter()
+        .map(|row| interpolate(&DEFLECTIONS, row, delta))
+        .collect();
+    let chord = if chord_fraction.is_finite() {
+        chord_fraction
+    } else {
+        CHORDS[CHORDS.len() - 1]
+    };
+    interpolate(&CHORDS, &by_chord, chord)
 }
 
 /// Maximum section lift coefficient of the tail airfoil, `c_l,max`, at the
@@ -202,8 +244,12 @@ pub(super) fn tail_section_cl_max(airfoil: &str) -> f64 {
 pub(super) struct RotationTailLift {
     /// Tail lift-curve slope, per radian (DATCOM, incompressible).
     pub(super) lift_curve_slope_per_rad: f64,
-    /// Chord-weighted mean incidence of the built tail, rad.
+    /// Tail incidence at rotation, rad: the trimmable stabiliser's takeoff
+    /// setting when it gives more download than the built incidence, else
+    /// the built incidence.
     pub(super) incidence_rad: f64,
+    /// Chord-weighted mean incidence of the built tail, rad.
+    pub(super) built_incidence_rad: f64,
     /// Downwash at the tail in ground effect, rad.
     pub(super) downwash_rad: f64,
     /// Elevator effectiveness times its span fraction.
@@ -225,8 +271,11 @@ pub(super) struct RotationTailLift {
 /// `CL_h = a_h [alpha + i_h - epsilon + tau_e (b_e / b_h) delta_e,max]`
 ///
 /// - `alpha = 0`: the fuselage stands level in the ground roll;
-/// - `i_h`: the built tail's chord-weighted mean incidence (its section
-///   twist), the setting the stabiliser holds;
+/// - `i_h`: the tail incidence at rotation. A fixed stabiliser holds its
+///   built chord-weighted mean incidence (its section twist). A trimmable
+///   stabiliser is set nose-up for the takeoff CG before the roll, so it
+///   holds `-landing_gear.takeoff_stabilizer_nose_up_deg` whenever that is
+///   the more nose-up (more download) of the two;
 /// - `epsilon = sigma 2 CL_g / (pi A)`: the lifting-line downwash of the wing
 ///   at its ground-roll lift coefficient `CL_g` (the same `2 CL / (pi A)`
 ///   gradient model `alas_stab` uses), reduced by Wieselsberger's
@@ -283,16 +332,21 @@ pub(super) fn rotation_tail_lift(
     let controls = &config.control_surfaces;
     let span_fraction =
         (controls.elevator_span_end_frac - controls.elevator_span_start_frac).clamp(0.0, 1.0);
+    let elevator_deg = elevator_up_deflection_deg(config);
     let effectiveness = elevator_effectiveness(controls.elevator_chord_fraction)
-        * large_deflection_effectiveness_factor(MAX_ELEVATOR_UP_DEFLECTION_DEG)
+        * large_deflection_effectiveness_factor(elevator_deg, controls.elevator_chord_fraction)
         * span_fraction;
-    let incidence_rad = incidence_deg.to_radians();
+    let built_incidence_rad = incidence_deg.to_radians();
+    let incidence_rad = takeoff_incidence_rad(
+        built_incidence_rad,
+        config.landing_gear.takeoff_stabilizer_nose_up_deg,
+    );
     let linear_lift_coefficient = tail_lift_coefficient(
         lift_curve_slope_per_rad,
         incidence_rad,
         downwash_rad,
         effectiveness,
-        MAX_ELEVATOR_UP_DEFLECTION_DEG.to_radians(),
+        elevator_deg.to_radians(),
     );
     let section_cap = 0.9
         * tail_section_cl_max(&config.geometry.empennage.tail_airfoil)
@@ -301,12 +355,27 @@ pub(super) fn rotation_tail_lift(
     Some(RotationTailLift {
         lift_curve_slope_per_rad,
         incidence_rad,
+        built_incidence_rad,
         downwash_rad,
         elevator_effectiveness: effectiveness,
         lift_coefficient,
         linear_lift_coefficient,
         section_cap,
     })
+}
+
+/// The tail incidence at rotation, rad (negative is leading edge down, more
+/// download): the trimmable stabiliser's takeoff setting `-nose_up_deg` when
+/// it is finite, positive and more nose-up than the built incidence, else the
+/// built incidence. The crew never sets a takeoff trim that removes download
+/// a forward CG needs, so the setting can only add tail authority.
+#[must_use]
+pub(super) fn takeoff_incidence_rad(built_incidence_rad: f64, nose_up_deg: Option<f64>) -> f64 {
+    nose_up_deg
+        .filter(|deg| deg.is_finite() && *deg > 0.0)
+        .map_or(built_incidence_rad, |deg| {
+            built_incidence_rad.min(-deg.to_radians())
+        })
 }
 
 /// `CL_h = a_h (alpha + i_h - epsilon + tau delta_e)` with the fuselage at
@@ -505,36 +574,95 @@ mod tests {
         }
     }
 
-    /// 7 deg/s^2 for every class unless the config overrides it.
+    /// 5 deg/s^2 for every class unless the config overrides it.
     #[test]
-    fn the_required_pitch_acceleration_is_seven_unless_overridden() {
+    fn the_required_pitch_acceleration_is_five_unless_overridden() {
         for preset in ["ATR72-600", "A320-200", "B787-9"] {
             let mut config = AlasConfig::from_value(&serde_json::json!({ "preset": preset }))
                 .expect("a registered preset configures");
-            assert_eq!(rotation_pitch_acceleration_deg_s2(&config), 7.0, "{preset}");
-            config.landing_gear.rotation_pitch_acceleration_deg_s2 = Some(5.0);
             assert_eq!(rotation_pitch_acceleration_deg_s2(&config), 5.0, "{preset}");
+            config.landing_gear.rotation_pitch_acceleration_deg_s2 = Some(6.0);
+            assert_eq!(rotation_pitch_acceleration_deg_s2(&config), 6.0, "{preset}");
             config.landing_gear.rotation_pitch_acceleration_deg_s2 = Some(-1.0);
-            assert_eq!(rotation_pitch_acceleration_deg_s2(&config), 7.0, "{preset}");
+            assert_eq!(rotation_pitch_acceleration_deg_s2(&config), 5.0, "{preset}");
         }
     }
 
     #[test]
-    fn the_large_deflection_factor_is_one_at_zero_and_about_point_six_at_25_degrees() {
-        assert_eq!(large_deflection_effectiveness_factor(0.0), 1.0);
-        let at_25 = large_deflection_effectiveness_factor(-25.0);
-        assert!((0.5..=0.65).contains(&at_25), "{at_25}");
-        // Monotone non-increasing in |delta| and symmetric in sign.
-        let mut previous = 1.0;
-        for delta in 0..=60 {
-            let factor = large_deflection_effectiveness_factor(f64::from(delta));
-            assert!(factor <= previous + 1.0e-15 && factor > 0.0);
-            assert_eq!(
-                factor,
-                large_deflection_effectiveness_factor(-f64::from(delta))
-            );
-            previous = factor;
+    fn the_large_deflection_factor_follows_the_digitised_datcom_figure() {
+        // Tabulated points (DATCOM Fig. 6.1.1.1-40).
+        assert_eq!(large_deflection_effectiveness_factor(-10.0, 0.30), 1.0);
+        assert_eq!(large_deflection_effectiveness_factor(-25.0, 0.25), 0.74);
+        assert_eq!(large_deflection_effectiveness_factor(-25.0, 0.30), 0.72);
+        assert_eq!(large_deflection_effectiveness_factor(-25.0, 0.40), 0.68);
+        // Linear between chords: c_f/c = 0.35 at 25 deg is halfway.
+        assert!((large_deflection_effectiveness_factor(-25.0, 0.35) - 0.70).abs() < 1.0e-12);
+        // Clamped outside the tabulated chord and deflection ranges.
+        assert_eq!(large_deflection_effectiveness_factor(-25.0, 0.10), 0.74);
+        assert_eq!(large_deflection_effectiveness_factor(-60.0, 0.30), 0.56);
+        // Monotone non-increasing in |delta|, symmetric in sign, larger
+        // chords lose more.
+        for chord in [0.25, 0.3, 0.35, 0.4] {
+            let mut previous = 1.0;
+            for delta in 0..=60 {
+                let factor = large_deflection_effectiveness_factor(f64::from(delta), chord);
+                assert!(factor <= previous + 1.0e-15 && factor > 0.0);
+                assert_eq!(
+                    factor,
+                    large_deflection_effectiveness_factor(-f64::from(delta), chord)
+                );
+                assert!(factor <= large_deflection_effectiveness_factor(f64::from(delta), 0.25));
+                previous = factor;
+            }
         }
+    }
+
+    #[test]
+    fn a_trimmable_stabiliser_can_only_add_takeoff_download() {
+        let built = (-2.0_f64).to_radians();
+        // Fixed stabiliser, or a setting that is not a positive angle: the
+        // built incidence holds.
+        for setting in [None, Some(0.0), Some(-3.0), Some(f64::NAN)] {
+            assert_eq!(takeoff_incidence_rad(built, setting), built);
+        }
+        // A nose-up setting beyond the built incidence replaces it.
+        assert_eq!(
+            takeoff_incidence_rad(built, Some(4.3)),
+            -(4.3_f64.to_radians())
+        );
+        // A setting less nose-up than the built incidence never removes
+        // download.
+        assert_eq!(takeoff_incidence_rad(built, Some(1.0)), built);
+    }
+
+    /// The registered presets with a trimmable stabiliser get more takeoff
+    /// download than their built incidence gives, and the fixed-stabiliser
+    /// ATR keeps its built incidence.
+    #[test]
+    fn the_takeoff_trim_raises_the_rotation_download_of_the_stabiliser_presets() {
+        use alas_geom::builder::AircraftBuilder;
+        for name in alas_config::presets::available() {
+            let config = AlasConfig::from_value(&serde_json::json!({ "preset": name }))
+                .expect("a registered preset configures");
+            let registered = alas_config::presets::get(name).expect("a registered preset");
+            let plane = AircraftBuilder::new(Some(config.geometry.clone()))
+                .build(Some(&registered.design_vector), true)
+                .expect("a registered preset builds");
+            let ground = super::super::support::ground_z_m(&plane.fuselages[0], &config);
+            let cl_ground = config.performance.cl_max_to
+                * config.landing_gear.cl_ground_attitude_frac_of_cl_max_to;
+            let tail = rotation_tail_lift(&plane, &config, ground, cl_ground).expect("a tail");
+            match config.landing_gear.takeoff_stabilizer_nose_up_deg {
+                Some(setting) => {
+                    assert!(tail.incidence_rad < tail.built_incidence_rad, "{name}");
+                    assert!((tail.incidence_rad + setting.to_radians()).abs() < 1.0e-12);
+                }
+                None => assert_eq!(tail.incidence_rad, tail.built_incidence_rad, "{name}"),
+            }
+        }
+        let atr = AlasConfig::from_value(&serde_json::json!({ "preset": "ATR72-600" }))
+            .expect("the ATR configures");
+        assert_eq!(atr.landing_gear.takeoff_stabilizer_nose_up_deg, None);
     }
 
     #[test]
@@ -570,7 +698,12 @@ mod tests {
                 - controls.elevator_span_start_frac)
                 .clamp(0.0, 1.0);
             let thin = elevator_effectiveness(controls.elevator_chord_fraction) * span_fraction;
-            let expected = thin * large_deflection_effectiveness_factor(-25.0);
+            let deflection = elevator_up_deflection_deg(&config);
+            let expected = thin
+                * large_deflection_effectiveness_factor(
+                    deflection,
+                    controls.elevator_chord_fraction,
+                );
             assert!(
                 (tail.elevator_effectiveness - expected).abs() < 1.0e-12,
                 "{name}"
@@ -580,7 +713,7 @@ mod tests {
                 tail.incidence_rad,
                 tail.downwash_rad,
                 thin,
-                MAX_ELEVATOR_UP_DEFLECTION_DEG.to_radians(),
+                deflection.to_radians(),
             );
             assert!(
                 tail.linear_lift_coefficient > uncorrected,

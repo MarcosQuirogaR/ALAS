@@ -217,36 +217,36 @@ fn registered_hard_mtow_nominals_separate_model_defects_from_physical_findings()
         let expected: &[&str] = match name {
             "A220-300" => &[],
             "A320-200" => &[],
-            // The derived rotation boundary, with the plain-flap
-            // large-deflection correction and the class-generic -25 deg
-            // elevator and no credited stabiliser trim, lies aft of the
-            // item-level takeoff CG: the registered layout cannot lift its
-            // nose wheel in the model (boundary against takeoff CG, %MAC:
-            // A340 30.8 against 26.7, B787 21.9 against 16.9). A model-limit
-            // finding on a certified aircraft, kept visible rather than
-            // loosened; the A340's published ACAP limit is 20.3 %MAC.
-            "A340-300" | "B787-9" => &["forward_cg_range"],
+            // With the trimmable stabiliser at its takeoff nose-up setting
+            // the rotation boundary lies ahead of the item-level takeoff CG.
+            // At the built -2 deg incidence it did not (boundary against
+            // takeoff CG, %MAC: A340 30.8 against 26.7, B787 21.9 against
+            // 16.9).
+            "A340-300" | "B787-9" => &[],
             // Declared-mass loading misses the nose reaction. Its maximum-fuel
             // mission's mid-cruise lift clears Korn divergence (19.5 against
-            // 26.9 counts). The flown takeoff CG (42.6 %MAC) is 0.8 %MAC
-            // ahead of the rotation boundary (43.4).
-            "A380-800" => &["forward_cg_range", "min_nose_gear_load"],
-            // The nominal gear placement misses reaction and tip-back limits.
-            // The flown takeoff CG (29.6 %MAC) is ahead of the rotation
-            // boundary (31.8).
-            "ATR72-600" => &["forward_cg_range", "min_nose_gear_load", "tip_back"],
+            // 26.9 counts). The takeoff trim clears the rotation boundary
+            // that sat 0.8 %MAC aft of the flown takeoff CG (42.6 %MAC).
+            "A380-800" => &["min_nose_gear_load"],
+            // Pin update (round 3): was ["forward_cg_range",
+            // "min_nose_gear_load", "tip_back"]. The 5 deg/s^2 class pitch
+            // acceleration (Sadraey 12.3), the DATCOM K' elevator table with
+            // the measured 21.8 deg up travel, and the tail-down-aware
+            // tip-back requirement (8 deg model tail-down vs 10.7 deg
+            // tip-back, no 15 deg floor) clear the rotation and tip-back
+            // findings. The nose-gear load shortfall remains.
+            "ATR72-600" => &["min_nose_gear_load"],
             // The maximum-fuel mission's mid-cruise lift still crosses the
-            // Korn divergence boundary (27.5 against 26.9 counts). The takeoff
-            // CG (26.1 %MAC) is ahead of the rotation boundary (28.9).
-            "AVE" => &["forward_cg_range", "sweep_consistent_with_cruise_mach"],
+            // Korn divergence boundary (27.5 against 26.9 counts). The
+            // takeoff trim clears the rotation boundary.
+            "AVE" => &["sweep_consistent_with_cruise_mach"],
             // The conventional Korn section factor leaves insufficient
             // cruise thrust and sweep. The empty aircraft's CG lies 3 mm
             // aft of the published minimum nose-gear share at its weight
             // (0.0598 against 0.0600 of its weight, inside the chart's
-            // +-0.15 % read). The rotation boundary (21.5 %MAC) lies aft of
-            // the volume-limited takeoff CG (16.5 %MAC).
+            // +-0.15 % read). The takeoff trim clears the rotation boundary
+            // that lay aft of the volume-limited takeoff CG.
             "DC-10" => &[
-                "forward_cg_range",
                 "min_nose_gear_load",
                 "cruise_thrust",
                 "sweep_consistent_with_cruise_mach",

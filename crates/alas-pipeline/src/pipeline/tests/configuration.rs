@@ -223,31 +223,23 @@ fn fixed_design_review_exposes_its_binding_constraint_without_promoting_a_finali
         .unwrap_or_else(|error| panic!("fixed-design finalist run: {error}"));
 
     assert_eq!(result.optimized_design, Some(design));
-    // The review is usable: it reports, and the one error it carries is the
-    // takeoff forward-CG finding of this notional shape. With the rotation
-    // authority corrected for large elevator deflection, the default
-    // clean-sheet aircraft's takeoff CG lies ahead of the nose-wheel lift-off
-    // boundary; that is a real finding of the shape, independent of the
-    // sizing residual under test, and it is asserted rather than hidden.
+    // The review is usable: it reports its findings (none at error severity
+    // since the rotation model update, see below).
     let errors = result
         .feasibility
         .findings
         .iter()
         .filter(|finding| finding.severity == crate::FindingSeverity::Error)
         .collect::<Vec<_>>();
-    assert_eq!(
-        errors.len(),
-        1,
-        "the physical review carries only the rotation forward-CG finding; errors: {errors:?}"
-    );
-    assert_eq!(
-        errors[0].code,
-        crate::FindingCode::ModelCgForwardRangeViolation
-    );
+    // Pin update (round 3): was exactly one error, the nose-wheel lift-off
+    // (rotation) forward-CG finding. With the 5 deg/s^2 class pitch
+    // acceleration (Sadraey 12.3, transports 4-6; was 7) and the DATCOM
+    // K' large-deflection elevator table, the default shape's takeoff CG is
+    // no longer ahead of the rotation boundary, so the review carries no
+    // error at all and the finalist is still not promoted below.
     assert!(
-        errors[0].message.contains("nose-wheel liftoff (rotation)"),
-        "{}",
-        errors[0].message
+        errors.is_empty(),
+        "the physical review carries no error finding; errors: {errors:?}"
     );
     assert!(result.solver_optimizations.as_ref().is_some_and(|set| {
         set.vlm.status == crate::SolverOptimizationStatus::Failed
