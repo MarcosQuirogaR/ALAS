@@ -13,52 +13,44 @@ impl ToolLocator {
     ///
     /// A configured solver path remains authoritative at the pipeline layer;
     /// this discovery is only the safe automatic candidate when that field is
-    /// empty.  The recursive scan is limited to known MSC installation roots,
-    /// never the whole drive.
+    /// empty. The selected launcher's installation is the only automatic
+    /// solver candidate; incomplete installations cannot borrow another
+    /// installation's solver.
     pub fn discover_nastran_solver(&self, configured: &Path) -> ExecutableDiscovery {
-        let mut roots = Vec::new();
-        if let Some(path) = self.resolve_file(configured) {
-            if let Some(root) = msc_install_root(&path) {
-                roots.push(root);
-            }
-        } else if let Some(directory) = self.resolve_directory(configured) {
-            if let Some(root) = msc_install_root(&directory) {
-                roots.push(root);
-            }
-        }
-        for root in &self.system_tool_roots {
-            if !roots.contains(root) {
-                roots.push(root.clone());
-            }
-        }
-        let adjacent = self.app_root.join("external tools");
-        for name in ["NASTRAN", "Nastran", "nastran"] {
-            let root = adjacent.join(name);
-            if root.is_dir() && !roots.contains(&root) {
-                roots.push(root);
-            }
-        }
-
-        let mut incomplete = None;
-        for root in roots {
-            if let Some(path) = find_servermode_solver(&root) {
-                return ExecutableDiscovery::Ready(path);
-            }
-            if root.is_dir() && incomplete.is_none() {
-                incomplete = Some(ExecutableDiscovery::Incomplete {
-                    directory: root,
-                    missing: vec!["servermode/analysis.exe".to_owned()],
-                });
-            }
-        }
-        incomplete.unwrap_or(ExecutableDiscovery::Absent)
+        self.discover_nastran(configured)
+            .ready_path()
+            .map_or(ExecutableDiscovery::Absent, |launcher| {
+                solver_for_launcher(&launcher)
+            })
     }
 }
 
+pub(super) fn solver_for_launcher(launcher: &Path) -> ExecutableDiscovery {
+    let Some(root) = msc_install_root(launcher) else {
+        return ExecutableDiscovery::Absent;
+    };
+    find_servermode_solver(&root).map_or_else(
+        || ExecutableDiscovery::Incomplete {
+            directory: root,
+            missing: vec!["servermode/analysis.exe".to_owned()],
+        },
+        ExecutableDiscovery::Ready,
+    )
+}
+
 fn msc_install_root(path: &Path) -> Option<PathBuf> {
-    path.ancestors()
-        .find(|candidate| candidate.join("Nastran").is_dir() || candidate.join("Patran").is_dir())
-        .map(Path::to_path_buf)
+    let nastran = path.parent()?.ancestors().find(|candidate| {
+        candidate
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.eq_ignore_ascii_case("Nastran"))
+    })?;
+    let edition = nastran.parent()?;
+    Some(if edition.join("Patran").is_dir() {
+        edition.to_path_buf()
+    } else {
+        nastran.to_path_buf()
+    })
 }
 
 fn find_servermode_solver(root: &Path) -> Option<PathBuf> {

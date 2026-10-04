@@ -15,16 +15,35 @@ use alas_mass::product_stations::product_component_stations;
 use alas_mass::statement::{
     LedgerMethods, LoadState, MassStatement, MassStatementInputs, PayloadItemSummary,
 };
-use alas_mass::tanks::resolve_product_layout;
+use alas_mass::tanks::{resolve_product_layout, TankLayoutError};
 use alas_payload::{build::build_payload_layout, oew::oew_and_cg};
 
 use super::SizingOutcome;
-use crate::envelope::LedgerLoadingBasis;
+use crate::envelope::{LedgerLandingState, LedgerLoadingBasis};
 
 pub(super) fn loading_basis(
     outcome: &SizingOutcome,
     config: &AlasConfig,
 ) -> Result<LedgerLoadingBasis, String> {
+    loading_bases(outcome, config).map(|(design, _)| design)
+}
+
+/// The design loading of [`loading_basis`] and, from the same item ledger,
+/// the dispatched route's takeoff and landing points: the usable fuel the
+/// dispatch plan loads at brake release, burned down from the same tank
+/// state to its destination landing fuel, as the reporting mass statement
+/// builds its flown states. `None` when the dispatch fuel does not load into
+/// the tanks; the dispatch residuals already reject that candidate.
+pub(super) fn loading_bases(
+    outcome: &SizingOutcome,
+    config: &AlasConfig,
+) -> Result<
+    (
+        LedgerLoadingBasis,
+        Option<(LedgerLoadingBasis, LedgerLandingState)>,
+    ),
+    String,
+> {
     let mut config = config.at_sized_closure_mass(outcome.sized.takeoff_mass_kg);
     crate::objective::apply_candidate_payload_load_case(&mut config, &outcome.history.dv)
         .map_err(|error| format!("ledger load case: {error}"))?;
@@ -70,9 +89,15 @@ pub(super) fn loading_basis(
         .masses
         .physical_fuel_mass_kg()
         .ok_or_else(|| "nonphysical ledger fuel mass".to_owned())?;
-    let fuel_kg = tanks
-        .loadable_fuel_kg(carried_kg)
-        .map_err(|error| format!("ledger fuel load: {error}"))?;
+    let fuel_kg = tanks.loadable_fuel_kg(carried_kg).map_err(|error| {
+        fuel_load_error(
+            &error,
+            config.optimizer.objective.mtow_sizing,
+            carried_kg,
+            tanks.usable_capacity_kg(),
+            tanks.unusable_fuel_kg(),
+        )
+    })?;
     let fuel = tanks
         .distribute(fuel_kg)
         .map_err(|error| format!("ledger fuel distribution: {error}"))?;
@@ -109,8 +134,7 @@ pub(super) fn loading_basis(
     .map_err(|error| format!("mass statement: {error}"))?;
     let oew = statement.state(LoadState::OperatingEmpty);
     let zfw = statement.state(LoadState::ZeroFuel);
-    let tow = statement.state(LoadState::Takeoff);
-    Ok(LedgerLoadingBasis {
+    let basis = |tow: &alas_mass::ledger::MassProperties| LedgerLoadingBasis {
         oew_mass_kg: oew.mass_kg,
         oew_cg_x_m: oew.cg_m[0],
         oew_cg_z_m: oew.cg_m[2],
@@ -120,7 +144,51 @@ pub(super) fn loading_basis(
         takeoff_mass_kg: tow.mass_kg,
         takeoff_cg_x_m: tow.cg_m[0],
         takeoff_cg_z_m: tow.cg_m[2],
-    })
+        takeoff_pitch_inertia_kg_m2: tow.inertia_cg.iyy,
+    };
+    let design = basis(&statement.state(LoadState::Takeoff));
+    let dispatch = outcome.sized.flown_dispatch();
+    // A report without a flown mission has no dispatched states to gate.
+    let flown = config.mission.enabled.then_some(()).and_then(|()| {
+        let takeoff_kg = tanks
+            .loadable_fuel_kg(dispatch.plan.takeoff_fuel_kg())
+            .ok()?;
+        let landing_kg = (dispatch.destination_landing_mass_kg - dispatch.zero_fuel_mass_kg)
+            .clamp(0.0, takeoff_kg);
+        let takeoff = tanks.distribute(takeoff_kg).ok()?;
+        let landing = takeoff.burned(&tanks, takeoff_kg - landing_kg).ok()?;
+        let tow = statement.with_fuel_items(&takeoff.mass_items(&tanks));
+        let lw = statement.with_fuel_items(&landing.mass_items(&tanks));
+        Some((
+            basis(&tow),
+            LedgerLandingState {
+                mass_kg: lw.mass_kg,
+                cg_x_m: lw.cg_m[0],
+                cg_z_m: lw.cg_m[2],
+            },
+        ))
+    });
+    Ok((design, flown))
+}
+
+fn fuel_load_error(
+    error: &TankLayoutError,
+    mode: alas_config::MtowSizing,
+    usable_remainder_kg: f64,
+    usable_capacity_kg: f64,
+    unusable_kg: f64,
+) -> String {
+    if mode == alas_config::MtowSizing::FixedRequirement
+        && matches!(error, TankLayoutError::Overflow { .. })
+    {
+        // FLOPS unusable fuel is already in OEW; the MTOW-minus-ZFW remainder
+        // is usable fuel. Adding unusable fuel converts both sides to total fuel.
+        format!("tank overflow at fixed MTOW: usable fuel remainder {usable_remainder_kg:.3} kg exceeds usable tank capacity {usable_capacity_kg:.3} kg by {:.3} kg; unusable fuel {unusable_kg:.3} kg is excluded from usable capacity (total fuel {:.3} kg, total capacity {:.3} kg)",
+            usable_remainder_kg - usable_capacity_kg,
+            usable_remainder_kg + unusable_kg, usable_capacity_kg + unusable_kg)
+    } else {
+        format!("ledger fuel load: {error}")
+    }
 }
 
 #[cfg(test)]
@@ -128,7 +196,39 @@ mod tests {
     use super::*;
 
     #[test]
-    fn preset_item_ledgers_close_the_search_mass_and_keep_forward_rejections_visible() {
+    fn fixed_mtow_overflow_reports_usable_and_total_fuel_on_matching_bases() {
+        let usable_volume_m3 = 25.0;
+        let density_kg_m3 = 800.0;
+        let capacity_kg = usable_volume_m3 * density_kg_m3;
+        let unusable_kg = 100.0;
+        let fixed_mtow_kg = 80_000.0;
+        let oew_including_unusable_kg = 40_000.0;
+        let payload_kg = 15_000.0;
+        let remainder_kg = fixed_mtow_kg - oew_including_unusable_kg - payload_kg;
+        let error = TankLayoutError::Overflow {
+            excess_kg: remainder_kg - capacity_kg,
+        };
+        let detail = fuel_load_error(
+            &error,
+            alas_config::MtowSizing::FixedRequirement,
+            remainder_kg,
+            capacity_kg,
+            unusable_kg,
+        );
+        assert_eq!(detail, "tank overflow at fixed MTOW: usable fuel remainder 25000.000 kg exceeds usable tank capacity 20000.000 kg by 5000.000 kg; unusable fuel 100.000 kg is excluded from usable capacity (total fuel 25100.000 kg, total capacity 20100.000 kg)");
+        let invalid = TankLayoutError::InvalidFuelMass { fuel_kg: -1.0 };
+        assert!(fuel_load_error(
+            &invalid,
+            alas_config::MtowSizing::FixedRequirement,
+            -1.0,
+            capacity_kg,
+            unusable_kg
+        )
+        .starts_with("ledger fuel load:"));
+    }
+
+    #[test]
+    fn mission_sized_preset_ledgers_close_search_mass_and_keep_forward_rejections_visible() {
         for name in [
             "A320-200",
             "A220-300",
@@ -139,8 +239,13 @@ mod tests {
             "AVE",
             "ATR72-600",
         ] {
-            let config = AlasConfig::from_value(&serde_json::json!({"preset": name, "optimizer": {"design_space": {"mode": "reference_adaptation"}}}))
-                .unwrap_or_else(|error| panic!("{name}: {error}"));
+            // The ledger conservation check uses a mission-sized, loadable
+            // dispatch; fixed MTOW does not guarantee a loadable fuel remainder.
+            let config = AlasConfig::from_value(&serde_json::json!({"preset": name, "optimizer": {
+                "design_space": {"mode": "reference_adaptation"},
+                "objective": {"mtow_sizing": "sized_by_mission"}
+            }}))
+            .unwrap_or_else(|error| panic!("{name}: {error}"));
             let design = alas_config::presets::get(name)
                 .unwrap_or_else(|error| panic!("{name}: {error}"))
                 .design_vector;
@@ -188,5 +293,116 @@ mod tests {
                 .any(|constraint| constraint.constraint
                     == crate::envelope::ModelCgConstraint::PhysicalForwardCgLimit));
         }
+    }
+
+    #[test]
+    fn hard_mtow_preset_ledgers_conserve_mass_and_report_volume_limits() {
+        for name in alas_config::presets::available() {
+            let config = AlasConfig::from_value(&serde_json::json!({"preset": name})).unwrap();
+            let design = alas_config::presets::get(name).unwrap().design_vector;
+            let outcome = crate::mdo::sizing::run_candidate(&config, &design.to_array()).unwrap();
+            let ledger =
+                loading_basis(&outcome, &config).unwrap_or_else(|error| panic!("{name}: {error}"));
+            let load = outcome.sized.takeoff_loading.unwrap();
+            let tanks = resolve_product_layout(&config, &design, &outcome.plane).unwrap();
+            let capacity_kg: f64 = tanks
+                .tanks()
+                .iter()
+                .map(|tank| tank.usable_volume_m3 * tanks.density_kg_m3)
+                .sum();
+            let carried = outcome.masses.physical_fuel_mass_kg().unwrap();
+            let scale = ledger.takeoff_mass_kg.max(1.0);
+            assert!(
+                (ledger.takeoff_mass_kg - ledger.zero_fuel_mass_kg - carried).abs() < 1e-6 * scale
+            );
+            assert!(
+                (ledger.oew_mass_kg - outcome.sized.operating_empty_mass_kg).abs() < 1e-5 * scale
+            );
+            assert!((ledger.takeoff_mass_kg - load.takeoff_mass_kg).abs() < 1e-6 * scale);
+            assert_eq!(carried, load.mtow_fuel_budget_kg.min(capacity_kg));
+            assert!(ledger.takeoff_mass_kg <= config.requirements.mtow_kg + 1e-6 * scale);
+            assert_eq!(
+                outcome.sized.design_gross_mass_kg,
+                config.requirements.mtow_kg
+            );
+            let envelope = crate::envelope::assess_model_cg_envelope_with_ledger(
+                &outcome.plane,
+                ledger,
+                outcome.x_np,
+                outcome.x_np,
+                outcome.mac,
+                &config,
+            )
+            .unwrap_or_else(|error| panic!("{name}: {error}"));
+            for state in &envelope.loading_states {
+                assert!(
+                    state.mass_kg <= load.takeoff_mass_kg + 1e-6 * scale,
+                    "{name}: {state:?}"
+                );
+                if state.state != crate::envelope::ModelCgLoadingState::OperatingEmpty {
+                    let fuel_kg = state.mass_kg - ledger.zero_fuel_mass_kg;
+                    assert!(
+                        fuel_kg >= -1e-6 * scale && fuel_kg <= capacity_kg + 1e-6 * scale,
+                        "{name}: {state:?}"
+                    );
+                }
+            }
+            let landing_row = super::super::mass_residuals(&outcome, &config)
+                .into_iter()
+                .find(|row| row.id == "landing_mass")
+                .unwrap();
+            assert_eq!(landing_row.limit, outcome.sized.design_landing_mass_kg);
+            assert_eq!(
+                landing_row.actual,
+                outcome.sized.dispatch.destination_landing_mass_kg
+            );
+            assert_eq!(landing_row.role, crate::mdo::ResidualRole::Constraint);
+            if matches!(name, "A320-200" | "DC-10") {
+                assert_eq!(
+                    load.status,
+                    alas_mass::loading::MtowFuelLoadingStatus::VolumeLimited,
+                    "{name}: {load:?}"
+                );
+                assert!(load.mtow_margin_kg > 0.0);
+                assert_eq!(load.usable_capacity_margin_kg, Some(0.0));
+                assert_eq!(carried, capacity_kg);
+            }
+        }
+    }
+
+    #[test]
+    fn fixed_mtow_cannot_admit_more_fuel_than_the_tanks_hold() {
+        let config = AlasConfig::from_value(&serde_json::json!({"preset": "A320-200"}))
+            .unwrap_or_else(|error| panic!("{error}"));
+        assert_eq!(
+            config.optimizer.objective.mtow_sizing,
+            alas_config::MtowSizing::FixedRequirement
+        );
+        let design = alas_config::presets::get("A320-200")
+            .unwrap_or_else(|error| panic!("{error}"))
+            .design_vector;
+        let mut outcome = crate::mdo::sizing::run_candidate(&config, &design.to_array())
+            .unwrap_or_else(|error| panic!("{}", error.reason));
+        let tanks = resolve_product_layout(&config, &design, &outcome.plane)
+            .unwrap_or_else(|error| panic!("{error}"));
+        // Even treating all unusable fuel as usable cannot fit twice the
+        // complete tank inventory; no empirical aircraft mass is pinned here.
+        outcome.masses.fuel = 2.0 * (tanks.usable_capacity_kg() + tanks.unusable_fuel_kg());
+        let error = loading_basis(&outcome, &config)
+            .err()
+            .unwrap_or_else(|| panic!("excess fuel must reject the ledger"));
+        assert!(error.starts_with("tank overflow at fixed MTOW:"), "{error}");
+        let rows = super::super::balance_residuals(
+            &outcome,
+            &config,
+            crate::mdo::ResidualRole::Constraint,
+        );
+        assert!(rows.iter().any(|row| row.id == "cg_model_error"
+            && row.role == crate::mdo::ResidualRole::Constraint
+            && row.violated()
+            && row.actual == 1.0
+            && row.limit == 0.0
+            && row.normalized_violation == 1.0
+            && row.detail.as_deref() == Some(error.as_str())));
     }
 }

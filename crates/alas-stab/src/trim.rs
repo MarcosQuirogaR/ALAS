@@ -59,7 +59,8 @@ pub use tail_volume::{tail_volume_coefficients, tail_volume_coefficients_referen
 mod with_system;
 pub use with_system::{
     neutral_point_reference_compatibility_with_system, neutral_point_with_system,
-    stability_and_trim_reference_compatibility_with_system, stability_and_trim_with_system,
+    stability_and_trim_reference_compatibility_with_system, stability_and_trim_with_cache,
+    stability_and_trim_with_system,
 };
 
 mod longitudinal;

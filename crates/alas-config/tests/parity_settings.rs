@@ -705,7 +705,7 @@ fn saved_file_source_corrections() -> BTreeMap<String, SourceCorrection> {
         correction("preset_only.requirements.cabin_preset", "Ryanair", "Custom"),
         correction("preset_only.requirements.num_passengers", 130, 140),
         // The saved-file cases load the A220-300 and B787-9 presets, whose
-        // wing-box materials are now assigned per type; see the preset table.
+        // wing-box materials are assigned per type; see the preset table.
         correction(
             "preset_only.structures.skin_material",
             "Al 7075-T6",
@@ -925,7 +925,7 @@ fn saved_file_source_corrections() -> BTreeMap<String, SourceCorrection> {
 }
 
 /// Configurations with no certified MLW/MTOW pair (AVE and the unconfigured
-/// defaults) carry the default landing ratio, which is now the AVE's 777-9
+/// defaults) carry the default landing ratio, which is the AVE's 777-9
 /// benchmark (Boeing D6-86073 Rev G Table 2-1) instead of the frozen,
 /// unsourced 0.92; see `alas_config::landing_mass_ratio::LONG_HAUL_MLW_FRACTION_MTOW`.
 fn add_default_landing_ratio_corrections(

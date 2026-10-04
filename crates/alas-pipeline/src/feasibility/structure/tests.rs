@@ -154,6 +154,8 @@ fn downstream_failure_revokes_a_previously_valid_search_result() {
         design: Some(result.best_design),
         optimization: Some(result.clone()),
         report: None,
+        verification: None,
+        baseline_verification: None,
         avl_result: None,
         output_dir: None,
         error: None,

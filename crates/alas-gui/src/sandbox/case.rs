@@ -22,6 +22,7 @@ pub struct CaseSnapshot {
     selected_aux_preset: BTreeMap<String, String>,
     pipeline_result: Option<PipelineResult>,
     pipeline_result_design_values: Option<BTreeMap<String, f64>>,
+    pipeline_result_form_config: Option<alas_config::AlasConfig>,
     run_events: Vec<RunEvent>,
     logs: Vec<LogLine>,
     run_log_tab: RunLogTab,
@@ -89,6 +90,7 @@ impl AppState {
             selected_aux_preset: std::mem::take(&mut self.selected_aux_preset),
             pipeline_result: self.pipeline_result.take(),
             pipeline_result_design_values: self.pipeline_result_design_values.take(),
+            pipeline_result_form_config: self.pipeline_result_form_config.take(),
             run_events: std::mem::take(&mut self.run_events),
             logs: std::mem::take(&mut self.logs),
             run_log_tab: self.run_log_tab,
@@ -117,6 +119,7 @@ impl AppState {
         self.selected_aux_preset = case.selected_aux_preset;
         self.pipeline_result = case.pipeline_result;
         self.pipeline_result_design_values = case.pipeline_result_design_values;
+        self.pipeline_result_form_config = case.pipeline_result_form_config;
         self.run_events = case.run_events;
         self.logs = case.logs;
         self.run_log_tab = case.run_log_tab;

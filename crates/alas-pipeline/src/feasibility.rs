@@ -112,7 +112,7 @@ fn warning(
     }
 }
 
-use model_cg::{append_model_cg_findings, model_cg_assessment};
+use model_cg::{append_model_cg_findings, design_model_cg_assessment, model_cg_assessment};
 
 /// Evaluate conservation laws and configured limits on a completed run.
 ///
@@ -138,6 +138,8 @@ pub fn assess_physical_feasibility_with_load_case(
     mission: Option<&MissionResult>,
     load_case: Option<&SelectedLoadCase>,
 ) -> FeasibilityReport {
+    // The verdict describes the report's aircraft, gear included.
+    let config = &crate::gear_stations::report_config(config, report);
     let mut findings = Vec::new();
     structure::append_native(config, design, report, &mut findings);
     let envelope = design_vn_diagram(config, report);
@@ -223,6 +225,36 @@ pub fn assess_physical_feasibility_with_load_case(
             None
         }
     };
+    let design_model_cg = match design_model_cg_assessment(
+        config,
+        report,
+        &fuel_loading,
+        mass_balance.as_ref(),
+        model_cg.as_ref(),
+    ) {
+        Ok(assessment) => {
+            if fuel_loading.design_takeoff_loading.is_some() {
+                if let Some(assessment) = &assessment {
+                    let first = findings.len();
+                    append_model_cg_findings(&mut findings, assessment);
+                    for finding in &mut findings[first..] {
+                        finding.message.insert_str(0, "Design loading: ");
+                    }
+                }
+            }
+            assessment
+        }
+        Err(message) => {
+            findings.push(error(
+                FindingCode::ModelCgAssessmentUnavailable,
+                message,
+                None,
+                None,
+                "",
+            ));
+            None
+        }
+    };
     let operational_envelope = model_cg.as_ref().and_then(|assessment| {
         operational_envelope::assess_operational_envelope(config, report, assessment)
     });
@@ -238,7 +270,10 @@ pub fn assess_physical_feasibility_with_load_case(
     let cg_envelope = assess_public_cg_reference(
         config,
         report,
-        fuel_loading.analyzed_carried_fuel_kg,
+        // The dispatched route's loaded CG, as the search evaluates it.
+        fuel_loading
+            .flown_carried_fuel_kg
+            .unwrap_or(fuel_loading.analyzed_carried_fuel_kg),
         model_cg.as_ref(),
         operational_envelope.as_ref(),
     );
@@ -542,6 +577,7 @@ pub fn assess_physical_feasibility_with_load_case(
         findings,
         cg_envelope,
         model_cg,
+        design_model_cg,
         fuel_loading,
         cruise_equilibrium,
         mass_balance,

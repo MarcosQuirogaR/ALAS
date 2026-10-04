@@ -56,3 +56,6 @@ pub fn run() -> Result<(), eframe::Error> {
         }),
     )
 }
+
+#[cfg(test)]
+mod test_svg;

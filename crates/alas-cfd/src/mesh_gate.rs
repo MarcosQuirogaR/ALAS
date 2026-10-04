@@ -10,7 +10,7 @@
 //! exceed a published maximum and still be accepted.
 //!
 //! That gap is closed here, in the direction that does not weaken anything: the
-//! declared numbers are now **enforced** on the quantities this crate actually
+//! declared numbers are **enforced** on the quantities this crate actually
 //! measures, and every check this crate cannot measure is reported explicitly as
 //! [`MeshCheckStatus::NotMeasured`] rather than quietly counted as a pass.
 //!

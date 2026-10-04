@@ -50,7 +50,7 @@ mod thickness;
 mod wave;
 mod wetted;
 
-use std::sync::OnceLock;
+use std::sync::{Arc, Mutex, OnceLock};
 
 use alas_atmo::Atmosphere;
 use alas_config::analysis::AnalysisConfig;
@@ -60,7 +60,9 @@ use alas_geom::aircraft::airplane::Airplane;
 use alas_geom::aircraft::fuselage::Fuselage;
 
 pub use parasite::{ParasiteBreakdown, ParasiteComponent};
-pub use performance::{PolarSweep, QuickPerformance, TrimPoint, TrimmedPerformance};
+pub use performance::{
+    PolarSweep, QuickPerformance, TrimPoint, TrimmedInviscid, TrimmedPerformance,
+};
 
 /// The thickness-to-chord [`AeroAnalysis::section_thickness`] answers when
 /// there is no root section to read one off.
@@ -182,6 +184,8 @@ pub struct AeroAnalysis<'a> {
     /// running its own `area_weighted_thickness` pass, since the two would
     /// otherwise compute the identical value from the identical wing.
     wing_thickness_cache: OnceLock<Vec<f64>>,
+    /// Exact lattice and wake reuse across trimmed operating points.
+    vlm_cache: Arc<Mutex<crate::vlm::VlmGeometryCache>>,
 }
 
 impl Clone for AeroAnalysis<'_> {
@@ -200,6 +204,7 @@ impl Clone for AeroAnalysis<'_> {
             frozen_wave_drag: self.frozen_wave_drag,
             section_thickness_cache: OnceLock::new(),
             wing_thickness_cache: OnceLock::new(),
+            vlm_cache: Arc::default(),
         }
     }
 }
@@ -224,7 +229,16 @@ impl<'a> AeroAnalysis<'a> {
             frozen_wave_drag: false,
             section_thickness_cache: OnceLock::new(),
             wing_thickness_cache: OnceLock::new(),
+            vlm_cache: Arc::default(),
         }
+    }
+
+    /// Share exact geometry-only VLM work with other analyses of this
+    /// candidate, including changes of CG and stabilizer incidence.
+    /// The cache validates actual mesh entries on every assembly.
+    pub fn with_vlm_cache(mut self, cache: Arc<Mutex<crate::vlm::VlmGeometryCache>>) -> Self {
+        self.vlm_cache = cache;
+        self
     }
 
     /// Construct an analysis that replays the frozen reference drag buildup.

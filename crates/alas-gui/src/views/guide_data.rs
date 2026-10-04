@@ -87,7 +87,7 @@ pub const CHAPTERS: &[Chapter] = &[
                 heading: "The objective",
                 body: &[
                     "The candidate score is mission-sized: block fuel by default, or takeoff mass, operating empty mass or fuel per seat-kilometre, evaluated after mission closure. Whether a run optimises at all is the Optimize design space choice on Inputs; the search settings live under Advanced Settings > Optimizer.",
-                    "The search treats mass and fuel capacity, the CG envelope and gear reactions, the CS-25 climb and field requirements, and the planform limits as requirement families whose policy you set: hard, soft, diagnostic or off.",
+                    "The search treats mass and fuel capacity, the CG envelope and gear reactions, the CS-25 climb and field requirements, and the planform limits as hard requirements.",
                 ],
             },
             Section {

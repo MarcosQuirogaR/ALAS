@@ -23,7 +23,6 @@ use alas_aero::mses::{
 };
 use alas_config::airports::get as get_airport;
 use alas_config::design_variables::DesignVector;
-use alas_config::presets;
 use alas_config::{AlasConfig, Severity};
 use alas_exec::storage::{mark_storage_root, StorageCategoryId};
 use alas_exec::RunEnvironment;
@@ -247,6 +246,16 @@ type MissionStageOutputs = (
     Option<MissionResult>,
     Option<SelectedLoadCase>,
 );
+
+/// The observation callbacks of one run, as [`DesignPipeline::run_inner`]
+/// receives them.
+#[derive(Clone, Copy)]
+struct RunCallbacks<'a> {
+    progress: Option<&'a (dyn Fn(&str) + Sync)>,
+    events: Option<&'a (dyn Fn(RunEvent) + Sync)>,
+    cancel: Option<&'a AtomicBool>,
+    snapshots: Option<&'a (dyn Fn(PipelineResult) + Sync)>,
+}
 
 #[derive(Debug, Clone)]
 struct PlannedRoute {
@@ -578,6 +587,67 @@ impl DesignPipeline {
         snapshots: Option<&(dyn Fn(PipelineResult) + Sync)>,
     ) -> Result<PipelineResult, String> {
         let run_clock = Instant::now();
+        check_cancelled(cancel)?;
+        validate_run_configuration(&self.config, initial_design.as_ref(), bounds)?;
+        // The route depends on the configuration, not on the design, so it
+        // is planned once, before anything else runs. Three consumers fly it:
+        // the search (through `MissionConfig::route_distance_m`, which this
+        // run records on the configuration it runs with), the optimizer's
+        // reporting-fidelity acceptance check and the mission stage. Planning
+        // it twice would also mean two SimBrief fetches per run.
+        let planned_route = if self.config.mission.enabled {
+            self.plan_active_route(dispatched_route)
+        } else {
+            None
+        };
+        let planned_distance_m = planned_route
+            .as_ref()
+            .map_or(0.0, |planned| planned.route.total_distance_m());
+        let recorded = DesignPipeline {
+            config: AlasConfig {
+                mission: alas_config::MissionConfig {
+                    route_distance_m: planned_distance_m,
+                    ..self.config.mission.clone()
+                },
+                ..self.config.clone()
+            },
+            ..self.clone()
+        };
+        recorded.run_planned(
+            options,
+            environment,
+            planned_route,
+            initial_design,
+            bounds,
+            run_clock,
+            RunCallbacks {
+                progress,
+                events,
+                cancel,
+                snapshots,
+            },
+        )
+    }
+
+    /// The run on the route [`Self::run_inner`] planned, with the planned
+    /// distance recorded on `self.config`.
+    #[allow(clippy::too_many_arguments)]
+    fn run_planned(
+        &self,
+        options: &PipelineOptions,
+        environment: &RunEnvironment,
+        planned_route: Option<PlannedRoute>,
+        initial_design: Option<DesignVector>,
+        bounds: Option<&[(f64, f64)]>,
+        run_clock: Instant,
+        callbacks: RunCallbacks<'_>,
+    ) -> Result<PipelineResult, String> {
+        let RunCallbacks {
+            progress,
+            events,
+            cancel,
+            snapshots,
+        } = callbacks;
         let report = |message: &str| {
             if let Some(callback) = progress {
                 callback(message);
@@ -613,21 +683,9 @@ impl DesignPipeline {
         let nominal_design = initial_design.unwrap_or_else(|| self.configured_nominal_design());
         let fixed_design_review = bounds.is_some_and(bounds_are_fixed);
 
-        // The route depends on the configuration, not on the design, so plan
-        // it once here rather than inside the mission stage. Two callers now
-        // need it: the mission stage as before, and the optimizer's
-        // reporting-fidelity acceptance check, which has to fly the same
-        // route the published mission will. Planning it twice would also mean
-        // two SimBrief fetches per run.
-        let planned_route = if self.config.mission.enabled {
-            let planned = self.plan_active_route(dispatched_route);
-            if planned.is_some() {
-                emit_diagnostic(events, run_clock, "setup", "Route planned for this run");
-            }
-            planned
-        } else {
-            None
-        };
+        if planned_route.is_some() {
+            emit_diagnostic(events, run_clock, "setup", "Route planned for this run");
+        }
 
         // Stage 0: Baseline W&B + stability estimation.
         report("Stage 1/7: baseline weight, balance, and stability");
@@ -742,6 +800,21 @@ impl DesignPipeline {
         } else {
             (nominal_design, None, None)
         };
+        let selected_verification = solver_optimizations
+            .as_ref()
+            .and_then(|solutions| solutions.selected(options.optimization_solver).ok());
+        let native_verification = selected_verification
+            .and_then(|selected| selected.verification.as_ref())
+            .filter(|verified| {
+                self.aircraft_override.is_none()
+                    && self.mission_payload_override_kg.is_none()
+                    && verified.matches(&self.config, &optimized_design, acceptance_route.as_ref())
+            });
+        let baseline_verification = selected_verification
+            .and_then(|selected| selected.baseline_verification.as_ref())
+            .filter(|verified| {
+                verified.matches(&self.config, &nominal_design, acceptance_route.as_ref())
+            });
         // Say what the reporting-fidelity re-evaluation did, in the run log,
         // before any downstream stage speaks. A user who sees a converged
         // search and an infeasible aircraft is entitled to read which of the
@@ -842,8 +915,12 @@ impl DesignPipeline {
         // boundary. Publish it before CPACS/export/downstream work starts so
         // the desktop can render the same report gallery it will keep after
         // the run, while the remaining stages continue in the worker.
+        // Every stage bound to the delivered report resolves its landing gear
+        // where that report's aircraft has it: a redesigned candidate's main
+        // gear is placed by the search, not at the published stations.
+        let delivered = crate::gear_stations::report_config(&self.config, &optimized_report);
         let live_results = SnapshotPublisher::new(snapshots, || PipelineResult {
-            config: self.config.clone(),
+            config: delivered.clone(),
             optimized_design: Some(optimized_design),
             optimized_report: Some(optimized_report.clone()),
             optimization_result: optimization_result.clone(),
@@ -883,7 +960,7 @@ impl DesignPipeline {
             "CPACS export and geometry canonicalization",
         );
         let cpacs_path = analysis_dir.join("cpacs/optimized_aircraft.cpacs.xml");
-        let (export, xml) = export_cpacs_document(&optimized_report, &self.config, &cpacs_path)
+        let (export, xml) = export_cpacs_document(&optimized_report, &delivered, &cpacs_path)
             .map_err(|error| format!("CPACS export failed: {error}"))?;
         let cpacs_export = Some(export);
         {
@@ -902,11 +979,11 @@ impl DesignPipeline {
         finish_stage(events, run_clock, stage_clock, 4, "geometry_export");
         check_cancelled(cancel)?;
 
-        let openvsp_export = if self.config.downstream.openvsp {
+        let openvsp_export = if delivered.downstream.openvsp {
             let af_path = analysis_dir.join("airfoils/optimized_root.dat");
             let openvsp_path = analysis_dir.join("openvsp/optimized_aircraft.vspscript");
             if let Err(error) =
-                export_airfoil_dat(&optimized_report, &self.config, &af_path, "ALAS_Optimized")
+                export_airfoil_dat(&optimized_report, &delivered, &af_path, "ALAS_Optimized")
             {
                 warn_artifact_failure(
                     events,
@@ -916,7 +993,7 @@ impl DesignPipeline {
                     &error,
                 );
             }
-            match export_openvsp_script(&optimized_report, &self.config, &openvsp_path) {
+            match export_openvsp_script(&optimized_report, &delivered, &openvsp_path) {
                 Ok(export) => Some(match environment.openvsp_exe.as_deref() {
                     Some(executable) => materialize_openvsp_project(export, executable, 120.0),
                     None => export,
@@ -937,7 +1014,7 @@ impl DesignPipeline {
             None
         };
         live_results.update(|snapshot| snapshot.openvsp_export = openvsp_export.clone());
-        let avl_requested = self.config.downstream.avl
+        let avl_requested = delivered.downstream.avl
             && matches!(
                 options.aerodynamic_solver,
                 AerodynamicSolverMode::Avl | AerodynamicSolverMode::Both
@@ -945,7 +1022,7 @@ impl DesignPipeline {
         let run_vspaero = || {
             let stage_clock =
                 begin_component(events, run_clock, "downstream/vspaero", "VSPAERO analysis");
-            if !self.config.downstream.vspaero {
+            if !delivered.downstream.vspaero {
                 finish_component(
                     events,
                     run_clock,
@@ -958,7 +1035,7 @@ impl DesignPipeline {
             let result = openvsp_export.as_ref().map(|openvsp| {
                 run_vspaero_analysis(
                     &optimized_report,
-                    &self.config,
+                    &delivered,
                     openvsp,
                     environment.vspaero_exe.as_deref(),
                     // A five-minute wall clock cut the installed A380-like
@@ -994,10 +1071,10 @@ impl DesignPipeline {
             }
             let result = Some(run_avl_takeoff_comparison_cancellable(
                 &optimized_report,
-                &self.config,
+                &delivered,
                 &analysis_dir,
                 environment.avl_exe.as_deref(),
-                self.config.analysis.avl_timeout_s,
+                delivered.analysis.avl_timeout_s,
                 cancel,
             ));
             live_results.update(|snapshot| snapshot.avl_result = result.clone());
@@ -1017,7 +1094,7 @@ impl DesignPipeline {
                 "downstream/flowunsteady",
                 "FLOWUnsteady analysis",
             );
-            if !self.config.downstream.flowunsteady {
+            if !delivered.downstream.flowunsteady {
                 finish_component(
                     events,
                     run_clock,
@@ -1029,7 +1106,7 @@ impl DesignPipeline {
             }
             let result = Some(run_flowunsteady_analysis(
                 &optimized_report,
-                &self.config,
+                &delivered,
                 &analysis_dir,
                 environment.flowunsteady_exe.as_deref(),
                 900.0,
@@ -1073,7 +1150,10 @@ impl DesignPipeline {
                 );
                 (Some(optimized_report.clone()), None)
             } else {
-                let result = match full.run(&nominal_design, true) {
+                let baseline = baseline_verification
+                    .map(|verified| Ok(verified.verification().report.clone()))
+                    .unwrap_or_else(|| full.run(&nominal_design, true));
+                let result = match baseline {
                     Ok(report) => (Some(report), None),
                     Err(error) => (None, Some(error)),
                 };
@@ -1098,7 +1178,11 @@ impl DesignPipeline {
                 "downstream/mission",
                 "Mission and route analysis",
             );
-            let result = self.evaluate_active_mission(&optimized_report, planned_route.as_ref());
+            let result = self.evaluate_active_mission(
+                &optimized_report,
+                planned_route.as_ref(),
+                native_verification,
+            );
             if let Ok((route, status, mission, load_case)) = &result {
                 live_results.update(|snapshot| {
                     snapshot.route = route.clone();
@@ -1120,7 +1204,7 @@ impl DesignPipeline {
                 run_clock,
                 stage_clock,
                 "downstream/mission",
-                if self.config.mission.enabled {
+                if delivered.mission.enabled {
                     "Completed"
                 } else {
                     "Skipped"
@@ -1181,7 +1265,7 @@ impl DesignPipeline {
                 run_clock,
                 stage_clock,
                 "downstream/mses",
-                if self.config.mses.enabled {
+                if delivered.mses.enabled {
                     "Completed"
                 } else {
                     "Skipped"
@@ -1196,14 +1280,14 @@ impl DesignPipeline {
                 "downstream/structural",
                 "Structural sizing and analysis",
             );
-            if self.config.structures.enabled {
+            if delivered.structures.enabled {
                 let work_dir = Some(analysis_dir.join("structures"));
                 // Loads use the mass the report was evaluated at (the sized
                 // takeoff mass of a sized finalist); a registered aircraft keeps
                 // its declared design gross weight, so a light dispatch does not
                 // resize its box.
                 let structural_config =
-                    crate::feasibility::structure::design_config(&self.config, &optimized_report);
+                    crate::feasibility::structure::design_config(&delivered, &optimized_report);
                 emit_diagnostic(
                     events,
                     run_clock,
@@ -1213,7 +1297,7 @@ impl DesignPipeline {
                         alas_opt::mdo::structural_feasibility::structural_design_mass_kg(
                             &structural_config
                         ),
-                        self.config.requirements.mtow_kg,
+                        delivered.requirements.mtow_kg,
                     ),
                 );
                 let result = Some(
@@ -1350,21 +1434,25 @@ impl DesignPipeline {
             "feasibility",
             "Physical feasibility assessment",
         );
-        let mut feasibility = assess_physical_feasibility_with_load_case(
-            &self.config,
-            &optimized_design,
-            &optimized_report,
-            mission_result.as_ref(),
-            mission_load_case.as_ref(),
-        );
+        let mut feasibility = native_verification
+            .map(|verified| verified.verification().feasibility.clone())
+            .unwrap_or_else(|| {
+                assess_physical_feasibility_with_load_case(
+                    &delivered,
+                    &optimized_design,
+                    &optimized_report,
+                    mission_result.as_ref(),
+                    mission_load_case.as_ref(),
+                )
+            });
         crate::feasibility::structure::append_delivery(
-            &self.config,
+            &delivered,
             &optimized_design,
             &optimized_report,
             structural_result.as_ref(),
             &mut feasibility.findings,
         );
-        if self.config.optimizer.solver.method == alas_config::optimizer::PRODUCT_DE_METHOD {
+        if delivered.optimizer.solver.method == alas_config::optimizer::PRODUCT_DE_METHOD {
             if let Some(message) = crate::feasibility::structure::revoke_delivery(
                 &feasibility.findings,
                 optimization_result.as_mut(),
@@ -1382,7 +1470,7 @@ impl DesignPipeline {
         if let Some(export) = cpacs_export.as_ref() {
             export_cpacs_with_analysis(
                 &optimized_report,
-                &self.config,
+                &delivered,
                 Some(&feasibility),
                 mission_result.as_ref(),
                 &export.path,
@@ -1417,7 +1505,7 @@ impl DesignPipeline {
                 || {
                     crate::export::export_json_with_feasibility(
                         &optimized_report,
-                        &self.config,
+                        &delivered,
                         &feasibility,
                         &path,
                     )
@@ -1425,7 +1513,7 @@ impl DesignPipeline {
                 |cpacs| {
                     export_json_with_feasibility_and_cpacs(
                         &optimized_report,
-                        &self.config,
+                        &delivered,
                         &feasibility,
                         cpacs,
                         &path,
@@ -1448,7 +1536,7 @@ impl DesignPipeline {
         let payload_layout_artifact = options.output_dir.as_ref().and_then(|out_dir| {
             let layout = optimized_report.payload_layout.as_ref()?;
             let path = out_dir.join("payload_layout.json");
-            match export_payload_layout_artifact(&self.config, optimized_design, layout, &path) {
+            match export_payload_layout_artifact(&delivered, optimized_design, layout, &path) {
                 Ok(_) => Some(path),
                 Err(error) => {
                     warn_artifact_failure(
@@ -1464,7 +1552,7 @@ impl DesignPipeline {
         });
         let cabin_scene_artifact = options.output_dir.as_ref().and_then(|out_dir| {
             let path = out_dir.join("cabin_scene_v2.json");
-            match export_cabin_scene(&self.config, &optimized_report, &path) {
+            match export_cabin_scene(&delivered, &optimized_report, &path) {
                 Ok(_) => Some(path),
                 Err(error) => {
                     warn_artifact_failure(
@@ -1756,7 +1844,7 @@ impl DesignPipeline {
         finish_stage(events, run_clock, stage_clock, 7, "finalization");
         check_cancelled(cancel)?;
         Ok(PipelineResult {
-            config: self.config.clone(),
+            config: delivered.clone(),
             optimized_design: Some(optimized_design),
             optimized_report: Some(optimized_report),
             optimization_result,
@@ -1784,22 +1872,22 @@ impl DesignPipeline {
     }
 
     fn configured_nominal_design(&self) -> DesignVector {
-        if self.config.preset.is_empty() {
-            return DesignVector::default();
-        }
-        match presets::get(&self.config.preset) {
-            Ok(preset) => preset.design_vector,
-            Err(error) => {
-                tracing::warn!(%error, "configured preset has no registered design vector");
-                DesignVector::default()
+        // A derived clean sheet is analysed as the evaluator builds it (its
+        // fuselage sized by the cabin); a registered vector stays verbatim.
+        if self.config.derives_clean_sheet_start() {
+            match alas_opt::configured_nominal_design(&self.config) {
+                Ok(design) => return design,
+                Err(error) => tracing::warn!(%error, "clean-sheet start could not be sized"),
             }
         }
+        self.config.configured_nominal_design()
     }
 
     fn evaluate_active_mission(
         &self,
         report: &AnalysisReport,
         planned_route: Option<&PlannedRoute>,
+        verified: Option<&crate::acceptance::VerifiedAnalysis>,
     ) -> Result<MissionStageOutputs, String> {
         if !self.config.mission.enabled {
             return Ok((None, None, None, None));
@@ -1812,6 +1900,14 @@ impl DesignPipeline {
         let planned = planned_route
             .cloned()
             .ok_or_else(|| "mission is enabled but route planning produced no route".to_owned())?;
+        if let Some(verified) = verified {
+            return Ok((
+                Some(planned.route),
+                Some(planned.status),
+                verified.verification().mission.clone(),
+                verified.verification().load_case.clone(),
+            ));
+        }
         let (origin, destination) = route_endpoints(&self.config, &planned.route)?;
         let overridden = self
             .mission_payload_override_kg

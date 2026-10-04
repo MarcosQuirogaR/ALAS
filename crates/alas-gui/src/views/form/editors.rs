@@ -40,7 +40,11 @@ pub(super) fn edit_leaf(
     match kind {
         Kind::Bool => {
             let mut v = slot.as_bool().unwrap_or(false);
-            if ui.checkbox(&mut v, label).changed() {
+            let response = ui.scope(|ui| {
+                ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
+                ui.checkbox(&mut v, label)
+            });
+            if response.inner.changed() {
                 *slot = Value::Bool(v);
                 return true;
             }
@@ -63,6 +67,10 @@ pub(super) fn edit_leaf(
                 .suffix(unit_suffix(field));
             if let (Some(lo), Some(hi)) = bounds(field) {
                 drag = drag.range(lo..=hi);
+            }
+            if super::options::zero_means_all_threads(field) {
+                // Zero is the automatic setting; below it is no thread count.
+                drag = drag.range(0.0..=f64::INFINITY);
             }
             let response = ui.add_sized([ui.available_width(), ui.spacing().interact_size.y], drag);
             if response.changed() {
@@ -153,6 +161,16 @@ pub(super) fn optional_value_from_text(
     }
 }
 
+/// Outer height of a numeric editor: a drag value sized to the interaction
+/// height grows to its text plus button padding when that is taller.
+pub(super) fn numeric_editor_height(ui: &Ui) -> f32 {
+    let spacing = ui.spacing();
+    spacing
+        .interact_size
+        .y
+        .max(ui.text_style_height(&egui::TextStyle::Button) + 2.0 * spacing.button_padding.y)
+}
+
 pub(super) fn edit_optional(
     ui: &mut Ui,
     field: &Field,
@@ -216,12 +234,16 @@ pub(super) fn edit_optional(
         // next one.
         let margin = egui::Margin::symmetric(4.0, 2.0);
         let text_width = ui.available_width() - unit_width - margin.sum().x;
+        // The same outer height as the numeric editors beside it, with the
+        // text centred, so a form row's boxes share top and bottom edges.
         let response = ui.add(
             TextEdit::singleline(&mut text)
                 .id(id)
                 .margin(margin)
                 .hint_text(&hint)
-                .desired_width(text_width.max(40.0)),
+                .desired_width(text_width.max(40.0))
+                .min_size(egui::vec2(0.0, numeric_editor_height(ui)))
+                .vertical_align(egui::Align::Center),
         );
         if !unit.is_empty() {
             ui.label(RichText::new(unit).weak());
@@ -270,34 +292,58 @@ pub(super) fn edit_str(
     match options {
         Some(opts) if !is_editable(field) => {
             let mut changed = false;
-            ComboBox::from_id_salt(format!("{id_prefix}::{}", field.name))
+            let selected = if current.is_empty() {
+                "-".to_owned()
+            } else {
+                display_option(field, &current)
+            };
+            // The closed box keeps one line so every cell in a form row has
+            // the same height in either language; the full text is on hover
+            // and the open list wraps.
+            let response = ComboBox::from_id_salt(format!("{id_prefix}::{}", field.name))
                 .width(ui.available_width())
-                .selected_text(if current.is_empty() {
-                    "-".to_owned()
-                } else {
-                    display_option(&current)
-                })
+                .truncate()
+                .selected_text(selected.clone())
                 .show_ui(ui, |ui| {
+                    ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
                     // Keep a value from an older save selectable even when it
                     // is no longer in the list.
                     if !current.is_empty()
                         && !opts.iter().any(|o| o == &current)
                         && ui
-                            .selectable_label(true, display_option(&current))
+                            .selectable_label(true, display_option(field, &current))
                             .clicked()
                     {
                         changed = true;
                     }
                     for opt in opts {
-                        if ui
-                            .selectable_label(current == *opt, display_option(opt))
-                            .clicked()
+                        let response =
+                            ui.selectable_label(current == *opt, display_option(field, opt));
+                        let response = if let Some(kind) =
+                            super::options::objective_kind(field, opt)
                         {
+                            response.on_hover_text(crate::views::tr(
+                                alas_pipeline::optimizer_summary::objective::objective_help(kind),
+                            ))
+                        } else {
+                            response
+                        };
+                        if response.clicked() {
                             *slot = Value::String(opt.clone());
                             changed = true;
                         }
                     }
                 });
+            let hover = match super::options::objective_kind(field, &current) {
+                Some(kind) => format!(
+                    "{selected}\n\n{}",
+                    crate::views::tr(alas_pipeline::optimizer_summary::objective::objective_help(
+                        kind
+                    ))
+                ),
+                None => selected,
+            };
+            response.response.on_hover_text(hover);
             changed
         }
         Some(opts) => {

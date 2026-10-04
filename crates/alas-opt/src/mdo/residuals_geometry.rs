@@ -3,8 +3,10 @@
 
 //! The planform, wing-loading and accommodation requirement family.
 
+use crate::mdo::ResidualRole;
+
 use alas_config::design_variables::DesignVector;
-use alas_config::{AlasConfig, ConstraintPolicy, ObjectiveWeights};
+use alas_config::{AlasConfig, ObjectiveWeights};
 use alas_geom::aircraft::airplane::Airplane;
 
 use super::sizing::SizingOutcome;
@@ -22,18 +24,15 @@ pub(super) fn geometry_residuals(
     outcome: &SizingOutcome,
     config: &AlasConfig,
     weights: &ObjectiveWeights,
-    policy: ConstraintPolicy,
+    role: ResidualRole,
     target_num_passengers: i64,
     target_cargo_payload_kg: f64,
 ) -> Vec<ConstraintResidual> {
-    if policy == ConstraintPolicy::Off {
-        return Vec::new();
-    }
     let req = &config.requirements;
     let dv: DesignVector = outcome.history.dv;
     let plane: &Airplane = &outcome.plane;
     let mut residuals = Vec::new();
-    residuals.extend(planform::residuals(plane, &dv, config, policy));
+    residuals.extend(planform::residuals(plane, &dv, config, role));
 
     // The aerodrome reference code's wingspan band (ICAO Annex 14 Vol. I,
     // Table 1-1): the registered aircraft's own letter in a reference
@@ -47,7 +46,7 @@ pub(super) fn geometry_residuals(
             max_span_m,
             "m",
             dv.span_m - max_span_m,
-            policy,
+            role,
         ));
     }
 
@@ -58,7 +57,7 @@ pub(super) fn geometry_residuals(
         req.max_wing_area_m2,
         "m^2",
         plane.s_ref - req.max_wing_area_m2,
-        policy,
+        role,
     ));
 
     // The requirement is a design wing loading, MTOW over area: the design
@@ -74,7 +73,7 @@ pub(super) fn geometry_residuals(
         req.min_wing_loading_kg_m2,
         "kg/m^2",
         req.min_wing_loading_kg_m2 - wing_loading_kg_m2,
-        policy,
+        role,
     ));
 
     // The clean-sheet transport search must keep the aircraft body attitude
@@ -93,16 +92,16 @@ pub(super) fn geometry_residuals(
             outcome.geometric_body_alpha_deg,
             weights.geometric_body_alpha_min_deg,
             weights.geometric_body_alpha_max_deg,
-            policy,
+            role,
         ));
     }
 
-    residuals.extend(plausibility_residuals(outcome, config, policy));
+    residuals.extend(plausibility_residuals(outcome, config, role));
 
     if req.aircraft_type == "cargo" {
         // The entered cargo mass is a *target to match*, not a floor to clear and not a licence
         // to load without limit. It is therefore reported as a two-sided
-        // deviation from the target under the Soft policy, which is a cost
+        // deviation from the target under the Soft role, which is a cost
         // contribution rather than a rejection: a candidate that cannot reach
         // the requested payload is ranked worse than one that can, and so is
         // one that only reaches it by carrying more than was asked for, while
@@ -110,15 +109,12 @@ pub(super) fn geometry_residuals(
         // belongs, in the mass, balance and volume residuals that measure the
         // physical limits.
         //
-        // The pair is normalized by the target itself and enters the scalar
-        // cost through the objective's existing `soft_penalty_weight`
-        // (`mdo::cost::assemble`), so no new weight or coefficient is
-        // introduced and every other cost term keeps its meaning.
+        // Normalize each preference by the target itself.
         residuals.extend(cargo_target_residuals(
             outcome.sized.carried_cargo_payload_kg,
             target_cargo_payload_kg,
-            match policy {
-                ConstraintPolicy::Hard => ConstraintPolicy::Soft,
+            match role {
+                ResidualRole::Constraint => ResidualRole::Preference,
                 other => other,
             },
         ));
@@ -136,7 +132,7 @@ pub(super) fn geometry_residuals(
             target_num_passengers as f64,
             "passengers",
             (target_num_passengers - outcome.sized.carried_passengers) as f64,
-            policy,
+            role,
         ));
     }
 
@@ -157,18 +153,29 @@ const AC_CHORD_FRACTION: f64 = 0.25;
 /// a tail the fuselage cannot carry) is visible here. Each limit and its
 /// rationale is documented on
 /// [`alas_config::optimizer::PlausibilityLimits`]. They enter the Geometry
-/// family and therefore follow its configured policy and the
-/// constraint-relaxation rules; they are not a separate rejection path.
+/// family and follow its hard-constraint rules.
 ///
 /// Units: aspect ratio, fineness, chord ratios and thickness ratios are
 /// dimensionless; the tail-arm fraction is metres over metres, positive aft.
 fn plausibility_residuals(
     outcome: &SizingOutcome,
     config: &AlasConfig,
-    policy: ConstraintPolicy,
+    role: ResidualRole,
 ) -> Vec<ConstraintResidual> {
     let limits = &config.optimizer.plausibility;
-    if !limits.enabled || limits.validate().is_err() {
+    if limits.validate().is_err() {
+        return vec![ConstraintResidual::direct(
+            "plausibility_configuration_invalid",
+            Geometry,
+            1.0,
+            0.0,
+            "bool",
+            1.0,
+            1.0,
+            ResidualRole::Constraint,
+        )];
+    }
+    if !limits.enabled {
         return Vec::new();
     }
     let plane: &Airplane = &outcome.plane;
@@ -185,7 +192,7 @@ fn plausibility_residuals(
         limits.min_aspect_ratio,
         limits.max_aspect_ratio,
         "-",
-        policy,
+        role,
     ));
 
     // Fuselage fineness: overall length over the largest equivalent diameter
@@ -198,7 +205,7 @@ fn plausibility_residuals(
             limits.min_fuselage_fineness,
             limits.max_fuselage_fineness,
             "-",
-            policy,
+            role,
         ));
     }
 
@@ -214,7 +221,7 @@ fn plausibility_residuals(
                 limits.min_tail_arm_fraction,
                 limits.max_tail_arm_fraction,
                 "-",
-                policy,
+                role,
             ));
         }
     }
@@ -228,7 +235,7 @@ fn plausibility_residuals(
             limits.min_tip_root_chord_ratio,
             limits.max_tip_root_chord_ratio,
             "-",
-            policy,
+            role,
         ));
         if limits.require_monotonic_planform_break {
             // The raw residual is the larger of the two orderings' misses, in
@@ -243,7 +250,7 @@ fn plausibility_residuals(
                 dv.root_chord_m,
                 "m",
                 below_tip.max(above_root),
-                policy,
+                role,
             ));
         }
     }
@@ -270,7 +277,7 @@ fn plausibility_residuals(
             washin_rise_deg,
             limits.min_tip_washout_deg,
             limits.max_tip_washout_deg,
-            policy,
+            role,
         ));
     }
 
@@ -284,7 +291,7 @@ fn plausibility_residuals(
             limits.min_root_thickness_ratio,
             limits.max_root_thickness_ratio,
             "-",
-            policy,
+            role,
         ));
     }
 
@@ -331,7 +338,7 @@ fn fuselage_fineness(plane: &Airplane) -> Option<f64> {
 fn cargo_target_residuals(
     carried_kg: f64,
     target_kg: f64,
-    policy: ConstraintPolicy,
+    role: ResidualRole,
 ) -> Vec<ConstraintResidual> {
     if !(target_kg.is_finite() && target_kg > 0.0) || !carried_kg.is_finite() {
         return Vec::new();
@@ -346,7 +353,7 @@ fn cargo_target_residuals(
             target_kg,
             "kg",
             shortfall,
-            policy,
+            role,
         ),
         ConstraintResidual::scaled(
             "cargo_target_excess",
@@ -355,7 +362,7 @@ fn cargo_target_residuals(
             target_kg,
             "kg",
             excess,
-            policy,
+            role,
         ),
     ]
 }
@@ -398,7 +405,7 @@ fn twist_window_residuals(
     washin_rise_deg: f64,
     minimum_deg: f64,
     maximum_deg: f64,
-    policy: ConstraintPolicy,
+    role: ResidualRole,
 ) -> Vec<ConstraintResidual> {
     let over = washout_deg - maximum_deg;
     let under = minimum_deg - washout_deg;
@@ -414,7 +421,7 @@ fn twist_window_residuals(
             "deg",
             rise_over,
             ((rise_over - TWIST_NUMERICAL_SLACK_DEG) / TWIST_VIOLATION_SCALE_DEG).max(0.0),
-            policy,
+            role,
         ),
         ConstraintResidual::direct(
             "tip_washout_max",
@@ -424,7 +431,7 @@ fn twist_window_residuals(
             "deg",
             over,
             ((over - TWIST_NUMERICAL_SLACK_DEG) / TWIST_VIOLATION_SCALE_DEG).max(0.0),
-            policy,
+            role,
         ),
         ConstraintResidual::direct(
             "tip_washout_min",
@@ -434,7 +441,7 @@ fn twist_window_residuals(
             "deg",
             under,
             ((under - TWIST_NUMERICAL_SLACK_DEG) / TWIST_VIOLATION_SCALE_DEG).max(0.0),
-            policy,
+            role,
         ),
     ]
 }
@@ -459,7 +466,7 @@ fn window_residuals(
     minimum: f64,
     maximum: f64,
     unit: &'static str,
-    policy: ConstraintPolicy,
+    role: ResidualRole,
 ) -> Vec<ConstraintResidual> {
     if !value.is_finite() {
         // A non-finite geometric quantity is a failed build, which the
@@ -476,7 +483,7 @@ fn window_residuals(
             maximum,
             unit,
             value - maximum,
-            policy,
+            role,
         ),
         ConstraintResidual::scaled(
             min_id,
@@ -485,7 +492,7 @@ fn window_residuals(
             minimum,
             unit,
             minimum - value,
-            policy,
+            role,
         ),
     ]
 }
@@ -513,7 +520,7 @@ fn body_alpha_window_residual(
     actual_deg: f64,
     min_deg: f64,
     max_deg: f64,
-    policy: ConstraintPolicy,
+    role: ResidualRole,
 ) -> ConstraintResidual {
     let (limit_deg, raw_residual) = if actual_deg < min_deg {
         (min_deg, min_deg - actual_deg)
@@ -538,7 +545,7 @@ fn body_alpha_window_residual(
         limit_deg,
         "deg",
         raw_residual,
-        policy,
+        role,
     )
 }
 

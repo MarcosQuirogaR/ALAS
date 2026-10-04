@@ -12,7 +12,7 @@ use crate::{
     AircraftPreset, AircraftReferenceData, AircraftVariantIdentity, CgEnvelopeEvidence,
     DesignRequirements, DesignVector, EmpennageConfig, EngineConfig, FuselageConfig,
     GeometryConfig, LandingGearConfig, MissingDesignMissionDatum, MissionEvidenceApplicability,
-    PartialDesignMissionEvidence, PartialMissionEvidenceKind, PublishedAftCgNoseLoad, WingConfig,
+    PartialDesignMissionEvidence, PartialMissionEvidenceKind, WingConfig,
 };
 
 /// Long-range quad with a conventional tail.
@@ -67,14 +67,7 @@ pub fn a340_300() -> AircraftPreset {
                 source: "Airbus A340-200/-300 Aircraft Characteristics Rev 33, 2025-12-01, section 3-2-1 p.4, Figure 3-2-1-991-013-A01",
             }],
             cg_evidence: CgEnvelopeEvidence::AfmRequired,
-            // 1 - (2 x 102,950 + 41,120) / 260,900: two wing-gear legs and
-            // the centre gear at the most-aft CG.
-            aft_cg_nose_load: Some(PublishedAftCgNoseLoad {
-                mass_kg: 260_900.0,
-                nose_gear_fraction: 1.0 - (2.0 * 102_950.0 + 41_120.0) / 260_900.0,
-                aft_cg_pct_mac: Some(38.0),
-                source: "Airbus A340-200/-300 Aircraft Characteristics Rev 33, 2025-12-01, Figure 7-3-0-991-007-A01 sheet 2 (WV029, MRW 260,900 kg: wing-gear 102,950 kg per strut and centre-gear 41,120 kg static at the most-aft CG, 38 % MAC)",
-            }),
+            aft_cg_nose_load: Some(crate::presets::gear_load::A340_300),
             reference_wing_area_m2: Some(361.6),
             sources: vec![
                 "EASA.A.015 Issue 28, 2026-01-15, pp.32-36",

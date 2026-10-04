@@ -267,7 +267,7 @@ fn draw_axes_configured(
     }
 }
 
-fn tick_step(min: f64, max: f64, scale: Scale, target: usize) -> f64 {
+pub(crate) fn tick_step(min: f64, max: f64, scale: Scale, target: usize) -> f64 {
     let (lo, hi) = ordered_range(min, max, scale);
     let span = (hi - lo).max(1e-12);
     let raw = span / target.max(2) as f64;
@@ -288,7 +288,7 @@ fn tick_step(min: f64, max: f64, scale: Scale, target: usize) -> f64 {
     (multiplier * power).max(1e-12)
 }
 
-fn major_ticks(min: f64, max: f64, scale: Scale, target: usize) -> Vec<f64> {
+pub(crate) fn major_ticks(min: f64, max: f64, scale: Scale, target: usize) -> Vec<f64> {
     let (lo, hi) = ordered_range(min, max, scale);
     if !lo.is_finite() || !hi.is_finite() || hi <= lo {
         return vec![lo];
@@ -347,7 +347,7 @@ fn ordered_range(min: f64, max: f64, scale: Scale) -> (f64, f64) {
     }
 }
 
-fn format_tick(value: f64, step: f64, fixed_decimals: Option<usize>) -> String {
+pub(crate) fn format_tick(value: f64, step: f64, fixed_decimals: Option<usize>) -> String {
     let value = if value.abs() < step.abs() * 1e-9 {
         0.0
     } else {

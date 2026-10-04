@@ -7,8 +7,8 @@
 //! Shared helpers for the matching-chart and landing/take-off figures:
 //! airport-string resolution, sea-level static thrust-to-weight, a status
 //! placeholder for an airport that cannot be resolved, and drawing
-//! primitives (arrowheads, star and diamond markers) that neither figure
-//! needed on its own but both do now.
+//! primitives (arrowheads, star and diamond markers) used by
+//! both figures.
 
 use alas_config::airports::{Airport, UnknownAirport};
 use alas_config::AlasConfig;

@@ -14,10 +14,9 @@
 //! search mesh sits further still, per an internal VLM resolution-sensitivity
 //! study.
 //!
-//! Before this check existed nothing closed that loop: `feasibility` tested
-//! the trimmed point for finiteness only, so a candidate selected because its
-//! in-loop attitude fell inside the window could be published with a reported
-//! attitude outside it, and the report would not say so. The constraint is
+//! Without this check nothing closes that loop: a candidate selected because
+//! its in-loop attitude fell inside the window could be published with a
+//! reported attitude outside it, and the report would not say so. The constraint is
 //! the optimizer's, but the number a reader sees is this one, so this is
 //! where the two have to be reconciled.
 //!
@@ -84,8 +83,7 @@ pub(crate) fn assess(config: &AlasConfig, report: &AnalysisReport) -> Vec<Physic
         // numbers, as a warning rather than as physical infeasibility.
         //
         // This is not a relaxation and nothing about the search changes: the
-        // `geometric_body_alpha` residual stays in the optimizer's Geometry
-        // family under that family's configured policy, hard by default, so a
+        // `geometric_body_alpha` residual is a hard Geometry constraint, so a
         // candidate outside the window is still rejected by the search.
         severity: FindingSeverity::Warning,
         message: format!(

@@ -87,6 +87,10 @@ pub struct LeafField {
     pub readonly_unless: Option<ReadonlyUnless>,
     /// Where this field's accepted values come from.
     pub options: Option<OptionSource>,
+    /// What a value of zero means, for a whole-number field whose zero is a
+    /// setting rather than a count. GUI-only metadata, absent from the
+    /// serialized schema like `optional_value_kind`.
+    pub zero_means: Option<ZeroMeaning>,
 }
 
 /// A bound, which keeps whether it was written as an integer.
@@ -160,6 +164,14 @@ pub enum Kind {
     /// which reaches this for an empty list because it tests the list's
     /// contents and an empty one has none.
     Unsupported,
+}
+
+/// What zero stands for in a whole-number field that declares it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ZeroMeaning {
+    /// Every logical thread the machine reports
+    /// (`std::thread::available_parallelism`).
+    AllThreads,
 }
 
 /// The declared scalar type of an optional leaf. `Kind::Optional` describes

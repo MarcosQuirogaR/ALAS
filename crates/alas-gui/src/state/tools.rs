@@ -3,6 +3,7 @@
 
 //! Machine-tool preferences and background downloads and installs of optional tools.
 
+use std::path::Path;
 use std::sync::Arc;
 
 use super::types::LogKind;
@@ -203,4 +204,19 @@ impl AppState {
             }
         }
     }
+}
+
+/// Whether `marker_path` is being seen here for the first time: if it is
+/// absent, it is created immediately (matching the "seen" semantics below,
+/// which flip on first display rather than on completion) and `true` is
+/// returned exactly once per marker file.
+pub(super) fn first_start_marker_gate(marker_path: &Path) -> bool {
+    if marker_path.exists() {
+        return false;
+    }
+    if let Some(parent) = marker_path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let _ = std::fs::write(marker_path, b"1");
+    true
 }

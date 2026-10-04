@@ -28,16 +28,6 @@ pub(super) const SCISSOR_ETA: f64 = 0.9;
 /// measured.
 pub(super) const SCISSOR_CL_H_MAX: f64 = -0.8;
 
-/// Most negative horizontal-tail lift coefficient available *at rotation*,
-/// dimensionless: the stabiliser is set to the takeoff trim position, so
-/// only the elevator adds download, and the tail sits in the wing's ground
-/// downwash. Torenbeek (Synthesis, ch. 9) and Obert (Aerodynamic Design of
-/// Transport Aircraft, ch. 34) place the elevator-only tail lift increment
-/// at rotation around -0.5 to -0.6 for transports, well below the
-/// full-authority adjustable-stabiliser value ([`SCISSOR_CL_H_MAX`], -0.8)
-/// used for landing trim. A declared estimate, not measured.
-pub(super) const ROTATION_CL_H: f64 = -0.55;
-
 /// Wing-body pitching moment about its own AC in the *takeoff* flap/slat
 /// configuration, dimensionless, used by the rotation (nose-wheel liftoff)
 /// forward-limit criterion. A documented Torenbeek
@@ -83,23 +73,18 @@ pub(super) fn horizontal_tail_ac_x_m(plane: &Airplane) -> f64 {
 /// `sigma = (16 h/b)^2 / (1 + (16 h/b)^2)`, `h` = height above the ground,
 /// `b` = span); this reuses that functional form as a documented,
 /// conservative estimate of how much the tail's maximum-download authority
-/// is degraded near the ground during rotation/landing flare (reduced local
-/// dynamic pressure and interference), not a measured tail-specific result.
+/// is degraded near the ground in the landing flare (reduced local dynamic
+/// pressure and interference), not a measured tail-specific result. The
+/// rotation criterion does not use it; it carries ground effect through the
+/// wing downwash instead (`super::rotation::rotation_tail_lift`).
 pub(super) fn tail_ground_effect_factor(plane: &Airplane, ground_z_m: f64) -> f64 {
     let Some(h_stab) = plane.wings.get(1) else {
         return 1.0;
     };
-    let height_above_ground_m = h_stab.aerodynamic_center(0.25)[2] - ground_z_m;
-    let span_m = h_stab.span();
-    if !height_above_ground_m.is_finite()
-        || !span_m.is_finite()
-        || height_above_ground_m <= 0.0
-        || span_m <= 0.0
-    {
-        return 1.0;
-    }
-    let ratio = 16.0 * height_above_ground_m / span_m;
-    (ratio * ratio / (1.0 + ratio * ratio)).clamp(0.0, 1.0)
+    super::rotation::wieselsberger_factor(
+        h_stab.aerodynamic_center(0.25)[2] - ground_z_m,
+        h_stab.span(),
+    )
 }
 
 /// This design's mass-weighted vertical CG for the `OEW_KEYS` component

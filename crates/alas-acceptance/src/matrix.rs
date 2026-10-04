@@ -54,6 +54,9 @@ pub struct PresetAcceptanceResult {
     pub usable_fuel_capacity_kg: Option<f64>,
     /// Fuel actually carried by the analyzed load case, in kilograms.
     pub analyzed_carried_fuel_kg: f64,
+    /// Fuel the dispatched route loads when it differs from the analyzed
+    /// (Hard-MTOW design) load, in kilograms.
+    pub flown_carried_fuel_kg: Option<f64>,
     /// Takeoff mass actually evaluated by the mission, in kilograms.
     pub analyzed_takeoff_mass_kg: f64,
     /// Amount by which the analyzed load case lies below MTOW, in kilograms.

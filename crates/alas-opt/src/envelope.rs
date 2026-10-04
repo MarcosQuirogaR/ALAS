@@ -12,10 +12,12 @@
 //! Principles and Practices*, AIAA, 1988.
 
 mod constraints;
+mod gear_placement;
 mod ledger_basis;
 mod ledger_states;
 mod loading;
 mod physical_limits;
+mod rotation;
 mod rotation_thrust;
 mod support;
 #[cfg(test)]
@@ -32,6 +34,10 @@ use alas_perf::landing_gear::{
 };
 use constraints::{assess_loading_constraints, LoadingConstraintInputs};
 pub use constraints::{ModelCgConstraint, ModelCgConstraintAssessment};
+pub use gear_placement::{
+    configured_stations_suffice, configured_translation_m, place_main_gear, MainGearPlacement,
+    PlacementLedgers,
+};
 pub use ledger_states::{
     assess_model_cg_envelope_with_ledger, assess_model_cg_envelope_with_ledger_and_landing,
     LedgerLandingState, LedgerLoadingBasis,
@@ -130,9 +136,12 @@ pub fn assess_model_cg_envelope(
         coords.fuel[2],
         cg_x,
     );
+    // The lumped breakdown carries no inertia tensor: the rotation criterion
+    // takes Raymer's radius of gyration.
     ledger_basis::assess_model_cg_envelope_from_states(
         plane,
         states,
+        f64::NAN,
         cg_x,
         x_np,
         critical_x_np,

@@ -2,8 +2,8 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 //! The wing-to-fuselage layout residuals (`mdo::residuals_layout`): every
-//! registered aircraft's own reference geometry must pass them, and a
-//! deliberately disconnected or transonically inconsistent candidate must be
+//! registered aircraft's reference geometry meets the containment bounds, and a
+//! disconnected or transonically inconsistent candidate must be
 //! rejected by name.
 
 // A test asserts on values it constructed or loaded from a fixture it
@@ -35,28 +35,37 @@ const LAYOUT_IDS: &[&str] = &[
 /// Assess `preset` at its own registered design, in the same
 /// `DesignMode::ReferenceAdaptation` the GUI's default preset selection
 /// loads: the registered/published geometry is kept intact rather than
-/// re-derived, which is the "reference geometry" this suite must pass.
+/// re-derived.
 fn assess_reference(preset: &str) -> Result<CandidateAssessment, String> {
-    let config = AlasConfig::from_value(&serde_json::json!({ "preset": preset }))
+    assess_reference_mode(preset, alas_config::MtowSizing::FixedRequirement)
+}
+
+fn assess_reference_mode(
+    preset: &str,
+    mode: alas_config::MtowSizing,
+) -> Result<CandidateAssessment, String> {
+    let mut config = AlasConfig::from_value(&serde_json::json!({ "preset": preset }))
         .unwrap_or_else(|error| panic!("{preset}: {error}"));
     assert_eq!(
         config.optimizer.design_space.mode,
         alas_config::DesignMode::ReferenceAdaptation,
         "a bare preset document loads as reference adaptation"
     );
+    config.optimizer.objective.mtow_sizing = mode;
     assess_product_candidate(&config, &nominal(preset))
 }
 
 #[test]
-fn every_registered_preset_reference_geometry_passes_the_layout_residuals() {
+fn mission_sized_reference_geometry_passes_layout_residuals() {
     let mut failures = Vec::new();
     for preset in alas_config::presets::available() {
-        let assessment = match assess_reference(preset) {
-            Ok(assessment) => assessment,
-            // A preset that cannot be sized at all under its default route is
-            // a mass/mission model matter, not a layout-residual one.
-            Err(_) => continue,
-        };
+        let assessment =
+            match assess_reference_mode(preset, alas_config::MtowSizing::SizedByMission) {
+                Ok(assessment) => assessment,
+                // A preset that cannot be sized at all under its default route is
+                // a mass/mission model matter, not a layout-residual one.
+                Err(_) => continue,
+            };
         for id in LAYOUT_IDS {
             if preset == "DC-10" && *id == "sweep_consistent_with_cruise_mach" {
                 // Documented exception. DC-10 cruises beyond model Mdd (0.800
@@ -84,6 +93,87 @@ fn every_registered_preset_reference_geometry_passes_the_layout_residuals() {
         "registered presets whose reference geometry violates a layout residual:\n  {}",
         failures.join("\n  ")
     );
+}
+
+#[test]
+fn hard_mtow_reference_layouts_keep_named_drag_divergence_findings() {
+    let mut failures = Vec::new();
+    for preset in alas_config::presets::available() {
+        let assessment = match assess_reference(preset) {
+            Ok(assessment) => assessment,
+            Err(reason) => panic!("{preset}: hard-MTOW assessment failed: {reason}"),
+        };
+        for id in LAYOUT_IDS {
+            if *id == "sweep_consistent_with_cruise_mach" {
+                let residual = assessment.residuals.iter().find(|r| r.id == *id).unwrap();
+                assert!(residual.actual.is_finite() && residual.actual >= 0.0);
+                assert!(residual.limit.is_finite() && residual.limit > 0.0);
+                assert_eq!(residual.role, alas_opt::mdo::ResidualRole::Constraint);
+                let finding = match preset {
+                    // At mid-cruise of the maximum-fuel design mission (its
+                    // own trip, the trip-share contingency of that trip
+                    // kept) the lift still lies past the Korn drag-divergence
+                    // boundary at the preset cruise point (27.5 against 26.9
+                    // counts). The A380 clears it at that mass (19.5 counts).
+                    "AVE" => {
+                        Some("maximum-fuel mid-cruise lift exceeds the drag-divergence boundary")
+                    }
+                    // The conventional factor is not calibrated to this
+                    // aircraft's aft-loaded section (Mason, chapter 7).
+                    "DC-10" => Some("aft-loaded section lacks a sourced Korn technology factor"),
+                    _ => None,
+                };
+                if let Some(reason) = finding {
+                    assert!(
+                        violates(&assessment, id),
+                        "{preset}: {reason}; boundary now met: review finding"
+                    );
+                } else {
+                    assert!(
+                        !violates(&assessment, id),
+                        "{preset}: new drag-divergence finding: {residual:?}"
+                    );
+                }
+                if violates(&assessment, id) {
+                    assert!(residual.actual > residual.limit, "{preset}: {residual:?}");
+                    assert!(!assessment.hard_feasible, "{preset}: {residual:?}");
+                    assert!(assessment.violated_hard_ids().contains(id), "{preset}");
+                }
+                continue;
+            }
+            if violates(&assessment, id) {
+                let residual = assessment.residuals.iter().find(|r| r.id == *id);
+                failures.push(format!("{preset}: {id} violated; residual: {residual:?}"));
+            }
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "registered presets whose reference geometry violates a layout residual:\n  {}",
+        failures.join("\n  ")
+    );
+}
+
+#[test]
+fn lock_drag_divergence_ceiling_matches_the_quartic_law_slope() {
+    for preset in alas_config::presets::available() {
+        let assessment = assess_reference(preset).unwrap();
+        let config = AlasConfig::from_value(&serde_json::json!({"preset": preset})).unwrap();
+        let rise = config.drag_model.wave_drag_coefficient;
+        let id = "sweep_consistent_with_cruise_mach";
+        let residual = assessment
+            .residuals
+            .iter()
+            .find(|row| row.id == id)
+            .unwrap();
+        // Eliminating the Mach excess from CDw = C (M - Mcrit)^4 gives
+        // dCDw/dM = 4 C^(1/4) CDw^(3/4); drag divergence is slope 0.1.
+        let ceiling_slope = 4.0 * rise.powf(0.25) * residual.limit.powf(0.75);
+        assert!((ceiling_slope / 0.1 - 1.0).abs() <= 16.0 * f64::EPSILON);
+        let slope = 4.0 * rise.powf(0.25) * residual.actual.powf(0.75);
+        assert_eq!(residual.actual > residual.limit, slope > 0.1, "{preset}");
+        assert_eq!(violates(&assessment, id), slope > 0.1, "{preset}");
+    }
 }
 
 #[test]
@@ -166,20 +256,28 @@ fn an_unswept_wing_at_a_high_cruise_mach_is_rejected_by_the_korn_equation_residu
     );
 }
 
+/// The gated cruise point is mid-cruise; the start of cruise is reported
+/// beside it so the choice is visible, and it is the heavier state.
 #[test]
-fn turning_geometry_constraints_off_removes_the_layout_residuals_too() {
-    // The layout family shares `objective.geometry_constraints`
-    // (`mdo::residuals_layout`'s own module doc), so disabling the geometry
-    // family removes these rows along with the aspect-ratio/fineness ones.
-    let mut config = AlasConfig::from_value(&serde_json::json!({ "preset": "AVE" }))
-        .unwrap_or_else(|error| panic!("{error}"));
-    let design = nominal("AVE");
-    let with = assess_product_candidate(&config, &design).expect("sizes with the family on");
-    config.optimizer.objective.geometry_constraints = alas_config::ConstraintPolicy::Off;
-    let without = assess_product_candidate(&config, &design).expect("sizes with the family off");
-
-    for id in LAYOUT_IDS {
-        assert!(with.residuals.iter().any(|residual| residual.id == *id));
-        assert!(!without.residuals.iter().any(|residual| residual.id == *id));
-    }
+fn the_wave_drag_residual_reports_the_start_of_cruise_beside_the_gated_mid_cruise() {
+    let assessment = assess_reference("A320-200").expect("A320-200 assessed");
+    let residual = assessment
+        .residuals
+        .iter()
+        .find(|r| r.id == "sweep_consistent_with_cruise_mach")
+        .expect("the wave-drag residual is evaluated");
+    let detail = residual.detail.as_deref().expect("the residual has detail");
+    assert!(detail.contains("gated at mid-cruise"), "{detail}");
+    assert!(detail.contains("start of cruise (not gated)"), "{detail}");
+    let cl_mid = {
+        let (_, after_mid) = detail.split_once("CL ").expect("mid CL");
+        let end = after_mid.find(',').expect("comma");
+        after_mid[..end].parse::<f64>().expect("mid CL number")
+    };
+    let cl_start = {
+        let (_, after_start) = detail.rsplit_once("CL ").expect("start CL");
+        let end = after_start.find(',').expect("comma");
+        after_start[..end].parse::<f64>().expect("start CL number")
+    };
+    assert!(cl_start > cl_mid, "{detail}");
 }

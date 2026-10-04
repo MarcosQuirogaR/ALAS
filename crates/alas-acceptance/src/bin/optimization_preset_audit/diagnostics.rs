@@ -71,8 +71,9 @@ pub(super) fn evidence(result: &PipelineResult) -> Value {
         },
         "external_solvers": external_evidence(result),
         "gui_equivalence": {
+            "pipeline_entry_point": "DesignPipeline::run_with_design_space_events_and_snapshots with the same resolved preset bounds and immutable snapshot observers as the GUI launch",
             "configuration_origin": "canonical AlasConfig preset with the explicitly reported solver preset",
-            "mission_profile": "Canonical preset with the GUI route-aware cruise-leg fraction algorithm: shared alas_mission route proposal, same endpoint records, great-circle distance and preset leg cap. Speeds and altitudes stay canonical.",
+            "mission_profile": "Canonical preset initialized as in the GUI: same resolved endpoint records, great-circle radius, shared route proposal and configure_cruise_legs call. Aircraft speeds and rates remain canonical.",
             "machine_paths": "Persisted machine preferences applied as at GUI startup; unsaved GUI session path edits are not part of this headless run. OpenVSP, AVL and FLOWUnsteady discovery consult preferences.",
         },
     })

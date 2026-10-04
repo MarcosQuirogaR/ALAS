@@ -28,11 +28,17 @@ pub(super) fn run<E: SearchObjective + ?Sized>(
     let before = evaluator.analyses();
     let hits = evaluator.cache.hits;
     let initial_violation = outcome.winner.constraint_violation;
-    let repaired = restoration::run(
+    let (baseline, config) = (evaluator.baseline, evaluator.config);
+    let admits = |values: &[f64]| {
+        baseline == Some(values)
+            || super::batch::pre_gate_violation(values, bounds, config).is_none()
+    };
+    let repaired = restoration::run_with_admission(
         bounds,
         outcome.winner.clone(),
         limits,
         scope,
+        Some(&admits),
         &mut |points| evaluator.evaluate_block(points),
     );
     let diagnostics = RestorationDiagnostics {

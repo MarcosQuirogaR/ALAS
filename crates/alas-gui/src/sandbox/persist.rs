@@ -84,7 +84,7 @@ impl AppState {
     /// The configuration loader's message when the file is not a valid
     /// configuration.
     pub fn apply_workspace_document(&mut self, document: &Value) -> Result<(), String> {
-        let envelope: Option<WorkspaceEnvelope> = document
+        let mut envelope: Option<WorkspaceEnvelope> = document
             .get(WORKSPACE_ENVELOPE_KEY)
             .map(|value| serde_json::from_value(value.clone()))
             .transpose()
@@ -99,6 +99,14 @@ impl AppState {
         }
         let config = AlasConfig::from_value(document).map_err(|error| error.to_string())?;
         let canonical = full_config_values(&config);
+        if let Some(design) = envelope
+            .as_mut()
+            .and_then(|saved| saved.sandbox_design.as_mut())
+        {
+            let config = AlasConfig::from_value(&design.config_values)
+                .map_err(|error| format!("saved sandbox configuration: {error}"))?;
+            design.config_values = full_config_values(&config);
+        }
         // A loaded non-default profile may be a deliberate case-file or
         // Advanced Settings edit. Preset operational profiles are also
         // non-default, though, and must still receive their route-aware
@@ -148,7 +156,7 @@ impl AppState {
             self.sandbox.estimates.abandon();
             self.on_sandbox_model_changed();
         } else {
-            self.reset_design_space_bounds_to_mode();
+            self.keep_design_and_reset_bounds();
             self.on_config_modified();
         }
         Ok(())
@@ -249,5 +257,34 @@ mod tests {
         let mut document = serde_json::to_value(AlasConfig::default()).expect("config");
         document[WORKSPACE_ENVELOPE_KEY] = json!({ "version": WORKSPACE_VERSION + 1 });
         assert!(loaded.apply_workspace_document(&document).is_err());
+    }
+
+    #[test]
+    fn a_guided_project_migrates_its_saved_sandbox_before_resuming() {
+        let mut saved = state();
+        assert!(saved.enter_sandbox(false));
+        saved.design_values.insert("span_m".to_owned(), 62.0);
+        assert!(saved.resolve_leave_sandbox(super::super::session::ExitChoice::Promote));
+        let mut document = saved.workspace_document();
+        let nested = &mut document[WORKSPACE_ENVELOPE_KEY]["sandbox_design"]["config_values"];
+        nested["optimizer"]["relaxation"] = json!({"enabled": true, "allowed_violated_groups": 4});
+        nested["optimizer"]["objective"]["mass_constraints"] = json!("soft");
+        nested["optimizer"]["objective"]["soft_penalty_weight"] = json!(99.0);
+        let mut loaded = state();
+        loaded
+            .apply_workspace_document(&document)
+            .expect("legacy project loads");
+        assert!(!loaded.sandbox.active());
+        let migrated = &loaded.sandbox.last_design.as_ref().unwrap().config_values;
+        assert!(migrated.pointer("/optimizer/relaxation").is_none());
+        assert!(migrated
+            .pointer("/optimizer/objective/mass_constraints")
+            .is_none());
+        assert!(migrated
+            .pointer("/optimizer/objective/soft_penalty_weight")
+            .is_none());
+        assert!(loaded.enter_sandbox(false));
+        assert!(loaded.typed_config().is_some());
+        assert_eq!(loaded.design_values["span_m"], 62.0);
     }
 }

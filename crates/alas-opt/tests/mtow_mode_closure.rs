@@ -70,7 +70,13 @@ fn the_fixed_requirement_evaluates_the_declared_mass_and_checks_the_mission_agai
     let sized = &assessment.sized;
     // One pass, at the declared mass: the aircraft is the requirement.
     assert_eq!(sized.sizing_iterations, 1);
-    assert_eq!(sized.takeoff_mass_kg, declared_kg);
+    let load = sized.takeoff_loading.unwrap();
+    assert_eq!(
+        sized.takeoff_mass_kg,
+        load.zero_fuel_mass_kg
+            + (declared_kg - load.zero_fuel_mass_kg).min(sized.usable_capacity_kg)
+    );
+    assert_eq!(sized.design_gross_mass_kg, declared_kg);
     // The dispatch keeps the mass the mission needs, built on the empty mass
     // evaluated at the declared mass, and the ceiling check is its sign.
     let required_kg = sized.dispatch.takeoff_mass_kg;

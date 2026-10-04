@@ -188,6 +188,18 @@ pub(super) fn linear_reduced_size(
     (target.round() as usize).clamp(minimum, initial)
 }
 
+/// `size` rounded to the nearest multiple of `quantum` (halves up), never
+/// below `minimum` and never above `current`: the linear schedule taken in
+/// whole evaluator waves. A `quantum` of `0` or `1` returns `size` clamped.
+pub(super) fn quantized_size(size: usize, quantum: usize, minimum: usize, current: usize) -> usize {
+    let rounded = if quantum > 1 {
+        (size + quantum / 2) / quantum * quantum
+    } else {
+        size
+    };
+    rounded.max(minimum).min(current.max(minimum))
+}
+
 /// Keep the best `keep` members under the epsilon comparison.
 pub(super) fn reduce_population(
     population: &mut Vec<Vec<f64>>,

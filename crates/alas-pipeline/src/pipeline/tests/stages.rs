@@ -6,7 +6,9 @@ use alas_exec::ToolLocator;
 
 #[test]
 fn enabled_native_mission_is_present_in_a_normal_pipeline_result() {
-    let config = AlasConfig::default();
+    let mut config = AlasConfig::default();
+    config.structures.run_nastran = false;
+    config.structures.run_patran_export = false;
     let pipeline = DesignPipeline::new(config);
     let options = PipelineOptions {
         optimize: false,
@@ -61,10 +63,12 @@ fn enabled_native_mission_is_present_in_a_normal_pipeline_result() {
 
 #[test]
 fn enabled_mission_does_not_silently_succeed_without_a_route() {
-    let config = AlasConfig {
+    let mut config = AlasConfig {
         departure_airport: "not an airport".to_owned(),
         ..AlasConfig::default()
     };
+    config.structures.run_nastran = false;
+    config.structures.run_patran_export = false;
     let pipeline = DesignPipeline::new(config);
     let options = PipelineOptions {
         optimize: false,
@@ -90,6 +94,8 @@ fn enabled_mission_does_not_silently_succeed_without_a_route() {
 #[test]
 fn disabled_mission_does_not_publish_a_route() {
     let mut config = AlasConfig::default();
+    config.structures.run_nastran = false;
+    config.structures.run_patran_export = false;
     config.mission.enabled = false;
     let pipeline = DesignPipeline::new(config);
     let options = PipelineOptions {
@@ -115,6 +121,8 @@ fn disabled_mission_does_not_publish_a_route() {
 #[test]
 fn parallel_downstream_stages_preserve_the_serial_analysis_result() {
     let mut config = AlasConfig::default();
+    config.structures.run_nastran = false;
+    config.structures.run_patran_export = false;
     config.mission.enabled = false;
     config.mses.enabled = false;
     config.structures.enabled = false;
@@ -203,6 +211,8 @@ fn parallel_downstream_stages_preserve_the_serial_analysis_result() {
 #[test]
 fn enabled_mses_without_a_tool_retains_the_corrected_section_condition() {
     let mut config = AlasConfig::default();
+    config.structures.run_nastran = false;
+    config.structures.run_patran_export = false;
     config.mission.enabled = false;
     config.mses.enabled = true;
     let freestream_mach = config.requirements.cruise_mach;
@@ -415,6 +425,8 @@ fn a_headless_run_can_be_cancelled_and_joined_instead_of_being_abandoned() {
     use std::sync::Arc;
 
     let mut config = AlasConfig::default();
+    config.structures.run_nastran = false;
+    config.structures.run_patran_export = false;
     // A budget large enough that a run which ignored the flag would not
     // finish inside this test, so a pass cannot be an accident of speed.
     config.optimizer.solver.refinement.max_evaluations = 19296;

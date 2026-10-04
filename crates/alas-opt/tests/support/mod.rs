@@ -11,7 +11,7 @@
 #![allow(clippy::expect_used)]
 
 use alas_config::design_variables::DesignVector;
-use alas_config::{AlasConfig, ConstraintPolicy, MtowSizing};
+use alas_config::{AlasConfig, MtowSizing};
 use alas_opt::CandidateAssessment;
 
 /// The registered design vector of `preset`.
@@ -22,12 +22,11 @@ pub fn nominal(preset: &str) -> DesignVector {
 }
 
 /// The default clean-sheet aircraft sized in `sizing`, with the transport
-/// planform constraints off and the balance constraints diagnostic.
+/// planform preferences disabled.
 pub fn clean_sheet(sizing: MtowSizing) -> AlasConfig {
     let mut config = AlasConfig::default();
     let optimizer = &mut config.optimizer;
     optimizer.weights.transport_planform_constraints_enabled = false;
-    optimizer.objective.balance_constraints = ConstraintPolicy::Diagnostic;
     optimizer.objective.mtow_sizing = sizing;
     config
 }

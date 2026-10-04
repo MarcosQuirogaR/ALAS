@@ -25,7 +25,11 @@ impl DesignOptimizer {
         let mut evaluator =
             BatchEvaluator::new(model, run.workers, run.bounds, run.pre_gate, run.cancel);
         evaluator.baseline = run.baseline.as_deref();
+        evaluator.stage = crate::TraceStage::Screening;
         let before = evaluator.analyses();
+        evaluator
+            .objective
+            .set_deadline(limit.map(|limit| started + limit));
         let outcome = screening::run(
             run.bounds,
             run.baseline.as_deref(),
@@ -45,6 +49,7 @@ impl DesignOptimizer {
             &|values: &[f64]| run.admits(values),
             &mut |points: &[Vec<f64>]| evaluator.evaluate_block(points),
         );
+        evaluator.objective.set_deadline(None);
         let wall = started.elapsed().as_secs_f64();
         let cancelled = outcome.termination == Termination::Cancelled;
         let excluded: Vec<Vec<f64>> = run.baseline.iter().cloned().collect();
@@ -88,6 +93,11 @@ impl DesignOptimizer {
             rejections,
             elite,
             cancelled,
+            // Without the cache the refinement scores with another model.
+            trace: crate::EvaluationTrace {
+                screening_separate: !keep_cache,
+                ..evaluator.trace
+            },
             cache: keep_cache.then_some(evaluator.cache),
         }
     }

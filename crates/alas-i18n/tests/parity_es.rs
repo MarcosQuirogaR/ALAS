@@ -212,8 +212,8 @@ const NATIVE_CATALOG_ENTRIES: &[NativeCatalogEntry] = &[
         value: "Capacidad m\u{00ed}nima de pasajeros",
     },
     NativeCatalogEntry {
-        key: "Hard floor on the geometry-resolved passenger capacity: a candidate whose class-mix and geometry produce fewer than this many seats is scored infeasible under the configured geometry constraint policy. 0 = disabled (the default): capacity is otherwise always dynamic, whatever the configured cabin class-mix percentages and the candidate's actual fuselage/cabin geometry produce, with no minimum.",
-        value: "L\u{00ed}mite m\u{00ed}nimo obligatorio sobre la capacidad de pasajeros resuelta por geometr\u{00ed}a: un candidato cuya mezcla de clases y geometr\u{00ed}a produzcan menos asientos que este n\u{00fa}mero se punt\u{00fa}a como no factible seg\u{00fa}n la pol\u{00ed}tica de restricciones de geometr\u{00ed}a configurada. 0 = desactivado (el valor por defecto): la capacidad es, por lo dem\u{00e1}s, siempre din\u{00e1}mica, sea cual sea el resultado de los porcentajes de mezcla de clases configurados y de la geometr\u{00ed}a real de fuselaje/cabina del candidato, sin m\u{00ed}nimo alguno.",
+        key: "Hard floor on the geometry-resolved passenger capacity: a candidate whose class-mix and geometry produce fewer than this many seats is infeasible. 0 = disabled (the default): capacity is otherwise always dynamic, whatever the configured cabin class-mix percentages and the candidate's actual fuselage/cabin geometry produce, with no minimum.",
+        value: "L\u{00ed}mite m\u{00ed}nimo obligatorio sobre la capacidad de pasajeros resuelta por geometr\u{00ed}a: un candidato cuya mezcla de clases y geometr\u{00ed}a produzcan menos asientos que este n\u{00fa}mero es no factible. 0 = desactivado (el valor por defecto): la capacidad es, por lo dem\u{00e1}s, siempre din\u{00e1}mica, sea cual sea el resultado de los porcentajes de mezcla de clases configurados y de la geometr\u{00ed}a real de fuselaje/cabina del candidato, sin m\u{00ed}nimo alguno.",
     },
 ];
 

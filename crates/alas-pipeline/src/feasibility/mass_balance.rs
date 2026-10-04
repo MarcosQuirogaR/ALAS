@@ -166,7 +166,12 @@ pub(super) fn assess_mass_balance(
     };
     let payload_items = payload_items(report);
     let capacity_kg = tanks.usable_capacity_kg();
-    let takeoff_fuel_kg = match tanks.loadable_fuel_kg(fuel_loading.analyzed_carried_fuel_kg) {
+    // The flown states follow the dispatched route; the sized design loading
+    // is the separate maximum-fuel state below.
+    let flown_fuel_kg = fuel_loading
+        .flown_carried_fuel_kg
+        .unwrap_or(fuel_loading.analyzed_carried_fuel_kg);
+    let takeoff_fuel_kg = match tanks.loadable_fuel_kg(flown_fuel_kg) {
         Ok(kg) => kg,
         Err(error) => {
             warn(
@@ -374,7 +379,7 @@ pub fn takeoff_mass_properties(
     } else {
         resolved_tanks
     };
-    let mass_basis_kg = report.analysis_takeoff_mass_kg(config.requirements.mtow_kg);
+    let mass_basis_kg = report.loaded_takeoff_mass_kg(config.requirements.mtow_kg);
     let zero_fuel_mass_kg = mass_basis_kg - masses.fuel;
     let fuel_kg = tanks
         .loadable_fuel_kg((mass_basis_kg - zero_fuel_mass_kg).max(0.0))

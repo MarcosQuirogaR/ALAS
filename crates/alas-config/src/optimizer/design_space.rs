@@ -11,6 +11,8 @@
 //! around it, and the window is recorded with the run so a "redesigned A320"
 //! can be traced back to the envelope that produced it.
 
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 
 use crate::design_variables::{DesignVariableSpec, DesignVector, SPECS};
@@ -143,6 +145,36 @@ pub struct DesignSpaceConfig {
         help = "Half-width of the search window around the reference Hicks-Henne bump amplitudes."
     )]
     pub reference_bump_half_width: f64,
+
+    /// Explicit clean-sheet start values, by design-variable name.
+    ///
+    /// Entries replace the derived (or preset) start of a clean-sheet run
+    /// variable by variable; other modes ignore them.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    #[config(skip)]
+    pub initial_design: BTreeMap<String, f64>,
+
+    /// Explicit clean-sheet search bounds, by design-variable name, as
+    /// `[lower, upper]` in the variable's own units.
+    ///
+    /// Entries replace the derived (or global) box of a clean-sheet run
+    /// variable by variable; the fuselage-length entry of a cabin-sized run
+    /// is the interval its length is solved in. Other modes ignore them.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    #[config(skip)]
+    pub bounds: BTreeMap<String, (f64, f64)>,
+
+    /// Whether a preset-less configuration is a clean-sheet brief whose
+    /// start, box, dependent geometry, cabin and exits are derived from it
+    /// (`alas_config::clean_sheet`). Loading a file without a preset marks it
+    /// true when the brief departs from the shipped reference aircraft's in
+    /// clean-sheet mode, and the mark is saved, so a reload keeps the
+    /// decision; a file may state it explicitly, an explicit false included,
+    /// which is kept. Unset (`None`) means undecided: a registered preset, the
+    /// reference brief, or a configuration built in code.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[config(skip)]
+    pub clean_sheet_brief: Option<bool>,
 }
 
 impl Default for DesignSpaceConfig {
@@ -158,6 +190,9 @@ impl Default for DesignSpaceConfig {
             reference_angle_half_width_deg: 3.0,
             reference_shift_half_width_m: 1.0,
             reference_bump_half_width: 0.002,
+            initial_design: BTreeMap::new(),
+            bounds: BTreeMap::new(),
+            clean_sheet_brief: None,
         }
     }
 }
@@ -270,7 +305,62 @@ impl DesignSpaceConfig {
                 return Err(format!("fixed variable '{name}' is not a design variable"));
             }
         }
+        self.validate_explicit_space()
+    }
+
+    /// Reject explicit start values and bounds that name no design variable,
+    /// are not finite, are inverted, or put a start outside its own bound.
+    fn validate_explicit_space(&self) -> Result<(), String> {
+        let known = |name: &str| SPECS.iter().any(|spec| spec.name == name);
+        for (name, value) in &self.initial_design {
+            if !known(name) || !value.is_finite() {
+                return Err(format!(
+                    "design space initial_design entry '{name}' must name a design variable and be finite"
+                ));
+            }
+        }
+        for (name, &(lower, upper)) in &self.bounds {
+            if !known(name) || !lower.is_finite() || !upper.is_finite() || lower > upper {
+                return Err(format!(
+                    "design space bounds entry '{name}' must name a design variable with finite lower <= upper"
+                ));
+            }
+            // The guardrails every registered aircraft's window respects
+            // bound an explicit box too.
+            if let Some(spec) = SPECS.iter().find(|spec| spec.name == name) {
+                if lower < spec.preset_lower || upper > spec.preset_upper {
+                    return Err(format!(
+                        "design space bounds entry '{name}' [{lower}, {upper}] leaves the design-variable guardrails [{}, {}]",
+                        spec.preset_lower, spec.preset_upper
+                    ));
+                }
+            }
+            if let Some(value) = self.initial_design.get(name) {
+                if *value < lower || *value > upper {
+                    return Err(format!(
+                        "design space initial_design entry '{name}' lies outside its explicit bounds"
+                    ));
+                }
+            }
+        }
         Ok(())
+    }
+
+    /// `design` with the explicit start values applied, and every variable
+    /// with an explicit bound clamped into it.
+    pub fn apply_explicit_start(&self, design: DesignVector) -> DesignVector {
+        let mut values = design.to_array();
+        for (index, spec) in SPECS.iter().enumerate() {
+            if let Some(value) = self.initial_design.get(spec.name) {
+                values[index] = *value;
+            }
+            if let Some(&(lower, upper)) = self.bounds.get(spec.name) {
+                if lower <= upper {
+                    values[index] = values[index].clamp(lower, upper);
+                }
+            }
+        }
+        DesignVector::from_array(&values).unwrap_or(design)
     }
 
     /// The per-variable envelope the search runs over, from `nominal`.

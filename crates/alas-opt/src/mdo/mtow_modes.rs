@@ -145,6 +145,20 @@ pub(crate) fn design_weights(
     declared_mtow_kg: f64,
     landing_floor_kg: Option<f64>,
 ) -> (&'static str, f64, f64) {
+    if plan.mode == MtowSizing::FixedRequirement {
+        let basis = config.mass_sizing_basis();
+        return match basis {
+            MassSizingBasis::FixedAircraft {
+                design_gross_mass_kg,
+                design_landing_mass_kg,
+            } => (basis.as_str(), design_gross_mass_kg, design_landing_mass_kg),
+            MassSizingBasis::Coupled => (
+                basis.as_str(),
+                declared_mtow_kg,
+                config.design_landing_mass_for(declared_mtow_kg),
+            ),
+        };
+    }
     if plan.requires_mission_sized_evaluation() {
         // The two design modes design the structure at the closure (unless
         // an explicit design gross mass pins it), so the label says the

@@ -396,6 +396,9 @@ pub struct FeasibilityReport {
     pub cg_envelope: CgEnvelopeAssessment,
     /// Typed hard model constraints, separate from public planning evidence.
     pub model_cg: Option<ModelCgEnvelopeAssessment>,
+    /// Design-envelope CG at capped maximum usable-fuel loading. Dispatch
+    /// telemetry and landing checks remain in [`Self::model_cg`].
+    pub design_model_cg: Option<ModelCgEnvelopeAssessment>,
     /// Fuel budget, capacity, actual load, takeoff mass, and mission burn.
     pub fuel_loading: FuelLoadingAssessment,
     /// Explicit cruise force-balance evidence from the flown mission.

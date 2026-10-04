@@ -217,6 +217,67 @@ fn the_frozen_step_count_meets_the_richardson_bound() {
     );
 }
 
+/// A frozen plan stores the fuel of its own fixed choices, which must
+/// replay at the planning mass and stay within the same error bound on a
+/// finer integration. The fixture polar is independent of optimizer output.
+// Coverage diagnostics keep explicitly rejected fixture loads visible.
+#[allow(clippy::print_stderr)]
+#[test]
+fn frozen_plans_replay_their_declared_fuel_and_converge_with_fixed_choices() {
+    for preset in alas_config::presets::registry() {
+        let (model, config) = preset_model(preset.name);
+        let range_m = 1_500_000.0;
+        let mut replayed = Vec::new();
+        for mass_fraction in [0.6, 0.75, 0.9] {
+            let mass_kg = mass_fraction * config.requirements.mtow_kg;
+            let plan = match model.freeze_plan(mass_kg, range_m, &CruiseAltitudePolicy::OptimumStep)
+            {
+                Ok(plan) => plan,
+                Err(FreezeError::Fuel(FuelModelError::NotConverged(reason)))
+                    if reason.contains("energy deficit")
+                        || reason.contains("speed schedule not attained") =>
+                {
+                    continue
+                }
+                Err(error) => panic!("{} at {mass_kg} kg freeze: {error}", preset.name),
+            };
+            assert!(plan.richardson_error_kg <= RICHARDSON_TOLERANCE * plan.trip_fuel_kg);
+            let frozen = model.clone().with_frozen_plan(plan.clone());
+            let flown = frozen
+                .fly_trip(mass_kg, range_m)
+                .unwrap_or_else(|error| panic!("{} replay: {error}", preset.name));
+            assert_eq!(flown.leg.fuel_kg.to_bits(), plan.trip_fuel_kg.to_bits());
+            assert_eq!(flown.step_positions.len(), plan.step_positions.len());
+            let reference = model
+                .clone()
+                .with_frozen_plan(FrozenMissionPlan {
+                    steps_per_segment: 128,
+                    ..plan
+                })
+                .fly_trip(mass_kg, range_m)
+                .unwrap_or_else(|error| panic!("{} reference: {error}", preset.name));
+            assert!(
+                (flown.leg.fuel_kg - reference.leg.fuel_kg).abs()
+                    <= RICHARDSON_TOLERANCE * reference.leg.fuel_kg,
+                "{} frozen {} kg against fixed-choice reference {} kg",
+                preset.name,
+                flown.leg.fuel_kg,
+                reference.leg.fuel_kg
+            );
+            replayed.push(mass_fraction);
+        }
+        assert!(
+            !replayed.is_empty(),
+            "{} has no flyable fixture load",
+            preset.name
+        );
+        eprintln!(
+            "{} validated fixed-plan mass fractions {replayed:?}",
+            preset.name
+        );
+    }
+}
+
 /// A frozen plan re-frozen twice at its own closure prices the dispatch
 /// within 0.1 % of fuel of the converged reference: the closure whose plan
 /// is re-frozen at its own takeoff mass until that mass stops moving. Each

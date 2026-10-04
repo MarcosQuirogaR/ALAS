@@ -36,9 +36,8 @@
 //! # Where these are enforced
 //!
 //! `alas_opt::mdo::residuals_geometry` turns them into named residuals in the
-//! Geometry family, so they follow that family's configured policy and the
-//! constraint-relaxation rules with every other geometry requirement. They
-//! are not a separate rejection path.
+//! Geometry family, enforcing the same hard-constraint rules as every other
+//! geometry requirement. They are not a separate rejection path.
 
 use serde::{Deserialize, Serialize};
 
@@ -228,7 +227,7 @@ pub struct PlausibilityLimits {
     /// by `geometry.wing.break_twist_deg` (0 to +2 degrees on the registered
     /// aircraft) and every root carries +2.0 to +4.5. The tip can therefore
     /// rise above the break while the wing as a whole is still washed out:
-    /// the A320-200 and A220-300 optimizer winners of the Phase 4 audit
+    /// the A320-200 and A220-300 optimizer winners of the plausibility audit
     /// reached +0.47 degrees of outboard wash-in that way, which the
     /// root-to-tip window alone cannot see.
     ///
@@ -427,6 +426,21 @@ mod tests {
             ..Default::default()
         };
         assert!(limits.validate().is_err());
+    }
+
+    #[test]
+    fn public_validation_rejects_invalid_plausibility_windows() {
+        for upper in [3.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            for enabled in [true, false] {
+                let mut config = crate::AlasConfig::default();
+                config.optimizer.plausibility.max_aspect_ratio = upper;
+                config.optimizer.plausibility.enabled = enabled;
+                assert!(crate::validation::validate(&config)
+                    .iter()
+                    .any(|issue| issue.field_path == "optimizer.plausibility"
+                        && issue.severity == crate::validation::Severity::Error));
+            }
+        }
     }
 
     #[test]

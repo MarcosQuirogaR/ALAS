@@ -110,6 +110,7 @@ fn resolved_gear_stations(
             x_mlg_m: fallback_x_mlg,
             main_gear_x_m: vec![fallback_x_mlg],
             source_scaled: false,
+            derived: false,
             resolution: alas_config::effective_main_gear_station(&[fallback_x_mlg], None),
         })
 }
@@ -208,7 +209,9 @@ pub(super) fn main_gear_station(
             gear_mass_centroid_z(ground_z, strut_length),
         ],
         extent_m: [0.0, 0.0, strut_length],
-        method: if !resolved.source_scaled {
+        method: if resolved.derived {
+            "candidate uniform MLG placement from loading-state moments"
+        } else if !resolved.source_scaled {
             "mlg_x_fraction_mac aft of MAC leading edge"
         } else {
             match outcome {

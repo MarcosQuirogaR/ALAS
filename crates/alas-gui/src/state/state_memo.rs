@@ -97,7 +97,15 @@ impl AppState {
                 return Some((**cached).clone());
             }
         }
-        let config: AlasConfig = serde_json::from_value(self.config_values.clone()).ok()?;
+        let config: AlasConfig = if self
+            .config_values
+            .pointer("/optimizer/objective/mtow_sizing")
+            .is_none()
+        {
+            AlasConfig::from_value(&self.config_values).ok()?
+        } else {
+            serde_json::from_value(self.config_values.clone()).ok()?
+        };
         *self.typed_config_memo.borrow_mut() = Some((fingerprint, Arc::new(config.clone())));
         Some(config)
     }

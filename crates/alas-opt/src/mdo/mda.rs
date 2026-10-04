@@ -20,8 +20,9 @@
 //! a plan frozen at the pass's takeoff mass, and the dispatch iteration
 //! starts from that mass.
 //!
-//! `MtowSizing::FixedRequirement` takes one pass: the takeoff mass is the
-//! requirement and the mission must fit under it. `MtowSizing::SizedByMission`
+//! `MtowSizing::FixedRequirement` takes one structural pass at the
+//! requirement; its physical takeoff fuel also respects tank volume and
+//! the mission must fit both limits. `MtowSizing::SizedByMission`
 //! and `MtowSizing::Unconstrained` both iterate this same fixed point,
 //! starting from the requirement value as the first pass's takeoff mass, but
 //! differ in what stays bound to that requirement afterwards:
@@ -50,11 +51,15 @@ use super::mission_model::{
     FreezeError, FrozenMissionPlan, SegmentMissionModel, MISSION_STEP_UNCONVERGED,
     SIZING_BUDGET_EXHAUSTED,
 };
-use super::trim::{trim_and_polar, TrimmedPolar};
+use super::trim::{CandidateVlmCache, TrimmedPolar};
 use super::types::CandidateFailure;
 
+mod iteration;
+mod trim;
 mod wing_box;
 use alas_mass::wingbox_feedback::ReferenceWingMass;
+use iteration::aitken;
+pub(crate) use trim::retrim_needed;
 pub(crate) use wing_box::PassWingBox;
 
 /// What the loop reads but never changes.
@@ -78,6 +83,8 @@ pub(crate) struct MdaContext<'a> {
     /// Whether the loop may re-trim; false when the polar was supplied by
     /// an external solver and must be held fixed.
     pub retrim_allowed: bool,
+    /// Whether drag-table construction may use the screening check set.
+    pub screening_drag_table: bool,
     /// Frozen empirical reference wing inventory for reference adaptation or
     /// the baseline sandbox. Clean-sheet runs leave this absent.
     pub structural_reference: Option<ReferenceWingMass>,
@@ -85,9 +92,13 @@ pub(crate) struct MdaContext<'a> {
     pub structural_feedback: alas_mass::wingbox_feedback::WingboxFeedback,
     /// Source and current-mass inventory completeness at the initial pass.
     pub structural_inventory_complete: bool,
-    /// The primary box of the latest pass, reused by a pass whose sizing
-    /// inputs are unchanged.
+    /// Primary box reused when the pass's sizing inputs are unchanged.
     pub wing_box: PassWingBox,
+    /// Exact lattice and wake work, independent of this pass's CG.
+    pub vlm_cache: CandidateVlmCache,
+    /// Centre of gravity the initial polar was trimmed at, m: the initial
+    /// state's own, or a reused trim's within the re-trim tolerance.
+    pub initial_trim_cg_x_m: f64,
 }
 
 /// The coupled state at one pass.
@@ -106,6 +117,8 @@ pub(crate) struct MdaClosure {
     pub sizing_iterations: usize,
     /// Trim solves after the first.
     pub retrim_count: usize,
+    /// Centre of gravity the final polar was trimmed at, m.
+    pub trim_cg_x_m: f64,
     /// Centre-of-gravity shift, percent MAC, between the last trim and the
     /// converged state.
     pub cg_shift_pct_mac: f64,
@@ -140,18 +153,6 @@ fn mass_coordinates_failure() -> CandidateFailure {
     CandidateFailure {
         reason: "mass_coordinates",
     }
-}
-
-/// Aitken delta-squared extrapolation of the fixed-point iterates
-/// `x0 -> x1 -> x2`, or `None` when the denominator vanishes or the
-/// estimate leaves `(0, ceiling]`.
-fn aitken(x0: f64, x1: f64, x2: f64, ceiling: f64) -> Option<f64> {
-    let denominator = (x2 - x1) - (x1 - x0);
-    if denominator.abs() < 1e-9 {
-        return None;
-    }
-    let estimate = x2 - (x2 - x1) * (x2 - x1) / denominator;
-    (estimate.is_finite() && estimate > 0.0 && estimate <= ceiling).then_some(estimate)
 }
 
 /// Re-evaluate the shared product state at one outer-loop takeoff mass.
@@ -239,22 +240,13 @@ fn evaluate_state_at_tow(
     // The residual shift that was accepted is reported through
     // `MdaClosure::cg_shift_pct_mac`, so a candidate never claims a polar it
     // did not solve at.
-    if context.retrim_allowed {
-        let tolerance_pct = config
-            .optimizer
-            .objective
-            .retrim_cg_tolerance_pct_mac
-            .max(0.0);
-        let mac = plane.c_ref.max(1e-9);
-        let cg_shift_pct_mac = (cg[0] - *cg_at_trim).abs() / mac * 100.0;
-        if cg_shift_pct_mac > tolerance_pct {
-            state.polar = trim_and_polar(config, plane, cg[0], context.dv, tow_k)?;
-            *cg_at_trim = cg[0];
-            *retrim_count += 1;
-            *model = model
-                .clone()
-                .with_cruise_drag(state.polar.drag.cruise_drag());
-        }
+    if context.retrim_allowed && retrim_needed(config, plane, cg[0], *cg_at_trim) {
+        state.polar = context.trim_at(plane, cg[0], tow_k)?;
+        *cg_at_trim = cg[0];
+        *retrim_count += 1;
+        *model = model
+            .clone()
+            .with_cruise_drag(state.polar.drag.cruise_drag());
     }
     Ok(inventory.is_complete())
 }
@@ -272,7 +264,12 @@ pub(crate) fn converge(
     // The plan's seed is the first pass's takeoff mass under every mode (see
     // the module doc comment). `FixedRequirement` takes exactly that one
     // pass; every mission-closed mode iterates it with the configured budget.
-    let seed = plan.seed_kg;
+    let seed = if plan.mode == alas_config::MtowSizing::FixedRequirement {
+        let (oew_kg, _) = oew_and_cg(&initial.masses, &initial.coords);
+        oew_kg + initial.masses.payload + initial.masses.fuel
+    } else {
+        plan.seed_kg
+    };
     let sizing_iterates = plan.iterates;
     let max_passes = if sizing_iterates {
         objective.sizing_max_iterations.max(1) as usize
@@ -306,7 +303,7 @@ pub(crate) fn converge(
     let mac = plane.c_ref.max(1e-9);
 
     let mut state = initial;
-    let mut cg_at_trim = state.cg[0];
+    let mut cg_at_trim = context.initial_trim_cg_x_m;
     let mut tow_k = seed;
     let mut iterates: Vec<f64> = vec![tow_k];
     let mut model = context.model.clone();
@@ -486,6 +483,7 @@ pub(crate) fn converge(
         state,
         sizing_iterations,
         retrim_count,
+        trim_cg_x_m: cg_at_trim,
         cg_shift_pct_mac,
         sizing_closed,
         takeoff_mass_settled,
@@ -494,27 +492,4 @@ pub(crate) fn converge(
         frozen_plan,
         plan_freezes,
     })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::aitken;
-
-    #[test]
-    fn aitken_reaches_the_fixed_point_of_a_linear_contraction_in_one_step() {
-        // x -> 0.25 x + 75 has the fixed point 100; three iterates from 0
-        // extrapolate to it exactly.
-        let g = |x: f64| 0.25 * x + 75.0;
-        let x0 = 0.0;
-        let x1 = g(x0);
-        let x2 = g(x1);
-        let estimate = aitken(x0, x1, x2, 1_000.0).unwrap_or_else(|| panic!("admissible"));
-        assert!((estimate - 100.0).abs() < 1e-9);
-    }
-
-    #[test]
-    fn a_stalled_or_out_of_range_extrapolation_is_declined() {
-        assert!(aitken(1.0, 1.0, 1.0, 10.0).is_none());
-        assert!(aitken(0.0, 10.0, 15.0, 12.0).is_none());
-    }
 }

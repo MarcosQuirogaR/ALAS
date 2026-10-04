@@ -190,9 +190,17 @@ pub(super) fn apply_load_case(
             });
         }
         LoadCaseSelection::PolicyClosure(case) => {
-            fuel_loading.analyzed_takeoff_mass_kg = takeoff_mass_kg;
-            fuel_loading.analyzed_carried_fuel_kg = takeoff_mass_kg - load_case.zero_fuel_mass_kg;
-            fuel_loading.carried_fuel_basis = CarriedFuelBasis::ReservePolicyClosure;
+            let flown_fuel_kg = takeoff_mass_kg - load_case.zero_fuel_mass_kg;
+            if fuel_loading.design_takeoff_loading.is_some() {
+                // Hard MTOW: the analyzed state stays the sized design
+                // loading, one closure with the report's sized takeoff mass;
+                // the route is flown at its own dispatch mass beside it.
+                fuel_loading.flown_carried_fuel_kg = Some(flown_fuel_kg);
+            } else {
+                fuel_loading.analyzed_takeoff_mass_kg = takeoff_mass_kg;
+                fuel_loading.analyzed_carried_fuel_kg = flown_fuel_kg;
+                fuel_loading.carried_fuel_basis = CarriedFuelBasis::ReservePolicyClosure;
+            }
             let outcome = if case.shortfall_kg > 0.0 {
                 match case.analytic.status {
                     DispatchStatus::TankLimited { .. } => DispatchOutcome::TankLimited,

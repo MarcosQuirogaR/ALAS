@@ -110,7 +110,7 @@ pub struct Pw127m568fModel {
     /// the typed `MaximumCruise` rating is a sea-level 2,132 shp, so this is
     /// `762 / (2 x 1,589.83 kW) = 0.239648 kg/kWh`; a caller mapping a
     /// catalogue entry writes the published flow here the same way. The
-    /// model no longer burns fuel from it: the fuel flow is
+    /// model does not burn fuel from it: the fuel flow is
     /// [`Self::psfc_reference_kg_kwh`] scaled by ambient temperature.
     /// [`Pw127m568fModel::fuel_validation`] multiplies it back by
     /// `2 x maximum_cruise_power_w` to recover the published flow and reports

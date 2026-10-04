@@ -205,8 +205,8 @@ rather than just expanded.
   ALAS that resolves a shock rather than correlating it.
 
 **Objective function**
-: The single number the optimizer minimises: efficiency, less a penalty for
-  every constraint the candidate violates.
+: The single mission quantity the optimizer minimises (block fuel by
+  default). Constraints are hard and are not folded into it.
 
 **SUAVE**
 : The mission simulation package ALAS uses to fly a design through a

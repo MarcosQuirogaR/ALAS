@@ -92,6 +92,7 @@ fn moved_wing_result(limited: bool) -> OptimizationResult {
         scope: alas_opt::SEARCH_SCOPE.to_owned(),
         baseline: Some(comparison),
         winner_history_row: Some(1),
+        evaluation_trace: Default::default(),
         baseline_clamped: false,
     };
     let mut result = OptimizationResult {
@@ -271,7 +272,7 @@ fn a_fallback_delivery_shows_the_delivered_candidates_own_values() {
     assert!((change - (8_800.0 - 9_000.0) / 9_000.0).abs() < 1e-12);
     let lines = summary.label_lines();
     assert_eq!(value(&lines, "Block fuel, result"), Some("8750 kg"));
-    assert!(value(&lines, "Objective, result")
+    assert!(value(&lines, "Block fuel [kg], result")
         .expect("objective line")
         .starts_with("8800.0000"));
 }
@@ -295,7 +296,7 @@ fn a_fallback_delivery_never_shows_the_rejected_finalists_values() {
         assert!(summary.baseline.is_none());
         let lines = summary.label_lines();
         assert_eq!(value(&lines, "Same-model baseline"), Some("unavailable"));
-        assert!(value(&lines, "Objective, result").is_none());
+        assert!(value(&lines, "Block fuel [kg], result").is_none());
     }
 }
 
@@ -364,7 +365,7 @@ fn a_constrained_start_is_labelled_as_such_and_a_preset_is_not() {
         OptimizerRunSummary::from_result(&moved_wing_result(false), &AlasConfig::default(), None);
     let preset = summary.label_lines();
     for label in [
-        "Objective, preset",
+        "Block fuel [kg], preset",
         "Block fuel, preset",
         "Trip fuel at reporting fidelity, preset",
     ] {
@@ -373,7 +374,10 @@ fn a_constrained_start_is_labelled_as_such_and_a_preset_is_not() {
     summary.baseline_constrained = true;
     let constrained = summary.label_lines();
     for (preset_label, label) in [
-        ("Objective, preset", "Objective, constrained start"),
+        (
+            "Block fuel [kg], preset",
+            "Block fuel [kg], constrained start",
+        ),
         ("Block fuel, preset", "Block fuel, constrained start"),
         (
             "Trip fuel at reporting fidelity, preset",

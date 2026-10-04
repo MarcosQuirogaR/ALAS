@@ -10,6 +10,102 @@ use alas_config::ConfigNode;
 use serde_json::json;
 
 #[test]
+fn optimizer_reset_changes_exactly_its_visible_leaves() {
+    fn visit(fields: &[alas_config::Field], prefix: &str, leaves: &mut Vec<String>) {
+        for field in fields {
+            let path = format!("{prefix}/{}", field.name);
+            match &field.entry {
+                alas_config::Entry::Node(node) => visit(&node.fields, &path, leaves),
+                alas_config::Entry::Leaf(_) => leaves.push(path),
+            }
+        }
+    }
+    let mut state = AppState::default();
+    let defaults = state.config_values.clone();
+    let page = nav::page("optimizer").unwrap();
+    let alas_config::Entry::Node(node) = &state.schema.field("optimizer").unwrap().entry else {
+        panic!("optimizer node")
+    };
+    let mut all = Vec::new();
+    visit(&node.fields, "/optimizer", &mut all);
+    let mut visible = Vec::new();
+    visit(
+        &super::placement::visible_fields(page, "optimizer", &node.fields),
+        "/optimizer",
+        &mut visible,
+    );
+    for path in &all {
+        if let Some(value) = state.config_values.pointer_mut(path) {
+            *value = json!("modified");
+        }
+    }
+    let before = state.config_values.clone();
+    reset_page_to_defaults(&mut state, page, "optimizer");
+    for path in all {
+        if visible.contains(&path) {
+            assert_eq!(
+                state.config_values.pointer(&path),
+                defaults.pointer(&path),
+                "{path}"
+            );
+        } else {
+            assert_eq!(
+                state.config_values.pointer(&path),
+                before.pointer(&path),
+                "{path}"
+            );
+        }
+    }
+}
+
+#[test]
+fn advanced_mass_reset_restores_its_mtow_controls_without_other_requirements_or_search_settings() {
+    for preset in ["A320-200", ""] {
+        let mut state = AppState::default();
+        state.config_values["preset"] = json!(preset);
+        state.config_values["requirements"]["mtow_kg"] = json!(123.0);
+        state.config_values["requirements"]["cruise_mach"] = json!(0.71);
+        state.config_values["optimizer"]["objective"]["mtow_sizing"] = json!("payload_adjusted");
+        state.config_values["optimizer"]["objective"]["mtow_target_kg"] = json!(456.0);
+        state.config_values["optimizer"]["objective"]["mtow_band_fraction"] = json!(0.1);
+        state.config_values["optimizer"]["objective"]["design_range_nmi"] = json!(321.0);
+        state.config_values["optimizer"]["objective"]["kind"] = json!("takeoff_mass");
+        let solver = state.config_values["optimizer"]["solver"].clone();
+        let expected = if preset.is_empty() {
+            alas_config::AlasConfig::default()
+        } else {
+            alas_config::AlasConfig::from_value(&json!({"preset": preset})).unwrap()
+        };
+        let page = nav::page("mass_advanced").unwrap();
+        reset_page_to_defaults(&mut state, page, "mass_model");
+        let result = state.typed_config().unwrap();
+        assert_eq!(result.requirements.mtow_kg, expected.requirements.mtow_kg);
+        assert_eq!(
+            result.optimizer.objective.mtow_sizing,
+            expected.optimizer.objective.mtow_sizing
+        );
+        assert_eq!(
+            result.optimizer.objective.mtow_target_kg,
+            expected.optimizer.objective.mtow_target_kg
+        );
+        assert_eq!(
+            result.optimizer.objective.mtow_band_fraction,
+            expected.optimizer.objective.mtow_band_fraction
+        );
+        assert_eq!(
+            result.optimizer.objective.design_range_nmi,
+            expected.optimizer.objective.design_range_nmi
+        );
+        assert_eq!(result.requirements.cruise_mach, 0.71);
+        assert_eq!(
+            state.config_values["optimizer"]["objective"]["kind"],
+            json!("takeoff_mass")
+        );
+        assert_eq!(state.config_values["optimizer"]["solver"], solver);
+    }
+}
+
+#[test]
 fn propulsion_reset_restores_only_its_relocated_mass_inputs() {
     let defaults = serde_json::to_value(alas_config::AlasConfig::default())
         .expect("default config serializes");

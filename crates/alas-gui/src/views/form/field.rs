@@ -114,7 +114,7 @@ pub(super) fn render_one(
                         // on the editor line of its row, not on the label line.
                         ui.add_space(label_row_height + ui.spacing().item_spacing.y);
                     }
-                    ui.horizontal(|ui| {
+                    ui.horizontal_wrapped(|ui| {
                         ui.add_enabled_ui(!readonly, |ui| {
                             changed = edit_leaf(
                                 ui,
@@ -135,8 +135,10 @@ pub(super) fn render_one(
                         // A fixed label-row height: the reset button appears
                         // only on modified fields and must not shift the row.
                         ui.set_min_height(label_row_height);
-                        ui.add(egui::Label::new(text).truncate())
-                            .on_hover_text(&help);
+                        // The marker and the reset glyph are placed first,
+                        // from the right edge; the label then truncates in
+                        // the width they leave, so a long label never pushes
+                        // them past the column.
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             // A framed reset glyph, not a bare ASCII arrow:
                             // `<-` rendered as dim body text beside the label
@@ -153,6 +155,13 @@ pub(super) fn render_one(
                                 changed = true;
                             }
                             modified_marker(ui, modified && !changed);
+                            ui.with_layout(
+                                egui::Layout::left_to_right(egui::Align::Center),
+                                |ui| {
+                                    ui.add(egui::Label::new(text).truncate())
+                                        .on_hover_text(&help);
+                                },
+                            );
                         });
                     });
                     ui.add_enabled_ui(!readonly, |ui| {

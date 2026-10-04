@@ -212,7 +212,11 @@ fn the_same_seed_reaches_the_same_winner_at_1_4_and_16_workers() {
 
 #[test]
 fn every_stage_respects_its_budget_and_a_time_limited_run_replays_exactly() {
-    let preset = "AVE";
+    // The test is about stage budgets and replay, so it needs a preset whose
+    // nominal passes the hard gate: the AVE nominal now fails the rotation
+    // forward-CG limit (a physical finding, see `mission_sized`), leaving a
+    // four-evaluation search nothing feasible to return.
+    let preset = "A320-200";
     let start = nominal(preset);
     let mut limited = reference_config(preset, 4);
     limited.optimizer.solver.screening.time_limit_s = 3.0;

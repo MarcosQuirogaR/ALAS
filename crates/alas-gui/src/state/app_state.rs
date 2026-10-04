@@ -11,6 +11,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use super::tools::apply_tool_preferences;
+pub(super) use super::tools::first_start_marker_gate;
 use super::types::*;
 use crate::feedback::ParameterFeedback;
 use crate::path_picker::PathPicker;
@@ -52,6 +53,8 @@ pub struct AppState {
     /// (a config clone, payload case load, fuselage sizing) except when the
     /// configuration or the design point actually changed.
     pub(crate) design_space_enforcement_memo: Option<(u64, u64)>,
+    /// Fingerprint of the clean-sheet brief the design space was last derived from.
+    pub(crate) clean_sheet_brief_fingerprint: Option<(u64, u64)>,
     /// Memo behind [`Self::cached_page_preview`]: a fingerprint of every
     /// input `crate::scene::build_page_preview` reads (config, design, the
     /// preview id, theme, language and that preview's camera), paired with
@@ -141,6 +144,8 @@ pub struct AppState {
     /// The design values on the form when `pipeline_result` was started; a
     /// later edit makes the run's report stale for the previews.
     pub pipeline_result_design_values: Option<BTreeMap<String, f64>>,
+    /// The form's configuration at run start, before the dispatch adjustments.
+    pub pipeline_result_form_config: Option<alas_config::AlasConfig>,
     /// Whether the user has manually changed a mission-profile phase.
     /// Route changes use this bit to switch from automatic regeneration to
     /// the explicit retain/regenerate prompt.
@@ -295,21 +300,6 @@ pub(crate) const ONBOARDING_MARKER_FILE: &str = "onboarding-seen";
 /// dismissed independently of each other.
 pub(crate) const EXTERNAL_TOOLS_INTRO_MARKER_FILE: &str = "external-tools-intro-seen";
 
-/// Whether `marker_path` is being seen here for the first time: if it is
-/// absent, it is created immediately (matching the "seen" semantics below,
-/// which flip on first display rather than on completion) and `true` is
-/// returned exactly once per marker file.
-pub(super) fn first_start_marker_gate(marker_path: &Path) -> bool {
-    if marker_path.exists() {
-        return false;
-    }
-    if let Some(parent) = marker_path.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-    let _ = std::fs::write(marker_path, b"1");
-    true
-}
-
 /// The maximum retained run-log lines. A long optimization emits one line per
 /// progress update; nobody scrolls back through thousands of superseded lines.
 pub(crate) const MAX_LOG_LINES: usize = 1500;
@@ -359,6 +349,7 @@ impl Default for AppState {
             config_values,
             typed_config_memo: std::cell::RefCell::new(None),
             design_space_enforcement_memo: None,
+            clean_sheet_brief_fingerprint: None,
             page_preview_cache: std::cell::RefCell::new(None),
             schema,
             active_preset: String::new(),
@@ -397,6 +388,7 @@ impl Default for AppState {
             pipeline_result: None,
             pipeline_result_complete: false,
             pipeline_result_design_values: None,
+            pipeline_result_form_config: None,
             mission_profile_manual_edit: false,
             mission_profile_route_signature: String::new(),
             mission_profile_regeneration_prompt: false,

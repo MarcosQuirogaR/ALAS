@@ -206,16 +206,27 @@ impl TrimmedDragTable {
     /// # Errors
     ///
     /// See [`DragTableError`].
+    #[cfg(test)]
     pub(crate) fn build(
         aero: &AeroAnalysis<'_>,
         design: &DesignTrim,
+    ) -> Result<Self, DragTableError> {
+        Self::build_with_check_set(aero, design, false)
+    }
+
+    /// Build with fewer independent checks only for screening. Any failed
+    /// check uses the full adaptive representation and its original bounds.
+    pub(crate) fn build_with_check_set(
+        aero: &AeroAnalysis<'_>,
+        design: &DesignTrim,
+        screening: bool,
     ) -> Result<Self, DragTableError> {
         let plane = aero.plane;
         let aspect_ratio = plane.b_ref * plane.b_ref / plane.s_ref;
         if !aspect_ratio.is_finite() || aspect_ratio <= 0.0 {
             return Err(DragTableError::NonPhysical("aspect ratio"));
         }
-        let (induced, induced_check) = induced_curve(aero, design)?;
+        let (induced, induced_check) = induced_curve(aero, design, screening)?;
         let mcrit_at_zero_cl = aero.korn_mach_numbers(0.0, None).1;
         let mcrit_per_cl = aero.korn_mach_numbers(1.0, None).1 - mcrit_at_zero_cl;
         let cl = cl_grid(design.cl_max_clean)?;

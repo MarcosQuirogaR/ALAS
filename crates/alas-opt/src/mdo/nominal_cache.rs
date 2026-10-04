@@ -29,6 +29,17 @@ pub(crate) fn config_key(config: &AlasConfig) -> (String, u64) {
     (config.preset.clone(), hasher.finish())
 }
 
+/// `config` with no candidate main-gear translation: the configuration of
+/// the registered aircraft, which has its published gear.
+fn without_placement(config: &AlasConfig) -> std::borrow::Cow<'_, AlasConfig> {
+    if config.landing_gear.derived_main_gear.is_none() {
+        return std::borrow::Cow::Borrowed(config);
+    }
+    let mut cleared = config.clone();
+    cleared.landing_gear.derived_main_gear = None;
+    std::borrow::Cow::Owned(cleared)
+}
+
 /// One key's value, resolved at most once.
 type Cell<T> = Arc<OnceLock<Option<T>>>;
 /// A lazily created, locked map from the configuration key.
@@ -53,11 +64,19 @@ impl<T: Copy> NominalCache<T> {
 
     /// The value cached for `config`, resolving it with `resolve` the first
     /// time that configuration is seen.
+    ///
+    /// The registered aircraft has its published gear: a candidate's solved
+    /// main-gear translation (`LandingGearConfig::derived_main_gear`) is
+    /// cleared before the configuration is keyed and before `resolve` sees
+    /// it, so every placed candidate shares the one nominal of its
+    /// configuration and none is compared with a nominal carrying its gear.
     pub(crate) fn get_or_resolve(
         &self,
         config: &AlasConfig,
-        resolve: impl FnOnce() -> Option<T>,
+        resolve: impl FnOnce(&AlasConfig) -> Option<T>,
     ) -> Option<T> {
+        let config = without_placement(config);
+        let config = config.as_ref();
         let key = config_key(config);
         let cell = Arc::clone(
             self.cells
@@ -78,7 +97,7 @@ impl<T: Copy> NominalCache<T> {
                     .entry(key)
                     .or_default() += 1;
             }
-            resolve()
+            resolve(config)
         })
     }
 
@@ -89,7 +108,7 @@ impl<T: Copy> NominalCache<T> {
             .get_or_init(Mutex::default)
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
-            .get(&config_key(config))
+            .get(&config_key(without_placement(config).as_ref()))
             .copied()
             .unwrap_or(0)
     }

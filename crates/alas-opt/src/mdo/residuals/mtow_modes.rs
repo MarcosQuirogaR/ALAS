@@ -9,7 +9,9 @@
 //! distance from `T`, so the search is not pulled toward the target and no
 //! fuel is added to reach it.
 
-use alas_config::{ConstraintPolicy, MtowPlan, MtowSizing};
+use crate::mdo::ResidualRole;
+
+use alas_config::{MtowPlan, MtowSizing};
 use alas_mass::dispatch::DispatchStatus;
 
 use super::super::offdesign::OffDesignFlight;
@@ -28,7 +30,7 @@ pub(crate) fn takeoff_mass_residuals(
     required_takeoff_mass_kg: f64,
     closed_takeoff_mass_kg: f64,
     ceiling_kg: f64,
-    policy: ConstraintPolicy,
+    role: ResidualRole,
 ) -> Vec<ConstraintResidual> {
     match (plan.mode, plan.upper_bound_kg, plan.lower_bound_kg) {
         (MtowSizing::MtowBand, Some(upper_kg), Some(lower_kg)) => vec![
@@ -39,7 +41,7 @@ pub(crate) fn takeoff_mass_residuals(
                 upper_kg,
                 "kg",
                 required_takeoff_mass_kg - upper_kg,
-                policy,
+                role,
             ),
             ConstraintResidual::scaled(
                 "mtow_band_lower",
@@ -48,7 +50,7 @@ pub(crate) fn takeoff_mass_residuals(
                 lower_kg,
                 "kg",
                 lower_kg - closed_takeoff_mass_kg,
-                policy,
+                role,
             ),
         ],
         (_, Some(_), _) => vec![ConstraintResidual::scaled(
@@ -58,21 +60,20 @@ pub(crate) fn takeoff_mass_residuals(
             ceiling_kg,
             "kg",
             required_takeoff_mass_kg - ceiling_kg,
-            policy,
+            role,
         )],
         _ => Vec::new(),
     }
 }
 
-/// The off-design route checks: reserve-inclusive takeoff fuel against the
-/// usable tank capacity, route payload against the derived design structural
+/// The off-design route checks: ramp fuel against the usable tank capacity, route payload against the derived design structural
 /// payload, and route takeoff mass against the closed MTOW.
 ///
 /// A route whose dispatch did not converge has no requirement to compare,
 /// so `offdesign_tow` is then reported as a failed boolean.
 pub(crate) fn offdesign_residuals(
     flight: &OffDesignFlight,
-    policy: ConstraintPolicy,
+    role: ResidualRole,
 ) -> Vec<ConstraintResidual> {
     let mut residuals = Vec::new();
     if !matches!(flight.dispatch.status, DispatchStatus::Converged) {
@@ -84,19 +85,22 @@ pub(crate) fn offdesign_residuals(
             "bool",
             1.0,
             1.0,
-            policy,
+            role,
         ));
         return residuals;
     }
     if flight.usable_capacity_kg.is_finite() {
+        // Taxi fuel is loaded at the ramp and occupies tank volume, as in
+        // the reporting dispatch's tank ceiling.
+        let ramp_fuel_kg = flight.dispatch.plan.ramp_fuel_kg();
         residuals.push(ConstraintResidual::scaled(
             "offdesign_fuel_capacity",
             Mass,
-            flight.takeoff_fuel_kg,
+            ramp_fuel_kg,
             flight.usable_capacity_kg,
             "kg",
-            flight.takeoff_fuel_kg - flight.usable_capacity_kg,
-            policy,
+            ramp_fuel_kg - flight.usable_capacity_kg,
+            role,
         ));
     }
     residuals.push(ConstraintResidual::scaled(
@@ -106,7 +110,7 @@ pub(crate) fn offdesign_residuals(
         flight.payload_limit_kg,
         "kg",
         flight.payload_kg - flight.payload_limit_kg,
-        policy,
+        role,
     ));
     residuals.push(ConstraintResidual::scaled(
         "offdesign_tow",
@@ -115,7 +119,7 @@ pub(crate) fn offdesign_residuals(
         flight.mtow_kg,
         "kg",
         flight.required_takeoff_mass_kg - flight.mtow_kg,
-        policy,
+        role,
     ));
     residuals
 }
@@ -125,7 +129,7 @@ pub(crate) fn plan_residuals(
     plan: &MtowPlan,
     sized: &SizedCandidate,
     ceiling_kg: f64,
-    policy: ConstraintPolicy,
+    role: ResidualRole,
 ) -> Vec<ConstraintResidual> {
     let required_takeoff_mass_kg =
         sized.dispatch.zero_fuel_mass_kg + sized.dispatch.plan.takeoff_fuel_kg();
@@ -134,10 +138,10 @@ pub(crate) fn plan_residuals(
         required_takeoff_mass_kg,
         sized.takeoff_mass_kg,
         ceiling_kg,
-        policy,
+        role,
     );
     if let Some(flight) = &sized.mtow.offdesign {
-        residuals.extend(offdesign_residuals(flight, policy));
+        residuals.extend(offdesign_residuals(flight, role));
     }
     residuals
 }
@@ -175,7 +179,7 @@ mod tests {
     fn the_band_residuals_change_sign_at_each_edge() {
         let plan = band_plan();
         let at = |mass_kg: f64| {
-            takeoff_mass_residuals(&plan, mass_kg, mass_kg, 105_000.0, ConstraintPolicy::Hard)
+            takeoff_mass_residuals(&plan, mass_kg, mass_kg, 105_000.0, ResidualRole::Constraint)
         };
         assert!(raw(&at(104_990.0), "mtow_band_upper") < 0.0);
         assert!(raw(&at(105_010.0), "mtow_band_upper") > 0.0);
@@ -193,7 +197,7 @@ mod tests {
     fn two_masses_inside_the_band_cost_the_same_so_nothing_pulls_toward_the_target() {
         let plan = band_plan();
         let total = |mass_kg: f64| -> f64 {
-            takeoff_mass_residuals(&plan, mass_kg, mass_kg, 105_000.0, ConstraintPolicy::Hard)
+            takeoff_mass_residuals(&plan, mass_kg, mass_kg, 105_000.0, ResidualRole::Constraint)
                 .iter()
                 .map(|residual| residual.normalized_violation)
                 .sum()
@@ -219,7 +223,7 @@ mod tests {
                 101_000.0,
                 100_000.0,
                 100_000.0,
-                ConstraintPolicy::Hard,
+                ResidualRole::Constraint,
             );
             assert_eq!(residuals.len(), expected, "{mode:?}");
             assert!(residuals

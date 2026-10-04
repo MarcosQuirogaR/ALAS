@@ -14,11 +14,13 @@
 //! # Stopping rules
 //!
 //! Each stage stops on its evaluation budget or its wall-clock limit,
-//! whichever comes first; the limit is checked only at generation (batch)
-//! boundaries, the first right after the initial population. A time-limited
-//! stage's stopping point depends on machine speed and worker count. With a
-//! time limit the refinement plans its evaluation budget, which sets its
-//! population schedule, from its measured throughput, at most
+//! whichever comes first. Native workers check the deadline before taking
+//! each candidate; at most one in-flight analysis per worker finishes after
+//! it. External evaluator adapters cooperate at batch boundaries because
+//! they own mutable process/session state. A time-limited stage's stopping
+//! point depends on machine speed and worker count. With a
+//! time limit the refinement plans its population schedule from its measured
+//! throughput, at most
 //! [`StageBudget::max_evaluations`]. The result records each stage's replay
 //! count (pre-gate-passed candidates, including repeats) and the
 //! refinement's planned budget; replaying with those counts
@@ -84,7 +86,7 @@ pub struct SolverSettings {
     #[config(
         nested,
         label = "Screening stage",
-        help = "Budget of the screening stage, which evaluates a space-filling sample of the design box plus the baseline with the screening model (the same physics as the full evaluation) and keeps a diverse elite to seed the refinement."
+        help = "Screening samples the design box and baseline to seed refinement with a diverse elite."
     )]
     pub screening: StageBudget,
 
@@ -94,7 +96,7 @@ pub struct SolverSettings {
     #[config(
         nested,
         label = "Refinement stage",
-        help = "Budget of the refinement stage, which runs differential evolution at full in-loop fidelity from the screening elite and the baseline. Its evaluation budget also sets the initial population and its reduction schedule. A reserved share of its evaluations and of its time limit pays for the reporting-fidelity verification of the finalists, the baseline analysis and the final analysis."
+        help = "Refinement searches from the screening elite and baseline. Its budget includes final verification and analysis."
     )]
     pub refinement: StageBudget,
 
@@ -141,6 +143,7 @@ pub struct SolverSettings {
     /// which designs are evaluated only through a stage that stops on its
     /// time limit. A positive value is used exactly as given.
     #[config(
+        zero_means = AllThreads,
         label = "Native compute worker threads",
         help = "Threads a generation's candidates are spread across; 0 uses every thread the machine reports. Each candidate runs on one thread. The product search evaluates deterministic whole-generation batches: with evaluation-budget stops or replay counts the result is bit-identical at any worker count. Time-limited: the stopping point depends on machine speed and worker count; replay with the recorded evaluation counts for a bit-identical result at any worker count. External evaluator adapters remain serial because they own mutable process/session state."
     )]
@@ -184,9 +187,11 @@ pub const MAXIMUM_STAGE_TIME_LIMIT_S: f64 = 300.0;
 /// capped separately ([`Self::max_pregate_rejects`]); a stage that reaches
 /// that cap stops as `pregate_exhausted`. The evaluation budget is the
 /// reproducible bound: a run that stops on it replays bit-identically from
-/// its seed at any worker count. The wall-clock limit is checked only at
-/// generation boundaries, the first right after the initial population, so a
-/// generation in flight always completes. A time-limited stop depends on
+/// its seed at any worker count. Native workers check the wall-clock deadline
+/// before each candidate dispatch, including the initial population and
+/// refinement pilot. At most one in-flight analysis per worker completes
+/// after the deadline. External evaluator adapters check between batches.
+/// A time-limited stop depends on
 /// machine speed and worker count; the run records the stage's replay count
 /// (pre-gate-passed candidates, including repeats) and, for the refinement,
 /// the budget it planned from its measured throughput. Setting
@@ -200,19 +205,19 @@ pub struct StageBudget {
     /// Largest number of analysed candidates: those that passed the
     /// design-vector pre-gate. Rejections do not count here.
     #[config(
-        label = "Evaluation budget",
+        label = "Evaluation ceiling",
         min = 1,
-        help = "Largest number of candidates this stage analyses. Candidates the design-vector pre-gate rejects in microseconds do not count here; they have their own cap. With a time limit the refinement plans its budget from its measured throughput, at most this ceiling; a run that stops on evaluations only replays exactly from its seed."
+        help = "Maximum analysed candidates in this stage; pre-gate rejections do not count. Time-limited refinement may plan a smaller budget."
     )]
     pub max_evaluations: i64,
 
-    /// Wall-clock limit in seconds, checked between generations.
+    /// Wall-clock limit in seconds, checked before each native candidate dispatch.
     #[config(
-        label = "Time limit",
+        label = "Time limit [s]",
         unit = "s",
         min = 1.0,
         max = 300.0,
-        help = "Wall-clock limit of this stage, at most 300 s. It is checked only at generation boundaries, the first right after the initial population, so a generation in flight always finishes. Time-limited: the stopping point depends on machine speed and worker count; replay with the recorded evaluation counts for a bit-identical result at any worker count."
+        help = "Elapsed-time limit [s], at most 300 s; checked between generations, so a running generation finishes. Ignored when stopping on evaluations only."
     )]
     pub time_limit_s: f64,
 
@@ -329,16 +334,11 @@ impl StageBudget {
     }
 }
 
-/// Default evaluation ceiling of both stages: a ceiling the time limits
-/// reach first, not a budget. Measured on a 32-thread machine: 0.3 s to
-/// 1.5 s of lane time per coupled analysis and about 8 analyses per second
-/// in aggregate, so even the 300 s maximum limit affords about 2 400; the
-/// ceiling binds only above about 67 analyses per second at 300 s (167 at
-/// the 120 s default), some eight times the measured throughput
-/// (engineering choice). With a time limit the refinement plans its own
-/// budget below it from the screening throughput. A run on evaluation
-/// budgets only should set its budgets explicitly: at the measured rate this
-/// ceiling is about 40 minutes per stage.
+/// Default evaluation ceiling of both stages (engineering choice). Stage
+/// clocks bound interactive runs independently of machine throughput.
+/// Refinement plans its population schedule below this ceiling from its
+/// measured full-fidelity cost; that estimate never reduces the stopping
+/// ceiling. Evaluation-only runs should set their effort explicitly.
 const DEFAULT_EVALUATION_CEILING: i64 = 20_000;
 
 /// Screening default: the 30 s limit is the interactive budget and ends the
@@ -505,6 +505,21 @@ mod tests {
             Entry::Leaf(leaf) => leaf.clone(),
             Entry::Node(_) => panic!("{name} is not a group"),
         }
+    }
+
+    #[test]
+    fn only_the_worker_count_declares_zero_as_all_threads() {
+        let settings = SolverSettings::default();
+        assert_eq!(
+            leaf("workers", &settings).zero_means,
+            Some(crate::ZeroMeaning::AllThreads)
+        );
+        assert_eq!(
+            leaf("convergence_stagnation_generations", &settings).zero_means,
+            None
+        );
+        let schema = serde_json::to_value(settings.schema()).unwrap();
+        assert!(!schema.to_string().contains("zero_means"));
     }
 
     #[test]

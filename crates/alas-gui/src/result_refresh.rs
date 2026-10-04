@@ -17,6 +17,7 @@ impl AppState {
     pub fn set_completed_pipeline_result(&mut self, result: alas_pipeline::PipelineResult) {
         self.pipeline_result = Some(result);
         self.pipeline_result_design_values = Some(self.design_values.clone());
+        self.pipeline_result_form_config = self.typed_config();
         self.pipeline_result_complete = true;
     }
 

@@ -3,7 +3,7 @@
 
 //! Finite typed residual construction and normalized constraint values.
 use super::{ConstraintFamily, ConstraintResidual, NUMERICAL_SLACK};
-use alas_config::ConstraintPolicy;
+use crate::mdo::ResidualRole;
 
 impl ConstraintResidual {
     /// Build a residual whose normalized violation is `raw_residual` scaled
@@ -18,7 +18,7 @@ impl ConstraintResidual {
         limit: f64,
         unit: &'static str,
         raw_residual: f64,
-        policy: ConstraintPolicy,
+        role: ResidualRole,
     ) -> Self {
         let scale = limit.abs().max(1e-9);
         let normalized_violation = if [actual, limit, raw_residual].iter().all(|v| v.is_finite()) {
@@ -34,7 +34,8 @@ impl ConstraintResidual {
             unit,
             raw_residual,
             normalized_violation,
-            policy,
+            role,
+            detail: None,
         }
     }
 
@@ -50,7 +51,7 @@ impl ConstraintResidual {
         unit: &'static str,
         raw_residual: f64,
         normalized_violation: f64,
-        policy: ConstraintPolicy,
+        role: ResidualRole,
     ) -> Self {
         let normalized_violation = if [actual, limit, raw_residual, normalized_violation]
             .iter()
@@ -69,13 +70,58 @@ impl ConstraintResidual {
             unit,
             raw_residual,
             normalized_violation,
-            policy,
+            role,
+            detail: None,
         }
+    }
+
+    /// Attach reportable failure context without changing the constraint.
+    pub(crate) fn with_detail(mut self, detail: impl Into<String>) -> Self {
+        self.detail = Some(detail.into());
+        self
     }
 
     /// Whether this residual is on the infeasible side of its limit.
     #[must_use]
     pub fn violated(&self) -> bool {
         !self.normalized_violation.is_finite() || self.normalized_violation > 0.0
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn diagnostic_detail_preserves_the_hard_residual() {
+        let original = ConstraintResidual::direct(
+            "model_unavailable",
+            ConstraintFamily::Structure,
+            1.0,
+            0.0,
+            "bool",
+            1.0,
+            1.0,
+            ResidualRole::Constraint,
+        );
+        assert!(original.detail.is_none());
+        let detailed = original
+            .clone()
+            .with_detail("mesh construction: invalid topology");
+        assert_eq!(detailed.id, original.id);
+        assert_eq!(detailed.role, original.role);
+        assert_eq!(
+            detailed.raw_residual.to_bits(),
+            original.raw_residual.to_bits()
+        );
+        assert_eq!(
+            detailed.normalized_violation.to_bits(),
+            original.normalized_violation.to_bits()
+        );
+        assert!(detailed.violated());
+        assert_eq!(
+            detailed.detail.as_deref(),
+            Some("mesh construction: invalid topology")
+        );
     }
 }

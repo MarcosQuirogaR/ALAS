@@ -167,7 +167,7 @@ pub fn figure_engine_designer_preview(config: &AlasConfig, theme: Option<&str>) 
 }
 
 /// Text lines for the on-design cycle summary panel. `verbose` retains the
-/// report-summary option for the fuel-air-ratio line; the compact editor now
+/// report-summary option for the fuel-air-ratio line; the compact editor
 /// shows the thermodynamic path instead of duplicating this text panel.
 ///
 /// Upstream's docstring says `verbose = False` also drops "the

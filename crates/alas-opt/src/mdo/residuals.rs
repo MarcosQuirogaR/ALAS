@@ -3,14 +3,13 @@
 
 //! Turning a sized candidate into the typed residual table.
 //!
-//! Each family is independent: a family whose policy is
-//! [`ConstraintPolicy::Off`] contributes no residuals at all, and every
-//! other family is evaluated the same way regardless of the others'
-//! policies. The mass and balance families are evaluated here; the
+//! Every requirement family is evaluated with hard constraints. The mass and balance families are evaluated here; the
 //! performance and geometry families are large enough on their own that they
 //! live in `mdo::residuals_performance` and `mdo::residuals_geometry`.
 
-use alas_config::{AlasConfig, ConstraintPolicy, ObjectiveWeights};
+use crate::mdo::ResidualRole;
+
+use alas_config::{AlasConfig, ObjectiveWeights};
 
 use crate::envelope::{ModelCgConstraint, ModelCgConstraintAssessment, ModelCgLoadingAssessment};
 
@@ -24,13 +23,19 @@ use super::types::ConstraintResidual;
 mod balance_ledger;
 #[cfg(test)]
 mod critical_tests;
+mod declared_fuel;
 #[cfg(test)]
 mod declared_fuel_tests;
+pub(super) mod gear_placement;
 mod mtow_modes;
+mod public_planning;
 mod relative_balance;
 #[cfg(test)]
 mod relative_tests;
 
+#[cfg(test)]
+use declared_fuel::NOMINAL_TANK_CAPACITY_KG;
+use declared_fuel::{nominal_tank_capacity_kg, published_fuel};
 pub use relative_balance::reporting_relative_balance;
 
 /// Every requirement family's residuals for one sized candidate.
@@ -41,7 +46,6 @@ pub(crate) fn build(
     target_num_passengers: i64,
     target_cargo_payload_kg: f64,
 ) -> Vec<ConstraintResidual> {
-    let objective = &config.optimizer.objective;
     let mut residuals = Vec::new();
     // Loads use the sized closure mass in every mode, the same binding the
     // pipeline gives the final report and its structural stage; a registered
@@ -56,85 +60,60 @@ pub(crate) fn build(
         outcome.masses.wing,
     ));
     residuals.extend(mass_residuals(outcome, config));
-    residuals.extend(balance_residuals(
-        outcome,
-        config,
-        objective.balance_constraints,
-    ));
+    residuals.extend(balance_residuals(outcome, config, ResidualRole::Constraint));
+    residuals.extend(public_planning::residuals(outcome, config));
     residuals.extend(performance_residuals(
         outcome,
         config,
-        objective.performance_constraints,
+        ResidualRole::Constraint,
     ));
     residuals.extend(geometry_residuals(
         outcome,
         config,
         weights,
-        objective.geometry_constraints,
+        ResidualRole::Constraint,
         target_num_passengers,
         target_cargo_payload_kg,
     ));
-    residuals.extend(layout_residuals(
-        outcome,
-        config,
-        objective.geometry_constraints,
-    ));
+    residuals.extend(layout_residuals(outcome, config, ResidualRole::Constraint));
     residuals.extend(super::residuals_buffet::buffet_residuals(
         outcome,
         config,
-        objective.performance_constraints,
+        ResidualRole::Constraint,
     ));
     residuals
 }
 
-/// The published usable fuel mass of the registered aircraft a reference
-/// adaptation redesigns, kg, or `None` in any other mode or when the preset
-/// carries no published figure. A clean-sheet study has no such requirement,
-/// and the working-default FLOPS capacity is a placeholder, not a source.
-fn published_fuel(config: &AlasConfig) -> Option<(Option<f64>, Option<f64>)> {
-    if config.optimizer.design_space.mode != alas_config::DesignMode::ReferenceAdaptation {
-        return None;
-    }
-    let reference = &alas_config::presets::get(&config.preset).ok()?.reference;
-    let positive = |v: Option<f64>| v.filter(|x| x.is_finite() && *x > 0.0);
-    Some((
-        positive(reference.usable_fuel_mass_kg),
-        positive(reference.usable_fuel_volume_l),
-    ))
-}
-
-/// Modelled usable tank capacity of the registered preset design, kg, for a
-/// reference adaptation; `None` in any other mode or when it cannot be
-/// resolved. Resolved once per complete configuration
-/// ([`super::nominal_cache`]): geometry, structures, tank declarations and
-/// fuel density all move it.
-fn nominal_tank_capacity_kg(config: &AlasConfig) -> Option<f64> {
-    published_fuel(config)?;
-    NOMINAL_TANK_CAPACITY_KG.get_or_resolve(config, || {
-        let design = alas_config::presets::get(&config.preset)
-            .ok()?
-            .design_vector;
-        let plane = alas_geom::builder::AircraftBuilder::new(Some(config.geometry.clone()))
-            .build(Some(&design), false)
-            .ok()?;
-        super::tanks::tank_capacity_kg(config, &plane, &design)
-    })
-}
-
-/// The cache of [`nominal_tank_capacity_kg`].
-static NOMINAL_TANK_CAPACITY_KG: super::nominal_cache::NominalCache<f64> =
-    super::nominal_cache::NominalCache::new();
-
 /// The fuel-capacity, takeoff-mass-ceiling, landing-mass and sizing-closure
 /// residuals.
 fn mass_residuals(outcome: &SizingOutcome, config: &AlasConfig) -> Vec<ConstraintResidual> {
-    let objective = &config.optimizer.objective;
-    let policy = objective.mass_constraints;
-    if policy == ConstraintPolicy::Off {
-        return Vec::new();
-    }
+    let role = ResidualRole::Constraint;
     let sized = &outcome.sized;
     let mut residuals = Vec::new();
+
+    if let Some(loading) = sized.takeoff_loading {
+        residuals.push(ConstraintResidual::scaled(
+            "takeoff_mtow_margin",
+            Mass,
+            loading.takeoff_mass_kg,
+            outcome.mtow_ceiling,
+            "kg",
+            -loading.mtow_margin_kg,
+            ResidualRole::Diagnostic,
+        ));
+        let mut volume = ConstraintResidual::direct(
+            "takeoff_volume_limited",
+            Mass,
+            f64::from(loading.status == alas_mass::loading::MtowFuelLoadingStatus::VolumeLimited),
+            0.0,
+            "bool",
+            0.0,
+            0.0,
+            ResidualRole::Diagnostic,
+        );
+        volume.detail = Some(loading.status.as_str().to_owned());
+        residuals.push(volume);
+    }
 
     // The clean-sheet reconciliation currently has an explicit primary box
     // and Torenbeek high-lift/spoiler inventory, while joints, actuators,
@@ -154,7 +133,7 @@ fn mass_residuals(outcome: &SizingOutcome, config: &AlasConfig) -> Vec<Constrain
             "bool",
             1.0,
             1.0,
-            policy,
+            role,
         ));
     }
 
@@ -166,7 +145,7 @@ fn mass_residuals(outcome: &SizingOutcome, config: &AlasConfig) -> Vec<Constrain
             sized.usable_capacity_kg,
             "kg",
             sized.ramp_fuel_kg - sized.usable_capacity_kg,
-            policy,
+            role,
         ));
     } else {
         residuals.push(ConstraintResidual::direct(
@@ -177,7 +156,7 @@ fn mass_residuals(outcome: &SizingOutcome, config: &AlasConfig) -> Vec<Constrain
             "bool",
             1.0,
             1.0,
-            policy,
+            role,
         ));
     }
 
@@ -207,7 +186,7 @@ fn mass_residuals(outcome: &SizingOutcome, config: &AlasConfig) -> Vec<Constrain
             required_kg,
             "kg",
             required_kg - capacity_kg,
-            policy,
+            role,
         ));
         // Published figures, for context only; never ranked.
         if let Some(published) = published_fuel(config) {
@@ -219,7 +198,7 @@ fn mass_residuals(outcome: &SizingOutcome, config: &AlasConfig) -> Vec<Constrain
                     kg,
                     "kg",
                     kg - capacity_kg,
-                    ConstraintPolicy::Diagnostic,
+                    ResidualRole::Diagnostic,
                 ));
             }
             if let Some(litres) = published.1 {
@@ -233,7 +212,7 @@ fn mass_residuals(outcome: &SizingOutcome, config: &AlasConfig) -> Vec<Constrain
                     litres,
                     "L",
                     litres - modelled_l,
-                    ConstraintPolicy::Diagnostic,
+                    ResidualRole::Diagnostic,
                 ));
             }
         }
@@ -244,13 +223,13 @@ fn mass_residuals(outcome: &SizingOutcome, config: &AlasConfig) -> Vec<Constrain
     // pair for `MtowBand`, and nothing for `Unconstrained` and
     // `PayloadAdjusted`, which declare no ceiling (a residual against the
     // seed would reject every closure above it under the default hard
-    // policy, defeating the mode). A design-mission closure adds the
+    // role, defeating the mode). A design-mission closure adds the
     // off-design route checks.
     residuals.extend(mtow_modes::plan_residuals(
         &outcome.plan,
         sized,
         outcome.mtow_ceiling,
-        policy,
+        role,
     ));
 
     // The landing-mass limit is the sizing basis's own `design_landing_mass_kg`
@@ -268,7 +247,7 @@ fn mass_residuals(outcome: &SizingOutcome, config: &AlasConfig) -> Vec<Constrain
         mlw_kg,
         "kg",
         sized.dispatch.destination_landing_mass_kg - mlw_kg,
-        policy,
+        role,
     ));
 
     match &sized.dispatch.status {
@@ -284,7 +263,7 @@ fn mass_residuals(outcome: &SizingOutcome, config: &AlasConfig) -> Vec<Constrain
                 outcome.mtow_ceiling,
                 "kg",
                 *shortfall_kg,
-                policy,
+                role,
             ));
         }
         alas_mass::dispatch::DispatchStatus::TankLimited { shortfall_kg } => {
@@ -297,7 +276,7 @@ fn mass_residuals(outcome: &SizingOutcome, config: &AlasConfig) -> Vec<Constrain
                     capacity,
                     "kg",
                     *shortfall_kg,
-                    policy,
+                    role,
                 )
             } else {
                 ConstraintResidual::direct(
@@ -308,7 +287,7 @@ fn mass_residuals(outcome: &SizingOutcome, config: &AlasConfig) -> Vec<Constrain
                     "bool",
                     1.0,
                     1.0,
-                    policy,
+                    role,
                 )
             });
         }
@@ -317,10 +296,10 @@ fn mass_residuals(outcome: &SizingOutcome, config: &AlasConfig) -> Vec<Constrain
                 "dispatch_not_converged",
                 Mass,
                 *last_change_kg,
-                objective.sizing_tolerance_kg,
+                config.optimizer.objective.sizing_tolerance_kg,
                 "kg",
                 last_change_kg.abs(),
-                policy,
+                role,
             ));
         }
         alas_mass::dispatch::DispatchStatus::ModelFailed(_) => {
@@ -332,7 +311,7 @@ fn mass_residuals(outcome: &SizingOutcome, config: &AlasConfig) -> Vec<Constrain
                 "bool",
                 1.0,
                 1.0,
-                policy,
+                role,
             ));
         }
     }
@@ -346,7 +325,7 @@ fn mass_residuals(outcome: &SizingOutcome, config: &AlasConfig) -> Vec<Constrain
         "bool",
         not_closed,
         not_closed,
-        policy,
+        role,
     ));
 
     residuals
@@ -401,48 +380,73 @@ const BALANCE_CONSTRAINTS: [(&str, ModelCgConstraint, bool); 9] = [
 fn balance_residuals(
     outcome: &SizingOutcome,
     config: &AlasConfig,
-    policy: ConstraintPolicy,
+    role: ResidualRole,
 ) -> Vec<ConstraintResidual> {
-    if policy == ConstraintPolicy::Off {
-        return Vec::new();
-    }
-    let assessment = relative_balance::assess(outcome, config);
-    let Ok(assessment) = assessment else {
-        tracing::debug!(error = ?assessment.err(), "candidate item-level CG assessment unavailable");
-        return vec![ConstraintResidual::direct(
-            "cg_model_error",
-            Balance,
-            1.0,
-            0.0,
-            "bool",
-            1.0,
-            1.0,
-            policy,
-        )];
+    let (assessment, flown) = match relative_balance::assess_states(outcome, config) {
+        Ok(assessments) => assessments,
+        Err(error) => {
+            tracing::debug!(error = %error, "candidate item-level CG assessment unavailable");
+            return vec![ConstraintResidual::direct(
+                "cg_model_error",
+                Balance,
+                1.0,
+                0.0,
+                "bool",
+                1.0,
+                1.0,
+                role,
+            )
+            .with_detail(error)];
+        }
     };
     // Hard, preset-anchored companions of the two diagnostic residuals below.
-    let mut residuals = relative_balance::residuals(&assessment, config, policy);
+    // They compare design loadings, as the reporting guard does.
+    let mut residuals = relative_balance::residuals(&assessment, config, role);
+    // The absolute constraints hold in every state the reporting verdict
+    // gates: the design loading and the dispatched route's takeoff and
+    // landing.
+    let states: Vec<(&str, ModelCgLoadingAssessment)> = assessment
+        .loading_states
+        .into_iter()
+        .map(|state| ("design", state))
+        .chain(
+            flown
+                .into_iter()
+                .flat_map(|flown| flown.loading_states)
+                .map(|state| ("flown", state)),
+        )
+        .collect();
     residuals.extend(
         BALANCE_CONSTRAINTS
             .iter()
             .filter_map(|&(id, constraint, is_lower_bound)| {
-                worst_by_constraint(&assessment.loading_states, constraint).map(|worst| {
-                    let raw_residual = if is_lower_bound {
-                        worst.limit - worst.actual
-                    } else {
-                        worst.actual - worst.limit
-                    };
-                    // Diagnostic constraints (`ModelCgConstraint::is_diagnostic`:
-                    // the configured CG range, and tail scrape until the aft
-                    // fuselage contour is validated) are reported and visible to
-                    // the relaxation review but never reject a candidate, whatever the
-                    // Balance family policy -- unless the family is `Off`, which
-                    // already short-circuits above.
-                    let residual_policy = if constraint.is_diagnostic() {
-                        ConstraintPolicy::Diagnostic
-                    } else {
-                        policy
-                    };
+                let (loading, state, worst) = states
+                    .iter()
+                    .flat_map(|(loading, state)| {
+                        state
+                            .constraints
+                            .iter()
+                            .filter(move |candidate| candidate.constraint == constraint)
+                            .map(move |candidate| (*loading, state.state, *candidate))
+                    })
+                    .max_by(|a, b| {
+                        a.2.normalized_exceedance
+                            .total_cmp(&b.2.normalized_exceedance)
+                    })?;
+                let raw_residual = if is_lower_bound {
+                    worst.limit - worst.actual
+                } else {
+                    worst.actual - worst.limit
+                };
+                // Unvalidated CG-range and tail-scrape measurements are diagnostics.
+                let residual_policy = if constraint.is_diagnostic() {
+                    ResidualRole::Diagnostic
+                } else {
+                    role
+                };
+                // The governing loading and state, so a reader can match the
+                // residual to the report's own state.
+                Some(
                     ConstraintResidual::direct(
                         id,
                         Balance,
@@ -453,7 +457,8 @@ fn balance_residuals(
                         worst.normalized_exceedance,
                         residual_policy,
                     )
-                })
+                    .with_detail(format!("{loading} {}", state.label())),
+                )
             }),
     );
     residuals

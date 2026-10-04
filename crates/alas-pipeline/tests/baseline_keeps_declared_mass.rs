@@ -57,6 +57,21 @@ fn assert_declared_basis(report: &AnalysisReport, declared_mtow_kg: f64, what: &
             "{what}: mass basis {basis} kg vs declared {declared_mtow_kg} kg"
         );
     }
+    // The fuel the report's masses carry is loaded to the usable tanks: the
+    // loaded takeoff mass is MTOW unless the tanks cap it, and then the
+    // report flags it as volume-limited with the shortfall below MTOW.
+    let summary = &report.geometry_summary;
+    let loaded_kg = report.loaded_takeoff_mass_kg(declared_mtow_kg);
+    if summary.get("takeoff_volume_limited").copied() == Some(1.0) {
+        let margin_kg = summary["takeoff_mtow_margin_kg"];
+        assert!(margin_kg > 0.0, "{what}: volume-limited without a margin");
+        assert!(
+            (loaded_kg - (declared_mtow_kg - margin_kg)).abs() < 1.0e-6,
+            "{what}"
+        );
+    } else {
+        assert!((loaded_kg - declared_mtow_kg).abs() < 1.0e-6, "{what}");
+    }
 }
 
 #[test]

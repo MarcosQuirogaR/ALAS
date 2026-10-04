@@ -69,7 +69,10 @@ fn main() {
 
 fn dump(name: &str) -> Result<Value, String> {
     let preset = presets::get(name).map_err(|e| e.to_string())?;
-    let config = AlasConfig::from_value(&json!({ "preset": name })).map_err(|e| e.to_string())?;
+    let mut config =
+        AlasConfig::from_value(&json!({ "preset": name })).map_err(|e| e.to_string())?;
+    config.structures.run_nastran = false;
+    config.structures.run_patran_export = false;
     let dv = &preset.design_vector;
 
     let plane = AircraftBuilder::new(Some(config.geometry.clone()))

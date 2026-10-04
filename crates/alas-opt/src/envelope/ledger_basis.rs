@@ -11,6 +11,9 @@
 use alas_config::{AlasConfig, MacFrame};
 use alas_geom::aircraft::airplane::Airplane;
 
+use super::rotation::{
+    pitch_radius_of_gyration_m, rotation_pitch_acceleration_deg_s2, rotation_tail_lift,
+};
 use super::rotation_thrust::{rotation_lift_coefficient, RotationThrustModel};
 use super::support::{
     horizontal_tail_ac_x_m, tail_area_ratio, tail_ground_effect_factor, ROTATION_CM_AC_WB_TAKEOFF,
@@ -27,8 +30,8 @@ pub(super) fn registered_mrw_kg(config: &AlasConfig) -> Option<f64> {
         .and_then(|preset| preset.reference.mrw_kg)
 }
 
-/// The minimum static nose-gear load fraction at `mass_kg`: the registered
-/// preset's published aft-CG gear-load split
+/// The minimum static nose-gear load fraction at `mass_kg`, the state's own
+/// weight: the registered preset's published aft-CG nose share against weight
 /// ([`alas_config::PublishedAftCgNoseLoad::minimum_nose_gear_fraction`]) when
 /// it has one, else the class default `mass_model.pct_load_nlg_min`. A
 /// clean-sheet preset has no published split and keeps the class default.
@@ -59,10 +62,18 @@ pub(super) fn registered_aft_cg_nose_load(
 /// basis built them. The list must contain an
 /// [`ModelCgLoadingState::AnalyzedTakeoff`] state and may carry an
 /// [`ModelCgLoadingState::AnalyzedLanding`] state.
+///
+/// `takeoff_pitch_inertia_kg_m2` is the mass ledger's pitch moment of
+/// inertia about the analyzed-takeoff centre of gravity, kg m^2; `NaN` when
+/// no ledger exists, which selects Raymer's radius of gyration
+/// (`rotation::pitch_radius_of_gyration_m`). Every state uses the takeoff
+/// radius of gyration with its own mass; only the takeoff state is gated by
+/// rotation, so the other states' rotation boundaries are diagnostics.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn assess_model_cg_envelope_from_states(
     plane: &Airplane,
     states: Vec<(ModelCgLoadingState, f64, f64, f64)>,
+    takeoff_pitch_inertia_kg_m2: f64,
     cg_x: f64,
     x_np: f64,
     critical_x_np: f64,
@@ -198,6 +209,17 @@ pub(super) fn assess_model_cg_envelope_from_states(
     let tail_ground_effect_factor_val = tail_ground_effect_factor(plane, ground_z_m);
     let cl_ground_attitude =
         config.performance.cl_max_to * config.landing_gear.cl_ground_attitude_frac_of_cl_max_to;
+    let rotation_tail_lift_coefficient =
+        rotation_tail_lift(plane, config, ground_z_m, cl_ground_attitude)
+            .map_or(f64::NAN, |tail| tail.lift_coefficient);
+    let pitch_radius_of_gyration_m = pitch_radius_of_gyration_m(
+        config.landing_gear.pitch_radius_of_gyration_frac_mac,
+        mac,
+        takeoff_pitch_inertia_kg_m2,
+        mtow_mass_kg,
+        plane.b_ref,
+        fuselage_length_m,
+    );
     let cl_r_rotation = rotation_lift_coefficient(&config.performance);
     let thrust_model = RotationThrustModel::new(plane, config, ground_z_m, cl_r_rotation);
     let takeoff_thrust = thrust_model.at_mass(mtow_mass_kg);
@@ -227,11 +249,12 @@ pub(super) fn assess_model_cg_envelope_from_states(
         x_h_ac_m,
         tail_area_ratio: tail_area_ratio_val,
         tail_ground_effect_factor: tail_ground_effect_factor_val,
+        rotation_tail_lift_coefficient,
         cl_ground_attitude,
         cl_r_rotation,
         cm_ac_wb_takeoff: ROTATION_CM_AC_WB_TAKEOFF,
-        pitch_radius_of_gyration_frac_mac: config.landing_gear.pitch_radius_of_gyration_frac_mac,
-        rotation_angular_accel_deg_s2: config.landing_gear.rotation_pitch_acceleration_deg_s2,
+        pitch_radius_of_gyration_m,
+        rotation_angular_accel_deg_s2: rotation_pitch_acceleration_deg_s2(config),
         gravity_m_s2: config.requirements.gravity_m_s2,
         rotation_thrust_to_weight: takeoff_thrust.thrust_to_weight,
         rotation_thrust_line_height_m: takeoff_thrust.thrust_line_height_m,
@@ -385,11 +408,11 @@ mod tests {
     use super::super::LedgerLoadingBasis;
     use super::{minimum_nose_gear_fraction, registered_aft_cg_nose_load};
 
-    /// Every preset whose airport-planning document prints the most-aft CG
-    /// of its tabulated gear split must land its model ground aft boundary,
-    /// at that mass, on that CG. The tolerance is the model-frame residual:
-    /// the model MAC and LEMAC are fitted, not the manufacturer's (A320
-    /// 36.8 [S] -> 36.9 [M], A340 38.0 -> 38.4, A380 43.0 -> 42.0).
+    /// Every published point that prints its most-aft CG must land the
+    /// model ground aft boundary, at that mass, on that CG. The tolerance is
+    /// the model-frame residual: the model MAC and LEMAC are fitted, not the
+    /// manufacturer's (A320 36.8 [S] -> 36.9 [M], A340 38.0 -> 38.4, A380
+    /// 43.0 -> 42.0).
     #[test]
     fn published_aft_cg_gear_splits_return_the_tabulated_aft_cg() {
         use alas_config::{presets, AlasConfig};
@@ -399,9 +422,6 @@ mod tests {
             let config = AlasConfig::from_value(&serde_json::json!({ "preset": name }))
                 .expect("a registered preset configures");
             let Some(split) = registered_aft_cg_nose_load(&config) else {
-                continue;
-            };
-            let Some(published_pct_mac) = split.aft_cg_pct_mac else {
                 continue;
             };
             let registered = presets::get(name).expect("a registered preset");
@@ -418,19 +438,24 @@ mod tests {
                 start,
                 length,
             );
-            let fraction = minimum_nose_gear_fraction(&config, Some(split), split.mass_kg);
             let wheelbase_m = stations.x_mlg_m - stations.x_nlg_m;
-            let aft_x_m = stations.x_mlg_m - fraction * wheelbase_m;
-            let model_pct_mac = frame.pct_mac(aft_x_m);
-            assert!(
-                (model_pct_mac - published_pct_mac).abs() < 1.5,
-                "{name}: model ground aft {model_pct_mac:.2} % MAC against the published \
-                 {published_pct_mac} % MAC at {} kg",
-                split.mass_kg
-            );
-            checked += 1;
+            for point in split.points {
+                let Some(published_pct_mac) = point.aft_cg_pct_mac else {
+                    continue;
+                };
+                let fraction = minimum_nose_gear_fraction(&config, Some(split), point.mass_kg);
+                let aft_x_m = stations.x_mlg_m - fraction * wheelbase_m;
+                let model_pct_mac = frame.pct_mac(aft_x_m);
+                assert!(
+                    (model_pct_mac - published_pct_mac).abs() < 1.5,
+                    "{name}: model ground aft {model_pct_mac:.2} % MAC against the published \
+                     {published_pct_mac} % MAC at {} kg",
+                    point.mass_kg
+                );
+                checked += 1;
+            }
         }
-        assert!(checked >= 3, "presets checked: {checked}");
+        assert!(checked >= 18, "published points checked: {checked}");
     }
 
     /// Feeding `payload_and_fuel`'s back-solved deltas into the same
@@ -450,6 +475,7 @@ mod tests {
             takeoff_mass_kg: 70_000.0,
             takeoff_cg_x_m: 17.8,
             takeoff_cg_z_m: 1.2,
+            takeoff_pitch_inertia_kg_m2: f64::NAN,
         };
         let (payload_mass, payload_cg_x, payload_cg_z, fuel_mass, fuel_cg_x, fuel_cg_z) =
             basis.payload_and_fuel();
@@ -485,6 +511,7 @@ mod tests {
             takeoff_mass_kg: 40_000.0,
             takeoff_cg_x_m: 17.0,
             takeoff_cg_z_m: 1.0,
+            takeoff_pitch_inertia_kg_m2: f64::NAN,
         };
         let (payload_mass, payload_cg_x, payload_cg_z, fuel_mass, fuel_cg_x, fuel_cg_z) =
             basis.payload_and_fuel();

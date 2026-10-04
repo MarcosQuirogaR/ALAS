@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
+use crate::mdo::ResidualRole;
+
 use super::super::nominal_cache::config_key;
 use super::relative_balance::{
     assess, nominal_balance, relative_residuals, NominalBalance, NOMINAL,
@@ -19,9 +21,14 @@ const PRESETS: [&str; 8] = [
 ];
 
 fn reference_config(name: &str) -> AlasConfig {
+    // Mission-closed comparisons use the same mission condition on the
+    // candidate and reference; the hard-MTOW loading is tested separately.
     AlasConfig::from_value(&serde_json::json!({
         "preset": name,
-        "optimizer": {"design_space": {"mode": "reference_adaptation"}}
+        "optimizer": {
+            "design_space": {"mode": "reference_adaptation"},
+            "objective": {"mtow_sizing": "sized_by_mission"}
+        }
     }))
     .unwrap_or_else(|error| panic!("{name}: {error}"))
 }
@@ -42,11 +49,41 @@ fn find<'a>(residuals: &'a [ConstraintResidual], id: &str) -> &'a ConstraintResi
 }
 
 #[test]
+fn hard_mtow_nominals_keep_relative_guards_with_volume_limited_loading() {
+    for name in PRESETS {
+        let config = AlasConfig::from_value(&serde_json::json!({"preset": name})).unwrap();
+        assert_eq!(
+            config.optimizer.objective.mtow_sizing,
+            alas_config::MtowSizing::FixedRequirement
+        );
+        let outcome = nominal_outcome(&config);
+        let rows = balance_residuals(&outcome, &config, ResidualRole::Constraint);
+        assert!(
+            nominal_balance(&config).is_some(),
+            "{name}: no nominal loading"
+        );
+        assert!(!rows.iter().any(|row| row.id == "cg_model_error"), "{name}");
+        if matches!(name, "A320-200" | "DC-10") {
+            assert_eq!(
+                outcome.sized.takeoff_loading.unwrap().status,
+                alas_mass::loading::MtowFuelLoadingStatus::VolumeLimited,
+                "{name}"
+            );
+        }
+        for id in ["usable_cg_range_vs_nominal", "tail_scrape_vs_nominal"] {
+            let row = find(&rows, id);
+            assert_eq!(row.role, ResidualRole::Constraint);
+            assert_eq!(row.normalized_violation, 0.0, "{name}: {id}");
+        }
+    }
+}
+
+#[test]
 fn every_preset_nominal_passes_both_relative_constraints() {
     for name in PRESETS {
         let config = reference_config(name);
         let outcome = nominal_outcome(&config);
-        let residuals = balance_residuals(&outcome, &config, ConstraintPolicy::Hard);
+        let residuals = balance_residuals(&outcome, &config, ResidualRole::Constraint);
         let nominal = nominal_balance(&config).unwrap_or_else(|| panic!("{name}: no nominal"));
         for (id, value) in [
             (
@@ -56,7 +93,7 @@ fn every_preset_nominal_passes_both_relative_constraints() {
             ("tail_scrape_vs_nominal", nominal.tail_scrape_deg),
         ] {
             let r = find(&residuals, id);
-            assert_eq!(r.policy, ConstraintPolicy::Hard, "{name} {id}");
+            assert_eq!(r.role, ResidualRole::Constraint, "{name} {id}");
             assert_eq!(r.normalized_violation, 0.0, "{name} {id}: nominal fails");
             assert!(r.limit <= value + 1e-12, "{name} {id}: limit above nominal");
             assert!(
@@ -66,18 +103,21 @@ fn every_preset_nominal_passes_both_relative_constraints() {
             );
         }
         for id in ["minimum_usable_cg_range", "tail_scrape"] {
-            assert_eq!(find(&residuals, id).policy, ConstraintPolicy::Diagnostic);
+            assert_eq!(find(&residuals, id).role, ResidualRole::Diagnostic);
         }
     }
 }
 
 #[test]
 fn a_candidate_below_both_nominal_and_requirement_fails() {
-    let config = reference_config("A320-200");
+    // The fixture needs a registered aircraft short of both requirements;
+    // the A320's usable takeoff range now exceeds 30 %MAC (the derived
+    // rotation authority), the A380-800's does not.
+    let config = reference_config("A380-800");
     let outcome = nominal_outcome(&config);
     let assessment = assess(&outcome, &config).unwrap_or_else(|error| panic!("{error}"));
     let own = nominal_balance(&config).unwrap_or_else(|| panic!("no nominal"));
-    let absolute = balance_residuals(&outcome, &config, ConstraintPolicy::Hard);
+    let absolute = balance_residuals(&outcome, &config, ResidualRole::Constraint);
     // A better registered aircraft that is itself still short of the requirement.
     let headroom = |id: &str, actual: f64| {
         let limit = find(&absolute, id).limit;
@@ -88,7 +128,7 @@ fn a_candidate_below_both_nominal_and_requirement_fails() {
         usable_cg_range_pct_mac: headroom("minimum_usable_cg_range", own.usable_cg_range_pct_mac),
         tail_scrape_deg: headroom("tail_scrape", own.tail_scrape_deg),
     };
-    let failing = relative_residuals(&assessment, better, ConstraintPolicy::Hard);
+    let failing = relative_residuals(&assessment, better, ResidualRole::Constraint);
     for id in ["usable_cg_range_vs_nominal", "tail_scrape_vs_nominal"] {
         let r = find(&failing, id);
         assert!(r.raw_residual > 0.0 && r.normalized_violation > 0.0, "{id}");
@@ -98,7 +138,7 @@ fn a_candidate_below_both_nominal_and_requirement_fails() {
         usable_cg_range_pct_mac: 1.0e3,
         tail_scrape_deg: 1.0e3,
     };
-    let capped = relative_residuals(&assessment, above, ConstraintPolicy::Hard);
+    let capped = relative_residuals(&assessment, above, ResidualRole::Constraint);
     assert_eq!(
         find(&capped, "usable_cg_range_vs_nominal").limit,
         find(&absolute, "minimum_usable_cg_range").limit
@@ -119,7 +159,7 @@ fn clean_sheet_has_no_nominal_and_no_relative_residuals() {
     );
     assert!(nominal_balance(&config).is_none());
     let outcome = nominal_outcome(&config);
-    let residuals = balance_residuals(&outcome, &config, ConstraintPolicy::Hard);
+    let residuals = balance_residuals(&outcome, &config, ResidualRole::Constraint);
     assert!(residuals.iter().all(|r| !r.id.ends_with("_vs_nominal")));
     assert!(residuals.iter().any(|r| r.id == "minimum_usable_cg_range"));
 }
@@ -154,7 +194,7 @@ fn the_nominal_is_sized_once_across_many_candidate_evaluations() {
         x[0] *= 1.0 + 0.004 * f64::from(k);
         let outcome = super::super::sizing::run_candidate(&config, &x)
             .unwrap_or_else(|failure| panic!("candidate {k}: {}", failure.reason));
-        let residuals = balance_residuals(&outcome, &config, ConstraintPolicy::Hard);
+        let residuals = balance_residuals(&outcome, &config, ResidualRole::Constraint);
         assert!(residuals
             .iter()
             .any(|r| r.id == "usable_cg_range_vs_nominal"));
@@ -214,20 +254,19 @@ fn the_cache_key_costs_far_less_than_a_millisecond() {
     assert!(per_call < 1.0e-3, "key took {per_call} s");
 }
 
-/// An unresolvable nominal is a violation under the requested policy: hard
-/// under a hard Balance policy, so the guard cannot silently switch off, and
-/// diagnostic only under a diagnostic policy.
+/// An unavailable nominal cannot silently bypass the balance requirement.
 #[test]
-fn an_unresolvable_nominal_inherits_the_requested_policy() {
+fn an_unresolvable_nominal_is_a_hard_violation() {
     let good = reference_config("A320-200");
     let outcome = nominal_outcome(&good);
     let assessment = assess(&outcome, &good).unwrap_or_else(|error| panic!("{error}"));
     let mut broken = good.clone();
     broken.requirements.cruise_mach = f64::NAN;
-    for policy in [ConstraintPolicy::Hard, ConstraintPolicy::Diagnostic] {
-        let residuals = super::relative_balance::residuals(&assessment, &broken, policy);
+    {
+        let role = ResidualRole::Constraint;
+        let residuals = super::relative_balance::residuals(&assessment, &broken, role);
         let flag = find(&residuals, "relative_balance_nominal_unavailable");
-        assert_eq!(flag.policy, policy);
+        assert_eq!(flag.role, role);
         assert!(flag.normalized_violation > 0.0);
         assert!(residuals.iter().all(|r| !r.id.ends_with("_vs_nominal")));
     }

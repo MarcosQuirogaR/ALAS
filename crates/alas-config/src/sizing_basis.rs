@@ -201,6 +201,25 @@ impl AlasConfig {
     /// configuration; the rewritten one carries the overrides and reads as a
     /// declared structure.
     pub fn at_sized_closure_mass(&self, closure_mass_kg: f64) -> Self {
+        if self.optimizer.objective.mtow_sizing == crate::MtowSizing::FixedRequirement {
+            // A volume-limited takeoff load does not resize the aircraft's
+            // structure or landing gear below its declared design weights.
+            let (gross_kg, landing_kg) = match self.mass_sizing_basis() {
+                MassSizingBasis::FixedAircraft {
+                    design_gross_mass_kg,
+                    design_landing_mass_kg,
+                } => (design_gross_mass_kg, design_landing_mass_kg),
+                MassSizingBasis::Coupled => (
+                    self.requirements.mtow_kg,
+                    self.design_landing_mass_for(self.requirements.mtow_kg),
+                ),
+            };
+            let mut config = self.clone();
+            config.mass_model.flops_structure.design_gross_mass_kg = Some(gross_kg);
+            config.mass_model.flops_structure.design_landing_mass_kg = Some(landing_kg);
+            config.requirements.mtow_kg = closure_mass_kg;
+            return config;
+        }
         let designs_at_closure =
             self.mtow_plan().structural_basis == crate::optimizer::StructuralBasis::ClosureMass;
         if !designs_at_closure || self.mass_sizing_basis() == MassSizingBasis::Coupled {
@@ -397,6 +416,39 @@ mod tests {
         let mut band = a320(DesignMode::ReferenceAdaptation);
         band.optimizer.objective.mtow_sizing = MtowSizing::MtowBand;
         assert_eq!(band.design_landing_mass_at_closure(78_000.0), 66_000.0);
+    }
+
+    #[test]
+    fn hard_mtow_lower_takeoff_loading_preserves_all_design_weight_bases() {
+        for mode in [
+            DesignMode::BaselineSandbox,
+            DesignMode::ReferenceAdaptation,
+            DesignMode::CleanSheet,
+        ] {
+            let mut config = a320(mode);
+            config.optimizer.objective.mtow_sizing = crate::MtowSizing::FixedRequirement;
+            let cap_kg = config.requirements.mtow_kg;
+            let expected = match config.mass_sizing_basis() {
+                MassSizingBasis::FixedAircraft {
+                    design_gross_mass_kg,
+                    design_landing_mass_kg,
+                } => (design_gross_mass_kg, design_landing_mass_kg),
+                MassSizingBasis::Coupled => (cap_kg, config.design_landing_mass_for(cap_kg)),
+            };
+            for takeoff_kg in [0.6 * cap_kg, 0.9 * cap_kg, cap_kg] {
+                let loaded = config.at_sized_closure_mass(takeoff_kg);
+                assert_eq!(loaded.requirements.mtow_kg, takeoff_kg);
+                assert_eq!(
+                    loaded.mass_sizing_basis(),
+                    MassSizingBasis::FixedAircraft {
+                        design_gross_mass_kg: expected.0,
+                        design_landing_mass_kg: expected.1
+                    }
+                );
+                assert_eq!(config.sized_design_weights_kg(takeoff_kg), expected);
+                assert_eq!(loaded.at_sized_closure_mass(takeoff_kg), loaded);
+            }
+        }
     }
 
     #[test]

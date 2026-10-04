@@ -3,7 +3,7 @@
 
 //! Unit tests for the scalar aircraft-design objective.
 
-use alas_config::{AlasConfig, ConstraintPolicy, DesignVector};
+use alas_config::{AlasConfig, DesignVector};
 use alas_geom::aircraft::airfoil::Airfoil;
 use alas_geom::aircraft::spacing::linspace;
 use alas_geom::aircraft::wing::{Wing, WingXSec};
@@ -110,15 +110,11 @@ fn the_product_transport_constraints_are_reached_at_the_default_area_requirement
     assert_ne!(reason, "transport_planform");
 }
 
-/// Diagnostic objectives cannot make invalid mandatory structural inputs valid.
+/// Invalid mandatory structural inputs reject the candidate.
 #[test]
-fn diagnostic_families_do_not_bypass_invalid_structure() {
+fn invalid_structure_rejects_the_candidate() {
     let mut config = AlasConfig::default();
     config.requirements.max_wing_area_m2 = 1.0;
-    config.optimizer.objective.mass_constraints = ConstraintPolicy::Diagnostic;
-    config.optimizer.objective.balance_constraints = ConstraintPolicy::Diagnostic;
-    config.optimizer.objective.performance_constraints = ConstraintPolicy::Diagnostic;
-    config.optimizer.objective.geometry_constraints = ConstraintPolicy::Diagnostic;
     config.structures.max_linear_curvature_relative_error = f64::NAN;
 
     let mut objective = DesignObjective::new(config);

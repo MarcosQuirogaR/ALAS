@@ -241,9 +241,13 @@ fn public_planning_cg_uses_the_source_frame_without_becoming_a_certification_cla
         alas_mass::breakdown::FURNISHINGS,
         alas_mass::breakdown::PAYLOAD,
     ];
-    let mut lumped_mass_kg = result.analyzed_carried_fuel_kg;
-    let mut lumped_moment_kg_m = result.analyzed_carried_fuel_kg
-        * lumped_full_report.mass_coordinates[alas_mass::breakdown::FUEL][0];
+    // The planning point is the dispatched route's load.
+    let planning_fuel_kg = result
+        .flown_carried_fuel_kg
+        .unwrap_or(result.analyzed_carried_fuel_kg);
+    let mut lumped_mass_kg = planning_fuel_kg;
+    let mut lumped_moment_kg_m =
+        planning_fuel_kg * lumped_full_report.mass_coordinates[alas_mass::breakdown::FUEL][0];
     for name in lumped_names {
         let mass = lumped_full_report.component_masses[name].max(0.0);
         lumped_mass_kg += mass;
@@ -357,6 +361,8 @@ fn a380_soft_static_margin_target_does_not_become_a_hard_model_constraint() {
     // shortfall without changing the geometry, loading or hard floor.
     let mut config =
         AlasConfig::from_value(&serde_json::json!({ "preset": "A380-800" })).expect("A380 config");
+    config.structures.run_nastran = false;
+    config.structures.run_patran_export = false;
     config.requirements.target_static_margin =
         result.model_cg_analyzed_takeoff_static_margin + result.model_cg_static_margin_floor;
     let options = PipelineOptions {
@@ -454,9 +460,36 @@ fn a380_soft_static_margin_target_does_not_become_a_hard_model_constraint() {
         .iter()
         .filter(|finding| finding.code == FindingCode::ModelCgForwardRangeViolation)
         .collect();
-    assert!(forward_findings
+    // The rotation boundary is a hard physical limit and the flown takeoff CG
+    // (42.6 %MAC) lies 0.8 %MAC ahead of it once the tail authority is
+    // corrected for large elevator deflection: that finding is an Error.
+    // Every other forward finding stays a warning, so the soft targets still
+    // do not become hard constraints.
+    let is_rotation_error = |finding: &&&alas_pipeline::PhysicalFinding| {
+        finding.message.contains("nose-wheel liftoff (rotation)")
+            && finding.severity == alas_pipeline::FindingSeverity::Error
+    };
+    let rotation_findings: Vec<_> = forward_findings
         .iter()
-        .all(|finding| finding.severity == alas_pipeline::FindingSeverity::Warning));
+        .filter(|finding| is_rotation_error(finding))
+        .collect();
+    let soft_findings: Vec<_> = forward_findings
+        .iter()
+        .filter(|finding| !is_rotation_error(finding))
+        .collect();
+    assert!(
+        !rotation_findings.is_empty()
+            && rotation_findings
+                .iter()
+                .all(|finding| finding.message.contains("physical forward CG limit")),
+        "{forward_findings:?}"
+    );
+    assert!(
+        soft_findings
+            .iter()
+            .all(|finding| finding.severity == alas_pipeline::FindingSeverity::Warning),
+        "{soft_findings:?}"
+    );
     for mechanism in ["usable CG range", "potato extreme", "fuel-vector"] {
         assert!(
             forward_findings
@@ -574,9 +607,9 @@ fn acceptance_narrowbody_and_widebody_mass_calibrations() {
     // 3. The tip-back/tail-scrape constraints are geometric
     //    ground-clearance-at-rotation checks (`min_tip_back_deg` default
     //    15 deg, `required_rotation_angle_deg` default 10 deg).
-    // 4. The fuel-vector/potato operational-envelope checks raise two
-    //    `Warning`-severity `ModelCgForwardRangeViolation` findings (a
-    //    usable-range shortfall and a potato/fuel-vector excursion).
+    // 4. The fuel-vector/potato operational-envelope check raises one
+    //    `Warning`-severity `ModelCgForwardRangeViolation` finding (a
+    //    potato/fuel-vector excursion).
     let a320_errors: Vec<_> = a320
         .physical_findings
         .iter()
@@ -594,16 +627,20 @@ fn acceptance_narrowbody_and_widebody_mass_calibrations() {
         "unexpected error findings: {a320_errors:?}"
     );
     // Tail scrape (8.19 deg vs 10 deg) is a warning
-    // (`ModelCgConstraint::is_diagnostic`). The `ModelCgForwardRangeViolation`
-    // warnings are the usable CG-range shortfall and the potato boundary
-    // excursion. The full-fuel point of the fuel vector clears the aft limit
-    // with the 150-seat planning cabin.
+    // (`ModelCgConstraint::is_diagnostic`). The one
+    // `ModelCgForwardRangeViolation` warning is the potato boundary
+    // excursion plus the usable-range shortfall of the flown and of the
+    // design loading: with the rotation authority corrected for large
+    // elevator deflection the usable takeoff range is 28.5 and 29.0 %MAC,
+    // below the configured 30 %MAC (a configured assumption, a warning). The
+    // full-fuel point of the fuel vector clears the aft limit with the
+    // 150-seat planning cabin.
     assert_eq!(
         a320.physical_findings
             .iter()
             .filter(|finding| finding.code == FindingCode::ModelCgForwardRangeViolation)
             .count(),
-        2,
+        3,
         "{:?}",
         a320.physical_findings
     );
@@ -671,7 +708,10 @@ fn ave_usable_cg_range_and_tail_scrape_are_warnings() {
     let ave_forward_finding = ave
         .physical_findings
         .iter()
-        .find(|finding| finding.code == FindingCode::ModelCgForwardRangeViolation)
+        .find(|finding| {
+            finding.code == FindingCode::ModelCgForwardRangeViolation
+                && finding.message.contains("usable CG range")
+        })
         .expect("AVE still reports a usable-CG-range finding");
     assert_eq!(
         ave_forward_finding.severity,
@@ -681,22 +721,41 @@ fn ave_usable_cg_range_and_tail_scrape_are_warnings() {
     // rotation forward limit at the analyzed takeoff state (stall-branch V_R,
     // V_R/V_S = 1.10, thrust and rolling-friction term), so it moves with the
     // mass model and the rotation physics and is not pinned. The physical
-    // property asserted: the range is positive (the limits do not cross) and
-    // it is reported as a warning because it falls short of the configured
-    // 30 %MAC minimum.
+    // property asserted: the range falls short of the configured 30 %MAC
+    // minimum and is reported as a warning. Finding: with the tail authority
+    // corrected for large elevator deflection the AVE rotation boundary
+    // (28.9 %MAC) lies aft of its minimum-nose-load aft limit (27.9 %MAC), so
+    // the limits cross and the range is negative (-1.0 %MAC): no takeoff CG
+    // both lifts the nose wheel and keeps the nose-load minimum. The model has
+    // no stabiliser-trim credit and one class-generic -25 deg elevator, so
+    // this is likely conservative for the real aircraft; it is stated, not
+    // tuned away.
     let ave_usable_range = ave_forward_finding.actual.expect("AVE CG range actual");
     let ave_range_limit = ave_forward_finding.limit.expect("AVE CG range limit");
     assert!(
-        ave_usable_range > 0.0 && ave_usable_range < ave_range_limit,
+        ave_usable_range < 0.0 && ave_usable_range < ave_range_limit,
         "AVE usable CG range {ave_usable_range} %MAC against the {ave_range_limit} %MAC minimum"
     );
     assert!((ave_range_limit - 30.0).abs() < 0.01);
-    // AVE has no Error finding: tail scrape is a warning
-    // (`ModelCgConstraint::is_diagnostic`).
-    assert!(!ave
+    // Tail scrape is a warning (`ModelCgConstraint::is_diagnostic`). The
+    // Errors are the rotation forward-CG findings: with the tail authority
+    // corrected for large elevator deflection the takeoff CG (26.1 %MAC)
+    // lies ahead of the nose-wheel lift-off boundary (28.9 %MAC).
+    let ave_errors: Vec<_> = ave
         .physical_findings
         .iter()
-        .any(|finding| finding.severity == alas_pipeline::FindingSeverity::Error));
+        .filter(|finding| finding.severity == alas_pipeline::FindingSeverity::Error)
+        .collect();
+    // The flown and the design loading each carry it.
+    assert!(!ave_errors.is_empty(), "{ave_errors:?}");
+    for error in &ave_errors {
+        assert_eq!(error.code, FindingCode::ModelCgForwardRangeViolation);
+        assert!(
+            error.message.contains("nose-wheel liftoff (rotation)"),
+            "{}",
+            error.message
+        );
+    }
     let ave_scrape = ave
         .physical_findings
         .iter()
@@ -901,8 +960,10 @@ fn acceptance_scene_and_svg_export_integrity() {
     // hand-assembled config skips the preset's cabin and design seed, and a
     // widebody default cabin over an A320 shell exceeds the A320 MTOW before
     // any figure is rendered.
-    let config = AlasConfig::from_value(&serde_json::json!({ "preset": preset.name }))
+    let mut config = AlasConfig::from_value(&serde_json::json!({ "preset": preset.name }))
         .expect("preset configuration");
+    config.structures.run_nastran = false;
+    config.structures.run_patran_export = false;
 
     let builder = AircraftBuilder::new(Some(config.geometry.clone()));
     let airplane = builder
@@ -942,7 +1003,9 @@ fn acceptance_scene_and_svg_export_integrity() {
 
 #[test]
 fn acceptance_solver_degradation_without_external_tools() {
-    let config = AlasConfig::default();
+    let mut config = AlasConfig::default();
+    config.structures.run_nastran = false;
+    config.structures.run_patran_export = false;
     let pipeline = DesignPipeline::new(config);
     let options = PipelineOptions {
         optimize: false,

@@ -80,13 +80,29 @@ fn packaged_executable(bundle: &Path) -> PathBuf {
     executable
 }
 
-fn child_output(executable: &Path, cwd: &Path, user_data: &Path, args: &[String]) -> Output {
-    Command::new(executable)
+fn child_command(executable: &Path, cwd: &Path, user_data: &Path) -> Command {
+    let mut command = Command::new(executable);
+    command
         .current_dir(cwd)
         .env("ALAS_FROZEN", "1")
+        .env("ALAS_APP_DIR", executable.parent().unwrap_or(cwd))
+        .env_remove("ALAS_TOOL_DISCOVERY")
         .env("LOCALAPPDATA", user_data.join("localappdata"))
         .env("XDG_DATA_HOME", user_data.join("xdg"))
-        .env("HOME", user_data.join("home"))
+        .env("HOME", user_data.join("home"));
+    command
+}
+
+fn missing_tool_command(executable: &Path, cwd: &Path, user_data: &Path) -> Command {
+    let mut command = child_command(executable, cwd, user_data);
+    command
+        .env("ALAS_TOOL_DISCOVERY", "disabled")
+        .env_remove("ALAS_NASTRAN95_DIR");
+    command
+}
+
+fn child_output(executable: &Path, cwd: &Path, user_data: &Path, args: &[String]) -> Output {
+    child_command(executable, cwd, user_data)
         .args(args)
         .output()
         .expect("packaged executable can be launched")
@@ -102,9 +118,16 @@ fn assert_success(output: &Output, context: &str) {
     );
 }
 
-fn write_overlay(path: &Path, preset: &str, mission: bool, mses: bool, structures: bool) {
+fn write_overlay(
+    path: &Path,
+    preset: &str,
+    mission: bool,
+    mses: bool,
+    structures: bool,
+    run_nastran: bool,
+) {
     let content = format!(
-        "preset: {preset}\nmission:\n  enabled: {mission}\nmses:\n  enabled: {mses}\nstructures:\n  enabled: {structures}\n"
+        "preset: {preset}\nmission:\n  enabled: {mission}\nmses:\n  enabled: {mses}\nstructures:\n  enabled: {structures}\n  run_nastran: {run_nastran}\n  run_patran_export: false\n"
     );
     fs::write(path, content).expect("preset overlay can be written");
 }
@@ -196,7 +219,7 @@ fn packaged_executable_covers_w55_runtime_matrix_across_all_presets() {
 
     for preset in presets::available() {
         let no_mission_config = sandbox.path.join(format!("{preset}-no-mission.yaml"));
-        write_overlay(&no_mission_config, preset, true, false, false);
+        write_overlay(&no_mission_config, preset, true, false, false, false);
         let no_mission_output = output_root.join(format!("{preset}-no-mission"));
         let no_mission_args = vec![
             "--config".to_owned(),
@@ -214,7 +237,7 @@ fn packaged_executable_covers_w55_runtime_matrix_across_all_presets() {
         assert!(no_mission_output.join("design_database.json").is_file());
 
         let mission_config = sandbox.path.join(format!("{preset}-mission.yaml"));
-        write_overlay(&mission_config, preset, true, false, false);
+        write_overlay(&mission_config, preset, true, false, false, false);
         let mission_output = output_root.join(format!("{preset}-mission"));
         let mission_args = vec![
             "--config".to_owned(),
@@ -235,8 +258,12 @@ fn packaged_executable_covers_w55_runtime_matrix_across_all_presets() {
         .expect("adjacent NASTRAN fixture can be removed");
     fs::remove_dir_all(adjacent_patran.parent().expect("Patran has a parent"))
         .expect("adjacent Patran fixture can be removed");
+    let adjacent_nastran95 = bundle.join("external tools/NASTRAN-95");
+    if adjacent_nastran95.exists() {
+        fs::remove_dir_all(adjacent_nastran95).expect("bundled NASTRAN-95 fixture can be removed");
+    }
     let missing_config = sandbox.path.join("missing-tools.yaml");
-    write_overlay(&missing_config, "AVE", false, false, true);
+    write_overlay(&missing_config, "AVE", false, false, true, true);
     let missing_output = output_root.join("missing-tools");
     let missing_args = vec![
         "--config".to_owned(),
@@ -249,9 +276,18 @@ fn packaged_executable_covers_w55_runtime_matrix_across_all_presets() {
         "--output".to_owned(),
         path_text(&missing_output),
     ];
-    let missing = child_output(&executable, &sandbox.path, &user_data, &missing_args);
+    let missing = missing_tool_command(&executable, &sandbox.path, &user_data)
+        .args(&missing_args)
+        .output()
+        .expect("missing-tools executable can be launched");
     assert_success(&missing, "missing-tool path");
     assert!(missing_output.join("structures").is_dir());
+    let database = fs::read_to_string(missing_output.join("design_database.json"))
+        .expect("missing-tools design database can be read");
+    assert!(
+        database.contains("NASTRAN executable not configured"),
+        "{database}"
+    );
 
     let configured_nastran = sandbox.path.join("configured/nastran.exe");
     let configured_patran = sandbox.path.join("configured/patran.exe");
@@ -261,7 +297,7 @@ fn packaged_executable_covers_w55_runtime_matrix_across_all_presets() {
     fs::write(&configured_patran, b"not a post-processor")
         .expect("configured Patran can be written");
     let configured_config = sandbox.path.join("configured-tools.yaml");
-    write_overlay(&configured_config, "AVE", false, false, true);
+    write_overlay(&configured_config, "AVE", false, false, true, false);
     let mut configured_text =
         fs::read_to_string(&configured_config).expect("configured overlay read");
     configured_text.push_str(&format!(
@@ -285,4 +321,33 @@ fn packaged_executable_covers_w55_runtime_matrix_across_all_presets() {
     let configured = child_output(&executable, &sandbox.path, &user_data, &configured_args);
     assert_success(&configured, "configured-tool path");
     assert!(configured_output.join("structures").is_dir());
+}
+
+#[test]
+fn missing_tools_are_isolated_without_disabling_the_requested_structural_solve() {
+    let sandbox = Sandbox::new();
+    let overlay = sandbox.path.join("missing.yaml");
+    write_overlay(&overlay, "AVE", false, false, true, true);
+    let value: serde_json::Value =
+        serde_yaml::from_str(&fs::read_to_string(overlay).unwrap()).unwrap();
+    let config = alas_config::AlasConfig::from_value(&value).unwrap();
+    assert!(config.structures.run_nastran);
+    assert!(config.structures.nastran95_dir_path.is_empty());
+    let executable = sandbox.path.join("ALAS.exe");
+    let command = missing_tool_command(&executable, &sandbox.path, &sandbox.path);
+    let environment: std::collections::BTreeMap<_, _> = command.get_envs().collect();
+    assert_eq!(
+        environment[std::ffi::OsStr::new("ALAS_TOOL_DISCOVERY")],
+        Some(std::ffi::OsStr::new("disabled"))
+    );
+    assert_eq!(
+        environment[std::ffi::OsStr::new("ALAS_NASTRAN95_DIR")],
+        None
+    );
+    let configured = child_command(&executable, &sandbox.path, &sandbox.path);
+    let environment: std::collections::BTreeMap<_, _> = configured.get_envs().collect();
+    assert_eq!(
+        environment[std::ffi::OsStr::new("ALAS_TOOL_DISCOVERY")],
+        None
+    );
 }

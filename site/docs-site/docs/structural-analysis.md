@@ -127,6 +127,18 @@ ALAS will use it automatically for static loads, normal modes, and
 vibration (sine/random) analysis in addition to its own solver, but every
 number in this chapter came from the always-available analytical path.
 
+## Wing-box validation against MSC Nastran
+
+The wing-box sizing is checked against MSC Nastran with the
+`wingbox_nastran_validation` tool of the acceptance crate. For a preset, the
+tool sizes the box with the same fuel and mounted masses as the product, writes
+the native beam model as a Nastran deck, runs MSC Nastran, and compares the
+displacement, bending-moment and spar-stress profiles along the span with the
+analytical solution. An optional shell model (`--shell`) refines the check
+against a plate-element idealisation of the box. The comparison is retained as
+a reproducible summary. It needs a local MSC Nastran installation and is not
+part of the standard run; the analytical solver does not depend on it.
+
 ## Natural frequencies
 
 <figure markdown>

@@ -9,9 +9,9 @@
 //! and reports per preset:
 //!
 //! - Spearman's rho of the search's own ranking key (tier, normalized
-//!   violation, objective) between the two models;
-//! - the overlap of the two top-k sets, for k = the default elite size and
-//!   k = 10;
+//!   violation, objective) between the two models, including separate
+//!   analysed and feasible subsets so failed ties cannot mask inversions;
+//! - the overlap of the two top-k sets, for k = 29 and k = 10;
 //! - Spearman's rho per term over candidates both models analysed: the
 //!   mission objective, the closed takeoff mass and each residual's
 //!   normalized violation;
@@ -27,9 +27,12 @@
 //! model-to-model consistency check, not physical validation.
 //!
 //! ```text
-//! screening_rank_correlation --preset A320-200 [--preset B787-9] [--samples 60]
+//! screening_rank_correlation [--preset A320-200] [--preset B787-9] [--samples 128]
 //!     [--seed 20260930] [--workers 0] [--screening-tolerance-kg KG]
 //!     [--chordwise-resolution N] [--steps-per-segment N] [--output FILE]
+//!     [--fidelity shipped|full] [--induced-checks screening|full]
+//!     [--solver-preset balanced]
+//!     [--include-candidates]
 //! ```
 //!
 //! Each `--screening-*`, `--chordwise-resolution` and `--steps-per-segment`
@@ -43,17 +46,23 @@
 use std::collections::BTreeMap;
 use std::io;
 use std::process::ExitCode;
+use std::time::Instant;
 
-use alas_config::AlasConfig;
+use alas_config::{presets, solver_presets, AlasConfig, MtowSizing};
 use alas_opt::{
     compare_fidelities, CandidateScore, FidelityPair, ScreeningFidelity, WORK_CAP_MULTIPLE,
 };
 use serde_json::{json, Value};
 
-/// The refinement's default elite size: half of the 60-member initial
-/// population a 600-evaluation budget gives a 13-variable box, less the
-/// baseline (`product_de::initial_population`, `ELITE_POPULATION_FRACTION`).
-const DEFAULT_ELITE_SIZE: usize = 29;
+#[path = "screening_rank_correlation/candidate_scores.rs"]
+mod candidate_scores;
+#[path = "screening_rank_correlation/ranking.rs"]
+mod ranking;
+#[path = "optimization_preset_audit/route_profile.rs"]
+mod route_profile;
+
+/// Fixed comparison set size, independent of the time-planned population.
+const REFERENCE_TOP_K: usize = 29;
 
 struct Args {
     presets: Vec<String>,
@@ -61,6 +70,8 @@ struct Args {
     seed: u64,
     workers: usize,
     fidelity: ScreeningFidelity,
+    solver_preset: String,
+    include_candidates: bool,
     output: Option<String>,
 }
 
@@ -79,15 +90,22 @@ fn parse(values: &[String]) -> io::Result<Args> {
     let invalid = |message: String| io::Error::new(io::ErrorKind::InvalidInput, message);
     let mut args = Args {
         presets: Vec::new(),
-        samples: 60,
+        samples: 128,
         seed: 20_260_930,
         workers: 0,
-        fidelity: ScreeningFidelity::full(),
+        fidelity: ScreeningFidelity::shipped(),
+        solver_preset: "balanced".to_owned(),
+        include_candidates: false,
         output: None,
     };
     let mut index = 0;
     while index < values.len() {
         let flag = values[index].as_str();
+        if flag == "--include-candidates" {
+            args.include_candidates = true;
+            index += 1;
+            continue;
+        }
         let value = values
             .get(index + 1)
             .ok_or_else(|| invalid(format!("{flag} requires a value")))?;
@@ -97,6 +115,21 @@ fn parse(values: &[String]) -> io::Result<Args> {
             "--samples" => args.samples = value.parse().map_err(|_| number())?,
             "--seed" => args.seed = value.parse().map_err(|_| number())?,
             "--workers" => args.workers = value.parse().map_err(|_| number())?,
+            "--solver-preset" => args.solver_preset = value.clone(),
+            "--fidelity" => {
+                args.fidelity = match value.as_str() {
+                    "full" => ScreeningFidelity::full(),
+                    "shipped" => ScreeningFidelity::shipped(),
+                    _ => return Err(invalid(format!("{flag} requires shipped or full"))),
+                }
+            }
+            "--induced-checks" => {
+                args.fidelity.reduced_induced_checks = match value.as_str() {
+                    "screening" => true,
+                    "full" => false,
+                    _ => return Err(invalid(format!("{flag} requires screening or full"))),
+                }
+            }
             "--screening-tolerance-kg" => {
                 args.fidelity.sizing_tolerance_kg = Some(value.parse().map_err(|_| number())?)
             }
@@ -112,7 +145,16 @@ fn parse(values: &[String]) -> io::Result<Args> {
         index += 2;
     }
     if args.presets.is_empty() {
-        return Err(invalid("at least one --preset is required".to_owned()));
+        args.presets = presets::registry()
+            .iter()
+            .map(|preset| preset.name.to_owned())
+            .collect();
+    }
+    for preset in &args.presets {
+        presets::get(preset).map_err(|error| invalid(error.to_string()))?;
+    }
+    if args.samples < 3 {
+        return Err(invalid("--samples must be at least three".to_owned()));
     }
     if args.workers == 0 {
         args.workers = std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get);
@@ -126,10 +168,31 @@ fn run(args: &Args) -> io::Result<()> {
     for preset in &args.presets {
         let mut config = AlasConfig::from_value(&json!({ "preset": preset }))
             .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error.to_string()))?;
-        config.optimizer.solver.method = alas_config::optimizer::PRODUCT_DE_METHOD.to_owned();
+        config.optimizer.solver = solver_presets::get(&args.solver_preset)
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error.to_string()))?
+            .settings
+            .clone();
+        config.optimizer.objective.mtow_sizing = MtowSizing::FixedRequirement;
+        route_profile::initialize_route_profile(&mut config);
+        eprintln!(
+            "[rank] preset={preset} samples={} workers={}",
+            args.samples, args.workers
+        );
+        let started = Instant::now();
         let pairs = compare_fidelities(&config, fidelity, args.samples, args.seed, args.workers)
             .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error.to_string()))?;
-        report.push(json!({ "preset": preset, "statistics": statistics(&pairs) }));
+        let nominal = candidate_scores::fixed_nominal_assessment(&config, &pairs);
+        let mut row = json!({
+            "preset": preset,
+            "wall_time_s": started.elapsed().as_secs_f64(),
+            "statistics": statistics(&pairs),
+            "nominal_assessment": nominal,
+            "optimized_nominal_assessment": candidate_scores::nominal_assessment(&pairs),
+        });
+        if args.include_candidates {
+            row["candidate_scores"] = candidate_scores::candidates(&pairs);
+        }
+        report.push(row);
     }
     let document = json!({
         "experiment": "screening_rank_correlation",
@@ -137,7 +200,10 @@ fn run(args: &Args) -> io::Result<()> {
             "sizing_tolerance_kg": fidelity.sizing_tolerance_kg,
             "chordwise_resolution": fidelity.chordwise_resolution,
             "steps_per_segment": fidelity.steps_per_segment,
+            "reduced_induced_checks": fidelity.reduced_induced_checks,
         },
+        "solver_preset": args.solver_preset,
+        "mtow_mode": "fixed_requirement",
         "samples": args.samples,
         "seed": args.seed,
         "workers": args.workers,
@@ -154,55 +220,9 @@ fn run(args: &Args) -> io::Result<()> {
     }
 }
 
-/// The search's ranking key: tier (feasible, closed, not analysed), then
-/// normalized violation, then objective.
-fn ranking_key(score: &CandidateScore) -> (u8, f64, f64) {
-    let tier = if score.feasible {
-        0
-    } else if score.analysed {
-        1
-    } else {
-        2
-    };
-    let violation = if score.feasible {
-        0.0
-    } else {
-        score.hard_violation
-    };
-    (tier, violation, score.cost)
-}
-
-/// Candidate indices best first under the ranking key, ties by index.
-fn order(pairs: &[FidelityPair], pick: impl Fn(&FidelityPair) -> &CandidateScore) -> Vec<usize> {
-    let mut indices: Vec<usize> = (0..pairs.len()).collect();
-    indices.sort_by(|&a, &b| {
-        let (ka, kb) = (ranking_key(pick(&pairs[a])), ranking_key(pick(&pairs[b])));
-        ka.0.cmp(&kb.0)
-            .then(ka.1.total_cmp(&kb.1))
-            .then(ka.2.total_cmp(&kb.2))
-            .then(a.cmp(&b))
-    });
-    indices
-}
-
 fn statistics(pairs: &[FidelityPair]) -> Value {
-    let screening_order = order(pairs, |pair| &pair.screening);
-    let full_order = order(pairs, |pair| &pair.full);
-    let position = |order: &[usize]| {
-        let mut rank = vec![0.0; order.len()];
-        for (place, &index) in order.iter().enumerate() {
-            rank[index] = place as f64;
-        }
-        rank
-    };
-    let overlap = |k: usize| {
-        let k = k.min(pairs.len());
-        let top: Vec<&usize> = screening_order[..k].iter().collect();
-        full_order[..k]
-            .iter()
-            .filter(|index| top.contains(index))
-            .count()
-    };
+    let all_pairs: Vec<&FidelityPair> = pairs.iter().collect();
+    let all_ranking = ranking::statistics(&all_pairs, REFERENCE_TOP_K);
     let both_analysed: Vec<&FidelityPair> = pairs
         .iter()
         .filter(|pair| pair.screening.analysed && pair.full.analysed)
@@ -229,7 +249,11 @@ fn statistics(pairs: &[FidelityPair]) -> Value {
         .iter()
         .filter(|(_, (a, b))| a.iter().chain(b).any(|value| *value > 0.0))
         .map(|(id, (a, b))| {
-            (*id, json!({ "n": a.len(), "spearman_rho": spearman(a, b), "violated_screening": a.iter().filter(|v| **v > 0.0).count(), "violated_full": b.iter().filter(|v| **v > 0.0).count() }))
+            let role = both_analysed.iter().find_map(|pair| {
+                pair.full.residuals.iter().find(|residual| residual.id == *id)
+                    .map(|residual| format!("{:?}", residual.role))
+            });
+            (*id, json!({ "role": role, "n": a.len(), "spearman_rho": spearman(a, b), "violated_screening": a.iter().filter(|v| **v > 0.0).count(), "violated_full": b.iter().filter(|v| **v > 0.0).count() }))
         })
         .collect();
     let mean_wall = |pick: &dyn Fn(&FidelityPair) -> f64| {
@@ -241,13 +265,12 @@ fn statistics(pairs: &[FidelityPair]) -> Value {
         "feasible_screening": pairs.iter().filter(|p| p.screening.feasible).count(),
         "feasible_full": pairs.iter().filter(|p| p.full.feasible).count(),
         "feasibility_agreement": pairs.iter().filter(|p| p.screening.feasible == p.full.feasible).count(),
-        "ranking_key_spearman_rho": spearman(&position(&screening_order), &position(&full_order)),
-        "top_k_overlap": {
-            "k_elite": DEFAULT_ELITE_SIZE.min(pairs.len()),
-            "overlap_elite": overlap(DEFAULT_ELITE_SIZE),
-            "k_10": 10.min(pairs.len()),
-            "overlap_10": overlap(10),
-        },
+        "ranking_key_spearman_rho": all_ranking["ranking_key_spearman_rho"],
+        "top_k_overlap": all_ranking["top_k_overlap"],
+        "ranking_among_analysed": ranking::statistics(&both_analysed, REFERENCE_TOP_K),
+        "ranking_among_feasible": ranking::statistics(
+            &pairs.iter().filter(|pair| pair.screening.feasible && pair.full.feasible).collect::<Vec<_>>(),
+            REFERENCE_TOP_K),
         "terms": {
             "cost": term(&|score| score.cost),
             "objective_value": term(&|score| score.objective_value),
@@ -352,11 +375,70 @@ mod tests {
     use super::*;
 
     #[test]
+    fn an_unknown_preset_is_rejected_before_configuration_fallback() {
+        let input = ["--preset".to_owned(), "unregistered-aircraft".to_owned()];
+        let result = parse(&input);
+        assert!(result.is_err());
+        if let Err(error) = result {
+            assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
+            assert!(error.to_string().contains("unregistered-aircraft"));
+            assert!(error.to_string().contains("available:"));
+        }
+    }
+
+    #[test]
+    fn every_registered_preset_is_accepted_by_the_cli() {
+        for preset in presets::registry() {
+            let input = ["--preset".to_owned(), preset.name.to_owned()];
+            assert!(parse(&input).is_ok(), "{}", preset.name);
+        }
+    }
+
+    #[test]
     fn spearman_is_one_for_monotone_data_and_minus_one_when_reversed() {
         let a = [1.0, 2.0, 3.0, 10.0];
         assert_eq!(spearman(&a, &[2.0, 4.0, 8.0, 9.0]), Some(1.0));
         assert_eq!(spearman(&a, &[9.0, 8.0, 4.0, 2.0]), Some(-1.0));
         assert_eq!(spearman(&a, &[1.0, 1.0, 1.0, 1.0]), None);
         assert_eq!(average_ranks(&[5.0, 1.0, 5.0]), vec![2.5, 1.0, 2.5]);
+    }
+
+    #[test]
+    fn failed_tied_candidates_do_not_establish_rank_correlation() {
+        let failed = CandidateScore {
+            cost: 1.0,
+            feasible: false,
+            analysed: false,
+            hard_violation: f64::INFINITY,
+            objective_value: f64::NAN,
+            takeoff_mass_kg: f64::NAN,
+            violations: Vec::new(),
+            residuals: Vec::new(),
+            failure_reason: Some("failed".to_owned()),
+            wall_time_s: 0.0,
+            work: None,
+        };
+        let pairs: Vec<FidelityPair> = (0..10)
+            .map(|index| FidelityPair {
+                design: vec![f64::from(index)],
+                screening: failed.clone(),
+                full: failed.clone(),
+            })
+            .collect();
+        assert!(statistics(&pairs)["ranking_key_spearman_rho"].is_null());
+
+        let mut reversed = pairs;
+        for (index, pair) in reversed.iter_mut().take(3).enumerate() {
+            pair.screening.analysed = true;
+            pair.full.analysed = true;
+            pair.screening.hard_violation = index as f64;
+            pair.full.hard_violation = (2 - index) as f64;
+        }
+        let result = statistics(&reversed);
+        assert_eq!(result["ranking_among_analysed"]["n"], 3);
+        assert_eq!(
+            result["ranking_among_analysed"]["ranking_key_spearman_rho"],
+            -1.0
+        );
     }
 }

@@ -14,13 +14,9 @@
 //!
 //! # What the sheet shows
 //!
-//! - The boarding potato: the minimum and maximum CG, at common mass levels,
-//!   over the composed loading orders cargo (per hold), passengers (zone by
-//!   zone, window-middle-aisle, and cabin-wide category-first extremes) and
-//!   fuel (`alas_payload::loading_sequence::LoadSequenceSet`). Each named
-//!   order is also drawn as a thin line. This is not the reorder polygon of
-//!   [`loading_envelope_polygon`], which also holds physically impossible
-//!   orders and is kept only as the superset the potato must lie inside.
+//! - Five numbered loading states and their loading/burn path.
+//! - The composed loading orders remain computational data for independent
+//!   loading-envelope checks; the sheet does not draw their boarding potato.
 //! - Four limit sets, each drawn where its mechanism applies: ground
 //!   (dashed, DOW to ramp mass), takeoff (solid, takeoff-mass band), flight
 //!   (dotted) and landing (dash-dot, up to the landing mass). The potato is
@@ -30,12 +26,19 @@
 //! from a pipeline result.
 
 pub mod data;
+mod gate;
 mod layers;
 mod limits;
+mod mass_lines;
 mod panel;
 mod render;
 mod sequences;
+mod weights;
 
+pub use gate::{GatePhase, StepGate};
+pub use weights::MassRole;
+
+pub use panel::SHEET_TEXT;
 pub use render::figure_load_trim_sheet;
 
 use crate::scene::Point2D;
@@ -121,11 +124,11 @@ pub struct NamedPath {
     pub points: Vec<(f64, f64)>,
 }
 
-/// A labelled structural weight line (MTOW, MLW, MZFW).
+/// A labeled analyzed or design mass line.
 #[derive(Debug, Clone, PartialEq)]
 pub struct WeightLine {
-    /// Short label, e.g. `MTOW`.
-    pub label: String,
+    /// Provenance of this mass.
+    pub role: MassRole,
     /// Mass, kg.
     pub mass_kg: f64,
 }
@@ -141,6 +144,9 @@ pub struct LoadStep {
     pub mass_kg: f64,
     /// CG after the step, %MAC.
     pub pct_mac: f64,
+    /// The run's CG-gate verdict for this state; `None` for a loading step
+    /// the gate does not evaluate.
+    pub gate: Option<StepGate>,
 }
 
 /// Everything the balance chart draws. Masses in kg, CG in %MAC of
@@ -169,21 +175,17 @@ pub struct LoadTrimSheetData {
     pub landing_limits: Vec<LimitVertex>,
     /// Zero-fuel operational limits, ascending mass (empty if unknown).
     pub zfw_limits: Vec<LimitVertex>,
-    /// Structural weight lines.
+    /// Analyzed and design mass lines.
     pub weight_lines: Vec<WeightLine>,
     /// The boarding potato, ascending mass, from DOW to takeoff mass.
     pub potato: Vec<PotatoLevel>,
-    /// Every composed loading order, drawn as a thin line.
+    /// Every composed loading order, retained for envelope verification.
     pub sequences: Vec<NamedPath>,
     /// Fuel curve (mass kg, %MAC), ascending mass, from ZFW to TOW; burn
     /// retraces it downwards.
     pub fuel_curve: Vec<(f64, f64)>,
     /// Worked loading case, first step is the empty (DOW) state.
     pub steps: Vec<LoadStep>,
-    /// What governs the forward and aft limits, for the key.
-    pub governance: [String; 2],
-    /// Footnotes (method and evidence caveats).
-    pub notes: Vec<String>,
 }
 
 impl LoadTrimSheetData {
@@ -216,11 +218,11 @@ impl LoadTrimSheetData {
             .fold(0.0, f64::max)
     }
 
-    /// Structural weight line mass by label.
-    pub fn weight(&self, label: &str) -> Option<f64> {
+    /// Analyzed or design mass by its semantic role.
+    pub fn weight(&self, role: MassRole) -> Option<f64> {
         self.weight_lines
             .iter()
-            .find(|line| line.label == label)
+            .find(|line| line.role == role)
             .map(|line| line.mass_kg)
     }
 }
@@ -331,8 +333,8 @@ impl Frame {
 
 /// Canvas size and chart rectangle; the side panel lives right of the chart.
 pub(crate) const SHEET_W: f64 = 1420.0;
-pub(crate) const SHEET_H: f64 = 800.0;
-pub(crate) const CHART: (f64, f64, f64, f64) = (100.0, 70.0, 900.0, 620.0);
+pub(crate) const SHEET_H: f64 = 750.0;
+pub(crate) const CHART: (f64, f64, f64, f64) = (100.0, 70.0, 860.0, 620.0);
 
 /// Round `value` down/up to a multiple of `step`.
 fn snap(value: f64, step: f64, up: bool) -> f64 {
@@ -353,13 +355,23 @@ pub(crate) fn weight_step_kg(span_kg: f64) -> f64 {
     .unwrap_or(200_000.0)
 }
 
-/// Choose the frame so the envelope, weight lines, loading envelope and
+/// Choose the frame so displayed limits, weight lines, fuel curve and
 /// steps fit.
 pub(crate) fn frame_for(data: &LoadTrimSheetData) -> Frame {
-    let mut masses: Vec<f64> = data.ground_limits.iter().map(|v| v.mass_kg).collect();
+    let limits = [
+        &data.ground_limits,
+        &data.takeoff_limits,
+        &data.flight_limits,
+        &data.landing_limits,
+        &data.zfw_limits,
+    ];
+    let mut masses: Vec<f64> = limits
+        .iter()
+        .flat_map(|set| set.iter().map(|v| v.mass_kg))
+        .collect();
     masses.extend(data.weight_lines.iter().map(|l| l.mass_kg));
     masses.extend(data.steps.iter().map(|s| s.mass_kg));
-    masses.extend(data.potato.iter().map(|p| p.mass_kg));
+    masses.extend(data.fuel_curve.iter().map(|point| point.0));
     let lo = masses.iter().copied().fold(f64::INFINITY, f64::min);
     let hi = masses.iter().copied().fold(f64::NEG_INFINITY, f64::max);
     let step = weight_step_kg(hi - lo * 0.9);
@@ -376,9 +388,33 @@ pub(crate) fn frame_for(data: &LoadTrimSheetData) -> Frame {
             .iter()
             .map(|s| data.index_at(s.mass_kg, s.pct_mac)),
     );
-    for level in &data.potato {
-        indices.push(data.index_at(level.mass_kg, level.fwd_pct_mac));
-        indices.push(data.index_at(level.mass_kg, level.aft_pct_mac));
+    indices.extend(
+        data.fuel_curve
+            .iter()
+            .map(|&(mass, pct)| data.index_at(mass, pct)),
+    );
+    for set in limits {
+        for pair in set.windows(2) {
+            for (start_pct, end_pct) in [
+                (pair[0].fwd_pct_mac, pair[1].fwd_pct_mac),
+                (pair[0].aft_pct_mac, pair[1].aft_pct_mac),
+            ] {
+                let slope = (end_pct - start_pct) / (pair[1].mass_kg - pair[0].mass_kg);
+                if !slope.is_finite() || slope == 0.0 {
+                    continue;
+                }
+                let arm_pct = 100.0 * (data.x_at(start_pct) - data.index.x_ref_m) / data.mac_m;
+                // Linear percent-MAC limits become quadratic in balance index.
+                let mass = 0.5 * (pair[0].mass_kg - arm_pct / slope);
+                if mass > pair[0].mass_kg && mass < pair[1].mass_kg {
+                    indices.push(data.index_at(mass, start_pct + slope * (mass - pair[0].mass_kg)));
+                }
+            }
+        }
+        for vertex in set {
+            indices.push(data.index_at(vertex.mass_kg, vertex.fwd_pct_mac));
+            indices.push(data.index_at(vertex.mass_kg, vertex.aft_pct_mac));
+        }
     }
     let finite = indices.iter().copied().filter(|v| v.is_finite());
     let i_lo = finite.clone().fold(f64::INFINITY, f64::min);

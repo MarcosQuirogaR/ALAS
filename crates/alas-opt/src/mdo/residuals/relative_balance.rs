@@ -26,7 +26,9 @@
 //!
 //! Units: usable CG range in % MAC, tail-scrape angle in degrees.
 
-use alas_config::{AlasConfig, ConstraintPolicy, DesignMode};
+use crate::mdo::ResidualRole;
+
+use alas_config::{AlasConfig, DesignMode};
 
 use crate::envelope::{
     assess_model_cg_envelope_with_ledger, ModelCgConstraint, ModelCgEnvelopeAssessment,
@@ -53,7 +55,17 @@ pub(super) fn assess(
     outcome: &SizingOutcome,
     config: &AlasConfig,
 ) -> Result<ModelCgEnvelopeAssessment, String> {
-    let ledger = balance_ledger::loading_basis(outcome, config)?;
+    assess_states(outcome, config).map(|(design, _)| design)
+}
+
+/// [`assess`] plus the dispatched route's own loading, when its fuel loads:
+/// the takeoff and landing states the reporting verdict evaluates as the
+/// flown mission (`feasibility::model_cg`), beside the design loading.
+pub(super) fn assess_states(
+    outcome: &SizingOutcome,
+    config: &AlasConfig,
+) -> Result<(ModelCgEnvelopeAssessment, Option<ModelCgEnvelopeAssessment>), String> {
+    let (ledger, flown) = balance_ledger::loading_bases(outcome, config)?;
     if !config.requirements.cruise_mach.is_finite()
         || !(0.0..1.0).contains(&config.requirements.cruise_mach)
         || !config.requirements.cruise_altitude_m.is_finite()
@@ -73,7 +85,7 @@ pub(super) fn assess(
         },
     )
     .map_err(|error| format!("critical neutral-point conditions: {error:?}"))?;
-    assess_model_cg_envelope_with_ledger(
+    let design = assess_model_cg_envelope_with_ledger(
         &outcome.plane,
         ledger,
         outcome.x_np,
@@ -81,7 +93,22 @@ pub(super) fn assess(
         outcome.mac,
         config,
     )
-    .map_err(|error| format!("{error}"))
+    .map_err(|error| format!("{error}"))?;
+    let flown = flown
+        .map(|(basis, landing)| {
+            crate::envelope::assess_model_cg_envelope_with_ledger_and_landing(
+                &outcome.plane,
+                basis,
+                Some(landing),
+                outcome.x_np,
+                conditions.critical,
+                outcome.mac,
+                config,
+            )
+            .map_err(|error| format!("flown loading: {error}"))
+        })
+        .transpose()?;
+    Ok((design, flown))
 }
 
 fn measure(assessment: &ModelCgEnvelopeAssessment) -> Option<NominalBalance> {
@@ -118,7 +145,7 @@ pub(super) fn nominal_balance(config: &AlasConfig) -> Option<NominalBalance> {
     if config.optimizer.design_space.mode != DesignMode::ReferenceAdaptation {
         return None;
     }
-    NOMINAL.get_or_resolve(config, || {
+    NOMINAL.get_or_resolve(config, |config| {
         resolve(config)
             .map_err(|reason| {
                 tracing::warn!(
@@ -136,25 +163,25 @@ pub(super) fn nominal_balance(config: &AlasConfig) -> Option<NominalBalance> {
 pub(super) fn residuals(
     assessment: &ModelCgEnvelopeAssessment,
     config: &AlasConfig,
-    policy: ConstraintPolicy,
+    role: ResidualRole,
 ) -> Vec<ConstraintResidual> {
     if config.optimizer.design_space.mode != DesignMode::ReferenceAdaptation {
         return Vec::new();
     }
-    residuals_against(assessment, nominal_balance(config), policy)
+    residuals_against(assessment, nominal_balance(config), role)
 }
 
 /// The two relative residuals against `nominal`, or, when the nominal could
 /// not be resolved, one `relative_balance_nominal_unavailable` violation
-/// under the requested `policy`: a failed reference cannot switch a hard
-/// guard off, and the flag is diagnostic only under a diagnostic policy.
+/// under the requested `role`: a failed reference cannot switch a hard
+/// guard off, and the flag is diagnostic only under a diagnostic role.
 pub(super) fn residuals_against(
     assessment: &ModelCgEnvelopeAssessment,
     nominal: Option<NominalBalance>,
-    policy: ConstraintPolicy,
+    role: ResidualRole,
 ) -> Vec<ConstraintResidual> {
     match nominal {
-        Some(nominal) => relative_residuals(assessment, nominal, policy),
+        Some(nominal) => relative_residuals(assessment, nominal, role),
         None => vec![ConstraintResidual::direct(
             "relative_balance_nominal_unavailable",
             Balance,
@@ -163,7 +190,7 @@ pub(super) fn residuals_against(
             "bool",
             1.0,
             1.0,
-            policy,
+            role,
         )],
     }
 }
@@ -171,27 +198,24 @@ pub(super) fn residuals_against(
 /// The relative balance residuals of a reported analysis's assessment
 /// `candidate` against `nominal`, the registered aircraft's assessment at the
 /// same reporting fidelity (`None` when it could not be evaluated), under the
-/// configured Balance policy. Empty outside a reference adaptation or with
-/// the Balance family off.
+/// hard Balance requirements. Empty outside a reference adaptation.
 pub fn reporting_relative_balance(
     candidate: &ModelCgEnvelopeAssessment,
     nominal: Option<&ModelCgEnvelopeAssessment>,
     config: &AlasConfig,
 ) -> Vec<ConstraintResidual> {
-    let policy = config.optimizer.objective.balance_constraints;
-    if config.optimizer.design_space.mode != DesignMode::ReferenceAdaptation
-        || policy == ConstraintPolicy::Off
-    {
+    let role = ResidualRole::Constraint;
+    if config.optimizer.design_space.mode != DesignMode::ReferenceAdaptation {
         return Vec::new();
     }
-    residuals_against(candidate, nominal.and_then(measure), policy)
+    residuals_against(candidate, nominal.and_then(measure), role)
 }
 
 /// Each quantity of `assessment` held to `min(requirement, nominal)`.
 pub(super) fn relative_residuals(
     assessment: &ModelCgEnvelopeAssessment,
     nominal: NominalBalance,
-    policy: ConstraintPolicy,
+    role: ResidualRole,
 ) -> Vec<ConstraintResidual> {
     [
         (
@@ -218,7 +242,7 @@ pub(super) fn relative_residuals(
             limit,
             unit,
             limit - worst.actual,
-            policy,
+            role,
         ))
     })
     .collect()

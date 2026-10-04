@@ -91,7 +91,7 @@ pub use evidence::{
     MissionEvidenceApplicability, PartialDesignMissionEvidence, PartialMissionEvidenceKind,
     PayloadRangeDesignPoint, PublishedMissionLoadCase, PublishedRange, PublishedReserveContract,
 };
-pub use gear_load::PublishedAftCgNoseLoad;
+pub use gear_load::{AftCgNoseLoadPoint, PublishedAftCgNoseLoad};
 pub use landing_reference::{
     published_landing_reference, published_landing_references, PublishedLandingReference,
 };

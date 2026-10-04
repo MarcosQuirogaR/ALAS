@@ -5,6 +5,12 @@
 
 use super::*;
 
+#[path = "search_evidence.rs"]
+mod search_evidence;
+
+#[path = "verification.rs"]
+mod verification;
+
 /// Run the native search, then make product-profile finalists survive the
 /// application's reporting-fidelity re-evaluation before the branch is
 /// reported as completed.
@@ -54,7 +60,16 @@ pub(super) fn run_vlm_optimizer(request: VlmOptimizerRequest<'_>) -> SolverOptim
         Err(error) => return SolverOptimizationResult::failed(SolverKind::Vlm, output_dir, error),
     };
     let mut optimizer = DesignOptimizer::new(effective_config.clone());
-    let mut optimization = match optimizer.run_cancellable(bounds, Some(&nominal), None, cancel) {
+    let mut persist_evidence = |result: &OptimizationResult| {
+        search_evidence::persist(output_dir.as_deref(), result);
+    };
+    let mut optimization = match optimizer.run_cancellable_with_evidence(
+        bounds,
+        Some(&nominal),
+        None,
+        cancel,
+        Some(&mut persist_evidence),
+    ) {
         Ok(result) => result,
         Err(error) => {
             return SolverOptimizationResult::failed(
@@ -90,23 +105,20 @@ pub(super) fn run_vlm_optimizer(request: VlmOptimizerRequest<'_>) -> SolverOptim
     // The registered aircraft at reporting fidelity, once per run, for the
     // relative balance guard of every finalist. It is the baseline analysis
     // when the baseline is the registered vector, else one more analysis.
+    // It is job 0 of the first verification wave, so it runs beside the
+    // finalists instead of ahead of them; the guard is applied once both are
+    // known.
     let mut analyses = 0usize;
-    let reporting_nominal = match scope.evaluation(|| {
-        crate::acceptance::ReportingNominal::evaluate(&config, acceptance_route, cancel)
-    }) {
-        None => None,
-        Some(Ok(evaluated)) => {
-            analyses += 1;
-            Some(evaluated)
-        }
-        Some(Err(error)) => {
-            return SolverOptimizationResult::failed(SolverKind::Vlm, output_dir, error);
-        }
-    };
-    let baseline_is_nominal = reporting_nominal
-        .as_ref()
-        .is_some_and(|evaluated| *evaluated.design() == nominal);
-    let separate_nominal = usize::from(reporting_nominal.is_some() && !baseline_is_nominal);
+    let registered_design = (config.optimizer.design_space.mode
+        == alas_config::DesignMode::ReferenceAdaptation)
+        .then(|| alas_config::presets::get(&config.preset).ok())
+        .flatten()
+        .map(|preset| preset.design_vector);
+    let baseline_is_nominal = registered_design == Some(nominal);
+    let separate_nominal = usize::from(
+        config.optimizer.design_space.mode == alas_config::DesignMode::ReferenceAdaptation
+            && !baseline_is_nominal,
+    );
     let ladder = reserve
         .evaluations
         .saturating_sub(2 + separate_nominal)
@@ -125,40 +137,79 @@ pub(super) fn run_vlm_optimizer(request: VlmOptimizerRequest<'_>) -> SolverOptim
     let mut finalist_rejected_by = Vec::new();
     let mut rejection_messages: Vec<String> = Vec::new();
     let mut accepted: Option<(usize, FinalistVerification)> = None;
-    for (rank, candidate) in candidates.iter().enumerate() {
-        // Rank 0 is always re-evaluated: without it the branch has no
-        // delivered design at all. Beyond it the ladder is optional quality
-        // improvement, so a cancellation stops it at the next candidate
-        // instead of paying up to `MAX_VERIFIED_CANDIDATES` coupled analyses
-        // of drain.
-        if rank > 0 && scope.requested() {
-            scope.work_skipped(format!(
-                "reporting-fidelity ladder stopped after {rank} of {} candidates",
-                candidates.len()
-            ));
-            break;
+    let jobs = match verification::evaluate_ordered(
+        candidates.len() + 1,
+        2.min(candidates.len() + 1),
+        effective_config.optimizer.solver.resolved_workers(),
+        started,
+        time_left_s,
+        &scope,
+        |job| {
+            if job == 0 {
+                LadderJob::Nominal(crate::acceptance::ReportingNominal::evaluate(
+                    &config,
+                    acceptance_route,
+                    cancel,
+                ))
+            } else {
+                LadderJob::Finalist(crate::acceptance::verify_finalist_cancellable(
+                    &config,
+                    &candidates[job - 1],
+                    acceptance_route,
+                    None,
+                    cancel,
+                ))
+            }
+        },
+        |done| {
+            let nominal = done.iter().find_map(|(_, job)| match job {
+                LadderJob::Nominal(Some(Ok(nominal))) => Some(nominal),
+                _ => None,
+            });
+            done.iter().any(|(job, result)| match result {
+                LadderJob::Nominal(Some(Err(_))) => true,
+                LadderJob::Nominal(_) => false,
+                LadderJob::Finalist(Ok(verification)) => {
+                    let mut held = verification.clone();
+                    crate::acceptance::hold_to_nominal(&mut held, &config, nominal);
+                    held.accepted()
+                }
+                LadderJob::Finalist(Err(error)) => {
+                    *job == 1 || error.starts_with("Cancelled safely")
+                }
+            })
+        },
+    ) {
+        Ok(jobs) => jobs,
+        Err(error) => return SolverOptimizationResult::failed(SolverKind::Vlm, output_dir, error),
+    };
+    let mut reporting_nominal = None;
+    let mut verifications = Vec::with_capacity(jobs.len());
+    for (job, result) in jobs {
+        match result {
+            LadderJob::Nominal(None) => {}
+            LadderJob::Nominal(Some(Ok(evaluated))) => {
+                analyses += 1;
+                reporting_nominal = Some(evaluated);
+            }
+            LadderJob::Nominal(Some(Err(error))) => {
+                return SolverOptimizationResult::failed(SolverKind::Vlm, output_dir, error);
+            }
+            LadderJob::Finalist(result) => verifications.push((job - 1, result)),
         }
-        if rank > 0 && time_left_s.is_some_and(|left| started.elapsed().as_secs_f64() >= left) {
-            tracing::info!(
-                rank,
-                "reporting-fidelity ladder stopped on the refinement time limit"
-            );
-            break;
+    }
+    for (_, result) in &mut verifications {
+        if let Ok(verification) = result {
+            crate::acceptance::hold_to_nominal(verification, &config, reporting_nominal.as_ref());
         }
-        analyses += 1;
-        scope.enter(
-            alas_opt::CancelPhase::ReportingFidelityVerification,
-            rank as u64,
-        );
-        let verification = match scope.evaluation(|| {
-            crate::acceptance::verify_finalist_cancellable(
-                &config,
-                candidate,
-                acceptance_route,
-                reporting_nominal.as_ref(),
-                cancel,
-            )
-        }) {
+    }
+    analyses += verifications.len();
+    evaluated += verifications
+        .iter()
+        .filter(|(_, result)| result.is_ok())
+        .count();
+    for (rank, result) in verifications {
+        let verification = match result {
             Ok(verification) => verification,
             Err(error) if error.starts_with("Cancelled safely") => {
                 return SolverOptimizationResult::failed(SolverKind::Vlm, output_dir, error);
@@ -175,10 +226,20 @@ pub(super) fn run_vlm_optimizer(request: VlmOptimizerRequest<'_>) -> SolverOptim
             }
             Err(error) => {
                 tracing::warn!(%error, rank, "fallback candidate could not be re-evaluated");
+                optimization.record_verification(
+                    rank,
+                    &candidates[rank],
+                    alas_opt::TraceClass::Failed,
+                );
                 continue;
             }
         };
-        evaluated += 1;
+        let class = if verification.accepted() {
+            alas_opt::TraceClass::Valid
+        } else {
+            alas_opt::TraceClass::Rejected
+        };
+        optimization.record_verification(rank, &candidates[rank], class);
         if rank == 0 {
             finalist_rejected_by = verification.rejected_by();
             rejection_messages = verification.rejection_messages();
@@ -251,14 +312,29 @@ pub(super) fn run_vlm_optimizer(request: VlmOptimizerRequest<'_>) -> SolverOptim
     // adaptation's solved tail scale, and the report, mission and feasibility
     // are built on that aircraft; the vector it was handed is the search's.
     let delivered_design = delivered.report.design;
+    let baseline_verification = reporting_nominal
+        .as_ref()
+        .and_then(|nominal| nominal.verified_analysis(&config, acceptance_route));
+    let report = delivered.report.clone();
+    let verification =
+        crate::acceptance::VerifiedAnalysis::new(config, acceptance_route.cloned(), delivered);
     SolverOptimizationResult {
         solver: SolverKind::Vlm,
         status,
         design: Some(delivered_design),
         optimization: Some(optimization),
-        report: Some(delivered.report),
+        report: Some(report),
+        verification: Some(verification),
+        baseline_verification,
         avl_result: None,
         output_dir,
         error: None,
     }
+}
+
+/// One job of the reporting-fidelity ladder: the registered aircraft the
+/// relative balance guard compares against, or one ranked finalist.
+enum LadderJob {
+    Nominal(Option<Result<crate::acceptance::ReportingNominal, String>>),
+    Finalist(Result<FinalistVerification, String>),
 }

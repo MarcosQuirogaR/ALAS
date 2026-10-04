@@ -77,6 +77,9 @@ pub(crate) fn model_cg_gate_assessment(
     ) else {
         return Err(alas_opt::ModelCgEnvelopeError::InvalidInput);
     };
+    // The gear where this report's aircraft has it, whichever configuration
+    // the caller holds.
+    let config = &alas_pipeline::gear_stations::report_config(config, report);
     let critical_x_np = report
         .neutral_point_conditions
         .as_ref()
@@ -106,3 +109,7 @@ pub mod screening;
 pub mod stability;
 pub mod structures;
 pub mod structures_dynamics;
+
+#[cfg(test)]
+#[path = "placed_gear_tests.rs"]
+mod placed_gear_tests;

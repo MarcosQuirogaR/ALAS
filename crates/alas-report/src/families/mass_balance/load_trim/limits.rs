@@ -29,9 +29,9 @@ pub(super) struct Bands {
     /// Zero-fuel mass: the lightest mass a flight limit applies at.
     pub(super) zfw_kg: f64,
     /// Heaviest takeoff (ramp) mass.
-    pub(super) mtow_kg: f64,
+    pub(super) takeoff_kg: f64,
     /// Landing mass the landing limit runs up to.
-    pub(super) mlw_kg: f64,
+    pub(super) landing_kg: f64,
 }
 
 fn vertex(state: &ModelCgLoadingAssessment, phase: PhaseLimits) -> Option<LimitVertex> {
@@ -80,19 +80,19 @@ pub(super) fn limit_sets(states: &[&ModelCgLoadingAssessment], bands: Bands) -> 
     let mut landing = set_over(
         states,
         PhaseLimits::LANDING,
-        (bands.zfw_kg, bands.mlw_kg),
-        bands.mlw_kg,
+        (bands.zfw_kg, bands.landing_kg),
+        bands.landing_kg,
     );
     if landing.is_empty() {
         // No state inside the landing band: hold the state nearest to the
         // landing mass across it.
         if let Some(nearest) = states.iter().min_by(|a, b| {
-            (a.mass_kg - bands.mlw_kg)
+            (a.mass_kg - bands.landing_kg)
                 .abs()
-                .total_cmp(&(b.mass_kg - bands.mlw_kg).abs())
+                .total_cmp(&(b.mass_kg - bands.landing_kg).abs())
         }) {
             if let Some(v) = vertex(nearest, PhaseLimits::LANDING) {
-                landing = [bands.zfw_kg, bands.mlw_kg]
+                landing = [bands.zfw_kg, bands.landing_kg]
                     .into_iter()
                     .map(|mass_kg| LimitVertex { mass_kg, ..v })
                     .collect();
@@ -104,13 +104,13 @@ pub(super) fn limit_sets(states: &[&ModelCgLoadingAssessment], bands: Bands) -> 
             states,
             PhaseLimits::GROUND,
             (f64::NEG_INFINITY, f64::INFINITY),
-            bands.mtow_kg,
+            bands.takeoff_kg,
         ),
         takeoff: set_over(
             states,
             PhaseLimits::TAKEOFF,
             (bands.zfw_kg, f64::INFINITY),
-            bands.mtow_kg,
+            bands.takeoff_kg,
         ),
         flight: set_over(
             states,

@@ -3,7 +3,7 @@
 
 //! Build a [`LoadTrimSheetData`] from a pipeline result: the CG gate's
 //! per-state physical limits scoped by phase, the composed loading orders
-//! behind the boarding potato, and the preset's structural weights.
+//! behind the boarding potato, and the model's analyzed/design masses.
 
 use alas_opt::ModelCgLoadingState;
 use alas_payload::loading_sequence::{LoadSequenceSet, LoadingPoint, LoadingSequence};
@@ -12,21 +12,7 @@ use alas_pipeline::PipelineResult;
 use super::limits::{limit_sets, Bands};
 use super::sequences::{load_sequence_set, potato_and_paths};
 use super::LimitVertex;
-use super::{BalanceIndex, LoadStep, LoadTrimSheetData, WeightLine};
-
-/// Plain-language name of a limit mechanism from its governance variant.
-fn describe(governance: &str) -> &'static str {
-    match governance {
-        g if g.contains("Rotation") => "nose-wheel lift-off at rotation governs",
-        g if g.contains("LandingTrim") => "landing trim in ground effect governs",
-        g if g.contains("TipBack") => "tip-back geometry governs",
-        g if g.contains("MinimumNose") => "minimum nose-gear load governs",
-        g if g.contains("MaxNose") => "maximum nose-gear load governs",
-        g if g.contains("Scissor") => "tail-authority estimate governs",
-        g if g.contains("Aero") => "neutral point less minimum margin governs",
-        _ => "governing mechanism per CG gate",
-    }
-}
+use super::{BalanceIndex, LoadStep, LoadTrimSheetData, MassRole, StepGate, WeightLine};
 
 /// Mass and moment about the nose after replaying the increments of the
 /// path `sequence` (built from `origin`) on top of `(mass, moment)`.
@@ -71,8 +57,36 @@ pub fn load_trim_data_from_pipeline(result: &PipelineResult) -> Option<LoadTrimS
         .optimized_report
         .as_ref()
         .or(result.baseline_analysis.as_ref())?;
+    build_data(
+        report,
+        &result.config,
+        result.feasibility.model_cg.as_ref()?,
+        result.feasibility.fuel_loading.analyzed_takeoff_mass_kg,
+        result
+            .feasibility
+            .operational_envelope
+            .as_ref()
+            .and_then(|env| env.zfw_operational_limits_pct_mac),
+    )
+}
+
+/// Build the sheet for a selected analysis or editable mass preview.
+pub fn load_trim_data_from_report(
+    report: &alas_pipeline::full_analysis::AnalysisReport,
+    config: &alas_config::AlasConfig,
+) -> Option<LoadTrimSheetData> {
+    let assessment = crate::families::model_cg_gate_assessment(report, config).ok()?;
+    build_data(report, config, &assessment, f64::NAN, None)
+}
+
+fn build_data(
+    report: &alas_pipeline::full_analysis::AnalysisReport,
+    config: &alas_config::AlasConfig,
+    model_cg: &alas_opt::ModelCgEnvelopeAssessment,
+    analyzed_takeoff_mass_kg: f64,
+    zfw_operational_limits: Option<(f64, f64)>,
+) -> Option<LoadTrimSheetData> {
     let frame = report.airplane.mac_frame()?;
-    let model_cg = result.feasibility.model_cg.as_ref()?;
     let pct = |x_m: f64| frame.pct_mac(x_m);
     let state = |s: ModelCgLoadingState| model_cg.loading_states.iter().find(|l| l.state == s);
 
@@ -80,60 +94,23 @@ pub fn load_trim_data_from_pipeline(result: &PipelineResult) -> Option<LoadTrimS
         .loading_states
         .iter()
         .max_by(|a, b| a.mass_kg.total_cmp(&b.mass_kg))?;
-    let governance = [
-        describe(&format!(
-            "{:?}",
-            heaviest.physical_limits.fwd_limit_governance
-        ))
-        .to_owned(),
-        describe(&format!(
-            "{:?}",
-            heaviest.physical_limits.aft_limit_governance
-        ))
-        .to_owned(),
-    ];
-
-    let config = &result.config;
     let preset = alas_config::presets::get(&config.preset).ok();
-    let reference = preset.map(|p| p.reference.clone());
-    // The weight lines are the model's own masses: the pipeline's sized
-    // takeoff mass (then the analyzed takeoff mass, then the heaviest gate
-    // state) and the landing mass the model closes on it. The preset's
-    // published structural weights are a labelled reference overlay only.
-    let mtow = report
-        .sized_takeoff_mass_kg()
+    let sized_takeoff_mass = report.sized_takeoff_mass_kg();
+    let takeoff_role = if sized_takeoff_mass.is_some() {
+        MassRole::SizedTakeoff
+    } else {
+        MassRole::AnalyzedTakeoff
+    };
+    let takeoff_mass = sized_takeoff_mass
         .or_else(|| {
-            let analyzed = result.feasibility.fuel_loading.analyzed_takeoff_mass_kg;
+            let analyzed = analyzed_takeoff_mass_kg;
             (analyzed.is_finite() && analyzed > 0.0).then_some(analyzed)
         })
         .unwrap_or(heaviest.mass_kg);
-    let mlw = report
+    let landing_mass = report
         .design_landing_mass_kg()
-        .unwrap_or_else(|| config.design_landing_mass_at_closure(mtow))
-        .min(mtow);
-    let mut notes = vec![
-        "Limits are the ALAS CG gate's per-weight physical limits (model, not certified)."
-            .to_owned(),
-    ];
-    if let Some(reference) = reference.as_ref() {
-        let published =
-            |label: &str, mass: Option<f64>| mass.map(|kg| format!("{label} {kg:.0} kg"));
-        let parts: Vec<String> = [
-            published("MTOW", reference.mtow_kg),
-            published("MLW", reference.mlw_kg),
-            published("MZFW", reference.mzfw_kg),
-        ]
-        .into_iter()
-        .flatten()
-        .collect();
-        if !parts.is_empty() {
-            notes.push(format!(
-                "Published reference (overlay, not used by the model): {}.",
-                parts.join(", ")
-            ));
-        }
-    }
-
+        .unwrap_or_else(|| config.design_landing_mass_at_closure(takeoff_mass))
+        .min(takeoff_mass);
     // Worked case: DOW, cargo, passengers (ZFW), fuel (TOW), burn (LW).
     let dow = state(ModelCgLoadingState::OperatingEmpty)?;
     let dow_point = LoadingPoint {
@@ -145,6 +122,7 @@ pub fn load_trim_data_from_pipeline(result: &PipelineResult) -> Option<LoadTrimS
         state: "DOW".to_owned(),
         mass_kg: dow.mass_kg,
         pct_mac: dow.cg_pct_mac,
+        gate: Some(StepGate::from_assessment(dow)),
     }];
     let tow = state(ModelCgLoadingState::AnalyzedTakeoff);
     let zfw_model = state(ModelCgLoadingState::AnalyzedZeroFuel);
@@ -154,13 +132,15 @@ pub fn load_trim_data_from_pipeline(result: &PipelineResult) -> Option<LoadTrimS
     };
     let set = load_sequence_set(config, report, dow_point, fuel_kg);
     let mut load = (dow.mass_kg, dow.mass_kg * dow.cg_x_m);
-    let mut fuel_path = Vec::new();
+
     if let Some(set) = set.as_ref() {
         for (sequence, item, label) in [
             (set.cargo.first(), "Cargo", "+hold"),
             (set.pax.first(), "Passengers", "ZFW"),
         ] {
-            if sequence.is_none() {
+            if sequence.and_then(|s| s.points.last()).is_none_or(|last| {
+                !last.mass_kg.is_finite() || !last.x_m.is_finite() || last.mass_kg <= dow.mass_kg
+            }) {
                 continue;
             }
             load = add_stage(load, dow_point, sequence);
@@ -169,10 +149,27 @@ pub fn load_trim_data_from_pipeline(result: &PipelineResult) -> Option<LoadTrimS
                 state: label.to_owned(),
                 mass_kg: load.0,
                 pct_mac: pct(load.1 / load.0),
+                // The gate evaluates the zero-fuel state, not the hold step.
+                gate: (label == "ZFW")
+                    .then(|| zfw_model.map(StepGate::from_assessment))
+                    .flatten(),
             });
         }
-        fuel_path = fuel_curve(set, load, pct);
     }
+    if !steps.iter().any(|step| step.state == "ZFW") {
+        let zfw = zfw_model?;
+        load = (zfw.mass_kg, zfw.mass_kg * zfw.cg_x_m);
+        steps.push(LoadStep {
+            item: "Payload".to_owned(),
+            state: "ZFW".to_owned(),
+            mass_kg: zfw.mass_kg,
+            pct_mac: zfw.cg_pct_mac,
+            gate: Some(StepGate::from_assessment(zfw)),
+        });
+    }
+    let fuel_path = set
+        .as_ref()
+        .map_or_else(Vec::new, |set| fuel_curve(set, load, pct));
     let zfw_mass = load.0;
     for (s, item, label) in [
         (ModelCgLoadingState::AnalyzedTakeoff, "Fuel", "TOW"),
@@ -189,19 +186,12 @@ pub fn load_trim_data_from_pipeline(result: &PipelineResult) -> Option<LoadTrimS
             let on_path = (label == "LW")
                 .then(|| interpolate_curve(&fuel_path, s.mass_kg))
                 .flatten();
-            if let Some(path_pct) = on_path {
-                if (path_pct - s.cg_pct_mac).abs() > 0.05 {
-                    notes.push(format!(
-                        "Landing point CG {path_pct:.1} %MAC follows the tank-burn path; the CG gate's reserve state assumes {:.1} %MAC.",
-                        s.cg_pct_mac
-                    ));
-                }
-            }
             steps.push(LoadStep {
                 item: item.to_owned(),
                 state: label.to_owned(),
                 mass_kg: s.mass_kg,
                 pct_mac: on_path.unwrap_or(s.cg_pct_mac),
+                gate: Some(StepGate::from_assessment(s)),
             });
         }
     }
@@ -211,12 +201,7 @@ pub fn load_trim_data_from_pipeline(result: &PipelineResult) -> Option<LoadTrimS
     });
 
     let mut zfw_limits = Vec::new();
-    if let Some((fwd, aft)) = result
-        .feasibility
-        .operational_envelope
-        .as_ref()
-        .and_then(|env| env.zfw_operational_limits_pct_mac)
-    {
+    if let Some((fwd, aft)) = zfw_operational_limits {
         for mass_kg in [dow.mass_kg.min(zfw_mass), zfw_mass] {
             zfw_limits.push(LimitVertex {
                 mass_kg,
@@ -231,35 +216,25 @@ pub fn load_trim_data_from_pipeline(result: &PipelineResult) -> Option<LoadTrimS
         &states,
         Bands {
             zfw_kg: zfw_model.map_or(zfw_mass, |z| z.mass_kg),
-            mtow_kg: mtow,
-            mlw_kg: mlw,
+            takeoff_kg: takeoff_mass,
+            landing_kg: landing_mass,
         },
     );
 
     let weight_lines = vec![
         WeightLine {
-            label: "MTOW".to_owned(),
-            mass_kg: mtow,
+            role: takeoff_role,
+            mass_kg: takeoff_mass,
         },
         WeightLine {
-            label: "MLW".to_owned(),
-            mass_kg: mlw,
+            role: MassRole::DesignLanding,
+            mass_kg: landing_mass,
         },
         WeightLine {
-            label: "MZFW".to_owned(),
+            role: MassRole::AnalyzedZeroFuel,
             mass_kg: zfw_mass,
         },
     ];
-    notes.push("MZFW line is the model zero-fuel mass of the analyzed loading.".to_owned());
-    notes.push(format!(
-        "Forward limit at takeoff mass: {}; aft limit: {}.",
-        governance[0], governance[1]
-    ));
-    notes.push(
-        "Ground limits use the maximum-nose-load forward and the minimum-nose-load and tip-back aft mechanisms only; the forward line at empty weight is a ground limit, not a flight limit."
-            .to_owned(),
-    );
-
     let all_limits = [&sets.ground, &sets.takeoff, &sets.flight, &sets.landing];
     let fwd_min = all_limits
         .iter()
@@ -272,11 +247,17 @@ pub fn load_trim_data_from_pipeline(result: &PipelineResult) -> Option<LoadTrimS
         .map(|v| v.aft_pct_mac)
         .fold(f64::NEG_INFINITY, f64::max);
     let name = preset.map_or(config.preset.clone(), |p| p.display_name.to_owned());
-    let mut data = LoadTrimSheetData {
-        title: format!("{name}  -  LOAD & TRIM SHEET (ALAS model)"),
+    Some(LoadTrimSheetData {
+        title: format!("{name}  -  {}", super::panel::SHEET_NAME),
         x_lemac_m: frame.x_lemac_m,
         mac_m: frame.chord_m,
-        index: BalanceIndex::for_aircraft(frame.x_lemac_m, frame.chord_m, mtow, fwd_min, aft_max),
+        index: BalanceIndex::for_aircraft(
+            frame.x_lemac_m,
+            frame.chord_m,
+            takeoff_mass,
+            fwd_min,
+            aft_max,
+        ),
         ground_limits: sets.ground,
         takeoff_limits: sets.takeoff,
         flight_limits: sets.flight,
@@ -287,22 +268,5 @@ pub fn load_trim_data_from_pipeline(result: &PipelineResult) -> Option<LoadTrimS
         sequences,
         fuel_curve: fuel_path,
         steps,
-        governance,
-        notes,
-    };
-    if !data.potato.is_empty() {
-        let excess = data.potato_ground_exceedance_pct_mac();
-        data.notes.push(if excess > 1e-6 {
-            format!(
-                "Boarding potato ({} composed orders) leaves the ground limits by up to {excess:.1} %MAC.",
-                data.sequences.len()
-            )
-        } else {
-            format!(
-                "Boarding potato ({} composed orders) lies inside the ground limits.",
-                data.sequences.len()
-            )
-        });
-    }
-    Some(data)
+    })
 }

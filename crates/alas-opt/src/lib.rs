@@ -22,6 +22,7 @@
 pub mod cancellation;
 pub mod differential_evolution;
 pub mod envelope;
+pub mod evaluation_trace;
 pub mod evaluator;
 pub mod history;
 pub mod mdo;
@@ -50,11 +51,13 @@ pub use envelope::{
     ModelCgConstraintAssessment, ModelCgEnvelopeAssessment, ModelCgEnvelopeError,
     ModelCgLoadingAssessment, ModelCgLoadingState, StaticMarginPreferenceAssessment,
 };
+pub use evaluation_trace::{EvaluationTrace, TraceClass, TraceStage, TracedEvaluation};
 pub use evaluator::{ObjectiveEvaluation, ObjectiveEvaluator};
 pub use history::OptimizationHistory;
 pub use mdo::{
     assess_candidate, assess_candidate_with_polar_cancellable, assess_product_candidate,
-    assess_product_candidate_cancellable, canonicalize_design, evaluate_mission_sized,
+    assess_product_candidate_cancellable, assess_product_candidate_with_controls_cancellable,
+    canonicalize_design, configured_nominal_design, evaluate_mission_sized,
     evaluate_mission_sized_with_assessment, reporting_relative_balance, resolve_tail_sizing,
     CandidateAssessment, ConstraintFamily, ConstraintResidual, ExternalPolar,
     PolarConditionTolerance, ProductStateProvenance, ResolvedProductState, SegmentMissionModel,

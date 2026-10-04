@@ -132,6 +132,10 @@ pub struct SolverOptimizationResult {
     pub optimization: Option<OptimizationResult>,
     /// Full report for this branch's best design.
     pub report: Option<AnalysisReport>,
+    /// Exact reporting analysis retained for downstream native stages.
+    pub verification: Option<crate::acceptance::VerifiedAnalysis>,
+    /// Registered reporting analysis, reusable when its resolved aircraft matches.
+    pub baseline_verification: Option<crate::acceptance::VerifiedAnalysis>,
     /// Retained AVL run for the AVL branch's best design.
     pub avl_result: Option<AvlAnalysisResult>,
     /// Branch-local output directory, when one is configured.
@@ -148,6 +152,8 @@ impl SolverOptimizationResult {
             design: None,
             optimization: None,
             report: None,
+            verification: None,
+            baseline_verification: None,
             avl_result: None,
             output_dir: None,
             error: None,
@@ -161,6 +167,8 @@ impl SolverOptimizationResult {
             design: None,
             optimization: None,
             report: None,
+            verification: None,
+            baseline_verification: None,
             avl_result: None,
             output_dir,
             error: Some(error.into()),
@@ -245,8 +253,11 @@ pub fn run_solver_optimizations(
     );
     let bounds = bounds.map(<[(f64, f64)]>::to_vec);
     let nominal = *nominal_design;
-    let vlm_config = serial_solver_config(config, parallel);
-    let avl_config = serial_solver_config(config, parallel);
+    let SolverBranches {
+        vlm_config,
+        avl_config,
+        parallel,
+    } = solver_branches(config, parallel);
     let avl_environment = environment.clone();
     let vlm_output = output_dir.map(|path| path.join("solvers/vlm"));
     let avl_output = output_dir.map(|path| path.join("solvers/avl"));

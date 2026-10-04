@@ -42,6 +42,7 @@ mod mass;
 mod nodes;
 mod product_caps;
 mod rivets;
+mod section_closure;
 mod write;
 
 pub use build::{build_wing_mesh_bdf, build_wing_mesh_bdf_product};
@@ -138,6 +139,12 @@ impl MeshHealthReport {
 /// A mesh defect severe enough that there is no deck to return.
 #[derive(Debug, Clone, Copy, PartialEq, thiserror::Error)]
 pub enum MeshError {
+    /// A source section crosses before enclosing its configured spar box.
+    #[error("unsupported section material domain at rib {rib}")]
+    SectionMaterialDomain {
+        /// Zero-based rib station.
+        rib: usize,
+    },
     /// A product spar-cap section or its attachment geometry is invalid.
     #[error("invalid product cap geometry at spar {spar}, segment {segment}")]
     InvalidCapGeometry {

@@ -12,15 +12,23 @@
 use std::sync::Arc;
 
 use alas_config::design_variables::DesignVector;
-use alas_config::{ConstraintPolicy, TailSizing};
+use alas_config::TailSizing;
 use alas_mass::breakdown::{MassBreakdown, MassCoordinates};
 use alas_mass::dispatch::DispatchSolution;
 
+/// Fixed meaning of an evaluated residual in candidate ranking.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResidualRole {
+    /// A violation invalidates the candidate.
+    Constraint,
+    /// A study preference contributes to cost without changing feasibility.
+    Preference,
+    /// A reported measurement that does not contribute to ranking.
+    Diagnostic,
+}
 /// Which requirement family a [`ConstraintResidual`] belongs to.
 ///
-/// Ordered so that the relaxation policy can count *distinct* violated
-/// discipline groups deterministically. The order is
-/// the declaration order and carries no severity meaning.
+/// Declaration order carries no severity meaning.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ConstraintFamily {
     /// Fuel capacity, the takeoff-mass ceiling and the sizing closure.
@@ -42,7 +50,7 @@ pub enum ConstraintFamily {
 /// physical units as `actual` and `limit`. `normalized_violation` is what
 /// `mdo::cost` actually sums: `max(raw_residual, 0) / scale`, dimensionless,
 /// so a mass residual and an angle residual can be added together.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ConstraintResidual {
     /// Stable identifier, joined with `+` in a rejected candidate's reason.
     pub id: &'static str,
@@ -59,7 +67,9 @@ pub struct ConstraintResidual {
     /// `max(raw_residual, 0) / scale`, dimensionless.
     pub normalized_violation: f64,
     /// How this family takes part in the ranking.
-    pub policy: ConstraintPolicy,
+    pub role: ResidualRole,
+    /// Model or input failure context; does not alter the residual's ranking.
+    pub detail: Option<String>,
 }
 
 /// Relative violation below which a scaled residual counts as met.
@@ -81,10 +91,12 @@ pub use fuel::{CandidateDrag, CandidateFuelArtifacts, DeckKey, SizingControls, S
 /// One design candidate closed against the sizing mission.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SizedCandidate {
-    /// Analysis takeoff mass, kg: the mission-closed dispatch mass in every
-    /// mode but `FixedRequirement`, where it is the declared MTOW; the
-    /// dispatch plan keeps the mission-required mass for the ceiling check.
+    /// Physical analysis takeoff mass, kg. Hard MTOW carries the maximum
+    /// fuel the weight and volume budgets admit; other modes use dispatch.
     pub takeoff_mass_kg: f64,
+    /// Maximum available fuel loading under Hard MTOW, including the
+    /// governing weight/volume limit; absent for mission-closed modes.
+    pub takeoff_loading: Option<alas_mass::loading::MtowFuelLoading>,
     /// `fixed_aircraft` or `coupled` (`alas_config::MassSizingBasis`).
     pub sizing_basis: &'static str,
     /// FLOPS design gross mass `DG` the components were evaluated at, kg.
@@ -174,6 +186,42 @@ pub struct SizedCandidate {
     pub structural_secondary_mass_kg: f64,
 }
 
+impl SizedCandidate {
+    /// The dispatch of the route the aircraft is flown over: the off-design
+    /// route flight when the closure flew another mission, else the
+    /// closure's own. Its takeoff and landing are the flown load the
+    /// reporting verdict checks.
+    #[must_use]
+    pub fn flown_dispatch(&self) -> &DispatchSolution {
+        self.mtow
+            .offdesign
+            .as_ref()
+            .map_or(&self.dispatch, |flight| &flight.dispatch)
+    }
+
+    /// Start-of-cruise mass, kg: the takeoff mass with the climb burn not
+    /// deducted, so an upper bound of the heaviest cruise state. Reported
+    /// beside the gated mid-cruise point, never gated.
+    #[must_use]
+    pub fn start_of_cruise_mass_kg(&self) -> f64 {
+        self.takeoff_mass_kg
+    }
+
+    /// Mid-cruise mass, kg, of the design mission flown from this
+    /// candidate's takeoff loading ([`Self::takeoff_mass_kg`] carrying
+    /// [`Self::takeoff_fuel_kg`]) with the reserves of the dispatch it was
+    /// closed on; see [`super::cruise_mass`] for the definition, which is
+    /// the same under every MTOW mode.
+    #[must_use]
+    pub fn mid_cruise_mass_kg(&self) -> f64 {
+        super::cruise_mass::mid_cruise_mass_of_loading_kg(
+            self.takeoff_mass_kg,
+            self.takeoff_fuel_kg,
+            &self.dispatch.plan,
+        )
+    }
+}
+
 /// Where a [`ResolvedProductState`] came from, so a consumer can say which
 /// physical evaluation it is quoting instead of assuming every mass/CG state
 /// in the run is the same one.
@@ -223,6 +271,10 @@ pub struct ResolvedProductState {
     pub design: DesignVector,
     /// Solved tail sizing; a replay applies it with [`TailSizing::apply_to`].
     pub tail_sizing: TailSizing,
+    /// Solved main-gear group translation of a redesigned candidate
+    /// (`alas_config::LandingGearConfig::derived_main_gear`); `None` keeps
+    /// the configured stations. A replay writes it into its configuration.
+    pub main_gear_placement: Option<alas_config::DerivedMainGearStation>,
     /// Component masses at the closed takeoff mass, kg.
     pub masses: MassBreakdown,
     /// Component centroids the balance was evaluated at, m.
@@ -239,38 +291,6 @@ pub struct ResolvedProductState {
     pub provenance: ProductStateProvenance,
 }
 
-/// What the controlled-relaxation policy made of one candidate's violated
-/// hard residuals.
-///
-/// Empty and `rejected: false` for a strictly feasible candidate, which is
-/// every candidate under the shipped strict policy. A candidate with a
-/// non-empty `relaxed_ids` is *relaxed*, never fully feasible, and every
-/// reader that reports feasibility has to say so.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct RelaxationOutcome {
-    /// Limits that were missed inside their own declared tolerance.
-    pub relaxed_ids: Vec<&'static str>,
-    /// Distinct discipline groups carrying a relaxed miss (the policy counts
-    /// groups, not limits).
-    pub violated_groups: usize,
-    /// Whether the candidate is rejected despite the policy: a miss outside
-    /// its tolerance, a limit that is not eligible, or more violated groups
-    /// than the policy allows.
-    pub rejected: bool,
-}
-
-impl RelaxationOutcome {
-    /// The outcome of a candidate that needed no relaxation at all.
-    pub fn strict() -> Self {
-        Self::default()
-    }
-
-    /// Whether this candidate was admitted only by the relaxation policy.
-    pub fn is_relaxed(&self) -> bool {
-        !self.relaxed_ids.is_empty() && !self.rejected
-    }
-}
-
 /// The residual table and scalar cost for one evaluated candidate.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CandidateAssessment {
@@ -281,17 +301,11 @@ pub struct CandidateAssessment {
     pub resolved: ResolvedProductState,
     /// Every evaluated requirement, as a typed residual.
     pub residuals: Vec<ConstraintResidual>,
-    /// Whether the candidate is admissible: every hard-policy residual
-    /// satisfied, or every miss admitted by the controlled-relaxation policy.
-    /// Check [`CandidateAssessment::is_strictly_feasible`] before reporting
-    /// an aircraft as feasible.
+    /// Whether every hard requirement is satisfied.
     pub hard_feasible: bool,
-    /// What the relaxation policy made of the violated hard residuals.
-    /// Empty under the shipped strict policy.
-    pub relaxation: RelaxationOutcome,
-    /// Sum of normalized violations across hard-policy residuals.
+    /// Sum of normalized violations across hard-role residuals.
     pub hard_violation_sum: f64,
-    /// Sum of normalized violations across soft-policy residuals.
+    /// Sum of normalized violations across soft-role residuals.
     pub soft_violation_sum: f64,
     /// The configured mission quantity, before normalization.
     pub objective_value: f64,
@@ -300,23 +314,32 @@ pub struct CandidateAssessment {
 }
 
 impl CandidateAssessment {
-    /// Whether every hard-policy residual is met with nothing relaxed.
-    ///
-    /// This is the question a feasibility report has to ask. `hard_feasible`
-    /// admits a relaxed candidate on purpose, so that the search can rank it;
-    /// reporting one as feasible would be exactly the silent relabelling the
-    /// relaxation policy forbids.
+    /// Whether every hard requirement is satisfied.
     pub fn is_strictly_feasible(&self) -> bool {
-        self.hard_feasible && !self.relaxation.is_relaxed()
+        self.hard_feasible
     }
 
-    /// Identifiers of every violated hard-policy residual, in evaluation
+    /// Identifiers of every violated hard-role residual, in evaluation
     /// order, joined with `+` for a rejected candidate's history entry.
     pub fn violated_hard_ids(&self) -> Vec<&'static str> {
         self.residuals
             .iter()
-            .filter(|residual| residual.policy == ConstraintPolicy::Hard && residual.violated())
+            .filter(|residual| residual.role == ResidualRole::Constraint && residual.violated())
             .map(|residual| residual.id)
+            .collect()
+    }
+
+    /// Violated hard requirements with model-failure context for reports.
+    pub fn violated_hard_details(&self) -> Vec<String> {
+        self.residuals
+            .iter()
+            .filter(|row| row.role == ResidualRole::Constraint && row.violated())
+            .map(|row| {
+                row.detail.as_ref().map_or_else(
+                    || row.id.to_owned(),
+                    |detail| format!("{}: {detail}", row.id),
+                )
+            })
             .collect()
     }
 }
@@ -386,7 +409,7 @@ mod tests {
                     limit,
                     "m",
                     raw,
-                    ConstraintPolicy::Hard,
+                    ResidualRole::Constraint,
                 );
                 assert!(residual.violated());
             }
@@ -398,7 +421,7 @@ mod tests {
                 "m",
                 0.0,
                 invalid,
-                ConstraintPolicy::Hard,
+                ResidualRole::Constraint,
             );
             assert!(residual.violated());
         }
@@ -409,7 +432,7 @@ mod tests {
             1.0,
             "m",
             -0.5,
-            ConstraintPolicy::Hard,
+            ResidualRole::Constraint,
         );
         assert!(!satisfied.violated());
     }

@@ -305,6 +305,36 @@ fn induced_cells_reproduce_design_drag_and_pass_independent_trimmed_solves() {
 }
 
 #[test]
+fn screening_induced_fit_retains_trim_and_checked_clean_range() {
+    for preset in presets() {
+        let aero = preset.aero();
+        let table = TrimmedDragTable::build_with_check_set(&aero, &preset.design, true)
+            .unwrap_or_else(|error| panic!("{}: {error}", preset.name));
+        assert!(
+            (table.induced_cd(preset.design.cl) - preset.design.cd_induced).abs() < 1e-12,
+            "{} design trim",
+            preset.name
+        );
+        for target in [0.0, preset.design.cl_max_clean] {
+            let (cl, direct) = induced::trimmed_node(&aero, &preset.design, target)
+                .unwrap_or_else(|error| panic!("{}: {error}", preset.name));
+            assert!(
+                (table.induced_cd(cl) - direct).abs() / direct <= INDUCED_CHECK_RELATIVE_TOLERANCE,
+                "{} clean-CL endpoint",
+                preset.name
+            );
+        }
+        for target in (0..=20).map(|node| preset.design.cl_max_clean * f64::from(node) / 20.0) {
+            assert!(
+                table.induced_cd(target) >= 0.0,
+                "{} wake energy",
+                preset.name
+            );
+        }
+    }
+}
+
+#[test]
 fn a_design_point_with_a_loose_moment_residual_is_retrimmed() {
     let preset = Trimmed::new("A320-200");
     let aero = preset.aero();

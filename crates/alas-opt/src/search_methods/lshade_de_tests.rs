@@ -11,15 +11,248 @@ use crate::cancellation::CancelWatch;
 fn settings(seed: u64, budget: usize) -> Settings {
     Settings {
         max_evaluations: budget,
+        schedule_evaluations: budget,
         stop_after: budget,
         population: 20,
+        minimum_population: MIN_POPULATION,
+        population_quantum: 1,
         seed,
         adaptation: false,
         spread_tolerance: 0.0,
         stagnation_generations: usize::MAX,
         time_limit: None,
+        intra_batch_deadline: false,
         infeasible_reserve: 0,
         max_rejects: 20 * budget,
+    }
+}
+
+#[test]
+fn an_affordable_schedule_does_not_reduce_the_configured_evaluation_ceiling() {
+    let budget = 128;
+    let mut observed = Vec::new();
+    let answer = run(
+        &[(0.0, 1.0); 2],
+        &[],
+        Settings {
+            schedule_evaluations: budget / 4,
+            ..settings(7, budget)
+        },
+        Instant::now(),
+        &CancelScope::attach(None),
+        &mut |points: &[Vec<f64>]| {
+            observed.extend_from_slice(points);
+            points
+                .iter()
+                .map(|point| scored(point, point.iter().sum(), 0.0))
+                .collect()
+        },
+    );
+    assert_eq!(answer.evaluations, budget);
+    assert_eq!(observed.len(), budget);
+    assert!(answer.winner.valid());
+    let mut replayed = Vec::new();
+    let stop_after = budget / 2;
+    let replay = run(
+        &[(0.0, 1.0); 2],
+        &[],
+        Settings {
+            schedule_evaluations: budget / 4,
+            stop_after,
+            ..settings(7, budget)
+        },
+        Instant::now(),
+        &CancelScope::attach(None),
+        &mut |points: &[Vec<f64>]| {
+            replayed.extend_from_slice(points);
+            points
+                .iter()
+                .map(|point| scored(point, point.iter().sum(), 0.0))
+                .collect()
+        },
+    );
+    assert_eq!(replay.evaluations, stop_after);
+    assert_eq!(replayed, observed[..stop_after]);
+}
+
+#[test]
+fn an_admitted_replay_keeps_trailing_gate_rejections_without_another_analysis() {
+    let seeds = vec![vec![0.4], vec![0.0], vec![0.6], vec![0.0]];
+    let admits = |values: &[f64]| values[0] > 0.1;
+    let evaluate = |values: &[f64]| {
+        let mut answer = scored(values, values[0], 0.0);
+        if !admits(values) {
+            answer.tier = Tier::PreGateFailed;
+        }
+        answer
+    };
+    let mut recorded = Vec::new();
+    let limited = run_with_admission(
+        &[(0.0, 1.0)],
+        &seeds,
+        Settings {
+            population: seeds.len(),
+            time_limit: Some(Duration::ZERO),
+            ..settings(7, 100)
+        },
+        Instant::now(),
+        &CancelScope::attach(None),
+        Some(&admits),
+        &mut |points| {
+            recorded.extend_from_slice(points);
+            points.iter().map(|values| evaluate(values)).collect()
+        },
+    );
+    let mut replayed = Vec::new();
+    let replay = run_with_admission(
+        &[(0.0, 1.0)],
+        &seeds,
+        Settings {
+            population: seeds.len(),
+            stop_after: limited.evaluations,
+            ..settings(7, 100)
+        },
+        Instant::now(),
+        &CancelScope::attach(None),
+        Some(&admits),
+        &mut |points| {
+            replayed.extend_from_slice(points);
+            points.iter().map(|values| evaluate(values)).collect()
+        },
+    );
+    assert!(limited.rejected > 0);
+    assert_eq!(recorded, replayed);
+    assert_eq!(limited.evaluations, replay.evaluations);
+    assert_eq!(limited.rejected, replay.rejected);
+    assert_eq!(limited.winner, replay.winner);
+}
+
+#[test]
+fn a_native_population_floor_saturates_small_budgets_and_keeps_full_waves() {
+    let floor = 32;
+    for budget in [1, floor - 1, floor, 512] {
+        let mut batches = Vec::new();
+        let outcome = run_bowl(
+            Settings {
+                population: 2 * floor,
+                minimum_population: floor,
+                ..settings(19, budget)
+            },
+            &mut batches,
+        );
+        assert_eq!(outcome.evaluations, budget);
+        assert!(outcome.population_initial <= budget);
+        assert!(outcome.population_final >= floor.min(outcome.population_initial));
+        let full_generations = batches
+            .get(1..batches.len().saturating_sub(1))
+            .unwrap_or_default();
+        assert!(full_generations.iter().all(|&count| count >= floor));
+    }
+}
+
+/// With a lane quantum, every generation but the budget-truncated last one
+/// dispatches a whole number of waves, the population still shrinks to its
+/// floor, and the schedule does not lose evaluations against the plain one.
+#[test]
+fn a_quantized_population_dispatches_whole_waves() {
+    let quantum = 32;
+    let budget = 1_024;
+    let mut batches = Vec::new();
+    let outcome = run_bowl(
+        Settings {
+            population: 3 * quantum,
+            minimum_population: quantum,
+            population_quantum: quantum,
+            ..settings(23, budget)
+        },
+        &mut batches,
+    );
+    assert_eq!(outcome.evaluations, budget);
+    assert_eq!(outcome.population_final, quantum);
+    let generations = batches
+        .get(..batches.len().saturating_sub(1))
+        .unwrap_or_default();
+    assert!(
+        generations.iter().all(|&count| count % quantum == 0),
+        "{batches:?}"
+    );
+    assert!(
+        batches.iter().any(|&count| count == 2 * quantum),
+        "{batches:?}"
+    );
+}
+
+#[test]
+fn quantized_sizes_round_to_whole_waves_inside_floor_and_current() {
+    assert_eq!(ops::quantized_size(35, 32, 32, 35), 32);
+    assert_eq!(ops::quantized_size(47, 32, 32, 96), 32);
+    assert_eq!(ops::quantized_size(48, 32, 32, 96), 64);
+    assert_eq!(ops::quantized_size(95, 32, 32, 64), 64);
+    assert_eq!(ops::quantized_size(10, 32, 32, 64), 32);
+    assert_eq!(ops::quantized_size(37, 1, 8, 40), 37);
+    assert_eq!(ops::quantized_size(37, 0, 8, 30), 30);
+}
+
+#[test]
+fn a_deadline_prefix_replays_exactly_inside_the_population_or_generation() {
+    for cut in [7, 35] {
+        let mut limited_points = Vec::new();
+        let mut admitted = 0;
+        let limited = run(
+            &[(-2.0, 2.0), (-2.0, 2.0)],
+            &[],
+            settings(17, 400),
+            Instant::now(),
+            &CancelScope::attach(None),
+            &mut |points| {
+                let mut scores = Vec::new();
+                for point in points {
+                    if admitted >= cut {
+                        break;
+                    }
+                    let mut score = bowl_behind_a_halfplane(point);
+                    if point[0] < -0.5 {
+                        score.tier = Tier::PreGateFailed;
+                    } else {
+                        admitted += 1;
+                    }
+                    limited_points.push(point.clone());
+                    scores.push(score);
+                }
+                scores
+            },
+        );
+        let mut replay_points = Vec::new();
+        let replay = run(
+            &[(-2.0, 2.0), (-2.0, 2.0)],
+            &[],
+            Settings {
+                stop_after: cut,
+                ..settings(17, 400)
+            },
+            Instant::now(),
+            &CancelScope::attach(None),
+            &mut |points| {
+                points
+                    .iter()
+                    .map(|point| {
+                        replay_points.push(point.clone());
+                        let mut score = bowl_behind_a_halfplane(point);
+                        if point[0] < -0.5 {
+                            score.tier = Tier::PreGateFailed;
+                        }
+                        score
+                    })
+                    .collect()
+            },
+        );
+        assert_eq!(limited.evaluations, cut);
+        assert_eq!(replay.evaluations, cut);
+        assert_eq!(limited.termination, Termination::TimeBudget);
+        assert_eq!(replay.termination, Termination::EvaluationBudget);
+        assert_eq!(limited_points, replay_points);
+        assert_eq!(limited.winner, replay.winner);
+        assert_eq!(limited.rejected, replay.rejected);
     }
 }
 

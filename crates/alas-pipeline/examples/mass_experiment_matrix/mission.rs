@@ -224,12 +224,13 @@ pub(crate) fn mission_case(
                     .iter()
                     .map(|r| json!({
                         "id": r.id,
+                        "detail": r.detail,
                         "actual": r.actual,
                         "limit": r.limit,
                         "unit": r.unit,
                         "raw_residual": r.raw_residual,
                         "normalized_violation": r.normalized_violation,
-                        "policy": r.policy.as_str(),
+                        "role": format!("{:?}", r.role),
                     }))
                     .collect::<Vec<_>>()),
             );

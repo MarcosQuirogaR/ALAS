@@ -93,6 +93,9 @@ impl ToolLocator {
     }
 
     /// Resolve configured locations and discover adjacent bundled tools.
+    ///
+    /// `ALAS_TOOL_DISCOVERY=disabled` supplies an empty environment for
+    /// isolated runs, including tools with explicit configured paths.
     pub fn resolve_environment(
         &self,
         mses_dir: &Path,
@@ -101,10 +104,36 @@ impl ToolLocator {
         openvsp_dir: &Path,
         avl_exe: &Path,
     ) -> RunEnvironment {
+        self.resolve_environment_with_discovery(
+            mses_dir,
+            nastran_exe,
+            patran_exe,
+            openvsp_dir,
+            avl_exe,
+            tool_discovery_enabled(),
+        )
+    }
+
+    pub(super) fn resolve_environment_with_discovery(
+        &self,
+        mses_dir: &Path,
+        nastran_exe: &Path,
+        patran_exe: &Path,
+        openvsp_dir: &Path,
+        avl_exe: &Path,
+        discovery_enabled: bool,
+    ) -> RunEnvironment {
+        if !discovery_enabled {
+            return RunEnvironment::default();
+        }
+        let nastran_exe = self.discover_nastran(nastran_exe).ready_path();
+        let nastran_solver = nastran_exe
+            .as_deref()
+            .and_then(|launcher| solver_for_launcher(launcher).ready_path());
         RunEnvironment {
             mses_dir: self.resolve_mses_dir(mses_dir),
-            nastran_exe: self.discover_nastran(nastran_exe).ready_path(),
-            nastran_solver: self.discover_nastran_solver(nastran_exe).ready_path(),
+            nastran_exe,
+            nastran_solver,
             patran_exe: self.discover_patran(patran_exe).ready_path(),
             openvsp_exe: self.discover_openvsp(openvsp_dir).ready_path(),
             vspaero_exe: self.discover_vspaero(openvsp_dir).ready_path(),
@@ -161,21 +190,12 @@ impl ToolLocator {
         if matches!(adjacent, ExecutableDiscovery::Ready(_)) {
             return adjacent;
         }
-        // A Student Edition's visible `Nastran/bin/nastran.exe` is a thin
-        // launcher that can fail at Windows loader startup on machines with
-        // a different VC80 side-by-side revision.  When the user has not
-        // explicitly selected a file, prefer the versioned inner launcher
-        // that is paired with the server-mode solver and was validated on the
-        // installed layout.
-        if configured.as_os_str().is_empty() {
-            for root in &self.system_tool_roots {
-                if let Some(path) = find_embedded_nastran(root) {
-                    return ExecutableDiscovery::Ready(path);
-                }
-            }
-        }
-        self.discover_msc_executable("Nastran/bin", &["nastran.exe", "nastranw.exe"])
-            .unwrap_or(adjacent)
+        self.discover_msc_executable(
+            "Nastran/bin",
+            &["nastran.exe", "nastranw.exe"],
+            configured.as_os_str().is_empty(),
+        )
+        .unwrap_or(adjacent)
     }
 
     /// Inspect the configured and adjacent MSC Patran installation.
@@ -188,7 +208,7 @@ impl ToolLocator {
         if matches!(adjacent, ExecutableDiscovery::Ready(_)) {
             return adjacent;
         }
-        self.discover_msc_executable("Patran/bin", &["patran.exe"])
+        self.discover_msc_executable("Patran/bin", &["patran.exe"], false)
             .unwrap_or(adjacent)
     }
 
@@ -277,6 +297,13 @@ impl ToolLocator {
                 return ExecutableDiscovery::Ready(path);
             }
             if let Some(directory) = self.resolve_directory(configured) {
+                if let Some(path) = names
+                    .iter()
+                    .map(|name| directory.join(name))
+                    .find(|path| path.is_file())
+                {
+                    return ExecutableDiscovery::Ready(path);
+                }
                 candidates.push(directory);
             }
         }
@@ -342,8 +369,22 @@ impl ToolLocator {
         &self,
         relative_directory: &str,
         names: &[&str],
+        prefer_embedded_nastran: bool,
     ) -> Option<ExecutableDiscovery> {
+        let mut incomplete = None;
         for root in &self.system_tool_roots {
+            // App-data editions can require the inner launcher for their
+            // side-by-side runtime; Program Files editions use the bin entry.
+            let is_napa = root
+                .parent()
+                .and_then(Path::file_name)
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.eq_ignore_ascii_case("NaPa_SE"));
+            if prefer_embedded_nastran && !is_napa {
+                if let Some(path) = find_embedded_nastran(root) {
+                    return Some(ExecutableDiscovery::Ready(path));
+                }
+            }
             let directory = root.join(relative_directory);
             if let Some(path) = names
                 .iter()
@@ -352,14 +393,14 @@ impl ToolLocator {
             {
                 return Some(ExecutableDiscovery::Ready(path));
             }
-            if directory.is_dir() {
-                return Some(ExecutableDiscovery::Incomplete {
+            if directory.is_dir() && incomplete.is_none() {
+                incomplete = Some(ExecutableDiscovery::Incomplete {
                     directory,
                     missing: names.iter().map(|name| (*name).to_owned()).collect(),
                 });
             }
         }
-        None
+        incomplete
     }
 
     fn mses_candidates(&self, configured: &Path) -> Vec<(PathBuf, MsesSource)> {

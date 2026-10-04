@@ -68,7 +68,7 @@ pub(super) fn render_sectioned_form(
                     if flatten_turboprop {
                         // This node already has a dedicated Advanced Settings
                         // card. Edit its children at the existing JSON path,
-                        // without a second "Flops turboprop" card and the
+                        // without a second "FLOPS turboprop" card and the
                         // schema's inner "Advanced (17)" accordion.
                         let Entry::Node(node) = &section_fields[0].entry else {
                             return;
@@ -218,7 +218,7 @@ mod tests {
         assert_eq!(
             labels
                 .iter()
-                .filter(|label| *label == "Flops turboprop")
+                .filter(|label| *label == "FLOPS turboprop")
                 .count(),
             1
         );

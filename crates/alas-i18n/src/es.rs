@@ -249,4 +249,31 @@ mod tests {
             Some("Zoom autom\u{e1}tico")
         );
     }
+
+    #[test]
+    fn optimizer_settings_translate_units_and_runtime_worker_count() {
+        let catalog = native_desktop_catalog();
+        let automatic = &catalog["Automatic (all {count} threads)"];
+        assert_eq!(automatic.matches("{count}").count(), 1);
+        assert!(!automatic.replace("{count}", "16").contains('{'));
+        for key in [
+            "Evaluation ceiling",
+            "Hard MTOW constraint (preset default)",
+            "Preference weight",
+        ] {
+            assert_ne!(catalog[key], key);
+        }
+        for (key, unit) in [
+            ("Time limit [s]", "[s]"),
+            ("Block fuel [kg]", "[kg]"),
+            ("Takeoff mass [kg]", "[kg]"),
+            ("Operating empty mass [kg]", "[kg]"),
+            (
+                "Fuel per seat-kilometre [kg/(seat km)]",
+                "[kg/(asiento km)]",
+            ),
+        ] {
+            assert!(catalog[key].ends_with(unit), "{key}");
+        }
+    }
 }

@@ -93,10 +93,10 @@ pub fn validate(config: &AlasConfig) -> Vec<ValidationIssue> {
     issues.extend(empennage_tapers_toward_its_tips(config));
     issues.extend(solver_timeouts_are_positive_and_finite(config));
     issues.extend(optimizer_tokens_are_supported(config));
-    issues.extend(crate::optimizer::policy_review::policy_group_issues(config));
     issues.extend(mass_model::active_issues(config));
     issues.extend(fuel_scheme::fuel_scheme_matches_the_propulsion_type(config));
     issues.extend(mtow_sizing::mtow_sizing_issues(config));
+    issues.extend(config.optimizer.validation_issues());
     issues.extend(passenger_and_mass_inputs_are_coherent(config));
     issues.extend(custom_geometry_is_physical(config));
     issues.extend(vlm_mesh_is_solvable(config));

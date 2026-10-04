@@ -15,7 +15,7 @@ use std::time::Duration;
 
 use alas_config::{SolverSettings, StageBudget};
 
-pub(crate) use super::lshade_de::{run, Outcome, Settings, Termination};
+pub(crate) use super::lshade_de::{run_with_admission as run, Outcome, Settings, Termination};
 use super::{ScoredPoint, Tier};
 
 /// The `method` string every product optimization result reports.
@@ -118,11 +118,9 @@ pub(crate) fn stage_limits(
 }
 
 /// Safety factor on the measured throughput when the refinement budget is
-/// planned from its time limit. Engineering estimate: refinement
-/// generations shrink to eight trials and keep fewer lanes busy than a
-/// screening batch (lane utilization measured 0.55 to 0.68 against 0.77 to
-/// 0.91 on a 32-thread machine), and the time guard stops the run anyway, so
-/// the plan only has to be close.
+/// planned from its time limit. Engineering estimate: refinement trials may
+/// have different costs from the pilot, and generation construction leaves
+/// lanes idle between batches. The time guard still bounds the run.
 pub const THROUGHPUT_SAFETY_FACTOR: f64 = 0.9;
 
 /// Smallest planned refinement budget: ten evaluations per member of the
@@ -168,37 +166,65 @@ pub fn planned_refinement_budget(solver: &SolverSettings, rate: Option<f64>) -> 
 }
 
 /// The refinement kernel's settings for `free_dimension` free variables on
-/// the `planned` budget ([`planned_refinement_budget`]): exactly the
-/// settings of the same run with the configured budget set to `planned`,
-/// less the [`verification_reserve`], the stage time limit kept.
+/// the `planned` schedule ([`planned_refinement_budget`]). The configured
+/// evaluation ceiling and clock remain the stopping limits; an estimate
+/// cannot discard remaining search time when subsequent candidates cost less.
 pub(crate) fn refinement_settings(
     solver: &SolverSettings,
     free_dimension: usize,
     seed: u64,
     planned: usize,
 ) -> Settings {
-    let mut solver = solver.clone();
-    solver.refinement.max_evaluations = i64::try_from(planned.max(1)).unwrap_or(i64::MAX);
     let (budget, stop_after, limit) =
         stage_limits(&solver.refinement, solver.stop_on_evaluations_only);
-    let reserve = verification_reserve(&solver);
+    let reserve = verification_reserve(solver);
     let budget = budget - reserve.evaluations;
+    let planned = planned.max(1).min(budget + reserve.evaluations);
+    let mut planned_solver = solver.clone();
+    planned_solver.refinement.max_evaluations = i64::try_from(planned.max(1)).unwrap_or(i64::MAX);
+    let schedule = planned - verification_reserve(&planned_solver).evaluations;
     // A replay stops the kernel where the recorded kernel stopped; the
     // recorded restoration share replays after it (`restoration_replay`).
     let stop_after = stop_after.saturating_sub(restoration_replay(&solver.refinement).unwrap_or(0));
     Settings {
         max_evaluations: budget,
+        schedule_evaluations: schedule,
         stop_after: stop_after.min(budget),
-        population: initial_population(budget, free_dimension),
+        population: initial_population(schedule, free_dimension),
+        minimum_population: super::lshade_de::MIN_POPULATION,
+        population_quantum: 1,
         seed,
         adaptation: solver.parameter_adaptation,
         spread_tolerance: solver.tolerance.max(0.0),
         stagnation_generations: usize::try_from(solver.convergence_stagnation_generations.max(1))
             .unwrap_or(1),
         time_limit: limit.map(|limit| limit.mul_f64(1.0 - VERIFICATION_RESERVE_TIME_FRACTION)),
-        infeasible_reserve: (budget as f64 * RESTORATION_BUDGET_FRACTION).ceil() as usize,
+        intra_batch_deadline: false,
+        infeasible_reserve: (schedule as f64 * RESTORATION_BUDGET_FRACTION).ceil() as usize,
         max_rejects: reject_cap(&solver.refinement),
     }
+}
+
+/// Lane quantum of the native population schedule: the size of one
+/// evaluator wave on the reference 32-thread workstation. It is a fixed
+/// constant, never the configured worker count, so the population schedule,
+/// and with it the search trajectory, is the same at any worker count and a
+/// run replays on any machine. On 32 lanes every generation is then a whole
+/// number of full waves, where a 35-member generation ran 32 lanes and then
+/// 3 (about half the lane time idle).
+pub(crate) const NATIVE_LANE_QUANTUM: usize = 32;
+
+/// Keep whole native waves occupied without making the population schedule
+/// depend on the machine or the configured worker count: the population is
+/// rounded to the nearest multiple of [`NATIVE_LANE_QUANTUM`] (at least
+/// one), never above the evaluation ceiling, and the linear reduction steps
+/// in the same quantum down to a one-wave floor.
+pub(crate) fn configure_native_population(settings: &mut Settings) {
+    let quantum = NATIVE_LANE_QUANTUM;
+    settings.minimum_population = quantum;
+    settings.population_quantum = quantum;
+    let waves = (settings.population.max(quantum) + quantum / 2) / quantum;
+    settings.population = (waves * quantum).min(settings.max_evaluations);
 }
 
 /// The restoration evaluations a replayed refinement runs, `None` outside a
@@ -233,6 +259,38 @@ pub(crate) fn unevaluated(values: &[f64]) -> ScoredPoint {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn native_population_is_worker_independent_and_saturates_to_the_budget() {
+        for budget in [1, 31, 32, 120, 240, 5_000] {
+            let mut solver = SolverSettings::default();
+            solver.refinement.max_evaluations = budget;
+            let budget = usize::try_from(budget).expect("positive test budget");
+            let mut reference = refinement_settings(&solver, 1, 7, budget);
+            assert_eq!(
+                reference.minimum_population,
+                super::super::lshade_de::MIN_POPULATION
+            );
+            configure_native_population(&mut reference);
+            assert!(reference.population <= reference.max_evaluations);
+            assert!(reference.population >= 32.min(reference.max_evaluations));
+            // Whole 32-lane waves unless the ceiling itself is smaller.
+            assert!(
+                reference.population % NATIVE_LANE_QUANTUM == 0
+                    || reference.population == reference.max_evaluations,
+                "population {} on ceiling {}",
+                reference.population,
+                reference.max_evaluations
+            );
+            assert_eq!(reference.population_quantum, NATIVE_LANE_QUANTUM);
+            for workers in [1, 8, 32] {
+                solver.workers = workers;
+                let mut native = refinement_settings(&solver, 1, 7, budget);
+                configure_native_population(&mut native);
+                assert_eq!(native, reference);
+            }
+        }
+    }
 
     #[test]
     fn the_initial_population_follows_the_budget_and_never_the_workers() {
@@ -331,11 +389,20 @@ mod tests {
             previous = planned;
             // The plan sets the schedule exactly as the same configured budget.
             let settings = refinement_settings(&solver, 13, 1, planned);
+            assert_eq!(
+                settings.max_evaluations + verification_reserve(&solver).evaluations,
+                usize::try_from(solver.refinement.max_evaluations).expect("positive ceiling")
+            );
+            assert_eq!(
+                settings.schedule_evaluations,
+                planned - VERIFICATION_RESERVE_EVALUATIONS
+            );
             let mut replay = solver.clone();
             replay.refinement.replay_planned_evaluations = Some(planned as i64);
             replay.refinement.replay_evaluations = Some(100);
             let replayed = configured(&replay, 13, 1);
             assert_eq!(settings.max_evaluations, replayed.max_evaluations);
+            assert_eq!(settings.schedule_evaluations, replayed.schedule_evaluations);
             assert_eq!(settings.population, replayed.population);
             assert_eq!(settings.infeasible_reserve, replayed.infeasible_reserve);
             assert_eq!(settings.max_rejects, replayed.max_rejects);

@@ -23,7 +23,7 @@ use alas_geom::aircraft::wing::Wing;
 use alas_math::interp;
 
 use crate::operating_point::OperatingPoint;
-use crate::vlm::{self, VlmError, VlmResult};
+use crate::vlm::{self, VlmError, VlmResult, VlmSystem};
 
 use super::{compressible_report_alpha, swept_pg_beta, AeroAnalysis};
 
@@ -51,6 +51,17 @@ pub struct TrimPoint {
     pub trim_ih_deg: f64,
     /// The lift-curve slope the trim solve used, per degree.
     pub cl_alpha: f64,
+}
+
+/// Inviscid coefficients of one fully rotated trimmed lattice.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TrimmedInviscid {
+    /// Lift coefficient in wind axes, referenced to the aircraft area.
+    pub cl: f64,
+    /// Pitching moment coefficient about the aircraft reference, body axes.
+    pub cm_residual: f64,
+    /// Trefftz induced drag in the product, near-field on the reference path.
+    pub cd_induced: f64,
 }
 
 /// What the two-point cruise estimate reports: `quick_performance`'s dict.
@@ -124,22 +135,6 @@ pub struct PolarSweep {
 }
 
 impl AeroAnalysis<'_> {
-    /// One vortex-lattice solve at `op_point`: `_run_vlm`.
-    fn run_vlm(&self, op_point: &OperatingPoint) -> Result<VlmResult, VlmError> {
-        self.run_vlm_on(self.plane, op_point)
-    }
-
-    /// The same solve, on a specific airplane, which is only ever a
-    /// modified copy of `self.plane`, in [`Self::trimmed_performance`].
-    fn run_vlm_on(
-        &self,
-        plane: &alas_geom::aircraft::airplane::Airplane,
-        op_point: &OperatingPoint,
-    ) -> Result<VlmResult, VlmError> {
-        let (spanwise, chordwise) = self.mesh_resolution();
-        vlm::run(plane, op_point, spanwise, chordwise)
-    }
-
     /// The induced-drag coefficient of one solve of `plane`.
     ///
     /// The product takes it in the Trefftz plane
@@ -276,36 +271,18 @@ impl AeroAnalysis<'_> {
         mach: f64,
         altitude_m: f64,
     ) -> Result<TrimmedPerformance, VlmError> {
+        let inviscid = self.trimmed_inviscid(trim, mach, altitude_m)?;
         let atmosphere = Atmosphere::new(altitude_m);
-        let velocity = mach * atmosphere.speed_of_sound();
-        let op_point = Self::level_op_point(atmosphere, velocity, trim.trim_alpha_deg);
+        let cl_trim = inviscid.cl;
+        let components = self.drag_components(
+            mach,
+            altitude_m,
+            cl_trim,
+            inviscid.cd_induced,
+            Some(&atmosphere),
+        );
 
-        // Upstream overwrites every stabilizer section's twist in place and
-        // restores it in a `finally`. A copy for the duration of the solve
-        // is the same thing without the window in which an exception would
-        // leave the aircraft altered, and it is also why the restore's own
-        // quirk (it writes `xsecs[0]`'s twist back to all of them, losing any
-        // spanwise variation) has nothing to reproduce here: no section of
-        // `self.plane` is ever written to.
-        let perturbed = self.with_stabilizer_incidence(trim.trim_ih_deg);
-        let solved = match &perturbed {
-            Some(plane) => self.run_vlm_on(plane, &op_point)?,
-            None => self.run_vlm(&op_point)?,
-        };
-
-        let cl_trim = solved.cl_lift;
-        let cd_induced = self.induced_drag(
-            &solved,
-            &op_point,
-            None,
-            perturbed.as_ref().unwrap_or(self.plane),
-        )?;
-        let components =
-            self.drag_components(mach, altitude_m, cl_trim, cd_induced, Some(&atmosphere));
-
-        // The solve ran at the incompressible trim angle, so CL and CD, and
-        // therefore L/D and the trim drag, are already right; only the
-        // angle is reported corrected.
+        // Only the reporting angle receives the compressibility correction.
         let alpha_report = if trim.cl_alpha.abs() > CL_ALPHA_FLOOR {
             let alpha_zero_lift = trim.trim_alpha_deg - cl_trim / trim.cl_alpha;
             compressible_report_alpha(trim.trim_alpha_deg, alpha_zero_lift, mach, self.sweep_deg)
@@ -322,6 +299,50 @@ impl AeroAnalysis<'_> {
             cd_induced: components.cd_induced,
             cd_wave: components.cd_wave,
             cl: cl_trim,
+            cm_residual: inviscid.cm_residual,
+        })
+    }
+
+    /// The exact inviscid part of [`Self::trimmed_performance`]. Trim-node
+    /// iteration needs only lift, pitching moment and wake energy, so it can
+    /// omit the independent parasite/wave buildup and reporting conversion.
+    ///
+    /// # Errors
+    ///
+    /// See [`VlmError`].
+    pub fn trimmed_inviscid(
+        &self,
+        trim: &TrimPoint,
+        mach: f64,
+        altitude_m: f64,
+    ) -> Result<TrimmedInviscid, VlmError> {
+        let atmosphere = Atmosphere::new(altitude_m);
+        let velocity = mach * atmosphere.speed_of_sound();
+        let op_point = Self::level_op_point(atmosphere, velocity, trim.trim_alpha_deg);
+
+        // Upstream overwrites every stabilizer section's twist in place and
+        // restores it in a `finally`. A copy for the duration of the solve
+        // is the same thing without the window in which an exception would
+        // leave the aircraft altered, and it is also why the restore's own
+        // quirk (it writes `xsecs[0]`'s twist back to all of them, losing any
+        // spanwise variation) has nothing to reproduce here: no section of
+        // `self.plane` is ever written to.
+        let perturbed = self.with_stabilizer_incidence(trim.trim_ih_deg);
+        let plane = perturbed.as_ref().unwrap_or(self.plane);
+        let (spanwise, chordwise) = self.mesh_resolution();
+        let system = {
+            let mut cache = self
+                .vlm_cache
+                .lock()
+                .map_err(|_| VlmError::NonFiniteResult)?;
+            VlmSystem::assemble_cached(plane, spanwise, chordwise, &mut cache)?
+        };
+        let solved = system.solve(&op_point)?;
+
+        let cd_induced = self.induced_drag(&solved, &op_point, Some(&system), plane)?;
+        Ok(TrimmedInviscid {
+            cl: solved.cl_lift,
+            cd_induced,
             cm_residual: solved.cm_pitch,
         })
     }

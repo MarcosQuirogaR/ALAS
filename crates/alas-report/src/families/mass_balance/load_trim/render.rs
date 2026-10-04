@@ -5,15 +5,18 @@
 //!
 //! Layering, bottom to top: shaded "do not operate" field, the clear region
 //! inside the ground limits, weight gridlines and the %MAC fan, hatching
-//! where a zero-fuel CG is not permitted, the boarding potato with its
-//! named orders, the four phase limit sets, structural weight lines, the
+//! where a zero-fuel CG is not permitted, the four phase limit sets,
+//! analyzed/design mass lines, and the
 //! worked case (the highlighted path).
 
-use super::layers::{draw_limit_sets, draw_potato};
-use super::panel::{draw_panel, kg};
+use super::layers::draw_limit_sets;
+use super::mass_lines::draw_mass_lines;
+use super::panel::{
+    alert_ring, draw_panel, gate_failed, kg, panel_rows, PanelLayout, AXIS_INDEX, AXIS_WEIGHT,
+};
 use super::{
     envelope_outline, fan_segment, frame_for, limit_at, weight_step_kg, Frame, LoadTrimSheetData,
-    SHEET_H, SHEET_W,
+    MassRole, SHEET_H, SHEET_W,
 };
 use crate::scene::{Color, Fill, Point2D, Scene, SceneElement, Stroke, TextAlign, TextBaseline};
 use crate::theme::Palette;
@@ -28,11 +31,11 @@ pub(super) struct Ink {
     pub(super) fan: Color,
     pub(super) path: Color,
     pub(super) fuel: Color,
-    pub(super) envelope: Color,
+    pub(super) alert: Color,
 }
 
 impl Ink {
-    fn for_palette(pal: &Palette) -> Self {
+    pub(super) fn for_palette(pal: &Palette) -> Self {
         let dark = pal.name.starts_with("dark") || pal.name.starts_with("grey");
         let hex =
             |light: &str, dark_hex: &str| Color::from_hex(if dark { dark_hex } else { light });
@@ -45,7 +48,7 @@ impl Ink {
             fan: hex("#9a9a9a", "#6a707a"),
             path: hex("#1f5bd6", "#6aa2ff"),
             fuel: hex("#d9770a", "#f0a24a"),
-            envelope: hex("#1f5bd6", "#6aa2ff"),
+            alert: hex("#c62828", "#ff6b6b"),
         }
     }
 }
@@ -157,14 +160,29 @@ fn hatch(scene: &mut Scene, fr: &Frame, inside: impl Fn(f64, f64) -> bool, color
 /// Render the balance chart and its side panel.
 pub fn figure_load_trim_sheet(data: &LoadTrimSheetData, pal: &Palette) -> Scene {
     let ink = Ink::for_palette(pal);
-    let mut scene = Scene::new(SHEET_W, SHEET_H, Some(ink.paper));
     let fr = frame_for(data);
+    let panel_x = fr.right() + 30.0;
+    let layout = PanelLayout::solve(
+        panel_x,
+        fr.top,
+        fr.bottom(),
+        SHEET_W - panel_x - 16.0,
+        panel_rows(data),
+    );
+    // Many loading states can need more than the chart's height at the
+    // smallest legible row pitch; the sheet then grows instead of clipping.
+    let mut scene = Scene::new(
+        SHEET_W,
+        SHEET_H.max(layout.bottom() + 16.0),
+        Some(ink.paper),
+    );
     let px = |i: f64, m: f64| fr.map(i, m);
     let (w0, w1) = fr.w_range_kg;
     let top_kg = data
-        .weight("MTOW")
+        .weight(MassRole::SizedTakeoff)
+        .or_else(|| data.weight(MassRole::AnalyzedTakeoff))
         .unwrap_or_else(|| data.ground_limits.last().map_or(w1, |v| v.mass_kg));
-    let mzfw = data.weight("MZFW");
+    let zero_fuel_mass = data.weight(MassRole::AnalyzedZeroFuel);
     let fwd_i = |m: f64| data.index_at(m, limit_at(&data.ground_limits, m, true));
     let aft_i = |m: f64| data.index_at(m, limit_at(&data.ground_limits, m, false));
 
@@ -223,15 +241,15 @@ pub fn figure_load_trim_sheet(data: &LoadTrimSheetData, pal: &Palette) -> Scene 
         }
     }
 
-    // 3. Hatching: inside the takeoff envelope, at or below MZFW, but
+    // 3. Hatching: inside the takeoff envelope, at or below analyzed ZFW, but
     //    outside the zero-fuel limits (a ZFW CG there cannot be fuelled).
-    if let (Some(mzfw), false) = (mzfw, data.zfw_limits.is_empty()) {
+    if let (Some(zero_fuel_mass), false) = (zero_fuel_mass, data.zfw_limits.is_empty()) {
         let zfw = &data.zfw_limits;
         hatch(
             &mut scene,
             &fr,
             |i, m| {
-                m <= mzfw
+                m <= zero_fuel_mass
                     && i >= fwd_i(m)
                     && i <= aft_i(m)
                     && (i < data.index_at(m, limit_at(zfw, m, true))
@@ -241,14 +259,11 @@ pub fn figure_load_trim_sheet(data: &LoadTrimSheetData, pal: &Palette) -> Scene 
         );
     }
 
-    // 4. Boarding potato and every composed loading order.
-    draw_potato(&mut scene, data, &fr, &ink);
-
     // 5. Limit sets by phase, then the zero-fuel CG limit outline.
     draw_limit_sets(&mut scene, data, &fr, &ink);
-    if let (Some(mzfw), Some(first)) = (mzfw, data.zfw_limits.first()) {
+    if let (Some(zero_fuel_mass), Some(first)) = (zero_fuel_mass, data.zfw_limits.first()) {
         let bottom = first.mass_kg.max(w0);
-        let z: Vec<Point2D> = envelope_outline(data, &data.zfw_limits, bottom, mzfw)
+        let z: Vec<Point2D> = envelope_outline(data, &data.zfw_limits, bottom, zero_fuel_mass)
             .iter()
             .map(|&(i, m)| px(i, m))
             .collect();
@@ -259,35 +274,8 @@ pub fn figure_load_trim_sheet(data: &LoadTrimSheetData, pal: &Palette) -> Scene 
         });
     }
 
-    // 6. Structural weight lines across the envelope.
-    for wl in &data.weight_lines {
-        if wl.mass_kg < w0 || wl.mass_kg > w1 {
-            continue;
-        }
-        let m = wl.mass_kg.min(top_kg);
-        let (a, b) = (px(fwd_i(m), wl.mass_kg), px(aft_i(m), wl.mass_kg));
-        line(&mut scene, a, b, Stroke::new(ink.text, 2.0));
-        let label = format!("{} {} KG", wl.label, kg(wl.mass_kg));
-        // MTOW caps the envelope, so its label goes inside, below the line.
-        let below = wl.label == "MTOW";
-        scene.add(SceneElement::Text {
-            text: label,
-            pos: [a[0] + 14.0, a[1] + if below { 4.0 } else { -4.0 }],
-            font_size: 11.5,
-            color: ink.text,
-            align: TextAlign::Left,
-            baseline: if below {
-                TextBaseline::Top
-            } else {
-                TextBaseline::Bottom
-            },
-            angle_deg: 0.0,
-            bold: true,
-        });
-    }
-
-    // 7. %MAC labels in boxes along one row, as on manufacturer sheets.
-    // %MAC row in the band above MTOW if it fits, else near the chart top.
+    // The %MAC row sits in the band above takeoff mass if it fits, else near
+    // the chart top; mass labels keep clear of it.
     let room_px = px(fr.i_range.0, top_kg)[1] - fr.top;
     let row_kg = if room_px > 24.0 {
         0.5 * (top_kg + w1)
@@ -295,6 +283,10 @@ pub fn figure_load_trim_sheet(data: &LoadTrimSheetData, pal: &Palette) -> Scene 
         w0 + 0.9 * (w1 - w0)
     };
     let row_y = px(fr.i_range.0, row_kg)[1];
+
+    // 6. Analyzed/design mass lines across the envelope, then their labels.
+    draw_mass_lines(&mut scene, data, &fr, &ink, top_kg, row_y);
+    // 7. %MAC labels in boxes along one row, as on manufacturer sheets.
     let mut last_x = f64::NEG_INFINITY;
     text(
         &mut scene,
@@ -350,21 +342,13 @@ pub fn figure_load_trim_sheet(data: &LoadTrimSheetData, pal: &Palette) -> Scene 
             points: fuel_pts.clone(),
             stroke: Stroke::dashed(ink.fuel, 2.4, 8.0, 4.0),
         });
-        for p in fuel_pts.iter().step_by((fuel_pts.len() / 6).max(1)) {
-            scene.add(SceneElement::Circle {
-                center: *p,
-                radius: 3.0,
-                fill: Some(Fill::new(ink.fuel)),
-                stroke: None,
-            });
-        }
     }
     for (k, pair) in pts.windows(2).enumerate() {
         let is_fuel = data
             .steps
             .get(k + 1)
             .is_some_and(|s| s.item.to_ascii_lowercase().contains("fuel"));
-        if !is_fuel {
+        if !is_fuel || fuel_pts.len() < 2 {
             line(&mut scene, pair[0], pair[1], Stroke::new(ink.path, 2.4));
             arrowhead(&mut scene, pair[0], pair[1], ink.path);
         }
@@ -383,6 +367,9 @@ pub fn figure_load_trim_sheet(data: &LoadTrimSheetData, pal: &Palette) -> Scene 
             ink.paper,
             ink.paper,
         );
+        if gate_failed(&data.steps[k]) {
+            alert_ring(&mut scene, &ink, *p);
+        }
     }
 
     // 9. Frame, index axes top and bottom, weight axis.
@@ -434,7 +421,7 @@ pub fn figure_load_trim_sheet(data: &LoadTrimSheetData, pal: &Palette) -> Scene 
     }
     text(
         &mut scene,
-        "INDEX",
+        AXIS_INDEX,
         [fr.left + fr.width / 2.0, fr.bottom() + 36.0],
         13.0,
         ink.text,
@@ -442,7 +429,7 @@ pub fn figure_load_trim_sheet(data: &LoadTrimSheetData, pal: &Palette) -> Scene 
         true,
     );
     scene.add(SceneElement::Text {
-        text: "AIRPLANE GROSS WEIGHT - KILOGRAMS".to_owned(),
+        text: AXIS_WEIGHT.to_owned(),
         pos: [24.0, fr.top + fr.height / 2.0],
         font_size: 12.0,
         color: ink.text,
@@ -461,6 +448,6 @@ pub fn figure_load_trim_sheet(data: &LoadTrimSheetData, pal: &Palette) -> Scene 
         true,
     );
 
-    draw_panel(&mut scene, data, &ink, fr.right() + 30.0, fr.top);
+    draw_panel(&mut scene, data, &ink, &layout);
     scene
 }

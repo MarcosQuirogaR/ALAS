@@ -30,6 +30,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     std::fs::create_dir_all(&out_dir)?;
     for name in presets {
         let mut config = AlasConfig::from_value(&serde_json::json!({ "preset": name }))?;
+        config.structures.run_nastran = false;
+        config.structures.run_patran_export = false;
         config.optimizer.design_space.mode = DesignMode::BaselineSandbox;
         let options = PipelineOptions {
             optimize: false,

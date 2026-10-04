@@ -12,9 +12,12 @@ use std::sync::Mutex;
 use std::time::Instant;
 
 use alas_config::AlasConfig;
+use rayon::ThreadPoolBuilder;
 
 use super::screening::{self, ScreeningFidelity};
-use crate::mdo::{evaluate_mission_sized_with_assessment, CandidateAssessment, SizingWork};
+use crate::mdo::{
+    evaluate_mission_sized_with_assessment, CandidateAssessment, ConstraintResidual, SizingWork,
+};
 use crate::{DesignObjective, DesignOptimizer, OptimizationError};
 
 /// One model's verdict on one candidate.
@@ -34,6 +37,10 @@ pub struct CandidateScore {
     pub takeoff_mass_kg: f64,
     /// Every residual's normalized violation, by identifier.
     pub violations: Vec<(&'static str, f64)>,
+    /// Complete physical residuals, retaining units and signed margins.
+    pub residuals: Vec<ConstraintResidual>,
+    /// Rejection before a residual table could be assembled.
+    pub failure_reason: Option<String>,
     /// Wall time of this one evaluation, s.
     pub wall_time_s: f64,
     /// Work of the sizing closure, when the candidate sized.
@@ -82,21 +89,40 @@ pub fn compare_fidelities(
     let full_model = DesignObjective::new_with_nominal(config.clone(), nominal);
     let next = AtomicUsize::new(0);
     let results = Mutex::new(vec![None; points.len()]);
+    let workers = if workers == 0 {
+        config.optimizer.solver.resolved_workers()
+    } else {
+        workers
+    };
+    let lanes = (0..workers.clamp(1, points.len().max(1)))
+        .map(|_| ThreadPoolBuilder::new().num_threads(1).build())
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| {
+            OptimizationError::InvalidConfiguration(format!(
+                "could not create fidelity-comparison compute lanes: {error}"
+            ))
+        })?;
     std::thread::scope(|scope| {
-        for _ in 0..workers.clamp(1, points.len().max(1)) {
-            scope.spawn(|| loop {
-                let index = next.fetch_add(1, Ordering::Relaxed);
-                let Some(design) = points.get(index) else {
-                    break;
-                };
-                let pair = FidelityPair {
-                    design: design.clone(),
-                    screening: score(&screening_model, design),
-                    full: score(&full_model, design),
-                };
-                if let Ok(mut results) = results.lock() {
-                    results[index] = Some(pair);
-                }
+        for lane in &lanes {
+            let (next, results, points, screening_model, full_model) =
+                (&next, &results, &points, &screening_model, &full_model);
+            scope.spawn(move || {
+                // Match the native optimizer: nested VLM parallel loops stay
+                // on the candidate's one-thread lane.
+                lane.install(|| loop {
+                    let index = next.fetch_add(1, Ordering::Relaxed);
+                    let Some(design) = points.get(index) else {
+                        break;
+                    };
+                    let pair = FidelityPair {
+                        design: design.clone(),
+                        screening: score(screening_model, design),
+                        full: score(full_model, design),
+                    };
+                    if let Ok(mut results) = results.lock() {
+                        results[index] = Some(pair);
+                    }
+                });
             });
         }
     });
@@ -123,6 +149,8 @@ fn score(model: &DesignObjective, design: &[f64]) -> CandidateScore {
             objective_value: f64::NAN,
             takeoff_mass_kg: f64::NAN,
             violations: Vec::new(),
+            residuals: Vec::new(),
+            failure_reason: objective.history.reject_reason.last().cloned(),
             wall_time_s,
             work: None,
         },
@@ -146,6 +174,8 @@ fn from_assessment(
             .iter()
             .map(|residual| (residual.id, residual.normalized_violation))
             .collect(),
+        residuals: assessment.residuals.clone(),
+        failure_reason: None,
         wall_time_s,
         work: Some(assessment.sized.work),
     }

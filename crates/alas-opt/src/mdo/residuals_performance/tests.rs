@@ -5,6 +5,8 @@
 // failing rather than a library invariant being broken.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+use crate::mdo::ResidualRole;
+
 use super::*;
 use crate::mdo::sizing::run_candidate;
 
@@ -21,7 +23,7 @@ fn takeoff_miss(mass_kg: f64, toda_m: f64) -> f64 {
         G,
         &runway,
         2.1,
-        ConstraintPolicy::Hard,
+        ResidualRole::Constraint,
     )
     .raw_residual
 }
@@ -46,19 +48,41 @@ fn a_runway_cleared_at_the_city_pair_mass_is_missed_at_the_maximum_takeoff_mass(
 
 #[test]
 fn the_field_residuals_are_evaluated_at_the_design_masses_not_the_dispatch_mass() {
+    field_residuals_use_design_masses(alas_config::MtowSizing::SizedByMission);
+}
+
+#[test]
+fn hard_mtow_field_residuals_use_the_declared_design_masses() {
+    field_residuals_use_design_masses(alas_config::MtowSizing::FixedRequirement);
+}
+
+fn field_residuals_use_design_masses(mode: alas_config::MtowSizing) {
     let config = AlasConfig::from_value(&serde_json::json!({
         "preset": "A320-200",
-        "optimizer": {"design_space": {"mode": "reference_adaptation"}}
+        "optimizer": {
+            "design_space": {"mode": "reference_adaptation"},
+            "objective": {"mtow_sizing": mode}
+        }
     }))
     .unwrap();
     let design = alas_config::presets::get("A320-200").unwrap().design_vector;
     let outcome = run_candidate(&config, &design.to_array()).unwrap();
     let sized = &outcome.sized;
     // A short route dispatches well below the declared MTOW and MLW.
-    assert!(sized.takeoff_mass_kg < sized.design_gross_mass_kg);
+    if mode == alas_config::MtowSizing::SizedByMission {
+        assert!(sized.takeoff_mass_kg < sized.design_gross_mass_kg);
+    } else {
+        let load = sized.takeoff_loading.unwrap();
+        assert_eq!(
+            sized.takeoff_mass_kg,
+            load.zero_fuel_mass_kg + load.carried_usable_fuel_kg
+        );
+        assert!(sized.takeoff_mass_kg <= config.requirements.mtow_kg);
+        assert_eq!(sized.design_gross_mass_kg, config.requirements.mtow_kg);
+    }
     assert!(sized.dispatch.destination_landing_mass_kg < sized.design_landing_mass_kg);
 
-    let table = performance_residuals(&outcome, &config, ConstraintPolicy::Hard);
+    let table = performance_residuals(&outcome, &config, ResidualRole::Constraint);
     let find = |id: &str| table.iter().find(|r| r.id == id).unwrap();
     let s_ref = outcome.plane.s_ref;
     let thrust_n = outcome.n_engines as f64 * outcome.static_thrust_kn * 1_000.0;
@@ -140,7 +164,7 @@ fn cruise_thrust_follows_mass_changes_without_rebuilding_the_table() {
             config.requirements.cruise_altitude_m,
         ) / cl
             / config.performance.thrust_lapse;
-        let residuals = performance_residuals(&outcome, &config, ConstraintPolicy::Hard);
+        let residuals = performance_residuals(&outcome, &config, ResidualRole::Constraint);
         let actual = residuals
             .iter()
             .find(|residual| residual.id == "cruise_thrust")
@@ -206,19 +230,19 @@ fn each_oei_evidence_gap_uses_the_v2_lift_coefficient() {
         config.performance.oei_condition_to_sls_thrust_ratio = (missing != 0).then_some(0.8);
         config.performance.oei_asymmetric_trim_cd = (missing != 1).then_some(0.003);
         config.performance.oei_windmilling_cd = (missing != 2).then_some(0.002);
-        let residuals = performance_residuals(&outcome, &config, ConstraintPolicy::Hard);
+        let residuals = performance_residuals(&outcome, &config, ResidualRole::Constraint);
         let requirement = residuals
             .iter()
             .find(|residual| residual.id == "oei_second_segment")
             .unwrap();
-        assert_eq!(requirement.policy, ConstraintPolicy::Soft);
+        assert_eq!(requirement.role, ResidualRole::Preference);
         assert!(
             (requirement.limit - expected).abs() < 1e-14,
             "gap {missing}"
         );
         assert!(residuals.iter().any(|residual| {
             residual.id == "oei_second_segment_evidence_gap"
-                && residual.policy == ConstraintPolicy::Diagnostic
+                && residual.role == ResidualRole::Diagnostic
         }));
     }
 }

@@ -18,7 +18,7 @@ pub(crate) mod rng;
 /// has no trustworthy residual table either.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum Tier {
-    /// Every hard residual met (or admitted by the relaxation policy).
+    /// Every hard residual met.
     Feasible,
     /// The coupled analysis closed; some hard residual is violated.
     ClosedInfeasible,
@@ -94,6 +94,9 @@ impl Ord for OrderedF64 {
 /// scores in input order. How the batch is spread across threads is the
 /// implementation's business; the scores it returns may not depend on it.
 pub(crate) type EvaluateBatch<'a> = dyn FnMut(&[Vec<f64>]) -> Vec<ScoredPoint> + 'a;
+
+/// Cheap design-vector admission check, without any coupled analysis.
+pub(crate) type Admission<'a> = dyn Fn(&[f64]) -> bool + 'a;
 
 pub(crate) fn clamp_to_bounds(values: &mut [f64], bounds: &[(f64, f64)]) {
     for (value, &(lower, upper)) in values.iter_mut().zip(bounds) {

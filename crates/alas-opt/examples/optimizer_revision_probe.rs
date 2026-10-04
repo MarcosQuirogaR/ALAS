@@ -56,7 +56,8 @@ fn assessment_json(config: &AlasConfig, value: CandidateAssessment, elapsed: f64
             .map(|s| json!({"leading_edge_m":s.xyz_le,"chord_m":s.chord})).collect::<Vec<_>>()),
         "rejected_by":value.violated_hard_ids(),
         "residuals":value.residuals.iter().map(|r| json!({
-            "id":r.id,"family":format!("{:?}",r.family),"policy":format!("{:?}",r.policy),
+            "id":r.id,"family":format!("{:?}",r.family),"role":format!("{:?}",r.role),
+            "detail":r.detail,
             "actual":r.actual,"limit":r.limit,"unit":r.unit,
             "raw_residual":r.raw_residual,"normalized_violation":r.normalized_violation,
         })).collect::<Vec<_>>()

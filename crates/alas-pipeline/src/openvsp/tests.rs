@@ -409,7 +409,7 @@ fn an_aircraft_with_no_measured_main_gear_station_is_not_exported_with_gear() {
     let mut atr = AlasConfig::from_value(&serde_json::json!({ "preset": "ATR72-600" }))
         .expect("ATR configuration");
     // This export refusal test uses an intentionally unmeasured fixture. The
-    // production ATR preset now carries its published gear anchors.
+    // production ATR preset carries its published gear anchors.
     atr.landing_gear.reference_station_fuselage_length_m = None;
     atr.landing_gear.reference_nlg_x_fraction = None;
     atr.landing_gear.reference_mlg_x_fractions = None;

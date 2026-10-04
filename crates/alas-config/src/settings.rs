@@ -280,6 +280,7 @@ impl AlasConfig {
                     // every downstream solver must preserve verbatim.
                     instance.geometry.engine.apply_engine_spec();
                     instance.requirements = preset.requirements.clone();
+                    instance.optimizer.objective.mtow_sizing = crate::MtowSizing::FixedRequirement;
                     // A preset's published passenger target is a load-case
                     // input, not an operator LOPA. Seed the generic cabin
                     // with the profile that can physically represent that
@@ -342,32 +343,8 @@ impl AlasConfig {
                     instance.departure_airport = operational.departure_airport.to_owned();
                     instance.arrival_airport = operational.arrival_airport.to_owned();
                     instance.mission.profile = operational.profile;
-                    // Naming a registered aircraft means adapting *that*
-                    // aircraft, so the design space defaults to its own
-                    // reference envelope rather than to a clean sheet.
-                    //
-                    // The two are genuinely different studies and the
-                    // distinction is kept, not blurred: `CleanSheet` re-derives
-                    // the fuselage from the cabin load case and searches the
-                    // global box, `ReferenceAdaptation` holds the preset's
-                    // declared geometry and searches the +/-10 % preset window
-                    // around it. What was wrong was which of them a bare
-                    // `{"preset": "..."}` document selected. It selected the
-                    // clean sheet, so loading an ATR 72-600 and pressing run
-                    // produced a cabin-derived body of fineness 23.5 against
-                    // the aircraft's own 9.8, and the plausibility window then
-                    // correctly rejected it - measured on the shipped path as
-                    // `fuselage_fineness_max` on 509 of 623 ATR 72-600
-                    // candidates and 646 of 668 A220-300 candidates, with the
-                    // mission and mass residuals cascading behind it. The
-                    // product answered a question nobody asked and then
-                    // reported that it had no answer.
-                    //
-                    // This widens nothing. The preset envelope, the frozen
-                    // reference variables and every hard residual are
-                    // untouched; a document that explicitly asks for
-                    // `clean_sheet` still gets it, because the file overlay
-                    // below is applied after this and remains authoritative.
+                    // Registered aircraft use their reference design envelope;
+                    // the file overlay can explicitly select a clean sheet.
                     instance.optimizer.design_space.mode =
                         crate::optimizer::DesignMode::ReferenceAdaptation;
                 }
@@ -375,6 +352,13 @@ impl AlasConfig {
                     tracing::debug!(%error, "configuration names an unregistered preset");
                 }
             }
+        }
+        if data
+            .get("preset")
+            .and_then(serde_json::Value::as_str)
+            .is_none_or(str::is_empty)
+        {
+            crate::clean_sheet::seed_preset_less_defaults(&mut instance, data)?;
         }
 
         // `MassModelConfig`'s serde representation repairs its derived group
@@ -813,6 +797,61 @@ mod tests {
             crate::MassArchitecture::LegacyReferenceCompatibleComparison
         );
         assert!(config.mass_model.architecture_is_coherent());
+    }
+
+    #[test]
+    fn registered_presets_default_to_the_declared_hard_mtow() {
+        for name in crate::presets::available() {
+            let preset = crate::presets::get(name).unwrap();
+            let config = AlasConfig::from_value(&json!({"preset": name})).unwrap();
+            assert_eq!(
+                config.optimizer.objective.mtow_sizing,
+                crate::MtowSizing::FixedRequirement
+            );
+            assert_eq!(
+                config.requirements.mtow_kg, preset.requirements.mtow_kg,
+                "{name}"
+            );
+            if let Some(reference_mtow_kg) = preset.reference.mtow_kg {
+                assert_eq!(config.requirements.mtow_kg, reference_mtow_kg, "{name}");
+            }
+        }
+    }
+
+    #[test]
+    fn an_explicit_mtow_mode_overrides_the_registered_preset_default() {
+        let config = AlasConfig::from_value(&json!({
+            "preset": "A320-200",
+            "optimizer": {"objective": {"mtow_sizing": "sized_by_mission"}}
+        }))
+        .unwrap();
+        assert_eq!(
+            config.optimizer.objective.mtow_sizing,
+            crate::MtowSizing::SizedByMission
+        );
+        assert_eq!(
+            AlasConfig::default().optimizer.objective.mtow_sizing,
+            crate::MtowSizing::SizedByMission
+        );
+    }
+
+    #[test]
+    fn saved_preset_without_mtow_mode_uses_hard_mass_and_explicit_mode_is_authoritative() {
+        for mode in [None, Some("fixed_requirement"), Some("sized_by_mission")] {
+            let mut document = json!({"preset": "A320-200", "optimizer": {"objective": {
+                "design_range_nmi": 500.0, "mass_constraints": "hard"
+            }}});
+            if let Some(mode) = mode {
+                document["optimizer"]["objective"]["mtow_sizing"] = json!(mode);
+            }
+            let config = AlasConfig::from_value(&document).unwrap();
+            let expected = if mode == Some("sized_by_mission") {
+                crate::MtowSizing::SizedByMission
+            } else {
+                crate::MtowSizing::FixedRequirement
+            };
+            assert_eq!(config.optimizer.objective.mtow_sizing, expected);
+        }
     }
 
     #[test]

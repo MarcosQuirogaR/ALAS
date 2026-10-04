@@ -13,10 +13,9 @@ mod predictions;
 mod preset_references;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let output = PathBuf::from(
-        std::env::args()
-            .nth(1)
-            .unwrap_or_else(|| ".agent/reports/field_fleet_after.json".to_owned()),
+    let output = std::env::args().nth(1).map_or_else(
+        || std::env::temp_dir().join("field_fleet.json"),
+        PathBuf::from,
     );
     let aircraft =
         cado::read(PathBuf::from("docs/data/cado/CADO_airplane_database_v1.0.csv").as_path())?;

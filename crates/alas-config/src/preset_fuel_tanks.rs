@@ -149,7 +149,7 @@ pub fn layout_for(preset_name: &str) -> Option<FuelTankLayoutConfig> {
         // "Systems" row, usable fuel held in lines and engines rather than in
         // a tank, so it has no tank station and is deliberately not modelled
         // here. The declared total is kept as the certified aeroplane figure
-        // and the residual between it and these cells is now exactly that
+        // and the residual between it and these cells is exactly that
         // 793 L (0.245 %), where before it was an unexplained 5,031 L.
         // `calibrate_to_published_capacity` cannot close it in either case:
         // every A380 cell carries its own published volume, so the

@@ -40,6 +40,12 @@ pub const SPAN_CODE_MARGIN_M: f64 = 0.01;
 /// An aerodrome reference code letter, or no wingspan limit at all.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum AerodromeReferenceCode {
+    /// The letter whose span band holds the class span a clean-sheet brief
+    /// implies, re-derived whenever the brief is committed
+    /// (`ObjectiveConfig::derived_aerodrome_code`). The default for a
+    /// preset-less clean-sheet brief only.
+    #[serde(rename = "auto")]
+    Auto,
     /// No wingspan limit is applied.
     #[serde(rename = "unrestricted")]
     Unrestricted,
@@ -71,6 +77,7 @@ impl AerodromeReferenceCode {
     /// Stable serialized name.
     pub const fn as_str(self) -> &'static str {
         match self {
+            Self::Auto => "auto",
             Self::Unrestricted => "unrestricted",
             Self::A => "A",
             Self::B => "B",
@@ -82,13 +89,14 @@ impl AerodromeReferenceCode {
     }
 
     /// Serialized names, in declaration order.
-    pub const NAMES: [&'static str; 7] = ["unrestricted", "A", "B", "C", "D", "E", "F"];
+    pub const NAMES: [&'static str; 8] = ["auto", "unrestricted", "A", "B", "C", "D", "E", "F"];
 
     /// The wingspan the band's letter excludes from above, m (Annex 14
-    /// Table 1-1), or `None` without a limit.
+    /// Table 1-1), or `None` without a limit. `Auto` has no band of its own;
+    /// [`AlasConfig::aerodrome_reference_code`] resolves it to a letter.
     pub const fn span_upper_limit_m(self) -> Option<f64> {
         match self {
-            Self::Unrestricted => None,
+            Self::Auto | Self::Unrestricted => None,
             Self::A => Some(15.0),
             Self::B => Some(24.0),
             Self::C => Some(36.0),
@@ -137,7 +145,15 @@ impl AlasConfig {
                     .and_then(|preset| preset.reference.aerodrome_reference_code)
             }
         };
-        registered.unwrap_or(self.optimizer.objective.aerodrome_reference_code)
+        let objective = &self.optimizer.objective;
+        registered.unwrap_or(match objective.aerodrome_reference_code {
+            // The letter derived when the brief was last committed, so the
+            // limit cannot drift while an analysis rewrites brief fields.
+            AerodromeReferenceCode::Auto => objective
+                .derived_aerodrome_code
+                .unwrap_or_else(|| self.class_aerodrome_code()),
+            code => code,
+        })
     }
 
     /// The largest wingspan a design may have, m, or `None` without a limit.
@@ -145,14 +161,16 @@ impl AlasConfig {
         self.aerodrome_reference_code().max_design_span_m()
     }
 
-    /// [`crate::DesignSpaceConfig::envelope`] with the wingspan window's
-    /// upper bound clamped to [`Self::max_design_span_m`].
+    /// [`crate::DesignSpaceConfig::envelope`], with a clean sheet's derived
+    /// and explicit boxes applied (see [`crate::clean_sheet`]) and the
+    /// wingspan window's upper bound clamped to [`Self::max_design_span_m`].
     ///
     /// A window that starts above the limit (a nominal that already violates
     /// it) is pulled down to the limit as well, so the search is never
     /// handed a span range the hard requirement rejects outright.
     pub fn design_envelope(&self, nominal: &DesignVector) -> Vec<VariableEnvelope> {
         let mut envelope = self.optimizer.design_space.envelope(nominal);
+        self.apply_clean_sheet_bounds(&mut envelope);
         if let Some(limit) = self.max_design_span_m() {
             for variable in envelope.iter_mut().filter(|v| v.name == "span_m") {
                 variable.upper = variable.upper.min(limit);
@@ -204,10 +222,14 @@ mod tests {
 
     #[test]
     fn serialized_names_match_the_listed_options() {
-        let names: Vec<_> = std::iter::once(AerodromeReferenceCode::Unrestricted)
-            .chain(AerodromeReferenceCode::LETTERS)
-            .map(|code| serde_json::to_value(code).unwrap())
-            .collect();
+        let names: Vec<_> = [
+            AerodromeReferenceCode::Auto,
+            AerodromeReferenceCode::Unrestricted,
+        ]
+        .into_iter()
+        .chain(AerodromeReferenceCode::LETTERS)
+        .map(|code| serde_json::to_value(code).unwrap())
+        .collect();
         let listed: Vec<_> = AerodromeReferenceCode::NAMES
             .iter()
             .map(|name| serde_json::json!(name))

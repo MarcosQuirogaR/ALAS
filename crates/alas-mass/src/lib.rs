@@ -30,6 +30,7 @@ pub mod fuel_plan;
 pub mod fuel_policy;
 pub mod inertia;
 pub mod ledger;
+pub mod loading;
 pub mod payload_range;
 pub mod product_stations;
 pub mod propulsion_mass;

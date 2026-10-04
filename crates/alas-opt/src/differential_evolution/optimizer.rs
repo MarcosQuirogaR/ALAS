@@ -182,18 +182,9 @@ impl DesignOptimizer {
         &self,
         initial_design: Option<&DesignVector>,
     ) -> Result<DesignVector, OptimizationError> {
-        let nominal = initial_design.copied().unwrap_or_else(|| {
-            self.config
-                .preset
-                .is_empty()
-                .then_some(DesignVector::default())
-                .or_else(|| {
-                    alas_config::presets::get(&self.config.preset)
-                        .ok()
-                        .map(|preset| preset.design_vector)
-                })
-                .unwrap_or_default()
-        });
+        let nominal = initial_design
+            .copied()
+            .unwrap_or_else(|| self.config.configured_nominal_design());
         crate::mdo::canonical_nominal_design(&self.config, nominal)
             .map_err(OptimizationError::InvalidConfiguration)
     }
@@ -232,15 +223,28 @@ impl DesignOptimizer {
         progress_callback: Option<&mut dyn FnMut(&str)>,
         cancel: Option<&AtomicBool>,
     ) -> Result<OptimizationResult, OptimizationError> {
-        let result = self.run_native_search(bounds, initial_design, progress_callback, cancel)?;
-        // A cancelled run did not finish asking whether the design space has
-        // a feasible aircraft. Preserve its explicit cancellation verdict.
-        if result.was_cancelled() {
-            return Ok(result);
-        }
-        let result = ensure_feasible(result)?;
-        restore_winning_payload_load_case(&mut self.config, &result.best_design);
-        Ok(result)
+        self.run_cancellable_with_evidence(bounds, initial_design, progress_callback, cancel, None)
+    }
+
+    /// Run the same strict search, observing completed evidence before rejection.
+    ///
+    /// The callback borrows the complete search once, before cancellation or
+    /// feasibility determines the result and before restoring the winning load
+    /// case. Observing failed candidates never makes them deliverable.
+    ///
+    /// # Errors
+    ///
+    /// Same as [`Self::run_cancellable`]; invalid requests publish no evidence.
+    pub fn run_cancellable_with_evidence(
+        &mut self,
+        bounds: Option<&[(f64, f64)]>,
+        initial_design: Option<&DesignVector>,
+        progress_callback: Option<&mut dyn FnMut(&str)>,
+        cancel: Option<&AtomicBool>,
+        evidence_callback: Option<&mut dyn FnMut(&OptimizationResult)>,
+    ) -> Result<OptimizationResult, OptimizationError> {
+        let result = self.run_native_search(bounds, initial_design, progress_callback, cancel);
+        complete_search(&mut self.config, result, evidence_callback)
     }
 
     pub(super) fn run_native_search(
@@ -398,6 +402,24 @@ impl DesignOptimizer {
     }
 }
 
+fn complete_search(
+    config: &mut AlasConfig,
+    result: Result<OptimizationResult, OptimizationError>,
+    evidence_callback: Option<&mut dyn FnMut(&OptimizationResult)>,
+) -> Result<OptimizationResult, OptimizationError> {
+    let result = result?;
+    if let Some(callback) = evidence_callback {
+        callback(&result);
+    }
+    // A cancelled search has not decided whether the design space is feasible.
+    if result.was_cancelled() {
+        return Ok(result);
+    }
+    let result = ensure_feasible(result)?;
+    restore_winning_payload_load_case(config, &result.best_design);
+    Ok(result)
+}
+
 /// `result` with the per-candidate work cap of its native search recorded on
 /// every stage's work summary.
 fn with_work_cap(
@@ -413,4 +435,102 @@ fn with_work_cap(
         work.cap_deck_evals = cap.map(|cap| cap.max_deck_evals);
     }
     result
+}
+
+#[cfg(test)]
+// Fixture setup and expected outcomes fail at the assertion boundary.
+#[allow(clippy::expect_used)]
+mod evidence_tests {
+    use super::*;
+
+    fn search_result(valid: bool, termination: &str) -> OptimizationResult {
+        let design = DesignVector::default();
+        OptimizationResult {
+            best_design: design,
+            best_cost: 1.0,
+            best_valid: valid,
+            history: OptimizationHistory {
+                design_vectors: vec![design],
+                valid: vec![valid],
+                cost: vec![1.0],
+                objective_value: vec![2.0],
+                hard_violation: vec![if valid { 0.0 } else { 1.0 }],
+                reject_reason: vec![if valid { "" } else { "buffet_margin" }.into()],
+                ..Default::default()
+            },
+            wall_time_s: 0.0,
+            method: "differential_evolution".into(),
+            strategy: "test".into(),
+            termination: termination.into(),
+            pareto_front: Vec::new(),
+            search_diagnostics: None,
+            delivered_acceptance: None,
+        }
+    }
+
+    #[test]
+    fn observing_success_preserves_result_and_payload_restoration_in_every_mass_mode() {
+        for mode in alas_config::MtowSizing::ALL {
+            let mut initial = AlasConfig::default();
+            initial.optimizer.objective.mtow_sizing = mode;
+            initial.cabin.passenger.class_mix_mode = "percent".into();
+            initial.requirements.num_passengers = 1;
+            let result = search_result(true, "evaluation_budget");
+            let mut unobserved_config = initial.clone();
+            let unobserved = complete_search(&mut unobserved_config, Ok(result.clone()), None)
+                .expect("successful search");
+            assert_ne!(unobserved_config, initial, "winning payload is restored");
+            let mut observed_config = initial;
+            let mut snapshots = Vec::new();
+            let observed = complete_search(
+                &mut observed_config,
+                Ok(result.clone()),
+                Some(&mut |snapshot| snapshots.push(snapshot.clone())),
+            )
+            .expect("observing success");
+            assert_eq!(snapshots, vec![result]);
+            assert_eq!(observed, unobserved);
+            assert_eq!(observed_config, unobserved_config, "{mode:?} payload state");
+        }
+    }
+
+    #[test]
+    fn rejection_and_cancellation_publish_once_without_restoring_payload() {
+        for termination in ["evaluation_budget", "cancelled"] {
+            let mut config = AlasConfig::default();
+            config.requirements.num_passengers = 1;
+            let initial = config.clone();
+            let result = search_result(false, termination);
+            let mut snapshots = Vec::new();
+            let observed = complete_search(
+                &mut config,
+                Ok(result.clone()),
+                Some(&mut |snapshot| snapshots.push(snapshot.clone())),
+            );
+            assert_eq!(snapshots, vec![result.clone()]);
+            assert_eq!(config, initial);
+            if termination == "cancelled" {
+                assert_eq!(observed.expect("cancellation has priority"), result);
+            } else {
+                let strict = ensure_feasible(result).expect_err("strict rejection");
+                assert_eq!(observed.expect_err("observed rejection"), strict);
+            }
+        }
+    }
+
+    #[test]
+    fn errors_before_search_publish_no_candidate_history() {
+        let mut config = AlasConfig::default();
+        let initial = config.clone();
+        let error = OptimizationError::InvalidBounds("invalid request".into());
+        let mut callbacks = 0;
+        let result = complete_search(
+            &mut config,
+            Err(error.clone()),
+            Some(&mut |_| callbacks += 1),
+        );
+        assert_eq!(result.expect_err("invalid request"), error);
+        assert_eq!(callbacks, 0);
+        assert_eq!(config, initial);
+    }
 }

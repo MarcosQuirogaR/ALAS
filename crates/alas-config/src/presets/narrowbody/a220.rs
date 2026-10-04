@@ -91,6 +91,7 @@ pub fn a220_300() -> AircraftPreset {
             cg_evidence: CgEnvelopeEvidence::PublicPlanning,
             reference_wing_area_m2: Some(112.3),
             planning_cg_envelope: Some(crate::presets::cg_envelope::A220_300_PLANNING_CG_ENVELOPE),
+            aft_cg_nose_load: Some(crate::presets::gear_load::A220_300),
             sources: vec![
                 "Airbus FAST 63 (2019), Flying the A220; Airbus A220 airframe features (July 2025), composite wing: https://www.aircraft.airbus.com/en/newsroom/stories/2025-07-the-clean-sheet-single-aisle-aircraft-at-the-vanguard-of-innovation",
                 crate::preset_structures::TRANSPORT_CAP_SOURCE,

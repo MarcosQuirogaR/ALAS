@@ -1,9 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! Optimization-history parity: the Rust scene preserves the reference
-//! panel shape, objective series, span color encoding, running-best trace, and
-//! colorbar contract.
+//! Optimization-history contract against the reference panel.
+//!
+//! The reference figure is a valid-only objective scatter with a running
+//! best, colored by span with a colorbar. The native figure deliberately
+//! departs from it: it plots every requested candidate of every stage,
+//! highlights only the valid ones and drops the span encoding. What carries
+//! over, and is checked here, is the running-best series over the valid
+//! evaluations and a physically labelled objective axis.
 
 // Invalid checked-in JSON is itself the assertion this fixture-backed test
 // needs to report, so decoding is intentionally fail-fast.
@@ -11,7 +16,9 @@
 
 use alas_config::design_variables::DesignVector;
 use alas_opt::history::OptimizationHistory;
-use alas_report::families::optimization::figure_optimization_history;
+use alas_report::families::optimization::{
+    figure_optimization_history, BEST_VALID_LABEL, HISTORY_TITLE, VALID_LABEL, VALID_RADIUS,
+};
 use alas_report::scene::SceneElement;
 use serde_json::Value;
 
@@ -25,27 +32,17 @@ fn sample_history() -> OptimizationHistory {
 }
 
 #[test]
-fn optimization_history_matches_the_reference_panel_and_series_contract() {
+fn optimization_history_keeps_the_reference_running_best_over_valid_evaluations() {
     let fixture: Value = serde_json::from_str(include_str!(
         "../../../golden/report/reference_render_w39.json"
     ))
     .expect("fixture is valid JSON");
     let reference = &fixture["figures"]["optimization_history:light"];
     assert_eq!(reference["available"], true);
-    assert_eq!(reference["panel_count"], 2);
     assert_eq!(reference["axes"][0]["series"][0], "best so far");
-    // the checked-in artifact records the historical L/D axis. The
-    // producer now exposes the generic objective quantity, so keep the
-    // historical value as fixture evidence while checking the current scene
-    // contract below.
-    assert_eq!(reference["axes"][0]["ylabel"], "L/D");
-    assert_eq!(reference["axes"][1]["ylabel"], "span [m]");
 
     let scene = figure_optimization_history(&sample_history(), Some("light"));
-    assert_eq!(
-        scene.title.as_deref(),
-        Some("Optimization convergence (3 valid evaluations)")
-    );
+    assert_eq!(scene.title.as_deref(), Some(HISTORY_TITLE));
 
     let labels: Vec<&str> = scene
         .elements
@@ -55,12 +52,10 @@ fn optimization_history_matches_the_reference_panel_and_series_contract() {
             _ => None,
         })
         .collect();
-    assert!(labels.contains(&"valid evaluation #"));
-    assert!(labels.contains(&"objective"));
+    assert!(labels.contains(&"Normalized ranking cost [dimensionless]"));
     assert!(!labels.contains(&"L/D"));
-    assert!(labels.contains(&"Span [m]"));
-    assert!(labels.contains(&"Evaluation"));
-    assert!(labels.contains(&"Best so far"));
+    assert!(labels.contains(&format!("{VALID_LABEL} (3)").as_str()));
+    assert!(labels.contains(&BEST_VALID_LABEL));
 
     let evaluation_points = scene
         .elements
@@ -71,9 +66,8 @@ fn optimization_history_matches_the_reference_panel_and_series_contract() {
                 SceneElement::Circle {
                     radius,
                     fill: Some(_),
-                    stroke: None,
                     ..
-                } if (*radius - 3.5).abs() < f64::EPSILON
+                } if (*radius - VALID_RADIUS).abs() < f64::EPSILON
             )
         })
         .count();
@@ -86,14 +80,5 @@ fn optimization_history_matches_the_reference_panel_and_series_contract() {
             .count(),
         1,
         "the running-best series is present"
-    );
-    assert!(
-        scene
-            .elements
-            .iter()
-            .filter(|element| matches!(element, SceneElement::Rect { fill: Some(_), .. }))
-            .count()
-            >= 64,
-        "the span colorbar is present"
     );
 }

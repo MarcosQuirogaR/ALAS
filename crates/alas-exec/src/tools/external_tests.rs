@@ -223,6 +223,341 @@ fn automatic_student_edition_resolution_prefers_the_versioned_nastran_launcher()
 }
 
 #[test]
+fn napa_program_files_discovery_selects_newest_numeric_version() -> std::io::Result<()> {
+    let root = std::env::temp_dir().join(format!("alas-napa-versions-{}", std::process::id()));
+    let program_files = root.join("Program Files");
+    let other_program_files = root.join("Program Files (x86)");
+    let app_data = root.join("AppData/Roaming");
+    let editions = program_files.join("MSC.Software/NaPa_SE");
+    for version in ["9999", "10000", "current"] {
+        for tool in ["Nastran", "Patran"] {
+            let directory = editions.join(version).join(tool).join("bin");
+            fs::create_dir_all(&directory)?;
+            fs::write(
+                directory.join(format!("{}.exe", tool.to_lowercase())),
+                b"test",
+            )?;
+        }
+    }
+    let newest = other_program_files.join("MSC.Software/NaPa_SE/10001");
+    let legacy = app_data.join("MSC.Software/MSC Nastran and Patran Student Editions/9998");
+    for edition in [&newest, &legacy] {
+        for tool in ["Nastran", "Patran"] {
+            let directory = edition.join(tool).join("bin");
+            fs::create_dir_all(&directory)?;
+            fs::write(
+                directory.join(format!("{}.exe", tool.to_lowercase())),
+                b"test",
+            )?;
+        }
+    }
+    fs::write(editions.join("10002"), b"not a directory")?;
+    let inner = newest.join("Nastran/msc10001/win64i8");
+    fs::create_dir_all(&inner)?;
+    fs::write(inner.join("nastran.exe"), b"inner")?;
+    let solver =
+        newest.join("Patran/mscnastran_files/10001/servermode/msc10001/win64i8/analysis.exe");
+    fs::create_dir_all(solver.parent().unwrap_or(Path::new(".")))?;
+    fs::write(&solver, b"solver")?;
+
+    let mut locator = ToolLocator::new(root.join("app"), root.join("prefs"));
+    locator.system_tool_roots = msc_roots_from_locations(
+        &[program_files.clone(), program_files, other_program_files],
+        Some(&app_data),
+    );
+    assert_eq!(
+        locator.system_tool_roots,
+        vec![
+            newest.clone(),
+            editions.join("10000"),
+            editions.join("9999"),
+            legacy
+        ]
+    );
+    assert_eq!(
+        locator.discover_nastran(Path::new("")),
+        ExecutableDiscovery::Ready(newest.join("Nastran/bin/nastran.exe"))
+    );
+    assert_eq!(
+        locator.discover_patran(Path::new("")),
+        ExecutableDiscovery::Ready(newest.join("Patran/bin/patran.exe"))
+    );
+    let environment = locator.resolve_environment(
+        Path::new(""),
+        Path::new(""),
+        Path::new(""),
+        Path::new(""),
+        Path::new(""),
+    );
+    assert_eq!(environment.nastran_solver, Some(solver));
+    fs::remove_dir_all(root)
+}
+
+#[test]
+fn configured_msc_files_and_bin_directories_keep_priority() -> std::io::Result<()> {
+    let root = std::env::temp_dir().join(format!("alas-napa-configured-{}", std::process::id()));
+    let program_files = root.join("Program Files");
+    let mut locator = ToolLocator::new(root.join("app"), root.join("prefs"));
+    for tool in ["Nastran", "Patran"] {
+        let filename = format!("{}.exe", tool.to_lowercase());
+        for directory in [
+            program_files
+                .join("MSC.Software/NaPa_SE/20261")
+                .join(tool)
+                .join("bin"),
+            root.join("configured").join(tool).join("bin"),
+            root.join("app/external tools"),
+        ] {
+            fs::create_dir_all(&directory)?;
+            fs::write(directory.join(&filename), b"test")?;
+        }
+    }
+    locator.system_tool_roots = msc_roots_from_locations(&[program_files], None);
+    let nastran = root.join("configured/Nastran/bin/nastran.exe");
+    let patran = root.join("configured/Patran/bin/patran.exe");
+    for configured in [&nastran, &root.join("configured/Nastran/bin")] {
+        assert_eq!(
+            locator.discover_nastran(configured),
+            ExecutableDiscovery::Ready(nastran.clone())
+        );
+    }
+    for configured in [&patran, &root.join("configured/Patran/bin")] {
+        assert_eq!(
+            locator.discover_patran(configured),
+            ExecutableDiscovery::Ready(patran.clone())
+        );
+    }
+    fs::remove_dir_all(root)
+}
+
+#[test]
+fn incomplete_newest_msc_installation_falls_back_to_complete_version() -> std::io::Result<()> {
+    let root = std::env::temp_dir().join(format!("alas-napa-incomplete-{}", std::process::id()));
+    let program_files = root.join("Program Files");
+    let editions = program_files.join("MSC.Software/NaPa_SE");
+    for tool in ["Nastran", "Patran"] {
+        fs::create_dir_all(editions.join("20262").join(tool).join("bin"))?;
+        let directory = editions.join("20261").join(tool).join("bin");
+        fs::create_dir_all(&directory)?;
+        fs::write(
+            directory.join(format!("{}.exe", tool.to_lowercase())),
+            b"test",
+        )?;
+    }
+    let mut locator = ToolLocator::new(root.join("app"), root.join("prefs"));
+    locator.system_tool_roots = msc_roots_from_locations(&[program_files], None);
+    assert_eq!(
+        locator.discover_nastran(Path::new("")),
+        ExecutableDiscovery::Ready(editions.join("20261/Nastran/bin/nastran.exe"))
+    );
+    assert_eq!(
+        locator.discover_patran(Path::new("")),
+        ExecutableDiscovery::Ready(editions.join("20261/Patran/bin/patran.exe"))
+    );
+    fs::remove_dir_all(root)
+}
+
+fn write_msc_fixture(path: &Path) -> std::io::Result<()> {
+    fs::create_dir_all(path.parent().unwrap_or(Path::new(".")))?;
+    fs::write(path, b"test")
+}
+
+fn resolve_msc_fixture(locator: &ToolLocator, configured: &Path) -> RunEnvironment {
+    locator.resolve_environment(
+        Path::new(""),
+        configured,
+        Path::new(""),
+        Path::new(""),
+        Path::new(""),
+    )
+}
+
+#[test]
+fn solver_only_newer_edition_cannot_override_the_selected_launcher_pair() -> std::io::Result<()> {
+    let root = std::env::temp_dir().join(format!("alas-msc-solver-only-{}", std::process::id()));
+    let older = root.join("NaPa_SE/20261");
+    let newer = root.join("NaPa_SE/20262");
+    let launcher = older.join("Nastran/bin/nastran.exe");
+    let solver = older.join("Patran/servermode/win64i8/analysis.exe");
+    write_msc_fixture(&launcher)?;
+    write_msc_fixture(&solver)?;
+    write_msc_fixture(&newer.join("Patran/servermode/win64i8/analysis.exe"))?;
+    let mut locator = ToolLocator::new(root.join("app"), root.join("prefs"));
+    locator.system_tool_roots = vec![newer, older];
+
+    let environment = resolve_msc_fixture(&locator, Path::new(""));
+    assert_eq!(environment.nastran_exe, Some(launcher));
+    assert_eq!(environment.nastran_solver, Some(solver.clone()));
+    assert_eq!(
+        locator.discover_nastran_solver(Path::new("")),
+        ExecutableDiscovery::Ready(solver)
+    );
+    fs::remove_dir_all(root)
+}
+
+#[test]
+fn launcher_only_newer_edition_cannot_borrow_an_older_solver() -> std::io::Result<()> {
+    let root = std::env::temp_dir().join(format!("alas-msc-launcher-only-{}", std::process::id()));
+    let older = root.join("NaPa_SE/20261");
+    let newer = root.join("NaPa_SE/20262");
+    let launcher = newer.join("Nastran/bin/nastran.exe");
+    write_msc_fixture(&launcher)?;
+    fs::create_dir_all(newer.join("Patran"))?;
+    write_msc_fixture(&older.join("Nastran/bin/nastran.exe"))?;
+    write_msc_fixture(&older.join("Patran/servermode/win64i8/analysis.exe"))?;
+    let mut locator = ToolLocator::new(root.join("app"), root.join("prefs"));
+    locator.system_tool_roots = vec![newer.clone(), older];
+
+    let environment = resolve_msc_fixture(&locator, Path::new(""));
+    assert_eq!(environment.nastran_exe, Some(launcher));
+    assert_eq!(environment.nastran_solver, None);
+    assert_eq!(
+        locator.discover_nastran_solver(Path::new("")),
+        ExecutableDiscovery::Incomplete {
+            directory: newer,
+            missing: vec!["servermode/analysis.exe".to_owned()],
+        }
+    );
+    fs::remove_dir_all(root)
+}
+
+#[test]
+fn configured_msc_launchers_keep_their_own_installation_solver() -> std::io::Result<()> {
+    let root =
+        std::env::temp_dir().join(format!("alas-msc-configured-pair-{}", std::process::id()));
+    let installed = root.join("NaPa_SE/20262");
+    let configured = root.join("configured/20261");
+    let launcher = configured.join("Nastran/bin/nastran.exe");
+    let inner = configured.join("Nastran/msc20261/win64i8/nastran.exe");
+    let solver = configured.join("Patran/servermode/win64i8/analysis.exe");
+    for file in [
+        &launcher,
+        &inner,
+        &solver,
+        &installed.join("Nastran/bin/nastran.exe"),
+        &installed.join("Patran/servermode/win64i8/analysis.exe"),
+    ] {
+        write_msc_fixture(file)?;
+    }
+    let mut locator = ToolLocator::new(root.join("app"), root.join("prefs"));
+    locator.system_tool_roots = vec![installed];
+    for (selected, expected) in [
+        (&launcher, &launcher),
+        (&configured.join("Nastran/bin"), &launcher),
+        (&inner, &inner),
+    ] {
+        let environment = resolve_msc_fixture(&locator, selected);
+        assert_eq!(environment.nastran_exe.as_ref(), Some(expected));
+        assert_eq!(environment.nastran_solver.as_ref(), Some(&solver));
+        assert_eq!(
+            locator.discover_nastran_solver(selected),
+            ExecutableDiscovery::Ready(solver.clone())
+        );
+    }
+    fs::remove_dir_all(root)
+}
+
+#[test]
+fn arbitrary_configured_launcher_cannot_inherit_an_installation_solver() -> std::io::Result<()> {
+    let root = std::env::temp_dir().join(format!("alas-msc-arbitrary-pair-{}", std::process::id()));
+    let launcher = root.join("custom/launcher.exe");
+    let installed = root.join("NaPa_SE/20261");
+    write_msc_fixture(&launcher)?;
+    write_msc_fixture(&installed.join("Nastran/bin/nastran.exe"))?;
+    write_msc_fixture(&installed.join("Patran/servermode/win64i8/analysis.exe"))?;
+    write_msc_fixture(&root.join("Nastran/bin/nastran.exe"))?;
+    write_msc_fixture(&root.join("Patran/servermode/win64i8/analysis.exe"))?;
+    let mut locator = ToolLocator::new(root.join("app"), root.join("prefs"));
+    locator.system_tool_roots = vec![installed];
+
+    let environment = resolve_msc_fixture(&locator, &launcher);
+    assert_eq!(environment.nastran_exe, Some(launcher.clone()));
+    assert_eq!(environment.nastran_solver, None);
+    assert_eq!(
+        locator.discover_nastran_solver(&launcher),
+        ExecutableDiscovery::Absent
+    );
+    fs::remove_dir_all(root)
+}
+
+#[test]
+fn solver_without_a_selected_launcher_is_not_an_environment_candidate() -> std::io::Result<()> {
+    let root =
+        std::env::temp_dir().join(format!("alas-msc-unpaired-solver-{}", std::process::id()));
+    let installed = root.join("NaPa_SE/20261");
+    write_msc_fixture(&installed.join("Patran/servermode/win64i8/analysis.exe"))?;
+    let mut locator = ToolLocator::new(root.join("app"), root.join("prefs"));
+    locator.system_tool_roots = vec![installed];
+
+    let environment = resolve_msc_fixture(&locator, Path::new(""));
+    assert_eq!(environment.nastran_exe, None);
+    assert_eq!(environment.nastran_solver, None);
+    assert_eq!(
+        locator.discover_nastran_solver(Path::new("")),
+        ExecutableDiscovery::Absent
+    );
+    fs::remove_dir_all(root)
+}
+
+#[test]
+fn disabled_environment_discovery_skips_even_configured_tools() -> std::io::Result<()> {
+    let root = std::env::temp_dir().join(format!("alas-tools-disabled-{}", std::process::id()));
+    let mses = root.join("MSES");
+    let nastran = root.join("Nastran/bin/nastran.exe");
+    let patran = root.join("Patran/bin/patran.exe");
+    let openvsp = root.join("OpenVSP");
+    let avl = root.join("avl.exe");
+    for file in [
+        mses.join("mset.exe"),
+        mses.join("mses.exe"),
+        mses.join("mplot.exe"),
+        nastran.clone(),
+        patran.clone(),
+        root.join("Patran/servermode/win64i8/analysis.exe"),
+        openvsp.join("vspscript.exe"),
+        openvsp.join("vspaero.exe"),
+        avl.clone(),
+    ] {
+        write_msc_fixture(&file)?;
+    }
+    let locator = ToolLocator::new(root.join("app"), root.join("prefs"));
+    locator
+        .save_preferences(&ToolPreferences {
+            flowunsteady_exe: Some(avl.display().to_string()),
+            ..ToolPreferences::default()
+        })
+        .map_err(std::io::Error::other)?;
+
+    assert_eq!(
+        locator.resolve_environment_with_discovery(&mses, &nastran, &patran, &openvsp, &avl, false),
+        RunEnvironment::default()
+    );
+    let environment =
+        locator.resolve_environment_with_discovery(&mses, &nastran, &patran, &openvsp, &avl, true);
+    assert_eq!(environment.mses_dir, Some(mses));
+    assert_eq!(environment.nastran_exe, Some(nastran));
+    assert_eq!(
+        environment.nastran_solver,
+        Some(root.join("Patran/servermode/win64i8/analysis.exe"))
+    );
+    assert_eq!(environment.patran_exe, Some(patran));
+    assert_eq!(environment.openvsp_exe, Some(openvsp.join("vspscript.exe")));
+    assert_eq!(environment.vspaero_exe, Some(openvsp.join("vspaero.exe")));
+    assert_eq!(environment.avl_exe, Some(avl.clone()));
+    assert_eq!(environment.flowunsteady_exe, Some(avl));
+    fs::remove_dir_all(root)
+}
+
+#[test]
+fn external_tool_discovery_is_disabled_only_by_an_explicit_mode() {
+    assert!(discovery_mode_enabled(None));
+    assert!(discovery_mode_enabled(Some("")));
+    assert!(discovery_mode_enabled(Some("enabled")));
+    assert!(!discovery_mode_enabled(Some("disabled")));
+    assert!(!discovery_mode_enabled(Some("DISABLED")));
+}
+
+#[test]
 fn preferences_keep_all_nastran_paths_and_openvsp_directory() {
     let root = std::env::temp_dir().join(format!("alas-prefs-{}", std::process::id()));
     let locator = ToolLocator::new(root.join("app"), &root);

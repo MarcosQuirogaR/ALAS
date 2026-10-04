@@ -122,6 +122,8 @@ pub struct LandingGearStationPositions {
     pub main_gear_x_m: Vec<f64>,
     /// Whether the positions came from a complete normalized source anchor.
     pub source_scaled: bool,
+    /// Whether a uniform main group was placed from candidate loading states.
+    pub derived: bool,
     /// The typed resolution outcome of resolving the effective main-gear station.
     pub resolution: Result<ValidGearStation, GearStationRejection>,
 }

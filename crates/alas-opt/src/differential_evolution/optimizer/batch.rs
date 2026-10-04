@@ -12,8 +12,8 @@
 //! constructs with the same call (`WingConfig::transport_planform`), so a
 //! chord that grows outboard, such as a pinned side-of-body chord below the
 //! kink chord, is rejected exactly as the full build would reject it; then,
-//! while the Geometry family is hard, the exposed trailing-edge angle and the
-//! span code limit. The planform and Geometry checks apply to the native
+//! the hard exposed trailing-edge angle, the span code limit and the
+//! declared maximum wing area. The planform and Geometry checks apply to the native
 //! model only: a delegated evaluator owns its constraint set. A
 //! rejected candidate is scored in the [`Tier::PreGateFailed`] tier with its
 //! normalized violation, never counts against the stage's evaluation budget,
@@ -22,8 +22,10 @@
 //! alone decides belongs in that one function.
 
 use super::*;
+use crate::evaluation_trace::analysed_record;
 use crate::mdo::TE_ANGLE_LIMIT_DEG;
 use crate::search_methods::Tier;
+use crate::{EvaluationTrace, TraceClass, TraceStage};
 use crate::{PreGateReasons, SizingWorkSummary, StageRejections, StageSummary};
 
 /// The first design-vector check a candidate failed, in the gate's order.
@@ -33,6 +35,7 @@ pub(crate) enum Reason {
     Planform,
     TrailingEdgeAngle,
     SpanCode,
+    WingArea,
 }
 
 impl Reason {
@@ -42,6 +45,7 @@ impl Reason {
             Self::Planform => &mut reasons.planform,
             Self::TrailingEdgeAngle => &mut reasons.trailing_edge_angle,
             Self::SpanCode => &mut reasons.span_code,
+            Self::WingArea => &mut reasons.wing_area,
         } += 1;
     }
 }
@@ -73,29 +77,56 @@ pub(crate) fn pre_gate_violation(
         .or_else(|| hard_geometry_violation(config, &design))
 }
 
-/// The two Geometry residuals a design vector alone decides, while that
-/// family is hard: the exposed trailing-edge angle
-/// ([`crate::transport_planform::exposed_te_angle_deg`]) and the aerodrome
-/// code span limit ([`AlasConfig::max_design_span_m`]), each normalized by
-/// its limit as the residual table does. The reason is the angle when it
-/// fails, else the span.
+/// The three hard Geometry residuals a design vector alone decides: the
+/// exposed trailing-edge angle
+/// ([`crate::transport_planform::exposed_te_angle_deg`]), the aerodrome
+/// code span limit ([`AlasConfig::max_design_span_m`]) and the declared
+/// maximum wing area (`requirements.max_wing_area_m2`), each normalized by
+/// its limit as the residual table does. The reason is the first that fails
+/// in that order.
+///
+/// The area is the planform's own trapezoid sum
+/// ([`alas_config::TransportPlanform::reference_area_m2`]). The built wing's
+/// `s_ref` reproduces it to summation round-off and adds the projection of
+/// any non-planar tip device, so it is never smaller; the gate rejects only
+/// an excess beyond [`AREA_ROUNDOFF`], so every design it rejects is over
+/// the limit in the residual table too, and the borderline ones and those a
+/// tip device carries over are left to it.
 fn hard_geometry_violation(config: &AlasConfig, design: &DesignVector) -> Option<(Reason, f64)> {
-    if config.optimizer.objective.geometry_constraints != alas_config::ConstraintPolicy::Hard {
-        return None;
-    }
     let angle = crate::transport_planform::exposed_te_angle_deg(&config.geometry.wing, design)?;
     let excess_angle = (angle - TE_ANGLE_LIMIT_DEG) / TE_ANGLE_LIMIT_DEG;
     let excess_span = config
         .max_design_span_m()
         .map_or(0.0, |limit| (design.span_m - limit) / limit);
-    let violation = excess_angle.max(0.0) + excess_span.max(0.0);
+    let limit_m2 = config.requirements.max_wing_area_m2;
+    let excess_area = match config.geometry.wing.transport_planform(design) {
+        Ok(planform) if limit_m2.is_finite() && limit_m2 > 0.0 => {
+            let excess = (planform.reference_area_m2() - limit_m2) / limit_m2;
+            if excess > AREA_ROUNDOFF {
+                excess
+            } else {
+                0.0
+            }
+        }
+        _ => 0.0,
+    };
+    let violation = excess_angle.max(0.0) + excess_span.max(0.0) + excess_area;
     let reason = if excess_angle > 0.0 {
         Reason::TrailingEdgeAngle
-    } else {
+    } else if excess_span > 0.0 {
         Reason::SpanCode
+    } else {
+        Reason::WingArea
     };
     (violation > 0.0).then_some((reason, violation))
 }
+
+/// Relative excess of the planform area over the declared maximum below
+/// which the pre-gate defers to the full residual table: far above the
+/// summation round-off between the planform and the lofted wing's `s_ref`
+/// (`the_wing_area_pre_gate_agrees_with_the_built_reference_area`) and far
+/// below any physical difference.
+const AREA_ROUNDOFF: f64 = 1.0e-9;
 
 /// A planform the builder cannot construct: a chord growing outboard by the
 /// relative excess `(outboard - inboard) / outboard`, any other defect 1.
@@ -132,12 +163,17 @@ pub(super) struct BatchEvaluator<'a, E: SearchObjective + ?Sized> {
     /// History rows of requested candidates no lane started before a
     /// cancellation ([`CANCELLED_UNSTARTED`]).
     pub(super) cancelled_unstarted: usize,
+    /// The stage the next batches are recorded under in [`Self::trace`].
+    pub(super) stage: TraceStage,
+    /// Every requested candidate this evaluator rejected or analysed, for
+    /// display; the search never reads it.
+    pub(super) trace: EvaluationTrace,
 }
 
 /// The history reason of a requested candidate a cancellation stopped before
 /// any analysis started. It keeps one history row per requested design, and
 /// it is never an analysis.
-pub(super) const CANCELLED_UNSTARTED: &str = "cancelled_unstarted";
+pub(super) const CANCELLED_UNSTARTED: &str = crate::evaluation_trace::CANCELLED_UNSTARTED;
 
 impl<'a, E: SearchObjective + ?Sized> BatchEvaluator<'a, E> {
     pub(super) fn new(
@@ -160,6 +196,8 @@ impl<'a, E: SearchObjective + ?Sized> BatchEvaluator<'a, E> {
             feasible: 0,
             busy: Duration::ZERO,
             cancelled_unstarted: 0,
+            stage: TraceStage::Refinement,
+            trace: EvaluationTrace::default(),
         }
     }
 
@@ -220,30 +258,33 @@ impl<'a, E: SearchObjective + ?Sized> BatchEvaluator<'a, E> {
         let mut rejected = Vec::new();
         let admitted: Vec<Vec<f64>> = points
             .iter()
-            .filter(|values| {
+            .enumerate()
+            .filter(|(index, values)| {
                 match (self.baseline != Some(values.as_slice()))
                     .then(|| pre_gate_violation(values, self.bounds, self.config))
                     .flatten()
                 {
                     Some((reason, violation)) => {
-                        reason.count(&mut self.reasons);
-                        rejected.push(ScoredPoint {
-                            values: (*values).clone(),
-                            cost: f64::INFINITY,
-                            tier: Tier::PreGateFailed,
-                            constraint_violation: violation,
-                            objectives: [f64::INFINITY; 3],
-                        });
+                        rejected.push((
+                            *index,
+                            reason,
+                            ScoredPoint {
+                                values: (*values).clone(),
+                                cost: f64::INFINITY,
+                                tier: Tier::PreGateFailed,
+                                constraint_violation: violation,
+                                objectives: [f64::INFINITY; 3],
+                            },
+                        ));
                         false
                     }
                     None => true,
                 }
             })
-            .cloned()
+            .map(|(_, values)| values.clone())
             .collect();
-        self.pre_gate_rejects += rejected.len();
-        for point in rejected {
-            self.cache.insert(point);
+        for (_, _, point) in &rejected {
+            self.cache.insert(point.clone());
         }
         let pending = self.cache.missing(&admitted);
         let before = self.objective.history().n_evaluations();
@@ -279,15 +320,74 @@ impl<'a, E: SearchObjective + ?Sized> BatchEvaluator<'a, E> {
         for (offset, (values, (cost, _))) in pending.iter().zip(scores).enumerate() {
             let point = scored_point_at(values, cost, history, before + offset);
             self.feasible += usize::from(point.valid());
+            self.trace
+                .evaluations
+                .extend(analysed_record(history, before + offset, self.stage));
             self.cache.insert_analysed(point, before + offset);
         }
-        self.cache.resolve(points)
+        let resolved = self.cache.resolve_prefix(points);
+        for (index, reason, _) in rejected {
+            if index < resolved.len() {
+                reason.count(&mut self.reasons);
+                self.pre_gate_rejects += 1;
+                self.trace
+                    .push(self.stage, TraceClass::Rejected, None, None);
+            }
+        }
+        resolved
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_deadline_counts_only_the_resolved_prefix_including_its_pre_gate_rejects() {
+        struct Prefix(OptimizationHistory);
+        impl SearchObjective for Prefix {
+            fn evaluate(&mut self, design: &[f64]) -> f64 {
+                self.0.record(
+                    DesignVector::from_array(design).unwrap(),
+                    true,
+                    1.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    "",
+                );
+                1.0
+            }
+            fn history(&self) -> &OptimizationHistory {
+                &self.0
+            }
+            fn evaluate_batch(
+                &mut self,
+                designs: &[Vec<f64>],
+                _workers: usize,
+            ) -> Vec<(f64, bool)> {
+                designs
+                    .iter()
+                    .take(1)
+                    .map(|values| (self.evaluate(values), true))
+                    .collect()
+            }
+        }
+        let bounds = vec![(0.0, 1.0); DesignVector::bounds().len()];
+        let points = vec![vec![0.5; 16], vec![2.0; 16], vec![0.6; 16], vec![3.0; 16]];
+        let mut objective = Prefix(OptimizationHistory::new());
+        let mut evaluator = BatchEvaluator::new(&mut objective, 4, &bounds, None, None);
+        let scores = evaluator.evaluate_block(&points);
+        assert_eq!(scores.len(), 2);
+        assert_eq!(evaluator.analyses(), 1);
+        assert_eq!(evaluator.feasible, 1);
+        assert_eq!(evaluator.pre_gate_rejects, 1);
+        assert_eq!(evaluator.reasons.design_box, 1);
+        assert_eq!(scores[0].tier, Tier::Feasible);
+        assert_eq!(scores[1].tier, Tier::PreGateFailed);
+    }
 
     #[test]
     fn pre_gated_candidates_stay_out_of_the_budget_and_the_baseline_is_always_analysed() {
@@ -315,6 +415,17 @@ mod tests {
         assert_eq!(scores[1].tier, Tier::Feasible);
         assert_eq!(scores[2].tier, Tier::PreGateFailed);
         assert!((scores[2].constraint_violation - 32.0).abs() < 1e-12);
+        // Every requested candidate is traced once; a repeat served from the
+        // cache is not.
+        evaluator.evaluate_block(&[vec![0.5; 16]]);
+        let trace = &evaluator.trace;
+        assert_eq!(trace.len(), 3);
+        assert_eq!(trace.count(TraceClass::Rejected), 1);
+        assert_eq!(trace.count(TraceClass::Valid), 2);
+        assert!(trace
+            .evaluations
+            .iter()
+            .all(|evaluation| evaluation.stage == TraceStage::Refinement));
     }
 
     #[test]
@@ -352,6 +463,47 @@ mod tests {
             }
         }
         assert!(rejected > 0);
+    }
+
+    #[test]
+    fn the_wing_area_pre_gate_agrees_with_the_built_reference_area() {
+        // Every registered aircraft over its own box: the built wing's
+        // `s_ref` is the planform's trapezoid area to round-off far below
+        // the gate's margin, plus any non-planar tip device's projection
+        // (the AVE's), never less, so the gate rejects only designs the
+        // residual table rejects.
+        let mut gated = 0;
+        for preset in alas_config::presets::available() {
+            let config = AlasConfig::from_value(&serde_json::json!({ "preset": preset })).unwrap();
+            let bounds = DesignOptimizer::new(config.clone())
+                .resolved_bounds(None, None)
+                .unwrap();
+            let limit_m2 = config.requirements.max_wing_area_m2;
+            let mut rng = crate::search_methods::rng::SearchRng::seed(11);
+            let builder = alas_geom::builder::AircraftBuilder::new(Some(config.geometry.clone()));
+            for values in crate::search_methods::latin_hypercube(&bounds, 40, &mut rng) {
+                let design = DesignVector::from_array(&values).unwrap();
+                let Ok(planform) = config.geometry.wing.transport_planform(&design) else {
+                    continue;
+                };
+                let Ok(plane) = builder.build(Some(&design), false) else {
+                    continue;
+                };
+                let area_m2 = planform.reference_area_m2();
+                assert!(
+                    plane.s_ref >= area_m2 * (1.0 - 1.0e-12),
+                    "{preset}: planform {area_m2} m2 against built {} m2",
+                    plane.s_ref
+                );
+                let gate = hard_geometry_violation(&config, &design)
+                    .is_some_and(|(reason, _)| reason == Reason::WingArea);
+                if gate {
+                    assert!(plane.s_ref > limit_m2, "{preset} {values:?}");
+                    gated += 1;
+                }
+            }
+        }
+        assert!(gated > 0);
     }
 
     #[test]

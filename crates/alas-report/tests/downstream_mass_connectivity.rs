@@ -10,6 +10,10 @@
 //! depends on the takeoff mass (not `config.requirements.mtow_kg`) is checked against a
 //! reference drawn at that sized mass explicitly, and against the same figure
 //! drawn at the declared MTOW, which must differ when the two masses differ.
+//! That comparison needs a run sized below MTOW, so it selects
+//! `SizedByMission`. Under Hard MTOW the sized takeoff mass is MTOW itself,
+//! or ZFW plus the usable capacity when the tanks limit the load, and every
+//! consumer reads that one number.
 
 // A test asserts on values it constructed, so a failed unwrap is the
 // assertion failing.
@@ -23,9 +27,10 @@ use alas_report::svg::render_svg;
 
 const PRESET: &str = "A220-300";
 
-fn run_seeded_a220() -> PipelineResult {
+fn run_seeded_a220(mode: alas_config::MtowSizing) -> PipelineResult {
     let mut config =
         AlasConfig::from_value(&serde_json::json!({ "preset": PRESET })).expect("A220 preset");
+    config.optimizer.objective.mtow_sizing = mode;
     config.optimizer.solver.method = alas_config::optimizer::PRODUCT_DE_METHOD.to_owned();
     config.optimizer.solver.refinement.max_evaluations = 128;
     config.optimizer.solver.screening.max_evaluations = 8;
@@ -80,7 +85,7 @@ fn run_seeded_a220() -> PipelineResult {
 
 #[test]
 fn figures_and_load_trim_use_the_sized_takeoff_mass_not_the_preset_mtow() {
-    let result = run_seeded_a220();
+    let result = run_seeded_a220(alas_config::MtowSizing::SizedByMission);
     let report = result.optimized_report.as_ref().expect("optimized report");
     let declared_mtow_kg = result.config.requirements.mtow_kg;
     let sized_kg = report
@@ -192,17 +197,63 @@ fn figures_and_load_trim_use_the_sized_takeoff_mass_not_the_preset_mtow() {
 
     // Load-and-trim sheet: model weights, not the published reference.
     let sheet = load_trim_data_from_pipeline(&result).expect("load and trim data");
-    let mtow_line = sheet.weight("MTOW").expect("MTOW line");
-    assert_eq!(mtow_line, sized_kg);
+    let sized_takeoff_line = sheet
+        .weight(alas_report::families::mass_balance::load_trim::MassRole::SizedTakeoff)
+        .expect("sized takeoff mass line");
+    assert_eq!(sized_takeoff_line, sized_kg);
     let published = alas_config::presets::get(PRESET)
         .expect("A220 preset")
         .reference
         .clone();
     if let Some(published_mtow_kg) = published.mtow_kg {
-        assert_ne!(mtow_line, published_mtow_kg);
+        assert_ne!(sized_takeoff_line, published_mtow_kg);
     }
     assert!(sheet
-        .notes
+        .weight_lines
         .iter()
-        .any(|note| note.contains("Published reference")));
+        .all(|line| !["MTOW", "MLW", "MZFW"].contains(&line.role.label())));
+}
+
+#[test]
+fn hard_mtow_figures_and_load_trim_read_the_one_takeoff_loading() {
+    let result = run_seeded_a220(alas_config::MtowSizing::FixedRequirement);
+    let report = result.optimized_report.as_ref().expect("optimized report");
+    let declared_mtow_kg = result.config.requirements.mtow_kg;
+    let fuel = &result.feasibility.fuel_loading;
+    let loading = fuel
+        .design_takeoff_loading
+        .expect("a Hard-MTOW run reports its takeoff fuel loading");
+    // TOW is MTOW unless the usable tanks cap the fuel; then it is ZFW plus
+    // the usable capacity, below MTOW.
+    let expected_kg = if loading.status.as_str() == "volume_limited" {
+        let capacity_kg = loading.usable_capacity_kg.expect("established capacity");
+        assert!(loading.zero_fuel_mass_kg + capacity_kg < declared_mtow_kg);
+        loading.zero_fuel_mass_kg + capacity_kg
+    } else {
+        declared_mtow_kg
+    };
+    let sized_kg = report
+        .sized_takeoff_mass_kg()
+        .expect("a product run binds its report to the sized takeoff mass");
+    for (name, kg) in [
+        ("sized", sized_kg),
+        ("analysed", fuel.analyzed_takeoff_mass_kg),
+        ("loading", loading.takeoff_mass_kg),
+    ] {
+        assert!(
+            (kg - expected_kg).abs() <= 1e-6 * expected_kg,
+            "{name} {kg} kg vs {expected_kg} kg"
+        );
+    }
+
+    // The payload-range corners trade payload against fuel under the
+    // aircraft's limit, which one volume-limited load case does not lower.
+    let range = performance::payload_range_data(report, &result.config).expect("payload range");
+    assert_eq!(range.mtow_kg, declared_mtow_kg);
+
+    let sheet = load_trim_data_from_pipeline(&result).expect("load and trim data");
+    let sized_takeoff_line = sheet
+        .weight(alas_report::families::mass_balance::load_trim::MassRole::SizedTakeoff)
+        .expect("sized takeoff mass line");
+    assert_eq!(sized_takeoff_line, sized_kg);
 }

@@ -7,8 +7,8 @@ use crate::{
     AircraftPreset, AircraftReferenceData, AircraftVariantIdentity, CgEnvelopeEvidence,
     DesignRequirements, DesignVector, EmpennageConfig, EngineConfig, FuselageConfig,
     GeometryConfig, LandingGearConfig, MissingDesignMissionDatum, MissionEvidenceApplicability,
-    PartialDesignMissionEvidence, PartialMissionEvidenceKind, PublishedAftCgNoseLoad,
-    PublishedRange, PublishedReserveContract, WingConfig,
+    PartialDesignMissionEvidence, PartialMissionEvidenceKind, PublishedRange,
+    PublishedReserveContract, WingConfig,
 };
 
 /// Double-deck quad, the largest airliner in the registry.
@@ -86,14 +86,7 @@ pub fn a380_800() -> AircraftPreset {
                 source: "Airbus A380 Aircraft Characteristics Rev 20, 2025-12-01, section 3-2-1 p.2, Figure 3-2-1-991-001-A01",
             }],
             cg_evidence: CgEnvelopeEvidence::AfmRequired,
-            // 1 - (2 x 106,920 + 2 x 160,380) / 562,000: wing-gear and
-            // body-gear struts at the most-aft CG.
-            aft_cg_nose_load: Some(PublishedAftCgNoseLoad {
-                mass_kg: 562_000.0,
-                nose_gear_fraction: 1.0 - (2.0 * 106_920.0 + 2.0 * 160_380.0) / 562_000.0,
-                aft_cg_pct_mac: Some(43.0),
-                source: "Airbus A380 Aircraft Characteristics Rev 20, 2025-12-01, Figure 7-3-0-991-006-A01 sheet 1 (WV000, MRW 562,000 kg: wing-gear 106,920 kg and body-gear 160,380 kg per strut static at the most-aft CG, 43 % MAC)",
-            }),
+            aft_cg_nose_load: Some(crate::presets::gear_load::A380_800),
             sources: vec![
                 "EASA.A.110 Issue 17, 2026-08-05, pp.10-15",
                 "Airbus A380 Aircraft Characteristics Rev 20, 2025-12-01, section 2-1-1",

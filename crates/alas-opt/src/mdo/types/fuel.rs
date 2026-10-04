@@ -157,4 +157,8 @@ pub struct SizingControls {
     /// from, instead of the model default; the frozen count still meets
     /// `mission_model::frozen_plan::RICHARDSON_TOLERANCE`.
     pub steps_per_segment: Option<usize>,
+    /// Screening-only drag tables check the fitted induced quadratic at the
+    /// clean-CL endpoints and cruise check before refining failed cells.
+    /// Reported candidates use the full set of independent interior checks.
+    pub screening_drag_table: bool,
 }

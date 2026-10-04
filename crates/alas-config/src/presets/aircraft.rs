@@ -161,9 +161,10 @@ pub struct AircraftReferenceData {
     /// This is deliberately absent for presets whose type-certificate source
     /// delegates the limits to the AFM/WBM.
     pub planning_cg_envelope: Option<PlanningCgEnvelope>,
-    /// Static gear-load split the airport-planning document tabulates at the
-    /// most-aft CG; it sets the ground minimum nose-gear load in place of the
-    /// class default (see [`PublishedAftCgNoseLoad`]).
+    /// Static nose-gear share the airport-planning document publishes at the
+    /// most-aft CG against weight; it sets the per-state ground minimum
+    /// nose-gear load in place of the class default (see
+    /// [`PublishedAftCgNoseLoad`]).
     pub aft_cg_nose_load: Option<PublishedAftCgNoseLoad>,
     /// Revision-locked primary documents supporting this record.
     pub sources: Vec<&'static str>,

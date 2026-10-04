@@ -429,7 +429,7 @@ fn declared_cabin_equipment_method(preset: &crate::AircraftPreset) -> CabinEquip
 /// role: the A340-300, A380-800, B787-9, DC-10-30 and the notional AVE are
 /// long-haul types, the A320-200, A220-300 and ATR 72-600 are not. The ATR at
 /// 72 installed seats is inside the LTH domain statement's seat clause, so
-/// this class is now load-bearing for it and not merely declarative: the
+/// this class is load-bearing for it and not merely declarative: the
 /// ATR 72-600 takes `m_opp = 32.907 n_pax^1.021`.
 fn declared_haul_class(name: &str) -> OperatingHaulClass {
     match name {

@@ -8,8 +8,8 @@
 //!
 //! This is deliberately separate from `preset_audit` (baseline, `optimize:
 //! false`), which it reuses for its own purpose and does not reimplement. The
-//! optimizer has no wall-clock timeout of its own (only a deterministic
-//! evaluation-count budget), so a `--timeout-s` guard here is external. On
+//! optimizer has separate screening and refinement deadlines and evaluation
+//! ceilings. A `--timeout-s` guard here bounds the entire pipeline. On
 //! expiry the guard sets the run's cooperative cancellation flag, which
 //! `DesignPipeline::run_cancellable` threads into the active search's own
 //! generation and poll loops, and then *joins* the worker: no thread is
@@ -76,6 +76,12 @@ mod exposure;
 use diagnostics::dependency_gaps;
 #[path = "optimization_preset_audit/preparation.rs"]
 mod preparation;
+#[path = "optimization_preset_audit/route_profile.rs"]
+mod route_profile;
+#[path = "optimization_preset_audit/search_evidence.rs"]
+mod search_evidence;
+#[path = "optimization_preset_audit/snapshot_evidence.rs"]
+mod snapshot_evidence;
 
 /// Fixed recorded seed for every optimization run in this harness. A fixed
 /// constant, not a "representative" or hidden default: recorded verbatim in
@@ -114,7 +120,9 @@ fn main() -> io::Result<()> {
         Some("matrix") => run_matrix(&args[1..]),
         _ => {
             eprintln!(
-                "usage:\n  optimization_preset_audit measure --preset <NAME> --output-dir <DIR> [--seed N] [--solver-preset NAME] [--timeout-s N] [--native-only] [--mtow-mode MODE] [--experiment LABEL [--time-limit S] [--max-evaluations N] [--screening-time-limit S] [--screening-max-evaluations N] [--replay-evaluations S,R[,P[,Q]]] [--stop-on-evaluations] [--workers N]]\n  optimization_preset_audit matrix --output-dir <DIR> [--seed N] [--solver-preset NAME] [--timeout-s N] [--native-only] [--mtow-mode MODE] [--time-limit S] [--max-evaluations N]\n\n  --mtow-mode MODE sets optimizer.objective.mtow_sizing (fixed_requirement, sized_by_mission,\n  unconstrained, mtow_band, payload_adjusted) and is recorded in the row. --time-limit and\n  --max-evaluations are refused until the solver settings carry such a budget.\n\n  --experiment LABEL marks a measurement/engineering-budget run. It is required before\n  the stage budget flags (refinement --time-limit and --max-evaluations, and their\n  screening counterparts) may change the registered solver preset's search\n  effort, and the label is recorded in every row and artefact the run writes. It changes\n  numerical search effort only. --replay-evaluations S,R,P,Q replays the stage replay_evaluations\n  S,R, refinement planned_evaluations P and restoration_evaluations Q a time-limited run recorded (row field optimizer.stages), bit-identically at any worker count;\n  --stop-on-evaluations ignores both time limits; --workers N sets the native worker threads. No requirement, constraint, mission, design space or\n  acceptance clause is reachable from it."
+                "usage:\n  optimization_preset_audit measure --preset <NAME> --output-dir <DIR> [--seed N] [--solver-preset NAME] [--timeout-s N] [--native-only | --external-tools] [--mtow-mode MODE] [--experiment LABEL [--time-limit S] [--max-evaluations N] [--screening-time-limit S] [--screening-max-evaluations N] [--replay-evaluations S,R[,P[,Q]]] [--stop-on-evaluations] [--workers N]]\n  optimization_preset_audit matrix --output-dir <DIR> [--seed N] [--solver-preset NAME] [--timeout-s N] [--native-only | --external-tools] [--mtow-mode MODE] [--time-limit S] [--max-evaluations N]\n\n  Native execution is the default; --external-tools allows configured host tools.
+
+  --mtow-mode accepts the user-facing modes fixed_requirement, mtow_band and payload_adjusted.\n  The mode is recorded in the row. --time-limit and\n  --max-evaluations are refused until the solver settings carry such a budget.\n\n  --experiment LABEL marks a measurement/engineering-budget run. It is required before\n  the stage budget flags (refinement --time-limit and --max-evaluations, and their\n  screening counterparts) may change the registered solver preset's search\n  effort, and the label is recorded in every row and artefact the run writes. It changes\n  numerical search effort only. --replay-evaluations S,R,P,Q replays the stage replay_evaluations\n  S,R, refinement planned_evaluations P and restoration_evaluations Q a time-limited run recorded (row field optimizer.stages), bit-identically at any worker count;\n  --stop-on-evaluations ignores both time limits; --workers N sets the native worker threads. No requirement, constraint, mission, design space or\n  acceptance clause is reachable from it."
             );
             std::process::exit(2);
         }
@@ -157,7 +165,7 @@ fn parse_args(values: &[String]) -> io::Result<Args> {
     let mut timeout_s = None;
     let mut preset = None;
     let mut experiment = None;
-    let mut native_only = false;
+    let mut native_only = true;
     let mut mtow_mode = None;
     let mut time_limit_s = None;
     let mut max_evaluations = None;
@@ -170,6 +178,7 @@ fn parse_args(values: &[String]) -> io::Result<Args> {
     while index < values.len() {
         match values[index].as_str() {
             "--native-only" => native_only = true,
+            "--external-tools" => native_only = false,
             "--mtow-mode" => {
                 index += 1;
                 mtow_mode = Some(controls::parse_mtow_mode(values.get(index))?);
@@ -411,6 +420,7 @@ fn settings_json(settings: &SolverSettings) -> Value {
         "refinement": settings.refinement,
         "tolerance": settings.tolerance,
         "workers": settings.workers,
+        "resolved_workers": settings.resolved_workers(),
         "seed": settings.seed,
     })
 }
@@ -474,6 +484,7 @@ fn run_with_timeout(
     let (tx, rx) = mpsc::channel();
     let handle = thread::spawn(move || {
         let start = Instant::now();
+        let snapshots = snapshot_evidence::SnapshotEvidence::start(options.output_dir.as_deref());
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             let on_event = |event: alas_pipeline::runs::RunEvent| {
                 eprintln!(
@@ -483,26 +494,22 @@ fn run_with_timeout(
             };
             let preset = presets::get(&config.preset).map_err(|e| e.to_string())?;
             let design = preset.design_vector;
-            let envelope = config.optimizer.design_space.envelope(&design);
-            let bounds = alas_config::DESIGN_VARIABLE_SPECS
-                .iter()
-                .map(|spec| {
-                    envelope
-                        .iter()
-                        .find(|v| v.name == spec.name)
-                        .map(|variable| (variable.lower, variable.upper))
-                        .ok_or_else(|| format!("design variable {} has no envelope", spec.name))
-                })
-                .collect::<Result<Vec<_>, String>>()?;
-            DesignPipeline::new(config).run_with_design_space_events(
+            let bounds = alas_opt::DesignOptimizer::new(config.clone())
+                .resolved_bounds(None, Some(&design))
+                .map_err(|error| error.to_string())?;
+            DesignPipeline::new(config).run_with_design_space_events_and_snapshots(
                 &options,
                 &environment,
                 &design,
                 &bounds,
-                &on_event,
-                worker_watch.flag(),
+                alas_pipeline::RunObservers {
+                    events: &on_event,
+                    snapshots: &|snapshot| snapshots.publish(snapshot),
+                    cancel: worker_watch.flag(),
+                },
             )
         }));
+        snapshots.finish();
         let elapsed = start.elapsed();
         let _ = tx.send((result, elapsed));
     });
@@ -639,6 +646,8 @@ fn evaluate_preset_optimization(
     native_only: bool,
     mtow_mode: Option<MtowSizing>,
 ) -> Value {
+    let result_dir = output_root.join(name).join("optimize");
+    let evidence_error = search_evidence::prepare(&result_dir);
     let mut row = evaluate_preset_optimization_inner(
         name,
         output_root,
@@ -651,6 +660,9 @@ fn evaluate_preset_optimization(
         native_only,
         mtow_mode,
     );
+    search_evidence::attach(&mut row, &result_dir, evidence_error.as_deref());
+    row["baseline_execution_scope"] = json!("native_only");
+    row["baseline_external_completion_claimed"] = json!(false);
     preparation::record_scope(&mut row, native_only);
     row
 }
@@ -723,13 +735,17 @@ fn evaluate_preset_optimization_inner(
         eprintln!("[warn] could not persist input config for {name}: {error}");
     }
 
-    let environment = locator.resolve_environment(
-        Path::new(&config.mses.mses_dir),
-        Path::new(&config.structures.nastran_exe_path),
-        Path::new(&config.structures.patran_exe_path),
-        Path::new(preferences.openvsp_dir.as_deref().unwrap_or("")),
-        Path::new(preferences.avl_exe.as_deref().unwrap_or("")),
-    );
+    let environment = if native_only {
+        RunEnvironment::default()
+    } else {
+        locator.resolve_environment(
+            Path::new(&config.mses.mses_dir),
+            Path::new(&config.structures.nastran_exe_path),
+            Path::new(&config.structures.patran_exe_path),
+            Path::new(preferences.openvsp_dir.as_deref().unwrap_or("")),
+            Path::new(preferences.avl_exe.as_deref().unwrap_or("")),
+        )
+    };
 
     let options = PipelineOptions {
         optimize: true,
@@ -1140,6 +1156,8 @@ fn build_success_row(
             "converged": optimizer_converged,
             "delivered_feasible": optimizer_feasible,
             "best_valid": optimizer_best_valid,
+            "total_full_fidelity_valid": optimization.map(|o| exposure::full_fidelity_valid(&o.history)),
+            "valid_candidate_definition": "Distinct design vectors in the full in-loop history with valid=true, zero hard violation, and finite objective and ranking cost. Separate screening scores are excluded; reporting mesh verification is recorded for the delivered finalist.",
             "best_cost": optimization.map(|o| o.best_cost),
             "reported_wall_time_s": optimization.map(|o| o.wall_time_s),
         },
@@ -1164,6 +1182,12 @@ fn build_success_row(
         "static_margin": static_margin,
         "metric_conventions": metric_conventions(),
         "public_planning_cg_status": format!("{:?}", result.feasibility.cg_envelope.planning_status),
+        // The delivered report's own model CG verdict line, so a feasible
+        // delivery that prints a failing hard constraint is visible here.
+        "model_cg_status": alas_pipeline::format_feasibility(&result.feasibility)
+            .lines()
+            .find(|line| line.starts_with("Model CG status"))
+            .map(str::to_owned),
         "governing_error_findings": governing_error_findings
             .iter()
             .map(|f| format_finding(f))

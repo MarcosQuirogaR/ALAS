@@ -2,14 +2,13 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 //! [`VlmSystem`]'s horseshoe-kernel cache, and the near-field velocity
-//! evaluation that reads it: precomputed once per assembled geometry, by
-//! its second solve, through [`build_kernel_cache`], and read by every
-//! later [`VlmSystem::solve`] through [`velocity_at_points`].
+//! evaluation that reads it: precomputed through [`build_kernel_cache`] for
+//! candidate geometry reuse, or by an ordinary system's second solve, and
+//! read by subsequent [`VlmSystem::solve`] calls through [`velocity_at_points`].
 //!
 //! Split out of `system.rs` to keep that file under its production-line
-//! budget; the two are not independently reusable, `build_kernel_cache`'s
-//! only caller is `VlmSystem::solve_about` and its only consumer is
-//! `velocity_at_points`, called in turn only from `VlmSystem::solve_about`.
+//! budget. Both assembly paths use the same exact brackets; their only
+//! consumer is `velocity_at_points`, called from `VlmSystem::solve_about`.
 //!
 //! [`VlmSystem`]: super::VlmSystem
 
@@ -115,18 +114,27 @@ pub(super) fn velocity_at_points(
 ) -> Vec<[f64; 3]> {
     let rotation_velocities = op_point.rotation_velocity_geometry_axes_about(points, reference);
     let n = panels.len();
+    // One exact division per source, rather than the same division at every
+    // field point. The cached and direct kernels retain their operation order.
+    let constants: Vec<_> = if kernel.is_some() {
+        vortex_strengths
+            .iter()
+            .map(|gamma| gamma / (4.0 * std::f64::consts::PI))
+            .collect()
+    } else {
+        Vec::new()
+    };
     let at_point = |point_index: usize, point: [f64; 3], rotation_velocity: [f64; 3]| {
         let induced = match kernel {
             Some(kernel) => {
                 let row = &kernel[point_index * n..point_index * n + n];
                 row.iter()
-                    .zip(vortex_strengths)
-                    .fold([0.0, 0.0, 0.0], |acc, (&bracket, &gamma)| {
+                    .zip(&constants)
+                    .fold([0.0, 0.0, 0.0], |acc, (&bracket, &constant)| {
                         // The exact same `constant * bracket_component`
                         // upstream's kernel computes inline; only the
                         // bracket itself (independent of gamma) was
                         // precomputed, in `build_kernel_cache`.
-                        let constant = gamma / (4.0 * std::f64::consts::PI);
                         let contribution = [
                             constant * bracket[0],
                             constant * bracket[1],

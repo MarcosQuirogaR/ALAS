@@ -8,7 +8,7 @@
 //! Keeping the adapters here leaves the renderer focused on layout and keeps
 //! a missing source from degrading silently into a free-text editor.
 
-use alas_config::{Entry, Field, Number, OptionSource};
+use alas_config::{Entry, Field, Number, OptionSource, ZeroMeaning};
 use serde_json::Value;
 
 /// Resolve the option sources the schema names at the GUI boundary.
@@ -151,7 +151,12 @@ fn cabin_preset_display_name(value: &str) -> Option<&'static str> {
 /// Present fixed option values as sentence-cased UI text without changing the
 /// serialized configuration value. This keeps values such as `passenger` and
 /// `auto` readable while preserving their lower-case data contracts.
-pub(super) fn display_option(value: &str) -> String {
+pub(super) fn display_option(field: &Field, value: &str) -> String {
+    if let Some(kind) = objective_kind(field, value) {
+        return crate::views::tr(
+            alas_pipeline::optimizer_summary::objective::objective_label(kind),
+        );
+    }
     let humanized = humanize_identifier(value);
     let source = cabin_preset_display_name(value)
         .or(humanized.as_deref())
@@ -162,6 +167,33 @@ pub(super) fn display_option(value: &str) -> String {
         return localized;
     };
     format!("{}{}", first.to_uppercase(), chars.as_str())
+}
+
+/// The objective a value names, for a field whose options are the objective
+/// list. Decoding the serialized token avoids duplicating the variant list.
+pub(super) fn objective_kind(field: &Field, value: &str) -> Option<alas_config::ObjectiveKind> {
+    let Entry::Leaf(leaf) = &field.entry else {
+        return None;
+    };
+    if leaf.options != Some(OptionSource::ObjectiveKind) {
+        return None;
+    }
+    serde_json::from_value(Value::String(value.to_owned())).ok()
+}
+
+/// Whether the schema declares that zero means every logical thread.
+pub(super) fn zero_means_all_threads(field: &Field) -> bool {
+    matches!(
+        &field.entry,
+        Entry::Leaf(leaf) if leaf.zero_means == Some(ZeroMeaning::AllThreads)
+    )
+}
+
+/// Logical threads the machine reports, resolved once: the editor formats
+/// its value every frame and the count does not change while running.
+pub(super) fn all_threads() -> usize {
+    static THREADS: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *THREADS.get_or_init(|| alas_config::SolverSettings::default().resolved_workers())
 }
 
 /// Readable text for a snake_case enumeration identifier such as
@@ -252,7 +284,9 @@ pub(crate) fn display_unit(unit: &str) -> String {
                 "semispan" => "semi-span",
                 other => other,
             };
-            return format!("of {reference}");
+            // The phrase is translated whole: Spanish needs an article that
+            // depends on the reference (`de la MAC`, `de semienvergadura`).
+            return crate::views::tr(&format!("of {reference}"));
         }
     }
     typeset_unit(unit)
@@ -335,6 +369,12 @@ pub(super) fn optional_hint(field: &Field) -> &'static str {
 
 /// The localized sentinel word an editor should render for `value`.
 pub(super) fn sentinel_text(field: &Field, value: f64) -> Option<String> {
+    if value == 0.0 && zero_means_all_threads(field) {
+        return Some(crate::views::tr_fields(
+            "Automatic (all {count} threads)",
+            &[("count", all_threads().to_string())],
+        ));
+    }
     sentinel_word(field, value).map(|word| alas_i18n::t(Some(word), None).into_owned())
 }
 
@@ -342,6 +382,9 @@ pub(super) fn sentinel_text(field: &Field, value: f64) -> Option<String> {
 /// either language, so the value it displays can also be typed back.
 pub(super) fn parse_number_or_sentinel(text: &str, field: &Field) -> Option<f64> {
     let trimmed = text.trim();
+    if zero_means_all_threads(field) && sentinel_text(field, 0.0).as_deref() == Some(trimmed) {
+        return Some(0.0);
+    }
     for candidate in [0.0_f64, 1.0] {
         if let Some(word) = sentinel_word(field, candidate) {
             let localized = alas_i18n::t(Some(word), None);

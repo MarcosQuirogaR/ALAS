@@ -187,7 +187,9 @@ fn the_sandbox_route_fuel_is_the_full_analysis_route_fuel_on_every_preset() {
     };
     for name in alas_config::presets::available() {
         let preset = alas_config::presets::get(name).unwrap();
-        let config = AlasConfig::from_value(&serde_json::json!({ "preset": name })).unwrap();
+        let mut config = AlasConfig::from_value(&serde_json::json!({ "preset": name })).unwrap();
+        config.structures.run_nastran = false;
+        config.structures.run_patran_export = false;
         let request = QuickAnalysisRequest {
             revision: 1,
             config: config.clone(),

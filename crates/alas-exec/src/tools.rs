@@ -13,6 +13,19 @@ use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+/// Whether configured and automatic external-tool resolution is enabled.
+///
+/// `ALAS_TOOL_DISCOVERY=disabled` isolates a run from installed tools.
+/// Direct calls to explicit tool runners remain available.
+pub fn tool_discovery_enabled() -> bool {
+    let mode = env::var("ALAS_TOOL_DISCOVERY").ok();
+    discovery_mode_enabled(mode.as_deref())
+}
+
+fn discovery_mode_enabled(mode: Option<&str>) -> bool {
+    !mode.is_some_and(|mode| mode.eq_ignore_ascii_case("disabled"))
+}
+
 mod types;
 pub use types::*;
 mod locator;

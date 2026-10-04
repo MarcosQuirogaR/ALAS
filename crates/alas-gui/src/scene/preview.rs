@@ -169,7 +169,23 @@ pub fn build_page_preview_with_camera(
                 }
             };
             match id {
-                "mass_cg" => figure_cg_envelope(&report, &config, Some(&theme)),
+                "mass_cg" => {
+                    use alas_report::families::mass_balance::load_trim::{
+                        data::load_trim_data_from_pipeline, figure_load_trim_sheet,
+                    };
+                    let data = completed_run_report_for_form(state)
+                        .and(state.pipeline_result.as_ref())
+                        .and_then(load_trim_data_from_pipeline);
+                    data.map_or_else(
+                        || figure_cg_envelope(&report, &config, Some(&theme)),
+                        |data| {
+                            figure_load_trim_sheet(
+                                &data,
+                                alas_report::theme::get_palette(Some(&theme)),
+                            )
+                        },
+                    )
+                }
                 "landing_gear" => figure_landing_gear_planform(&report, &config, Some(&theme)),
                 _ => figure_control_surfaces(&report, &config, Some(&theme)),
             }
@@ -193,7 +209,14 @@ pub(crate) fn completed_run_report_for_form(state: &AppState) -> Option<&Analysi
     // values the run started from are compared as well.
     let design_unchanged =
         state.pipeline_result_design_values.as_ref() == Some(&state.design_values);
-    (design_unchanged && state.typed_config().as_ref() == Some(&result.config)).then_some(report)
+    // The run may adjust its own copy of the configuration (the preset
+    // dispatch anchors the optimizer bounds), so the form is compared with
+    // what it held when the run started, and with the run's configuration
+    // for results installed without a recorded form.
+    let form = state.typed_config();
+    let config_unchanged = form.is_some()
+        && (form.as_ref() == Some(&result.config) || form == state.pipeline_result_form_config);
+    (design_unchanged && config_unchanged).then_some(report)
 }
 
 /// The mass-bearing report behind the CG, landing-gear and control-surface

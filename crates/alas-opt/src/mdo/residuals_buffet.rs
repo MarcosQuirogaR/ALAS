@@ -19,8 +19,10 @@
 //! loading) or thicken the wing at no cost until wave drag rises, while the
 //! real aircraft would lose its cruise altitude to buffet first.
 
+use crate::mdo::ResidualRole;
+
 use alas_aero::analysis::AeroAnalysis;
-use alas_config::{AlasConfig, ConstraintPolicy, DesignMode};
+use alas_config::{AlasConfig, DesignMode};
 use alas_geom::aircraft::airplane::Airplane;
 
 use super::sizing::SizingOutcome;
@@ -89,7 +91,7 @@ pub(super) fn reference_wing_basis(config: &AlasConfig) -> Option<(f64, f64, f64
     if config.optimizer.design_space.mode != DesignMode::ReferenceAdaptation {
         return None;
     }
-    REFERENCE_WING_BASIS.get_or_resolve(config, || {
+    REFERENCE_WING_BASIS.get_or_resolve(config, |config| {
         let design = alas_config::presets::get(&config.preset)
             .ok()?
             .design_vector;
@@ -134,11 +136,11 @@ pub(super) static REFERENCE_WING_BASIS: super::nominal_cache::NominalCache<(f64,
 pub(super) fn buffet_residuals(
     outcome: &SizingOutcome,
     config: &AlasConfig,
-    policy: ConstraintPolicy,
+    role: ResidualRole,
 ) -> Vec<ConstraintResidual> {
     let req = &config.requirements;
     let mach = req.cruise_mach;
-    if policy == ConstraintPolicy::Off || mach < config.drag_model.wave_drag_onset_mach {
+    if mach < config.drag_model.wave_drag_onset_mach {
         return Vec::new();
     }
     let kappa = config.geometry.wing.airfoil_class.korn_technology_factor();
@@ -164,15 +166,7 @@ pub(super) fn buffet_residuals(
         }
     });
     vec![
-        ConstraintResidual::scaled(
-            "buffet_margin",
-            Performance,
-            n,
-            floor,
-            "g",
-            floor - n,
-            policy,
-        ),
+        ConstraintResidual::scaled("buffet_margin", Performance, n, floor, "g", floor - n, role),
         ConstraintResidual::scaled(
             "buffet_margin_absolute",
             Performance,
@@ -180,7 +174,7 @@ pub(super) fn buffet_residuals(
             BUFFET_LOAD_FACTOR,
             "g",
             BUFFET_LOAD_FACTOR - n,
-            ConstraintPolicy::Diagnostic,
+            ResidualRole::Diagnostic,
         ),
     ]
 }

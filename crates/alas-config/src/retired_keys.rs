@@ -20,7 +20,14 @@ pub const RETIRED_SOLVER_KEYS: &[&str] = &[
 
 /// `optimizer.objective` keys that nothing reads any more: `max_span_m` gave
 /// way to the aerodrome reference code, whose letter now sets the span limit.
-pub const RETIRED_OBJECTIVE_KEYS: &[&str] = &["max_span_m"];
+pub const RETIRED_OBJECTIVE_KEYS: &[&str] = &[
+    "max_span_m",
+    "mass_constraints",
+    "balance_constraints",
+    "performance_constraints",
+    "geometry_constraints",
+    "soft_penalty_weight",
+];
 
 /// `drag_model` keys that nothing reads any more: the Korn technology factor
 /// follows the wing's declared section class, `geometry.wing.airfoil_class`,
@@ -173,6 +180,10 @@ pub struct RetiredKeysDropped {
     pub weights: bool,
     /// `optimizer.objective.max_span_m`, replaced by the aerodrome code.
     pub span: bool,
+    /// Removed family policies and bounded constraint allowances.
+    pub constraint_allowances: bool,
+    /// The preference cost scale was saved under its former key.
+    pub preference_weight: bool,
     /// `drag_model.korn_technology_factor`, replaced by the declared airfoil
     /// class.
     pub korn_technology_factor: bool,
@@ -189,7 +200,10 @@ impl RetiredKeysDropped {
         Self {
             solver: carries(data, "solver", RETIRED_SOLVER_KEYS),
             weights: carries(data, "weights", RETIRED_WEIGHT_KEYS),
-            span: carries(data, "objective", RETIRED_OBJECTIVE_KEYS),
+            span: carries(data, "objective", &["max_span_m"]),
+            constraint_allowances: data.pointer("/optimizer/relaxation").is_some()
+                || carries(data, "objective", &RETIRED_OBJECTIVE_KEYS[1..5]),
+            preference_weight: carries(data, "objective", &["soft_penalty_weight"]),
             korn_technology_factor: carries_drag_model(data),
             requested_count_budget: requested_count_stages(data).next().is_some(),
             requested_count_replay: requested_count_stages(data)
@@ -203,6 +217,8 @@ impl RetiredKeysDropped {
             (self.solver, "The saved solver options 'strategy', 'display_progress', 'seed_near_initial_design' and 'seed_perturbation_fraction' were dropped; the search does not read them."),
             (self.weights, "The saved optimizer weights of the retired weighted lift-to-drag objective were dropped; the mission objective does not read them."),
             (self.span, "The saved span limit 'max_span_m' was dropped; the aerodrome reference code letter now sets the span limit."),
+            (self.constraint_allowances, "The saved constraint policies and violation allowances were dropped; every constraint is hard."),
+            (self.preference_weight, "The saved soft-penalty weight was migrated to the study-preference weight; hard constraints do not use it."),
             (self.korn_technology_factor, "The saved Korn technology factor 'drag_model.korn_technology_factor' was dropped; it now follows the wing's declared airfoil class (0.87 conventional, 0.95 supercritical)."),
             (self.requested_count_budget, "The saved stage evaluation budgets counted design-vector pre-gate rejections; the same numbers now count analysed candidates only, and rejections have their own cap (20 times the budget unless set)."),
             (self.requested_count_replay, "The saved replay evaluation counts were recorded when pre-gate rejections counted as evaluations and were dropped; they would not reproduce that run."),
@@ -220,6 +236,7 @@ pub(crate) fn without_retired_optimizer_keys(
 ) -> Cow<'_, serde_json::Value> {
     let stale_replay = requested_count_stages(data).any(|stage| stage.contains_key(REPLAY_KEY));
     if !stale_replay
+        && data.pointer("/optimizer/relaxation").is_none()
         && !carries_drag_model(data)
         && !GROUPS
             .iter()
@@ -228,6 +245,20 @@ pub(crate) fn without_retired_optimizer_keys(
         return Cow::Borrowed(data);
     }
     let mut cleaned = data.clone();
+    if let Some(objective) = cleaned
+        .pointer_mut("/optimizer/objective")
+        .and_then(serde_json::Value::as_object_mut)
+    {
+        if let Some(weight) = objective.remove("soft_penalty_weight") {
+            objective.entry("preference_weight").or_insert(weight);
+        }
+    }
+    if let Some(optimizer) = cleaned
+        .get_mut("optimizer")
+        .and_then(serde_json::Value::as_object_mut)
+    {
+        optimizer.remove("relaxation");
+    }
     for (group, keys) in GROUPS {
         if let Some(map) = cleaned
             .pointer_mut(&format!("/optimizer/{group}"))
@@ -287,6 +318,44 @@ fn requested_count_stages(
 #[cfg(test)]
 mod tests {
     use crate::AlasConfig;
+
+    #[test]
+    fn explicit_preference_weight_takes_precedence_over_legacy_key() {
+        let (loaded, notes) = AlasConfig::from_value_with_notes(&serde_json::json!({
+            "optimizer": {"objective": {"soft_penalty_weight": 7.0, "preference_weight": 3.0}}
+        }))
+        .unwrap();
+        assert_eq!(loaded.optimizer.objective.preference_weight, 3.0);
+        assert!(notes.retired_keys.preference_weight);
+        assert!(!notes.retired_keys.constraint_allowances);
+    }
+
+    #[test]
+    fn saved_constraint_allowances_load_as_hard_requirements() {
+        let mut document = serde_json::to_value(AlasConfig::default()).unwrap();
+        document["optimizer"]["relaxation"] = serde_json::json!({
+            "enabled": true,
+            "allowed_violated_groups": 4,
+            "eligible": [{"id": "wing_area", "tolerance_fraction": 0.2, "source": "legacy"}]
+        });
+        document["optimizer"]["objective"] = serde_json::json!({
+            "mass_constraints": "off", "balance_constraints": "diagnostic",
+            "performance_constraints": "soft", "geometry_constraints": "hard",
+            "soft_penalty_weight": 123.0
+        });
+        let (loaded, notes) = AlasConfig::from_value_with_notes(&document).unwrap();
+        let mut expected = AlasConfig::default().optimizer;
+        expected.objective.preference_weight = 123.0;
+        assert_eq!(loaded.optimizer, expected);
+        assert!(notes.retired_keys.constraint_allowances);
+        let saved = serde_json::to_value(loaded).unwrap();
+        assert!(saved.pointer("/optimizer/relaxation").is_none());
+        for key in &super::RETIRED_OBJECTIVE_KEYS[1..] {
+            assert!(saved
+                .pointer(&format!("/optimizer/objective/{key}"))
+                .is_none());
+        }
+    }
 
     #[test]
     fn a_saved_file_with_the_removed_span_and_tail_volume_keys_still_loads() {

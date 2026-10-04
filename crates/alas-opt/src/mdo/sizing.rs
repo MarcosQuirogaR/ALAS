@@ -8,127 +8,30 @@
 use std::sync::Arc;
 
 use alas_atmo::Atmosphere;
-use alas_config::{airport_dataset, airports, AlasConfig, MtowPlan, TailSizing};
-use alas_geom::aircraft::airplane::Airplane;
-use alas_mass::breakdown::{MassBreakdown, MassCoordinates};
+use alas_config::{AlasConfig, TailSizing};
 use alas_payload::oew::oew_and_cg;
 
 pub(crate) mod candidate_model;
+mod entry;
+mod outcome;
 pub(crate) mod planned_mission;
 mod route;
+use entry::mass_coordinates_failure;
+#[cfg(test)]
+pub(crate) use entry::run_candidate;
+pub(crate) use entry::run_candidate_with_fuselage_policy;
+pub(crate) use outcome::{SizingOutcome, TrimReuse};
 
 use super::build::first_mass_pass;
 use super::engine::static_thrust_kn_per_engine;
 use super::mda::{converge, MdaContext, MdaState};
 use super::mission_model::SizingBudget;
 use super::tanks::usable_fuel_capacity;
-use super::trim::{trim_and_polar, TrimmedPolar};
+use super::trim::{trim_and_polar_with_cache, TrimmedPolar};
 use super::types::{
-    CandidateFailure, CandidateFuelArtifacts, ExternalPolar, HistoryFields, PayloadCapacity,
+    CandidateFailure, CandidateFuelArtifacts, ExternalPolar, HistoryFields,
     PolarConditionTolerance, SizedCandidate, SizingControls, SizingWork,
 };
-
-/// A failure with the `mass_coordinates` reason, for the engine-binding
-/// lookups beside the mass analysis.
-///
-/// This is deliberately **not** the seam for a station-placement failure. A
-/// candidate whose main-gear station cannot be placed never reaches here: the
-/// mass analysis it passes through first
-/// (`build::mass_analysis_with_structural_feedback`) already classifies that
-/// cause as `main_gear_station_not_measured` and propagates it with `?`, so
-/// a search log can separate a missing gear datum from a degenerate geometry.
-/// `a_missing_main_gear_datum_survives_the_mdo_sizing_entry_point` pins that.
-/// What is bucketed under `mass_coordinates` here is the engine binding
-/// beside the mass analysis, for the reason stated at each call site.
-fn mass_coordinates_failure() -> CandidateFailure {
-    CandidateFailure {
-        reason: "mass_coordinates",
-    }
-}
-
-/// Everything a mission-sized residual table is computed from, beyond the
-/// scalar summary in [`SizedCandidate`].
-pub(crate) struct SizingOutcome {
-    pub plane: Airplane,
-    pub masses: MassBreakdown,
-    pub coords: MassCoordinates,
-    pub cg_x: f64,
-    pub x_np: f64,
-    pub mac: f64,
-    /// Geometric aircraft-body angle at the cruise trim used by the mission
-    /// model, before the presentation-only compressibility correction.
-    pub geometric_body_alpha_deg: f64,
-    pub n_engines: i64,
-    pub static_thrust_kn: f64,
-    pub departure: Option<&'static airports::Airport>,
-    pub arrival: Option<&'static airports::Airport>,
-    /// Source-resolved records used for routing/elevation. A record may be
-    /// present while its runway values remain physical-only and therefore
-    /// unusable by field-performance constraints.
-    #[expect(
-        dead_code,
-        reason = "retained for finalist airport provenance reporting"
-    )]
-    pub departure_record: Option<airport_dataset::ProvenancedAirport>,
-    #[expect(
-        dead_code,
-        reason = "retained for finalist airport provenance reporting"
-    )]
-    pub arrival_record: Option<airport_dataset::ProvenancedAirport>,
-    /// Whether both configured aerodrome identifiers resolved to records.
-    pub airport_records_resolved: bool,
-    /// Whether both records carry declared operational runway distances.
-    pub declared_airport_data_complete: bool,
-    /// Whether the mission distance was explicit or could be computed from
-    /// two finite source-resolved coordinates.
-    pub mission_distance_known: bool,
-    /// Minimum still-air distance for the configured climb/descent profile.
-    pub minimum_profile_range_m: f64,
-    /// Upper takeoff-mass limit of the plan, or the declared MTOW when the
-    /// plan has none.
-    pub mtow_ceiling: f64,
-    /// The resolved takeoff-mass sizing plan of the candidate.
-    pub plan: MtowPlan,
-    pub sized: SizedCandidate,
-    pub history: HistoryFields,
-    #[expect(dead_code, reason = "retained for finalist load-case reporting")]
-    pub capacity: PayloadCapacity,
-    /// Whether the wing total represents a complete primary plus secondary
-    /// inventory. Clean-sheet movable correlations remain partial.
-    pub structural_inventory_complete: bool,
-}
-
-/// Build, size and trim one candidate design vector.
-///
-/// # Errors
-///
-/// [`CandidateFailure`] when the geometry, mass, payload layout or trim
-/// solve fails: the candidate is not a physically evaluable aircraft.
-#[cfg(test)]
-pub(crate) fn run_candidate(
-    config: &AlasConfig,
-    x: &[f64],
-) -> Result<SizingOutcome, CandidateFailure> {
-    run_candidate_cancellable(config, x, None, false, None, SizingControls::default())
-}
-
-/// Run a candidate while preserving a caller-pinned clean-sheet fuselage
-/// coordinate.  This is used by fixed desktop/reference reviews; ordinary
-/// product optimization keeps the cabin-derived sizing behavior.
-pub(crate) fn run_candidate_with_fuselage_policy(
-    config: &AlasConfig,
-    x: &[f64],
-    preserve_explicit_fuselage_length: bool,
-) -> Result<SizingOutcome, CandidateFailure> {
-    run_candidate_cancellable(
-        config,
-        x,
-        None,
-        preserve_explicit_fuselage_length,
-        None,
-        SizingControls::default(),
-    )
-}
 
 /// A budget that never binds: the closure always carries one so its work
 /// counters are kept (`SegmentMissionModel::work`).
@@ -148,6 +51,29 @@ pub(crate) fn run_candidate_cancellable(
     preserve_explicit_fuselage_length: bool,
     cancellation: Option<crate::cancellation::EvaluationCancellation>,
     controls: SizingControls,
+) -> Result<SizingOutcome, CandidateFailure> {
+    run_candidate_reusing(
+        config,
+        x,
+        external,
+        preserve_explicit_fuselage_length,
+        cancellation,
+        controls,
+        None,
+    )
+}
+
+/// [`run_candidate_cancellable`], starting from `reuse`'s trim when it
+/// stands for this candidate ([`TrimReuse`]) and from its lattice cache in
+/// any case.
+pub(crate) fn run_candidate_reusing(
+    config: &AlasConfig,
+    x: &[f64],
+    external: Option<&ExternalPolar>,
+    preserve_explicit_fuselage_length: bool,
+    cancellation: Option<crate::cancellation::EvaluationCancellation>,
+    controls: SizingControls,
+    reuse: Option<&TrimReuse>,
 ) -> Result<SizingOutcome, CandidateFailure> {
     if cancellation.as_ref().is_some_and(|token| token.requested()) {
         return Err(CandidateFailure {
@@ -175,17 +101,53 @@ pub(crate) fn run_candidate_cancellable(
     let seeded = plan
         .requires_mission_sized_evaluation()
         .then(|| candidate_config.at_sized_closure_mass(plan.seed_kg));
-    let (masses0, coords0, cg0, _summary, capacity, structural_reference) =
+    let (mut masses0, mut coords0, mut cg0, _summary, capacity, structural_reference) =
         first_mass_pass(seeded.as_ref().unwrap_or(&candidate_config), &dv, &plane)?;
+
+    // The structural pass stays at the declared design weights. Only the
+    // usable fuel and its physical moment follow the loadable takeoff case.
+    let takeoff_loading = if plan.mode == alas_config::MtowSizing::FixedRequirement {
+        let (loading, cg) = alas_mass::loading::apply_mtow_fuel_loading(
+            &candidate_config,
+            &dv,
+            &plane,
+            &mut masses0,
+            &mut coords0,
+        )
+        .map_err(|_| CandidateFailure {
+            reason: "mass_coordinates",
+        })?;
+        cg0 = cg;
+        Some(loading)
+    } else {
+        None
+    };
+    let initial_analysis_mass_kg =
+        takeoff_loading.map_or(plan.seed_kg, |load| load.takeoff_mass_kg);
 
     let req = &candidate_config.requirements;
     let declared_mtow_kg = req.mtow_kg;
     let mtow_ceiling = plan.upper_bound_kg.unwrap_or(declared_mtow_kg);
-    let polar0 = match external {
+    let untrimmed = plane.clone();
+    let vlm_cache: super::trim::CandidateVlmCache = reuse
+        .map(|reuse| reuse.vlm_cache.clone())
+        .unwrap_or_default();
+    let reused = reuse.filter(|reuse| {
+        external.is_none()
+            && reuse.stands_for(
+                &candidate_config,
+                &dv,
+                &plane,
+                cg0[0],
+                controls.screening_drag_table,
+            )
+    });
+    let initial_trim_cg_x_m = reused.map_or(cg0[0], |reuse| reuse.trim_cg_x_m);
+    let polar0 = match (external, reused) {
         // An external polar must describe this candidate at this cruise
         // point: a polar evaluated at another Mach, altitude or reference
         // area is a mismatched analysis, not a candidate.
-        Some(polar)
+        (Some(polar), _)
             if polar.is_valid()
                 && polar
                     .matches_condition(
@@ -198,12 +160,24 @@ pub(crate) fn run_candidate_cancellable(
         {
             TrimmedPolar::from_external(polar)
         }
-        Some(_) => {
+        (Some(_), _) => {
             return Err(CandidateFailure {
                 reason: "trim_solve",
             })
         }
-        None => trim_and_polar(&candidate_config, &mut plane, cg0[0], &dv, plan.seed_kg)?,
+        (None, Some(reuse)) => {
+            plane = reuse.trimmed.clone();
+            reuse.polar.clone()
+        }
+        (None, None) => trim_and_polar_with_cache(
+            &candidate_config,
+            &mut plane,
+            cg0[0],
+            &dv,
+            initial_analysis_mass_kg,
+            &vlm_cache,
+            controls.screening_drag_table,
+        )?,
     };
     let n_engines = candidate_config
         .geometry
@@ -261,10 +235,17 @@ pub(crate) fn run_candidate_cancellable(
         &plan,
         &candidate_config,
         &model,
-        route_distance_m,
+        range_m,
         (masses0.payload, capacity.carried_passengers),
     )?;
-    let route_model = design_mission.as_ref().map(|_| model.clone());
+    // The route is flown off-design by the closed aircraft whenever it is
+    // not the mission the closure flew: beside a design mission, and beside
+    // a great-circle sizing mission when the run planned a different route.
+    // Its dispatch is the flown load the reporting verdict checks.
+    let closes_on_design_mission = design_mission.is_some();
+    let flies_route_off_design =
+        closes_on_design_mission || (route_distance_m > 0.0 && route_distance_m != range_m);
+    let route_model = flies_route_off_design.then(|| model.clone());
     let (model, range_m, dispatch_payload_kg, mission_distance_known, minimum_profile_range_m) =
         match design_mission {
             Some(mission) => {
@@ -295,10 +276,13 @@ pub(crate) fn run_candidate_cancellable(
         dispatch_payload_kg,
         tank_capacity_kg: tank_capacity,
         retrim_allowed: external.is_none(),
+        screening_drag_table: controls.screening_drag_table,
         structural_reference: structural_reference.reference,
         structural_feedback: structural_reference.feedback,
         structural_inventory_complete: structural_reference.inventory_complete,
         wing_box: Default::default(),
+        vlm_cache,
+        initial_trim_cg_x_m,
     };
     let closure = converge(
         &context,
@@ -311,6 +295,20 @@ pub(crate) fn run_candidate_cancellable(
         },
     )?;
     let state = closure.state;
+    let trim_reuse = external.is_none().then(|| {
+        let mut without_gear = candidate_config.clone();
+        without_gear.landing_gear.derived_main_gear = None;
+        TrimReuse {
+            config: without_gear,
+            dv,
+            untrimmed,
+            trimmed: plane.clone(),
+            polar: state.polar.clone(),
+            trim_cg_x_m: closure.trim_cg_x_m,
+            screening_drag_table: controls.screening_drag_table,
+            vlm_cache: context.vlm_cache.clone(),
+        }
+    });
     let work = SizingWork {
         plan_freezes: closure.plan_freezes,
         trip_flights: context.model.work().map_or(0, |(flights, _)| flights),
@@ -331,7 +329,7 @@ pub(crate) fn run_candidate_cancellable(
     let analysis_takeoff_mass_kg = if plan.analyses_at_closure() {
         closure.dispatch.takeoff_mass_kg
     } else {
-        declared_mtow_kg
+        initial_analysis_mass_kg
     };
     // The last trim moved to the cruise lift of the analysis mass: the drag
     // table spans the lift range, so the reported lift-to-drag ratio and
@@ -369,7 +367,15 @@ pub(crate) fn run_candidate_cancellable(
                 operating_empty_mass_kg,
                 payload_kg: state.masses.payload,
                 design_payload_kg,
-                mtow_kg: analysis_takeoff_mass_kg,
+                // The takeoff-mass limit the route is flown under, as the
+                // reporting dispatch takes it: the mass a design mission
+                // closed on, else the declared MTOW that bounds the closure.
+                mtow_kg: if closes_on_design_mission {
+                    analysis_takeoff_mass_kg
+                } else {
+                    declared_mtow_kg
+                },
+                planning_mass_kg: analysis_takeoff_mass_kg,
                 usable_capacity_kg: tank_capacity,
             },
         )?),
@@ -384,6 +390,7 @@ pub(crate) fn run_candidate_cancellable(
         );
     let sized = SizedCandidate {
         takeoff_mass_kg: analysis_takeoff_mass_kg,
+        takeoff_loading,
         sizing_basis,
         design_gross_mass_kg,
         design_landing_mass_kg,
@@ -403,7 +410,10 @@ pub(crate) fn run_candidate_cancellable(
         cargo_capacity_kg: capacity.cargo_capacity_kg,
         carried_cargo_payload_kg: capacity.carried_cargo_payload_kg,
         block_fuel_kg: closure.dispatch.plan.block_fuel_kg(),
-        takeoff_fuel_kg: closure.dispatch.plan.takeoff_fuel_kg(),
+        takeoff_fuel_kg: takeoff_loading.map_or_else(
+            || closure.dispatch.plan.takeoff_fuel_kg(),
+            |load| load.carried_usable_fuel_kg,
+        ),
         ramp_fuel_kg: closure.dispatch.plan.ramp_fuel_kg(),
         usable_capacity_kg: tank_capacity.unwrap_or(f64::NAN),
         design_range_m: range_m,
@@ -469,6 +479,7 @@ pub(crate) fn run_candidate_cancellable(
         history,
         capacity,
         structural_inventory_complete,
+        trim_reuse,
     })
 }
 
@@ -501,7 +512,7 @@ mod tests {
         let mut config = AlasConfig::from_value(&serde_json::json!({ "preset": "ATR72-600" }))
             .unwrap_or_else(|error| panic!("ATR configuration: {error}"));
         // This test owns an explicitly unmeasured fixture; the registered
-        // ATR preset itself now has its published gear anchors.
+        // ATR preset itself has its published gear anchors.
         config.landing_gear.reference_station_fuselage_length_m = None;
         config.landing_gear.reference_nlg_x_fraction = None;
         config.landing_gear.reference_mlg_x_fractions = None;

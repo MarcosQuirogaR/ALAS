@@ -7,7 +7,7 @@ use crate::{
     AircraftPreset, AircraftReferenceData, AircraftVariantIdentity, CgEnvelopeEvidence,
     DesignRequirements, DesignVector, EmpennageConfig, EngineConfig, FuselageConfig,
     GeometryConfig, LandingGearConfig, MissingDesignMissionDatum, MissionEvidenceApplicability,
-    PartialDesignMissionEvidence, PartialMissionEvidenceKind, PublishedAftCgNoseLoad, WingConfig,
+    PartialDesignMissionEvidence, PartialMissionEvidenceKind, WingConfig,
 };
 
 /// Composite long-range twin, the type the global mass model is tuned on.
@@ -67,14 +67,7 @@ pub fn b787_9() -> AircraftPreset {
             }],
             cg_evidence: CgEnvelopeEvidence::AfmRequired,
             planning_cg_envelope: None,
-            // 1 - 2 x 259,574 lb / 563,000 lb: both main-gear struts at the
-            // most-aft CG; the table does not print that CG.
-            aft_cg_nose_load: Some(PublishedAftCgNoseLoad {
-                mass_kg: 255_372.0,
-                nose_gear_fraction: 1.0 - 2.0 * 259_574.0 / 563_000.0,
-                aft_cg_pct_mac: None,
-                source: "Boeing 787 ACAP D6-58333 Rev Q, October 2025, section 7.3 (787-9 at maximum design taxi weight 563,000 lb: 259,574 lb static per main-gear strut at the most-aft CG)",
-            }),
+            aft_cg_nose_load: Some(crate::presets::gear_load::B787_9),
             sources: vec![
                 "Boeing 787 ACAP D6-58333 Rev Q, October 2025, section 2",
                 "Boeing 787 ARFF composite-content diagram, p.3: https://www.boeing.com/content/dam/boeing/v2/airports/arff/787_composite_arff_data_2025.pdf",
@@ -274,12 +267,10 @@ pub fn dc_10() -> AircraftPreset {
             }),
             certified_max_seats: Some(399),
             cg_evidence: CgEnvelopeEvidence::AfmRequired,
-            aft_cg_nose_load: Some(PublishedAftCgNoseLoad {
-                mass_kg: 259_454.0,
-                nose_gear_fraction: 0.057,
-                aft_cg_pct_mac: None,
-                source: "Boeing DC/MD-10 ACAP DAC-67803A Rev A, Figure 7.4.2 (572,000 lb option: 5.7 % of weight on the nose gear at the most-aft CG)",
-            }),
+            // The ACAP publishes the Series 30 ground envelope at the
+            // 583,000 lb maximum ramp weight; the 572,000 lb option lies
+            // inside it.
+            aft_cg_nose_load: Some(crate::presets::gear_load::DC_10_30),
             sources: vec![
                 "Boeing DC/MD-10 ACAP DAC-67803A Rev A, Figure 2.1",
                 "FAA TCDS A22WE Rev 13, 2018-04-30",

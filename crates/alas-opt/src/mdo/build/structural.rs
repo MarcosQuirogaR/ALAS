@@ -74,9 +74,8 @@ fn product_mass_failure(error: &ComponentMassError) -> CandidateFailure {
 /// `alas_mass::stations`. This runs only on the failure path, so an accepted
 /// candidate pays nothing for it.
 ///
-/// A missing main-gear station rejects the candidate exactly as before; what
-/// changes is that `OptimizationHistory::reject_reason_counts` can now
-/// separate it from every other coordinate failure, which is what tells a
+/// A missing main-gear station rejects the candidate and
+/// `OptimizationHistory::reject_reason_counts` separates it from every other coordinate failure, which is what tells a
 /// reviewer to register the aircraft's published gear stations rather than to
 /// look for a geometry bug.
 fn mass_coordinate_failure(config: &AlasConfig, plane: &Airplane) -> CandidateFailure {

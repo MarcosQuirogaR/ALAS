@@ -339,7 +339,7 @@ mod tests {
         assert!(artifact.source.contains("Physical Surface(\"airfoil\")"));
         assert!(artifact.source.contains("Field[1] = BoundaryLayer;"));
         assert!(artifact.source.contains("Field[1].Thickness"));
-        // Both edge kinds fan now.  Excluding a blunt edge was measured to be
+        // Both edge kinds fan.  Excluding a blunt edge was measured to be
         // the cause of the worst face and the worst cell in every generated
         // mesh; see the emitter for the before/after numbers.  A sharp edge
         // fans its single closing point, a blunt edge its two corners.
@@ -415,7 +415,7 @@ mod tests {
             derived.requested_wall_distance_m,
             config.mesh.first_layer_height_m
         );
-        // The whole point: the estimate now lands on the configured target
+        // The whole point: the estimate lands on the configured target
         // instead of wherever the raw length happened to fall.
         assert!(
             (derived.estimated_y_plus - config.mesh.target_y_plus).abs() < 1.0e-9,

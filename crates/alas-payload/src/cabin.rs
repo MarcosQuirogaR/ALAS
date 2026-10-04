@@ -44,6 +44,7 @@
 
 mod door_seating;
 mod engine;
+mod exit_mix;
 mod exit_rules;
 mod fittings;
 mod seating;
@@ -52,6 +53,7 @@ mod stations;
 pub(crate) use door_seating::count_declared_deck;
 pub(crate) use engine::build_passenger_layout_with_aircraft_cg_target;
 pub use engine::{build_passenger_layout, build_passenger_layout_reference_compatibility};
+pub use exit_mix::{derived_exit_layout, door_type_for_diameter};
 pub(crate) use exit_rules::{
     effective_pair_capacity, largest_pair_rating, min_exit_pairs, MAX_EXIT_PAIRS_PER_DECK,
 };
@@ -298,8 +300,8 @@ pub(crate) fn max_certifiable_capacity_with_source_layout(
 }
 
 /// The historical capacity proxy used only by the frozen Python
-/// compatibility path.  The old fixture treated the pair table as a
-/// per-side quantity and doubled it; keeping this isolated means the public
+/// compatibility path.  The frozen fixture treats the pair table as a
+/// per-side quantity and doubles it; keeping this isolated means the public
 /// product path can use the corrected pair unit without rewriting the frozen
 /// evidence fixture.
 pub(crate) fn max_certifiable_capacity_reference_compatibility(

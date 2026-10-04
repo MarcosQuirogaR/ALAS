@@ -19,6 +19,7 @@
 
 mod build;
 mod cost;
+pub mod cruise_mass;
 pub mod drag_table;
 mod engine;
 mod mda;
@@ -53,7 +54,7 @@ pub use tanks::{usable_fuel_capacity, UsableCapacityBasis, UsableFuelCapacity};
 pub use types::{
     CandidateAssessment, CandidateDrag, CandidateFuelArtifacts, ConstraintFamily,
     ConstraintResidual, DeckKey, ExternalPolar, PolarConditionTolerance, ProductStateProvenance,
-    ResolvedProductState, SizedCandidate, SizingControls, SizingWork,
+    ResidualRole, ResolvedProductState, SizedCandidate, SizingControls, SizingWork,
 };
 
 use alas_config::design_variables::DesignVector;
@@ -67,11 +68,44 @@ use crate::objective::DesignObjective;
 /// same one-dimensional sizing solve before bounds are handed to the search;
 /// otherwise the search would evaluate one body length and return another in
 /// its best-design vector. Other modes return the supplied nominal intact.
+///
+/// A derived clean-sheet start places its wing on the estimated fuselage
+/// (see [`alas_config::clean_sheet`]); once the cabin has sized the actual
+/// body, that start's wing is placed on it at the same class station.
 pub(crate) fn canonical_nominal_design(
     config: &AlasConfig,
     nominal: DesignVector,
 ) -> Result<DesignVector, String> {
-    canonicalize_design(config, nominal)
+    let mut design = canonicalize_design(config, nominal)?;
+    let explicit_shift = config
+        .optimizer
+        .design_space
+        .initial_design
+        .contains_key("wing_x_shift_m");
+    if config.derives_clean_sheet_start()
+        && !explicit_shift
+        && nominal == config.configured_nominal_design()
+    {
+        if let Some(shift_m) = config.clean_sheet_wing_x_shift_m(&design) {
+            // An explicit wing-shift bound still holds the re-placed wing.
+            let bounds = config.optimizer.design_space.bounds.get("wing_x_shift_m");
+            design.wing_x_shift_m = bounds.map_or(shift_m, |&(lower, upper)| {
+                shift_m.clamp(lower, upper.max(lower))
+            });
+        }
+    }
+    Ok(design)
+}
+
+/// The vector a run that supplies no design starts from, materialized as the
+/// evaluator builds it: [`AlasConfig::configured_nominal_design`] through
+/// [`canonical_nominal_design`].
+///
+/// # Errors
+///
+/// When the cabin-derived fuselage cannot be sized.
+pub fn configured_nominal_design(config: &AlasConfig) -> Result<DesignVector, String> {
+    canonical_nominal_design(config, config.configured_nominal_design())
 }
 
 /// Materialize the design vector that the production evaluator actually
@@ -161,7 +195,7 @@ pub fn evaluate_mission_sized_with_assessment(
         );
         return (cost, None);
     }
-    let outcome = sizing::run_candidate_cancellable(
+    let outcome = residuals::gear_placement::size_with_main_gear_placement(
         &objective.config,
         x,
         None,
@@ -170,17 +204,18 @@ pub fn evaluate_mission_sized_with_assessment(
         objective.sizing_controls,
     );
     match outcome {
-        Ok(outcome) => {
+        Ok((outcome, placed)) => {
+            let config = placed.as_ref().unwrap_or(&objective.config);
             let history = outcome.history;
             let work = outcome.sized.work;
             let residuals = residuals::build(
                 &outcome,
-                &objective.config,
+                config,
                 &weights,
                 objective.target_num_passengers,
                 objective.target_cargo_payload_kg,
             );
-            let assessment = cost::assemble(outcome, &objective.config, residuals);
+            let assessment = cost::assemble(outcome, config, residuals);
             let reason = assessment.violated_hard_ids().join("+");
             objective.history.record_mission_sized(
                 history.dv,
@@ -276,6 +311,25 @@ pub fn assess_product_candidate_cancellable(
     design: &DesignVector,
     cancel: Option<&std::sync::atomic::AtomicBool>,
 ) -> Result<CandidateAssessment, String> {
+    assess_product_candidate_with_controls_cancellable(
+        config,
+        design,
+        SizingControls::default(),
+        cancel,
+    )
+}
+
+/// Product replay with explicit fidelity controls and deep solve cancellation.
+///
+/// # Errors
+///
+/// As [`assess_product_candidate_with_controls`], or `cancelled` when interrupted.
+pub fn assess_product_candidate_with_controls_cancellable(
+    config: &AlasConfig,
+    design: &DesignVector,
+    controls: SizingControls,
+    cancel: Option<&std::sync::atomic::AtomicBool>,
+) -> Result<CandidateAssessment, String> {
     if !config.mass_model.mass_architecture.is_production() {
         return Err(
             "the product candidate assessor requires pure_flops_transport_v1; select the explicit reference-compatibility comparison path for reference-compatible masses"
@@ -286,7 +340,7 @@ pub fn assess_product_candidate_cancellable(
     let token = crate::cancellation::EvaluationCancellation::new();
     objective.cancellation = Some(token.clone());
     crate::cancellation::forward_evaluation_cancellation(cancel, &token, || {
-        assess_candidate(&objective, &design.to_array())
+        assess_with(&objective, &design.to_array(), None, controls)
     })
 }
 
@@ -338,14 +392,7 @@ pub fn assess_product_candidate_with_controls(
     design: &DesignVector,
     controls: SizingControls,
 ) -> Result<CandidateAssessment, String> {
-    if !config.mass_model.mass_architecture.is_production() {
-        return Err(
-            "the product candidate assessor requires pure_flops_transport_v1; select the explicit reference-compatibility comparison path for reference-compatible masses"
-                .to_owned(),
-        );
-    }
-    let objective = DesignObjective::new_with_nominal(config.clone(), *design);
-    assess_with(&objective, &design.to_array(), None, controls)
+    assess_product_candidate_with_controls_cancellable(config, design, controls, None)
 }
 
 fn assess_with(
@@ -358,7 +405,7 @@ fn assess_with(
         .validate_design_space(x)
         .map_err(|_| "design_space".to_owned())?;
     let weights = objective.config.optimizer.weights.clone();
-    match sizing::run_candidate_cancellable(
+    match residuals::gear_placement::size_with_main_gear_placement(
         &objective.config,
         x,
         polar,
@@ -366,15 +413,16 @@ fn assess_with(
         objective.cancellation.clone(),
         controls,
     ) {
-        Ok(outcome) => {
+        Ok((outcome, placed)) => {
+            let config = placed.as_ref().unwrap_or(&objective.config);
             let residuals = residuals::build(
                 &outcome,
-                &objective.config,
+                config,
                 &weights,
                 objective.target_num_passengers,
                 objective.target_cargo_payload_kg,
             );
-            Ok(cost::assemble(outcome, &objective.config, residuals))
+            Ok(cost::assemble(outcome, config, residuals))
         }
         Err(failure) => Err(failure.reason.to_owned()),
     }
