@@ -94,6 +94,7 @@ pub fn b787_9() -> AircraftPreset {
             // D6-58333 Rev Q section 2.3.2 (PDF p.25, ground clearances):
             // fuselage bottom ahead of the wing (D) 1.75 m minimum.
             fuselage_ground_clearance_m: Some(1.75),
+            takeoff_stabilizer_nose_up_deg: Some(crate::landing_gear::TRANSPORT_THS_TAKEOFF_NOSE_UP_DEG),
             ..LandingGearConfig::default()
         },
         design_vector: DesignVector {
@@ -189,6 +190,12 @@ pub fn b787_9() -> AircraftPreset {
                 cabin_z_m: 0.2,
                 tailcone_length_m: 12.0,
                 tail_z_m: 1.5,
+                // Solved so the tail-down angle is 9.7 deg, the 787-9 pitch for tail
+                // contact "with wheels on the runway and landing gear struts extended"
+                // (UK AAIB Bulletin 11/2020, AAIB-26410, VH-ZND, quoting Boeing). The
+                // compressed-strut value was not found, so this static-ground geometry
+                // overstates the tail-down angle by the strut stroke.
+                belly_upsweep_length_m: Some(20.55),
                 ..FuselageConfig::default()
             },
             engine: EngineConfig {
@@ -301,6 +308,12 @@ pub fn dc_10() -> AircraftPreset {
             reference_station_fuselage_length_m: Some(55.35),
             reference_nlg_x_fraction: Some(8.1 / 55.35),
             reference_mlg_x_fractions: Some(vec![30.16 / 55.35, 30.16 / 55.35, 30.92 / 55.35]),
+            // No published tail-strike attitude backs this preset's aft-fuselage
+            // geometry, so its model tail-down angle is unvalidated (the generic
+            // tailcone loft understates it): keep the Raymer/Roskam 15 deg floor on
+            // top of the tail-down criterion.
+            min_tip_back_deg: 15.0,
+            takeoff_stabilizer_nose_up_deg: Some(crate::landing_gear::TRANSPORT_THS_TAKEOFF_NOSE_UP_DEG),
             ..LandingGearConfig::default()
         },
         design_vector: DesignVector {

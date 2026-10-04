@@ -15,7 +15,7 @@ use crate::envelope::{
 
 /// A weak required pitch acceleration, deg/s^2, used as a fixture to
 /// separate a gear-placement mechanism under test from the nose-wheel
-/// lift-off conflict the class value (7 deg/s^2) now raises on some presets.
+/// lift-off conflict the class value (5 deg/s^2) can raise on some presets.
 const ISOLATING_PITCH_ACCELERATION_DEG_S2: f64 = 1.0;
 
 fn preset(name: &str) -> (AlasConfig, DesignVector) {
@@ -129,13 +129,12 @@ fn a_translated_main_gear_meets_every_ground_mechanism_on_the_rebuilt_candidate(
 
 /// A check of the ATR placement, independent of the solver's algebra.
 ///
-/// Finding: with the tail lift at rotation derived from the geometry with
-/// the plain-flap large-deflection correction (CL_h about -0.94, not the
-/// thin-airfoil -1.3), nose-wheel lift-off conflicts with tip-back again on
-/// this candidate, as it did under the earlier fixed -0.55: no station
-/// meets every ground mechanism at the class pitch acceleration. The first
-/// assertion states that conflict. The algebra check below then isolates
-/// the placement from the lift-off authority with the optional
+/// Finding: with the model tail-down angle (8 deg) setting the tip-back
+/// requirement and the class 5 deg/s^2 required acceleration, this candidate
+/// has a feasible station at the class acceleration (the first assertion;
+/// earlier, at 7 deg/s^2 and a 15 deg tip-back floor, it had none). The
+/// algebra check below isolates the placement from the lift-off authority
+/// with the optional
 /// `rotation_pitch_acceleration_deg_s2` override, a weaker required
 /// acceleration that is a test fixture, not a physical claim: the ledger
 /// and envelope are rebuilt with the main group translated by the solved
@@ -149,13 +148,17 @@ fn a_redesigned_atr_gets_a_station_that_meets_every_ground_mechanism() {
     let mut moved = design;
     moved.span_m *= 0.995;
     let x = moved.to_array();
-    let mut conflicted = crate::mdo::sizing::run_candidate(&class_config, &x).unwrap();
+    // Product-state update: the class acceleration (5 deg/s^2) and the
+    // tail-down-aware tip-back requirement (8 deg model tail-down, not the
+    // old 15 deg floor) leave this candidate a feasible station at the class
+    // pitch acceleration; it was Infeasible at 7 deg/s^2 and 15 deg tip-back.
+    let mut at_class = crate::mdo::sizing::run_candidate(&class_config, &x).unwrap();
     assert!(
-        matches!(
-            solve(&mut conflicted, &class_config),
+        !matches!(
+            solve(&mut at_class, &class_config),
             Ok(MainGearPlacement::Infeasible)
         ),
-        "the class-acceleration ATR candidate now has a station"
+        "the class-acceleration ATR candidate has no station"
     );
     let mut config = class_config;
     config.landing_gear.rotation_pitch_acceleration_deg_s2 =
@@ -288,12 +291,14 @@ fn a_placed_candidate_shares_the_unplaced_nominal() {
 /// group translates aft and the rebuilt envelope meets every ground
 /// mechanism.
 ///
-/// Finding: with the corrected rotation authority (CL_h about -0.85 for the
-/// DC-10) this candidate has no station at the class pitch acceleration:
-/// the translation that clears the nose-load window leaves the nose wheel
-/// unable to lift off at maximum-fuel takeoff. The test states that, then
-/// isolates the centre-leg geometry from the lift-off authority with the
-/// optional pitch-acceleration override (a fixture, not a physical claim).
+/// Finding: at the built tail incidence (CL_h about -0.85 for the DC-10) this
+/// candidate had no station at the class pitch acceleration: the translation
+/// that clears the nose-load window left the nose wheel unable to lift off
+/// at maximum-fuel takeoff. With the trimmable stabiliser at its takeoff
+/// nose-up setting (CL_h about -0.98) it is placed at the class
+/// acceleration too. The test states that, then isolates the centre-leg
+/// geometry from the lift-off authority with the optional pitch-acceleration
+/// override (a fixture, not a physical claim).
 #[test]
 fn a_three_leg_group_translates_past_its_centre_leg_behind_the_wing_root() {
     let (class_config, nominal) = preset("DC-10");
@@ -333,7 +338,7 @@ fn a_three_leg_group_translates_past_its_centre_leg_behind_the_wing_root() {
     let before = super::super::relative_balance::assess(&configured, &config).unwrap();
     assert!(ground_misses(&before).contains("MinimumNoseGearLoad"));
 
-    let (_, class_placed) = size_with_main_gear_placement(
+    let (class_outcome, class_placed) = size_with_main_gear_placement(
         &class_config,
         &x,
         None,
@@ -342,10 +347,10 @@ fn a_three_leg_group_translates_past_its_centre_leg_behind_the_wing_root() {
         SizingControls::default(),
     )
     .unwrap();
-    assert!(
-        class_placed.is_none(),
-        "the class-acceleration DC-10 candidate now has a station"
-    );
+    let class_placed = class_placed.expect("the class-acceleration DC-10 candidate is placed");
+    let class_after =
+        super::super::relative_balance::assess(&class_outcome, &class_placed).unwrap();
+    assert_eq!(ground_misses(&class_after), BTreeSet::new());
     let (outcome, placed) =
         size_with_main_gear_placement(&config, &x, None, false, None, SizingControls::default())
             .unwrap();

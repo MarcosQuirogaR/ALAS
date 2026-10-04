@@ -21,6 +21,8 @@ use std::collections::BTreeMap;
 use alas_config::{presets, ConfigNode, EngineConfig, Entry, Node, DESIGN_VARIABLE_SPECS};
 use serde_json::Value;
 
+mod belly_upsweep;
+
 /// The name of the reference aircraft every sandbox starts from.
 pub const REFERENCE_PRESET: &str = "AVE";
 
@@ -696,6 +698,7 @@ const SPECS: &[Spec] = &[
             decimals: 2,
         },
     ),
+    belly_upsweep::SPEC,
     cfg(
         "geometry.fuselage.nose_z_m",
         Discipline::Fuselage,

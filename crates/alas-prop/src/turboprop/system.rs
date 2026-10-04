@@ -18,10 +18,15 @@ pub(super) fn rating_limit_name(rating: Pw127mRating) -> &'static str {
 
 pub(super) const PROVENANCE: &str = "PW127M take-off/continuous ratings and flat-rating temperatures (take-off to 39 C, maximum continuous to 48 C): EASA TCDS IM.E.041 section 5; ATR 72-600 climb/cruise ratings and 568F-1 diameter: ATR manufacturer factsheet; rated shaft power is flat down to the density of sea-level pressure at the flat-rating temperature and lapses as (rho/rho_corner)^0.728 below it (Nita 2008 eq. 3.5.11, PW120 maximum-cruise chart fit), floored at 0.15, a class relation rather than an OEM engine deck; fuel flow is shaft power times a class PSFC of 0.2945 kg/kWh at 249.65 K (measured PW120A, Majeed 2009 Tab. 3.3) scaled as sqrt(T/T_ref), flat in power over the sourced 46-100 percent band and held flat below it as an unsourced assumption; ATR's 762 kg/h maximum-cruise flow is a validation point, not a calibration anchor; propeller coefficients: generic six-blade surrogate (not OEM 568F data), bounded by one-dimensional actuator-disk momentum theory evaluated on the blade-efficiency share of shaft power rather than on the whole of it, so no operating point sits on the loss-free ideal bound; blade efficiency blends the 0.70 static figure of merit (class preliminary-design value, 0.65-0.80 band) into a declared forward-flight 0.86, the conservative end of the 0.86-0.91 band that NASA TM-83458 p.8 interpolation and Nita 2008 Table 3.4 (Scholz chart read for the ATR 72) agree on; the blend shape between the two ends is a surrogate and the resulting cruise efficiency carries about -0/+6 percent; propulsive efficiency is additionally capped at 0.88 as a guard; flight-idle propeller force is the neutral zero-force hypothesis because no OEM idle/windmilling map is available";
 
-/// Technology-neutral adapter for the two-engine ATR 72 PW127M/568F installation.
+/// Technology-neutral adapter for an N-engine PW127M/568F-class installation
+/// (N >= 2, even: symmetric port/starboard pairs; the ATR 72 is N = 2).
 ///
-/// It aggregates exactly two independent engine/propeller evaluations. It does
-/// not claim an altitude-lapse deck, a measured 568F coefficient map, a PW127M
+/// It aggregates N independent engine/propeller evaluations that share one
+/// unit model, flight condition and command; only each unit's position and
+/// thrust axis differ, so thrust, moment and fuel flow add per active unit.
+/// The unit model has no propeller handedness (no gyroscopic or slipstream
+/// swirl term), so rotation sense does not enter the result. It does not
+/// claim an altitude-lapse deck, a measured 568F coefficient map, a PW127M
 /// fuel map, validated flight-idle, feather/windmill, or reverse-beta physics.
 pub struct Atr72TurbopropSystem {
     pub(super) unit_model: Pw127m568fModel,
@@ -31,9 +36,10 @@ pub struct Atr72TurbopropSystem {
 }
 
 impl Atr72TurbopropSystem {
-    /// Construct a two-unit ATR propulsion adapter from explicit installation data.
+    /// Construct an N-unit propulsion adapter from explicit installation data.
     ///
-    /// Exactly two positions and two thrust axes are required. Installation mass
+    /// An even number (at least two) of positions, with one unit-vector thrust
+    /// axis each, is required. Installation mass
     /// remains caller-owned evidence because a defensible common definition for
     /// dry engine, propeller, nacelle, fluids, and mounting mass is not yet fixed.
     pub fn new(
@@ -41,9 +47,14 @@ impl Atr72TurbopropSystem {
         mass_inventory: Vec<PropulsionMassItem>,
         installation: PropulsionInstallation,
     ) -> Result<Self, PropulsionError> {
-        if installation.unit_positions_m.len() != 2 || installation.thrust_axes_body.len() != 2 {
+        let unit_count = installation.unit_positions_m.len();
+        if unit_count < 2
+            || unit_count % 2 != 0
+            || installation.thrust_axes_body.len() != unit_count
+        {
             return Err(PropulsionError::OutsideModelDomain(
-                "ATR 72 adapter requires exactly two positions and two thrust axes".to_owned(),
+                "turboprop adapter requires an even number (at least two) of unit positions and one thrust axis per position"
+                    .to_owned(),
             ));
         }
         for axis in &installation.thrust_axes_body {
@@ -74,17 +85,52 @@ impl Atr72TurbopropSystem {
         })
     }
 
+    /// Number of installed units.
+    #[must_use]
+    pub fn unit_count(&self) -> usize {
+        self.installation.unit_positions_m.len()
+    }
+
+    /// Index of the critical unit for a one-engine-inoperative case: the unit
+    /// with the largest lateral arm `|y|` (outboard, so the largest yawing
+    /// moment from the remaining thrust). Propeller handedness is not
+    /// modelled, so equal-arm ties resolve to the lowest index.
+    #[must_use]
+    pub fn critical_unit_index(&self) -> usize {
+        let mut critical = 0;
+        let mut arm = f64::NEG_INFINITY;
+        for (index, position) in self.installation.unit_positions_m.iter().enumerate() {
+            if position[1].abs() > arm {
+                arm = position[1].abs();
+                critical = index;
+            }
+        }
+        critical
+    }
+
+    /// Failure state for one engine inoperative at the critical unit.
+    #[must_use]
+    pub fn critical_engine_failure(&self) -> FailureState {
+        FailureState::UnitsUnavailable(vec![self.critical_unit_index()])
+    }
+
     fn active_units(&self, failure: &FailureState) -> Result<Vec<usize>, PropulsionError> {
+        let unit_count = self.unit_count();
         match failure {
-            FailureState::None => Ok(vec![0, 1]),
+            FailureState::None => Ok((0..unit_count).collect()),
             FailureState::UnitsUnavailable(indices) => {
-                if indices.iter().any(|index| *index > 1)
-                    || (indices.len() == 2 && indices[0] == indices[1])
-                    || indices.len() > 2
+                let mut sorted = indices.clone();
+                sorted.sort_unstable();
+                sorted.dedup();
+                if sorted.len() != indices.len()
+                    || indices.len() > unit_count
+                    || indices.iter().any(|index| *index >= unit_count)
                 {
                     return Err(PropulsionError::UnsupportedFailureState);
                 }
-                Ok((0..2).filter(|index| !indices.contains(index)).collect())
+                Ok((0..unit_count)
+                    .filter(|index| !indices.contains(index))
+                    .collect())
             }
         }
     }
@@ -94,7 +140,9 @@ impl Atr72TurbopropSystem {
         demand: PropulsionDemand,
         active_count: usize,
     ) -> Result<(Pw127mRating, f64), PropulsionError> {
-        let takeoff = if active_count == 1 {
+        // The automatic reserve rating applies to exactly one engine
+        // inoperative; for the two-engine ATR that is one active unit.
+        let takeoff = if active_count + 1 == self.unit_count() {
             Pw127mRating::MaximumTakeoffReserve
         } else {
             Pw127mRating::NormalTakeoff
@@ -237,7 +285,7 @@ impl PropulsionSystemModel for Atr72TurbopropSystem {
         }
         if active.is_empty() {
             return Ok(
-                self.zero_result("zero capability: both installed propulsion units unavailable")
+                self.zero_result("zero capability: all installed propulsion units unavailable")
             );
         }
         let extra_accessory_per_unit = request.loads.accessory_power_w / active.len() as f64;
@@ -423,7 +471,7 @@ impl PropulsionSystemModel for Atr72TurbopropSystem {
             ),
             DiagnosticsQuery::SupportedSemantics => (
                 "atr72-turboprop-surrogate-semantics",
-                "Two installed engines; normalized-force inverse control; takeoff, maximum-continuous, maximum-climb, maximum-cruise and unvalidated flight-idle ratings; normal, flight-idle and shutdown modes; OEI automatic-reserve rating; mechanical accessory load.",
+                "N installed engines (even, at least two); normalized-force inverse control; takeoff, maximum-continuous, maximum-climb, maximum-cruise and unvalidated flight-idle ratings; normal, flight-idle and shutdown modes; OEI automatic-reserve rating; mechanical accessory load.",
             ),
             DiagnosticsQuery::ValidityDomain => (
                 "atr72-turboprop-surrogate-validity",

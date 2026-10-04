@@ -881,6 +881,8 @@ fn is_native_config_field(path: &str, key: &str) -> bool {
                 // frozen Python schema predates them.
                 | "rotation_pitch_acceleration_deg_s2"
                 | "pitch_radius_of_gyration_frac_mac"
+                | "takeoff_stabilizer_nose_up_deg"
+                | "elevator_up_travel_deg"
                 | "cl_ground_attitude_frac_of_cl_max_to"
                 | "rotation_rolling_friction_coefficient"
         ) && (path.ends_with("LandingGearConfig") || path.ends_with(".landing_gear")))
@@ -899,6 +901,10 @@ fn is_native_config_field(path: &str, key: &str) -> bool {
             key,
             "objective" | "design_space" | "plausibility"
         ) && (path.ends_with("OptimizerConfig") || path.ends_with(".optimizer")))
+        // Optional belly-upsweep length of the aft fuselage; the frozen
+        // Python schema has no such field (unset = tailcone loft).
+        || (key == "belly_upsweep_length_m"
+            && (path.ends_with("FuselageConfig") || path.ends_with(".fuselage")))
         // The declared section class that fixes the Korn technology factor
         // replaced the frozen global `drag_model.korn_technology_factor`; its
         // mapping and per-preset declarations are checked by the airfoil-class

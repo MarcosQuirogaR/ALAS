@@ -134,6 +134,14 @@ fn compare(
                     if path.ends_with(".geometry_config.wing") && key == "airfoil_class" {
                         continue;
                     }
+                    // The optional belly-upsweep length is a native fuselage
+                    // input the frozen request predates; the geometry tests
+                    // and the preset tail-down checks cover it.
+                    if path.ends_with(".geometry_config.fuselage")
+                        && key == "belly_upsweep_length_m"
+                    {
+                        continue;
+                    }
                     let child = join(path, key);
                     // A leaf the frozen request never carried is admitted
                     // only through an explicit two-sided correction.

@@ -112,6 +112,8 @@ impl AircraftBuilder {
         geometry.wing.outboard_le_sweep_deg = None;
         // The frozen builder lofts one wing shape, the configured heights.
         geometry.wing.flight_tip_rise_semispan_fraction = None;
+        // And the tailcone loft: it has no belly upsweep.
+        geometry.fuselage.belly_upsweep_length_m = None;
         // And its spanwise mesh; see `mesh`.
         mesh::restore_reference_ratios(&mut geometry);
         Self {
@@ -309,7 +311,7 @@ impl AircraftBuilder {
         g.validate_generated_sections()?;
         let radius = g.diameter_m / 2.0;
         let fus_len = dv.fuselage_length_m;
-        let cabin_end = fus_len - g.tailcone_length_m;
+        let cabin_end = g.aft_body_start_m(fus_len);
 
         let local_height_scale = g.height_m.map_or(1.0, |height_m| height_m / g.diameter_m);
         let mut generated_index = 0usize;
@@ -368,13 +370,12 @@ impl AircraftBuilder {
         // Exclude the first point: it is the cabin end, added above.
         let x_tail = linspace(0.0, 1.0, 10);
         for &xi in &x_tail[1..] {
-            let z_val = g.cabin_z_m + (g.tail_z_m - g.cabin_z_m) * xi.powf(1.5);
-            let r_val = radius * (1.0 - xi.powf(1.5));
+            let station = g.aft_body_station(xi, fus_len);
             stations.push(make_xsec(
-                cabin_end + xi * g.tailcone_length_m,
-                z_val,
-                r_val * 2.0,
-                r_val * 2.0 * local_height_scale,
+                station.x_m,
+                station.z_m,
+                station.width_m,
+                station.height_m,
             )?);
         }
         self.append_custom_fuselage_sections(fus_len, &mut stations)?;
