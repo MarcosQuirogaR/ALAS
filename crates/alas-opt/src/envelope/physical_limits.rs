@@ -12,7 +12,7 @@
 
 use alas_config::MacFrame;
 
-use super::support::ROTATION_CL_H;
+use super::rotation::{longitudinal_force_moment_m, rotation_cg_offset_m};
 use super::PhaseLimits;
 
 /// Which physical mechanism governs the aft CG boundary.
@@ -39,12 +39,12 @@ pub enum ForwardLimitGovernance {
     /// [`Self::LandingTrimGroundEffect`] criteria; see
     /// `scissor_plot_fwd_pct_mac` on [`PhysicalCgLimits`].
     ScissorPlotEstimate,
-    /// Nose-wheel liftoff (rotation) moment-balance criterion at `V_R`
-    /// (Torenbeek *Synthesis of Subsonic Airplane Design* ch.
-    /// 8-9, Roskam *Airplane Design* Part II ch. 11): the most-forward CG at
-    /// which the available tail download, at its maximum coefficient, can
-    /// still supply the wing-body moment, the required pitch acceleration,
-    /// and the weight moment about the main-gear contact point.
+    /// Nose-wheel lift-off (rotation) moment-balance criterion at `V_R`
+    /// (Sadraey, *Aircraft Design: A Systems Engineering Approach*, 2012,
+    /// sec. 9.6.2 and 12.6): the most-forward CG at which the tail download
+    /// at full up-elevator can still supply the wing-body moment, the
+    /// required pitch acceleration of the inertia about the main-gear
+    /// contact, and the weight moment about that contact.
     RotationNoseWheelLiftoff,
     /// Landing trim/flare criterion (Torenbeek/Roskam scissor
     /// construction with a ground-effect knockdown on tail authority): the
@@ -82,9 +82,9 @@ pub struct PhysicalCgLimitsInput {
     /// Tail-scrape angle at the main gear, degrees, when the fuselage
     /// lower-contour geometry could place one.
     pub scrape_angle_deg: Option<f64>,
-    /// Minimum nose-load fraction of this state's weight: the steering
-    /// minimum, raised near the tabulated weight by a published main-gear
-    /// load limit (`alas_config::PublishedAftCgNoseLoad`).
+    /// Minimum nose-load fraction of this state's weight: the published
+    /// aft-CG nose share at this weight when the preset has one, never below
+    /// the steering minimum (`alas_config::PublishedAftCgNoseLoad`).
     pub pct_load_nlg_min: f64,
     /// Maximum nose-load fraction of current weight for handling.
     pub pct_load_nlg_max_handling: f64,
@@ -121,9 +121,18 @@ pub struct PhysicalCgLimitsInput {
     /// (`S_h / S`), `0.0` with no tail.
     pub tail_area_ratio: f64,
     /// Wieselsberger-style ground-effect knockdown on the tail's maximum
-    /// download authority, dimensionless in `(0, 1]`; `1.0` = no correction
-    /// (`alas_opt::envelope::support::tail_ground_effect_factor`).
+    /// download authority for the landing-trim criterion, dimensionless in
+    /// `(0, 1]`; `1.0` = no correction
+    /// (`alas_opt::envelope::support::tail_ground_effect_factor`). The
+    /// rotation criterion does not use it: its ground effect acts through
+    /// the wing downwash in [`Self::rotation_tail_lift_coefficient`].
     pub tail_ground_effect_factor: f64,
+    /// Horizontal-tail lift coefficient at rotation with full up-elevator,
+    /// on the tail's own area, negative (download), derived from the tail
+    /// geometry, the downwash in ground effect and the elevator
+    /// (`rotation::rotation_tail_lift`); `NaN` disables the rotation
+    /// mechanism.
+    pub rotation_tail_lift_coefficient: f64,
     /// Wing-body lift coefficient at the ground (pre-rotation) attitude at
     /// `V_R`, dimensionless; a declared estimate
     /// (`config.landing_gear.cl_ground_attitude_frac_of_cl_max_to * CL_max,TO`,
@@ -140,16 +149,18 @@ pub struct PhysicalCgLimitsInput {
     /// estimate (`alas_opt::envelope::support::ROTATION_CM_AC_WB_TAKEOFF`),
     /// not a measured value.
     pub cm_ac_wb_takeoff: f64,
-    /// Pitch radius of gyration, as a fraction of MAC (`r_y / c`); a
-    /// declared Torenbeek/Roskam typical-transport estimate, not measured.
-    pub pitch_radius_of_gyration_frac_mac: f64,
-    /// Required pitch angular acceleration at rotation, degrees per second
-    /// squared; a declared Torenbeek/Roskam typical-transport estimate
-    /// (6-8 deg/s^2), not measured.
+    /// Pitch radius of gyration about the centre of gravity, m: from the
+    /// mass ledger's takeoff `I_yy`, else Raymer's jet-transport radius
+    /// (`rotation::pitch_radius_of_gyration_m`). The rotation balance adds
+    /// the transfer to the main-gear contact itself.
+    pub pitch_radius_of_gyration_m: f64,
+    /// Required pitch angular acceleration at rotation, deg/s^2: 7 unless
+    /// the configuration overrides it
+    /// (`rotation::rotation_pitch_acceleration_deg_s2`).
     pub rotation_angular_accel_deg_s2: f64,
     /// Standard gravity, m/s^2 (`config.requirements.gravity_m_s2`): turns
-    /// the pitch-inertia moment into the same weight-normalized fraction of
-    /// MAC as every other rotation-criterion term.
+    /// the pitch-inertia moment into the same weight-normalized length as
+    /// every other rotation-criterion term.
     pub gravity_m_s2: f64,
     /// All-engine takeoff/go-around thrust at `V_R` over this state's
     /// weight, dimensionless; non-finite means not evaluated, and the
@@ -193,10 +204,15 @@ pub struct PhysicalCgLimits {
     /// Diagnostic and governance candidate: the rotation (nose-wheel
     /// liftoff) moment-balance boundary.
     pub rotation_fwd_pct_mac: f64,
-    /// Diagnostic only: the signed shift the thrust and rolling-friction
-    /// term applies to [`Self::rotation_fwd_pct_mac`], `%MAC`; negative
-    /// moves the rotation boundary forward.
+    /// Diagnostic only: the thrust and rolling-friction moment about the
+    /// main-gear contact over `W c`, signed so that negative is nose-up,
+    /// `%MAC`. The rotation boundary is nonlinear in its moments (the pitch
+    /// inertia about the contact grows with the CG offset), so this is the
+    /// term's size, not an exact shift of [`Self::rotation_fwd_pct_mac`].
     pub rotation_longitudinal_force_shift_pct_mac: f64,
+    /// Diagnostic only: the tail lift coefficient at rotation the boundary
+    /// used ([`PhysicalCgLimitsInput::rotation_tail_lift_coefficient`]).
+    pub rotation_tail_lift_coefficient: f64,
     /// Diagnostic and governance candidate: the landing trim/flare boundary
     /// in ground effect.
     pub landing_trim_fwd_pct_mac: f64,
@@ -286,54 +302,6 @@ impl PhysicalCgLimits {
     }
 }
 
-/// The thrust and rolling-friction moment about the main-gear contact at
-/// nose-wheel liftoff, over `W c`, nose-up positive: the amount the rotation
-/// boundary moves forward (as a fraction of MAC).
-///
-/// Statics about the main-gear ground contact, heights above the shared
-/// ground plane. Thrust `T` acts forward at `h_T` (moment `-T h_T`). The
-/// runway friction `mu (W - L)` acts in the contact plane (no moment). The
-/// inertial reaction of the forward acceleration,
-/// `m a = T - mu (W - L)`, acts aft at the CG (moment `+m a h_cg`). So
-///
-/// `dM / (W c) = [T/W (h_cg - h_T) - mu (1 - L/W) h_cg] / c`,
-///
-/// with `L/W = (CL_g + CL_h eta k_ge S_h/S) / CL_R` at `V_R`, clamped so
-/// the wheels never carry a negative load. A thrust line below the CG is
-/// nose-up; friction is always nose-down.
-///
-/// Aerodynamic drag is **omitted**; its net moment about the CG is
-/// `D (h_D - h_cg)` and its sign depends on where the drag line sits:
-///
-/// - low wing (drag line below the CG): the moment is nose-down, so leaving
-///   drag out moves the rotation boundary *forward*, which is **not
-///   conservative** (about 0.3-0.4 %MAC, an engineering estimate [E]);
-/// - high wing or high thrust line such as a turboprop like the ATR (drag
-///   line above the CG): the moment is nose-up, so omitting drag is
-///   **conservative**.
-///
-/// Adding a takeoff-configuration drag polar is a documented follow-up.
-///
-/// A non-finite or non-positive `h_cg_m` returns `0.0` (term not
-/// evaluated); a non-finite thrust or thrust-line height drops only the
-/// thrust part.
-fn rotation_longitudinal_force_frac(input: &PhysicalCgLimitsInput, lift_over_weight: f64) -> f64 {
-    let h_cg = input.h_cg_m;
-    if !h_cg.is_finite() || h_cg <= 0.0 || input.mac_frame.chord_m <= 0.0 {
-        return 0.0;
-    }
-    let thrust_moment = if input.rotation_thrust_to_weight.is_finite()
-        && input.rotation_thrust_line_height_m.is_finite()
-    {
-        input.rotation_thrust_to_weight * (h_cg - input.rotation_thrust_line_height_m)
-    } else {
-        0.0
-    };
-    let wheel_load_fraction = (1.0 - lift_over_weight).max(0.0);
-    let friction_moment = input.rotation_rolling_friction_coefficient * wheel_load_fraction * h_cg;
-    (thrust_moment - friction_moment) / input.mac_frame.chord_m
-}
-
 fn most_forward(candidates: [(f64, AftLimitGovernance); 3]) -> (f64, AftLimitGovernance) {
     candidates
         .into_iter()
@@ -363,17 +331,17 @@ fn most_aft(candidates: [(f64, ForwardLimitGovernance); 3]) -> (f64, ForwardLimi
 ///
 /// The more aft (most restrictive) of:
 /// - **Maximum nose-load handling**: `x_main_gear - pct_load_nlg_max_handling * wheelbase`.
-/// - **Rotation (nose-wheel liftoff)** (Torenbeek ch. 8-9, Roskam Part II ch.
-///   11): the moment balance about the main-gear contact point at `V_R`,
-///   nondimensionalized by the weight-support lift coefficient `CL_R`
-///   (see [`PhysicalCgLimitsInput::cl_r_rotation`]), solved for the most
-///   forward CG admitting nose liftoff at the tail's maximum download,
-///   including the required pitch angular acceleration and the thrust and
-///   rolling-friction moment (drag omitted, non-conservative; see
-///   `rotation_longitudinal_force_frac`). The tail lift coefficient
-///   (`CL_h = -0.55`), the takeoff `Cm_ac,wb = -0.15` and `x_ac,wb = 0.25`
-///   are declared estimates; deriving the elevator authority from the tail
-///   geometry is a documented follow-up.
+/// - **Rotation (nose-wheel lift-off)** (Sadraey 2012, sec. 9.6.2 and
+///   12.6): the moment balance about the main-gear contact at `V_R`,
+///   divided by the weight `W = q_R S CL_R` (see
+///   [`PhysicalCgLimitsInput::cl_r_rotation`]), solved exactly for the most
+///   forward CG at which the derived tail lift at full up-elevator, the
+///   wing-body lift and moment, thrust and rolling friction give the
+///   required pitch acceleration of the pitch inertia transferred to the
+///   contact point, `I_P = I_cg + m [(x_P - x_cg)^2 + h_cg^2]`. The balance
+///   is quadratic in the CG station; see `rotation::rotation_cg_offset_m`.
+///   Drag is omitted (about 1 %MAC; see `super::rotation`). The takeoff
+///   `Cm_ac,wb = -0.15` and `x_ac,wb = 0.25` remain declared estimates.
 /// - **Landing trim in ground effect**: the same scissor-plot construction
 ///   as the diagnostic-only estimate below, with a ground-effect knockdown
 ///   on the tail's available download coefficient.
@@ -426,42 +394,40 @@ pub fn physical_cg_limits(input: &PhysicalCgLimitsInput) -> PhysicalCgLimits {
             / cl_max;
     let landing_trim_fwd_pct_mac = landing_trim_fwd_frac * 100.0;
 
-    // Rotation (nose-wheel liftoff): moment balance about the
-    // main-gear contact point at V_R (Torenbeek ch. 8-9, Roskam Part II ch.
-    // 11), nondimensionalized by weight (W = q_R S CL_R) so it needs no
-    // explicit mass, dynamic pressure, or wing-area input. Every term below
-    // is `moment / W`, hence dimensionless (a fraction of MAC once
-    // multiplied by 100); see doc comments on the individual input fields
-    // for the physical meaning and source of each factor.
-    let x_mg_frac = pct_mac(frame, input.x_main_gear_m) / 100.0;
-    let x_h_frac = pct_mac(frame, input.x_h_ac_m) / 100.0;
-    let cl_r = input.cl_r_rotation.max(1.0e-6);
+    // Rotation (nose-wheel lift-off): the moment balance about the main-gear
+    // contact at V_R (Sadraey 2012, eqs. 9.36-9.54a; see `super::rotation`),
+    // every moment divided by the weight W = q_R S CL_R, so a moment over W
+    // is a length in metres and needs no explicit mass, dynamic pressure or
+    // wing area. The tail lift is the derived one at full up-elevator.
     let mac_m = frame.chord_m;
-    let inertia_frac = input.pitch_radius_of_gyration_frac_mac.powi(2)
-        * mac_m
-        * input.rotation_angular_accel_deg_s2.to_radians()
-        / input.gravity_m_s2.max(1.0e-6);
-    let wing_lift_term = (input.cl_ground_attitude / cl_r) * (x_mg_frac - input.x_ac_wb_frac);
-    let pitching_moment_term = input.cm_ac_wb_takeoff / cl_r;
-    // Tail download at the elevator-limited rotation lift coefficient
-    // (`ROTATION_CL_H`, stabiliser at takeoff trim), in ground effect; its
-    // moment arm about the main-gear contact is (x_h - x_mg), so this term
-    // is positive (nose-up credit). No clamp: the result follows the
-    // geometry.
+    let x_mg_m = input.x_main_gear_m;
+    let cl_r = input.cl_r_rotation.max(1.0e-6);
+    let x_ac_wb_m = frame.leading_edge_x_m + input.x_ac_wb_frac * mac_m;
+    let wing_lift_m = (input.cl_ground_attitude / cl_r) * (x_mg_m - x_ac_wb_m);
+    let pitching_moment_m = input.cm_ac_wb_takeoff / cl_r * mac_m;
+    // Tail lift over the wing-referenced lift coefficient: negative
+    // (download) at a station aft of the contact, so a nose-up moment.
     let tail_lift_coefficient =
-        ROTATION_CL_H * input.eta * input.tail_ground_effect_factor * input.tail_area_ratio;
-    let tail_download_term = (tail_lift_coefficient / cl_r) * (x_mg_frac - x_h_frac);
-    // Thrust and runway friction about the main-gear contact (see
-    // `rotation_longitudinal_force_frac`); the lift that unloads the wheels
-    // is the same wing and tail lift the moment terms above use.
+        input.rotation_tail_lift_coefficient * input.eta * input.tail_area_ratio;
+    let tail_lift_m = (tail_lift_coefficient / cl_r) * (x_mg_m - input.x_h_ac_m);
+    // The lift that unloads the wheels is the same wing and tail lift.
     let lift_over_weight = (input.cl_ground_attitude + tail_lift_coefficient) / cl_r;
-    let longitudinal_force_frac = rotation_longitudinal_force_frac(input, lift_over_weight);
-    let rotation_fwd_frac = x_mg_frac + inertia_frac
-        - wing_lift_term
-        - pitching_moment_term
-        - tail_download_term
-        - longitudinal_force_frac;
-    let rotation_fwd_pct_mac = rotation_fwd_frac * 100.0;
+    let longitudinal_force_m = longitudinal_force_moment_m(
+        input.h_cg_m,
+        input.rotation_thrust_to_weight,
+        input.rotation_thrust_line_height_m,
+        input.rotation_rolling_friction_coefficient,
+        lift_over_weight,
+    );
+    let available_m = wing_lift_m + pitching_moment_m + tail_lift_m + longitudinal_force_m;
+    let cg_offset_m = rotation_cg_offset_m(
+        available_m,
+        input.pitch_radius_of_gyration_m,
+        input.h_cg_m,
+        input.rotation_angular_accel_deg_s2,
+        input.gravity_m_s2.max(1.0e-6),
+    );
+    let rotation_fwd_pct_mac = pct_mac(frame, x_mg_m - cg_offset_m);
 
     let limits = PhysicalCgLimits {
         aft_limit_pct_mac: f64::NAN,
@@ -475,7 +441,8 @@ pub fn physical_cg_limits(input: &PhysicalCgLimitsInput) -> PhysicalCgLimits {
         max_nose_load_fwd_pct_mac,
         scissor_plot_fwd_pct_mac,
         rotation_fwd_pct_mac,
-        rotation_longitudinal_force_shift_pct_mac: -100.0 * longitudinal_force_frac,
+        rotation_longitudinal_force_shift_pct_mac: -100.0 * longitudinal_force_m / mac_m,
+        rotation_tail_lift_coefficient: input.rotation_tail_lift_coefficient,
         landing_trim_fwd_pct_mac,
         usable_range_pct_mac: f64::NAN,
     };
@@ -510,11 +477,12 @@ mod tests {
             x_h_ac_m: 30.0,
             tail_area_ratio: 0.25,
             tail_ground_effect_factor: 0.9,
+            rotation_tail_lift_coefficient: -1.3,
             cl_ground_attitude: 0.6,
             cl_r_rotation: 1.3,
             cm_ac_wb_takeoff: -0.15,
-            pitch_radius_of_gyration_frac_mac: 0.30,
-            rotation_angular_accel_deg_s2: 7.0,
+            pitch_radius_of_gyration_m: 6.0,
+            rotation_angular_accel_deg_s2: 5.0,
             gravity_m_s2: 9.806_65,
             rotation_thrust_to_weight: 0.30,
             rotation_thrust_line_height_m: 1.8,
@@ -532,25 +500,27 @@ mod tests {
         input.rotation_rolling_friction_coefficient = 0.0;
         let without = physical_cg_limits(&input);
 
-        // L/W = (CL_g + CL_h eta k_ge S_h/S) / CL_R
-        //     = (0.6 + (-0.55)(0.9)(0.9)(0.25)) / 1.3 = 0.488625 / 1.3 = 0.375865.
-        let lift_over_weight = (0.6 + ROTATION_CL_H * 0.9 * 0.9 * 0.25) / 1.3;
+        // L/W = (CL_g + CL_h eta S_h/S) / CL_R
+        //     = (0.6 + (-1.3)(0.9)(0.25)) / 1.3 = 0.3075 / 1.3 = 0.236538.
+        let lift_over_weight: f64 = (0.6 - 1.3 * 0.9 * 0.25) / 1.3;
         // Thrust below the CG: 0.30 * (3.0 - 1.8) = 0.36 m, nose-up.
-        // Friction: 0.02 * (1 - 0.375865) * 3.0 = 0.037448 m, nose-down.
-        // Net 0.322552 m over c = 4.0 m: -8.0638 %MAC.
+        // Friction: 0.02 * (1 - 0.236538) * 3.0 = 0.045808 m, nose-down.
+        // Net 0.314192 m over c = 4.0 m: -7.8548 %MAC.
         let moment_m = 0.30 * (3.0 - 1.8) - 0.02 * (1.0 - lift_over_weight) * 3.0;
         let expected_shift_pct = -100.0 * moment_m / 4.0;
-        assert!((expected_shift_pct - -8.0638).abs() < 1.0e-3);
         assert!(
             (with_term.rotation_longitudinal_force_shift_pct_mac - expected_shift_pct).abs()
                 < 1.0e-9
         );
+        assert_eq!(without.rotation_longitudinal_force_shift_pct_mac, 0.0);
+        // The boundary with the term still closes the full balance about the
+        // contact: the moment enters the available moment before the
+        // inertia is solved, not as an additive shift of the result.
         assert!(
-            (with_term.rotation_fwd_pct_mac - (without.rotation_fwd_pct_mac + expected_shift_pct))
+            rotation_balance_residual_m(&base_input(), with_term.rotation_fwd_pct_mac, moment_m)
                 .abs()
                 < 1.0e-9
         );
-        assert_eq!(without.rotation_longitudinal_force_shift_pct_mac, 0.0);
         // The thrust line below the CG outweighs the friction here, so the
         // rotation boundary moves forward.
         assert!(with_term.rotation_fwd_pct_mac < without.rotation_fwd_pct_mac);
@@ -657,32 +627,114 @@ mod tests {
         );
     }
 
-    /// Hand-computed rotation (nose-wheel liftoff) criterion against
-    /// [`base_input`]'s numbers, verifying the moment-balance construction
-    /// term by term.
+    /// The dimensional moment balance about the main-gear contact at a CG of
+    /// `cg_pct_mac`, Sadraey eq. 9.36 with the inertia of eq. 9.53, written
+    /// out independently of the solver for a 1000 kg aircraft: the moments
+    /// (N m, nose-up positive) minus `I_P th''`, over `W`, m. Zero on the
+    /// rotation boundary. `extra_moment_m` is the thrust and friction moment
+    /// over `W`.
+    fn rotation_balance_residual_m(
+        input: &PhysicalCgLimitsInput,
+        cg_pct_mac: f64,
+        extra_moment_m: f64,
+    ) -> f64 {
+        let mass_kg = 1000.0;
+        let weight_n = mass_kg * input.gravity_m_s2;
+        let frame = input.mac_frame;
+        let x_cg = frame.leading_edge_x_m + cg_pct_mac / 100.0 * frame.chord_m;
+        let x_p = input.x_main_gear_m;
+        let x_ac = frame.leading_edge_x_m + input.x_ac_wb_frac * frame.chord_m;
+        let wing_lift_n = weight_n * input.cl_ground_attitude / input.cl_r_rotation;
+        let tail_lift_n =
+            weight_n * input.rotation_tail_lift_coefficient * input.eta * input.tail_area_ratio
+                / input.cl_r_rotation;
+        let moment_ac_nm = weight_n * input.cm_ac_wb_takeoff / input.cl_r_rotation * frame.chord_m;
+        let moments_nm =
+            wing_lift_n * (x_p - x_ac) + moment_ac_nm + tail_lift_n * (x_p - input.x_h_ac_m)
+                - weight_n * (x_p - x_cg)
+                + weight_n * extra_moment_m;
+        let inertia_contact = mass_kg * input.pitch_radius_of_gyration_m.powi(2)
+            + mass_kg * ((x_p - x_cg).powi(2) + input.h_cg_m.powi(2));
+        (moments_nm - inertia_contact * input.rotation_angular_accel_deg_s2.to_radians()) / weight_n
+    }
+
+    /// Hand-computed rotation (nose-wheel lift-off) boundary of
+    /// [`base_input`] with no thrust or friction, from the moment balance
+    /// about the main-gear contact (x_P = 17 m, LEMAC 10 m, c = 4 m).
+    ///
+    /// Moments over W, m: wing 0.6/1.3 (17 - 11) = 2.769231; wing-body
+    /// moment -0.15/1.3 x 4 = -0.461538; tail -1.3 x 0.9 x 0.25/1.3
+    /// (17 - 30) = 2.925; available 5.232692. kappa = 5 deg/s^2 / g =
+    /// 0.0088987 1/m. Balance 5.232692 - d = kappa (6^2 + 3^2 + d^2), so
+    /// d = 4.64061 m, x_cg = 12.35939 m = 58.985 %MAC.
     #[test]
     fn the_rotation_criterion_matches_a_hand_computed_moment_balance() {
         let mut input = base_input();
         input.rotation_thrust_to_weight = f64::NAN;
         input.rotation_rolling_friction_coefficient = 0.0;
         let limits = physical_cg_limits(&input);
-        // x_mg_frac = (17.0-10.0)/4.0 = 1.75; x_h_frac = (30.0-10.0)/4.0 = 5.0.
-        let x_mg_frac = 1.75;
-        let x_h_frac = 5.0;
-        let cl_r: f64 = 1.3;
-        let inertia_frac = 0.30_f64.powi(2) * 4.0 * 7.0_f64.to_radians() / 9.806_65;
-        let wing_lift_term = (0.6 / cl_r) * (x_mg_frac - 0.25);
-        let pitching_moment_term = -0.15 / cl_r;
-        let tail_download_term: f64 =
-            (ROTATION_CL_H * 0.9 * 0.9 * 0.25 / cl_r) * (x_mg_frac - x_h_frac);
-        let expected_frac =
-            x_mg_frac + inertia_frac - wing_lift_term - pitching_moment_term - tail_download_term;
+        // The expected boundary is computed here from `base_input`'s numbers
+        // with the explicit quadratic formula, not the solver's conjugate form.
+        let (x_p, lemac, chord) = (17.0, 10.0, 4.0);
+        let (cl_g, cl_r, cm_ac, cl_h, eta, s_ratio, x_h) = (0.6, 1.3, -0.15, -1.3, 0.9, 0.25, 30.0);
+        let (k_y, h_cg, accel_deg_s2, g) = (6.0_f64, 3.0_f64, 5.0_f64, 9.806_65);
+        let wing_lift_m = cl_g / cl_r * (x_p - (lemac + 0.25 * chord));
+        let pitching_moment_m = cm_ac / cl_r * chord;
+        let tail_lift_m = cl_h * eta * s_ratio / cl_r * (x_p - x_h);
+        let available_m = wing_lift_m + pitching_moment_m + tail_lift_m;
+        let kappa = accel_deg_s2.to_radians() / g;
+        let r = available_m - kappa * (k_y * k_y + h_cg * h_cg);
+        let offset_m = (-1.0 + (1.0 + 4.0 * kappa * r).sqrt()) / (2.0 * kappa);
+        let expected_pct_mac = (x_p - offset_m - lemac) / chord * 100.0;
         assert!(
-            (limits.rotation_fwd_pct_mac - expected_frac * 100.0).abs() < 1.0e-9,
-            "{} against {}",
-            limits.rotation_fwd_pct_mac,
-            expected_frac * 100.0
+            (limits.rotation_fwd_pct_mac - expected_pct_mac).abs() < 1.0e-9,
+            "{} against {expected_pct_mac}",
+            limits.rotation_fwd_pct_mac
         );
+        assert!(rotation_balance_residual_m(&input, limits.rotation_fwd_pct_mac, 0.0).abs() < 1e-9);
+        // A CG forward of the boundary cannot rotate; one aft of it can.
+        assert!(rotation_balance_residual_m(&input, limits.rotation_fwd_pct_mac - 1.0, 0.0) < 0.0);
+        assert!(rotation_balance_residual_m(&input, limits.rotation_fwd_pct_mac + 1.0, 0.0) > 0.0);
+        // Without the transfer of the inertia to the contact the balance
+        // would be linear, available - d = kappa k_y^2: the transfer moves
+        // the boundary aft.
+        let linear_offset_m = available_m - kappa * k_y * k_y;
+        let linear_pct_mac = (x_p - linear_offset_m - lemac) / chord * 100.0;
+        assert!(limits.rotation_fwd_pct_mac > linear_pct_mac);
+    }
+
+    /// A larger required pitch acceleration needs a larger tail moment, so
+    /// the boundary moves aft monotonically.
+    #[test]
+    fn the_rotation_boundary_moves_aft_as_the_required_pitch_acceleration_grows() {
+        let mut previous = f64::NEG_INFINITY;
+        for accel in [0.0, 2.0, 4.0, 6.0, 8.0, 10.0] {
+            let mut input = base_input();
+            input.rotation_angular_accel_deg_s2 = accel;
+            let boundary = physical_cg_limits(&input).rotation_fwd_pct_mac;
+            assert!(boundary > previous, "{accel} deg/s^2: {boundary}");
+            previous = boundary;
+        }
+    }
+
+    /// More up-elevator gives more tail download and moves the boundary
+    /// forward monotonically.
+    #[test]
+    fn the_rotation_boundary_moves_forward_as_the_elevator_deflects_further_up() {
+        let mut previous = f64::INFINITY;
+        for deflection_deg in [-5.0_f64, -10.0, -15.0, -20.0, -25.0, -30.0] {
+            let mut input = base_input();
+            input.rotation_tail_lift_coefficient = super::super::rotation::tail_lift_coefficient(
+                4.0,
+                (-2.0_f64).to_radians(),
+                3.0_f64.to_radians(),
+                0.6,
+                deflection_deg.to_radians(),
+            );
+            let boundary = physical_cg_limits(&input).rotation_fwd_pct_mac;
+            assert!(boundary < previous, "{deflection_deg} deg: {boundary}");
+            previous = boundary;
+        }
     }
 
     /// Hand-computed landing-trim-in-ground-effect criterion: the scissor

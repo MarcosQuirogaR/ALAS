@@ -69,28 +69,57 @@ pub(super) fn platform_user_data_root() -> PathBuf {
 }
 
 pub(super) fn installed_msc_roots() -> Vec<PathBuf> {
-    #[cfg(target_os = "windows")]
-    let Some(app_data) = env::var_os("APPDATA") else {
-        return Vec::new();
-    };
     #[cfg(not(target_os = "windows"))]
     return Vec::new();
     #[cfg(target_os = "windows")]
-    let editions = PathBuf::from(app_data)
-        .join("MSC.Software")
-        .join("MSC Nastran and Patran Student Editions");
-    #[cfg(target_os = "windows")]
-    let Ok(entries) = fs::read_dir(editions) else {
+    {
+        let program_files = ["ProgramW6432", "ProgramFiles", "ProgramFiles(x86)"]
+            .into_iter()
+            .filter_map(env::var_os)
+            .map(PathBuf::from)
+            .chain([PathBuf::from("C:/Program Files")])
+            .collect::<Vec<_>>();
+        let app_data = env::var_os("APPDATA").map(PathBuf::from);
+        msc_roots_from_locations(&program_files, app_data.as_deref())
+    }
+}
+
+#[cfg(any(target_os = "windows", test))]
+pub(super) fn msc_roots_from_locations(
+    program_files: &[PathBuf],
+    app_data: Option<&Path>,
+) -> Vec<PathBuf> {
+    let mut locations = program_files
+        .iter()
+        .map(|root| root.join("MSC.Software/NaPa_SE"))
+        .collect::<Vec<_>>();
+    if let Some(root) = app_data {
+        locations.push(root.join("MSC.Software/MSC Nastran and Patran Student Editions"));
+    }
+    let mut roots = Vec::new();
+    for location in locations {
+        for root in msc_versioned_roots(&location) {
+            if !roots.contains(&root) {
+                roots.push(root);
+            }
+        }
+    }
+    roots.sort_by_key(|(version, _)| std::cmp::Reverse(*version));
+    roots.into_iter().map(|(_, path)| path).collect()
+}
+
+#[cfg(any(target_os = "windows", test))]
+fn msc_versioned_roots(location: &Path) -> Vec<(u64, PathBuf)> {
+    let Ok(entries) = fs::read_dir(location) else {
         return Vec::new();
     };
-    #[cfg(target_os = "windows")]
-    {
-        let mut roots = entries
-            .filter_map(Result::ok)
-            .map(|entry| entry.path())
-            .filter(|path| path.is_dir())
-            .collect::<Vec<_>>();
-        roots.sort_by(|left, right| right.file_name().cmp(&left.file_name()));
-        roots
-    }
+    entries
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| path.is_dir())
+        .filter_map(|path| {
+            let version = path.file_name()?.to_str()?.parse::<u64>().ok()?;
+            Some((version, path))
+        })
+        .collect()
 }

@@ -262,6 +262,7 @@ fn read_modes_print(
 
 /// Run with the persisted desktop configuration when present, otherwise retain
 /// the environment-variable contract used by headless developer workflows.
+/// `ALAS_TOOL_DISCOVERY=disabled` suppresses this automatic fallback.
 pub fn run_nastran95_from_config_or_env(
     deck: &Deck,
     node_index: &MeshNodeIndex,
@@ -269,20 +270,7 @@ pub fn run_nastran95_from_config_or_env(
     requirements: &DesignRequirements,
     work_dir: &Path,
 ) -> Option<NastranResults> {
-    let dir = Path::new(config.nastran95_dir_path.trim());
-    let runtime = nonempty_path(&config.nastran95_runtime_path);
-    let rf_stage = nonempty_path(&config.nastran95_rf_stage_path);
-    let open_core_words = nonempty_text(&config.nastran95_open_core_words);
-    let solver = if dir.as_os_str().is_empty() {
-        Nastran95Solver::from_env().or_else(Nastran95Solver::from_adjacent_bundle)
-    } else {
-        Nastran95Solver::from_paths(
-            dir,
-            runtime.as_deref(),
-            rf_stage.as_deref(),
-            open_core_words.as_deref(),
-        )
-    }?;
+    let solver = configured_solver(config, alas_exec::tools::tool_discovery_enabled())?;
     Some(run_nastran95_analysis(
         deck,
         node_index,
@@ -291,6 +279,29 @@ pub fn run_nastran95_from_config_or_env(
         work_dir,
         &solver,
     ))
+}
+
+fn configured_solver(
+    config: &StructuresConfig,
+    discovery_enabled: bool,
+) -> Option<Nastran95Solver> {
+    if !discovery_enabled {
+        return None;
+    }
+    let dir = Path::new(config.nastran95_dir_path.trim());
+    let runtime = nonempty_path(&config.nastran95_runtime_path);
+    let rf_stage = nonempty_path(&config.nastran95_rf_stage_path);
+    let open_core_words = nonempty_text(&config.nastran95_open_core_words);
+    if dir.as_os_str().is_empty() {
+        Nastran95Solver::from_env().or_else(Nastran95Solver::from_adjacent_bundle)
+    } else {
+        Nastran95Solver::from_paths(
+            dir,
+            runtime.as_deref(),
+            rf_stage.as_deref(),
+            open_core_words.as_deref(),
+        )
+    }
 }
 
 /// Public helper retained for developer and test environments that configure
@@ -324,6 +335,32 @@ fn nonempty_text(value: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn disabled_discovery_skips_configured_local_solver_selection() -> std::io::Result<()> {
+        let root =
+            std::env::temp_dir().join(format!("alas-nastran95-discovery-{}", std::process::id()));
+        let executable = root.join("build/bin/nastran.exe");
+        fs::create_dir_all(root.join("build/bin"))?;
+        fs::create_dir_all(root.join("rf"))?;
+        fs::write(&executable, b"test")?;
+        fs::write(root.join("rf/NASINFO"), b"test")?;
+        let config = StructuresConfig {
+            nastran95_dir_path: root.display().to_string(),
+            ..StructuresConfig::default()
+        };
+
+        assert!(configured_solver(&config, false).is_none());
+        assert_eq!(
+            configured_solver(&config, true).map(|solver| solver.exe),
+            Some(executable.clone())
+        );
+        assert_eq!(
+            Nastran95Solver::from_paths(&root, None, None, None).map(|solver| solver.exe),
+            Some(executable)
+        );
+        fs::remove_dir_all(root)
+    }
 
     #[test]
     fn local_static_prints_report_tip_deflection_without_fabricating_stress() {

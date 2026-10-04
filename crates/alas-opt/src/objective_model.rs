@@ -7,7 +7,7 @@
 //! (stability, CG envelope, tank capacity, cabin sizing, geometry bounds).
 
 use alas_config::cabin::annotate_flops_cabin_resolution;
-use alas_config::design_variables::DesignVector;
+use alas_config::design_variables::{DesignVector, SPECS};
 use alas_config::optimizer::DesignMode;
 use alas_config::AlasConfig;
 use alas_geom::aircraft::spacing::linspace;
@@ -221,15 +221,7 @@ impl DesignObjective {
     ) -> Self {
         let target_num_passengers = config.requirements.min_passenger_capacity;
         let target_cargo_payload_kg = config.requirements.cargo_target_kg();
-        let nominal = nominal.unwrap_or_else(|| {
-            if config.preset.is_empty() {
-                DesignVector::default()
-            } else {
-                alas_config::presets::get(&config.preset)
-                    .map(|preset| preset.design_vector)
-                    .unwrap_or_default()
-            }
-        });
+        let nominal = nominal.unwrap_or_else(|| config.configured_nominal_design());
         Self {
             config,
             history: OptimizationHistory::new(),
@@ -278,11 +270,25 @@ impl DesignObjective {
             {
                 continue;
             }
-            let tolerance = 1.0e-10 * envelope.lower.abs().max(envelope.upper.abs()).max(1.0);
-            if value < envelope.lower - tolerance || value > envelope.upper + tolerance {
+            // A clean sheet's derived or explicit box steers its search; it
+            // protects no reference aircraft. Direct assessment therefore
+            // still admits every vector the global box admits, under the
+            // same aerodrome span limit.
+            let (lower, upper) = match SPECS.get(index) {
+                Some(spec) if space.mode == DesignMode::CleanSheet => {
+                    let mut upper = envelope.upper.max(spec.upper);
+                    if envelope.name == "span_m" {
+                        upper = upper.min(self.config.max_design_span_m().unwrap_or(upper));
+                    }
+                    (envelope.lower.min(spec.lower), upper)
+                }
+                _ => (envelope.lower, envelope.upper),
+            };
+            let tolerance = 1.0e-10 * lower.abs().max(upper.abs()).max(1.0);
+            if value < lower - tolerance || value > upper + tolerance {
                 return Err(format!(
                     "design variable {} ({}) lies outside the {:?} envelope [{}, {}]",
-                    index, envelope.name, space.mode, envelope.lower, envelope.upper
+                    index, envelope.name, space.mode, lower, upper
                 ));
             }
         }

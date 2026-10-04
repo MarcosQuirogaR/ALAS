@@ -67,7 +67,7 @@ pub struct AcceptanceRoute {
 }
 
 /// One candidate's reporting-fidelity outcome.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct FinalistVerification {
     /// The candidate that was re-evaluated.
     pub design: DesignVector,
@@ -80,15 +80,6 @@ pub struct FinalistVerification {
     pub load_case: Option<SelectedLoadCase>,
     /// The feasibility assessment of the delivered aircraft.
     pub feasibility: FeasibilityReport,
-    /// Hard limits this candidate met only through the controlled-relaxation
-    /// policy, prefixed `relaxed:`. Empty under the shipped strict policy.
-    ///
-    /// A relaxed candidate is admissible for the *search*, and it is never
-    /// acceptable as a delivered aircraft: the acceptance gate exists to say
-    /// whether the application considers the design feasible, and a relaxed
-    /// design is by definition one it does not. Carrying the identifiers here
-    /// is what keeps that distinction visible instead of silent.
-    pub relaxed_limits: Vec<String>,
     /// The violated hard relative balance guards of the reported analysis
     /// (`usable_cg_range_vs_nominal`, `tail_scrape_vs_nominal`, or
     /// `relative_balance_nominal_unavailable`), measured against the
@@ -96,6 +87,9 @@ pub struct FinalistVerification {
     /// ([`ReportingNominal`]). Empty when no guard applies.
     pub relative_balance: Vec<alas_opt::ConstraintResidual>,
 }
+
+mod reuse;
+pub use reuse::VerifiedAnalysis;
 
 /// The registered aircraft a reference adaptation redesigns, re-evaluated
 /// once per run at reporting fidelity, exactly as a finalist is.
@@ -115,8 +109,7 @@ pub struct ReportingNominal {
 
 impl ReportingNominal {
     /// The nominal of `config` at reporting fidelity, or `None` when no
-    /// finalist can be rejected by the guard: outside a reference adaptation
-    /// or under a Balance policy that is not hard.
+    /// finalist can be rejected by the guard, outside a reference adaptation.
     ///
     /// # Errors
     ///
@@ -127,9 +120,7 @@ impl ReportingNominal {
         route: Option<&AcceptanceRoute>,
         cancel: Option<&std::sync::atomic::AtomicBool>,
     ) -> Option<Result<Self, String>> {
-        if config.optimizer.design_space.mode != alas_config::DesignMode::ReferenceAdaptation
-            || config.optimizer.objective.balance_constraints != alas_config::ConstraintPolicy::Hard
-        {
+        if config.optimizer.design_space.mode != alas_config::DesignMode::ReferenceAdaptation {
             return None;
         }
         let design = match alas_config::presets::get(&config.preset) {
@@ -158,13 +149,23 @@ impl ReportingNominal {
         &self.design
     }
 
-    /// The nominal's model CG envelope on the reported analysis, `None` when
+    pub(crate) fn verified_analysis(
+        &self,
+        config: &AlasConfig,
+        route: Option<&AcceptanceRoute>,
+    ) -> Option<VerifiedAnalysis> {
+        self.evaluation.as_ref().ok().map(|(verification, _)| {
+            VerifiedAnalysis::new(config.clone(), route.cloned(), verification.clone())
+        })
+    }
+
+    /// The nominal's design-loading CG envelope on the reported analysis, `None` when
     /// it could not be evaluated.
     fn model_cg(&self) -> Option<&alas_opt::ModelCgEnvelopeAssessment> {
         self.evaluation
             .as_ref()
             .ok()
-            .and_then(|(verification, _)| verification.feasibility.model_cg.as_ref())
+            .and_then(|(verification, _)| verification.feasibility.design_model_cg.as_ref())
     }
 }
 
@@ -191,10 +192,9 @@ impl FinalistVerification {
     }
 
     /// Identifiers of everything that rejects this design: the error-severity
-    /// findings, and any limit met only through the relaxation policy.
+    /// findings and violated relative balance guards.
     pub fn rejected_by(&self) -> Vec<String> {
         let mut rejected = rejecting_finding_ids(&self.feasibility);
-        rejected.extend(self.relaxed_limits.iter().cloned());
         rejected.extend(
             self.relative_balance
                 .iter()
@@ -252,19 +252,20 @@ pub fn verify_finalist_cancellable(
 /// Record the violated hard relative balance guards of `verification`'s
 /// reported analysis against `nominal`. A candidate without a model CG
 /// assessment already carries the error finding that rejects it.
-fn hold_to_nominal(
+pub(crate) fn hold_to_nominal(
     verification: &mut FinalistVerification,
     config: &AlasConfig,
     nominal: Option<&ReportingNominal>,
 ) {
-    let (Some(nominal), Some(candidate)) = (nominal, verification.feasibility.model_cg.as_ref())
+    let (Some(nominal), Some(candidate)) =
+        (nominal, verification.feasibility.design_model_cg.as_ref())
     else {
         return;
     };
     verification.relative_balance =
         alas_opt::reporting_relative_balance(candidate, nominal.model_cg(), config)
             .into_iter()
-            .filter(|r| r.policy == alas_config::ConstraintPolicy::Hard && r.violated())
+            .filter(|r| r.role == alas_opt::mdo::ResidualRole::Constraint && r.violated())
             .collect();
 }
 
@@ -324,10 +325,12 @@ pub fn compare_with_baseline(
 /// tail volume coefficients (`ResolvedProductState::design` and
 /// `::tail_sizing`). The fin scale lives in the empennage configuration, not
 /// in the vector, so a rebuild from the vector alone draws the unsized fin.
+/// A redesigned candidate's main gear is placed by the search
+/// (`ResolvedProductState::main_gear_placement`) and is written back too.
 /// Every reporting-fidelity rebuild goes through here so the report, the
 /// mission and the feasibility verdict describe the aircraft the search
 /// scored.
-pub(crate) fn apply_assessed_aircraft(
+pub fn apply_assessed_aircraft(
     resolved: &alas_opt::ResolvedProductState,
     config: &mut AlasConfig,
 ) -> DesignVector {
@@ -335,6 +338,7 @@ pub(crate) fn apply_assessed_aircraft(
     resolved
         .tail_sizing
         .apply_to(&mut config.geometry.empennage, &mut design);
+    config.landing_gear.derived_main_gear = resolved.main_gear_placement;
     design
 }
 
@@ -357,7 +361,7 @@ fn reporting_fidelity(
         })?;
     let violated = assessment.violated_hard_ids();
     if require_hard_feasible && !assessment.hard_feasible {
-        let violations = violated.join(", ");
+        let violations = assessment.violated_hard_details().join(", ");
         return Err(format!(
             "finalist is not hard-feasible on replay: {}",
             if violations.is_empty() {
@@ -367,12 +371,6 @@ fn reporting_fidelity(
             }
         ));
     }
-    let relaxed_limits = assessment
-        .relaxation
-        .relaxed_ids
-        .iter()
-        .map(|id| format!("relaxed:{id}"))
-        .collect();
     // The aircraft the gate above passed, not the vector it was handed: the
     // resolved design (a clean-sheet space derives the fuselage from the
     // cabin) with its solved tail sizing, so the report, mission and
@@ -412,7 +410,6 @@ fn reporting_fidelity(
             mission,
             load_case,
             feasibility,
-            relaxed_limits,
             relative_balance: Vec::new(),
         },
         violated,
@@ -531,18 +528,17 @@ mod tests {
     /// aircraft on the reported mesh: the registered aircraft itself passes,
     /// a finalist whose reported usable CG range lies below the reported
     /// nominal is rejected (and the ladder moves on), and an unavailable
-    /// nominal rejects under the hard Balance policy.
+    /// nominal rejects the candidate.
     #[test]
     fn a_finalist_below_the_reporting_fidelity_nominal_cg_range_is_rejected() {
+        // The registered aircraft must itself be short of the 30 %MAC range:
+        // the A380-800 is; the A320's usable range exceeds it with the
+        // derived rotation authority.
         let config = AlasConfig::from_value(&serde_json::json!({
-            "preset": "A320-200",
+            "preset": "A380-800",
             "optimizer": {"design_space": {"mode": "reference_adaptation"}}
         }))
         .expect("valid configuration");
-        assert_eq!(
-            config.optimizer.objective.balance_constraints,
-            alas_config::ConstraintPolicy::Hard
-        );
         let nominal = ReportingNominal::evaluate(&config, None, None)
             .expect("a hard reference adaptation has a reporting nominal")
             .expect("not cancelled");
@@ -550,7 +546,7 @@ mod tests {
         let range = |verification: &FinalistVerification| {
             verification
                 .feasibility
-                .model_cg
+                .design_model_cg
                 .as_ref()
                 .expect("model CG assessed")
                 .loading_states
@@ -564,7 +560,7 @@ mod tests {
         let worst = range(own);
         assert!(
             worst.actual < worst.limit,
-            "the registered A320 meets the requirement on the reported mesh"
+            "the registered A380 meets the requirement on the reported mesh"
         );
 
         // The registered aircraft against itself: the guard passes.
@@ -577,7 +573,7 @@ mod tests {
         let mut wider = own.clone();
         for state in &mut wider
             .feasibility
-            .model_cg
+            .design_model_cg
             .as_mut()
             .expect("model CG")
             .loading_states
@@ -619,12 +615,6 @@ mod tests {
         assert!(finalist
             .rejected_by()
             .contains(&"hard:relative_balance_nominal_unavailable".to_owned()));
-
-        // A diagnostic Balance policy has no reporting nominal to evaluate.
-        let mut diagnostic = config.clone();
-        diagnostic.optimizer.objective.balance_constraints =
-            alas_config::ConstraintPolicy::Diagnostic;
-        assert!(ReportingNominal::evaluate(&diagnostic, None, None).is_none());
     }
 
     #[test]

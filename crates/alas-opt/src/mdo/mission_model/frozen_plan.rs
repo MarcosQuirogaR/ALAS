@@ -210,33 +210,64 @@ impl SegmentMissionModel {
         let mut model = self.clone();
         model.profile.cruise_altitude_policy = *policy;
         model.frozen = None;
-        let fly = |steps: usize| {
+        let choose = |steps: usize| {
             let mut refined = model.clone();
             refined.steps_per_segment = steps;
             refined.fly_adapted(LegKind::Trip, takeoff_mass_kg, range_m, true)
         };
-        let frozen = |flown: Adapted, steps: usize, error_kg: f64| FrozenMissionPlan {
-            policy: *policy,
-            takeoff_mass_kg,
-            range_m,
-            cruise_altitude_m: flown.cruise_m,
-            climb_rate_scales: flown.scales,
-            trip_fuel_kg: flown.flown.leg.fuel_kg,
-            step_positions: flown.flown.step_positions,
-            steps_per_segment: steps,
-            richardson_error_kg: error_kg,
+        let replay = |steps: usize, choices: &Adapted| {
+            let mut refined = model.clone();
+            refined.steps_per_segment = steps;
+            refined
+                .fly_at_scales(
+                    LegKind::Trip,
+                    takeoff_mass_kg,
+                    range_m,
+                    choices.scales,
+                    Some((choices.cruise_m, &choices.flown.step_positions)),
+                    true,
+                )
+                .map(|(flown, _)| flown)
         };
+        let frozen =
+            |choices: Adapted, flown: FlownLeg, steps: usize, error_kg: f64| FrozenMissionPlan {
+                policy: *policy,
+                takeoff_mass_kg,
+                range_m,
+                cruise_altitude_m: choices.cruise_m,
+                climb_rate_scales: choices.scales,
+                trip_fuel_kg: flown.leg.fuel_kg,
+                step_positions: choices.flown.step_positions,
+                steps_per_segment: steps,
+                richardson_error_kg: error_kg,
+            };
         let mut steps = self.steps_per_segment.max(1);
-        let mut coarse = fly(steps)?;
         loop {
-            let fine = fly(2 * steps)?;
-            match refine(steps, coarse.flown.leg.fuel_kg, fine.flown.leg.fuel_kg)? {
-                Refinement::Coarse(error_kg) => return Ok(frozen(coarse, steps, error_kg)),
-                Refinement::Fine(error_kg) => return Ok(frozen(fine, 2 * steps, error_kg)),
-                Refinement::Double => {
-                    steps *= 2;
-                    coarse = fine;
+            // Changing level, climb-rate scales or step positions between
+            // grids measures plan changes, not integration error. Both
+            // grids fly the same choices selected by the finer model.
+            let choices = choose(2 * steps)?;
+            let fine =
+                replay(2 * steps, &choices).map_err(|error| into_model_error(error, range_m))?;
+            let coarse = match replay(steps, &choices) {
+                Ok(flown) => flown,
+                Err(FlyError::Fuel(error @ FuelModelError::Cancelled)) => return Err(error.into()),
+                Err(error) if 2 * steps >= MAX_STEPS_PER_SEGMENT => {
+                    return Err(into_model_error(error, range_m).into());
                 }
+                Err(_) => {
+                    steps *= 2;
+                    continue;
+                }
+            };
+            match refine(steps, coarse.leg.fuel_kg, fine.leg.fuel_kg)? {
+                Refinement::Coarse(error_kg) => {
+                    return Ok(frozen(choices, coarse, steps, error_kg))
+                }
+                Refinement::Fine(error_kg) => {
+                    return Ok(frozen(choices, fine, 2 * steps, error_kg))
+                }
+                Refinement::Double => steps *= 2,
             }
         }
     }

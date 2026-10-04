@@ -14,7 +14,7 @@ fn args() -> Args {
         timeout_s: None,
         preset: Some("A320-200".to_owned()),
         experiment: None,
-        native_only: false,
+        native_only: true,
         mtow_mode: None,
         time_limit_s: None,
         max_evaluations: None,
@@ -24,6 +24,36 @@ fn args() -> Args {
         stop_on_evaluations: false,
         workers: None,
     }
+}
+
+#[test]
+fn full_fidelity_valid_counts_distinct_feasible_designs_only() {
+    let nominal = alas_config::DesignVector::default();
+    let changed = alas_config::DesignVector {
+        span_m: nominal.span_m + 1.0,
+        ..nominal
+    };
+    let signed_zero = alas_config::DesignVector {
+        wing_x_shift_m: -0.0,
+        ..nominal
+    };
+    let history = alas_opt::OptimizationHistory {
+        design_vectors: vec![nominal, nominal, signed_zero, changed],
+        valid: vec![true, true, true, false],
+        hard_violation: vec![0.0; 4],
+        cost: vec![1.0; 4],
+        objective_value: vec![1.0; 4],
+        ..Default::default()
+    };
+    assert_eq!(exposure::full_fidelity_valid(&history), 1);
+    let mut history = history;
+    history.valid[3] = true;
+    assert_eq!(exposure::full_fidelity_valid(&history), 2);
+    history.hard_violation[3] = f64::EPSILON;
+    assert_eq!(exposure::full_fidelity_valid(&history), 1);
+    history.hard_violation[3] = 0.0;
+    history.objective_value[3] = f64::NAN;
+    assert_eq!(exposure::full_fidelity_valid(&history), 1);
 }
 
 #[test]
@@ -217,10 +247,12 @@ fn native_only_changes_only_external_execution_switches() {
 }
 
 #[test]
-fn native_scope_survives_early_failure_and_default_stays_full() {
+fn native_scope_survives_early_failure_and_external_tools_require_opt_in() {
     let values = ["--output-dir", ".", "--native-only"].map(str::to_owned);
     assert!(parse_args(&values).unwrap().native_only);
-    assert!(!parse_args(&values[..2]).unwrap().native_only);
+    assert!(parse_args(&values[..2]).unwrap().native_only);
+    let external = ["--output-dir", ".", "--external-tools"].map(str::to_owned);
+    assert!(!parse_args(&external).unwrap().native_only);
     let (configuration, settings) = Configuration::resolve(&args()).unwrap();
     let locator = ToolLocator::for_current_process();
     let row = evaluate_preset_optimization(
@@ -242,10 +274,14 @@ fn native_scope_survives_early_failure_and_default_stays_full() {
 }
 
 #[test]
-fn every_mtow_mode_name_parses_and_an_unknown_one_is_refused() {
+fn aircraft_benchmarks_accept_only_the_user_facing_mtow_modes() {
     for mode in MtowSizing::ALL {
         let values = ["--output-dir", ".", "--mtow-mode", mode.as_str()].map(str::to_owned);
-        assert_eq!(parse_args(&values).unwrap().mtow_mode, Some(mode));
+        if super::controls::USER_MTOW_MODES.contains(&mode) {
+            assert_eq!(parse_args(&values).unwrap().mtow_mode, Some(mode));
+        } else {
+            assert!(parse_args(&values).is_err(), "{mode:?}");
+        }
     }
     let values = ["--output-dir", ".", "--mtow-mode", "nonsense"].map(str::to_owned);
     assert!(parse_args(&values).is_err());

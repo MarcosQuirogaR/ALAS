@@ -65,6 +65,9 @@ pub fn figure_landing_gear_planform(
     theme: Option<&str>,
 ) -> Scene {
     let pal = get_palette(theme);
+    // The gear where this report's aircraft has it, whichever configuration
+    // the caller holds.
+    let config = &alas_pipeline::gear_stations::report_config(config, report);
     let plane = &report.airplane;
     let masses = &report.component_masses;
     let mac = plane.c_ref;
@@ -254,26 +257,39 @@ pub fn figure_landing_gear_planform(
     scene.title = Some("Landing-Gear Planform".to_owned());
     axes.draw_frame(&mut scene, pal);
 
-    scene.add(SceneElement::Text {
-        text: format!(
-            "Strut: {}   |   Track: {:.2} m   |   Wheelbase: {:.2} m   |   Turnover: {:.0} deg ({})",
-            gear.strut_material,
-            gear.track_width_m,
-            gear.wheelbase_m,
-            gear.turnover_angle_deg,
-            if gear.turnover_ok { "OK" } else { "EXCEEDS LIMIT" }
+    // The gear summary takes two centred lines: on one line it is wider than
+    // the 520 px canvas and both ends were cut.
+    for (text, y) in [
+        (format!("Strut: {}", gear.strut_material), 38.0),
+        (
+            format!(
+                "Track: {:.2} m  |  Wheelbase: {:.2} m  |  Turnover: {:.0} deg ({})",
+                gear.track_width_m,
+                gear.wheelbase_m,
+                gear.turnover_angle_deg,
+                if gear.turnover_ok {
+                    "OK"
+                } else {
+                    "EXCEEDS LIMIT"
+                }
+            ),
+            51.0,
         ),
-        pos: [canvas_w / 2.0, 46.0],
-        font_size: 9.0,
-        color: Color::from_hex(pal.title),
-        align: TextAlign::Center,
-        baseline: TextBaseline::Middle,
-        angle_deg: 0.0,
-        bold: false,
-    });
+    ] {
+        scene.add(SceneElement::Text {
+            text,
+            pos: [canvas_w / 2.0, y],
+            font_size: 9.0,
+            color: Color::from_hex(pal.title),
+            align: TextAlign::Center,
+            baseline: TextBaseline::Middle,
+            angle_deg: 0.0,
+            bold: false,
+        });
+    }
     scene.add(SceneElement::Text {
         text: crate::families::mass_balance::mass_method_note(config).to_owned(),
-        pos: [canvas_w / 2.0, 60.0],
+        pos: [canvas_w / 2.0, 63.0],
         font_size: 7.6,
         color: Color::from_hex(pal.tick),
         align: TextAlign::Center,

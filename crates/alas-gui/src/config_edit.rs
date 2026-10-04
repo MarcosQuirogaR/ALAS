@@ -195,30 +195,28 @@ impl AppState {
             );
             return;
         };
+        let from_preset = !config.preset.is_empty();
         if config.optimizer.design_space.mode == mode {
             self.run_options.optimize = mode != DesignMode::BaselineSandbox;
             if mode == DesignMode::BaselineSandbox {
                 self.run_options.compare_baseline = false;
             }
             if mode == DesignMode::CleanSheet && !config.preset.is_empty() {
-                // A registered aircraft is a reference starting point. Once
-                // the user explicitly chooses New aircraft, clear that
-                // provenance so clean-sheet-only inputs (including passenger
-                // target) become available while retaining the current shape
-                // as a useful starting geometry.
+                // Choosing New aircraft clears the registered provenance, so
+                // clean-sheet inputs (the passenger target among them) open
+                // while the current shape stays as the starting geometry.
                 config.preset.clear();
                 self.active_preset.clear();
                 self.config_values = full_config_values(&config);
                 self.on_config_modified();
             }
-            self.reset_design_space_bounds_to_mode();
+            self.reset_design_space_after_mode_change(mode, from_preset);
             return;
         }
         config.optimizer.design_space.mode = mode;
         if mode == DesignMode::CleanSheet {
-            // New aircraft studies may start from the currently displayed
-            // geometry, but they must not carry a registered aircraft's
-            // fixed passenger load case into the product model.
+            // A new aircraft keeps the displayed geometry, never a registered
+            // aircraft's fixed passenger load case.
             config.preset.clear();
             self.active_preset.clear();
         }
@@ -227,7 +225,7 @@ impl AppState {
         if mode == DesignMode::BaselineSandbox {
             self.run_options.compare_baseline = false;
         }
-        self.reset_design_space_bounds_to_mode();
+        self.reset_design_space_after_mode_change(mode, from_preset);
         self.log(
             tr_fields(
                 "Design mode changed to: {mode}",
@@ -236,25 +234,6 @@ impl AppState {
             LogKind::Info,
         );
         self.on_config_modified();
-    }
-
-    /// Rebuild the GUI bounds from the same typed design-mode envelope the
-    /// product optimizer intersects with its request. This is called after a
-    /// mode/window/preset change; ordinary design-space edits still remain
-    /// explicit run bounds within that declared envelope.
-    pub fn reset_design_space_bounds_to_mode(&mut self) {
-        let Some(config) = self.typed_config() else {
-            return;
-        };
-        let nominal = self.current_design().unwrap_or_default();
-        for variable in config.optimizer.design_space.envelope(&nominal) {
-            self.bounds
-                .insert(variable.name.to_owned(), (variable.lower, variable.upper));
-            if variable.fixed {
-                self.design_values
-                    .insert(variable.name.to_owned(), variable.nominal);
-            }
-        }
     }
 
     /// Apply one aux-preset (the Py6-era fidelity/solver/performance pickers)

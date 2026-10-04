@@ -9,6 +9,7 @@ mod aux_preset;
 mod cabin_editor;
 mod engine;
 mod mission_form;
+mod optimizer_reset;
 pub(crate) mod placement;
 mod preview;
 mod sections;
@@ -124,6 +125,10 @@ pub fn show_form_page_locked(state: &mut AppState, ui: &mut Ui, page: &Page, loc
 
     let visible_fields = placement::visible_fields(page, group, &fields);
     ui.add_enabled_ui(!locked, |ui| {
+        if page.id == "mass_advanced" {
+            crate::views::inputs_mtow::show_mtow_controls(state, ui);
+            ui.separator();
+        }
         render_editor(
             state,
             ui,
@@ -142,6 +147,13 @@ pub fn show_form_page_locked(state: &mut AppState, ui: &mut Ui, page: &Page, loc
 }
 
 pub(super) fn reset_page_to_defaults(state: &mut AppState, page: &Page, group: &str) {
+    if group == "optimizer" {
+        optimizer_reset::reset(state, page);
+        return;
+    }
+    if page.id == "mass_advanced" {
+        reset_mtow_fields(state);
+    }
     if page.id == "propulsion_advanced" {
         reset_relocated_propulsion_fields(state);
     }
@@ -166,6 +178,62 @@ pub(super) fn reset_page_to_defaults(state: &mut AppState, page: &Page, group: &
         state.reset_group_to_defaults_preserving(group, &preserve);
     } else {
         state.reset_group_to_defaults(group);
+    }
+}
+
+/// Restore the MTOW controls to the registered aircraft, or generic defaults.
+fn reset_mtow_fields(state: &mut AppState) {
+    let preset = state
+        .config_values
+        .get("preset")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("");
+    let defaults = if alas_config::presets::get(preset).is_ok() {
+        alas_config::AlasConfig::from_value(&serde_json::json!({"preset": preset}))
+            .unwrap_or_default()
+    } else {
+        alas_config::AlasConfig::default()
+    };
+    if let Some(requirements) = state
+        .group_mut("requirements")
+        .and_then(serde_json::Value::as_object_mut)
+    {
+        requirements.insert(
+            "mtow_kg".to_owned(),
+            serde_json::json!(defaults.requirements.mtow_kg),
+        );
+    }
+    if let Some(optimizer) = state
+        .group_mut("optimizer")
+        .and_then(serde_json::Value::as_object_mut)
+    {
+        let Some(objective) = optimizer
+            .entry("objective")
+            .or_insert_with(|| serde_json::json!({}))
+            .as_object_mut()
+        else {
+            return;
+        };
+        for (field, value) in [
+            (
+                "mtow_sizing",
+                serde_json::json!(defaults.optimizer.objective.mtow_sizing),
+            ),
+            (
+                "mtow_target_kg",
+                serde_json::json!(defaults.optimizer.objective.mtow_target_kg),
+            ),
+            (
+                "mtow_band_fraction",
+                serde_json::json!(defaults.optimizer.objective.mtow_band_fraction),
+            ),
+            (
+                "design_range_nmi",
+                serde_json::json!(defaults.optimizer.objective.design_range_nmi),
+            ),
+        ] {
+            objective.insert(field.to_owned(), value);
+        }
     }
 }
 

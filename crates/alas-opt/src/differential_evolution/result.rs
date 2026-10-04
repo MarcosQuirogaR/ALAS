@@ -102,10 +102,9 @@ pub struct SearchDiagnostics {
     pub screening_evaluations: usize,
     /// Screened candidates feasible under the screening model.
     pub screening_feasible: usize,
-    /// Screening elite members seeded into the refinement's initial
-    /// population. They cost a refinement analysis only when the screening
-    /// model differs from the refinement's; with the shipped (same) model
-    /// they are exact cache hits.
+    /// Screening elite designs scored on the refinement path. Separate
+    /// screening requires full-model analyses; a shared model reuses its
+    /// scores. This is distinct from reporting-mesh finalist verification.
     pub verification_evaluations: usize,
     /// Wall-clock seconds in the screening stage.
     pub scan_wall_time_s: f64,
@@ -161,6 +160,10 @@ pub struct SearchDiagnostics {
     /// than searched for.
     #[serde(default)]
     pub winner_history_row: Option<usize>,
+    /// Every candidate the run requested, across every stage, for display
+    /// ([`crate::EvaluationTrace`]).
+    #[serde(default)]
+    pub evaluation_trace: crate::EvaluationTrace,
 }
 
 /// Termination label for a run whose delivered design was rejected by the

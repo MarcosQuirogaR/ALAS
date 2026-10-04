@@ -54,6 +54,12 @@ filter = "package(alas-exec) & test(/^openfoam::tests::(timeout|cancellation)_|^
 threads-required = "num-test-threads"
 retries = 2
 
+# Quick-analysis lifecycle checks await worker completion against fixed
+# wall-clock deadlines, so competing numerical analyses must not starve them.
+[[profile.default.overrides]]
+filter = "package(alas-gui) & test(/^sandbox::quick::tests::(a_completed_job_terminates_every_metric_for_its_revision|a_superseded_job_never_repopulates_the_newer_revision|invalidation_marks_results_stale_without_discarding_them)$/)"
+threads-required = "num-test-threads"
+
 #
 # Quarantine list: tests that depend on wall-clock time or machine load. They
 # run in the wall-clock group and get two retries. Nextest reports every retry

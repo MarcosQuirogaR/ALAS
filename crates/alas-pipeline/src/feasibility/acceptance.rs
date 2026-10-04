@@ -685,7 +685,7 @@ mod tests {
             );
         }
         // The A220-300 and the ATR 72-600 register an advertised range, so
-        // range alone is no longer in their gap; nothing else has moved.
+        // range alone is not in their gap; nothing else has moved.
         let a220 = mission_evidence_gap(&config("A220-300")).expect("A220-300 gap");
         assert!(!a220.contains(&MissingDesignMissionDatum::Range));
         let ave = mission_evidence_gap(&config("AVE")).expect("AVE gap");

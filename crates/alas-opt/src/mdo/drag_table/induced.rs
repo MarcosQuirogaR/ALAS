@@ -105,6 +105,7 @@ pub(crate) struct DesignTrim {
 pub(super) fn induced_curve(
     aero: &AeroAnalysis<'_>,
     design: &DesignTrim,
+    screening: bool,
 ) -> Result<(InducedCurve, InducedCheck), DragTableError> {
     if !(design.cl > 0.0
         && design.cl <= design.cl_max_clean
@@ -148,11 +149,13 @@ pub(super) fn induced_curve(
         checked &=
             checked_point(coefficients, point).relative_error() <= INDUCED_CHECK_RELATIVE_TOLERANCE;
     }
-    for pair in boundaries.windows(2) {
-        for fraction in [0.25, 0.75] {
-            let point = sample(pair[0].0 + fraction * (pair[1].0 - pair[0].0))?;
-            checked &= checked_point(coefficients, point).relative_error()
-                <= INDUCED_CHECK_RELATIVE_TOLERANCE;
+    if !screening || !checked {
+        for pair in boundaries.windows(2) {
+            for fraction in [0.25, 0.75] {
+                let point = sample(pair[0].0 + fraction * (pair[1].0 - pair[0].0))?;
+                checked &= checked_point(coefficients, point).relative_error()
+                    <= INDUCED_CHECK_RELATIVE_TOLERANCE;
+            }
         }
     }
     let mut pieces = Vec::new();
@@ -288,7 +291,7 @@ pub(super) fn trimmed_node(
             cl_alpha: t.cl_alpha,
         };
         let perf = aero
-            .trimmed_performance(&point, design.mach, design.altitude_m)
+            .trimmed_inviscid(&point, design.mach, design.altitude_m)
             .map_err(|error| DragTableError::Solve(error.to_string()))?;
         let change = [perf.cl - cl_target - r_cl, perf.cm_residual - r_cm];
         r_cl = perf.cl - cl_target;

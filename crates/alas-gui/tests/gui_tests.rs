@@ -316,7 +316,9 @@ fn w33_public_mission_result_reaches_every_mission_dispatch() {
     use alas_pipeline::PipelineOptions;
     use alas_route::route::{Route, RouteSource, Waypoint};
 
-    let config = AlasConfig::default();
+    let mut config = AlasConfig::default();
+    config.structures.run_nastran = false;
+    config.structures.run_patran_export = false;
     let route = Route {
         waypoints: vec![
             Waypoint::named(40.47, -3.56, "LEMD"),

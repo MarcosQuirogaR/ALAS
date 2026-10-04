@@ -15,12 +15,17 @@
 //! p. 119). The A320-200 17 %MAC, the A340-300 20.3 %MAC and the A380-800
 //! 34.65-37.8 %MAC are the ACAP most-forward CG used in the pavement-load
 //! analysis at MRW (Aircraft Characteristics section 7-3), not certified
-//! limits. The A380 is not an anchor at all. The A340 stays as an ignored
-//! known residual: the model rotation limit (26.0 %MAC) sits 5.7 points aft
-//! of 20.3. The DC-10 is a known failure,
-//! not tuned: its centerline tail engine puts a thrust line above the CG and
-//! its main-gear station is not anchored to a source, and no published
-//! forward limit was retrieved for it.
+//! limits. The A380 is not an anchor at all. No published forward limit
+//! was retrieved for the DC-10.
+//!
+//! The tail lift at rotation is derived from the tail geometry with the
+//! plain-flap large-deflection correction and the tail-section lift cap, and
+//! the pitch inertia is transferred to the main-gear contact. The A320 and
+//! A220 rotation boundaries then lie forward of the published values (A320
+//! 9.2, A220 -3.0 %MAC; the earlier upper-bound tail lift gave -17.5 and
+//! -37.9): the inequalities hold and those published limits are set by
+//! criteria other than rotation. The A340 boundary (28.3 %MAC) lies aft of
+//! its ACAP 20.3 %MAC: a known residual, not tuned away.
 
 use alas_config::AlasConfig;
 use alas_pipeline::FullAnalysis;
@@ -83,11 +88,9 @@ fn the_rotation_limit_is_not_aft_of_published_forward_limits() {
 /// used in the pavement-load analysis at the WV025/WV029 ramp weight (Airbus
 /// A340-200/-300 Aircraft Characteristics, Dec 2025, Fig. 7-3-0-991-007), not
 /// a certified limit; LEMAC 28.083 m from that section's two-point statics,
-/// MAC 7.270 m (EASA TCDS). The model rotation boundary sits about 5.7 %MAC
-/// aft of it, so this stays a visible known residual rather than a widened
-/// tolerance.
+/// MAC 7.270 m (EASA TCDS).
 #[test]
-#[ignore = "known residual: model rotation limit 26.0 % vs ACAP 20.3 % MAC"]
+#[ignore = "known residual: model rotation limit 28.3 % vs ACAP 20.3 % MAC"]
 fn the_a340_300_rotation_limit_is_not_aft_of_its_published_forward_limit() {
     let rotation = rotation_limit_in_manufacturer_frame("A340-300", 28.083, 7.270);
     assert!(

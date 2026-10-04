@@ -14,9 +14,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 /// Extra settings persisted beside the study contract.
 ///
 /// OpenFOAM preferences belong to the execution environment rather than to
-/// an airfoil.  The top-level Gmsh key is read as a fallback for settings files that
-/// carry only it; the typed OpenFOAM preference is the source consumed by the
-/// worker.  The wrapper is deliberately versionless and `serde(default)` keeps
+/// an airfoil.  The top-level Gmsh key is read as a fallback for settings
+/// files that carry only it; the typed OpenFOAM preference is the source
+/// consumed by the worker.  The wrapper is deliberately versionless and `serde(default)` keeps
 /// files that omit a key readable.
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
@@ -32,10 +32,9 @@ impl AirfoilCfdState {
         let environment_path = environment_preferences_path(locator);
         let environment = read_environment_preferences(&environment_path);
         let mut openfoam_preferences = environment.openfoam;
-        // Migrate the first GUI version's top-level Gmsh path into the typed
-        // OpenFOAM preference consumed by the worker.  Keeping this migration
-        // here means an existing user's configured executable is never silently
-        // ignored after the execution crate gained its canonical field.
+        // Migrate the top-level Gmsh path of older settings files into the typed
+        // OpenFOAM preference consumed by the worker, so a configured executable
+        // is never silently ignored.
         if openfoam_preferences.gmsh_executable.is_none() {
             openfoam_preferences.gmsh_executable = environment.gmsh_executable;
         }

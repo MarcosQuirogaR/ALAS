@@ -77,8 +77,6 @@ pub enum OptionSource {
     /// to it, or closed by the mission with it used only to seed the first
     /// pass.
     MtowSizing,
-    /// How a family of requirements takes part in the ranking.
-    ConstraintPolicy,
     /// How the optimizer treats the aircraft geometry it starts from.
     DesignMode,
     /// The ICAO Annex 14 aerodrome reference code letter that caps the
@@ -152,7 +150,6 @@ impl OptionSource {
                 "fuel_per_seat_kilometre",
             ]),
             Self::MtowSizing => Some(&crate::optimizer::MtowSizing::NAMES),
-            Self::ConstraintPolicy => Some(&["hard", "soft", "diagnostic", "off"]),
             Self::DesignMode => Some(&["clean_sheet", "reference_adaptation", "baseline_sandbox"]),
             Self::AerodromeReferenceCode => Some(&crate::optimizer::AerodromeReferenceCode::NAMES),
             _ => None,

@@ -42,11 +42,23 @@ pub(crate) struct Limits {
     pub(crate) time_limit: Option<Duration>,
 }
 
+#[cfg(test)]
 pub(crate) fn run(
     bounds: &[(f64, f64)],
     initial: ScoredPoint,
     limits: Limits,
     scope: &CancelScope<'_>,
+    evaluate: &mut EvaluateBatch<'_>,
+) -> Outcome {
+    run_with_admission(bounds, initial, limits, scope, None, evaluate)
+}
+
+pub(crate) fn run_with_admission(
+    bounds: &[(f64, f64)],
+    initial: ScoredPoint,
+    limits: Limits,
+    scope: &CancelScope<'_>,
+    admits: Option<&super::Admission<'_>>,
     evaluate: &mut EvaluateBatch<'_>,
 ) -> Outcome {
     let active: Vec<usize> = bounds
@@ -100,19 +112,23 @@ pub(crate) fn run(
                 points.push(values);
             }
         }
-        let samples = evaluate_wave(&points, scope, evaluate, &mut result);
+        let remaining = limits.stop_after - (result.requested_scores - result.rejected_scores);
+        let samples = evaluate_wave(&points, remaining, admits, scope, evaluate, &mut result);
         if result.cancelled {
             break;
         }
         result.iterations += 1;
         // A full wave completes before stopping on feasibility, so the
         // winner never depends on how the wave was spread across threads.
-        if result.winner.valid() {
+        if result.winner.valid() || samples.len() < points.len() {
             break;
         }
-        if result.requested_scores < result.budget {
+        if result.requested_scores < result.budget
+            && result.requested_scores - result.rejected_scores < limits.stop_after
+            && !out_of_time()
+        {
             if let Some(trial) = gradient_trial(bounds, &active, &center, &samples, result.radius) {
-                evaluate_wave(&[trial], scope, evaluate, &mut result);
+                evaluate_wave(&[trial], 1, admits, scope, evaluate, &mut result);
             }
         }
         if result.cancelled || result.winner.valid() {
@@ -133,15 +149,14 @@ pub(crate) fn run(
 
 fn evaluate_wave(
     points: &[Vec<f64>],
+    remaining: usize,
+    admits: Option<&super::Admission<'_>>,
     scope: &CancelScope<'_>,
     evaluate: &mut EvaluateBatch<'_>,
     result: &mut Outcome,
 ) -> Vec<ScoredPoint> {
-    let samples: Vec<ScoredPoint> = evaluate(points)
-        .into_iter()
-        .map(ScoredPoint::sanitized)
-        .collect();
-    result.requested_scores += points.len();
+    let samples = super::lshade_de::evaluate(points, remaining, admits, evaluate);
+    result.requested_scores += samples.len();
     result.rejected_scores += samples
         .iter()
         .filter(|point| point.tier == super::Tier::PreGateFailed)

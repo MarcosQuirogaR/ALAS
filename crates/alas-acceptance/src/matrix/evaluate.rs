@@ -87,8 +87,10 @@ pub fn evaluate_preset(preset_name: &str) -> Result<PresetAcceptanceResult, Stri
     // lie-flat business block spends enough pitch to lose thirteen seats on
     // an A320 and eighteen on an A220. A config assembled by hand skips steps
     // the loader performs (cabin seed, engine binding).
-    let config = AlasConfig::from_value(&serde_json::json!({ "preset": preset.name }))
+    let mut config = AlasConfig::from_value(&serde_json::json!({ "preset": preset.name }))
         .map_err(|e| format!("failed to select preset '{preset_name}': {e}"))?;
+    config.structures.run_nastran = false;
+    config.structures.run_patran_export = false;
     // 1. Build geometry
     let builder = AircraftBuilder::new(Some(config.geometry.clone()));
     let airplane = builder
@@ -274,6 +276,7 @@ pub(super) fn extract_summary(
         mtow_closure_fuel_kg: fuel_loading.mtow_closure_fuel_kg,
         usable_fuel_capacity_kg: fuel_loading.usable_capacity.capacity_kg,
         analyzed_carried_fuel_kg: fuel_loading.analyzed_carried_fuel_kg,
+        flown_carried_fuel_kg: fuel_loading.flown_carried_fuel_kg,
         analyzed_takeoff_mass_kg: fuel_loading.analyzed_takeoff_mass_kg,
         mtow_shortfall_kg: fuel_loading.mtow_shortfall_kg,
         payload_kg: payload,

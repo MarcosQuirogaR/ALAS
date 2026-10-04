@@ -447,3 +447,51 @@ installed model use a declared ideal actuator-disk thrust envelope based on
 CADO shaft rating and rotor diameter, with 0.85 effective-power sensitivity.
 The published preset audit uses the actual installed propulsion model. Neither
 comparison establishes certificated performance.
+
+# Take-off rotation forward-CG limit
+
+`alas-opt::envelope::rotation` places the most-forward centre of gravity at
+which the nose wheel can still be lifted at V_R, from the moment balance about
+the main-gear contact P (Sadraey, *Aircraft Design: A Systems Engineering
+Approach*, Wiley 2012, sec. 9.6.2, eqs. 9.36-9.54a):
+
+```text
+I_P th'' = L_wf (x_P - x_ac) + M_ac + L_h (x_P - x_h) - W (x_P - x_cg)
+           + T (h_cg - h_T) - mu (W - L) h_cg
+I_P      = I_yy,cg + m [(x_P - x_cg)^2 + h_cg^2]          (eq. 9.53)
+```
+
+Heights are above the shared ground plane, x is aft, nose-up is positive.
+Every moment is divided by W = q_R S CL_R (V_R = 1.10 V_S), so with
+d = x_P - x_cg and kappa = th''/g the balance is `kappa d^2 + d - r = 0`,
+r = A - kappa (k_y^2 + h_cg^2), A the non-weight moments over W. The forward
+limit is the larger root, evaluated as `d = 2 r / (1 + sqrt(1 + 4 kappa r))`.
+k_y is the mass ledger's takeoff pitch radius of gyration (Raymer's
+jet-transport 0.38 L/2 without a ledger); th'' is 7 deg/s^2 for every class
+(Torenbeek/Roskam 6-8 deg/s^2 midpoint; Sadraey's Table 9.6 class values could
+not be confirmed from an accessible source). Both are overridable with the
+optional `landing_gear.rotation_pitch_acceleration_deg_s2` and
+`landing_gear.pitch_radius_of_gyration_frac_mac`.
+
+The tail lift at rotation follows sec. 12.6 (eqs. 12.55-12.76),
+`CL_h = a_h (alpha + i_h - epsilon + tau_e delta_e)`, with the fuselage level
+(alpha = 0), the built tail incidence, the DATCOM lift-curve slope of the
+built tail, the wing downwash `2 CL_g / (pi A)` reduced by Wieselsberger's
+ground-effect factor at the wing height, the thin-airfoil effectiveness
+`tau = 1 - (theta_f - sin theta_f)/pi` of the configured elevator chord
+fraction, reduced by the empirical plain-flap large-deflection correction
+(USAF DATCOM sec. 6.1.1.1 / Raymer, 0.60 at 25 deg, intermediate anchors
+not digitised from the figure), times its span fraction, and
+delta_e,max = -25 deg (Sadraey Table 12.3), one class-generic documented
+assumption. The download is limited to the tail section's stall,
+`CL_h,max = 0.9 c_l,max cos(Lambda_c/4)` (Raymer; c_l,max of the symmetric
+NACA tail section from Abbott and von Doenhoff). No take-off stabiliser trim
+beyond the built incidence is credited. Drag is
+omitted; its moment `D (h_D - h_cg)` is bounded by about 1 %MAC.
+
+These are implementation and plausibility checks: the derived CL_h of the
+registered presets is now -0.85 to -0.97 (the thin-airfoil upper bound gave
+-1.22 to -1.42), the section cap does not bind, and the rotation boundaries
+lie forward of the A220 certified (18.4) and A320 ACAP (17) limits (9.2 and
+-3.0 %MAC) but aft of the A340 ACAP 20.3 (28.3 %MAC), a known residual. These
+are checks, not calibration targets, and not a validation of the boundary.

@@ -28,6 +28,27 @@ use alas_config::{AlasConfig, LandingGearStationPositions, MainGearFallbackRefus
 use alas_geom::aircraft::airplane::Airplane;
 use alas_mass::stations::{component_stations_with_gear, StationError};
 
+/// `AnalysisReport::geometry_summary` key of the main-gear group translation
+/// a report was built with, m aft positive
+/// (`alas_config::LandingGearConfig::derived_main_gear`). Absent when the
+/// report has the configured stations.
+pub const MAIN_GEAR_TRANSLATION_KEY: &str = "main_gear_translation_m";
+
+/// `config` with the main-gear placement `report` was built with, so every
+/// figure, export and feasibility verdict bound to that report resolves the
+/// gear where the report's aircraft has it.
+#[must_use]
+pub fn report_config(config: &AlasConfig, report: &crate::AnalysisReport) -> AlasConfig {
+    let mut bound = config.clone();
+    bound.landing_gear.derived_main_gear = report
+        .geometry_summary
+        .get(MAIN_GEAR_TRANSLATION_KEY)
+        .copied()
+        .filter(|translation_m| translation_m.is_finite())
+        .map(|translation_m| alas_config::DerivedMainGearStation { translation_m });
+    bound
+}
+
 /// Whether the wing-mounted main-gear fallback applies to this built
 /// aircraft.
 ///
@@ -110,7 +131,7 @@ mod tests {
             .unwrap_or_else(|error| panic!("config {name}: {error}"));
         if name == "ATR72-600" {
             // Keep the refusal seam as an explicit unmeasured fixture. The
-            // registered production ATR now carries its published anchors.
+            // registered production ATR carries its published anchors.
             config.landing_gear.reference_station_fuselage_length_m = None;
             config.landing_gear.reference_nlg_x_fraction = None;
             config.landing_gear.reference_mlg_x_fractions = None;

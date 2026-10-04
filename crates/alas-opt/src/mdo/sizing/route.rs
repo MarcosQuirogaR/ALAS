@@ -21,8 +21,9 @@ pub(super) struct Route {
     /// Sizing still-air distance: the declared design range when positive,
     /// otherwise the great-circle route.
     pub range_m: f64,
-    /// The selected route alone, for a plan that closes on a design mission
-    /// and flies the route off-design (zero when unknown).
+    /// The selected route alone, flown off-design by a closed aircraft: the
+    /// run's planned route (`MissionConfig::planned_route_distance_m`), else
+    /// the great circle (zero when unknown).
     pub route_distance_m: f64,
     pub departure_elevation_m: f64,
     pub arrival_elevation_m: f64,
@@ -64,13 +65,19 @@ pub(super) fn resolve(config: &AlasConfig) -> Route {
     let departure_coordinates = coordinates(&departure_record);
     let arrival_coordinates = coordinates(&arrival_record);
     let coordinate_range = departure_coordinates.is_some() && arrival_coordinates.is_some();
+    // The aircraft is sized on its design mission, the declared design
+    // range or the great circle. The route it is flown over is the one the
+    // run planned, which its published mission and its delivery check fly;
+    // the great circle stands in only when none was planned.
     let range_m = mission_range_from_coordinates(
         config.optimizer.objective.design_range_nmi,
         departure_coordinates,
         arrival_coordinates,
     );
-    let route_distance_m =
-        mission_range_from_coordinates(0.0, departure_coordinates, arrival_coordinates);
+    let planned_m = config.mission.planned_route_distance_m();
+    let route_distance_m = planned_m.unwrap_or_else(|| {
+        mission_range_from_coordinates(0.0, departure_coordinates, arrival_coordinates)
+    });
     let elevation = |record: &Option<airport_dataset::ProvenancedAirport>,
                      airport: Option<&'static airports::Airport>| {
         record
@@ -115,5 +122,43 @@ pub(super) fn resolve(config: &AlasConfig) -> Route {
         arrival_elevation_m,
         holding_altitude_m,
         flown_cruise_altitude_m,
+    }
+}
+
+#[cfg(test)]
+// A registered preset that fails to load is the assertion failing.
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+    use alas_units::NAUTICAL_MILE;
+
+    #[test]
+    fn the_planned_route_is_flown_and_the_design_mission_still_sizes() {
+        let mut config = AlasConfig::from_value(&serde_json::json!({"preset": "DC-10"})).unwrap();
+        let great_circle = resolve(&config);
+        assert!(great_circle.route_distance_m > 0.0);
+        assert_eq!(great_circle.range_m, great_circle.route_distance_m);
+
+        // A planned airway route 19 % longer than the great circle.
+        let planned_m = 1.19 * great_circle.route_distance_m;
+        config.mission.route_distance_m = planned_m;
+        let planned = resolve(&config);
+        assert_eq!(planned.route_distance_m, planned_m);
+        assert_eq!(planned.range_m, great_circle.range_m);
+
+        config.optimizer.objective.design_range_nmi = 4_120.0;
+        let designed = resolve(&config);
+        assert_eq!(designed.range_m, 4_120.0 * NAUTICAL_MILE);
+        assert_eq!(designed.route_distance_m, planned_m);
+
+        // Nothing planned, or a non-physical record: the great circle.
+        config.optimizer.objective.design_range_nmi = 0.0;
+        for unset in [0.0, -1.0, f64::NAN] {
+            config.mission.route_distance_m = unset;
+            assert_eq!(
+                resolve(&config).route_distance_m,
+                great_circle.route_distance_m
+            );
+        }
     }
 }

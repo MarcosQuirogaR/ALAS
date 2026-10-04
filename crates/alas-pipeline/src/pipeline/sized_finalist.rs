@@ -50,7 +50,7 @@ pub(super) fn bind_sized_finalist(
         }
     })?;
     if !assessment.hard_feasible {
-        let violations = assessment.violated_hard_ids().join(", ");
+        let violations = assessment.violated_hard_details().join(", ");
         return Err(format!(
             "optimized finalist is not hard-feasible on replay: {}",
             if violations.is_empty() {

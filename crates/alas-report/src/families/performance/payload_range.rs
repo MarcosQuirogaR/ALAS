@@ -247,9 +247,16 @@ pub fn payload_range_data(
         .map(|key| masses.get(*key).copied().unwrap_or(0.0))
         .sum();
     let analyzed_payload_kg = masses.get("Payload").copied().unwrap_or(0.0);
-    // The mission-sized takeoff mass when the report carries one; the
-    // declared MTOW is only the fallback for an unsized report.
-    let mtow_kg = report.analysis_takeoff_mass_kg(config.requirements.mtow_kg);
+    // Capability corners trade payload against fuel under the aircraft's
+    // limit. Under Hard MTOW that limit is the declared MTOW, which one
+    // volume-limited load case does not lower; a mission-closed aircraft's
+    // limit is its sized takeoff mass.
+    let mtow_kg =
+        if config.optimizer.objective.mtow_sizing == alas_config::MtowSizing::FixedRequirement {
+            report.aircraft_mtow_limit_kg(config.requirements.mtow_kg)
+        } else {
+            report.analysis_takeoff_mass_kg(config.requirements.mtow_kg)
+        };
 
     // A payload-range chart is an aircraft-capability curve, not a second
     // drawing of the currently selected cabin load. The old implementation

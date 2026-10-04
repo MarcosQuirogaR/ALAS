@@ -45,23 +45,27 @@ pub fn show_design_space_view(state: &mut AppState, ui: &mut Ui) {
     ));
     ui.add_space(6.0);
     let mode = state.design_mode();
-    crate::theme::card_frame(ui).show(ui, |ui| {
-        ui.set_min_width(ui.available_width());
-        show_design_mode_settings(state, ui, mode);
-    });
-    ui.add_space(8.0);
 
     // Fixed rows are enforced at the view boundary as well as immediately
     // before a run. This keeps the editor honest when a user returns from an
     // advanced page after changing a requirement or loading a file.
     state.enforce_design_space_fixed_variables();
-    let config = state.typed_config().unwrap_or_default();
-    let nominal = state.current_design().unwrap_or_default();
-    let envelopes = config.optimizer.design_space.envelope(&nominal);
 
+    // The mode card scrolls with the table: it is taller than a short
+    // window, and above the scroll area it would push the whole table out
+    // of reach.
     ScrollArea::vertical()
         .auto_shrink([false, false])
         .show(ui, |ui| {
+            crate::theme::card_frame(ui).show(ui, |ui| {
+                ui.set_min_width(ui.available_width());
+                show_design_mode_settings(state, ui, mode);
+            });
+            ui.add_space(8.0);
+            // Read after the mode card, whose edits change the envelope.
+            let config = state.typed_config().unwrap_or_default();
+            let nominal = state.current_design().unwrap_or_default();
+            let envelopes = config.design_envelope(&nominal);
             show_design_constraints(state, ui);
             ui.add_space(8.0);
             let columns = design_space_column_count(ui.available_width());
@@ -382,6 +386,66 @@ mod tests {
             design_mode_display_name(DesignMode::BaselineSandbox),
             "Analyze reference"
         );
+    }
+
+    /// Top edge of the last painted text equal to `label`, if any is visible.
+    fn visible_label_top(output: &egui::FullOutput, label: &str) -> Option<f32> {
+        output
+            .shapes
+            .iter()
+            .rev()
+            .find_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) if text.galley.text() == label => {
+                    let rect = text.galley.rect.translate(text.pos.to_vec2());
+                    shape.clip_rect.contains_rect(rect).then_some(rect.top())
+                }
+                _ => None,
+            })
+    }
+
+    #[test]
+    fn every_design_variable_is_reachable_by_scrolling_a_short_window() {
+        let mut state = AppState::default();
+        state.load_preset("A220-300");
+        state.set_design_mode(DesignMode::ReferenceAdaptation);
+        let ctx = egui::Context::default();
+        crate::theme::apply_theme(crate::theme::AppTheme::Light, &ctx);
+        ctx.style_mut(|style| style.animation_time = 0.0);
+        let size = egui::vec2(600.0, 420.0);
+        let last = DESIGN_VARIABLE_SPECS.last().expect("design variables");
+        let label = crate::views::tr(&display_name(last));
+        let mut found = false;
+        for frame in 0..80 {
+            let events = if frame < 2 {
+                Vec::new()
+            } else {
+                vec![
+                    egui::Event::PointerMoved(egui::pos2(300.0, 300.0)),
+                    egui::Event::MouseWheel {
+                        unit: egui::MouseWheelUnit::Point,
+                        delta: egui::vec2(0.0, -200.0),
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                ]
+            };
+            let output = ctx.run(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+                    events,
+                    ..Default::default()
+                },
+                |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        super::show_design_space_view(&mut state, ui);
+                    });
+                },
+            );
+            if visible_label_top(&output, &label).is_some_and(|top| top < size.y) {
+                found = true;
+                break;
+            }
+        }
+        assert!(found, "{label} never scrolled into view");
     }
 
     #[test]

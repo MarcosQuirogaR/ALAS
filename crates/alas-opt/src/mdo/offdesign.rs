@@ -5,16 +5,20 @@
 //! mission.
 //!
 //! When the takeoff mass is closed on the design mission (the MTOW band
-//! mode, or the payload-adjusted mode with a design range), the route the
-//! user selected is not what sized the aircraft; it is a mission the sized
-//! aircraft has to be able to fly. It is flown here with the same dispatch
+//! mode, or the payload-adjusted mode with a design range), or the run
+//! planned a route other than the great circle the aircraft was sized on,
+//! the route is not what sized the aircraft; it is a mission the sized
+//! aircraft has to be able to fly, and the one the report's mission and
+//! delivery check fly (`alas_config::MissionConfig::route_distance_m`). It
+//! is flown here with the same dispatch
 //! solver and fuel policy, at the route's own cruise altitude on a trip plan
 //! frozen for the route ([`super::sizing::planned_mission`]), with the
 //! laid-out payload and the converged trimmed drag, and with no MTOW, landing
 //! or tank limit applied inside the solve, so the three checks read the
-//! unclamped requirement: reserve-inclusive takeoff fuel against usable tank
-//! capacity, route payload against the derived design structural payload
-//! (derived MZFW minus OEW), and route takeoff mass against the closed MTOW.
+//! unclamped requirement: the ramp fuel (reserve-inclusive takeoff fuel plus
+//! the taxi fuel that also occupies the tanks) against usable tank capacity, route payload against the derived design structural payload
+//! (derived MZFW minus OEW), and route takeoff mass against the takeoff-mass
+//! limit: the MTOW a design mission closed on, else the declared MTOW.
 
 use alas_config::optimizer::UNBOUNDED_DISPATCH_MTOW_KG;
 use alas_config::AlasConfig;
@@ -35,7 +39,7 @@ pub struct OffDesignFlight {
     /// Derived design structural payload, kg: derived design MZFW minus OEW,
     /// which is the design payload.
     pub payload_limit_kg: f64,
-    /// Closed MTOW the route is flown under, kg.
+    /// Takeoff-mass limit the route is flown under, kg.
     pub mtow_kg: f64,
     /// Route takeoff mass required, kg: route zero-fuel mass plus the
     /// reserve-inclusive takeoff fuel, unclamped.
@@ -58,8 +62,12 @@ pub(crate) struct ClosedAircraft<'a> {
     pub payload_kg: f64,
     /// Design payload, kg.
     pub design_payload_kg: f64,
-    /// Closed MTOW, kg.
+    /// Takeoff-mass limit, kg: the MTOW a design mission closed on, else
+    /// the declared MTOW.
     pub mtow_kg: f64,
+    /// The closed takeoff mass the route's trip plan is first frozen at,
+    /// kg, as the reporting dispatch plans it.
+    pub planning_mass_kg: f64,
     /// Usable tank capacity, kg, when resolved.
     pub usable_capacity_kg: Option<f64>,
 }
@@ -91,7 +99,7 @@ pub(crate) fn fly_route(
     let dispatch = solve_planned_dispatch(
         &model,
         zero_fuel_mass_kg,
-        aircraft.mtow_kg,
+        aircraft.planning_mass_kg,
         range_m,
         &config.fuel_policy,
         &limits,

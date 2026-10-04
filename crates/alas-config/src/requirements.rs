@@ -148,7 +148,7 @@ pub struct DesignRequirements {
     #[config(
         advanced,
         label = "Minimum passenger capacity",
-        help = "Hard floor on the geometry-resolved passenger capacity: a candidate whose class-mix and geometry produce fewer than this many seats is scored infeasible under the configured geometry constraint policy. 0 = disabled (the default): capacity is otherwise always dynamic, whatever the configured cabin class-mix percentages and the candidate's actual fuselage/cabin geometry produce, with no minimum."
+        help = "Hard floor on the geometry-resolved passenger capacity: a candidate whose class-mix and geometry produce fewer than this many seats is infeasible. 0 = disabled (the default): capacity is otherwise always dynamic, whatever the configured cabin class-mix percentages and the candidate's actual fuselage/cabin geometry produce, with no minimum."
     )]
     pub min_passenger_capacity: i64,
 

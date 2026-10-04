@@ -26,8 +26,7 @@ use crate::{
     AircraftPreset, AircraftReferenceData, AircraftVariantIdentity, CgEnvelopeEvidence,
     DesignRequirements, DesignVector, EmpennageConfig, EngineConfig, FuselageConfig,
     GeometryConfig, LandingGearConfig, MissingDesignMissionDatum, MissionEvidenceApplicability,
-    PartialDesignMissionEvidence, PartialMissionEvidenceKind, PublishedAftCgNoseLoad,
-    PublishedMissionLoadCase, WingConfig,
+    PartialDesignMissionEvidence, PartialMissionEvidenceKind, PublishedMissionLoadCase, WingConfig,
 };
 
 mod a220;
@@ -94,12 +93,7 @@ pub fn a320_200() -> AircraftPreset {
                 source: "Airbus A320 Aircraft Characteristics Rev 46, 2026-07-01, section 3-2-1 p.3, Figure 3-2-1-991-017-A01",
             }],
             cg_evidence: CgEnvelopeEvidence::AfmRequired,
-            aft_cg_nose_load: Some(PublishedAftCgNoseLoad {
-                mass_kg: 78_400.0,
-                nose_gear_fraction: 1.0 - 0.929,
-                aft_cg_pct_mac: Some(36.8),
-                source: "Airbus A320 Aircraft Characteristics, Jun 01/24, Figure 7-2-0-991-010-A01 sheet 6 (WV017, MRW 78,400 kg: 92.9 % of weight on main gear group) and Figure 7-3-0-991-010-A01 sheet 3 (WV017 main-gear load at the most-aft CG, 36.8 % MAC)",
-            }),
+            aft_cg_nose_load: Some(crate::presets::gear_load::A320_200),
             reference_wing_area_m2: Some(122.6),
             sources: vec![
                 "Airbus A320 Aircraft Characteristics Rev 46, 2026-07-01, section 2-1-1 p.2",

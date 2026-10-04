@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-use super::findings::finding_margin;
 use super::metrics::{
     fuel_margin_rows, mass_metrics, mass_triplet_kg, mtow_band_row, payload_summary_metrics,
     static_margin_rows, takeoff_mass_margin, takeoff_mass_rows,
@@ -13,7 +12,7 @@ use super::widgets::status_banner_title;
 use crate::theme::{apply_theme, AppTheme};
 use alas_payload::layout::{LayoutSummary, PassengerSummary, PayloadLayout};
 use alas_pipeline::feasibility::MissionFuelStatus;
-use alas_pipeline::FindingCode;
+
 use egui::{Context, FontFamily, RawInput, Shape};
 
 fn collect_text_families(shape: &Shape, families: &mut Vec<(String, FontFamily)>) {
@@ -205,16 +204,81 @@ fn headline_mass_rows_label_the_sized_result_apart_from_the_mtow_input() {
     assert_eq!(rows[2], ("MTOW limit (input)", "32.0 t".to_owned()));
 }
 
-/// One small seeded optimized run of the A220-300 preset: the summary's
-/// takeoff mass is the pipeline's analysed mass, not the preset MTOW, and
-/// the MTOW row is the configured limit under its own label.
+/// Small seeded optimized runs of the A220-300 preset. Sized by the mission,
+/// the summary's takeoff mass is the pipeline's analysed mass, not the
+/// preset MTOW, and the MTOW row is the configured limit under its own label.
+/// Under Hard MTOW the analysed, sized and summary takeoff masses are one
+/// closure: MTOW, or ZFW plus the usable capacity when the tanks limit the
+/// load, and the summary names which limit governed.
 #[test]
 fn summary_masses_of_an_optimized_run_are_the_pipeline_result() {
+    let result = seeded_a220(alas_config::MtowSizing::SizedByMission);
+    assert_sized_by_mission_summary(&result);
+
+    let result = seeded_a220(alas_config::MtowSizing::FixedRequirement);
+    let declared_mtow_kg = result.config.requirements.mtow_kg;
+    let fuel = &result.feasibility.fuel_loading;
+    let loading = fuel
+        .design_takeoff_loading
+        .expect("a Hard-MTOW run reports its takeoff fuel loading");
+    let sized_kg = result
+        .optimized_report
+        .as_ref()
+        .and_then(|report| report.sized_takeoff_mass_kg())
+        .expect("the optimized report is bound to the sized takeoff mass");
+    let analyzed_kg = fuel.analyzed_takeoff_mass_kg;
+    let expected_kg = match loading.status.as_str() {
+        "volume_limited" => {
+            loading.zero_fuel_mass_kg + loading.usable_capacity_kg.expect("established capacity")
+        }
+        _ => declared_mtow_kg,
+    };
+    for (name, kg) in [("sized", sized_kg), ("analysed", analyzed_kg)] {
+        assert!(
+            (kg - expected_kg).abs() <= 1e-6 * expected_kg,
+            "{name} {kg} kg vs {expected_kg} kg ({})",
+            loading.status.as_str()
+        );
+    }
+    let metrics = mass_metrics(&result);
+    let value = |label: &str| {
+        metrics
+            .iter()
+            .find(|(name, _)| *name == label)
+            .map(|(_, value)| value.clone())
+            .unwrap_or_else(|| panic!("missing summary row {label}"))
+    };
+    assert_eq!(
+        value("Takeoff mass (sized result)"),
+        format!("{:.1} t", expected_kg / 1_000.0)
+    );
+    assert_eq!(
+        value("Takeoff fuel load"),
+        super::metrics::takeoff_fuel_load(loading.status.as_str())
+    );
+
+    // The objective tile states a number in the unit its label names.
+    let optimization = result.optimization_result.as_ref().expect("optimized");
+    let kind = alas_pipeline::optimizer_summary::objective::history_objective_kind(
+        &optimization.history,
+        result.config.optimizer.objective.kind,
+    );
+    let text = super::objective_value_text(&result, kind);
+    assert!(
+        text.split_whitespace()
+            .next()
+            .is_some_and(|value| value.parse::<f64>().is_ok_and(f64::is_finite)),
+        "objective tile value: {text}"
+    );
+}
+
+fn seeded_a220(mode: alas_config::MtowSizing) -> alas_pipeline::PipelineResult {
     use alas_pipeline::{DesignPipeline, PipelineOptions, RunEnvironment};
 
     let mut config =
         alas_config::AlasConfig::from_value(&serde_json::json!({ "preset": "A220-300" }))
             .expect("A220-300 preset");
+    config.optimizer.objective.mtow_sizing = mode;
     config.optimizer.solver.method = alas_config::optimizer::PRODUCT_DE_METHOD.to_owned();
     config.optimizer.solver.refinement.max_evaluations = 128;
     config.optimizer.solver.screening.max_evaluations = 8;
@@ -262,10 +326,12 @@ fn summary_masses_of_an_optimized_run_are_the_pipeline_result() {
         seed: Some(42),
         quiet: true,
     };
-    let result = DesignPipeline::new(config)
+    DesignPipeline::new(config)
         .run_with_design_space(&options, &RunEnvironment::default(), &design, &bounds)
-        .expect("the seeded A220-300 finalist is delivered");
+        .expect("the seeded A220-300 finalist is delivered")
+}
 
+fn assert_sized_by_mission_summary(result: &alas_pipeline::PipelineResult) {
     let declared_mtow_kg = result.config.requirements.mtow_kg;
     let sized_kg = result
         .optimized_report
@@ -275,7 +341,7 @@ fn summary_masses_of_an_optimized_run_are_the_pipeline_result() {
     let analyzed_kg = result.feasibility.fuel_loading.analyzed_takeoff_mass_kg;
     assert!((declared_mtow_kg - analyzed_kg).abs() > 1.0);
 
-    let metrics = mass_metrics(&result);
+    let metrics = mass_metrics(result);
     let value = |label: &str| {
         metrics
             .iter()
@@ -371,39 +437,6 @@ fn propulsion_summary_uses_existing_spanish_cycle_labels() {
     );
 
     alas_i18n::set_language(Some("en"));
-}
-
-#[test]
-fn finding_margins_are_negative_on_both_upper_and_lower_bound_failures() {
-    assert_eq!(
-        finding_margin(FindingCode::MissionFuelShortfall, 51_410.0, 50_400.0),
-        -1_010.0
-    );
-    assert!(
-        (finding_margin(FindingCode::InsufficientStaticMargin, 0.03, 0.05) + 0.02).abs() < 1.0e-12
-    );
-}
-
-#[test]
-fn ground_clearance_findings_name_their_own_mechanism_and_not_the_nose_gear() {
-    use super::findings::{
-        actual_label, affected_disciplines, finding_meaning, finding_next_step, finding_title,
-    };
-    for (code, mechanism) in [
-        (FindingCode::TailScrapeViolation, "tail-scrape"),
-        (FindingCode::TipBackViolation, "tip-back"),
-    ] {
-        let title = finding_title(code).to_lowercase();
-        assert!(title.contains(mechanism), "{title}");
-        assert!(!title.contains("nose"), "{title}");
-        assert!(!finding_meaning(code).to_lowercase().contains("nose gear"));
-        assert!(!finding_next_step(code).is_empty());
-        assert!(!affected_disciplines(code).is_empty());
-        assert_eq!(actual_label(code), "Calculated angle");
-        // An angle below its minimum is a negative margin, like the other
-        // lower-bound failures (the tail-scrape case: 5.2 deg against 10 deg).
-        assert!((finding_margin(code, 5.2, 10.0) + 4.8).abs() < 1.0e-12);
-    }
 }
 
 #[test]

@@ -74,6 +74,7 @@ fn converged_result() -> OptimizationResult {
             scope: alas_opt::SEARCH_SCOPE.to_owned(),
             baseline: None,
             winner_history_row: None,
+            evaluation_trace: Default::default(),
             baseline_clamped: false,
         }),
         delivered_acceptance: None,

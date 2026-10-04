@@ -125,6 +125,11 @@ fn apply_cabin_preset_with_semantics(
             return Ok(());
         }
     }
+    if semantics == CabinPresetSemantics::RequirementsFirst
+        && super::brief_cabin::apply_brief_seat_target(config)
+    {
+        return Ok(());
+    }
     let preset = config.requirements.cabin_preset.clone();
     if preset == "Custom" {
         return apply_custom(config, design_vector, semantics);
@@ -315,7 +320,10 @@ fn apply_custom(
 /// Write a preset's seat geometry into the four class slots and return the
 /// share of cabin length each of them gets, or `None` for a name no preset
 /// matches.
-fn passenger_preset_mix(config: &mut AlasConfig, preset: &str) -> Option<Vec<(&'static str, f64)>> {
+pub(super) fn passenger_preset_mix(
+    config: &mut AlasConfig,
+    preset: &str,
+) -> Option<Vec<(&'static str, f64)>> {
     let pax = &mut config.cabin.passenger;
     match preset {
         "Ryanair" => {
@@ -410,6 +418,9 @@ pub(super) fn apply_cabin_preset_to_geometry(
             return;
         }
     }
+    if super::brief_cabin::apply_brief_seat_target(config) {
+        return;
+    }
     let preset = config.requirements.cabin_preset.clone();
     if preset == "Custom"
         && config.cabin.passenger.class_mix_mode == "count"
@@ -474,8 +485,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn named_passenger_preset_always_resolves_capacity_from_geometry() {
-        let mut config = AlasConfig::default();
+    fn named_passenger_preset_resolves_a_registered_capacity_from_geometry() {
+        // A registered aircraft's cabin follows its geometry; a clean-sheet
+        // brief's count is its target instead (see `brief_cabin`).
+        let mut config = AlasConfig::from_value(&serde_json::json!({"preset": "AVE"}))
+            .unwrap_or_else(|error| panic!("AVE preset loads: {error}"));
         config.requirements.cabin_preset = "Iberia".to_owned();
         config.requirements.num_passengers = 80;
         config.requirements.optimize_passenger_capacity = false;

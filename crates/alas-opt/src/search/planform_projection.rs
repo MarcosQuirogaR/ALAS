@@ -12,7 +12,7 @@
 //! - **Chord order** (the builder's `NonMonotoneChord`): with a pinned
 //!   side-of-body chord ratio `r` the side-of-body chord `r c_r` may not be
 //!   below the kink chord, `c_r >= c_k / r`; otherwise `c_r >= c_k`.
-//! - **Exposed trailing edge** (while the Geometry family is hard): the
+//! - **Exposed trailing edge**: the
 //!   kink's trailing edge may not lie forward of the inboard station's, the
 //!   90 degree limit of [`crate::transport_planform::exposed_te_angle_deg`].
 //!   With the leading edge at `x = y tan(Lambda)` (`Lambda` the leading-edge
@@ -47,7 +47,9 @@
 //! empty, and which the pre-gate still rejects, are 2.5 %, 0 %, 0 % and
 //! 5.5 % of the box.
 
-use alas_config::{AlasConfig, ConstraintPolicy};
+use alas_config::AlasConfig;
+
+use super::coupled_geometry::CoupledGeometry;
 
 /// Design-vector indices of the planform coordinates
 /// (`alas_config::design_variables`).
@@ -63,7 +65,8 @@ pub(crate) struct PlanformProjection {
     kink_fraction: f64,
     /// `(span fraction, chord ratio)` of a pinned side-of-body station.
     side_of_body: Option<(f64, f64)>,
-    trailing_edge: bool,
+    area_limit_m2: f64,
+    coupling: Option<CoupledGeometry>,
 }
 
 impl PlanformProjection {
@@ -88,8 +91,11 @@ impl PlanformProjection {
                 root,
                 kink_fraction,
                 side_of_body,
-                trailing_edge: config.optimizer.objective.geometry_constraints
-                    == ConstraintPolicy::Hard,
+                area_limit_m2: config
+                    .requirements
+                    .max_wing_area_m2
+                    .min(config.requirements.mtow_kg / config.requirements.min_wing_loading_kg_m2),
+                coupling: CoupledGeometry::new(config),
             })
     }
 
@@ -103,14 +109,12 @@ impl PlanformProjection {
         );
         let ratio = self.side_of_body.map_or(1.0, |(_, ratio)| ratio);
         let lower = self.root.0.max(kink_chord / ratio);
-        let upper = if self.trailing_edge {
+        let upper = {
             let inboard = self.side_of_body.map_or(0.0, |(fraction, _)| fraction);
             let run = (self.kink_fraction - inboard) * span / 2.0;
             self.root
                 .1
                 .min((run * sweep.to_radians().tan() + kink_chord) / ratio)
-        } else {
-            self.root.1
         };
         (lower.is_finite() && upper.is_finite() && lower <= upper).then_some((lower, upper))
     }
@@ -124,6 +128,64 @@ impl PlanformProjection {
             point[ROOT_CHORD] = (lower + fraction * (upper - lower)).clamp(lower, upper);
         }
     }
+
+    /// Full projected planform area, m^2, integrating the linear chords on both sides.
+    pub(super) fn area_m2(&self, point: &[f64]) -> f64 {
+        let (side, ratio) = self.side_of_body.unwrap_or((0.0, 1.0));
+        let kink = self.kink_fraction;
+        let root_weight = side * (1.0 + ratio) + (kink - side) * ratio;
+        point[SPAN] / 2.0
+            * (root_weight * point[ROOT_CHORD]
+                + (1.0 - side) * point[KINK_CHORD]
+                + (1.0 - kink) * point[3])
+    }
+
+    pub(super) fn area_limit_m2(&self) -> f64 {
+        self.area_limit_m2
+    }
+
+    pub(super) fn repair_coupled(
+        &self,
+        point: &mut [f64],
+        bounds: &[(f64, f64)],
+        anchor: &[f64],
+        sweep_fraction: f64,
+    ) {
+        if let Some(coupling) = self.coupling {
+            coupling.repair(self, point, bounds, anchor, sweep_fraction);
+        }
+    }
+
+    pub(super) fn outboard_span_m(&self, point: &[f64]) -> f64 {
+        (1.0 - self.kink_fraction) * point[0] / 2.0
+    }
+
+    /// Semispan integrals of chord, y*chord and chord^2: m^2, m^3, m^3.
+    pub(super) fn chord_integrals(&self, point: &[f64]) -> (f64, f64, f64) {
+        let (side, ratio) = self.side_of_body.unwrap_or((0.0, 1.0));
+        let semispan = point[0] / 2.0;
+        let stations = [
+            (0.0, point[1]),
+            (side * semispan, ratio * point[1]),
+            (self.kink_fraction * semispan, point[2]),
+            (semispan, point[3]),
+        ];
+        stations.windows(2).fold((0.0, 0.0, 0.0), |sum, pair| {
+            let ((y0, c0), (y1, c1)) = (pair[0], pair[1]);
+            let span = y1 - y0;
+            (
+                sum.0 + span * (c0 + c1) / 2.0,
+                sum.1 + span * (y0 * (c0 + c1) / 2.0 + span * (c0 + 2.0 * c1) / 6.0),
+                sum.2 + span * (c0 * c0 + c0 * c1 + c1 * c1) / 3.0,
+            )
+        })
+    }
+
+    /// Planar quarter-chord station relative to the untranslated root, m.
+    pub(super) fn quarter_chord_station(&self, point: &[f64]) -> f64 {
+        let (area, y_chord, chord_squared) = self.chord_integrals(point);
+        (point[4].to_radians().tan() * y_chord + 0.25 * chord_squared) / area
+    }
 }
 
 // A test asserts on values it built here, so a failed unwrap is the
@@ -134,6 +196,38 @@ mod tests {
     use super::*;
     use crate::search::screening;
     use crate::DesignOptimizer;
+
+    #[test]
+    fn chord_integrals_match_independent_simpson_integration() {
+        let projection = PlanformProjection {
+            root: (2.0, 6.0),
+            kink_fraction: 0.4,
+            side_of_body: None,
+            area_limit_m2: 100.0,
+            coupling: None,
+        };
+        let mut point = [0.0; 16];
+        point[..5].copy_from_slice(&[20.0, 4.0, 2.0, 1.0, 30.0]);
+        let analytic = projection.chord_integrals(&point);
+        let mut numerical = [0.0; 3];
+        for (y0, y1, c0, c1) in [(0.0, 4.0, 4.0, 2.0), (4.0, 10.0, 2.0, 1.0)] {
+            for (fraction, weight) in [(0.0, 1.0), (0.5, 4.0), (1.0, 1.0)] {
+                let y = y0 + fraction * (y1 - y0);
+                let c = c0 + fraction * (c1 - c0);
+                let factor = weight * (y1 - y0) / 6.0;
+                for (sum, value) in numerical.iter_mut().zip([c, y * c, c * c]) {
+                    *sum += factor * value;
+                }
+            }
+        }
+        for (actual, expected) in [analytic.0, analytic.1, analytic.2]
+            .into_iter()
+            .zip(numerical)
+        {
+            assert!((actual - expected).abs() < 64.0 * f64::EPSILON * expected);
+        }
+        assert!((2.0 * analytic.0 - projection.area_m2(&point)).abs() < f64::EPSILON * 100.0);
+    }
 
     fn preset(name: &str) -> (AlasConfig, Vec<(f64, f64)>) {
         let config = AlasConfig::from_value(&serde_json::json!({ "preset": name })).unwrap();
@@ -181,16 +275,5 @@ mod tests {
             assert!(empty < 200, "{name}: {empty} empty intervals");
             assert!(widths.iter().all(|&w| (0.0..=1.0).contains(&w)));
         }
-    }
-
-    #[test]
-    fn a_soft_geometry_family_projects_only_the_chord_order() {
-        let (mut config, bounds) = preset("A320-200");
-        config.optimizer.objective.geometry_constraints = ConstraintPolicy::Soft;
-        let projection = PlanformProjection::new(&config, &bounds).unwrap();
-        let point = screening::sample(&bounds, None, 1, 3, None).remove(0);
-        let (lower, upper) = projection.root_chord_interval(&point).unwrap();
-        assert_eq!(upper, bounds[ROOT_CHORD].1);
-        assert!(lower >= bounds[ROOT_CHORD].0);
     }
 }

@@ -44,7 +44,7 @@ pub(in crate::views::form_page) fn page_sections(
             default_open: true,
         },
         PageSection {
-            title: "Flops turboprop",
+            title: "FLOPS turboprop",
             names: &["flops_turboprop"],
             default_open: true,
         },
@@ -88,18 +88,9 @@ pub(in crate::views::form_page) fn page_sections(
             names: &["solver"],
             default_open: true,
         },
-        // Two questions the objective does not answer: where this program's
-        // own correlations stop being trustworthy, and whether an
-        // overconstrained problem may miss a limit at all. Both are closed
-        // by default because neither belongs in a routine run.
         PageSection {
             title: "Model validity domain",
             names: &["plausibility"],
-            default_open: false,
-        },
-        PageSection {
-            title: "Controlled constraint relaxation",
-            names: &["relaxation"],
             default_open: false,
         },
     ];

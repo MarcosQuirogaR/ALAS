@@ -315,13 +315,12 @@ fn the_neutral_point_resolution_difference_is_pinned_and_purely_aerodynamic() {
         .find(|residual| residual.id == "forward_cg_range")
         .map(|residual| residual.limit)
         .expect("the balance family evaluates the forward CG range");
-    // The report also gates the flown landing state, which the search's
-    // closed ledger does not build; the comparison covers the states both
-    // sides evaluate.
+    // The search gates the same loading states as the report, the flown
+    // landing state included (the unified loading model builds it on both
+    // sides), so the comparison covers every state, none filtered out.
     let report_forward = model_cg
         .loading_states
         .iter()
-        .filter(|state| state.state != alas_opt::ModelCgLoadingState::AnalyzedLanding)
         .flat_map(|state| {
             state
                 .constraints
@@ -336,6 +335,16 @@ fn the_neutral_point_resolution_difference_is_pinned_and_purely_aerodynamic() {
                 .total_cmp(&b.1.normalized_exceedance)
         })
         .expect("the report gates the physical forward CG limit");
+    // Finding: under Hard MTOW with the derived rotation authority the
+    // takeoff rotation boundary (the report's analysed TOW state) is not the
+    // worst forward state; the flown landing-trim boundary is, and the search
+    // and the report both carry it.
+    assert_eq!(
+        report_forward.0.state,
+        alas_opt::ModelCgLoadingState::AnalyzedLanding,
+        "the worst forward-CG state is {}",
+        report_forward.0.state.label()
+    );
     // Per-state consistency: the gated limit is that state's own scoped
     // forward limit, never wider than the envelope-wide one.
     for state in &model_cg.loading_states {

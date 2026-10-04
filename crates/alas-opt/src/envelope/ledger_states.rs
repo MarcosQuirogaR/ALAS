@@ -38,6 +38,10 @@ pub struct LedgerLoadingBasis {
     pub takeoff_cg_x_m: f64,
     /// Ledger analyzed-takeoff vertical CG, m.
     pub takeoff_cg_z_m: f64,
+    /// Ledger pitch moment of inertia about the analyzed-takeoff centre of
+    /// gravity, `I_yy`, kg m^2; `NaN` when not available, which selects
+    /// Raymer's radius of gyration in the rotation criterion.
+    pub takeoff_pitch_inertia_kg_m2: f64,
 }
 
 impl LedgerLoadingBasis {
@@ -172,6 +176,7 @@ pub fn assess_model_cg_envelope_with_ledger_and_landing(
     assess_model_cg_envelope_from_states(
         plane,
         states,
+        ledger.takeoff_pitch_inertia_kg_m2,
         ledger.takeoff_cg_x_m,
         x_np,
         critical_x_np,

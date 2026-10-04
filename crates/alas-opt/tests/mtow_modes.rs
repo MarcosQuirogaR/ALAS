@@ -169,21 +169,27 @@ fn the_design_modes_design_the_structure_at_the_converged_mass() {
     }
 }
 
-/// The fixed requirement keeps the structure and the analysis mass at the
-/// declared cap on a registered aircraft.
+/// Hard MTOW keeps structural design weights at the declared cap while
+/// the physical loading also observes the aircraft's usable tank capacity.
 #[test]
 fn the_fixed_requirement_keeps_the_declared_cap() {
     let (config, design) = a320_reference(MtowSizing::FixedRequirement);
     let assessment = assess(&config, &design);
     assert_eq!(
         assessment.sized.takeoff_mass_kg,
-        config.requirements.mtow_kg
+        assessment.sized.zero_fuel_mass_kg
+            + (config.requirements.mtow_kg - assessment.sized.zero_fuel_mass_kg)
+                .min(assessment.sized.usable_capacity_kg)
     );
     assert_eq!(
         assessment.sized.design_gross_mass_kg,
         config.requirements.mtow_kg
     );
     assert_eq!(assessment.sized.mtow.structural_basis, "declared_cap");
+    assert_eq!(
+        assessment.sized.takeoff_loading.unwrap().status,
+        alas_mass::loading::MtowFuelLoadingStatus::VolumeLimited
+    );
 }
 
 /// Zero-fuel mass plus every fuel past the destination (contingency,

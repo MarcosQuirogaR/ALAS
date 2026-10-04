@@ -5,12 +5,56 @@
 //! ledger remains authoritative. All structural loads use the design gross
 //! mass, not a convenient light mission dispatch state.
 
-use alas_config::{AlasConfig, ConstraintPolicy, DesignVector};
+use crate::mdo::ResidualRole;
+
+use alas_config::{AlasConfig, DesignVector};
 use alas_geom::aircraft::airplane::Airplane;
 use alas_geom::wing_structure::WingStructureGeometry;
 use alas_struct::feasibility::{LinearModelLimits, StructuralFeasibility};
 
 use super::types::{ConstraintFamily, ConstraintResidual};
+
+/// Why the mandatory structural assessment could not produce valid evidence.
+#[derive(Debug, Clone, PartialEq, thiserror::Error)]
+pub enum StructuralAssessmentError {
+    /// A failure outside the mesh path, identified by its stable hard residual.
+    #[error("{0}")]
+    Evaluation(&'static str),
+    /// The requested chordwise discretization cannot define shell elements.
+    #[error("mesh construction: mesh_chordwise_points={points}; at least two required")]
+    MeshResolution {
+        /// Requested points across each chord.
+        points: i64,
+    },
+    /// The product mesh builder rejected its geometry or topology.
+    #[error("mesh construction: {0:?}: {0}")]
+    MeshConstruction(#[from] alas_struct::mesh::MeshError),
+    /// The constructed deck cannot supply a valid material-mass inventory.
+    #[error("mesh material mass unavailable: {0}")]
+    MeshMaterialMassUnavailable(String),
+    /// The doubled semi-wing material mass is nonfinite or nonpositive.
+    #[error("mesh material mass invalid: complete-wing mass={mass_kg} kg")]
+    MeshMaterialMassInvalid {
+        /// Complete-wing material mass, kg.
+        mass_kg: f64,
+    },
+}
+
+impl StructuralAssessmentError {
+    /// Stable hard residual identifier, independent of diagnostic detail.
+    pub fn id(&self) -> &'static str {
+        match self {
+            Self::Evaluation(id) => id,
+            _ => "structural_mesh_invalid",
+        }
+    }
+}
+
+impl From<&'static str> for StructuralAssessmentError {
+    fn from(id: &'static str) -> Self {
+        Self::Evaluation(id)
+    }
+}
 
 /// Governing structural gross mass, kg, shared by search and final reporting.
 pub fn structural_design_mass_kg(config: &AlasConfig) -> f64 {
@@ -23,7 +67,7 @@ pub fn assess_candidate(
     config: &AlasConfig,
     dv: &DesignVector,
     plane: &Airplane,
-) -> Result<StructuralFeasibility, &'static str> {
+) -> Result<StructuralFeasibility, StructuralAssessmentError> {
     let cfg = &config.structures;
     let mut requirements = config.requirements.clone();
     requirements.mtow_kg = structural_design_mass_kg(config);
@@ -39,7 +83,7 @@ pub fn assess_candidate(
         || !cfg.additional_safety_factor.is_finite()
         || cfg.additional_safety_factor < 1.0
     {
-        return Err("structural_input_invalid");
+        return Err("structural_input_invalid".into());
     }
     let wing = alas_mass::wing_reconciliation::main_wing(plane).ok_or("structural_geometry")?;
     let root = wing.xsecs.first().ok_or("structural_geometry")?;
@@ -96,7 +140,7 @@ pub fn assess_candidate(
                 || *mass < 0.0
         })
     {
-        return Err("structural_input_invalid");
+        return Err("structural_input_invalid".into());
     }
     let fuel_scope = declared.as_ref().map_or(
         alas_struct::sizing::WingFuelRelief::EnclosedBoxVolume,
@@ -121,7 +165,7 @@ pub fn assess_candidate(
         &wing_mounted,
     );
     if !scoped.scope.relief_convergence.is_settled() {
-        return Err("structural_relief_not_converged");
+        return Err("structural_relief_not_converged".into());
     }
     let sizing = scoped.sizing;
     let result = alas_struct::sizing::size_for_linear_model(
@@ -141,14 +185,16 @@ pub fn assess_candidate(
         },
     );
     if !result.converged && result.assessment.passes() {
-        return Err("structural_stiffness_not_converged");
+        return Err("structural_stiffness_not_converged".into());
     }
     let mut assessment = result.assessment;
     if !assessment.input_valid {
         return Ok(assessment);
     }
     if cfg.mesh_chordwise_points < 2 {
-        return Err("structural_mesh_invalid");
+        return Err(StructuralAssessmentError::MeshResolution {
+            points: cfg.mesh_chordwise_points,
+        });
     }
     // This is the identical product builder and design-load state used by
     // final structural reporting. Native primary mass cannot substitute for
@@ -166,13 +212,15 @@ pub fn assess_candidate(
         cap,
         rib,
     )
-    .map_err(|_| "structural_mesh_invalid")?;
-    assessment.mesh_primary_mass_kg = Some(
-        deck.primary_structural_mass_kg()
-            .map(|mass| 2.0 * mass)
-            .filter(|mass| mass.is_finite() && *mass > 0.0)
-            .ok_or("structural_mesh_invalid")?,
-    );
+    .map_err(StructuralAssessmentError::MeshConstruction)?;
+    let mass_kg = 2.0
+        * deck
+            .primary_structural_mass_kg_with_diagnostics()
+            .map_err(StructuralAssessmentError::MeshMaterialMassUnavailable)?;
+    if !mass_kg.is_finite() || mass_kg <= 0.0 {
+        return Err(StructuralAssessmentError::MeshMaterialMassInvalid { mass_kg });
+    }
+    assessment.mesh_primary_mass_kg = Some(mass_kg);
     Ok(assessment)
 }
 
@@ -194,23 +242,26 @@ pub(crate) fn residuals(
             "bool",
             1.0,
             1.0,
-            ConstraintPolicy::Hard,
+            ResidualRole::Constraint,
         )];
     }
     let assessment = match assess_candidate(config, dv, plane) {
         Ok(assessment) if assessment.input_valid => assessment,
         result => {
-            let id = result.err().unwrap_or("structural_response_invalid");
+            let error = result
+                .err()
+                .unwrap_or_else(|| "structural_response_invalid".into());
             return vec![ConstraintResidual::direct(
-                id,
+                error.id(),
                 ConstraintFamily::Structure,
                 1.0,
                 0.0,
                 "bool",
                 1.0,
                 1.0,
-                ConstraintPolicy::Hard,
-            )];
+                ResidualRole::Constraint,
+            )
+            .with_detail(error.to_string())];
         }
     };
     let mut rows: Vec<_> = [
@@ -257,7 +308,7 @@ pub(crate) fn residuals(
             unit,
             residual,
             violation,
-            ConstraintPolicy::Hard,
+            ResidualRole::Constraint,
         )
     })
     .collect();
@@ -286,7 +337,7 @@ pub(crate) fn residuals(
             "-",
             actual - reference,
             0.0,
-            ConstraintPolicy::Diagnostic,
+            ResidualRole::Diagnostic,
         ));
     }
     // FLOPS and explicit primary inventories have different model scopes.
@@ -310,7 +361,7 @@ pub(crate) fn residuals(
                 "bool",
                 1.0,
                 1.0,
-                ConstraintPolicy::Hard,
+                ResidualRole::Constraint,
             ));
             continue;
         }
@@ -322,7 +373,7 @@ pub(crate) fn residuals(
             "kg",
             actual - wing_mass_kg,
             0.0,
-            ConstraintPolicy::Off,
+            ResidualRole::Diagnostic,
         ));
     }
     rows
@@ -346,7 +397,6 @@ mod tests {
     fn empirical_mass_disagreement_is_diagnostic_while_physical_checks_remain_hard() {
         let mut config = AlasConfig::from_value(&serde_json::json!({"preset":"B787-9"})).unwrap();
         config.structures.enabled = false;
-        config.optimizer.objective.geometry_constraints = ConstraintPolicy::Off;
         let design = alas_config::presets::get("B787-9").unwrap().design_vector;
         let plane = alas_geom::builder::AircraftBuilder::new(Some(config.geometry.clone()))
             .build(Some(&design), true)
@@ -356,31 +406,31 @@ mod tests {
             .iter()
             .find(|r| r.id == "structural_primary_mass_discrepancy")
             .expect("a finite structural candidate keeps its quantitative mass comparison");
-        assert_eq!(comparison.policy, ConstraintPolicy::Off);
+        assert_eq!(comparison.role, ResidualRole::Diagnostic);
         assert!(comparison.actual > comparison.limit);
         assert_eq!(comparison.normalized_violation, 0.0);
         assert!(rows
             .iter()
             .filter(|r| !r.id.ends_with("_mass_discrepancy")
                 && !r.id.starts_with("structural_ultimate_"))
-            .all(|r| r.policy == ConstraintPolicy::Hard));
+            .all(|r| r.role == ResidualRole::Constraint));
         for id in [
             "structural_ultimate_tip_deflection_ratio",
             "structural_ultimate_curvature",
         ] {
             let metric = rows.iter().find(|row| row.id == id).unwrap();
             assert!(metric.actual.is_finite() && metric.actual > 0.0);
-            assert_eq!(metric.policy, ConstraintPolicy::Diagnostic);
+            assert_eq!(metric.role, ResidualRole::Diagnostic);
             assert_eq!(metric.normalized_violation, 0.0);
         }
         let other_estimate = residuals(&config, &design, &plane, 1.0e9);
         assert_eq!(
             rows.iter()
-                .filter(|r| r.policy == ConstraintPolicy::Hard)
+                .filter(|r| r.role == ResidualRole::Constraint)
                 .collect::<Vec<_>>(),
             other_estimate
                 .iter()
-                .filter(|r| r.policy == ConstraintPolicy::Hard)
+                .filter(|r| r.role == ResidualRole::Constraint)
                 .collect::<Vec<_>>()
         );
     }
@@ -436,7 +486,7 @@ mod tests {
         assert!(native.raw_residual < 0.0);
         assert!(mesh.raw_residual > 0.0);
         for row in [native, mesh] {
-            assert_eq!(row.policy, ConstraintPolicy::Off);
+            assert_eq!(row.role, ResidualRole::Diagnostic);
             assert_eq!(row.normalized_violation, 0.0);
         }
     }
@@ -453,12 +503,36 @@ mod tests {
             .unwrap();
         assert_eq!(
             assess_candidate(&config, &design, &plane),
-            Err("structural_mesh_invalid")
+            Err(StructuralAssessmentError::MeshResolution { points: 0 })
         );
         let rows = residuals(&config, &design, &plane, 1.0e9);
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].id, "structural_mesh_invalid");
-        assert_eq!(rows[0].policy, ConstraintPolicy::Hard);
+        assert_eq!(rows[0].role, ResidualRole::Constraint);
         assert!(rows[0].normalized_violation > 0.0);
+        assert!(rows[0]
+            .detail
+            .as_deref()
+            .is_some_and(|detail| detail.contains("mesh_chordwise_points=0")));
+    }
+
+    #[test]
+    fn mesh_failure_details_preserve_the_original_error_and_distinguish_inventory_failure() {
+        let original = alas_struct::mesh::MeshError::InvalidCapGeometry {
+            spar: 2,
+            segment: 7,
+        };
+        let construction = StructuralAssessmentError::MeshConstruction(original);
+        assert_eq!(construction.id(), "structural_mesh_invalid");
+        assert!(construction.to_string().contains(&format!("{original:?}")));
+        assert!(construction.to_string().contains(&original.to_string()));
+        let inventory = StructuralAssessmentError::MeshMaterialMassUnavailable(
+            "invalid shell topology".to_owned(),
+        );
+        assert_eq!(inventory.id(), construction.id());
+        assert!(inventory
+            .to_string()
+            .starts_with("mesh material mass unavailable:"));
+        assert_ne!(inventory.to_string(), construction.to_string());
     }
 }

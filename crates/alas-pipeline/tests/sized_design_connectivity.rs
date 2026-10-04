@@ -29,6 +29,7 @@ use alas_pipeline::{
 fn seeded_a220_config() -> AlasConfig {
     let mut config =
         AlasConfig::from_value(&serde_json::json!({ "preset": "A220-300" })).expect("A220 preset");
+    config.optimizer.objective.mtow_sizing = alas_config::MtowSizing::SizedByMission;
     config.optimizer.solver.method = alas_config::optimizer::PRODUCT_DE_METHOD.to_owned();
     config.optimizer.solver.refinement.max_evaluations = 128;
     config.optimizer.solver.screening.max_evaluations = 8;
@@ -77,6 +78,27 @@ fn run_seeded_a220(config: &AlasConfig) -> PipelineResult {
     DesignPipeline::new(config.clone())
         .run_with_design_space(&options, &RunEnvironment::default(), &design, &bounds)
         .expect("finalist")
+}
+
+#[test]
+fn hard_mtow_finalist_keeps_declared_mass_and_replays_as_hard_feasible() {
+    let mut config = seeded_a220_config();
+    config.optimizer.objective.mtow_sizing = alas_config::MtowSizing::FixedRequirement;
+    let result = run_seeded_a220(&config);
+    let report = result.optimized_report.as_ref().expect("optimized report");
+    assert_eq!(result.optimized_design, Some(report.design));
+    let replay =
+        alas_opt::assess_product_candidate(&config, &report.design).expect("finalist replay");
+    assert!(replay.hard_feasible, "{:?}", replay.violated_hard_ids());
+    assert_eq!(replay.sized.takeoff_mass_kg, config.requirements.mtow_kg);
+    assert_eq!(
+        report.sized_takeoff_mass_kg(),
+        Some(config.requirements.mtow_kg)
+    );
+    assert_eq!(
+        design_vn_mass_kg(&config, report),
+        replay.sized.design_gross_mass_kg
+    );
 }
 
 #[test]

@@ -22,6 +22,9 @@ use alas_config::AlasConfig;
 
 use super::{FuelLoadingAssessment, MassBalanceAssessment};
 
+mod design;
+pub(super) use design::design_model_cg_assessment;
+
 /// The ledger's OEW/zero-fuel/flown-takeoff states, in the
 /// shape [`assess_model_cg_envelope_with_ledger`] needs, when `mass_balance`
 /// carries at least those three named states (see
@@ -31,7 +34,10 @@ use super::{FuelLoadingAssessment, MassBalanceAssessment};
 /// station/tank/FLOPS-grouping failure aside) or its published state order
 /// ever changes shape, so this stays a plain type conversion rather than a
 /// second, drifting definition of which index means what.
-fn ledger_loading_basis(mass_balance: &MassBalanceAssessment) -> Option<LedgerLoadingBasis> {
+fn ledger_loading_basis(
+    mass_balance: &MassBalanceAssessment,
+    takeoff_label: &str,
+) -> Option<LedgerLoadingBasis> {
     let oew = mass_balance
         .states
         .iter()
@@ -43,7 +49,7 @@ fn ledger_loading_basis(mass_balance: &MassBalanceAssessment) -> Option<LedgerLo
     let takeoff = mass_balance
         .states
         .iter()
-        .find(|state| state.label == "flown takeoff")?;
+        .find(|state| state.label == takeoff_label)?;
     Some(LedgerLoadingBasis {
         oew_mass_kg: oew.mass_kg,
         oew_cg_x_m: oew.cg_m[0],
@@ -54,6 +60,7 @@ fn ledger_loading_basis(mass_balance: &MassBalanceAssessment) -> Option<LedgerLo
         takeoff_mass_kg: takeoff.mass_kg,
         takeoff_cg_x_m: takeoff.cg_m[0],
         takeoff_cg_z_m: takeoff.cg_m[2],
+        takeoff_pitch_inertia_kg_m2: takeoff.inertia_cg.iyy,
     })
 }
 
@@ -132,7 +139,9 @@ pub(super) fn model_cg_assessment(
     // fallback basis when no ledger could be built, so the report's own mass
     // statement and the feasibility verdict describe the same centre of
     // gravity.
-    if let Some(ledger) = mass_balance.and_then(ledger_loading_basis) {
+    if let Some(ledger) =
+        mass_balance.and_then(|balance| ledger_loading_basis(balance, "flown takeoff"))
+    {
         return assess_model_cg_envelope_with_ledger_and_landing(
             &report.airplane,
             ledger,
@@ -288,20 +297,21 @@ mod tests {
     use super::*;
     use crate::feasibility::{assess_physical_feasibility, FindingSeverity};
 
-    /// The A220-300 preset's configured `cg_range_pct_mac` (30 %MAC default)
-    /// exceeds its physical usable range, per the probe that found this
-    /// defect. That must raise `MinimumNoseGearLoadViolation`... no: it must
-    /// raise `ModelCgForwardRangeViolation` at `Warning` severity (a
-    /// configured assumption, not a physical limit), never `Error`, and the
-    /// message must name both the usable range and the configured value.
+    /// A preset whose configured `cg_range_pct_mac` (30 %MAC default)
+    /// exceeds its physical usable range must raise
+    /// `ModelCgForwardRangeViolation` at `Warning` severity (a configured
+    /// assumption, not a physical limit), never `Error`, and the message must
+    /// name both the usable range and the configured value. The A380-800's
+    /// usable takeoff range (18 %MAC) is short of it; the A220-300's is not,
+    /// given the derived rotation authority.
     #[test]
-    fn a220_300_minimum_usable_cg_range_is_a_warning_not_an_error() {
-        let config = AlasConfig::from_value(&serde_json::json!({ "preset": "A220-300" }))
-            .expect("A220-300 preset config");
-        let preset = alas_config::presets::get("A220-300").expect("registered preset");
+    fn a380_800_minimum_usable_cg_range_is_a_warning_not_an_error() {
+        let config = AlasConfig::from_value(&serde_json::json!({ "preset": "A380-800" }))
+            .expect("A380-800 preset config");
+        let preset = alas_config::presets::get("A380-800").expect("registered preset");
         let report = crate::full_analysis::FullAnalysis::new(config.clone())
             .run(&preset.design_vector, true)
-            .expect("A220-300 must analyze");
+            .expect("A380-800 must analyze");
         let feasibility =
             assess_physical_feasibility(&config, &preset.design_vector, &report, None);
         let finding = feasibility
@@ -311,7 +321,7 @@ mod tests {
                 finding.code == FindingCode::ModelCgForwardRangeViolation
                     && finding.message.contains("usable CG range")
             })
-            .expect("the A220-300 preset raises the minimum-usable-cg-range finding");
+            .expect("the A380-800 preset raises the minimum-usable-cg-range finding");
         assert_eq!(finding.severity, FindingSeverity::Warning);
         assert!(finding.message.contains("configured requirement"));
         assert!(!feasibility.findings.iter().any(|other| {
@@ -319,6 +329,25 @@ mod tests {
                 && other.message.contains("usable CG range")
                 && other.severity == FindingSeverity::Error
         }));
+        // The printed model CG status counts the same hard set the verdict
+        // gates on: a diagnostic shortfall is never a hard failure there.
+        let hard_errors = [&feasibility.model_cg, &feasibility.design_model_cg]
+            .into_iter()
+            .flatten()
+            .flat_map(|assessment| &assessment.loading_states)
+            .flat_map(|state| &state.constraints)
+            .any(|constraint| constraint.violated && !constraint.constraint.is_diagnostic());
+        let text = crate::feasibility::report_format::format_feasibility(&feasibility);
+        let status = text
+            .lines()
+            .find(|line| line.starts_with("Model CG status"))
+            .expect("model CG status line");
+        assert_eq!(
+            status.contains("HARD CONSTRAINTS FAIL"),
+            hard_errors,
+            "{status}"
+        );
+        assert!(status.contains("diagnostic limit(s) not met"), "{status}");
     }
 
     /// Ground-clearance constraints report under their own finding codes, and

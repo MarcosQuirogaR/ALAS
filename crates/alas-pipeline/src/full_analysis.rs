@@ -18,7 +18,9 @@ use alas_aero::analysis::{AeroAnalysis, PolarSweep, TrimPoint};
 use alas_aero::vlm::VlmSystem;
 use alas_atmo::Atmosphere;
 use alas_config::design_variables::DesignVector;
-use alas_config::{presets, AlasConfig};
+#[cfg(test)]
+use alas_config::presets;
+use alas_config::AlasConfig;
 use alas_geom::aircraft::airplane::Airplane;
 use alas_geom::builder::AircraftBuilder;
 use alas_mass::breakdown::{FlopsMassBuildup, MassCoordinateModel};
@@ -217,6 +219,29 @@ impl AnalysisReport {
     pub fn analysis_takeoff_mass_kg(&self, fallback_mtow_kg: f64) -> f64 {
         self.sized_takeoff_mass_kg().unwrap_or(fallback_mtow_kg)
     }
+
+    /// The takeoff mass of the fuel load the report's masses carry, in kg:
+    /// zero-fuel mass plus `min(MTOW - ZFW, usable capacity)` when the
+    /// analysis loaded the tanks itself, else
+    /// [`Self::analysis_takeoff_mass_kg`]. Below the MTOW limit only when the
+    /// usable tanks cap the fuel, which the report flags as volume-limited.
+    pub fn loaded_takeoff_mass_kg(&self, fallback_mtow_kg: f64) -> f64 {
+        self.geometry_summary
+            .get("analysis_loaded_takeoff_mass_kg")
+            .copied()
+            .filter(|kg| kg.is_finite() && *kg > 0.0)
+            .unwrap_or_else(|| self.analysis_takeoff_mass_kg(fallback_mtow_kg))
+    }
+
+    /// Aircraft takeoff-weight limit, kg, distinct from its analyzed load.
+    /// Payload-range corners and dispatch limits use this capability bound.
+    pub fn aircraft_mtow_limit_kg(&self, fallback_mtow_kg: f64) -> f64 {
+        self.geometry_summary
+            .get("analysis_mtow_limit_kg")
+            .copied()
+            .filter(|kg| kg.is_finite() && *kg > 0.0)
+            .unwrap_or(fallback_mtow_kg)
+    }
 }
 
 /// Evaluates high-fidelity multidisciplinary analyses for candidate aircraft designs.
@@ -225,6 +250,9 @@ pub struct FullAnalysis {
     /// Configuration governing geometry, requirements, analysis fidelity, and mass models.
     pub config: AlasConfig,
     reference_compatibility: bool,
+    /// Whether the configuration is a sized closure's, whose takeoff fuel is
+    /// the closure's own rather than the maximum the declared MTOW admits.
+    closure_bound: bool,
 }
 
 mod maps;
@@ -251,13 +279,15 @@ use polar_point::design_point_nearest;
 pub mod cabin_sync;
 
 mod design_point;
+mod payload_limit;
 mod payload_pass;
 mod route_payload_cap;
 mod run;
+mod takeoff_loading;
 #[cfg(test)]
 // Failed expectations and unwraps here are failed test assertions.
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests;
 
+pub(crate) use payload_limit::effective_structural_payload_limit_kg;
 pub(crate) use route_payload_cap::ROUTE_PAYLOAD_OFFLOADED_KEY;
-pub(crate) use run::effective_structural_payload_limit_kg;

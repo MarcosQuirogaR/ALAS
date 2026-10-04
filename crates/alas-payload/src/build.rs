@@ -23,6 +23,7 @@
 //! reserves the same monument bays, applies the same exit-derived cap, and
 //! reads the same [`crate::cabin::cabin_deck_segments`].
 
+mod brief_cabin;
 mod count;
 mod mix_solve;
 mod presets;
@@ -135,15 +136,30 @@ pub fn product_cabin_geometry(
     .with_declared_doors(layout.as_ref()))
 }
 
-/// Resolve the source-defined exit arrangement for a registered passenger
-/// preset.  Clean-sheet and frozen compatibility callers deliberately retain
-/// the generic diameter-based exit proxy.
+/// Resolve the exit arrangement of a passenger cabin: the source-defined one
+/// of a registered preset, or the CS 25.807(g) derived one of a clean-sheet
+/// brief. Frozen compatibility callers, registered aircraft without a
+/// declared arrangement and the shipped reference brief retain the generic
+/// diameter-based exit proxy.
 pub(crate) fn registered_source_exit_layout(
     config: &AlasConfig,
     reference_compatibility: bool,
 ) -> Option<CertifiedExitLayout> {
     if reference_compatibility || config.requirements.aircraft_type == "cargo" {
         return None;
+    }
+    // A clean-sheet brief has no declared arrangement; it gets the smallest
+    // CS 25.807(g) compliant one for its seat target. A registered aircraft
+    // without a declared arrangement, and the shipped reference brief, keep
+    // the generic proxy.
+    if config.derives_clean_sheet_start() {
+        let pax = &config.cabin.passenger;
+        let seats = if pax.class_mix_mode == "count" && pax.total_seats() > 0 {
+            pax.total_seats()
+        } else {
+            config.requirements.num_passengers
+        };
+        return crate::cabin::derived_exit_layout(config.geometry.fuselage.diameter_m, seats);
     }
     alas_config::presets::get(&config.preset)
         .ok()
@@ -236,6 +252,11 @@ fn build_payload_layout_with_mass_semantics(
                 source_capacity_cap,
                 source_exit_layout,
             );
+            // A clean-sheet brief's seat target becomes a count cabin there,
+            // and a count is reported short, never replaced by the geometry.
+            explicit_count_cabin = effective.requirements.aircraft_type == "passenger"
+                && effective.cabin.passenger.class_mix_mode == "count"
+                && effective.cabin.passenger.total_seats() > 0;
         }
         // `requirements.passenger_mass_kg` is the single product load-case
         // authority (occupant plus checked bag, the same for every class):

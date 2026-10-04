@@ -115,9 +115,10 @@ pub(super) fn append_native(
                 FindingCode::StructuralResponseUnavailable,
                 format!(
                     "mandatory structural assessment unavailable: {}",
-                    result
-                        .err()
-                        .unwrap_or("invalid response arrays or model inputs")
+                    result.err().map_or_else(
+                        || "invalid response arrays or model inputs".to_owned(),
+                        |error| error.to_string()
+                    )
                 ),
                 None,
                 None,

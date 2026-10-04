@@ -149,6 +149,8 @@ fn public_native_mission_matches_pinned_provenance_checkpoints() {
         arrival_airport: "HKJK".to_owned(),
         ..AlasConfig::default()
     };
+    config.structures.run_nastran = false;
+    config.structures.run_patran_export = false;
     // This fixture predates the product transport-planform stations. Keep its
     // frozen three-station geometry so the test continues to isolate the
     // declared structural-wingbox CG correction instead of mixing a geometry

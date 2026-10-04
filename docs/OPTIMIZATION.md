@@ -46,12 +46,17 @@ holds; presets override the physical inputs.
 | --- | --- | --- |
 | `kind` | block fuel, takeoff mass, operating empty mass, fuel per seat-kilometre | `block_fuel` |
 | `design_range_nmi` | still-air design range; zero uses the great-circle distance between the departure and arrival aerodromes | 0 |
-| `mtow_sizing` | takeoff mass closed by the mission (`requirements.mtow_kg` is the ceiling) or fixed at the requirement | `sized_by_mission` |
+| `mtow_sizing` | takeoff mass closed by the mission (`requirements.mtow_kg` is the ceiling) or fixed at the requirement | `sized_by_mission`; registered presets and benchmarks use `fixed_requirement` |
 | `sizing_max_iterations`, `sizing_tolerance_kg` | sizing-loop budget and closure tolerance | 30, 1 kg |
 | `retrim_cg_tolerance_pct_mac` | CG shift that triggers a re-trim inside the loop; zero keeps one trim | 0.1 |
-| `mass_constraints`, `balance_constraints`, `performance_constraints`, `geometry_constraints` | hard, soft, diagnostic or off per family | hard |
+| `preference_weight` | scale of intrinsic study-preference penalties; never a constraint allowance | 10 |
 | `aerodrome_reference_code`, `max_approach_speed_kt` | ICAO Annex 14 code letter capping the clean-sheet wingspan (A 15 m ... F 80 m, strictly below the band edge; a registered aircraft in reference adaptation uses its own letter), approach-category speed limit (zero disables) | F, 0 |
-| `soft_penalty_weight` | weight of the soft-residual sum against the objective | 10 |
+
+Every constraint is hard: a violation makes the candidate invalid. Objective
+preferences and diagnostic outputs retain their fixed roles. Older saved
+constraint policies and violation allowances are discarded when loaded.
+Registered preset files that omit `mtow_sizing` use Hard MTOW; an explicit saved mode remains authoritative.
+The saved `soft_penalty_weight` is migrated to `preference_weight` with its value preserved.
 
 ### `optimizer.solver`: how the search is run
 
@@ -157,36 +162,16 @@ These are statements about where this program's own mass, drag and
 stability correlations were fitted, not performance requirements, and each
 window is deliberately wider than every registered aircraft. They reach the
 search as named Geometry residuals (`aspect_ratio_min/max` and the rest) and
-follow the geometry family's configured policy. The group is edited in
+reject candidates outside these hard limits. The group is edited in
 Advanced Settings > Optimizer > Model validity domain, and is written to a
 saved document only when it differs from the shipped defaults, so an older
 file loads with those defaults rather than with zeros.
-
-### `optimizer.relaxation`: controlled constraint relaxation (D01-D03)
-
-`enabled` and `allowed_violated_groups` are on the Inputs page under Run
-options and in Advanced Settings; `eligible`, the per-limit list, is
-document-only. Violated discipline *groups* are counted rather than limits
-(D01), a limit must be on the eligibility list and missed inside its own
-declared tolerance (D02), and a relaxed design never ranks ahead of, or is
-labelled as, a fully feasible one (D03).
-
-**No limit is currently eligible.** `alas_config::optimizer::policy_review`
-records the relaxation review as one determination per residual identifier, with
-the reason: a limit is `NeverRelaxable` (a failed or incomplete evaluation,
-or a boolean availability flag), or `Ineligible` because no traceable
-primary engineering or regulatory source states a fraction of it that may be
-exceeded and this program has no measured error band for the quantity
-either, or `Eligible` with a sourced tolerance ceiling. The third state has
-no entries. A configuration that lists an ineligible or unknown identifier
-is a blocking validation error quoting the recorded reason, so the shipped
-run is strict and stays strict.
 
 ### `optimizer.weights`: failure cost and planform thresholds
 
 The search reads `failure_cost` for a candidate that cannot be built, trimmed
 or analysed and the transport-planform thresholds; its objective and
-requirement policies live
+requirements live
 under `optimizer.objective` and `requirements`.
 
 ### `requirements`: the brief

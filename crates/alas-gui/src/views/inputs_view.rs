@@ -594,7 +594,6 @@ fn route_column_count(available_width: f32) -> usize {
 fn show_run_options_card(state: &mut AppState, ui: &mut Ui) {
     let _ = card(ui, "Run options", |ui| {
         show_run_content_options(state, ui);
-        crate::views::inputs_relaxation::show_constraint_policy(state, ui);
     });
 }
 

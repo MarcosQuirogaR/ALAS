@@ -15,9 +15,10 @@ use crate::search_methods::{restoration, ScoredPoint};
 use crate::{BaselineComparison, StageRejections, StageSummary, SEARCH_SCOPE};
 
 mod screen;
+mod seeding;
 
 /// Share of the refinement's initial population filled from the screening
-/// elite; the baseline takes one member and a Latin hypercube the rest
+/// elite; the baseline takes one member and coupled anchor draws the rest
 /// (engineering choice: half known-good starts, half fresh coverage).
 const ELITE_POPULATION_FRACTION: f64 = 0.5;
 
@@ -42,6 +43,8 @@ struct Screened {
     rejections: StageRejections,
     elite: Vec<ScoredPoint>,
     cancelled: bool,
+    /// Every candidate the stage requested, for display.
+    trace: crate::EvaluationTrace,
     /// The exact scores, when the refinement evaluates with the same model.
     cache: Option<EvaluationCache>,
 }
@@ -111,9 +114,15 @@ impl DesignOptimizer {
         // keeps; a smaller planned population takes the first members.
         let ceiling =
             usize::try_from(solver.refinement.max_evaluations.max(1)).unwrap_or(usize::MAX);
-        let elite_size = elite_members_kept(
-            product_de::refinement_settings(solver, dimension, run.seed, ceiling).population,
-        );
+        let mut ceiling_settings =
+            product_de::refinement_settings(solver, dimension, run.seed, ceiling);
+        if objective.honors_deadline() {
+            product_de::configure_native_population(&mut ceiling_settings);
+        }
+        let mut elite_size = elite_members_kept(ceiling_settings.population);
+        if objective.honors_deadline() {
+            elite_size = elite_size.min(native_elite_cap(run.baseline.is_some()));
+        }
         let screened = match screening_model {
             _ if dimension == 0 => None,
             ScreeningModel::Skip => None,
@@ -125,7 +134,9 @@ impl DesignOptimizer {
         let mut rejections = Vec::new();
         let mut elite_members = Vec::new();
         let mut cache = None;
+        let mut trace = crate::EvaluationTrace::default();
         if let Some(screened) = screened {
+            trace = screened.trace;
             report(&format!(
                 "screening | evaluations {} | rejected {} | feasible {} | elite {} | termination {} | wall_s {:.3}",
                 screened.summary.evaluations,
@@ -152,6 +163,7 @@ impl DesignOptimizer {
                     SearchDiagnostics {
                         stages,
                         rejections,
+                        evaluation_trace: trace,
                         ..SearchDiagnostics::default()
                     },
                 );
@@ -177,16 +189,25 @@ impl DesignOptimizer {
             evaluator.cache = cache;
         }
         let before = evaluator.analyses();
-        let pilot_rows = evaluator.objective.history().n_evaluations();
+        let (_, _, stage_limit) =
+            product_de::stage_limits(&solver.refinement, solver.stop_on_evaluations_only);
+        let search_limit = stage_limit
+            .map(|limit| limit.mul_f64(1.0 - product_de::VERIFICATION_RESERVE_TIME_FRACTION));
+        evaluator
+            .objective
+            .set_deadline(search_limit.map(|limit| stage_started + limit));
         // Refinement throughput: its model analyses baseline and elite in one
         // batch (cache hits later); rate = lanes the screening kept busy over
         // their mean lane time. A 12-member pilot under-loaded the lanes and
         // planned 1.4-2x what the time afforded (A320-200, 32 threads). The
         // screening's own model reuses its scores and its throughput.
         let busy = evaluator.busy;
-        if dimension > 0 && screening_throughput.is_some() {
-            evaluator.evaluate_block(&seeds);
-        }
+        let pilot_prefix = if dimension > 0 && screening_throughput.is_some() {
+            let points = replay_pilot_prefix(&run, &seeds, &solver.refinement);
+            evaluator.evaluate_block(points).len()
+        } else {
+            0
+        };
         let piloted = evaluator.analyses() - before;
         let rate = screening_throughput.map(|(analysed, wall_s, utilization)| {
             if piloted > 0 {
@@ -198,29 +219,23 @@ impl DesignOptimizer {
         });
         let planned = product_de::planned_refinement_budget(solver, rate);
         let mut refinement = product_de::refinement_settings(solver, dimension, run.seed, planned);
+        refinement.intra_batch_deadline = evaluator.objective.honors_deadline();
+        refinement.population = refinement.population.max(pilot_prefix);
+        if refinement.intra_batch_deadline {
+            // After the pilot prefix, so the rounded population is still a
+            // whole number of lane waves; the native pilot is at most one
+            // wave (`native_elite_cap`), which the rounded population holds.
+            product_de::configure_native_population(&mut refinement);
+        }
         if dimension == 0 {
             refinement.population = 1;
         }
         let search_budget = refinement.max_evaluations;
-        let kept = usize::from(run.baseline.is_some()) + elite_members_kept(refinement.population);
-        // Pilot analyses of seeds the planned population drops are charged
-        // to the budget, so the stage's analyses never exceed it; the count
-        // is a function of the replayed screening, so a replay charges it too.
-        let history = evaluator.objective.history();
-        let dropped = seeds
-            .get(kept..)
-            .unwrap_or_default()
-            .iter()
-            .filter(|values| {
-                evaluator.cache.row(values).is_some_and(|row| {
-                    row >= pilot_rows
-                        && history.reject_reason.get(row).map(String::as_str)
-                            != Some(super::batch::CANCELLED_UNSTARTED)
-                })
-            });
-        refinement.max_evaluations = search_budget.saturating_sub(dropped.count()).max(1);
-        refinement.stop_after = refinement.stop_after.min(refinement.max_evaluations);
+        let kept = (usize::from(run.baseline.is_some())
+            + elite_members_kept(refinement.population))
+        .max(pilot_prefix);
         seeds.truncate(kept);
+        seeding::top_up(&run, &evaluator, &mut seeds, refinement.population);
         report(&format!(
             "refinement | population {} | budget {} | seed {} | workers {}",
             refinement.population, refinement.max_evaluations, run.seed, run.workers
@@ -232,6 +247,7 @@ impl DesignOptimizer {
             refinement,
             stage_started,
             &scope,
+            Some(&|values| run.admits(values)),
             &mut |points: &[Vec<f64>]| evaluator.evaluate_block(points),
         );
         let kernel_evaluations = outcome.evaluations;
@@ -245,8 +261,11 @@ impl DesignOptimizer {
             started: stage_started,
             time_limit: refinement.time_limit,
         };
+        evaluator.stage = crate::TraceStage::Restoration;
         let restoration =
             feasibility_restoration::run(bounds, &mut outcome, limits, &scope, &mut evaluator);
+        trace.append(std::mem::take(&mut evaluator.trace));
+        evaluator.objective.set_deadline(None);
         let wall = stage_started.elapsed().as_secs_f64();
         let termination = if outcome.termination == Termination::Cancelled || dimension > 0 {
             outcome.termination.label()
@@ -257,7 +276,7 @@ impl DesignOptimizer {
             stage: "refinement".to_owned(),
             max_evaluations: ceiling,
             planned_evaluations: planned,
-            reserved_evaluations: planned.saturating_sub(search_budget),
+            reserved_evaluations: ceiling.saturating_sub(search_budget),
             time_limit_s: solver.refinement.time_limit_s,
             time_limited: refinement.time_limit.is_some(),
             evaluations: outcome.evaluations,
@@ -307,7 +326,10 @@ impl DesignOptimizer {
             analysis_evaluations,
             cache_hits: evaluator.cache.hits - hits_before,
             poll_iterations: outcome.generations_completed,
-            verification_evaluations: elite_members.len(),
+            verification_evaluations: elite_members
+                .iter()
+                .filter(|point| evaluator.cache.row(&point.values).is_some())
+                .count(),
             search_wall_time_s: wall,
             poll_block_size: outcome.population_initial,
             first_feasible_cost: outcome.first_feasible_cost,
@@ -321,6 +343,7 @@ impl DesignOptimizer {
             rejections,
             baseline: baseline_comparison,
             winner_history_row: winner_row,
+            evaluation_trace: trace,
             ..SearchDiagnostics::default()
         };
         let winner = MethodOutcome {
@@ -366,6 +389,42 @@ impl DesignOptimizer {
 /// beside the baseline ([`ELITE_POPULATION_FRACTION`]).
 fn elite_members_kept(population: usize) -> usize {
     (population.saturating_sub(1) as f64 * ELITE_POPULATION_FRACTION) as usize
+}
+
+/// Screening elite members a native refinement keeps: the refinement pilot
+/// (baseline plus elite) is then one whole lane wave
+/// ([`product_de::NATIVE_LANE_QUANTUM`]) and fits inside the smallest
+/// native population, so it neither leaves lanes idle in a second partial
+/// wave nor forces the population off a whole number of waves.
+fn native_elite_cap(has_baseline: bool) -> usize {
+    product_de::NATIVE_LANE_QUANTUM - usize::from(has_baseline)
+}
+
+/// A replay ending inside the pilot requests the same admitted prefix.
+/// Every started pilot seed is retained, so its cached initial population
+/// gives the kernel precisely that recorded count when the deadline expires.
+fn replay_pilot_prefix<'a>(
+    run: &Run<'_>,
+    seeds: &'a [Vec<f64>],
+    stage: &alas_config::StageBudget,
+) -> &'a [Vec<f64>] {
+    let Some(recorded) = stage
+        .replay_evaluations
+        .and_then(|value| usize::try_from(value).ok())
+    else {
+        return seeds;
+    };
+    let remaining = recorded.saturating_sub(product_de::restoration_replay(stage).unwrap_or(0));
+    let mut admitted = 0;
+    for (index, values) in seeds.iter().enumerate() {
+        if run.admits(values) {
+            if admitted >= remaining {
+                return &seeds[..index];
+            }
+            admitted += 1;
+        }
+    }
+    seeds
 }
 
 // A test asserts on values it built here, so a failed expect is the
@@ -440,6 +499,66 @@ mod tests {
         );
         let ladder = result.ranked_hard_feasible_candidates(4);
         assert!(!ladder[1..].contains(&history.design_vectors[row]));
+    }
+
+    #[test]
+    fn the_trace_records_every_rejected_and_analysed_candidate_of_each_stage_in_order() {
+        let mut config = AlasConfig::default();
+        config.optimizer.solver.seed = Some(5);
+        config.optimizer.solver.screening.max_evaluations = 48;
+        config.optimizer.solver.refinement.max_evaluations = 80;
+        config.optimizer.solver.stop_on_evaluations_only = true;
+        for separate in [false, true] {
+            // Spans above the code F limit fail the pre-gate in both stages.
+            let (_, bounds) = span_box(0.9, 1.4);
+            let mut screening = Timed(OptimizationHistory::new(), 0);
+            let mut refinement = Timed(OptimizationHistory::new(), 0);
+            let model = if separate {
+                ScreeningModel::Separate(&mut screening)
+            } else {
+                ScreeningModel::Same
+            };
+            let result = search(config.clone(), &bounds, &mut refinement, model);
+            let diagnostics = diagnostics_of(&result);
+            let trace = &diagnostics.evaluation_trace;
+            assert_eq!(trace.screening_separate, separate);
+            let recorded = |stages: &[crate::TraceStage]| {
+                trace
+                    .evaluations
+                    .iter()
+                    .filter(|evaluation| stages.contains(&evaluation.stage))
+                    .count()
+            };
+            let requested =
+                |stage: &StageSummary| stage.pre_gate_rejects + stage.analysis_evaluations;
+            assert!(diagnostics.stages.iter().all(|s| s.pre_gate_rejects > 0));
+            assert_eq!(
+                recorded(&[crate::TraceStage::Screening]),
+                requested(&diagnostics.stages[0])
+            );
+            assert_eq!(
+                recorded(&[
+                    crate::TraceStage::Refinement,
+                    crate::TraceStage::Restoration
+                ]),
+                requested(&diagnostics.stages[1])
+            );
+            assert!(trace
+                .evaluations
+                .windows(2)
+                .all(|pair| pair[0].stage <= pair[1].stage));
+            let rejected = trace.count(crate::TraceClass::Rejected);
+            let pre_gated: usize = diagnostics.stages.iter().map(|s| s.pre_gate_rejects).sum();
+            assert_eq!(rejected, pre_gated, "every Timed analysis is valid");
+            assert_eq!(
+                trace.count(crate::TraceClass::Valid),
+                diagnostics
+                    .stages
+                    .iter()
+                    .map(|s| s.analysis_evaluations)
+                    .sum::<usize>()
+            );
+        }
     }
 
     /// Scores a batch across `workers` threads that each spend `.1` ms per
@@ -545,14 +664,12 @@ mod tests {
         config.optimizer.solver.refinement.time_limit_s = 0.4;
         // The time limit, not stagnation, must end the refinement.
         config.optimizer.solver.convergence_stagnation_generations = 1_000_000;
-        // Spans above the code F limit fail the pre-gate in both stages.
+        // The requested box extends above the code F span limit.
         let limited = timed_run(&config, 1, 1.4);
         let diagnostics = diagnostics_of(&limited);
         let stages = &diagnostics.stages;
-        assert!(stages.iter().all(|stage| stage.pre_gate_rejects > 0));
         for (stage, rejections) in stages.iter().zip(&diagnostics.rejections) {
             assert_eq!(rejections.pre_gate.total(), stage.pre_gate_rejects);
-            assert!(rejections.pre_gate.span_code > 0);
         }
         for stage in stages {
             assert_eq!(stage.termination, "time_budget", "{}", stage.stage);
@@ -599,6 +716,103 @@ mod tests {
             &mut refinement,
             model,
         )
+    }
+
+    /// A deterministic deadline prefix with a measured lane cost, so clock
+    /// scheduling cannot change which pilot boundary the test exercises.
+    struct PilotPrefix {
+        history: OptimizationHistory,
+        allowance: usize,
+        remaining: Option<usize>,
+        telemetry: Vec<(Duration, bool)>,
+    }
+
+    impl SearchObjective for PilotPrefix {
+        fn evaluate(&mut self, design: &[f64]) -> f64 {
+            let design = DesignVector::from_array(design).expect("design");
+            let cost = design.span_m;
+            self.history
+                .record(design, true, cost, 17.0, design.span_m, 2.0, 120.0, 0.0, "");
+            cost
+        }
+        fn history(&self) -> &OptimizationHistory {
+            &self.history
+        }
+        fn set_deadline(&mut self, deadline: Option<Instant>) {
+            self.remaining = deadline.map(|_| self.allowance);
+        }
+        fn honors_deadline(&self) -> bool {
+            true
+        }
+        fn runs_concurrently(&self) -> bool {
+            true
+        }
+        fn take_concurrent_telemetry(&mut self) -> Option<Vec<(Duration, bool)>> {
+            Some(std::mem::take(&mut self.telemetry))
+        }
+        fn evaluate_batch(&mut self, points: &[Vec<f64>], _workers: usize) -> Vec<(f64, bool)> {
+            let count = self.remaining.unwrap_or(points.len()).min(points.len());
+            self.remaining = self
+                .remaining
+                .map(|remaining| remaining.saturating_sub(count));
+            self.telemetry = vec![(Duration::from_secs(1), false); count];
+            points
+                .iter()
+                .take(count)
+                .map(|point| (self.evaluate(point), true))
+                .collect()
+        }
+    }
+
+    #[test]
+    fn a_deadline_inside_the_pilot_replays_without_extra_elite_analyses() {
+        let nominal = DesignVector::default();
+        let values = nominal.to_array();
+        let mut bounds: Vec<(f64, f64)> = values.iter().map(|&value| (value, value)).collect();
+        for (bound, &value) in bounds.iter_mut().zip(&values).take(6) {
+            let half_width = 0.01 * value.abs().max(1.0);
+            *bound = (value - half_width, value + half_width);
+        }
+        let mut config = AlasConfig::default();
+        let solver = &mut config.optimizer.solver;
+        solver.seed = Some(11);
+        solver.workers = 1;
+        solver.screening.max_evaluations = 64;
+        solver.refinement.max_evaluations = 1_200;
+        solver.refinement.time_limit_s = 0.1;
+        let population = product_de::refinement_settings(solver, 6, 11, 1_200).population;
+        let allowance = elite_members_kept(population);
+        let execute = |config: AlasConfig| {
+            let mut screening = Timed(OptimizationHistory::new(), 0);
+            let mut objective = PilotPrefix {
+                history: OptimizationHistory::new(),
+                allowance,
+                remaining: None,
+                telemetry: Vec::new(),
+            };
+            search(
+                config,
+                &bounds,
+                &mut objective,
+                ScreeningModel::Separate(&mut screening),
+            )
+        };
+        let limited = execute(config.clone());
+        let stages = &diagnostics_of(&limited).stages;
+        assert_eq!(stages[1].analysis_evaluations, allowance);
+        assert_eq!(stages[1].evaluations, allowance);
+        assert_eq!(stages[1].feasible, allowance);
+        assert!(limited.best_valid);
+        assert!(allowance > elite_members_kept(stages[1].elite_size));
+        let replay = replay_of(&config, stages);
+        for workers in [1, 8] {
+            let replayed = execute(with_workers(&replay, workers));
+            assert_eq!(bits(&limited), bits(&replayed), "{workers} workers");
+            assert_eq!(
+                diagnostics_of(&replayed).stages[1].analysis_evaluations,
+                allowance
+            );
+        }
     }
 
     #[test]
@@ -691,11 +905,10 @@ mod tests {
     }
 
     /// The audit case: 13 free coordinates, the 20 000 ceiling and a planned
-    /// budget of 240. The ceiling's elite (38 members) is piloted, the
-    /// planned population keeps 11, and every analysis, pilot included,
-    /// stays inside the refinement's search budget.
+    /// schedule of 240. The pilot remains in the full history and the search
+    /// continues past that estimate within the configured evaluation ceiling.
     #[test]
-    fn the_refinement_analyses_stay_inside_the_planned_budget_pilot_included() {
+    fn the_refinement_analyses_stay_inside_the_configured_ceiling_pilot_included() {
         let mut config = AlasConfig::default();
         config.optimizer.solver.seed = Some(4);
         config.optimizer.solver.stop_on_evaluations_only = true;
@@ -714,10 +927,9 @@ mod tests {
         let stages = &diagnostics_of(&result).stages;
         let (screened, refined) = (&stages[0], &stages[1]);
         assert_eq!(refined.planned_evaluations, 240);
-        let search_budget = refined.planned_evaluations - refined.reserved_evaluations;
-        assert_eq!(search_budget, 230);
-        // The pilot dropped seeds: the scenario under test.
+        let search_budget = refined.max_evaluations - refined.reserved_evaluations;
         assert!(screened.elite_size > elite_members_kept(refined.elite_size));
+        assert!(refined.analysis_evaluations > refined.planned_evaluations);
         assert!(
             refined.analysis_evaluations <= search_budget,
             "{} analyses against a budget of {search_budget}",

@@ -59,9 +59,8 @@ pub struct LiftSolution {
     pub wing_induced_drag_coefficient: Vec<f64>,
     /// Whether either query coordinate was clamped to the training boundary.
     ///
-    /// The legacy [`LiftSurrogate::evaluate`] operation still returns the
-    /// reference-compatible edge value, but it no longer leaves the caller
-    /// guessing whether that happened. Product callers that require an
+    /// [`LiftSurrogate::evaluate`] returns the reference-compatible edge
+    /// value and reports here whether that happened. Product callers that require an
     /// in-domain model can use [`LiftSurrogate::evaluate_checked`].
     pub domain: SurrogateDomainStatus,
 }

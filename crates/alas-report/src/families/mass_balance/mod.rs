@@ -3,13 +3,7 @@
 
 // Ported from alas/reporting/visualization.py
 
-//! Mass breakdown, longitudinal weight distribution, model CG check, and landing gear layout figures.
-//!
-//! `figure_cg_envelope` and `figure_mass_distribution` alone translate close
-//! to 980 lines of `visualization.py`, past what one file under this crate's
-//! 500-line limit can hold, so this became a directory module: the same
-//! split `alas-geom::aircraft::airfoil` already uses. [`cg_envelope`] and
-//! [`mass_distribution`] hold those two.
+//! Mass breakdown, longitudinal weight distribution, load-and-trim, and landing gear layout figures.
 //!
 //! The sibling layout module owns the mass-breakdown and landing-gear figures;
 //! re-exporting them keeps the mass-balance API organized by discipline.

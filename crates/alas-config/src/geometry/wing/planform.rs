@@ -169,6 +169,18 @@ impl TransportPlanform {
         stations
     }
 
+    /// Projected (XY) reference area of both semispans, m^2: the straight
+    /// trapezoidal panels between the stations, `2 sum (c_i + c_o)/2 (y_o -
+    /// y_i)`. The geometry builder lofts these panels with chord linear in
+    /// span, so this is the main wing's `s_ref` before any non-planar tip
+    /// device.
+    pub fn reference_area_m2(&self) -> f64 {
+        self.stations()
+            .windows(2)
+            .map(|pair| (pair[0].chord_m + pair[1].chord_m) * (pair[1].y_m - pair[0].y_m))
+            .sum()
+    }
+
     /// Return every straight panel, including the optional side-of-body panel.
     pub fn panels(&self) -> Vec<MainWingPanel> {
         let stations = self.stations();

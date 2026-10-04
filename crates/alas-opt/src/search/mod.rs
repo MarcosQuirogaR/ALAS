@@ -4,6 +4,8 @@
 //! The screening stage of the product search and the diverse elite it hands
 //! to the refinement kernel (`search_methods::lshade_de`).
 
+mod anchored_sampling;
+mod coupled_geometry;
 pub(crate) mod elite;
 pub(crate) mod fidelity_pairs;
 pub(crate) mod planform_projection;

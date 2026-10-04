@@ -30,7 +30,7 @@ use alas_report::families::mission::{
     figure_mission_route_3d, figure_mission_velocities,
 };
 use alas_report::families::optimization::figure_airfoil_comparison;
-use alas_report::families::optimization::figure_optimization_history_labelled;
+use alas_report::families::optimization::figure_optimization_run;
 use alas_report::families::performance::{
     figure_lto_for_airport_at_masses, figure_matching_chart, figure_payload_range,
     figure_vn_diagram,
@@ -166,7 +166,7 @@ pub fn build_result_figure_with_camera(
                 &result.config,
                 result.execution.seed_requested,
             );
-            figure_optimization_history_labelled(&optimization.history, Some(&summary), Some(theme))
+            figure_optimization_run(optimization, Some(&summary), Some(theme))
         }
         "design_evolution" => {
             let history = &selected_optimization_result(state, result)?.history;
@@ -280,7 +280,21 @@ pub fn build_result_figure_with_camera(
         }
         "mass_distribution" => figure_mass_distribution(report, Some(theme)),
         "dynamic_modes" => figure_dynamic_modes(report, config, Some(theme)),
-        "cg_envelope" => figure_cg_envelope(report, config, Some(theme)),
+        "cg_envelope" => {
+            use alas_report::families::mass_balance::load_trim::{
+                data::load_trim_data_from_pipeline, figure_load_trim_sheet,
+            };
+            let data = result
+                .optimized_report
+                .as_ref()
+                .or(result.baseline_analysis.as_ref())
+                .filter(|primary| std::ptr::eq(*primary, report))
+                .and_then(|_| load_trim_data_from_pipeline(result));
+            data.map_or_else(
+                || figure_cg_envelope(report, config, Some(theme)),
+                |data| figure_load_trim_sheet(&data, alas_report::theme::get_palette(Some(theme))),
+            )
+        }
         "landing_gear_planform" => figure_landing_gear_planform(report, config, Some(theme)),
         "control_surfaces" => figure_control_surfaces(report, config, Some(theme)),
         "stability_side_view" => figure_stability_side_view(report, Some(theme)),

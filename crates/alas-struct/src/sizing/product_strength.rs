@@ -10,10 +10,18 @@
 //! Secondary wing items are resolved separately by the mass model.
 
 use super::law::{station_cap_dimensions, trapezoid};
-use super::section::{cap_ei, non_cap_ei, stress_utilization, update_moment_fractions};
+use super::section::{stress_utilization, update_moment_fractions};
 use super::WingboxSizing;
-use crate::allowables::bending_allowable_pa;
+
 use alas_config::{materials::MaterialSpec, StructuresConfig};
+
+#[cfg(test)]
+#[path = "product_strength_tests.rs"]
+mod tests;
+
+#[cfg(test)]
+#[path = "product_strength_reference.rs"]
+mod reference;
 
 /// Flange width follows available spar depth in the existing fabrication law.
 /// A common added flange gauge therefore gives A_i proportional to h_i.
@@ -65,70 +73,17 @@ fn size_station_caps(
     web: &MaterialSpec,
     cap: &MaterialSpec,
 ) {
-    let cap_strain = cap.e_pa / bending_allowable_pa(cap);
-    let skin_strain = skin.e_pa / bending_allowable_pa(skin);
-    let web_allowable = bending_allowable_pa(web);
-    // The cap search changes only the caps: spar depths, web gauge and
-    // covers, hence the non-cap stiffness and the cover lever arm, are
-    // fixed for this station and evaluated once. `station_ei` is the same
-    // non-cap term plus the same cap sum, so every trial is unchanged.
-    let non_cap = non_cap_ei(sizing, station, skin, web);
-    let height = sizing
-        .spars
-        .iter()
-        .map(|spar| spar.h[station])
-        .fold(0.0_f64, f64::max);
-    let cap_cover = cap_strain.max(skin_strain) * height;
-    let utilization = |section: &WingboxSizing| {
-        let ei = non_cap
-            + section
-                .spars
-                .iter()
-                .map(|spar| cap_ei(spar, station, cap))
-                .sum::<f64>();
-        let curvature = moment.abs() / ei;
-        let clear_height = section
-            .spars
-            .iter()
-            .map(|spar| super::web::clear_height(spar, station))
-            .fold(0.0_f64, f64::max);
-        0.5 * curvature * cap_cover.max(web.e_pa * clear_height / web_allowable)
-    };
-    install(sizing, station, 0.0, cfg.t_skin_min_m);
-    if utilization(sizing) > 1.0 {
-        let mut lower = 0.0;
-        let mut upper = cfg.t_skin_min_m * sizing.chord[station];
-        // At half-chord width and h/5 thickness every flange is at the
-        // existing geometric maximum. The finite search cannot buy a
-        // section that exceeds its packaging or occupies the whole web.
-        let maximum = sizing
-            .spars
-            .iter()
-            .map(|spar| 0.1 * sizing.chord[station] * spar.h[station])
-            .fold(0.0_f64, f64::max);
-        upper = upper.max(1.0e-12).min(maximum);
-        for _ in 0..64 {
-            install(sizing, station, upper, cfg.t_skin_min_m);
-            if utilization(sizing) <= 1.0 || upper >= maximum {
-                break;
-            }
-            lower = upper;
-            upper = (2.0 * upper).min(maximum);
-        }
-        if utilization(sizing) <= 1.0 {
-            for _ in 0..56 {
-                let middle = 0.5 * (lower + upper);
-                install(sizing, station, middle, cfg.t_skin_min_m);
-                if utilization(sizing) > 1.0 {
-                    lower = middle;
-                } else {
-                    upper = middle;
-                }
-            }
-            // Return the feasible side of the bounded section search.
-            install(sizing, station, upper, cfg.t_skin_min_m);
-        }
-    }
+    let area = super::cap_search::CapSearch::new(
+        sizing,
+        station,
+        moment,
+        cfg.t_skin_min_m,
+        skin,
+        web,
+        cap,
+    )
+    .area();
+    install(sizing, station, area, cfg.t_skin_min_m);
 }
 
 fn install_web(sizing: &mut WingboxSizing, thickness: f64) {

@@ -812,8 +812,8 @@ fn preset_and_domain_controls_are_validated_with_units() {
         Some((2.05 * config.chord_m / resolution.refinement.surface_size_m).round() as u64)
     );
 
-    // A too-coarse first cell is only reachable through the explicit override
-    // now; the derived path cannot disagree with its own target.
+    // A too-coarse first cell is only reachable through the explicit override:
+    // the derived path cannot disagree with its own target.
     let mut coarse_wall = CfdStudyConfig::default();
     coarse_wall.mesh.derive_first_layer_from_target_y_plus = false;
     coarse_wall.mesh.first_layer_height_m = 2.0e-3;

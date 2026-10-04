@@ -68,6 +68,8 @@ pub fn build_wing_mesh_bdf(
 /// Caps use the sized section dimensions and their physical centroids; spar
 /// webs remain shell elements and are never repeated inside a beam section.
 /// [`build_wing_mesh_bdf`] retains the reference deck topology.
+/// A crossed aft section closes at its first surface intersection. A closure
+/// in the credited spar box is unsupported and fails before deck construction.
 ///
 /// # Errors
 /// Returns [`MeshError`] for corrupt shell geometry or invalid cap sections.
@@ -108,10 +110,20 @@ fn build_with_caps(
         sizing.num_ribs.max(0) as usize,
         cfg.mesh_chordwise_points.max(0) as usize,
     );
+    let trimmed = if product_caps {
+        super::section_closure::trim_aft_intersections(wsg, &mut stations)?
+    } else {
+        0
+    };
     let n_spars = wsg.spar_fracs.len();
 
     let regions = classify_ribs(wsg, &mut stations);
     let mut warnings = regions.warnings.clone();
+    if trimmed > 0 {
+        warnings.push(format!(
+            "{trimmed} rib meshes close at the first upper/lower section intersection; crossed aft material is excluded."
+        ));
+    }
 
     let mut deck = Deck::new();
     for (mid, material) in [

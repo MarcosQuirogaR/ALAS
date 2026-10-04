@@ -70,6 +70,8 @@ fn both_mode_prefers_a_completed_vlm_branch_when_avl_is_unavailable() {
         design: None,
         optimization: None,
         report: None,
+        verification: None,
+        baseline_verification: None,
         avl_result: None,
         output_dir: None,
         error: None,
@@ -337,40 +339,36 @@ fn a_request_inside_a_de_generation_costs_at_most_one_more_analysis() {
 }
 
 #[test]
-fn a_serial_request_reaches_the_candidate_batch_and_not_only_the_branches() {
-    // `--no-parallel` decides both whether the VLM and AVL
-    // branches run side by side and the batch width. A user who asks for a serial run gets
-    // one candidate evaluated at a time as well, whatever the automatic
-    // worker count would have resolved to on this machine.
+fn sequential_branches_preserve_automatic_optimizer_workers() {
     let mut config = AlasConfig::default();
     config.optimizer.solver.workers = 0;
-    assert!(
-        config.optimizer.solver.resolved_workers() >= 1,
-        "the automatic setting (0) resolves against the machine"
-    );
-
-    let serial = serial_solver_config(&config, false);
-    assert_eq!(serial.optimizer.solver.workers, 1);
-    assert_eq!(serial.optimizer.solver.resolved_workers(), 1);
-
-    let parallel = serial_solver_config(&config, true);
-    assert_eq!(
-        parallel.optimizer.solver.workers, 0,
-        "a parallel run keeps the configured automatic setting"
-    );
+    let branches = solver_branches(&config, false);
+    assert!(!branches.parallel);
+    let machine_workers =
+        std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get);
+    for branch in [branches.vlm_config, branches.avl_config] {
+        assert_eq!(branch.optimizer.solver.workers, 0);
+        assert_eq!(branch.optimizer.solver.resolved_workers(), machine_workers);
+    }
 }
 
 #[test]
-fn a_serial_request_does_not_overwrite_an_explicit_worker_count_upwards() {
+fn branch_parallelism_preserves_explicit_optimizer_workers() {
     let mut config = AlasConfig::default();
-    config.optimizer.solver.workers = 4;
-    assert_eq!(
-        serial_solver_config(&config, false)
-            .optimizer
-            .solver
-            .workers,
-        1
-    );
+    for workers in [1, 4] {
+        config.optimizer.solver.workers = workers;
+        for parallel in [false, true] {
+            let branches = solver_branches(&config, parallel);
+            assert_eq!(branches.parallel, parallel);
+            for branch in [branches.vlm_config, branches.avl_config] {
+                assert_eq!(branch.optimizer.solver.workers, workers);
+                assert_eq!(
+                    branch.optimizer.solver.resolved_workers(),
+                    usize::try_from(workers).expect("positive worker count"),
+                );
+            }
+        }
+    }
 }
 
 fn delivered_fixture(best_valid: bool, verified: Option<bool>) -> alas_opt::OptimizationResult {

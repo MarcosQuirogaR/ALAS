@@ -5,6 +5,8 @@
 // failing rather than a library invariant being broken.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+use crate::mdo::ResidualRole;
+
 use super::*;
 
 fn config(preset: &str, mode: &str) -> AlasConfig {
@@ -40,10 +42,7 @@ fn incomplete_structural_inventory_gates_every_design_mode() {
     ] {
         config.optimizer.design_space.mode = mode;
         let incomplete = find(&outcome, &config, "structural_inventory_unverified").unwrap();
-        assert_eq!(
-            incomplete.policy,
-            config.optimizer.objective.mass_constraints
-        );
+        assert_eq!(incomplete.role, ResidualRole::Constraint);
         assert!(incomplete.normalized_violation > 0.0, "{mode:?}");
     }
 }
@@ -63,7 +62,7 @@ fn the_nominal_passes_on_every_preset_with_the_published_figures_as_context() {
             preset.name
         );
         if let Some(context) = published {
-            assert_eq!(context.policy, ConstraintPolicy::Diagnostic);
+            assert_eq!(context.role, ResidualRole::Diagnostic);
         }
     }
 }

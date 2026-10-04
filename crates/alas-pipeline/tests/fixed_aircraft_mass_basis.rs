@@ -83,6 +83,9 @@ fn a_sized_report_of_a_fixed_aircraft_keeps_the_declared_design_weights() {
     let preset = presets::get("A320-200").unwrap();
     let mut config = AlasConfig::from_value(&serde_json::json!({ "preset": "A320-200" })).unwrap();
     config.optimizer.design_space.mode = DesignMode::BaselineSandbox;
+    // A closure below MTOW is the mission-sized path; under Hard MTOW the
+    // structure of every design mode stays at the declared MTOW.
+    config.optimizer.objective.mtow_sizing = alas_config::MtowSizing::SizedByMission;
     let declared_mtow_kg = config.requirements.mtow_kg;
     let closure_mass_kg = 0.9 * declared_mtow_kg;
 

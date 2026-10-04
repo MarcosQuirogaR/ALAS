@@ -32,7 +32,7 @@ pub(super) const MAX_BRIDGE_HOPS: usize = 8;
 /// Outcome of [`Mses::bridge_to_target`].
 #[derive(Debug, Clone, Copy)]
 pub(super) enum BridgeOutcome {
-    /// `mdat.case` now holds a genuinely converged state within
+    /// `mdat.case` holds a genuinely converged state within
     /// [`MAX_CONTINUATION_STEP_DEG`] of the target angle (the value carried
     /// here), so the caller may treat it as a continuation anchor.
     Reached(f64),

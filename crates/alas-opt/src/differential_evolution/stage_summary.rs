@@ -215,13 +215,16 @@ pub struct PreGateReasons {
     pub trailing_edge_angle: usize,
     /// Span above the aerodrome reference code limit.
     pub span_code: usize,
+    /// Reference wing area above the declared maximum.
+    #[serde(default)]
+    pub wing_area: usize,
 }
 
 impl PreGateReasons {
     /// Every rejection counted.
     #[must_use]
     pub fn total(&self) -> usize {
-        self.design_box + self.planform + self.trailing_edge_angle + self.span_code
+        self.design_box + self.planform + self.trailing_edge_angle + self.span_code + self.wing_area
     }
 }
 

@@ -27,6 +27,7 @@ alas-exec = { path = "../alas-exec" }
 # distance in nautical miles; the burn-model bridge converts them once.
 alas-units = { path = "../alas-units" }
 tracing = { workspace = true }
+rayon = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 roxmltree = { workspace = true }

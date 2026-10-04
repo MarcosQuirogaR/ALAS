@@ -665,7 +665,7 @@ mod tests {
         // level the geometry admits, not the ladder at the configured level:
         // a route between the two is flown lower, which is what
         // `minimum_flyable_profile_range_m` documents and what the residual in
-        // `mdo::sizing` now tests against.
+        // `mdo::sizing` tests against.
         let floor_footprint = model.minimum_flyable_profile_range_m();
         assert!(configured_footprint > floor_footprint && floor_footprint > 0.0);
         match model.fly_trip(mtow, 0.0) {
@@ -1260,7 +1260,7 @@ mod tests {
     /// speeds (climb ~170 kt IAS, descent ~220 kt IAS, cruise ~270 kt TAS
     /// at FL200-FL240) as an explicit test assumption, not preset truth.
     fn turboprop_profile(profile: &mut MissionProfileConfig) {
-        // These are true-airspeed assumptions; the registered preset now
+        // These are true-airspeed assumptions; the registered preset
         // carries a calibrated schedule, so state the reference explicitly.
         profile.climb_descent_speed_reference = alas_config::mission::SpeedReference::TrueAirspeed;
         // After the ATR wing's legitimate s_ref correction to the published

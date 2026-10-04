@@ -7,13 +7,14 @@
 //! # The screening model
 //!
 //! [`ScreeningFidelity`] states exactly what the screening model changes
-//! relative to the full in-loop evaluation, and it may change only work that
-//! does not decide a candidate's rank: the geometry, mass and balance build,
-//! every constraint and the mission physics are the run's own.
+//! relative to the full in-loop evaluation: the geometry, mass and balance
+//! build, every constraint and the mission physics are the run's own.
 //! It may loosen the takeoff-mass closure tolerance, coarsen the in-loop
 //! chordwise mesh, and set the mission model's starting step count and a
-//! per-candidate work budget; the shipped descriptor coarsens the mesh and
-//! the starting step count (see [`ScreeningFidelity::shipped`]). The
+//! per-candidate work budget, and reduce independent induced-fit check
+//! states; the shipped descriptor sets the mesh, check set and starting
+//! step count (see [`ScreeningFidelity::shipped`]). Screening feasibility is
+//! provisional until evaluated at full fidelity. The
 //! rank-correlation experiment in `alas-acceptance`
 //! (`screening_rank_correlation`) measures whether a descriptor still ranks
 //! candidates like the full model before it is shipped.
@@ -29,8 +30,8 @@
 //! therefore a prefix of the sequence: a run stopped by its time limit
 //! after `n` analysed points evaluated exactly the points a longer run
 //! evaluates up to its `n`-th analysed one, and replays with
-//! `stop_after = n`. The number of analyses per batch is fixed, never the
-//! worker count.
+//! `stop_after = n`. The sample order never depends on the worker count;
+//! the lanes and remaining time change only its batch partition.
 
 use std::time::{Duration, Instant};
 
@@ -68,6 +69,10 @@ pub struct ScreeningFidelity {
     /// Work limit of one candidate's sizing closure
     /// (`SizingControls::budget`); an exhausted candidate is not closed.
     pub sizing_budget: Option<SizingBudget>,
+    /// Check the induced fit at the cruise check and clean-CL endpoints;
+    /// failed fits retain the full adaptive refinement and error threshold.
+    /// Full evaluation independently checks interior CL states as well.
+    pub reduced_induced_checks: bool,
 }
 
 impl ScreeningFidelity {
@@ -79,27 +84,25 @@ impl ScreeningFidelity {
             chordwise_resolution: None,
             steps_per_segment: None,
             sizing_budget: None,
+            reduced_induced_checks: false,
         }
     }
 
-    /// The shipped screening model: the draft four-panel chordwise mesh
-    /// (the `draft` fidelity preset's in-loop value) and frozen mission
-    /// plans refined from two integration steps per segment instead of four.
+    /// The shipped screening model: a four-panel chordwise mesh, six-state
+    /// induced-fit checks and frozen mission plans refined from two steps
+    /// per segment instead of four. Full-model residuals decide validity.
     ///
     /// The shipping rule is a ranking-key Spearman rho of at least 0.95 and
     /// a top-k overlap of at least 90 % against the full model on every
-    /// preset measured. With `screening_rank_correlation` (60 seeded
-    /// screening candidates per preset, seed 20260930) it gave rho 1.000,
-    /// 0.999, 0.996 and 1.000 on A320-200, B787-9, A380-800 and ATR72-600,
-    /// top-10 overlap 10 of 10 on all four and elite (29) overlap 29, 29, 28
-    /// and 29, with the same feasible set, for 30 to 55 % less wall time per
-    /// candidate. A 50 kg closure tolerance failed the rule (B787-9 rho
-    /// 0.87, top-10 overlap 8 of 10) and is not used.
+    /// preset measured by `screening_rank_correlation` on the product
+    /// search's seeded, preset-anchored candidates. The sizing closure
+    /// tolerance and every hard-constraint threshold remain configured.
     #[must_use]
     pub const fn shipped() -> Self {
         Self {
             chordwise_resolution: Some(4),
             steps_per_segment: Some(2),
+            reduced_induced_checks: true,
             ..Self::full()
         }
     }
@@ -127,6 +130,7 @@ impl ScreeningFidelity {
             budget: self.sizing_budget,
             initial_takeoff_mass_kg: None,
             steps_per_segment: self.steps_per_segment,
+            screening_drag_table: self.reduced_induced_checks,
         }
     }
 }
@@ -140,8 +144,8 @@ pub(crate) struct Settings {
     /// Pre-gate rejections after which the stage stops.
     pub(crate) max_rejects: usize,
     pub(crate) time_limit: Option<Duration>,
-    /// Lanes evaluating a batch in parallel; sizes only the last,
-    /// time-fitted batch ([`fitted_room`]).
+    /// Lanes evaluating a batch in parallel; sizes the first calibration
+    /// wave and subsequent time-fitted batches ([`fitted_room`]).
     pub(crate) workers: usize,
     pub(crate) seed: u64,
     /// The root-chord projection of the sampler, for the native model.
@@ -195,8 +199,18 @@ impl<'a> Sequence<'a> {
         }
         let mut points = latin_hypercube(self.bounds, BATCH_SIZE, &mut self.rng);
         if let Some(projection) = &self.projection {
-            for point in &mut points {
-                projection.apply(point);
+            for (index, point) in points.iter_mut().enumerate() {
+                if let Some(nominal) = self.baseline {
+                    super::anchored_sampling::apply(
+                        projection,
+                        point,
+                        self.bounds,
+                        nominal,
+                        self.drawn * BATCH_SIZE + index,
+                    );
+                } else {
+                    projection.apply(point);
+                }
             }
         }
         if self.drawn == 0 {
@@ -230,12 +244,11 @@ pub(crate) fn sample(
 /// the time limit or a cancellation stops it. `started` is the stage clock.
 ///
 /// A batch is refilled past the design-vector pre-gate: points are drawn
-/// from the sequence until [`BATCH_SIZE`] of them pass `admit` (or the
-/// budget ends), and the rejected ones travel in the same batch without
-/// counting against the budget. A batch therefore always carries a full
-/// complement of analyses for the workers, and its composition depends only
-/// on the seed, the budget, the rejection cap and the pre-gate, never on
-/// the worker count. Both limits are exact: drawing stops at the
+/// from the sequence until the fitted batch's complement passes `admit` (or
+/// a limit ends), and the rejected ones travel in the same batch without
+/// counting against the budget. The partition adapts to the workers and
+/// remaining time while preserving the ordered sample prefix. Both count
+/// limits are exact: drawing stops at the
 /// `stop_after`-th admitted point or the `max_rejects`-th rejected one, the
 /// latter ending the stage as [`Termination::PregateExhausted`].
 pub(crate) fn run(
@@ -282,24 +295,42 @@ pub(crate) fn run(
         }
         let batch_started = Instant::now();
         let mut points = Vec::new();
+        let mut admission = Vec::new();
         let mut admitted = 0;
-        while admitted < room && rejected < settings.max_rejects {
+        while admitted < room
+            && rejected < settings.max_rejects
+            && !scope.requested()
+            && settings
+                .time_limit
+                .is_none_or(|limit| started.elapsed() < limit)
+        {
             let point = sequence.next_point();
-            if admit(&point) {
+            let accepted = admit(&point);
+            if accepted {
                 admitted += 1;
             } else {
                 rejected += 1;
             }
+            admission.push(accepted);
             points.push(point);
         }
-        outcome.analysed += admitted;
         let scores = evaluate(&points);
+        let completed = scores.len();
+        outcome.analysed += admission
+            .into_iter()
+            .take(completed)
+            .filter(|&accepted| accepted)
+            .count();
         outcome
             .scored
             .extend(scores.into_iter().map(ScoredPoint::sanitized));
         outcome.batches += 1;
         if scope.requested() {
             outcome.termination = Termination::Cancelled;
+            break;
+        }
+        if completed < points.len() {
+            outcome.termination = Termination::TimeBudget;
             break;
         }
         last_batch = (batch_started.elapsed(), admitted);
@@ -310,8 +341,8 @@ pub(crate) fn run(
 /// Analysed points the next batch may carry so it ends inside `remaining`,
 /// projected from the last batch `(wall time, analysed points)`: that batch
 /// ran in `ceil(analysed / workers)` waves of one analysis per lane, and the
-/// next runs as many whole waves as fit. A full [`BATCH_SIZE`] when no
-/// analysed batch has run yet (the first batch is never cut), zero when not
+/// next runs as many whole waves as fit. One worker wave when no
+/// analysed batch has run yet, zero when not
 /// one wave fits.
 ///
 /// Only the batch partition depends on the clock: the points evaluated are
@@ -322,7 +353,7 @@ fn fitted_room(remaining: Duration, (wall, analysed): (Duration, usize), workers
         return 0;
     }
     if analysed == 0 {
-        return BATCH_SIZE;
+        return workers.clamp(1, BATCH_SIZE);
     }
     let lanes = workers.clamp(1, analysed);
     let waves = analysed.div_ceil(lanes);
@@ -417,6 +448,59 @@ mod tests {
     }
 
     #[test]
+    fn the_deadline_stops_pre_gate_refilling_without_running_an_analysis() {
+        let calls = std::cell::Cell::new(0);
+        let outcome = screen(
+            &[(0.0, 1.0); 2],
+            None,
+            Settings {
+                max_rejects: 8,
+                time_limit: Some(Duration::from_millis(5)),
+                ..settings(10_000, 10_000)
+            },
+            &|_| {
+                calls.set(calls.get() + 1);
+                std::thread::sleep(Duration::from_millis(10));
+                false
+            },
+            &mut |points| {
+                bowl(points)
+                    .into_iter()
+                    .map(|point| ScoredPoint {
+                        tier: Tier::PreGateFailed,
+                        ..point
+                    })
+                    .collect()
+            },
+        );
+        assert_eq!(outcome.termination, Termination::TimeBudget);
+        assert_eq!(outcome.analysed, 0);
+        assert!(calls.get() <= 1);
+    }
+
+    #[test]
+    fn a_timed_dispatch_counts_only_the_started_prefix() {
+        let outcome = screen(
+            &[(0.0, 1.0); 2],
+            None,
+            settings(10_000, 10_000),
+            &|_| true,
+            &mut |points| bowl(&points[..3]),
+        );
+        assert_eq!(outcome.termination, Termination::TimeBudget);
+        assert_eq!(outcome.analysed, 3);
+        assert_eq!(outcome.scored.len(), 3);
+        let replay = screen(
+            &[(0.0, 1.0); 2],
+            None,
+            settings(10_000, 3),
+            &|_| true,
+            &mut bowl,
+        );
+        assert_eq!(outcome.scored, replay.scored);
+    }
+
+    #[test]
     fn the_time_limit_stops_only_between_batches() {
         let bounds = [(0.0, 1.0); 2];
         let mut calls = Vec::new();
@@ -435,9 +519,8 @@ mod tests {
             },
         );
         assert_eq!(outcome.termination, Termination::TimeBudget);
-        // The guard never cuts a batch in flight: every requested point is
-        // scored, and the first batch is always whole.
-        assert_eq!(calls.first(), Some(&BATCH_SIZE), "{calls:?}");
+        // The first wave calibrates the batch cost before filling more lanes.
+        assert_eq!(calls.first(), Some(&1), "{calls:?}");
         assert!(calls.iter().all(|&len| len <= BATCH_SIZE), "{calls:?}");
         assert_eq!(outcome.scored.len(), calls.iter().sum::<usize>());
         assert!(calls.len() <= 3, "{calls:?}");
@@ -474,7 +557,7 @@ mod tests {
     }
 
     #[test]
-    fn screening_ends_within_one_batch_time_of_its_limit_on_a_fitted_last_batch() {
+    fn screening_fits_its_last_batch_and_preserves_the_replay_prefix() {
         // Four lanes, 20 ms per wave: a full batch is 16 waves, 320 ms. A
         // whole second batch would overrun the 0.5 s limit, so the stage
         // fits a smaller last one instead of stopping at 0.32 s.
@@ -482,7 +565,7 @@ mod tests {
         let limit = Duration::from_millis(500);
         let (wall, outcome, calls) = timed_screening(4, wave, limit, 10_000);
         assert_eq!(outcome.termination, Termination::TimeBudget);
-        assert_eq!(calls[0], BATCH_SIZE);
+        assert_eq!(calls[0], 4);
         let last = *calls.last().expect("a batch ran");
         assert!(calls.len() >= 2 && last < BATCH_SIZE, "{calls:?}");
         assert_eq!(last % 4, 0, "whole waves: {calls:?}");
@@ -513,7 +596,7 @@ mod tests {
         assert_eq!(fitted_room(Duration::from_millis(30), batch, 4), 12);
         assert_eq!(
             fitted_room(Duration::from_millis(5), (Duration::ZERO, 0), 8),
-            64
+            8
         );
         assert_eq!(fitted_room(Duration::ZERO, (Duration::ZERO, 0), 8), 0);
     }

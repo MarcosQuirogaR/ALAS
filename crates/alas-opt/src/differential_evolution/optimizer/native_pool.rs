@@ -14,7 +14,9 @@
 //! analyses poll. Once the token is set no lane takes another candidate: a
 //! request costs at most the candidates already in flight, one per lane, and
 //! every candidate never started is recorded as `cancelled_unstarted` so the history
-//! still has one row per requested design.
+//! still has one row per requested design. The same queue checks the stage
+//! deadline before each candidate; a timed stop returns only its started
+//! prefix, with no history rows for unstarted designs.
 
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{mpsc, Arc};
@@ -38,6 +40,7 @@ pub(super) struct NativeObjective<'a> {
     parent_cancel: Option<&'a AtomicBool>,
     cancellation: EvaluationCancellation,
     telemetry: Option<Vec<(Duration, bool)>>,
+    deadline: Option<Instant>,
 }
 
 impl<'a> NativeObjective<'a> {
@@ -81,6 +84,7 @@ impl<'a> NativeObjective<'a> {
             parent_cancel,
             cancellation,
             telemetry: None,
+            deadline: None,
         }
     }
 
@@ -103,8 +107,19 @@ impl<'a> NativeObjective<'a> {
 }
 
 impl SearchObjective for NativeObjective<'_> {
+    fn set_deadline(&mut self, deadline: Option<Instant>) {
+        self.deadline = deadline;
+    }
+
+    fn honors_deadline(&self) -> bool {
+        true
+    }
+
     fn evaluate(&mut self, design: &[f64]) -> f64 {
-        self.evaluate_batch(&[design.to_vec()], 1)[0].0
+        let failure_cost = self.baseline.config.optimizer.weights.failure_cost;
+        self.evaluate_batch(&[design.to_vec()], 1)
+            .first()
+            .map_or(failure_cost, |score| score.0)
     }
 
     fn history(&self) -> &OptimizationHistory {
@@ -131,19 +146,11 @@ impl SearchObjective for NativeObjective<'_> {
         for lane in self.lanes.iter().take(designs.len()) {
             let (points, next, sender) = (Arc::clone(&points), Arc::clone(&next), sender.clone());
             let (baseline, token) = (Arc::clone(&self.baseline), self.cancellation.clone());
+            let deadline = self.deadline;
             lane.spawn(move || {
-                while !token.requested() {
-                    let index = next.fetch_add(1, Ordering::Relaxed);
-                    let Some(values) = points.get(index) else {
-                        break;
-                    };
-                    let started = Instant::now();
-                    let answer = evaluate_independent(&baseline, values);
-                    let report = (index, answer, started.elapsed(), token.requested());
-                    if sender.send(report).is_err() {
-                        break;
-                    }
-                }
+                run_lane(&points, &next, &token, deadline, &sender, |values| {
+                    evaluate_independent(&baseline, values)
+                });
             });
         }
         drop(sender);
@@ -159,9 +166,16 @@ impl SearchObjective for NativeObjective<'_> {
             }
         }
         self.telemetry = Some(telemetry);
+        let started = next.load(Ordering::Relaxed).min(designs.len());
+        let count = if self.deadline.is_some() && !self.cancellation.requested() {
+            started
+        } else {
+            designs.len()
+        };
         answers
             .into_iter()
             .zip(designs)
+            .take(count)
             .map(|(answer, values)| match answer {
                 Some(Some((cost, valid, history))) => {
                     self.objective.history.append(history);
@@ -178,6 +192,28 @@ impl SearchObjective for NativeObjective<'_> {
                 }
             })
             .collect()
+    }
+}
+
+fn run_lane(
+    points: &[Vec<f64>],
+    next: &AtomicUsize,
+    token: &EvaluationCancellation,
+    deadline: Option<Instant>,
+    sender: &mpsc::Sender<LaneReport>,
+    mut evaluate: impl FnMut(&[f64]) -> CandidateAnswer,
+) {
+    while !token.requested() && deadline.is_none_or(|deadline| Instant::now() < deadline) {
+        let index = next.fetch_add(1, Ordering::Relaxed);
+        let Some(values) = points.get(index) else {
+            break;
+        };
+        let started = Instant::now();
+        let answer = evaluate(values);
+        let report = (index, answer, started.elapsed(), token.requested());
+        if sender.send(report).is_err() {
+            break;
+        }
     }
 }
 
@@ -204,6 +240,48 @@ fn record_unanalysed(objective: &mut DesignObjective, values: &[f64], reason: &s
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_expired_deadline_leaves_every_candidate_unanalysed() {
+        let mut objective = DesignObjective::new(alas_config::AlasConfig::default());
+        let mut pool = NativeObjective::new(&mut objective, 4, None).unwrap();
+        pool.set_deadline(Some(Instant::now()));
+        assert!(pool.evaluate_batch(&vec![Vec::new(); 64], 4).is_empty());
+        assert!(pool.evaluate(&[]).is_finite());
+        assert_eq!(pool.history().n_evaluations(), 0);
+        assert_eq!(pool.take_concurrent_telemetry(), Some(Vec::new()));
+        pool.set_deadline(None);
+        assert_eq!(pool.evaluate_batch(&[Vec::new()], 4).len(), 1);
+    }
+
+    #[test]
+    fn a_deadline_stops_the_queue_after_at_most_one_in_flight_candidate_per_lane() {
+        let points = vec![Vec::new(); 64];
+        let next = AtomicUsize::new(0);
+        let token = EvaluationCancellation::new();
+        let (sender, receiver) = mpsc::channel();
+        let deadline = Instant::now() + Duration::from_millis(10);
+        std::thread::scope(|scope| {
+            for _ in 0..4 {
+                let sender = sender.clone();
+                let (points, next, token) = (&points, &next, &token);
+                scope.spawn(move || {
+                    run_lane(points, next, token, Some(deadline), &sender, |_| {
+                        std::thread::sleep(Duration::from_millis(30));
+                        None
+                    });
+                });
+            }
+        });
+        drop(sender);
+        let mut indices: Vec<usize> = receiver.into_iter().map(|report| report.0).collect();
+        indices.sort_unstable();
+        assert!(indices.len() <= 4, "{indices:?}");
+        assert_eq!(
+            indices,
+            (0..next.load(Ordering::Relaxed)).collect::<Vec<_>>()
+        );
+    }
 
     #[test]
     fn a_worker_failure_records_an_invalid_analysis_without_retrying_it() {

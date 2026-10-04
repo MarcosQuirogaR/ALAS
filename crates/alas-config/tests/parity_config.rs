@@ -564,7 +564,7 @@ fn product_default_correction(path: &str) -> Option<(Value, Value)> {
         Some((serde_json::json!(0.02), serde_json::json!(0.06)))
     }
     // The unconfigured defaults build the AVE long-range twin, and its
-    // landing ratio is now its 777-9 benchmark (Boeing D6-86073 Rev G Table
+    // landing ratio is its 777-9 benchmark (Boeing D6-86073 Rev G Table
     // 2-1) instead of the frozen unsourced 0.92; see
     // `alas_config::landing_mass_ratio::LONG_HAUL_MLW_FRACTION_MTOW`.
     else if path.ends_with(".mlw_fraction_mtow") || path == "MassModelConfig.mlw_fraction_mtow" {
@@ -893,14 +893,11 @@ fn is_native_config_field(path: &str, key: &str) -> bool {
                 | "oei_asymmetric_trim_cd"
                 | "oei_windmilling_cd"
         ) && (path.ends_with("PerformanceConfig") || path.ends_with(".performance")))
-        // The mission-sized objective, the design-space boundary, the
-        // correlation validity domain and the relaxation policy are
-        // native product additions; the frozen Python optimizer schema
-        // predates all four. Their values, bounds and review are checked by
-        // the optimizer config tests and by `optimizer::policy_review`.
+        // The mission-sized objective, design-space boundary and
+        // correlation validity domain are checked by the optimizer config tests.
         || (matches!(
             key,
-            "objective" | "design_space" | "plausibility" | "relaxation"
+            "objective" | "design_space" | "plausibility"
         ) && (path.ends_with("OptimizerConfig") || path.ends_with(".optimizer")))
         // The declared section class that fixes the Korn technology factor
         // replaced the frozen global `drag_model.korn_technology_factor`; its

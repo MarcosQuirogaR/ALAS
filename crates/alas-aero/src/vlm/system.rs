@@ -25,7 +25,7 @@ use alas_geom::aircraft::wing::{SpacingFunction, Wing};
 use alas_math::linalg::{DenseMatrix, LuFactorization};
 use rayon::prelude::*;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 
 use super::streamlines::PanelSample;
 use super::{VlmError, VlmResult, TRAILING_VORTEX_DIRECTION, VORTEX_CORE_RADIUS};
@@ -45,6 +45,9 @@ const PARALLEL_PANEL_THRESHOLD: usize = 128;
 // budget; see that module's own doc.
 mod kernel_cache;
 use kernel_cache::{build_kernel_cache, velocity_at_points};
+
+mod cache;
+pub use cache::VlmGeometryCache;
 
 /// The largest `max |pivot| / min |pivot|` a solve may report and still be
 /// treated as a flow field, see [`VlmError::IllConditionedAic`].
@@ -72,17 +75,17 @@ pub(super) use mesh::*;
 pub struct VlmSystem<'a> {
     airplane: &'a Airplane,
     panels: Vec<Panel>,
-    factorization: LuFactorization,
+    factorization: Arc<LuFactorization>,
     /// The near-field horseshoe kernel at every vortex center against every
-    /// panel: see [`build_kernel_cache`]. Filled by the second solve, not by
-    /// `assemble`: filling it costs one uncached solve's kernel pass, so a
-    /// system solved once (every [`super::run`]) would only pay for it.
+    /// panel: see [`build_kernel_cache`]. Candidate assembly supplies this
+    /// eagerly for reuse. Ordinary `assemble` fills it on the second solve:
+    /// a system solved only once can evaluate its kernel directly.
     /// Holds `None` above `kernel_cache::KERNEL_CACHE_MAX_PANELS`, where every
     /// solve evaluates the kernel directly. Both paths are bit-identical.
-    kernel_cache: OnceLock<Option<Vec<[f64; 3]>>>,
+    kernel_cache: OnceLock<Option<Arc<Vec<[f64; 3]>>>>,
     /// The Trefftz-plane drag form of this lattice, built on the first
     /// [`VlmSystem::trefftz_induced_drag_coefficient`]; geometry-only.
-    trefftz: OnceLock<Option<super::trefftz::TrefftzOperator>>,
+    trefftz: Arc<OnceLock<Option<super::trefftz::TrefftzOperator>>>,
     solves: AtomicUsize,
 }
 
@@ -133,11 +136,30 @@ impl<'a> VlmSystem<'a> {
         Ok(Self {
             airplane,
             panels,
-            factorization,
+            factorization: Arc::new(factorization),
             kernel_cache: OnceLock::new(),
-            trefftz: OnceLock::new(),
+            trefftz: Arc::default(),
             solves: AtomicUsize::new(0),
         })
+    }
+
+    /// Assemble using exact geometry-only work retained by `cache`.
+    ///
+    /// Identical panels reuse their mutual influence and near-field kernel.
+    /// Identical complete meshes also reuse the factorization. Changed
+    /// incidence retains full panel rotation and the full-LU conditioning
+    /// gate. Wake traces are checked separately before sharing drag data.
+    ///
+    /// # Errors
+    ///
+    /// See [`Self::assemble`].
+    pub fn assemble_cached(
+        airplane: &'a Airplane,
+        spanwise_resolution: usize,
+        chordwise_resolution: usize,
+        cache: &mut VlmGeometryCache,
+    ) -> Result<Self, VlmError> {
+        cache.assemble(airplane, spanwise_resolution, chordwise_resolution)
     }
 
     /// The airplane this system was assembled from.
@@ -234,8 +256,9 @@ impl<'a> VlmSystem<'a> {
             None
         } else {
             self.kernel_cache
-                .get_or_init(|| build_kernel_cache(&vortex_centers, panels))
-                .as_deref()
+                .get_or_init(|| build_kernel_cache(&vortex_centers, panels).map(Arc::new))
+                .as_ref()
+                .map(|entries| entries.as_slice())
         };
         let v_centers = velocity_at_points(
             &vortex_centers,

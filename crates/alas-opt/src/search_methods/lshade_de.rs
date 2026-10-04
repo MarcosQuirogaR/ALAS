@@ -70,20 +70,20 @@
 //! whose scores come back in index order, so a seeded run that stops on its
 //! evaluation budget replays bit-identically at any worker count. Every
 //! score that passes the design-vector pre-gate counts against
-//! [`Settings::max_evaluations`], which also sets the population schedule; a
+//! [`Settings::max_evaluations`]; [`Settings::schedule_evaluations`] sets
+//! the population schedule independently of this hard ceiling. A
 //! generation never requests more trials than the budget has left, so the
 //! budget is never exceeded. Pre-gate rejections count against
 //! [`Settings::max_rejects`], checked between generations, so the cap is
-//! overrun by at most one generation. The wall-clock limit is checked only
-//! at generation boundaries, the first right after the initial population,
-//! by projecting the last batch's wall time; the initial population itself
-//! is never interrupted. A time-limited stop therefore depends on machine
-//! speed and worker count. Such a run records its evaluation count, and the
-//! same configuration with [`Settings::stop_after`] set to that count and no
-//! time limit replays it bit-identically at any worker count: the replay
-//! stops at the first generation boundary that reaches the count, and the
-//! schedule depends on the configured budget, never on the clock or on
-//! where the run stopped.
+//! overrun by at most one generation. The kernel projects the next batch's
+//! wall time at generation boundaries. A deadline-aware evaluator may also
+//! stop taking candidates inside a batch and return its started prefix;
+//! only those scores enter the budget and selection. A time-limited stop
+//! therefore depends on machine speed and worker count. The recorded
+//! evaluation count replays the same ordered prefix with
+//! [`Settings::stop_after`] and no time limit, including a partial initial
+//! population or generation. The population schedule depends on the
+//! configured budget, never on the clock or where the run stopped.
 
 use std::time::{Duration, Instant};
 
@@ -91,17 +91,21 @@ use super::rng::SearchRng;
 use super::{latin_hypercube, EvaluateBatch, ScoredPoint, Tier};
 use crate::cancellation::{CancelPhase, CancelScope};
 
+#[path = "lshade_de_evaluation.rs"]
+mod evaluation;
 #[path = "lshade_de_ops.rs"]
 mod ops;
+pub(super) use evaluation::evaluate;
+use evaluation::{feasible_fraction, prefix_termination, record, tally};
 use ops::{
     choose_distinct, choose_from_union, choose_pbest, epsilon_key, epsilon_schedule, lehmer_mean,
     linear_reduced_size, normalized_spread, push_archive, reduce_population, relative_change,
     repair_midpoint, sample_cr, sample_f, selection_improvement, stagnation_stops, unevaluated,
 };
 
-/// Floor of the population reduction. The L-SHADE paper uses four; eight
-/// keeps late generations wide enough to occupy a multi-core batch.
-const MIN_POPULATION: usize = 8;
+/// Default population floor. The L-SHADE paper uses four; eight preserves
+/// a wider late search for evaluator adapters with limited concurrency.
+pub(super) const MIN_POPULATION: usize = 8;
 /// Below four members `current-to-pbest/1` cannot draw a target, a pbest and
 /// two distinct difference vectors, so no generation runs.
 const OPERATOR_MIN_POPULATION: usize = 4;
@@ -128,13 +132,22 @@ pub(crate) const IMPROVEMENT_TOLERANCE: f64 = 1.0e-4;
 /// Resolved settings for one refinement run.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct Settings {
-    /// The evaluation budget `B`: sets the population and epsilon schedules.
+    /// Hard evaluation ceiling after reserving reporting work.
     pub(crate) max_evaluations: usize,
+    /// Estimated affordable evaluations for population and epsilon schedules.
+    pub(crate) schedule_evaluations: usize,
     /// Evaluations after which the run stops; `max_evaluations` unless a
     /// time-limited run is being replayed.
     pub(crate) stop_after: usize,
     /// Initial population `N_init`.
     pub(crate) population: usize,
+    /// Floor of linear population reduction, capped by the initial size.
+    pub(crate) minimum_population: usize,
+    /// Whole-batch quantum of the population schedule: the reduced size is
+    /// rounded to a multiple of it (never below the floor), so every
+    /// generation dispatches whole evaluator waves. `1` keeps the plain
+    /// linear schedule.
+    pub(crate) population_quantum: usize,
     pub(crate) seed: u64,
     /// Success-history adaptation of `F` and `CR` instead of the static pair.
     pub(crate) adaptation: bool,
@@ -145,8 +158,12 @@ pub(crate) struct Settings {
     /// before the run stops as stagnated or converged; the effective window
     /// and the budget share spent first are [`ops::stagnation_stops`].
     pub(crate) stagnation_generations: usize,
-    /// Wall-clock limit, checked between generations only.
+    /// Wall-clock limit of the generation guard; a deadline-aware evaluator
+    /// also checks between individual candidate dispatches.
     pub(crate) time_limit: Option<Duration>,
+    /// The evaluator stops its queue at the deadline, so the generation
+    /// guard need not reserve an entire last batch's projected wall time.
+    pub(crate) intra_batch_deadline: bool,
     /// Evaluations kept back for feasibility restoration while no feasible
     /// design has been found.
     pub(crate) infeasible_reserve: usize,
@@ -247,6 +264,7 @@ impl Memory {
 /// to 25, with no gain in lane utilization (0.52 against 0.54 at 16
 /// workers), because a generation of at most `N_init` trials, not the
 /// rejects, is what bounds the lanes.
+#[cfg(test)]
 pub(crate) fn run(
     bounds: &[(f64, f64)],
     seeds: &[Vec<f64>],
@@ -255,10 +273,31 @@ pub(crate) fn run(
     scope: &CancelScope<'_>,
     evaluate_batch: &mut EvaluateBatch<'_>,
 ) -> Outcome {
+    run_with_admission(
+        bounds,
+        seeds,
+        settings,
+        started,
+        scope,
+        None,
+        evaluate_batch,
+    )
+}
+
+pub(crate) fn run_with_admission(
+    bounds: &[(f64, f64)],
+    seeds: &[Vec<f64>],
+    settings: Settings,
+    started: Instant,
+    scope: &CancelScope<'_>,
+    admits: Option<&super::Admission<'_>>,
+    evaluate_batch: &mut EvaluateBatch<'_>,
+) -> Outcome {
     let budget = settings.max_evaluations.max(1);
+    let schedule = settings.schedule_evaluations.max(1).min(budget);
     let stop_after = settings.stop_after.min(budget);
     let population_initial = settings.population.min(budget);
-    let minimum = MIN_POPULATION.min(population_initial);
+    let minimum = settings.minimum_population.max(1).min(population_initial);
     let mut rng = SearchRng::stream(settings.seed, 2);
     let mut outcome = Outcome {
         winner: unevaluated(seeds.first().map_or(&[], Vec::as_slice)),
@@ -291,7 +330,7 @@ pub(crate) fn run(
     population.extend(latin_hypercube(bounds, top_up, &mut rng));
 
     let initial_started = Instant::now();
-    let mut scored = evaluate(&population, evaluate_batch);
+    let mut scored = evaluate(&population, stop_after, admits, evaluate_batch);
     tally(&mut outcome, &scored);
     outcome.first_scored = scored.first().cloned();
     for point in &scored {
@@ -299,6 +338,12 @@ pub(crate) fn run(
     }
     if scope.requested() {
         outcome.termination = Termination::Cancelled;
+        return outcome;
+    }
+    if scored.len() < population.len() {
+        outcome.population_final = scored.len();
+        outcome.feasible_fraction = feasible_fraction(&scored);
+        outcome.termination = prefix_termination(outcome.evaluations, stop_after);
         return outcome;
     }
 
@@ -309,7 +354,7 @@ pub(crate) fn run(
         .collect();
     violations.sort_by(f64::total_cmp);
     let epsilon0 = ops::quantile(&violations, EPSILON_INITIAL_QUANTILE);
-    let control_evaluations = (budget as f64 * EPSILON_CONTROL_FRACTION).floor() as usize;
+    let control_evaluations = (schedule as f64 * EPSILON_CONTROL_FRACTION).floor() as usize;
     outcome.epsilon_final = epsilon_schedule(epsilon0, outcome.evaluations, control_evaluations);
 
     let active: Vec<usize> = (0..bounds.len())
@@ -340,16 +385,20 @@ pub(crate) fn run(
         let limit = if outcome.winner.valid() {
             budget
         } else {
-            budget.saturating_sub(settings.infeasible_reserve)
+            schedule.saturating_sub(settings.infeasible_reserve)
         };
         let count = size.min(limit.saturating_sub(outcome.evaluations));
         if count == 0 {
             break;
         }
-        if settings
-            .time_limit
-            .is_some_and(|limit| started.elapsed() + last_generation > limit)
-        {
+        if settings.time_limit.is_some_and(|limit| {
+            let projected = if settings.intra_batch_deadline {
+                Duration::ZERO
+            } else {
+                last_generation
+            };
+            started.elapsed() + projected >= limit
+        }) {
             outcome.termination = Termination::TimeBudget;
             break;
         }
@@ -391,7 +440,13 @@ pub(crate) fn run(
             trials.push(trial);
         }
 
-        let trial_scores = evaluate(&trials, evaluate_batch);
+        let trial_scores = evaluate(
+            &trials,
+            stop_after.saturating_sub(outcome.evaluations),
+            admits,
+            evaluate_batch,
+        );
+        let completed = trial_scores.len();
         tally(&mut outcome, &trial_scores);
         for point in &trial_scores {
             record(&mut outcome, point);
@@ -417,11 +472,20 @@ pub(crate) fn run(
                 scored[target] = trial;
             }
         }
+        if completed < trials.len() {
+            outcome.termination = prefix_termination(outcome.evaluations, stop_after);
+            break;
+        }
         if settings.adaptation {
             memory.update(&successes);
         }
 
-        let next = linear_reduced_size(population_initial, minimum, outcome.evaluations, budget);
+        let next = ops::quantized_size(
+            linear_reduced_size(population_initial, minimum, outcome.evaluations, schedule),
+            settings.population_quantum,
+            minimum,
+            size,
+        );
         if next < size {
             reduce_population(&mut population, &mut scored, next, epsilon);
             size = next;
@@ -439,7 +503,7 @@ pub(crate) fn run(
                 stalled += 1;
             }
             let window = (settings.stagnation_generations, population_initial, minimum);
-            if epsilon == 0.0 && stagnation_stops(stalled, window, outcome.evaluations, budget) {
+            if epsilon == 0.0 && stagnation_stops(stalled, window, outcome.evaluations, schedule) {
                 let spread = normalized_spread(&population[..size], bounds);
                 outcome.termination = if spread <= settings.spread_tolerance {
                     Termination::Converged
@@ -454,44 +518,8 @@ pub(crate) fn run(
 
     outcome.population_final = size.min(scored.len());
     let live = &scored[..outcome.population_final];
-    outcome.feasible_fraction = if live.is_empty() {
-        0.0
-    } else {
-        live.iter().filter(|point| point.valid()).count() as f64 / live.len() as f64
-    };
+    outcome.feasible_fraction = feasible_fraction(live);
     outcome
-}
-
-fn evaluate(points: &[Vec<f64>], evaluate_batch: &mut EvaluateBatch<'_>) -> Vec<ScoredPoint> {
-    let mut scores: Vec<ScoredPoint> = evaluate_batch(points)
-        .into_iter()
-        .map(ScoredPoint::sanitized)
-        .collect();
-    scores.truncate(points.len());
-    while scores.len() < points.len() {
-        scores.push(unevaluated(&points[scores.len()]));
-    }
-    scores
-}
-
-fn record(outcome: &mut Outcome, point: &ScoredPoint) {
-    if outcome.first_feasible_cost.is_none() && point.valid() {
-        outcome.first_feasible_cost = Some(point.cost);
-    }
-    if point.feasibility_key() < outcome.winner.feasibility_key() {
-        outcome.winner = point.clone();
-    }
-}
-
-/// Count `scores` against the budget or, rejected by the pre-gate, against
-/// the rejection cap.
-fn tally(outcome: &mut Outcome, scores: &[ScoredPoint]) {
-    let rejected = scores
-        .iter()
-        .filter(|point| point.tier == Tier::PreGateFailed)
-        .count();
-    outcome.rejected += rejected;
-    outcome.evaluations += scores.len() - rejected;
 }
 
 #[cfg(test)]

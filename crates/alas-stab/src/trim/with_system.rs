@@ -12,15 +12,16 @@
 //! alone, so one factorization serves all three instead of each
 //! assembling its own copy of an identical matrix.
 
-use alas_aero::vlm::{VlmError, VlmSystem};
+use alas_aero::vlm::{VlmError, VlmGeometryCache, VlmSystem};
 use alas_atmo::Atmosphere;
 use alas_config::analysis::AnalysisConfig;
 use alas_geom::aircraft::airplane::Airplane;
 use alas_math::linalg;
+use std::sync::{Arc, Mutex};
 
 use super::{
-    assemble, fuselage_cm_alpha_with_reference_mode, hstab, main_wing_ac_x, probe, refine_trim,
-    with_hstab_twist, StabilityTrimResult, DEGENERACY_FLOOR,
+    fuselage_cm_alpha_with_reference_mode, hstab, main_wing_ac_x, probe, refine_trim,
+    with_hstab_twist, StabilityTrimResult, TrimAssembly, DEGENERACY_FLOOR,
 };
 
 /// [`super::neutral_point`], reusing an already-assembled VLM system instead
@@ -128,7 +129,40 @@ pub fn stability_and_trim_with_system(
     altitude_m: f64,
 ) -> Result<StabilityTrimResult, VlmError> {
     stability_and_trim_with_reference_mode(
-        system, airplane, analysis, cl_target, mach, altitude_m, false,
+        system,
+        airplane,
+        &TrimAssembly::new(analysis, None),
+        cl_target,
+        mach,
+        altitude_m,
+        false,
+    )
+}
+
+/// Product trim solve retaining exact geometry-only work across conditions.
+///
+/// Base, incidence and Newton-refinement probes share `cache`. A rotated
+/// stabilizer still changes the panels and uses the ordinary full-LU solve;
+/// only influence entries whose panel geometry is identical are retained.
+/// No angle, incidence or circulation is approximated or rounded. The cache
+/// may also span CG changes, since the reference point does not change the
+/// influence matrix; each solve still uses the supplied aircraft reference.
+///
+/// # Errors
+///
+/// See [`VlmError`].
+pub fn stability_and_trim_with_cache(
+    airplane: &Airplane,
+    analysis: &AnalysisConfig,
+    cl_target: f64,
+    mach: f64,
+    altitude_m: f64,
+    cache: &Arc<Mutex<VlmGeometryCache>>,
+) -> Result<StabilityTrimResult, VlmError> {
+    let assembly = TrimAssembly::new(analysis, Some(cache));
+    let system = assembly.assemble(airplane)?;
+    stability_and_trim_with_reference_mode(
+        &system, airplane, &assembly, cl_target, mach, altitude_m, false,
     )
 }
 
@@ -148,19 +182,26 @@ pub fn stability_and_trim_reference_compatibility_with_system(
     altitude_m: f64,
 ) -> Result<StabilityTrimResult, VlmError> {
     stability_and_trim_with_reference_mode(
-        system, airplane, analysis, cl_target, mach, altitude_m, true,
+        system,
+        airplane,
+        &TrimAssembly::new(analysis, None),
+        cl_target,
+        mach,
+        altitude_m,
+        true,
     )
 }
 
 fn stability_and_trim_with_reference_mode(
     system: &VlmSystem<'_>,
     airplane: &Airplane,
-    analysis: &AnalysisConfig,
+    assembly: &TrimAssembly<'_>,
     cl_target: f64,
     mach: f64,
     altitude_m: f64,
     reference_compatibility: bool,
 ) -> Result<StabilityTrimResult, VlmError> {
+    let analysis = assembly.analysis;
     let atmosphere = Atmosphere::new(altitude_m);
     let velocity = mach * atmosphere.speed_of_sound();
     let a_lo = analysis.probe_alpha_low_deg;
@@ -232,7 +273,7 @@ fn stability_and_trim_with_reference_mode(
     };
 
     let perturbed = with_hstab_twist(airplane, i_h0 + delta_ih);
-    let r3 = probe(&assemble(&perturbed, analysis)?, atmosphere, velocity, a_lo)?;
+    let r3 = probe(&assembly.assemble(&perturbed)?, atmosphere, velocity, a_lo)?;
 
     let cl_ih = (r3.cl_lift - r1.cl_lift) / delta_ih;
     let cm_ih = (r3.cm_pitch - r1.cm_pitch) / delta_ih;
@@ -279,7 +320,7 @@ fn stability_and_trim_with_reference_mode(
     let (trim_alpha_deg, trim_ih_deg, converged) = if !reference_compatibility && converged {
         let (alpha, incidence, refined) = refine_trim(
             airplane,
-            analysis,
+            assembly,
             cl_target,
             atmosphere,
             velocity,

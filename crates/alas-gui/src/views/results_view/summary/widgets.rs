@@ -18,22 +18,31 @@ pub(super) fn stat_tile(ui: &mut Ui, label: &str, value: String) {
     });
 }
 
+/// One stat tile, as wide as a tile of a [`show_stat_tiles`] row, whose
+/// label explains itself on hover.
+pub(super) fn show_explained_tile(ui: &mut Ui, label: &str, value: String, hover: String) {
+    let columns = summary_column_count(ui.available_width());
+    ui.columns(columns, |columns| {
+        let ui = &mut columns[0];
+        crate::theme::card_frame(ui).show(ui, |ui| {
+            ui.set_min_width(ui.available_width());
+            ui.vertical(|ui| {
+                ui.add(egui::Label::new(RichText::new(tr(label)).small()).wrap())
+                    .on_hover_text(hover.clone());
+                ui.add(egui::Label::new(RichText::new(value).strong().size(16.0)).wrap())
+                    .on_hover_text(hover);
+            });
+        });
+    });
+    ui.add_space(8.0);
+}
+
 pub(super) fn semantic_frame(ui: &Ui, color: egui::Color32) -> Frame {
     Frame::group(ui.style())
         .fill(ui.visuals().window_fill())
         .stroke(Stroke::new(1.5_f32, color))
         .inner_margin(Margin::symmetric(12.0, 8.0))
         .rounding(Rounding::same(12.0))
-}
-
-pub(super) fn status_frame(ui: &Ui, severity: FindingSeverity) -> Frame {
-    semantic_frame(
-        ui,
-        match severity {
-            FindingSeverity::Error => ui.visuals().error_fg_color,
-            FindingSeverity::Warning => ui.visuals().warn_fg_color,
-        },
-    )
 }
 
 pub(super) fn status_banner_title(completed: bool, errors: usize, warnings: usize) -> &'static str {
