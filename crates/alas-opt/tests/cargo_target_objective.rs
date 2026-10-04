@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! The cargo capacity objective (clarified ledger App Features 2, D10).
+//! The cargo capacity objective.
 //!
 //! The entered cargo mass is a target the search is rewarded for matching, not
 //! a floor it must clear and not an instruction to load without limit. What
@@ -21,7 +21,9 @@
 // controls, so a failed unwrap there is the assertion failing.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-use alas_config::{AlasConfig, ConstraintPolicy};
+use alas_opt::mdo::ResidualRole;
+
+use alas_config::AlasConfig;
 use alas_opt::{assess_product_candidate, CandidateAssessment, ConstraintResidual};
 
 /// A freighter configuration built on the reference twin, with `target_kg` as
@@ -67,10 +69,10 @@ fn the_cargo_target_is_reported_as_a_two_sided_soft_pair() {
     let shortfall = residual(&assessment, "cargo_target_shortfall");
     let excess = residual(&assessment, "cargo_target_excess");
 
-    // D10: a target, not a hard minimum. Under the default hard geometry
-    // policy it is still demoted to a ranking term.
-    assert_eq!(shortfall.policy, ConstraintPolicy::Soft);
-    assert_eq!(excess.policy, ConstraintPolicy::Soft);
+    // A target, not a hard minimum. Under the default hard geometry
+    // role it is still demoted to a ranking term.
+    assert_eq!(shortfall.role, ResidualRole::Preference);
+    assert_eq!(excess.role, ResidualRole::Preference);
     assert_eq!(shortfall.unit, "kg");
     assert_eq!(shortfall.limit, target_kg);
     assert_eq!(excess.limit, target_kg);
@@ -85,8 +87,8 @@ fn the_cargo_target_is_reported_as_a_two_sided_soft_pair() {
     assert!((shortfall.raw_residual + excess.raw_residual).abs() < 1.0e-9);
     assert!(shortfall.normalized_violation == 0.0 || excess.normalized_violation == 0.0);
 
-    // Neither identifier may reject a candidate, and the retired one-sided
-    // hard residual must be gone.
+    // Neither identifier may reject a candidate, and no one-sided hard
+    // residual may exist.
     let hard: Vec<&str> = assessment.violated_hard_ids();
     assert!(!hard.contains(&"cargo_target_shortfall"));
     assert!(!hard.contains(&"cargo_target_excess"));
@@ -99,9 +101,8 @@ fn the_cargo_target_is_reported_as_a_two_sided_soft_pair() {
 #[test]
 fn a_request_the_hold_cannot_take_is_reported_as_a_shortfall_not_a_rejection() {
     // The case the pair exists for: the aircraft, not the request, is the
-    // binding quantity. Before this change the same case was a *hard*
-    // `cargo_shortfall` and rejected the candidate outright, which D10
-    // explicitly rules out ("neither a new hard minimum").
+    // binding quantity. It must not be a *hard* `cargo_shortfall` that
+    // rejects the candidate outright: the target is not a hard minimum.
     let capacity_kg = saturated_capacity_kg();
     let target_kg = 1.5 * capacity_kg;
     let assessment = assess_freighter(target_kg);
@@ -218,8 +219,8 @@ fn the_entered_objective_is_the_target_the_residual_pair_is_scored_against() {
     assert_eq!(shortfall.actual, assessment.sized.carried_cargo_payload_kg);
 
     // Asked for everything, the hold took its capacity, which is twice what
-    // was requested as an objective: that is the excess side, and D10 makes
-    // it a ranking term rather than a rejection.
+    // was requested as an objective: that is the excess side, and it is a
+    // ranking term rather than a rejection.
     assert!((shortfall.actual - capacity_kg).abs() < 1.0);
     assert!(excess.raw_residual > 0.0);
     assert!(excess.normalized_violation > 0.0);
@@ -352,7 +353,7 @@ fn two_registered_passenger_presets_carry_no_cargo_residual_and_no_cargo_term() 
         let soft: f64 = assessment
             .residuals
             .iter()
-            .filter(|residual| residual.policy == ConstraintPolicy::Soft)
+            .filter(|residual| residual.role == ResidualRole::Preference)
             .map(|residual| residual.normalized_violation)
             .sum();
         assert!(

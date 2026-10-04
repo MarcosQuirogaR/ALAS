@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-// Ported from alas/physics/performance.py
-// Reference: alas @ rust-port-baseline.
-
 //! The four matching-chart constraint curves and the assembled chart.
 
 use alas_atmo::Atmosphere;
@@ -46,8 +43,8 @@ pub fn tw_cruise_constraint(
 /// This compatibility function returns the required *in-flight* all-engine
 /// equivalent `T/W` at the specified condition. It does not convert from the
 /// thrust available at `V2` and field altitude/temperature to sea-level static
-/// thrust. Use [`tw_oei_climb_constraint_at_v2`] when the result is compared
-/// with an SLS-rated installed thrust-to-weight.
+/// thrust. Use [`assess_oei_climb`] when the result is compared with an
+/// SLS-rated installed thrust-to-weight.
 ///
 /// FAR 25.121(b) evaluates the second segment at `V2` with the landing gear
 /// retracted. `delta_cd_to_config` therefore represents the takeoff
@@ -168,46 +165,6 @@ pub fn sls_tw_for_oei_condition(
     Some(required_inflight_tw / condition_to_sls_thrust_ratio)
 }
 
-/// Required SLS installed thrust-to-weight for the FAR 25.121(b) condition at
-/// the selected `V2` speed ratio.
-///
-/// This additive API keeps the legacy closed-form function and its golden
-/// values unchanged while making the physical inputs that were previously
-/// implicit explicit:
-///
-/// * only the two/three/four-engine Part 25 schedule is accepted;
-/// * `CL` is derived from the selected `V2/Vs` ratio;
-/// * gear-up high-lift, asymmetric trim/control, and failed-engine drag are
-///   separate terms, with missing terms returning `None`; and
-/// * the in-flight requirement is converted to SLS `T/W` using a supplied
-///   condition-to-SLS thrust ratio.
-///
-/// `None` means that the requested engine count or one of the physical inputs
-/// is outside this helper's documented domain. It is an unsupported/evidence
-/// gap for a caller, not a passing zero.
-#[allow(clippy::too_many_arguments)]
-pub fn tw_oei_climb_constraint_at_v2(
-    cd0: f64,
-    k: f64,
-    n_engines: i64,
-    oei_gradient: f64,
-    cl_max_to: f64,
-    v2_over_vstall: f64,
-    drag: OeiDragIncrements,
-    condition_to_sls_thrust_ratio: f64,
-) -> Option<f64> {
-    let required_inflight_tw = oei_inflight_tw_at_v2(
-        cd0,
-        k,
-        n_engines,
-        oei_gradient,
-        cl_max_to,
-        v2_over_vstall,
-        drag,
-    )?;
-    sls_tw_for_oei_condition(required_inflight_tw, condition_to_sls_thrust_ratio)
-}
-
 fn oei_inflight_tw_at_v2(
     cd0: f64,
     k: f64,
@@ -248,7 +205,7 @@ pub enum OeiClimbStatus {
     NotApplicable,
     /// All required departure/V2 evidence was supplied and is usable.
     SlsEquivalent,
-    /// A legacy in-flight estimate is available, but no condition conversion
+    /// An in-flight estimate is available, but no condition conversion
     /// evidence was supplied; the value is diagnostic only.
     ConceptualInflight,
     /// A condition was requested but one or more required inputs are missing
@@ -300,13 +257,13 @@ pub struct OeiClimbAssessment {
 
 /// Assess the engine-out second-segment requirement for charting and scoring.
 ///
-/// The legacy scalar inputs (`oei_climb_cl` and `oei_climb_delta_cd`) produce a
-/// useful in-flight estimate for compatibility. Passing `Some(condition)` is
+/// The scalar inputs (`oei_climb_cl` and `oei_climb_delta_cd`) produce an
+/// in-flight estimate only. Passing `Some(condition)` is
 /// required before this function can produce `required_sls_tw`: the departure
 /// context, selected V2 ratio, condition-specific thrust ratio, and both
 /// additional drag terms must all be finite and physically bounded. No generic
 /// thrust-lapse setting is used as a substitute for that evidence.
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments)] // one per FAR 25.121(b) physical input
 pub fn assess_oei_climb(
     cd0: f64,
     k: f64,
@@ -334,7 +291,7 @@ pub fn assess_oei_climb(
         };
     }
 
-    let legacy_is_valid = cd0.is_finite()
+    let scalar_inputs_valid = cd0.is_finite()
         && cd0 >= 0.0
         && k.is_finite()
         && k >= 0.0
@@ -344,7 +301,7 @@ pub fn assess_oei_climb(
         && oei_climb_cl > 0.0
         && oei_climb_delta_cd.is_finite()
         && oei_climb_delta_cd >= 0.0;
-    let legacy_inflight_tw = legacy_is_valid.then(|| {
+    let scalar_inflight_tw = scalar_inputs_valid.then(|| {
         tw_oei_climb_constraint(
             cd0,
             k,
@@ -354,18 +311,18 @@ pub fn assess_oei_climb(
             oei_climb_delta_cd,
         )
     });
-    let legacy_inflight_tw = legacy_inflight_tw.filter(|value| value.is_finite() && *value >= 0.0);
+    let scalar_inflight_tw = scalar_inflight_tw.filter(|value| value.is_finite() && *value >= 0.0);
 
     let Some(condition) = condition else {
         return OeiClimbAssessment {
-            status: if legacy_inflight_tw.is_some() {
+            status: if scalar_inflight_tw.is_some() {
                 OeiClimbStatus::ConceptualInflight
             } else {
                 OeiClimbStatus::EvidenceGap
             },
-            required_inflight_tw: legacy_inflight_tw,
+            required_inflight_tw: scalar_inflight_tw,
             required_sls_tw: None,
-            diagnostic: if legacy_inflight_tw.is_some() {
+            diagnostic: if scalar_inflight_tw.is_some() {
                 "OEI climb is a conceptual in-flight estimate; departure/V2 SLS evidence is absent, so no SLS floor is scored."
             } else {
                 "OEI climb inputs are invalid; no in-flight or SLS requirement is scored."
@@ -380,7 +337,7 @@ pub fn assess_oei_climb(
     let Some(condition_to_sls_thrust_ratio) = condition.condition_to_sls_thrust_ratio else {
         return OeiClimbAssessment {
             status: OeiClimbStatus::EvidenceGap,
-            required_inflight_tw: legacy_inflight_tw,
+            required_inflight_tw: scalar_inflight_tw,
             required_sls_tw: None,
             diagnostic: "OEI SLS evidence gap: condition-to-SLS thrust ratio is missing; no SLS floor is scored.",
         };
@@ -388,7 +345,7 @@ pub fn assess_oei_climb(
     let Some(asymmetric_trim_cd) = condition.asymmetric_trim_cd else {
         return OeiClimbAssessment {
             status: OeiClimbStatus::EvidenceGap,
-            required_inflight_tw: legacy_inflight_tw,
+            required_inflight_tw: scalar_inflight_tw,
             required_sls_tw: None,
             diagnostic:
                 "OEI SLS evidence gap: asymmetric trim drag is missing; no SLS floor is scored.",
@@ -397,7 +354,7 @@ pub fn assess_oei_climb(
     let Some(windmilling_cd) = condition.windmilling_cd else {
         return OeiClimbAssessment {
             status: OeiClimbStatus::EvidenceGap,
-            required_inflight_tw: legacy_inflight_tw,
+            required_inflight_tw: scalar_inflight_tw,
             required_sls_tw: None,
             diagnostic:
                 "OEI SLS evidence gap: failed-engine drag is missing; no SLS floor is scored.",
@@ -413,7 +370,7 @@ pub fn assess_oei_climb(
     {
         return OeiClimbAssessment {
             status: OeiClimbStatus::EvidenceGap,
-            required_inflight_tw: legacy_inflight_tw,
+            required_inflight_tw: scalar_inflight_tw,
             required_sls_tw: None,
             diagnostic: "OEI SLS evidence gap: departure/V2, thrust-ratio, or drag evidence is invalid; no SLS floor is scored.",
         };
@@ -482,8 +439,8 @@ pub fn ws_landing_limit(lda_m: f64, sigma: f64, cl_max_land: f64, k_factor: f64)
 /// Pre-computed constraint curves ready for plotting: `MatchingChartData`.
 ///
 /// `tw_takeoff` and `ws_land_limits` are keyed by aerodrome name in the order
-/// the aerodromes were supplied (upstream's insertion-ordered `dict`); a
-/// `Vec` of pairs keeps that order without an ordered-map dependency.
+/// the aerodromes were supplied; a `Vec` of pairs keeps that order without an
+/// ordered-map dependency.
 #[derive(Debug, Clone, PartialEq)]
 pub struct MatchingChartData {
     /// Wing-loading axis, Pa.
@@ -492,9 +449,9 @@ pub struct MatchingChartData {
     pub tw_cruise: Vec<f64>,
     /// Engine-out climb `T/W0` (constant).
     pub tw_oei_climb: f64,
-    /// Evidence-gated engine-out assessment. The legacy scalar above remains
-    /// available for parity/diagnostics; consumers must use this assessment
-    /// to decide whether an SLS floor is scoreable.
+    /// Evidence-gated engine-out assessment. The scalar above is diagnostic
+    /// only; consumers must use this assessment to decide whether an SLS floor
+    /// is scoreable.
     pub oei_climb_assessment: OeiClimbAssessment,
     /// Take-off `T/W0` curve per aerodrome, in supplied order.
     pub tw_takeoff: Vec<(String, Vec<f64>)>,
@@ -510,12 +467,11 @@ pub struct MatchingChartData {
 /// `build_matching_chart`.
 ///
 /// Each `Option` argument falls back to a fresh [`PerformanceConfig`]'s field
-/// of the same name, exactly as upstream's `None`-defaulted keywords do, one
-/// place the defaults live, so an omitted argument cannot drift from the
-/// configuration. `tw_design` alone has no configuration counterpart and is
+/// of the same name, one place the defaults live, so an omitted argument
+/// cannot drift from the configuration. `tw_design` alone has no configuration counterpart and is
 /// passed straight through. `n_ws_points` sets the wing-loading resolution;
 /// `ws_min_pa`/`ws_max_pa` set its range.
-#[allow(clippy::too_many_arguments)] // mirrors upstream's own keyword signature
+#[allow(clippy::too_many_arguments)] // one optional override per constraint input
 pub fn build_matching_chart(
     cd0: f64,
     k: f64,
@@ -575,8 +531,8 @@ pub fn build_matching_chart(
         ));
     }
 
-    // Upstream's `mtow_kg and wing_area_m2` is a truthiness test: a zero on
-    // either side leaves the design point undefined rather than dividing.
+    // A zero mass or area leaves the design point undefined rather than
+    // dividing.
     let design_ws_pa = if mtow_kg != 0.0 && wing_area_m2 != 0.0 {
         Some(mtow_kg * super::G / wing_area_m2)
     } else {
@@ -607,6 +563,31 @@ pub fn build_matching_chart(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Required SLS installed thrust-to-weight for the FAR 25.121(b) condition at
+    /// the selected `V2` speed ratio, or `None` outside the helpers' domain.
+    #[allow(clippy::too_many_arguments)]
+    fn tw_oei_climb_constraint_at_v2(
+        cd0: f64,
+        k: f64,
+        n_engines: i64,
+        oei_gradient: f64,
+        cl_max_to: f64,
+        v2_over_vstall: f64,
+        drag: OeiDragIncrements,
+        condition_to_sls_thrust_ratio: f64,
+    ) -> Option<f64> {
+        let required_inflight_tw = oei_inflight_tw_at_v2(
+            cd0,
+            k,
+            n_engines,
+            oei_gradient,
+            cl_max_to,
+            v2_over_vstall,
+            drag,
+        )?;
+        sls_tw_for_oei_condition(required_inflight_tw, condition_to_sls_thrust_ratio)
+    }
 
     #[test]
     fn a_single_engine_aircraft_has_no_oei_climb_constraint() {

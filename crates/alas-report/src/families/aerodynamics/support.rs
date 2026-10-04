@@ -9,25 +9,7 @@
 use crate::colormap::Colormap;
 use crate::scene::{Axes2D, Fill, Scene, SceneElement};
 
-/// The padded `(min, max)` of every finite value in `values`, or `(0, 1)` if
-/// none is finite. `pad_frac` widens each side by that fraction of the span,
-/// matching matplotlib's default 5% autoscale margin at `0.05`.
-pub(super) fn padded_range(values: impl Iterator<Item = f64>, pad_frac: f64) -> (f64, f64) {
-    let mut lo = f64::INFINITY;
-    let mut hi = f64::NEG_INFINITY;
-    for v in values {
-        if v.is_finite() {
-            lo = lo.min(v);
-            hi = hi.max(v);
-        }
-    }
-    if !lo.is_finite() || !hi.is_finite() {
-        return (0.0, 1.0);
-    }
-    let span = (hi - lo).max(1e-9);
-    let pad = span * pad_frac;
-    (lo - pad, hi + pad)
-}
+pub(super) use crate::families::common::padded_range;
 
 /// Cell boundaries for `n` sample points taken at the midpoint of each cell,
 /// on a linear axis: interior edges are the midpoint of each adjacent pair,
@@ -112,17 +94,6 @@ mod tests {
         let (lo, hi) = padded_range([1.0, 2.0, 3.0].into_iter(), 0.1);
         assert!((lo - 0.8).abs() < 1e-9);
         assert!((hi - 3.2).abs() < 1e-9);
-    }
-
-    #[test]
-    fn padded_range_ignores_non_finite_values() {
-        let (lo, hi) = padded_range([f64::NAN, 1.0, f64::INFINITY, 4.0].into_iter(), 0.0);
-        assert_eq!((lo, hi), (1.0, 4.0));
-    }
-
-    #[test]
-    fn padded_range_falls_back_to_unit_interval_with_no_finite_data() {
-        assert_eq!(padded_range(std::iter::empty(), 0.1), (0.0, 1.0));
     }
 
     #[test]

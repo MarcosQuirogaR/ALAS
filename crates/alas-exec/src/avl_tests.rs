@@ -4,6 +4,7 @@
 //! Behavioral contracts for the native AVL executor.
 
 use super::*;
+use std::time::Duration;
 
 const FAKE_OUTPUT: &str =
     "012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789";
@@ -268,5 +269,112 @@ fn a_timeout_kills_the_solver_tree_and_retains_the_failure_evidence() {
     assert!(result.stdout_path.is_file());
     assert!(result.stderr_path.is_file());
 
+    fs::remove_dir_all(&root).unwrap_or_else(|error| panic!("remove {}: {error}", root.display()));
+}
+
+#[test]
+fn cancellation_interrupts_running_solver_before_deadline() {
+    let root = temporary_directory("cancel");
+    let geometry = write_geometry(&root);
+    let executable = write_fake_solver(&root, FakeSolverBehavior::Sleeps, 1);
+    let flag = AtomicBool::new(false);
+    let start = Instant::now();
+    let result = std::thread::scope(|scope| {
+        scope.spawn(|| {
+            // Observe launch rather than relying on an arbitrary startup delay.
+            let stdout = root.join("case.avl.stdout.txt");
+            while !fs::metadata(&stdout).is_ok_and(|m| m.len() > 0) {
+                assert!(start.elapsed() < Duration::from_secs(10));
+                thread::sleep(Duration::from_millis(10));
+            }
+            flag.store(true, Ordering::Relaxed);
+        });
+        run_avl_with_options_cancellable(
+            &executable,
+            &geometry,
+            &[0.0],
+            30.0,
+            &AvlRunOptions::default(),
+            Some(&flag),
+        )
+    });
+    assert_eq!(result.status, AvlProcessStatus::Cancelled);
+    assert!(start.elapsed() < Duration::from_secs(10));
+    // Windows refuses removing live redirected handles: deletion also proves
+    // that the owned command and its sleeping child relinquished the files.
+    fs::remove_dir_all(&root).unwrap_or_else(|error| panic!("remove {}: {error}", root.display()));
+}
+
+#[test]
+fn precancelled_sweep_does_not_launch_or_create_artifacts() {
+    let root = temporary_directory("precancel");
+    let geometry = write_geometry(&root);
+    let result = run_avl_with_options_cancellable(
+        Path::new("absent"),
+        &geometry,
+        &[0.0],
+        30.0,
+        &AvlRunOptions::default(),
+        Some(&AtomicBool::new(true)),
+    );
+    assert_eq!(result.status, AvlProcessStatus::Cancelled);
+    assert!(!result.session_path.exists());
+    fs::remove_dir_all(root).unwrap_or_else(|error| panic!("cleanup: {error}"));
+}
+
+#[test]
+fn a_timeout_beyond_the_clock_range_runs_without_a_deadline() {
+    // `Instant::now() + Duration::MAX` panics; a caller asking for an
+    // effectively unbounded run must get one rather than a crashed worker.
+    let root = temporary_directory("unbounded");
+    let geometry = write_geometry(&root);
+    let executable = write_fake_solver(&root, FakeSolverBehavior::WritesOutputs, 1);
+
+    let result = run_avl(&executable, &geometry, &[0.0], 1.0e30);
+
+    assert_eq!(result.status, AvlProcessStatus::Completed);
+    fs::remove_dir_all(&root).unwrap_or_else(|error| panic!("remove {}: {error}", root.display()));
+}
+
+#[test]
+fn an_unremovable_stale_artifact_is_a_launch_failure_not_a_rejected_deck() {
+    let root = temporary_directory("stale-directory");
+    let geometry = write_geometry(&root);
+    let executable = write_fake_solver(&root, FakeSolverBehavior::WritesOutputs, 1);
+    let blocking = root.join("case.avl.000.ft");
+    fs::create_dir_all(&blocking)
+        .unwrap_or_else(|error| panic!("create {}: {error}", blocking.display()));
+
+    let result = run_avl(&executable, &geometry, &[0.0], 5.0);
+
+    assert_eq!(result.status, AvlProcessStatus::LaunchFailed);
+    assert!(result
+        .error
+        .as_deref()
+        .is_some_and(|error| error.contains("cannot remove stale")));
+    fs::remove_dir_all(&root).unwrap_or_else(|error| panic!("remove {}: {error}", root.display()));
+}
+
+#[test]
+fn an_unusable_timeout_is_an_invalid_timeout_and_nothing_is_launched() {
+    let root = temporary_directory("invalid-timeout");
+    let geometry = write_geometry(&root);
+    let executable = write_fake_solver(&root, FakeSolverBehavior::WritesOutputs, 1);
+
+    for timeout_seconds in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, 0.0, -1.0] {
+        let result = run_avl(&executable, &geometry, &[0.0], timeout_seconds);
+
+        assert_eq!(
+            result.status,
+            AvlProcessStatus::InvalidTimeout,
+            "{timeout_seconds}"
+        );
+        assert!(result
+            .error
+            .as_deref()
+            .is_some_and(|error| error.starts_with("AVL timeout must be")));
+        // The fake solver would have written its force file had it run.
+        assert!(!root.join("case.avl.000.ft").exists(), "{timeout_seconds}");
+    }
     fs::remove_dir_all(&root).unwrap_or_else(|error| panic!("remove {}: {error}", root.display()));
 }

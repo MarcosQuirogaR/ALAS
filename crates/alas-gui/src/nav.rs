@@ -66,7 +66,7 @@ pub enum PresetKind {
 }
 
 impl PresetKind {
-    /// The registry key, matching the reference's `/config/aux-presets/{kind}`.
+    /// The registry key of this auxiliary preset kind.
     pub fn code(&self) -> &'static str {
         match self {
             Self::Fidelity => "fidelity",
@@ -91,9 +91,9 @@ pub struct Page {
     pub surface: Surface,
     /// Cards of fields from other groups rendered after the form.
     pub extra: &'static [ExtraSection],
-    /// A one-paragraph description shown under the title.
+    /// A one-paragraph description shown when the title is hovered.
     pub description: Option<&'static str>,
-    /// "How this works" deep-dive paragraphs, hidden unless help is verbose.
+    /// Detailed help paragraphs shown when the title is hovered.
     pub detail: &'static [&'static str],
     /// A live preview figure id shown beside the form.
     pub preview: Option<&'static str>,
@@ -206,7 +206,7 @@ const MODELING_PAGES: &[Page] = &[
         description: Some("Mass-method and CG-solver assumptions: Torenbeek/Raymer structural relations, compatibility-only MTOW fractions for systems and furnishings, or the architecture-dependent NASA FLOPS transport component build-up. FLOPS inputs, high-lift mass loads and propulsion mass factors are in Advanced Settings."),
         surface: Surface::Modeling,
         preview: Some("mass_cg"),
-        preview_title: Some("CG envelope (illustrative)"),
+        preview_title: Some("LOAD & TRIM SHEET"),
         ..Page::form("mass_model", "Mass", "mass_model")
     },
     Page {
@@ -289,11 +289,10 @@ pub const ADVANCED_SETTINGS_PAGES: &[Page] = &[
         ..Page::form("mission_advanced", "Mission Analysis", "mission")
     },
     Page {
-        description: Some("The mission-sized objective, explicit requirement policies, and the differential-evolution search settings. Whether a run optimizes at all is chosen on Inputs; the selected catalogue engine remains fixed."),
+        description: Some("Search settings for the mission-sized L-SHADE optimizer. Whether a run optimizes at all is chosen on Inputs; the selected catalogue engine remains fixed."),
         detail: &[
-            "Every candidate is built, mass-balanced and trimmed, then closed by the design mission: mass, centre of gravity, trim, mission fuel and takeoff mass are iterated until the design weights converge. The objective is what that converged mission costs (block fuel, takeoff mass, empty mass or fuel per seat-kilometre); the frozen lift-to-drag formulation of the Python reference is replayed only by the parity fixtures.",
-            "Each requirement family (mass and fuel, balance, airworthiness performance, geometry) is a hard constraint by default: a candidate that misses one is infeasible and ranks behind every compliant candidate. A family can be made soft (a priced preference), diagnostic (reported only) or switched off.",
-            "The search is L-SHADE differential evolution under the epsilon-constrained method: a population of candidate aircraft evolves generation by generation, a shrinking constraint-violation boundary lets it explore past a locally-blocking limit early on and enforces the limit exactly once that boundary reaches zero, and the reported winner is always the least-violating (or best feasible) design any generation actually evaluated. The run records whether it reached its own convergence test, exhausted its generation budget, or was cancelled; that status describes termination, not a proof of global optimality.",
+            "Each candidate is mass-balanced, trimmed and closed by the design mission, then ranked against the selected fuel, mass or efficiency objective subject to hard requirements.",
+            "The search uses L-SHADE under epsilon constraints, seeded by a screening sample of the design box, with bounded feasibility restoration. It reports convergence, stagnation, an evaluation-budget or time-limit stop, or cancellation; convergence is the algorithm's stopping test, not a proof of global optimality.",
         ],
         ..Page::form("optimizer", "Optimizer", "optimizer")
     },
@@ -305,13 +304,17 @@ pub const ADVANCED_SETTINGS_PAGES: &[Page] = &[
         ],
         ..Page::form("mses", "MSES Analysis", "mses")
     },
-    Page::screen(
-        "airfoil_screening",
-        "Airfoil Screening",
-        PageKind::AirfoilScreening,
-    ),
     Page::screen("setup_tools", "External Tools", PageKind::Setup),
 ];
+
+/// Pages that are neither sidebar entries nor Advanced Settings tabs. Airfoil
+/// Screening opens from the top bar's Analysis menu in its own window; the
+/// page stays resolvable so the guided tour can still route to it.
+const STANDALONE_PAGES: &[Page] = &[Page::screen(
+    "airfoil_screening",
+    "Airfoil Screening",
+    PageKind::AirfoilScreening,
+)];
 
 const RESULTS_PAGES: &[Page] = &[Page::screen("results", "Results", PageKind::Results)];
 
@@ -340,12 +343,14 @@ pub const NAV: &[NavGroup] = &[
     },
 ];
 
-/// Every page: the sidebar tree first, then the Advanced Settings tabs.
+/// Every page: the sidebar tree first, then the Advanced Settings tabs, then
+/// the standalone pages.
 pub fn all_pages() -> impl Iterator<Item = &'static Page> {
     NAV.iter()
         .flat_map(|g| g.subgroups.iter())
         .flat_map(|s| s.pages.iter())
         .chain(ADVANCED_SETTINGS_PAGES.iter())
+        .chain(STANDALONE_PAGES.iter())
 }
 
 /// The page with the given id, if any.

@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/config/geometry_config.py (`EngineConfig`)
-// Reference: alas @ rust-port-baseline.
 
 //! The engine: where it hangs, what shape its nacelle is, and what cycle it
 //! runs.

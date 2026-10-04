@@ -33,7 +33,7 @@ pub fn check(root: &Path) -> Result<Vec<String>, String> {
             continue;
         }
         let name = entry.file_name().to_string_lossy().into_owned();
-        if !ledger.contains(&name) {
+        if !mentions_crate(&ledger, &name) {
             findings.push(format!(
                 "docs/PORTING.md: no row mentions the crate `{name}`"
             ));
@@ -41,4 +41,30 @@ pub fn check(root: &Path) -> Result<Vec<String>, String> {
     }
     findings.sort();
     Ok(findings)
+}
+
+/// Whether `ledger` names `crate_name` as a whole identifier. A plain substring
+/// test would let `alas-geometry` stand in for a crate called `alas-geo`.
+fn mentions_crate(ledger: &str, crate_name: &str) -> bool {
+    let is_name_char = |c: char| c.is_ascii_alphanumeric() || c == '-' || c == '_';
+    ledger.match_indices(crate_name).any(|(start, matched)| {
+        let before = ledger[..start].chars().next_back();
+        let after = ledger[start + matched.len()..].chars().next();
+        !before.is_some_and(is_name_char) && !after.is_some_and(is_name_char)
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::mentions_crate;
+
+    #[test]
+    fn a_crate_is_mentioned_only_as_a_whole_name() {
+        let ledger = "| `alas-geometry` | green |\n| x | `alas-mass::fuel` | todo |";
+        assert!(mentions_crate(ledger, "alas-geometry"));
+        assert!(mentions_crate(ledger, "alas-mass"));
+        assert!(!mentions_crate(ledger, "alas-geo"));
+        assert!(!mentions_crate(ledger, "alas"));
+        assert!(!mentions_crate(ledger, "geometry"));
+    }
 }

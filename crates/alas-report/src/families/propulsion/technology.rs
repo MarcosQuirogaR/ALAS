@@ -101,7 +101,7 @@ fn base(config: &AlasConfig, theme: Option<&str>, title: &str, size: (f64, f64))
     scene
 }
 
-fn label(scene: &mut Scene, theme: Option<&str>, text: &str, pos: [f64; 2], angle: f64) {
+pub(super) fn label(scene: &mut Scene, theme: Option<&str>, text: &str, pos: [f64; 2], angle: f64) {
     let pal = get_palette(theme);
     scene.add(SceneElement::Text {
         text: text.to_owned(),

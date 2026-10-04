@@ -24,8 +24,11 @@
 //! arrangement's published cells onto a redesigned wing as per-cell
 //! factors, so a candidate's capacity follows its own spar box.
 
+mod bays;
 mod distribute;
 mod geometry;
+mod order;
+mod product;
 mod resolve;
 mod scaled;
 mod types;
@@ -33,7 +36,12 @@ mod types;
 #[cfg(test)]
 mod tests;
 
-pub use distribute::FuelState;
+pub use distribute::{fuel_vector, FuelState};
+pub use product::{
+    inventory_density_kg_m3, resolve_product_layout, uses_preset_fuel, uses_registered_tank_layout,
+    PUBLISHED_INVENTORY_TOLERANCE,
+};
 pub use types::{
-    CapacitySource, FuelCgPoint, FuelTank, FuelTankLayout, TankKind, TankLayoutError, TankSide,
+    CapacitySource, FuelCgPoint, FuelTank, FuelTankLayout, FuelVectorPoint, TankKind,
+    TankLayoutError, TankSide,
 };

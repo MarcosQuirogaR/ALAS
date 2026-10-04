@@ -12,7 +12,7 @@ use alas_report::scene::{Color, Scene, SceneElement, TextAlign, TextBaseline};
 use egui::{Context, RawInput};
 
 #[test]
-fn openvsp_center_overlay_takes_the_click_instead_of_the_geometry_canvas() {
+fn openvsp_launch_button_has_its_own_row_and_takes_its_click() {
     let directory = std::env::temp_dir().join(format!("alas-openvsp-hit-{}", std::process::id()));
     std::fs::create_dir_all(&directory).unwrap();
     let executable = directory.join(if cfg!(windows) { "vsp.exe" } else { "vsp" });
@@ -75,17 +75,16 @@ fn openvsp_center_overlay_takes_the_click_instead_of_the_geometry_canvas() {
                 egui::CentralPanel::default().show(ctx, |ui| {
                     let (canvas, response) =
                         ui.allocate_exact_size(egui::vec2(640.0, 400.0), egui::Sense::click());
-                    center = canvas.center();
                     canvas_clicked |= response.clicked();
-                    super::openvsp::show_launch_button(&mut state, ui, canvas);
+                    let button = super::openvsp::show_launch_button(&mut state, ui);
+                    // The action has its own row below the canvas.
+                    assert!(button.top() >= canvas.bottom());
+                    center = button.center();
                 });
             },
         );
     }
-    assert!(
-        !canvas_clicked,
-        "the centered overlay must consume the canvas click"
-    );
+    assert!(!canvas_clicked, "the launch button sits outside the canvas");
     assert!(
         state.status_message.contains("Could not open OpenVSP"),
         "{}",
@@ -458,6 +457,7 @@ mod maximized_overlay {
                     ctx,
                     FullscreenFigure {
                         scene,
+                        revision: 1,
                         config,
                         theme: "Dark",
                         camera_key: CAMERA_KEY,
@@ -563,7 +563,6 @@ fn a_result_figure_card_shows_its_explanation_only_as_hover_text() {
         .expect("a registered result figure with an explanation");
     let context = Context::default();
     let mut state = AppState {
-        help_verbose: true,
         ..Default::default()
     };
     let config = state
@@ -597,6 +596,41 @@ fn a_result_figure_card_shows_its_explanation_only_as_hover_text() {
     );
     assert!(
         !painted.iter().any(|text| text == descriptor.description),
-        "Learn-more help must not repeat the hover explanation as a subtitle: {painted:?}"
+        "The hover explanation must not be painted as a subtitle: {painted:?}"
     );
+}
+
+#[test]
+fn a_static_card_canvas_takes_its_drawing_aspect_within_bounds() {
+    use super::gallery::{fitted_canvas_height, TileScene, FITTED_CANVAS_MAX, FITTED_CANVAS_MIN};
+    let tile = |width: f64, height: f64, orbitable: bool| TileScene {
+        scene: Some(std::sync::Arc::new(Scene::new(width, height, None))),
+        view_key: String::new(),
+        camera_key: String::new(),
+        orbitable,
+    };
+    // A wide sheet fills the card width with no band above or below it.
+    let height = fitted_canvas_height(&tile(1420.0, 750.0, false), 460.0, 320.0);
+    assert!((height - 460.0 * 750.0 / 1420.0).abs() < 1e-3);
+    // Extreme aspects stay within the card bounds.
+    assert_eq!(
+        fitted_canvas_height(&tile(400.0, 2000.0, false), 460.0, 320.0),
+        FITTED_CANVAS_MAX
+    );
+    assert_eq!(
+        fitted_canvas_height(&tile(4000.0, 300.0, false), 460.0, 320.0),
+        FITTED_CANVAS_MIN
+    );
+    // Orbit views and unavailable figures keep the gallery default.
+    assert_eq!(
+        fitted_canvas_height(&tile(1420.0, 750.0, true), 460.0, 320.0),
+        320.0
+    );
+    let empty = TileScene {
+        scene: None,
+        view_key: String::new(),
+        camera_key: String::new(),
+        orbitable: false,
+    };
+    assert_eq!(fitted_canvas_height(&empty, 460.0, 320.0), 320.0);
 }

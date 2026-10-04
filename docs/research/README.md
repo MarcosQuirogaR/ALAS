@@ -1,6 +1,6 @@
 # ALAS aircraft-design research library
 
-Research corpus assembled on 2026-08-26 for the requirements-first aircraft-design work. The individual notes are discipline reviews; the cross-discipline decision record is [AIRCRAFT_DESIGN_DOCTRINE.md](AIRCRAFT_DESIGN_DOCTRINE.md).
+Research corpus for the requirements-first aircraft-design work. The individual notes are discipline reviews; the cross-discipline decision record is [AIRCRAFT_DESIGN_DOCTRINE.md](AIRCRAFT_DESIGN_DOCTRINE.md).
 
 ## How to use this library
 
@@ -30,14 +30,11 @@ Research corpus assembled on 2026-08-26 for the requirements-first aircraft-desi
 | Environment and lifecycle | [environment-lifecycle.md](environment-lifecycle.md) | [bib/environment-lifecycle](../../bib/environment-lifecycle/) | Fuel/energy climate impact, noise, non-CO2, LCA, manufacturing and end-of-life |
 | Operations, economics, and maintainability | [operations-economics.md](operations-economics.md) | [bib/operations-economics](../../bib/operations-economics/) | Schedule, turnaround, DOC/LCC, dispatch, maintenance, crew, airport operations |
 
-The dependency-ordered implementation programme and complete research-to-code
-traceability matrix are maintained in
-[INTEGRATION_PLAN.md](INTEGRATION_PLAN.md).
-Machine-readable finding dispositions use
-[`implementation-ledger.schema.json`](implementation-ledger.schema.json). A
-finding cannot be called implemented until its ledger row is `Verified` and
-names retained evidence; planned code or an unverified implementation is not a
-release claim.
+These notes are design references, not statements of what the application
+implements. Implementation and validation status is recorded in
+[../STATUS.md](../STATUS.md) and the method descriptions in
+[../methods.md](../methods.md); a recommendation here becomes a release claim
+only when code, tests and retained evidence back it.
 
 ## Evidence boundary
 

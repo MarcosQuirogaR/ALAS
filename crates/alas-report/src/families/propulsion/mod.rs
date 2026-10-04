@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/reporting/visualization.py
-// Reference: alas @ rust-port-baseline.
 
 //! Propulsion thermodynamic cycle summary, the engine designer's nacelle
 //! preview, and parametric trade-space sweeps (carpet plot, efficiency
@@ -36,6 +35,8 @@ pub use sweeps::{
 
 use alas_config::{ActiveEngineModel, AlasConfig, TurbofanEngineSpec};
 use alas_prop::cycle::TurbofanCycleInputs;
+
+use crate::families::common::linspace;
 
 /// The cruise design point every propulsion figure evaluates the cycle at.
 ///
@@ -75,43 +76,9 @@ fn is_turboprop(config: &AlasConfig) -> bool {
     )
 }
 
-/// `numpy.linspace(start, stop, num)` with the inclusive endpoint NumPy uses.
-///
-/// The interior points are `start + step * i`; the last is set to `stop`
-/// exactly, matching `alas-perf::performance::linspace`'s own note on why
-/// (keeps the axis endpoints bit-identical rather than a rounding of
-/// `start + step * (num - 1)`). Every `np.linspace` call this family ports
-/// (the carpet plot's two axes, the efficiency-decomposition sweep, the BPR
-/// sweep, the altitude/Mach grid) goes through this one copy.
-fn linspace(start: f64, stop: f64, num: usize) -> Vec<f64> {
-    if num == 0 {
-        return Vec::new();
-    }
-    if num == 1 {
-        return vec![start];
-    }
-    let step = (stop - start) / (num - 1) as f64;
-    let mut values: Vec<f64> = (0..num).map(|i| start + step * i as f64).collect();
-    values[num - 1] = stop;
-    values
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn linspace_places_both_endpoints_exactly() {
-        let grid = linspace(15.0, 70.0, 12);
-        assert_eq!(grid.len(), 12);
-        assert_eq!(grid[0], 15.0);
-        assert_eq!(grid[11], 70.0);
-    }
-
-    #[test]
-    fn linspace_of_one_point_is_the_start() {
-        assert_eq!(linspace(3.0, 9.0, 1), vec![3.0]);
-    }
 
     #[test]
     fn design_point_reads_the_engine_and_the_cruise_requirement() {

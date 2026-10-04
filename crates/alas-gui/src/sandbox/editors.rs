@@ -213,6 +213,7 @@ fn optional_editor(state: &mut AppState, ui: &mut Ui, field: &SandboxField, curr
 
 fn airfoil_editor(state: &mut AppState, ui: &mut Ui, field: &SandboxField, current: &Value) {
     let mut text = current.as_str().unwrap_or_default().to_owned();
+    let search_id = ui.make_persistent_id(("sandbox_airfoil_search", &field.id));
     ui.horizontal(|ui| {
         let response = ui.add(egui::TextEdit::singleline(&mut text).desired_width(140.0));
         if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
@@ -224,15 +225,40 @@ fn airfoil_editor(state: &mut AppState, ui: &mut Ui, field: &SandboxField, curre
             );
         }
         ui.menu_button("v", |ui| {
-            let filter = text.to_ascii_lowercase();
+            let mut search = ui
+                .ctx()
+                .data(|data| data.get_temp::<String>(search_id))
+                .unwrap_or_default();
+            if ui
+                .add(
+                    egui::TextEdit::singleline(&mut search)
+                        .hint_text(tr("Search airfoils"))
+                        .desired_width(220.0),
+                )
+                .changed()
+            {
+                ui.ctx()
+                    .data_mut(|data| data.insert_temp(search_id, search.clone()));
+            }
+            let filter = search.trim().to_ascii_lowercase();
+            let names: Vec<_> =
+                alas_geom::airfoil_library::AirfoilLibrary::get_available_airfoils()
+                    .into_iter()
+                    .filter(|name| filter.is_empty() || name.to_ascii_lowercase().contains(&filter))
+                    .collect();
+            if names.is_empty() {
+                ui.label(tr("No library sections match the name filter."));
+                return;
+            }
+            let row_height = ui
+                .text_style_height(&egui::TextStyle::Button)
+                .max(ui.spacing().interact_size.y);
             egui::ScrollArea::vertical()
+                .id_salt(("sandbox_airfoil_rows", &field.id))
                 .max_height(260.0)
-                .show(ui, |ui| {
-                    for name in alas_geom::airfoil_library::AirfoilLibrary::get_available_airfoils()
-                        .into_iter()
-                        .filter(|n| filter.is_empty() || n.to_ascii_lowercase().contains(&filter))
-                        .take(300)
-                    {
+                .show_rows(ui, row_height, names.len(), |ui, range| {
+                    for index in range {
+                        let name = names[index];
                         if ui.selectable_label(text == name, name).clicked() {
                             commit_field(
                                 state,
@@ -240,6 +266,7 @@ fn airfoil_editor(state: &mut AppState, ui: &mut Ui, field: &SandboxField, curre
                                 Value::String(name.to_owned()),
                                 Gesture::Committed,
                             );
+                            ui.ctx().data_mut(|data| data.remove::<String>(search_id));
                             ui.close_menu();
                         }
                     }

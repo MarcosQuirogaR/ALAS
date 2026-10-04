@@ -7,7 +7,6 @@
 // mission analysis model/Methods/Missions/Segments/{Climb,Cruise}/Common.py.
 // Upstream: mission analysis model 2.5.2, LGPL-2.1 (relicensed under GPL-2.0-or-later per
 // LGPL-2.1 section 3; compatible with this program's AGPL-3.0-or-later).
-// Reference: alas @ rust-port-baseline.
 
 //! One leg of a mission, and the two-unknown system that flies it.
 //!
@@ -49,10 +48,12 @@
 pub mod analyses;
 pub mod common;
 pub mod conditions;
+pub mod drag;
 pub mod frames;
 
 pub use analyses::{AeroSolution, LegacyTurbofanCompatibility, MissionAnalyses};
 pub use conditions::{Conditions, Initials, Matrix3, Vector3};
+pub use drag::{MissionDragCoefficients, MissionDragModel, MissionDragSource};
 
 use crate::numerics::Numerics;
 use alas_config::mission::SpeedReference;
@@ -396,15 +397,13 @@ impl Segment {
             .sum();
 
         let initial_time = self.conditions.time_s[0];
-        for (point, &node) in self
-            .numerics
-            .dimensionless
-            .control_points
-            .clone()
-            .iter()
-            .enumerate()
+        for (time, &node) in self
+            .conditions
+            .time_s
+            .iter_mut()
+            .zip(&self.numerics.dimensionless.control_points)
         {
-            self.conditions.time_s[point] = initial_time + node * span;
+            *time = initial_time + node * span;
         }
     }
 

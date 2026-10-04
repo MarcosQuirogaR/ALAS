@@ -3,7 +3,6 @@
 
 // Ported from alas/reporting/visualization.py: figure_structures_vibration
 // (L6083-6177).
-// Reference: alas @ rust-port-baseline.
 
 //! NASTRAN harmonic-response and force-PSD RMS figures.
 //!

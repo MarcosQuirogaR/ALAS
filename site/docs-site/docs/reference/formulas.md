@@ -162,10 +162,9 @@ efficiency, propulsive efficiency, specific thrust, and TSFC.
 
 Covered in full in
 [Design space & optimizer](../design-space-and-optimizer.md#the-objective-function):
-a weighted L/D reward minus a long sum of constraint penalties, searched
-with SciPy's `differential_evolution`. Not repeated here since that
-chapter's framing (which penalty maps to which physical constraint) is
-the more useful version of the same information.
+the mission-sized objective (block fuel by default) minimised by
+differential_evolution under hard constraints. See that chapter for the
+takeoff-mass modes and the constraint rules.
 
 ## Where this diverges from the private engineering docs
 

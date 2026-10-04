@@ -5,9 +5,79 @@
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
 
 use crate::state::AppState;
 use crate::views::tr;
+
+/// How long a resolved (or failed) launch target stays valid.
+///
+/// `launch_target` probes the filesystem (`is_file`, tool discovery) and is
+/// evaluated once per figure per frame while the OpenVSP card is visible.
+/// Its inputs, an installed run and the configured tool locations, change on
+/// user action rather than every repaint, so a short TTL avoids redoing that
+/// I/O on idle frames while still picking up an install or a new run
+/// promptly.
+const LAUNCH_TARGET_TTL: Duration = Duration::from_secs(5);
+
+#[derive(Clone)]
+struct CachedLaunchTarget {
+    key: String,
+    computed_at: Instant,
+    result: Result<(PathBuf, PathBuf), String>,
+}
+
+/// Identity of everything `launch_target` reads, cheap to recompute every
+/// frame from data already resident in `state`.
+fn launch_target_cache_key(state: &AppState) -> String {
+    let export = state
+        .pipeline_result
+        .as_ref()
+        .and_then(|result| result.openvsp_export.as_ref());
+    match export {
+        Some(export) => format!(
+            "{:?}|{}|{}|{}",
+            export.status,
+            export.cad_preview_vsp3_path.display(),
+            export
+                .runtime_executable
+                .as_deref()
+                .map(Path::display)
+                .map(|path| path.to_string())
+                .unwrap_or_default(),
+            state.tool_preferences.openvsp_dir.as_deref().unwrap_or(""),
+        ),
+        None => "none".to_owned(),
+    }
+}
+
+/// `launch_target`, memoized behind [`LAUNCH_TARGET_TTL`] and the inputs it
+/// reads so an idle repaint reuses last frame's answer instead of probing
+/// the filesystem again.
+fn cached_launch_target(
+    ctx: &egui::Context,
+    state: &AppState,
+) -> Result<(PathBuf, PathBuf), String> {
+    let id = egui::Id::new("openvsp_launch_target_cache");
+    let key = launch_target_cache_key(state);
+    if let Some(cached) = ctx.data(|data| data.get_temp::<CachedLaunchTarget>(id)) {
+        if cached.key == key && cached.computed_at.elapsed() < LAUNCH_TARGET_TTL {
+            return cached.result;
+        }
+    }
+    let result = launch_target(state);
+    ctx.data_mut(|data| {
+        data.insert_temp(
+            id,
+            CachedLaunchTarget {
+                key,
+                computed_at: Instant::now(),
+                result: result.clone(),
+            },
+        )
+    });
+    result
+}
 
 fn gui_next_to(location: &Path) -> Option<PathBuf> {
     let directory = if location.is_dir() {
@@ -61,15 +131,24 @@ fn launch_target(state: &AppState) -> Result<(PathBuf, PathBuf), String> {
     Ok((executable, model))
 }
 
-/// Center the explicit interactive action on the geometry canvas.
-pub(super) fn show_launch_button(state: &mut AppState, ui: &mut egui::Ui, canvas: egui::Rect) {
-    let target = launch_target(state);
-    let button = egui::Rect::from_center_size(canvas.center(), egui::vec2(200.0, 36.0));
+/// Height the launch row takes below the geometry canvas, in points.
+pub(super) const LAUNCH_ROW_HEIGHT: f32 = 44.0;
+
+/// The explicit interactive action, in its own row centred below the
+/// geometry canvas: over the canvas it would cover the preview image or the
+/// status message drawn when no preview exists. Returns the button's rect.
+pub(super) fn show_launch_button(state: &mut AppState, ui: &mut egui::Ui) -> egui::Rect {
+    let target = cached_launch_target(ui.ctx(), state);
+    ui.add_space(LAUNCH_ROW_HEIGHT - 36.0);
     let response = ui
-        .add_enabled_ui(target.is_ok(), |ui| {
-            ui.put(button, egui::Button::new(tr("Explore in OpenVSP")))
+        .vertical_centered(|ui| {
+            ui.add_enabled_ui(target.is_ok(), |ui| {
+                ui.add_sized([200.0, 36.0], egui::Button::new(tr("Explore in OpenVSP")))
+            })
+            .inner
         })
         .inner;
+    let button = response.rect;
     let error_id = ui.id().with("openvsp_launch_error");
     match target {
         Ok((executable, model)) => {
@@ -109,15 +188,11 @@ pub(super) fn show_launch_button(state: &mut AppState, ui: &mut egui::Ui, canvas
         }
     }
     if let Some(error) = ui.ctx().data(|data| data.get_temp::<String>(error_id)) {
-        let error_rect = egui::Rect::from_center_size(
-            button.center() + egui::vec2(0.0, 46.0),
-            egui::vec2(canvas.width().min(480.0), 48.0),
-        );
-        ui.put(
-            error_rect,
-            egui::Label::new(egui::RichText::new(error).color(ui.visuals().error_fg_color)),
-        );
+        ui.vertical_centered(|ui| {
+            ui.label(egui::RichText::new(error).color(ui.visuals().error_fg_color));
+        });
     }
+    button
 }
 
 #[cfg(test)]
@@ -141,5 +216,29 @@ mod tests {
     #[test]
     fn no_run_disables_model_launch() {
         assert!(launch_target(&AppState::default()).is_err());
+    }
+
+    #[test]
+    fn an_expired_entry_is_recomputed() {
+        let ctx = egui::Context::default();
+        let state = AppState::default();
+        let id = egui::Id::new("openvsp_launch_target_cache");
+        ctx.data_mut(|data| {
+            data.insert_temp(
+                id,
+                CachedLaunchTarget {
+                    key: launch_target_cache_key(&state),
+                    computed_at: Instant::now() - Duration::from_secs(6),
+                    result: Ok((PathBuf::from("stale-exe"), PathBuf::from("stale-model"))),
+                },
+            )
+        });
+
+        let refreshed = cached_launch_target(&ctx, &state);
+
+        assert_ne!(
+            refreshed,
+            Ok((PathBuf::from("stale-exe"), PathBuf::from("stale-model")))
+        );
     }
 }

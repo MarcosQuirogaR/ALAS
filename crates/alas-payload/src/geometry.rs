@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/physics/payload.py (`DeckSpec`, `CabinGeometry`)
-// Reference: alas @ rust-port-baseline.
 
 //! Where the cabin is, how wide the floor is at each station, and where each
 //! deck sits inside the fuselage.
@@ -36,5 +35,13 @@
 //! `FuselageXSec` resolves that in its constructor, so both accessors are the
 //! fields themselves here.
 
-include!("geometry_parts/part_01.rs");
-include!("geometry_parts/part_02.rs");
+use crate::numeric::interp;
+use alas_config::GeometryConfig;
+use alas_geom::aircraft::airplane::Airplane;
+
+mod envelope;
+
+mod model;
+pub use model::*;
+mod deck_tables;
+use deck_tables::*;

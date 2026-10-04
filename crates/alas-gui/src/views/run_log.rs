@@ -74,7 +74,7 @@ pub fn show_run_log(state: &mut AppState, ui: &mut Ui) {
         ui.label(RichText::new(status).weak().small());
     }
 
-    let visible = rendered_visible_lines(state);
+    let visible = rendered_visible_lines(ui.ctx(), state);
     let elapsed_ms = state.elapsed_ms().min(u64::MAX as u128) as u64;
     let card = if state.is_running {
         crate::theme::card_frame(ui).show(ui, |ui| {

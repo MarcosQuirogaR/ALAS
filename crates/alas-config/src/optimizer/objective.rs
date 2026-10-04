@@ -7,19 +7,15 @@
 //! range under a reserve policy, and judged by what that mission costs,
 //! with the certification and operating requirements as boundaries rather
 //! than as prices. This group selects that formulation. The objective is a
-//! mission quantity such as block fuel or takeoff mass; the maximum takeoff
-//! mass is closed by the mission rather than typed in; and each family of
-//! requirements is declared hard (a candidate that misses it is infeasible),
-//! soft (it ranks behind feasibility but ahead of the objective), diagnostic
-//! (reported, never ranked) or off.
+//! mission quantity such as block fuel or takeoff mass. The MTOW mode chooses
+//! a fixed declared mass or mission closure. Every requirement is hard;
+//! independent study preferences affect cost and diagnostics remain unranked.
 //!
-//! The frozen weighted lift-to-drag objective of the Python reference is not
-//! a product objective: it survives only inside the parity replay
-//! (`DesignObjective::new_reference_compatibility`), where the fixtures need
-//! it, and cannot be selected here.
+//! This group defines the mission-sized objective the one search minimises.
 
 use serde::{Deserialize, Serialize};
 
+use super::aerodrome_code::AerodromeReferenceCode;
 use crate::{ConfigNode, Kind, Leaf};
 
 /// The scalar the search minimises.
@@ -75,6 +71,17 @@ pub enum MtowSizing {
     /// sizing mode for producing a certifiable design against a declared
     /// requirement.
     Unconstrained,
+    /// The takeoff mass is closed on the design mission (design range at
+    /// design payload, with the fuel-policy reserves), seeded at the MTOW
+    /// target `T` and clamped at `T (1 + p)`. A closure outside
+    /// `[T (1 - p), T (1 + p)]` is rejected on either side; inside the band
+    /// nothing pulls it toward `T`. The selected route is then flown
+    /// off-design at the closed mass as a check.
+    MtowBand,
+    /// The takeoff mass is closed with no ceiling at the configured payload
+    /// on the selected route, or on the design range when one is set, with
+    /// the fuel-policy reserves, seeded from the declared MTOW.
+    PayloadAdjusted,
 }
 
 impl MtowSizing {
@@ -84,7 +91,41 @@ impl MtowSizing {
             Self::FixedRequirement => "fixed_requirement",
             Self::SizedByMission => "sized_by_mission",
             Self::Unconstrained => "unconstrained",
+            Self::MtowBand => "mtow_band",
+            Self::PayloadAdjusted => "payload_adjusted",
         }
+    }
+
+    /// Every variant, in the order the form lists them.
+    pub const ALL: [Self; 5] = [
+        Self::FixedRequirement,
+        Self::SizedByMission,
+        Self::Unconstrained,
+        Self::MtowBand,
+        Self::PayloadAdjusted,
+    ];
+
+    /// The stable serialized names of [`Self::ALL`], in the same order: the
+    /// schema's option list.
+    pub const NAMES: [&'static str; 5] = [
+        "fixed_requirement",
+        "sized_by_mission",
+        "unconstrained",
+        "mtow_band",
+        "payload_adjusted",
+    ];
+
+    /// Whether the mode closes the takeoff mass on a mission rather than
+    /// taking it as the requirement value.
+    pub const fn closes_mass(self) -> bool {
+        !matches!(self, Self::FixedRequirement)
+    }
+
+    /// Whether the mode is evaluated by the mission-sized closure under
+    /// every optimizer method. The two design modes are; the three original
+    /// modes keep the reference replay under the legacy profile.
+    pub const fn requires_mission_sized_evaluation(self) -> bool {
+        matches!(self, Self::MtowBand | Self::PayloadAdjusted)
     }
 }
 
@@ -94,40 +135,7 @@ impl Leaf for MtowSizing {
     }
 }
 
-/// How a family of requirements takes part in the ranking.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ConstraintPolicy {
-    /// A violation makes the candidate infeasible.
-    #[default]
-    Hard,
-    /// A violation ranks the candidate behind compliant ones, ahead of the objective.
-    Soft,
-    /// The residual is reported and never ranked.
-    Diagnostic,
-    /// The family is not evaluated.
-    Off,
-}
-
-impl ConstraintPolicy {
-    /// Stable serialized name.
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Hard => "hard",
-            Self::Soft => "soft",
-            Self::Diagnostic => "diagnostic",
-            Self::Off => "off",
-        }
-    }
-}
-
-impl Leaf for ConstraintPolicy {
-    fn kind(&self, _name: &str) -> Kind {
-        Kind::Str
-    }
-}
-
-/// The mission-sized objective and its constraint policies.
+/// The mission-sized objective and its hard requirements.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ConfigNode)]
 #[serde(default, deny_unknown_fields)]
 pub struct ObjectiveConfig {
@@ -135,7 +143,7 @@ pub struct ObjectiveConfig {
     #[config(
         options = ObjectiveKind,
         label = "Objective",
-        help = "Quantity the design search minimises. Every choice sizes each candidate by the design mission under the fuel policy and ranks it feasibility first: block fuel is the operating cost of the mission, takeoff mass the structural and airport cost, operating empty mass the manufacturing cost, and fuel per seat-kilometre the block fuel normalised by the design passengers and range."
+        help = "Used by the mission-sized differential_evolution profile. That profile sizes each candidate by the design mission and ranks it feasibility first."
     )]
     pub kind: ObjectiveKind,
 
@@ -151,9 +159,24 @@ pub struct ObjectiveConfig {
     #[config(
         options = MtowSizing,
         label = "Takeoff mass sizing",
-        help = "Whether the maximum takeoff mass is the fixed requirement value, is iterated by the mission up to the requirement value, or is iterated by the mission with the requirement used only to seed the first pass. Sizing by mission makes the structural mass follow the closed takeoff mass, which is what lets a lighter wing pay for itself. Unconstrained runs the same mission-sized iteration with the requirement dropped as a ceiling after the seed, for asking what the closure converges to on its own rather than for producing a design bounded by a declared requirement."
+        help = "Whether the maximum takeoff mass is the fixed requirement value, is iterated by the mission up to the requirement value, or is iterated by the mission with the requirement used only to seed the first pass. Sizing by mission makes the structural mass follow the closed takeoff mass, which is what lets a lighter wing pay for itself. Unconstrained runs the same mission-sized iteration with the requirement dropped as a ceiling after the seed, for asking what the closure converges to on its own rather than for producing a design bounded by a declared requirement. MTOW band closes the takeoff mass on the design mission (design range at design payload, with reserves), rejects a closure outside the target plus or minus the band fraction, and then flies the selected route off-design at the closed mass as a check. Payload adjusted closes it with no ceiling at the configured payload on the route, or on the design range when one is set. In both design modes the structure is sized at the closed mass."
     )]
     pub mtow_sizing: MtowSizing,
+
+    /// Target MTOW of the band mode, kg; zero uses the requirement MTOW.
+    #[config(
+        label = "MTOW target",
+        unit = "kg",
+        help = "Centre of the MTOW band: the takeoff mass the design mission is expected to close at. Zero uses the requirement MTOW. Read only by the MTOW band mode."
+    )]
+    pub mtow_target_kg: f64,
+
+    /// Half-width of the MTOW band as a fraction of its target.
+    #[config(
+        label = "MTOW band fraction",
+        help = "Half-width of the MTOW band as a fraction of the target: a closed takeoff mass below the target times one minus this fraction, or above the target times one plus it, is rejected. Inside the band the closure is free and nothing pulls it toward the target. Read only by the MTOW band mode."
+    )]
+    pub mtow_band_fraction: f64,
 
     /// How many closure passes the sizing loop may take.
     #[config(
@@ -179,45 +202,19 @@ pub struct ObjectiveConfig {
     )]
     pub retrim_cg_tolerance_pct_mac: f64,
 
-    /// Policy for the mass and fuel-volume requirements.
+    /// Aerodrome reference code whose wingspan limit bounds a clean-sheet design.
     #[config(
-        options = ConstraintPolicy,
-        label = "Mass and fuel constraints",
-        help = "How the fuel-capacity, maximum-zero-fuel, maximum-landing and takeoff-mass-ceiling requirements take part in the ranking: hard makes a miss infeasible, soft ranks it behind compliant candidates, diagnostic only reports it."
+        options = AerodromeReferenceCode,
+        label = "Aerodrome reference code",
+        help = "ICAO Annex 14 aerodrome reference code letter that caps the wingspan of a clean-sheet design, strictly below the band edge: A 15 m, B 24 m, C 36 m, D 52 m, E 65 m, F 80 m (Table 1-1). Auto, the default for a new aircraft that names no preset, takes the letter whose band holds the wingspan the brief implies and re-derives it whenever the brief is committed; a letter chosen here is never replaced. A reference adaptation of a registered aircraft uses that aircraft's own letter instead. Unrestricted disables the limit. No code is inferred from an ICAO identifier or runway length."
     )]
-    pub mass_constraints: ConstraintPolicy,
+    pub aerodrome_reference_code: AerodromeReferenceCode,
 
-    /// Policy for the balance requirements.
-    #[config(
-        options = ConstraintPolicy,
-        label = "Balance constraints",
-        help = "How the centre-of-gravity envelope, gear reactions and static-margin floor take part in the ranking across the loading states from empty to takeoff."
-    )]
-    pub balance_constraints: ConstraintPolicy,
-
-    /// Policy for the airworthiness performance requirements.
-    #[config(
-        options = ConstraintPolicy,
-        label = "Performance constraints",
-        help = "How the CS-25.121 engine-out second-segment climb gradient, the takeoff and landing field lengths at the selected aerodromes, the cruise thrust margin and the approach-speed limit take part in the ranking."
-    )]
-    pub performance_constraints: ConstraintPolicy,
-
-    /// Policy for the geometric and accommodation requirements.
-    #[config(
-        options = ConstraintPolicy,
-        label = "Geometry constraints",
-        help = "How the span limit, the maximum wing area, the minimum wing loading, the tail volume window and the passenger-capacity requirement take part in the ranking."
-    )]
-    pub geometry_constraints: ConstraintPolicy,
-
-    /// Largest wingspan the aerodrome code admits.
-    #[config(
-        label = "Maximum wingspan",
-        unit = "m",
-        help = "Largest wingspan allowed by the selected aerodrome reference-code case. The 36/52/65/80 m values are study inputs representing codes C/D/E/F; this configuration does not infer a code from an ICAO identifier or runway length. Zero disables the limit."
-    )]
-    pub max_span_m: f64,
+    /// The letter `Auto` resolved to when the clean-sheet brief was last
+    /// committed; unused for any explicit letter.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[config(skip)]
+    pub derived_aerodrome_code: Option<AerodromeReferenceCode>,
 
     /// Highest approach speed the design may have.
     #[config(
@@ -227,12 +224,13 @@ pub struct ObjectiveConfig {
     )]
     pub max_approach_speed_kt: f64,
 
-    /// Weight of the soft-residual sum relative to the objective.
+    /// Cost scale of study preferences; never an allowance for a constraint.
+    #[serde(alias = "soft_penalty_weight")]
     #[config(
-        label = "Soft-constraint penalty weight",
-        help = "Scale applied to the sum of normalised soft-constraint violations before it is added to the normalised objective. Soft families rank behind hard feasibility regardless of this weight; it only decides how much a soft miss costs against the objective."
+        label = "Preference weight",
+        help = "Dimensionless w in the ranking cost J = Q/Qref + w*P, where P sums normalized preference violations; an infeasible candidate adds 1 + H. Feasibility is ranked before J; hard constraints are always enforced."
     )]
-    pub soft_penalty_weight: f64,
+    pub preference_weight: f64,
 }
 
 impl Default for ObjectiveConfig {
@@ -241,26 +239,27 @@ impl Default for ObjectiveConfig {
             kind: ObjectiveKind::BlockFuel,
             design_range_nmi: 0.0,
             mtow_sizing: MtowSizing::SizedByMission,
+            mtow_target_kg: 0.0,
+            mtow_band_fraction: DEFAULT_MTOW_BAND_FRACTION,
             sizing_max_iterations: 30,
             sizing_tolerance_kg: 1.0,
             retrim_cg_tolerance_pct_mac: 0.1,
-            mass_constraints: ConstraintPolicy::Hard,
-            balance_constraints: ConstraintPolicy::Hard,
-            performance_constraints: ConstraintPolicy::Hard,
-            geometry_constraints: ConstraintPolicy::Hard,
-            max_span_m: 80.0,
+            aerodrome_reference_code: AerodromeReferenceCode::F,
+            derived_aerodrome_code: None,
             max_approach_speed_kt: 0.0,
-            soft_penalty_weight: 10.0,
+            preference_weight: 10.0,
         }
     }
 }
 
-impl ObjectiveConfig {
-    /// Whether the serialized group equals the defaults.
-    pub fn is_default(&self) -> bool {
-        self == &Self::default()
-    }
+/// Default half-width of the MTOW band, as a fraction of the target.
+///
+/// Engineering estimate: plus or minus five per cent is of the order of the
+/// MTOW step between successive weight variants of one transport type, so a
+/// closure outside it describes a different variant from the targeted one.
+pub const DEFAULT_MTOW_BAND_FRACTION: f64 = 0.05;
 
+impl ObjectiveConfig {
     /// Reject values the sizing loop cannot run with.
     pub fn validate(&self) -> Result<(), String> {
         if !self.design_range_nmi.is_finite() || self.design_range_nmi < 0.0 {
@@ -272,10 +271,15 @@ impl ObjectiveConfig {
         if !self.sizing_tolerance_kg.is_finite() || self.sizing_tolerance_kg <= 0.0 {
             return Err("sizing tolerance must be positive".to_owned());
         }
+        if !self.mtow_target_kg.is_finite() || self.mtow_target_kg < 0.0 {
+            return Err("MTOW target must be finite and nonnegative".to_owned());
+        }
+        if !(self.mtow_band_fraction > 0.0 && self.mtow_band_fraction < 1.0) {
+            return Err("MTOW band fraction must lie strictly between zero and one".to_owned());
+        }
         for (name, value) in [
-            ("max_span_m", self.max_span_m),
+            ("preference_weight", self.preference_weight),
             ("max_approach_speed_kt", self.max_approach_speed_kt),
-            ("soft_penalty_weight", self.soft_penalty_weight),
             (
                 "retrim_cg_tolerance_pct_mac",
                 self.retrim_cg_tolerance_pct_mac,
@@ -294,11 +298,23 @@ mod tests {
     use super::*;
 
     #[test]
+    fn invalid_preference_weights_are_public_validation_errors() {
+        for weight in [-1.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            let mut config = crate::AlasConfig::default();
+            config.optimizer.objective.preference_weight = weight;
+            assert!(crate::validation::validate(&config)
+                .iter()
+                .any(|issue| issue.field_path == "optimizer.objective"
+                    && issue.severity == crate::validation::Severity::Error));
+        }
+    }
+
+    #[test]
     fn the_default_objective_is_block_fuel_over_a_mission_sized_takeoff_mass() {
         let objective = ObjectiveConfig::default();
         assert_eq!(objective.kind, ObjectiveKind::BlockFuel);
         assert_eq!(objective.mtow_sizing, MtowSizing::SizedByMission);
-        assert!(objective.is_default());
+        assert_eq!(objective, ObjectiveConfig::default());
         assert!(objective.validate().is_ok());
     }
 
@@ -315,8 +331,7 @@ mod tests {
                 Some(serde_json::json!(kind.as_str()))
             );
         }
-        // The frozen lift-to-drag objective is a parity-replay path, not a
-        // saved-configuration value.
+        // A weighted L/D surrogate is not a mission objective.
         assert!(
             serde_json::from_value::<ObjectiveKind>(serde_json::json!("legacy_lift_to_drag"))
                 .is_err()
@@ -324,11 +339,7 @@ mod tests {
     }
 
     #[test]
-    fn policy_and_sizing_names_are_stable_in_saved_configuration() {
-        assert_eq!(
-            serde_json::to_value(ConstraintPolicy::Diagnostic).ok(),
-            Some(serde_json::json!("diagnostic"))
-        );
+    fn sizing_names_are_stable_in_saved_configuration() {
         assert_eq!(
             serde_json::to_value(MtowSizing::SizedByMission).ok(),
             Some(serde_json::json!("sized_by_mission"))
@@ -337,6 +348,49 @@ mod tests {
             serde_json::to_value(MtowSizing::Unconstrained).ok(),
             Some(serde_json::json!("unconstrained"))
         );
+        for (sizing, name) in MtowSizing::ALL.into_iter().zip(MtowSizing::NAMES) {
+            assert_eq!(sizing.as_str(), name);
+            assert_eq!(
+                serde_json::to_value(sizing).ok(),
+                Some(serde_json::json!(sizing.as_str()))
+            );
+        }
+        assert_eq!(MtowSizing::MtowBand.as_str(), "mtow_band");
+        assert_eq!(MtowSizing::PayloadAdjusted.as_str(), "payload_adjusted");
+    }
+
+    #[test]
+    fn a_saved_objective_without_the_band_fields_loads_with_their_defaults() {
+        let saved = serde_json::json!({"kind": "block_fuel", "mtow_sizing": "sized_by_mission"});
+        let objective: ObjectiveConfig =
+            serde_json::from_value(saved).unwrap_or_else(|error| panic!("{error}"));
+        assert_eq!(objective.mtow_target_kg, 0.0);
+        assert_eq!(objective.mtow_band_fraction, DEFAULT_MTOW_BAND_FRACTION);
+        assert_eq!(objective, ObjectiveConfig::default());
+        let band: ObjectiveConfig = serde_json::from_value(serde_json::json!({
+            "mtow_sizing": "mtow_band",
+            "mtow_target_kg": 80_000.0,
+            "mtow_band_fraction": 0.08
+        }))
+        .unwrap_or_else(|error| panic!("{error}"));
+        assert_eq!(band.mtow_sizing, MtowSizing::MtowBand);
+        assert!(band.validate().is_ok());
+    }
+
+    #[test]
+    fn a_band_fraction_outside_the_open_unit_interval_is_rejected() {
+        for fraction in [0.0, 1.0, -0.1, f64::NAN] {
+            let objective = ObjectiveConfig {
+                mtow_band_fraction: fraction,
+                ..Default::default()
+            };
+            assert!(objective.validate().is_err(), "{fraction}");
+        }
+        let negative_target = ObjectiveConfig {
+            mtow_target_kg: -1.0,
+            ..Default::default()
+        };
+        assert!(negative_target.validate().is_err());
     }
 
     #[test]

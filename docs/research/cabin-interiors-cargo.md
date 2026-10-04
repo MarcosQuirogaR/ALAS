@@ -4,7 +4,6 @@ Research note for the ALAS requirements-first transport-aircraft workflow.
 
 - Prepared: 2026-08-26
 - Scope: passenger accommodation, seat pitch/width, aisles and exits, monuments, overhead stowage, accessibility, double decks, cargo holds and LD3-45 positions, freight/combi layouts, mass conventions, and centre-of-gravity effects.
-- Repository inputs read: docs/REQUIREMENTS_FIRST_AIRCRAFT_DESIGN.md, the ALAS configuration/payload/pipeline owners named by AGENTS.md, and the downloaded files listed below.
 - Download directory: bib/cabin-interiors-cargo/
 - Evidence convention: every conclusion is labelled as geometric capacity, operational load case, certification constraint, or preliminary-design proxy. A proxy is not a finding of compliance.
 
@@ -163,7 +162,7 @@ That is the right structure for a preliminary load planner, but it must be bound
 
 ## Exact mapping to the ALAS requirements-first algorithm
 
-The mapping below follows docs/REQUIREMENTS_FIRST_AIRCRAFT_DESIGN.md and current owner files. It is intentionally explicit about what is already implemented and what remains a residual.
+The mapping below follows the requirements-first flow and current owner files. It is intentionally explicit about what is already implemented and what remains a residual.
 
 | Requirements-first stage | Cabin/interiors/cargo materialization | Existing ALAS owner/evidence | Required result and residual |
 |---|---|---|---|

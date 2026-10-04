@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-// Ported from alas/physics/structural_loads.py
-// Reference: alas @ rust-port-baseline.
-
 //! Shared spanwise load model for the wingbox.
 //!
 //! One elliptic-lift (+ inertial-relief) distributed load, integrated to shear
@@ -208,6 +205,28 @@ pub fn apply_point_mass_relief(
     }
 }
 
+/// Subtract point-mass inertia from shear, paired with [`apply_point_mass_relief`].
+/// An attachment has a shear jump `n*g*m` and continuous bending moment. The
+/// shear at an attachment station is its inboard (left-limit) value, so away
+/// from each point load the cantilever equilibrium identity is `dM/dy = -V`.
+pub fn apply_point_mass_shear_relief(
+    y: &[f64],
+    shear_n: &mut [f64],
+    load_factor: f64,
+    gravity_m_s2: f64,
+    point_masses_kg: &[(f64, f64)],
+) {
+    let factor = load_factor * gravity_m_s2;
+    for &(y_item, mass_kg) in point_masses_kg {
+        let force_n = factor * mass_kg;
+        for (station, shear) in y.iter().zip(shear_n.iter_mut()) {
+            if *station <= y_item {
+                *shear -= force_n;
+            }
+        }
+    }
+}
+
 /// Half-elliptic spanwise load distribution [N/m], integrating to
 /// `total_force_n` over `[0, semi_span]`.
 ///
@@ -302,6 +321,26 @@ mod tests {
 
     fn requirements() -> DesignRequirements {
         DesignRequirements::default()
+    }
+
+    #[test]
+    fn point_inertia_preserves_shear_jump_moment_continuity_and_equilibrium() {
+        let y = [0.0, 1.0, 2.0, 2.5, 3.0, 4.0];
+        for load_factor in [3.75, -1.5] {
+            let force = load_factor * 9.81 * 1_000.0;
+            let mut shear = [0.0; 6];
+            let mut moment = [0.0; 6];
+            apply_point_mass_shear_relief(&y, &mut shear, load_factor, 9.81, &[(2.5, 1_000.0)]);
+            apply_point_mass_relief(&y, &mut moment, load_factor, 9.81, &[(2.5, 1_000.0)]);
+            assert!((shear[4] - shear[3] - force).abs() < 1.0e-10);
+            assert_eq!(moment[3], 0.0);
+            assert_eq!(moment[4], 0.0);
+            for station in [0, 1, 2, 4] {
+                let derivative =
+                    (moment[station + 1] - moment[station]) / (y[station + 1] - y[station]);
+                assert!((derivative + shear[station]).abs() < 1.0e-10);
+            }
+        }
     }
 
     #[test]

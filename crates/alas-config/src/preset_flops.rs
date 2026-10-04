@@ -235,9 +235,18 @@ pub fn inputs_for(preset_name: &str) -> Option<PresetFlopsInputs> {
         },
     };
 
+    let mut structure = declared_structure(preset_name);
+    // The pressurized fuselage of the regional turboprop class sizes its
+    // bending at the certified maximum zero-fuel mass.
+    if declared
+        .cabin_equipment_method
+        .is_regional_turboprop_class()
+    {
+        structure.design_zero_fuel_mass_kg = preset.reference.mzfw_kg;
+    }
     Some(PresetFlopsInputs {
         transport,
-        structure: declared_structure(preset_name),
+        structure,
         turboprop: declared_turboprop(preset_name),
     })
 }

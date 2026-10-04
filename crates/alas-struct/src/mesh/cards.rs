@@ -60,7 +60,7 @@ pub struct Pbarl {
     pub pid: i64,
     /// Material identifier.
     pub mid: i64,
-    /// Cross-section name, `"I"` for every spar cap this mesh builds.
+    /// Cross-section name: product caps use `"BAR"`, reference decks `"I"`.
     pub section: &'static str,
     /// The section's dimensions, in the order the named section expects them.
     pub dim: Vec<f64>,
@@ -95,6 +95,10 @@ pub struct Cbar {
     pub x: [f64; 3],
     /// Offset interpretation flag.
     pub offt: &'static str,
+    /// Grid-to-section-centroid offset at end A, metres in the OFFT frame.
+    pub offset_a: [f64; 3],
+    /// Grid-to-section-centroid offset at end B, metres in the OFFT frame.
+    pub offset_b: [f64; 3],
 }
 
 /// A `CONM2` concentrated mass hung off one grid.
@@ -220,6 +224,16 @@ impl Deck {
     /// Every `GRID` in the deck, in the order they were added.
     pub fn grids(&self) -> &[Grid] {
         &self.grids
+    }
+
+    /// Every submitted `MAT1`, preserving the deck's material identifiers.
+    pub fn materials(&self) -> &[Mat1] {
+        &self.materials
+    }
+
+    /// Every submitted `PSHELL`, for attributed shell-stress verification.
+    pub fn shell_properties(&self) -> &[Pshell] {
+        &self.shell_properties
     }
 
     /// Every `CQUAD4`, in the order they were added.

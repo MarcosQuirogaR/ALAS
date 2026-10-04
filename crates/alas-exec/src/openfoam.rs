@@ -234,22 +234,14 @@ pub struct OpenFoamAdapter {
     backend: OpenFoamBackend,
 }
 
-#[path = "openfoam_parts/adapter.rs"]
 mod adapter;
-#[path = "openfoam_parts/process.rs"]
 mod process_runner;
-#[path = "openfoam_parts/version.rs"]
 mod version;
 
 pub use version::{
     version_from_directory, OpenFoamDistribution, OpenFoamSupportLevel, OpenFoamVersion,
     OpenFoamVersionAssessment, FOUNDATION_LAST_RELEASE_WITH_SIMPLEFOAM, TEMPLATE_BASELINE_RELEASE,
 };
-
-/// Probe from preferences in one call for setup cards and tests.
-pub fn probe_openfoam(preferences: OpenFoamPreferences) -> OpenFoamCapabilities {
-    OpenFoamAdapter::resolve(preferences).probe()
-}
 
 fn valid_tool_name(tool: &str) -> bool {
     !tool.is_empty()
@@ -314,14 +306,8 @@ fn command_in_path(tool: &str) -> Option<PathBuf> {
         environment: Vec::new(),
         label: format!("probe:{tool}"),
     };
-    if matches!(
-        probe_result(&command),
-        Some(result) if result.status == OpenFoamProcessStatus::Completed
-    ) {
-        Some(PathBuf::from(candidate))
-    } else {
-        None
-    }
+    (probe_result(&command).status == OpenFoamProcessStatus::Completed)
+        .then(|| PathBuf::from(candidate))
 }
 
 fn configured_wsl_value(value: Option<&str>) -> Option<&str> {
@@ -369,7 +355,7 @@ fn wsl_candidate(preferences: &OpenFoamPreferences) -> bool {
         environment: Vec::new(),
         label: "probe:wsl".to_owned(),
     };
-    matches!(probe_result(&command), Some(result) if result.status == OpenFoamProcessStatus::Completed)
+    probe_result(&command).status == OpenFoamProcessStatus::Completed
 }
 
 fn remaining_probe_time(deadline: Instant) -> Option<Duration> {
@@ -385,7 +371,7 @@ fn probe_output(command: &OpenFoamCommand) -> Option<String> {
 }
 
 fn probe_output_with_timeout(command: &OpenFoamCommand, timeout: Duration) -> Option<String> {
-    let output = probe_result_with_timeout(command, timeout)?;
+    let output = probe_result_with_timeout(command, timeout);
     if output.status != OpenFoamProcessStatus::Completed {
         return None;
     }
@@ -396,16 +382,16 @@ fn probe_output_with_timeout(command: &OpenFoamCommand, timeout: Duration) -> Op
     Some(text)
 }
 
-fn probe_result(command: &OpenFoamCommand) -> Option<OpenFoamProcessResult> {
+fn probe_result(command: &OpenFoamCommand) -> OpenFoamProcessResult {
     probe_result_with_timeout(command, PROBE_TIMEOUT)
 }
 
 fn probe_result_with_timeout(
     command: &OpenFoamCommand,
     timeout: Duration,
-) -> Option<OpenFoamProcessResult> {
+) -> OpenFoamProcessResult {
     let cancel = Arc::new(AtomicBool::new(false));
-    Some(run_command(command, &cancel, timeout))
+    run_command(command, &cancel, timeout)
 }
 
 fn run_command(

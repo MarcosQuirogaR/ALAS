@@ -2,29 +2,32 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/config/optimizer_config.py (`SolverSettings`)
-// Reference: alas @ rust-port-baseline.
 
-//! How the aircraft-design search is run: which algorithm, how long, how wide,
-//! and from where.
+//! How the aircraft-design search is run: which optimization method, how
+//! long, how wide, and from where.
 //!
 //! These settings decide how many aircraft get built and analysed, and each
 //! evaluation is a full geometry build, mass breakdown and vortex-lattice
-//! solve. Generations times population size times the number of design
-//! variables is the run's cost, so this is the one group where a value chosen
-//! carelessly is felt as hours rather than as a wrong number.
+//! solve. The one search is the mission-sized differential evolution (L-SHADE
+//! under epsilon constraints).
 //!
-//! # Why the population starts clustered rather than spread
+//! # Stopping rules
 //!
-//! The upstream default seeds generation zero as a tight cluster of small
-//! perturbations around the initial design, plus that design unperturbed,
-//! instead of the uniform latin-hypercube coverage the solver would otherwise
-//! use. A design that trims, balances and closes its weight budget is a narrow
-//! region of the sixteen-dimensional box the bounds describe; a uniform sample
-//! of that box is almost entirely made of aircraft that do not balance, and
-//! the search spends its budget rediscovering feasibility rather than
-//! improving on it. Seeding near a known-good design starts inside the region
-//! and refines. [`SolverSettings::seed_near_initial_design`] turns it off for
-//! a deliberately broad search.
+//! Each stage stops on its evaluation budget or its wall-clock limit,
+//! whichever comes first. Native workers check the deadline before taking
+//! each candidate; at most one in-flight analysis per worker finishes after
+//! it. External evaluator adapters cooperate at batch boundaries because
+//! they own mutable process/session state. A time-limited stage's stopping
+//! point depends on machine speed and worker count. With a
+//! time limit the refinement plans its population schedule from its measured
+//! throughput, at most
+//! [`StageBudget::max_evaluations`]. The result records each stage's replay
+//! count (pre-gate-passed candidates, including repeats) and the
+//! refinement's planned budget; replaying with those counts
+//! ([`StageBudget::replay_evaluations`]) and the planned budget
+//! ([`StageBudget::replay_planned_evaluations`]), or running with
+//! [`SolverSettings::stop_on_evaluations_only`], gives a bit-identical result
+//! at any worker count.
 
 use serde::{Deserialize, Serialize};
 
@@ -34,18 +37,16 @@ use crate::ConfigNode;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ConfigNode)]
 #[serde(deny_unknown_fields)]
 pub struct SolverSettings {
-    /// Top-level optimizer selected for product searches.
+    /// The optimization method, always [`PRODUCT_DE_METHOD`].
     ///
-    /// This is the only value a saved file may carry going forward. A legacy
-    /// token from an earlier build (`sqp`, `nsga2`, `turbo_1`, `cma_es`,
-    /// `feasibility_first_de`) is migrated to this one at load time, with a
-    /// note the caller can surface (`alas_config::settings_load_notes`); it
-    /// is never silently accepted as a distinct algorithm.
+    /// Kept in the file so a saved configuration names its method; a token an
+    /// earlier build accepted is migrated at load time (see
+    /// [`LEGACY_METHOD_TOKENS`]).
     #[serde(default = "default_optimizer_method")]
     #[config(
         options = OptimizerMethod,
-        label = "Optimization method",
-        help = "The one search algorithm this build runs: L-SHADE differential evolution under the epsilon-constrained method (success-history parameter adaptation, current-to-pbest/1 mutation with an archive, linear population size reduction, and a constraint boundary that decays to strict feasibility as the search proceeds)."
+        label = "Optimization profile",
+        help = "The search that runs: mission-sized differential evolution (L-SHADE under epsilon constraints), seeded by a screening sample of the design box, with bounded feasibility restoration."
     )]
     pub method: String,
 
@@ -78,49 +79,53 @@ pub struct SolverSettings {
     )]
     pub constraint_tolerance: f64,
 
-    /// How new candidates are generated from the population.
-    ///
-    /// Read only by the frozen SciPy-parity replay
-    /// (`DesignOptimizer::new_reference_compatibility`), which no product
-    /// pipeline or GUI path constructs. The product L-SHADE search always
-    /// uses current-to-pbest/1/bin and does not read this field.
+    /// Budget of the screening stage: a space-filling sample of the design
+    /// box evaluated with the screening model, from which the refinement's
+    /// elite is drawn.
+    #[serde(default = "default_screening_budget")]
     #[config(
-        options = Strategy,
-        label = "DE mutation/crossover strategy (parity replay only)",
-        help = "SciPy differential_evolution strategy name (e.g. 'best1bin', 'rand1bin', 'best2bin'), read only by the frozen reference-compatibility replay used for regression comparison against the Python baseline. The product search always uses current-to-pbest/1/bin and ignores this field."
+        nested,
+        label = "Screening stage",
+        help = "Screening samples the design box and baseline to seed refinement with a diverse elite."
     )]
-    pub strategy: String,
+    pub screening: StageBudget,
 
-    /// How many generations the search runs for.
+    /// Budget of the refinement stage: differential evolution at full
+    /// in-loop fidelity, seeded with the screening elite and the baseline.
+    #[serde(default = "default_refinement_budget")]
     #[config(
-        label = "Max generations",
-        help = "Maximum number of generations (iterations) the solver runs before stopping."
+        nested,
+        label = "Refinement stage",
+        help = "Refinement searches from the screening elite and baseline. Its budget includes final verification and analysis."
     )]
-    pub max_iterations: i64,
+    pub refinement: StageBudget,
 
-    /// Population size, as a multiple of the number of design variables.
+    /// Success-history adaptation of the mutation factor and crossover rate.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     #[config(
-        label = "Population size multiplier",
-        help = "Population size as a multiplier on the number of design variables: more candidates per generation explores more broadly but costs more evaluations."
+        label = "Adapt mutation and crossover (L-SHADE)",
+        help = "Off: static F = 0.5 and CR = 0.9, which outperformed parameter adaptation below 800 evaluations per design variable in a published benchmark (Tanabe and Fukunaga 2020). On: L-SHADE success-history adaptation, recommended only for refinement budgets above 800 evaluations per free design variable."
     )]
-    pub population_size: i64,
+    pub parameter_adaptation: bool,
 
-    /// How converged the population has to be before stopping early.
+    /// Normalized design-space spread below which a stagnated refinement
+    /// population counts as converged.
     #[config(
-        label = "Convergence tolerance",
-        help = "The search stops early once two things both hold: the population's normalized design-space spread has fallen below this fraction of the bounds, and the best feasible cost's relative improvement has stayed below this fraction for the stagnation window below."
+        label = "Convergence spread tolerance",
+        help = "Normalized design-space spread (mean population range over bound width) below which a refinement that has stopped improving is reported as converged rather than stagnated."
     )]
     pub tolerance: f64,
 
-    /// Generations the best feasible cost may fail to improve by more than
-    /// `tolerance` before a converged spread is honoured.
+    /// Generations without a relative improvement of the feasible best above
+    /// 1e-4 before the refinement stops as converged or stagnated.
     #[serde(
         default = "default_convergence_stagnation_generations",
         skip_serializing_if = "is_default_convergence_stagnation_generations"
     )]
     #[config(
-        label = "Convergence stagnation window",
-        help = "Consecutive generations the best feasible cost may fail to improve by more than the convergence tolerance before the search may report convergence, once the population's design-space spread has also fallen below that tolerance."
+        label = "Stagnation window",
+        min = 1,
+        help = "Refinement generations in which the best feasible objective improves by less than 1e-4 (relative) before the search stops as converged or stagnated. The window used is at least 2 N_init / 8 generations (two initial populations of trials at the final population size of 8), and stagnation never stops a run before half its planned budget is spent."
     )]
     pub convergence_stagnation_generations: i64,
 
@@ -131,48 +136,27 @@ pub struct SolverSettings {
     )]
     pub seed: Option<i64>,
 
-    /// How many native-objective workers evaluate a candidate batch at once.
+    /// Native compute threads a candidate batch is spread across.
     ///
-    /// `0` means "decide from the machine". The worker count changes only how
-    /// a batch is distributed, never which designs are evaluated or what they
-    /// score, so this is a wall-clock setting and not a modelling one; the
-    /// batch is a fixed set of points and each point is scored independently.
-    /// A positive value is used exactly as given, so a configuration that
-    /// states `1` keeps one worker.
+    /// `0` means every thread the machine reports. The worker count changes
+    /// how a batch is distributed, never what a design scores; it changes
+    /// which designs are evaluated only through a stage that stops on its
+    /// time limit. A positive value is used exactly as given.
     #[config(
-        label = "Parallel worker processes",
-        help = "Number of native worker threads for candidate batches. 0 (the default) picks a count from the machine's available parallelism; a positive value is used exactly as written; negative values are treated as 1. The product L-SHADE search always evaluates one whole generation as a single deterministic batch, in the order it built the generation from its seed, so this setting changes only how long a batch takes, never which points are evaluated or the winner: a seeded run replays bit-identically at any worker count. The frozen reference-compatibility replay is the one exception: its legacy driver defers a whole generation only when more than one worker is requested, which changes the trial interleaving and is preserved that way for exact regression comparison against the Python baseline. External evaluator adapters remain serial because they own mutable process/session state."
+        zero_means = AllThreads,
+        label = "Native compute worker threads",
+        help = "Threads a generation's candidates are spread across; 0 uses every thread the machine reports. Each candidate runs on one thread. The product search evaluates deterministic whole-generation batches: with evaluation-budget stops or replay counts the result is bit-identical at any worker count. Time-limited: the stopping point depends on machine speed and worker count; replay with the recorded evaluation counts for a bit-identical result at any worker count. External evaluator adapters remain serial because they own mutable process/session state."
     )]
     pub workers: i64,
 
-    /// Whether each generation reports itself as it finishes.
+    /// Ignore the stage time limits and stop every stage on its evaluation
+    /// budget, so a seeded run is bit-identical at any worker count.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     #[config(
-        label = "Print progress to console",
-        help = "Print a one-line progress summary (valid count, best L/D so far) after each generation."
+        label = "Stop on evaluation budgets only",
+        help = "Off: each stage also stops at its time limit. Time-limited: the stopping point depends on machine speed and worker count; replay with the recorded evaluation counts for a bit-identical result at any worker count. On: the time limits are ignored and each stage runs to its evaluation budget, so a seeded run is bit-identical at any worker count however long it takes."
     )]
-    pub display_progress: bool,
-
-    /// Whether generation zero clusters around the initial design.
-    ///
-    /// Read only by the frozen SciPy-parity replay, like [`Self::strategy`];
-    /// the product L-SHADE search always seeds its population's first
-    /// individual directly from the supplied design and draws the rest from
-    /// a Latin hypercube over the bounds.
-    #[config(
-        label = "Seed search near the initial design (parity replay only)",
-        help = "Initialize the population as a tight cluster of small perturbations around the initial/preset design (plus the design itself, unperturbed) instead of SciPy's default uniform latin-hypercube coverage of the whole bounds space. Read only by the frozen reference-compatibility replay; the product L-SHADE search seeds its population's first individual directly from the supplied design instead and does not read this field."
-    )]
-    pub seed_near_initial_design: bool,
-
-    /// How tight that cluster is.
-    ///
-    /// Read only by the frozen SciPy-parity replay; see
-    /// [`Self::seed_near_initial_design`].
-    #[config(
-        label = "Seed cluster perturbation size (parity replay only)",
-        help = "Size of the initial random perturbation around the initial design, as a fraction of each design variable's (upper - lower) bound range. Read only by the frozen reference-compatibility replay when seed_near_initial_design is enabled; the product L-SHADE search does not read this field."
-    )]
-    pub seed_perturbation_fraction: f64,
+    pub stop_on_evaluations_only: bool,
 }
 
 impl Default for SolverSettings {
@@ -181,94 +165,292 @@ impl Default for SolverSettings {
             method: default_optimizer_method(),
             finite_difference_step: default_finite_difference_step(),
             constraint_tolerance: default_constraint_tolerance(),
-            strategy: "best1bin".to_owned(),
-            max_iterations: 15,
-            population_size: 6,
-            tolerance: 0.01,
+            screening: default_screening_budget(),
+            refinement: default_refinement_budget(),
+            parameter_adaptation: false,
+            tolerance: 0.02,
             convergence_stagnation_generations: default_convergence_stagnation_generations(),
             seed: None,
             workers: 0,
-            display_progress: true,
-            seed_near_initial_design: true,
-            seed_perturbation_fraction: 0.05,
+            stop_on_evaluations_only: false,
         }
     }
 }
 
-/// The largest automatic worker count.
+/// The largest wall-clock limit either search stage accepts, s.
+pub const MAXIMUM_STAGE_TIME_LIMIT_S: f64 = 300.0;
+
+/// Evaluation and wall-clock budget of one search stage.
 ///
-/// The measured evidence for worker scaling on this product covers one and
-/// eight workers (2.24x on B787-9 and 2.76x on AVE, with the evaluation count
-/// and the winning design identical at both). Eight is therefore the largest
-/// count the automatic setting will choose on its own: a bigger number is an
-/// extrapolation past what has been measured, and on a batch of a few hundred
-/// coupled analyses it also starts competing with the desktop session for
-/// cores. A configuration that states more than eight is still honoured.
-pub const MAXIMUM_AUTOMATIC_WORKERS: usize = 8;
+/// The evaluation budget counts analysed candidates: those that passed the
+/// design-vector pre-gate. Pre-gate rejections cost microseconds and are
+/// capped separately ([`Self::max_pregate_rejects`]); a stage that reaches
+/// that cap stops as `pregate_exhausted`. The evaluation budget is the
+/// reproducible bound: a run that stops on it replays bit-identically from
+/// its seed at any worker count. Native workers check the wall-clock deadline
+/// before each candidate dispatch, including the initial population and
+/// refinement pilot. At most one in-flight analysis per worker completes
+/// after the deadline. External evaluator adapters check between batches.
+/// A time-limited stop depends on
+/// machine speed and worker count; the run records the stage's replay count
+/// (pre-gate-passed candidates, including repeats) and, for the refinement,
+/// the budget it planned from its measured throughput. Setting
+/// [`Self::replay_evaluations`] to that count, and the refinement's
+/// [`Self::replay_planned_evaluations`] to the planned budget and
+/// [`Self::replay_restoration_evaluations`] to its restoration count, replays the run
+/// bit-identically at any worker count, with the time limit ignored.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ConfigNode)]
+#[serde(deny_unknown_fields)]
+pub struct StageBudget {
+    /// Largest number of analysed candidates: those that passed the
+    /// design-vector pre-gate. Rejections do not count here.
+    #[config(
+        label = "Evaluation ceiling",
+        min = 1,
+        help = "Maximum analysed candidates in this stage; pre-gate rejections do not count. Time-limited refinement may plan a smaller budget."
+    )]
+    pub max_evaluations: i64,
+
+    /// Wall-clock limit in seconds, checked before each native candidate dispatch.
+    #[config(
+        label = "Time limit [s]",
+        unit = "s",
+        min = 1.0,
+        max = 300.0,
+        help = "Elapsed-time limit [s], at most 300 s; checked between generations, so a running generation finishes. Ignored when stopping on evaluations only."
+    )]
+    pub time_limit_s: f64,
+
+    /// Analysed candidates after which the stage stops without changing its
+    /// schedule, to replay a run the time limit stopped.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[config(
+        label = "Replay evaluation count",
+        min = 1,
+        help = "Leave blank for a normal run. To replay a run, enter the replay count it recorded for this stage (pre-gate-passed candidates, including repeats; results card, report figure and run manifest), and for the refinement also its recorded planned budget: the stage then ignores its time limit and stops after exactly that many candidates, with the same schedule, reproducing the run bit-identically at any worker count."
+    )]
+    pub replay_evaluations: Option<i64>,
+
+    /// The refinement budget `B` a time-limited run planned from its
+    /// measured throughput, to replay it: the population schedule then runs
+    /// on exactly this budget. Unused by the screening stage.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[config(
+        label = "Replay planned budget",
+        min = 1,
+        help = "Refinement only. Leave blank for a normal run. To replay a time-limited run, enter the planned budget it recorded (results card, report figure and run manifest) beside the replay count: the refinement then sets its initial population and population reduction on exactly that budget instead of planning one from the measured throughput."
+    )]
+    pub replay_planned_evaluations: Option<i64>,
+
+    /// The feasibility-restoration share of [`Self::replay_evaluations`]
+    /// in the recorded refinement: the kernel replays the rest, restoration
+    /// exactly this many. Unset means zero. Unused by the screening stage.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[config(
+        label = "Replay restoration count",
+        min = 0,
+        help = "Refinement only. Leave blank for a normal run, or to replay a run whose refinement did not enter feasibility restoration. To replay one that did, enter the restoration count it recorded beside the replay count: the search kernel then stops after the replay count less this number and restoration after exactly this number, as in the recorded run."
+    )]
+    pub replay_restoration_evaluations: Option<i64>,
+
+    /// Largest number of pre-gate rejections; unset means
+    /// [`PREGATE_REJECTS_PER_EVALUATION`] times [`Self::max_evaluations`].
+    /// Always written to a saved file, where its presence marks a budget
+    /// that counts analysed candidates only.
+    #[serde(default)]
+    #[config(
+        label = "Pre-gate rejection cap",
+        min = 1,
+        help = "Largest number of candidates the design-vector pre-gate may reject in this stage before the stage stops. Leave blank for 20 times the evaluation budget. A rejection costs microseconds and never counts against the evaluation budget."
+    )]
+    pub max_pregate_rejects: Option<i64>,
+}
+
+/// Default pre-gate rejection cap per budgeted analysis. Engineering choice:
+/// the worst measured rate on a registered box is about 3.3 rejections per
+/// analysis (ATR72-600, uniform box samples; under 0.1 with the screening
+/// sampler's root-chord projection), so twenty leaves a factor of six, and a
+/// rejection costs about a microsecond against the 0.5 s to 1.5 s of an
+/// analysis.
+pub const PREGATE_REJECTS_PER_EVALUATION: i64 = 20;
+
+impl StageBudget {
+    /// Whether the budget can run: positive counts and a finite time limit
+    /// in `(0, MAXIMUM_STAGE_TIME_LIMIT_S]`.
+    ///
+    /// # Errors
+    ///
+    /// A sentence naming the offending field.
+    pub fn validate(&self, stage: &str) -> Result<(), String> {
+        if self.max_evaluations < 1 {
+            return Err(format!("{stage}.max_evaluations must be at least 1"));
+        }
+        if !(self.time_limit_s.is_finite()
+            && self.time_limit_s > 0.0
+            && self.time_limit_s <= MAXIMUM_STAGE_TIME_LIMIT_S)
+        {
+            return Err(format!(
+                "{stage}.time_limit_s must lie in (0, {MAXIMUM_STAGE_TIME_LIMIT_S}] s, got {}",
+                self.time_limit_s
+            ));
+        }
+        if self.replay_evaluations.is_some_and(|count| count < 1) {
+            return Err(format!("{stage}.replay_evaluations must be at least 1"));
+        }
+        if self
+            .replay_planned_evaluations
+            .is_some_and(|count| count < 1)
+        {
+            return Err(format!(
+                "{stage}.replay_planned_evaluations must be at least 1"
+            ));
+        }
+        if let Some(restoration) = self.replay_restoration_evaluations {
+            if restoration < 0
+                || self
+                    .replay_evaluations
+                    .is_some_and(|total| restoration > total)
+            {
+                return Err(format!(
+                    "{stage}.replay_restoration_evaluations must lie in [0, replay_evaluations]"
+                ));
+            }
+        }
+        if self.max_pregate_rejects.is_some_and(|count| count < 1) {
+            return Err(format!("{stage}.max_pregate_rejects must be at least 1"));
+        }
+        Ok(())
+    }
+
+    /// The pre-gate rejection cap: the configured one, else
+    /// [`PREGATE_REJECTS_PER_EVALUATION`] times the evaluation budget.
+    #[must_use]
+    pub fn resolved_max_pregate_rejects(&self) -> i64 {
+        self.max_pregate_rejects.unwrap_or_else(|| {
+            self.max_evaluations
+                .max(1)
+                .saturating_mul(PREGATE_REJECTS_PER_EVALUATION)
+        })
+    }
+}
+
+/// Default evaluation ceiling of both stages (engineering choice). Stage
+/// clocks bound interactive runs independently of machine throughput.
+/// Refinement plans its population schedule below this ceiling from its
+/// measured full-fidelity cost; that estimate never reduces the stopping
+/// ceiling. Evaluation-only runs should set their effort explicitly.
+const DEFAULT_EVALUATION_CEILING: i64 = 20_000;
+
+/// Screening default: the 30 s limit is the interactive budget and ends the
+/// stage under the [`DEFAULT_EVALUATION_CEILING`].
+fn default_screening_budget() -> StageBudget {
+    StageBudget {
+        max_evaluations: DEFAULT_EVALUATION_CEILING,
+        time_limit_s: 30.0,
+        replay_evaluations: None,
+        replay_planned_evaluations: None,
+        replay_restoration_evaluations: None,
+        max_pregate_rejects: None,
+    }
+}
+
+/// Refinement default: the 120 s limit ends the stage, whose population
+/// schedule is planned on what that limit affords at the measured screening
+/// throughput, at most the [`DEFAULT_EVALUATION_CEILING`].
+fn default_refinement_budget() -> StageBudget {
+    StageBudget {
+        max_evaluations: DEFAULT_EVALUATION_CEILING,
+        time_limit_s: 120.0,
+        replay_evaluations: None,
+        replay_planned_evaluations: None,
+        replay_restoration_evaluations: None,
+        max_pregate_rejects: None,
+    }
+}
+
+/// The one optimization method: mission-sized differential evolution.
+pub const PRODUCT_DE_METHOD: &str = "differential_evolution";
 
 /// Method tokens an earlier build accepted and this one no longer implements
-/// as a distinct kernel. A saved configuration document that carries one of
-/// these is migrated to `"differential_evolution"` at load time, with a note
-/// the caller can surface (see `crate::settings_load_notes`); a
-/// [`SolverSettings`] built directly with one of them, bypassing that
-/// boundary, is rejected by [`SolverSettings::is_supported_method`] rather
-/// than silently running an algorithm this build does not have.
-pub const LEGACY_METHOD_TOKENS: &[&str] =
-    &["feasibility_first_de", "nsga2", "turbo_1", "cma_es", "sqp"];
+/// as distinct kernels. A saved configuration carrying one of these is
+/// migrated to [`PRODUCT_DE_METHOD`] at load time, with a note the caller can
+/// surface (see `crate::settings_load_notes`).
+pub const LEGACY_METHOD_TOKENS: &[&str] = &[
+    "feasibility_first_de",
+    "nsga2",
+    "turbo_1",
+    "cma_es",
+    "sqp",
+    "scipy_legacy",
+];
+
+/// A run seed above what the configuration's signed [`SolverSettings::seed`]
+/// holds.
+///
+/// Refused rather than wrapped, so a seed given on the command line or to
+/// the pipeline never silently replays a different, negative seed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("optimizer seed exceeds the supported integer range (0 to {max}), got {seed}", max = i64::MAX)]
+pub struct SeedOutOfRange {
+    /// The refused seed.
+    pub seed: u64,
+}
 
 impl SolverSettings {
+    /// Store a run seed given as an unsigned integer.
+    ///
+    /// The one range check for every front end that accepts a seed: values
+    /// up to `i64::MAX` are stored unchanged, larger ones are refused with
+    /// [`SeedOutOfRange`] and leave the setting untouched.
+    pub fn set_seed(&mut self, seed: u64) -> Result<(), SeedOutOfRange> {
+        self.seed = Some(i64::try_from(seed).map_err(|_| SeedOutOfRange { seed })?);
+        Ok(())
+    }
+
     /// The worker count to actually evaluate a batch with.
     ///
-    /// Resolves the `0` automatic setting against the machine, so the
-    /// product search and the frozen reference-compatibility replay cannot
-    /// disagree about what "automatic" means. A machine that does not report
-    /// its parallelism falls back to one worker rather than guessing, which
-    /// is the same conservative answer the setting had before it could be
-    /// automatic.
+    /// Resolves the `0` automatic setting to every thread the machine
+    /// reports. A machine that does not report its parallelism falls back to
+    /// one worker rather than guessing.
     #[must_use]
     pub fn resolved_workers(&self) -> usize {
         if self.workers > 0 {
-            // `as` on a checked-positive i64 is the count the user asked for.
             return usize::try_from(self.workers).unwrap_or(usize::MAX);
         }
         if self.workers < 0 {
             return 1;
         }
-        std::thread::available_parallelism()
-            .map_or(1, |count| count.get().min(MAXIMUM_AUTOMATIC_WORKERS))
+        std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get)
     }
 
-    /// Whether `method` names an optimizer implemented by the product.
+    /// Whether both stage budgets can run.
     ///
-    /// `"differential_evolution"` is the only supported value; see
-    /// [`LEGACY_METHOD_TOKENS`] for the names a saved file may still carry
-    /// and where they are migrated.
-    pub fn is_supported_method(method: &str) -> bool {
-        method == "differential_evolution"
+    /// # Errors
+    ///
+    /// A sentence naming the offending field.
+    pub fn validate_budgets(&self) -> Result<(), String> {
+        self.screening.validate("screening")?;
+        self.refinement.validate("refinement")?;
+        if self.convergence_stagnation_generations < 1 {
+            return Err("convergence_stagnation_generations must be at least 1".to_owned());
+        }
+        if !(self.tolerance.is_finite() && self.tolerance >= 0.0) {
+            return Err(format!(
+                "tolerance must be finite and non-negative, got {}",
+                self.tolerance
+            ));
+        }
+        Ok(())
     }
 
-    /// Whether `strategy` is one of the DE mutation/crossover strategies.
-    pub fn is_supported_strategy(strategy: &str) -> bool {
-        matches!(
-            strategy,
-            "best1bin"
-                | "best1exp"
-                | "rand1bin"
-                | "rand1exp"
-                | "best2bin"
-                | "best2exp"
-                | "rand2bin"
-                | "rand2exp"
-                | "randtobest1bin"
-                | "randtobest1exp"
-                | "currenttobest1bin"
-                | "currenttobest1exp"
-        )
+    /// Whether `method` names the supported optimization method.
+    pub fn is_supported_method(method: &str) -> bool {
+        method == PRODUCT_DE_METHOD
     }
 }
 
 fn default_optimizer_method() -> String {
-    "differential_evolution".to_owned()
+    PRODUCT_DE_METHOD.to_owned()
 }
 
 fn default_finite_difference_step() -> f64 {
@@ -306,6 +488,18 @@ mod tests {
     use super::*;
     use crate::{Entry, Kind, OptionSource};
 
+    #[test]
+    fn a_seed_is_stored_up_to_the_signed_limit_and_refused_above_it() {
+        let mut settings = SolverSettings::default();
+        settings.set_seed(i64::MAX as u64).unwrap();
+        assert_eq!(settings.seed, Some(i64::MAX));
+
+        let error = settings.set_seed(i64::MAX as u64 + 1).unwrap_err();
+        assert_eq!(error.seed, i64::MAX as u64 + 1);
+        assert!(error.to_string().starts_with("optimizer seed exceeds"));
+        assert_eq!(settings.seed, Some(i64::MAX));
+    }
+
     fn leaf(name: &str, settings: &SolverSettings) -> crate::LeafField {
         match &settings.schema().field(name).unwrap().entry {
             Entry::Leaf(leaf) => leaf.clone(),
@@ -314,20 +508,22 @@ mod tests {
     }
 
     #[test]
-    fn the_strategy_is_offered_as_the_list_the_solver_accepts() {
-        // A strategy name the solver does not know is a run that fails after
-        // the first evaluation, which is minutes in, so the field is a strict
-        // list rather than free text.
+    fn only_the_worker_count_declares_zero_as_all_threads() {
         let settings = SolverSettings::default();
-        let strategy = leaf("strategy", &settings);
-        assert_eq!(strategy.options, Some(OptionSource::Strategy));
-        assert!(!OptionSource::Strategy.editable());
-        let accepted = OptionSource::Strategy.options().unwrap();
-        assert!(accepted.contains(&settings.strategy.as_str()));
+        assert_eq!(
+            leaf("workers", &settings).zero_means,
+            Some(crate::ZeroMeaning::AllThreads)
+        );
+        assert_eq!(
+            leaf("convergence_stagnation_generations", &settings).zero_means,
+            None
+        );
+        let schema = serde_json::to_value(settings.schema()).unwrap();
+        assert!(!schema.to_string().contains("zero_means"));
     }
 
     #[test]
-    fn every_product_optimizer_method_is_a_strict_gui_choice() {
+    fn the_method_is_the_single_strict_choice() {
         let settings = SolverSettings::default();
         let method = leaf("method", &settings);
         assert_eq!(method.options, Some(OptionSource::OptimizerMethod));
@@ -372,15 +568,19 @@ mod tests {
     }
 
     #[test]
-    fn the_default_search_is_small_enough_to_finish_in_an_afternoon() {
-        // Generations times population multiplier times the design-variable
-        // count is the evaluation budget, and one evaluation is a full build
-        // and vortex-lattice solve.
-        let settings = SolverSettings::default();
-        let evaluations = settings.max_iterations
-            * settings.population_size
-            * crate::DESIGN_VARIABLE_SPECS.len() as i64;
-        assert!(evaluations < 2_000, "{evaluations} evaluations");
+    fn the_refinement_time_limit_is_capped_at_five_minutes() {
+        let mut settings = SolverSettings::default();
+        assert_eq!(settings.validate_budgets(), Ok(()));
+        assert_eq!(settings.screening.time_limit_s, 30.0);
+        assert_eq!(settings.refinement.time_limit_s, 120.0);
+        settings.refinement.time_limit_s = MAXIMUM_STAGE_TIME_LIMIT_S;
+        assert_eq!(settings.validate_budgets(), Ok(()));
+        settings.refinement.time_limit_s = MAXIMUM_STAGE_TIME_LIMIT_S + 1.0;
+        let error = settings.validate_budgets().unwrap_err();
+        assert!(error.starts_with("refinement.time_limit_s"), "{error}");
+        settings.refinement.time_limit_s = 60.0;
+        settings.screening.max_evaluations = 0;
+        assert!(settings.validate_budgets().is_err());
     }
 
     #[test]
@@ -391,8 +591,6 @@ mod tests {
         assert!(!SolverSettings::is_supported_method(
             "differential_evoluton"
         ));
-        assert!(SolverSettings::is_supported_strategy("best1bin"));
-        assert!(!SolverSettings::is_supported_strategy("best1bni"));
     }
 
     #[test]

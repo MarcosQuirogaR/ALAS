@@ -22,6 +22,9 @@
 //! explicitly audited defaults.
 //! `optimize_passenger_capacity` is a native load-case switch with no Python
 //! field; requirements and preset unit tests pin it instead.
+//! Native field-method inputs are covered by sourced physical tests. Published
+//! landing inputs are checked against their source records after file loading,
+//! while the frozen landing coefficients and speed factors remain checked here.
 //!
 //! Compared at `exact`: nothing on this path computes anything. A value is
 //! copied from a default, from a preset, or from the file.
@@ -39,7 +42,7 @@
 
 use std::collections::BTreeMap;
 
-use alas_config::AlasConfig;
+use alas_config::{AlasConfig, AnalysisConfig, StructuresConfig};
 use alas_testkit::{Comparison, Tier};
 use serde::Deserialize;
 use serde_json::Value;
@@ -183,6 +186,21 @@ fn compare_values(
     actual: &Value,
     expected: &Value,
 ) {
+    if let Some((frozen, sourced)) = product_corrections::published_landing_change(path) {
+        compare_correction_value(
+            comparison,
+            &format!("{path}: frozen landing input"),
+            expected,
+            &frozen,
+        );
+        compare_correction_value(
+            comparison,
+            &format!("{path}: published landing input"),
+            actual,
+            &sourced,
+        );
+        return;
+    }
     if let Some((old, new)) = product_corrections::dimensions(path) {
         compare_correction_value(
             comparison,
@@ -207,6 +225,27 @@ fn compare_values(
             &format!("{path}: product binding"),
             actual,
             &new,
+        );
+        return;
+    }
+    // The widebody default profile's configuration heights, only where a
+    // file inherits the frozen default (a preset schedule sets its own).
+    if let Some((upstream, corrected)) =
+        mission_profile_default_correction(path).filter(|(upstream, _)| {
+            expected.as_f64().is_some() && expected.as_f64() == upstream.as_f64()
+        })
+    {
+        compare_correction_value(
+            comparison,
+            &format!("{path}: frozen Python value"),
+            expected,
+            &upstream,
+        );
+        compare_correction_value(
+            comparison,
+            &format!("{path}: source-corrected Rust value"),
+            actual,
+            &corrected,
         );
         return;
     }
@@ -243,6 +282,9 @@ fn compare_values(
     match (actual, expected) {
         (Value::Object(actual), Value::Object(expected)) => {
             for (key, expected_value) in expected {
+                if product_corrections::retired_reference_key(path, key) {
+                    continue;
+                }
                 // Historical Python fixtures include runtime paths that the
                 // native mission deliberately no longer serializes.
                 if (path.ends_with("MissionConfig") || path.ends_with(".mission"))
@@ -261,6 +303,7 @@ fn compare_values(
                             expected_value,
                         );
                     }
+                    None if is_retired_solver_field(path, key) => {}
                     None => {
                         comparison.exact(&child, &Value::Null, expected_value);
                     }
@@ -282,6 +325,7 @@ fn compare_values(
                     let child = format!("{path}.{key}");
                     if let Some(new) = product_corrections::engine_copy(&child)
                         .or_else(|| product_corrections::added_planform(&child))
+                        .or_else(|| product_corrections::declared_airfoil_class(&child))
                     {
                         corrections.remove(&child);
                         compare_correction_value(comparison, &child, &actual[key], &new);
@@ -370,6 +414,23 @@ fn vibration_performance_default_correction(path: &str) -> Option<(Value, Value)
     }
 }
 
+/// The default profile ends the takeoff configuration at 1,500 ft (ICAO
+/// PANS-OPS noise-abatement departure) instead of 10,000 ft and starts the
+/// landing configuration at 3,000 ft (glide-path interception) instead of
+/// 6,500 ft.
+fn mission_profile_default_correction(path: &str) -> Option<(Value, Value)> {
+    if path.ends_with(".mission.profile.takeoff_altitude_gain_m") {
+        Some((
+            serde_json::json!(3048.0),
+            serde_json::json!(1_500.0 * 0.3048),
+        ))
+    } else if path.ends_with(".mission.profile.descent_4_altitude_ft") {
+        Some((serde_json::json!(6500.0), serde_json::json!(3000.0)))
+    } else {
+        None
+    }
+}
+
 fn compare_correction_value(
     comparison: &mut Comparison,
     path: &str,
@@ -403,6 +464,13 @@ fn correction(
 fn preset_source_corrections() -> BTreeMap<String, SourceCorrection> {
     let mut corrections = [
         correction("A220-300.requirements.cabin_preset", "Ryanair", "Custom"),
+        // The registered cabin seeds are the manufacturers' typical-cabin
+        // seat counts, the basis of each reference operating-empty mass; see
+        // `AircraftReferenceData::planning_seats`.
+        correction("A220-300.requirements.num_passengers", 130, 140),
+        correction("A340-300.requirements.num_passengers", 290, 335),
+        correction("A380-800.requirements.num_passengers", 525, 555),
+        correction("DC-10.requirements.num_passengers", 250, 255),
         // Wing-box material families assigned per preset from the airport
         // planning documents (`alas_config::preset_structures`); the frozen
         // files carried the database default for every type.
@@ -410,7 +478,7 @@ fn preset_source_corrections() -> BTreeMap<String, SourceCorrection> {
         correction(
             "A220-300.structures.spar_cap_material",
             "CFRP UD",
-            "CFRP QI",
+            "CFRP 60/30/10",
         ),
         correction(
             "A220-300.structures.spar_web_material",
@@ -433,7 +501,11 @@ fn preset_source_corrections() -> BTreeMap<String, SourceCorrection> {
             "Al 7075-T6",
         ),
         correction("B787-9.structures.skin_material", "Al 7075-T6", "CFRP QI"),
-        correction("B787-9.structures.spar_cap_material", "CFRP UD", "CFRP QI"),
+        correction(
+            "B787-9.structures.spar_cap_material",
+            "CFRP UD",
+            "CFRP 60/30/10",
+        ),
         correction(
             "B787-9.structures.spar_web_material",
             "Al 7075-T6",
@@ -504,12 +576,18 @@ fn preset_source_corrections() -> BTreeMap<String, SourceCorrection> {
             14.34 / 7.14,
         ),
         correction("A380-800.requirements.max_wing_area_m2", 855.0, 845.0),
+        // NASA Common Research Model camber distribution; see the matching
+        // entries in `parity_aircraft_presets`.
+        correction("A380-800.geometry.wing.root_airfoil", "SC2-0714", "sc20414"),
+        correction("A380-800.geometry.wing.tip_airfoil", "sc20410", "sc20610"),
         correction("B787-9.landing_gear.n_mlg_struts", 0, 2),
         correction("B787-9.landing_gear.n_nlg_wheels", 0, 2),
+        // D6-58333 Rev Q section 2.2.2: 9.80 m track over the 18 ft 11 in
+        // (5.77 m) body width.
         correction(
             "B787-9.landing_gear.track_diameter_factor",
             1.85,
-            9.8 / 5.94,
+            9.8 / 5.77,
         ),
         correction("B787-9.landing_gear.wheels_per_mlg_strut", 0, 4),
         correction(
@@ -538,8 +616,10 @@ fn preset_source_corrections() -> BTreeMap<String, SourceCorrection> {
         ],
     );
     add_planning_cabin_corrections(&mut corrections, &["A220-300", "A320-200", "A340-300"]);
+    add_b787_9_typical_cabin_corrections(&mut corrections, &["B787-9"]);
+    add_ave_777_9_cabin_corrections(&mut corrections);
     for (case, kink_fraction) in [
-        ("A340-300", 0.362_094_754_983_253_8),
+        ("A340-300", 9.5 / 30.15),
         ("A380-800", 0.359_236_516_064_625_5),
         ("AVE", 0.35),
         ("B787-9", 0.353_771_245_388_011_8),
@@ -579,7 +659,14 @@ fn preset_source_corrections() -> BTreeMap<String, SourceCorrection> {
             "A220-300", "A320-200", "A340-300", "A380-800", "AVE", "B787-9", "DC-10",
         ],
     );
+    add_native_solver_limit_corrections(
+        &mut corrections,
+        &[
+            "A220-300", "A320-200", "A340-300", "A380-800", "AVE", "B787-9", "DC-10",
+        ],
+    );
     add_certified_landing_mass_ratio_corrections(&mut corrections);
+    add_default_landing_ratio_corrections(&mut corrections, &["AVE"]);
     corrections
 }
 
@@ -590,8 +677,8 @@ fn preset_source_corrections() -> BTreeMap<String, SourceCorrection> {
 /// put 515 t of landing weight into the A380-800's gear equation against its
 /// certified 386 t. Both masses are already in the registry with their
 /// airport-planning and type-certificate provenance, so the ratio is read
-/// from them. AVE declares no certified pair and keeps 0.92, which is why it
-/// is absent here.
+/// from them. AVE declares no certified pair and keeps the default ratio; see
+/// [`add_default_landing_ratio_corrections`].
 fn add_certified_landing_mass_ratio_corrections(
     corrections: &mut BTreeMap<String, SourceCorrection>,
 ) {
@@ -616,8 +703,9 @@ fn add_certified_landing_mass_ratio_corrections(
 fn saved_file_source_corrections() -> BTreeMap<String, SourceCorrection> {
     let mut corrections = [
         correction("preset_only.requirements.cabin_preset", "Ryanair", "Custom"),
+        correction("preset_only.requirements.num_passengers", 130, 140),
         // The saved-file cases load the A220-300 and B787-9 presets, whose
-        // wing-box materials are now assigned per type; see the preset table.
+        // wing-box materials are assigned per type; see the preset table.
         correction(
             "preset_only.structures.skin_material",
             "Al 7075-T6",
@@ -626,7 +714,7 @@ fn saved_file_source_corrections() -> BTreeMap<String, SourceCorrection> {
         correction(
             "preset_only.structures.spar_cap_material",
             "CFRP UD",
-            "CFRP QI",
+            "CFRP 60/30/10",
         ),
         correction(
             "preset_only.structures.spar_web_material",
@@ -641,7 +729,7 @@ fn saved_file_source_corrections() -> BTreeMap<String, SourceCorrection> {
         correction(
             "preset_then_field.structures.spar_cap_material",
             "CFRP UD",
-            "CFRP QI",
+            "CFRP 60/30/10",
         ),
         correction(
             "preset_then_field.structures.spar_web_material",
@@ -666,6 +754,38 @@ fn saved_file_source_corrections() -> BTreeMap<String, SourceCorrection> {
             0.92,
             192_776.0 / 254_692.0,
         ),
+        // Wing roots re-anchored to the manufacturer quarter-MAC point
+        // (see support/product_corrections.rs).
+        correction("preset_only.geometry.wing.root_datum_x_m", 13.3, 12.760),
+        correction(
+            "preset_then_field.geometry.wing.root_datum_x_m",
+            21.0,
+            21.552,
+        ),
+        // B787-9 root section matched to the CRM thickness distribution
+        // (see support/product_corrections.rs).
+        correction(
+            "preset_then_field.geometry.wing.root_airfoil",
+            "sc20614",
+            "sc20612",
+        ),
+        // B787-9 engine installation from the D6-58333 Rev Q section 2.2.2
+        // plan view (see support/product_corrections.rs).
+        correction(
+            "preset_then_field.geometry.engine.spanwise_positions_m[0]",
+            9.5,
+            9.91,
+        ),
+        correction(
+            "preset_then_field.geometry.engine.spanwise_positions_m[1]",
+            -9.5,
+            -9.91,
+        ),
+        correction(
+            "preset_then_field.geometry.engine.inlet_x_offset_m",
+            3.5,
+            6.118,
+        ),
         correction("preset_only.landing_gear.n_mlg_struts", 0, 2),
         correction("preset_only.landing_gear.n_nlg_wheels", 0, 2),
         correction(
@@ -685,7 +805,7 @@ fn saved_file_source_corrections() -> BTreeMap<String, SourceCorrection> {
         correction(
             "preset_then_field.landing_gear.track_diameter_factor",
             1.85,
-            9.8 / 5.94,
+            9.8 / 5.77,
         ),
         correction("preset_then_field.landing_gear.wheels_per_mlg_strut", 0, 4),
         correction(
@@ -714,6 +834,7 @@ fn saved_file_source_corrections() -> BTreeMap<String, SourceCorrection> {
         ],
     );
     add_planning_cabin_corrections(&mut corrections, &["preset_only"]);
+    add_b787_9_typical_cabin_corrections(&mut corrections, &["preset_then_field"]);
     corrections.insert(
         "preset_then_field.geometry.wing.kink_span_fraction".to_owned(),
         SourceCorrection {
@@ -776,13 +897,129 @@ fn saved_file_source_corrections() -> BTreeMap<String, SourceCorrection> {
             "deep_partial",
         ],
     );
+    add_native_solver_limit_corrections(
+        &mut corrections,
+        &[
+            "empty",
+            "preset_only",
+            "preset_then_field",
+            "tuple_field_from_a_list",
+            "airports",
+            "unknown_preset",
+            "deep_partial",
+        ],
+    );
+    // The five cases that load no registered aircraft keep the default
+    // landing ratio; the two preset cases carry their own (above).
+    add_default_landing_ratio_corrections(
+        &mut corrections,
+        &[
+            "empty",
+            "tuple_field_from_a_list",
+            "airports",
+            "unknown_preset",
+            "deep_partial",
+        ],
+    );
     corrections
+}
+
+/// Configurations with no certified MLW/MTOW pair (AVE and the unconfigured
+/// defaults) carry the default landing ratio, which is the AVE's 777-9
+/// benchmark (Boeing D6-86073 Rev G Table 2-1) instead of the frozen,
+/// unsourced 0.92; see `alas_config::landing_mass_ratio::LONG_HAUL_MLW_FRACTION_MTOW`.
+fn add_default_landing_ratio_corrections(
+    corrections: &mut BTreeMap<String, SourceCorrection>,
+    cases: &[&str],
+) {
+    for case in cases {
+        corrections.insert(
+            format!("{case}.mass_model.mlw_fraction_mtow"),
+            SourceCorrection {
+                upstream: Value::from(0.92),
+                corrected: Value::from(
+                    alas_config::landing_mass_ratio::LONG_HAUL_MLW_FRACTION_MTOW,
+                ),
+            },
+        );
+    }
 }
 
 /// The product presets now load an explicit, physically representable generic
 /// planning cabin instead of inheriting the old widebody business block. The
 /// saved Python fixture remains frozen; these leaves document the deliberate
 /// source correction rather than making the parity test silently accept drift.
+/// The 787-9 cabin is seeded with Boeing's typical two-class seat shares
+/// (D6-58333 Rev Q section 2.1.2: 28 business, 262 economy) instead of the
+/// generic 15/85 mix.
+fn add_b787_9_typical_cabin_corrections(
+    corrections: &mut BTreeMap<String, SourceCorrection>,
+    cases: &[&str],
+) {
+    for case in cases {
+        for (class, upstream, seats) in [("business", 15.0, 28.0), ("economy", 85.0, 262.0)] {
+            corrections.insert(
+                format!("{case}.cabin.passenger.{class}.share_pct"),
+                SourceCorrection {
+                    upstream: Value::from(upstream),
+                    corrected: Value::from(seats / 290.0 * 100.0),
+                },
+            );
+        }
+    }
+}
+
+/// AVE flies the 777-9 standard two-class cabin (D6-86073 Rev G Table 2-1
+/// and Figures 2-3 and 2-5: 42 business at 85 in, 384 economy at 32 in, 10
+/// abreast on 18 in seats) in place of the all-economy airline profile.
+fn add_ave_777_9_cabin_corrections(corrections: &mut BTreeMap<String, SourceCorrection>) {
+    const INCH_M: f64 = 0.0254;
+    let mut insert = |path: &str, upstream: Value, corrected: Value| {
+        corrections.insert(
+            format!("AVE.{path}"),
+            SourceCorrection {
+                upstream,
+                corrected,
+            },
+        );
+    };
+    insert(
+        "requirements.cabin_preset",
+        Value::from("Ryanair"),
+        Value::from("Custom"),
+    );
+    insert(
+        "cabin.passenger.business.share_pct",
+        Value::from(15.0),
+        Value::from(42.0 / 426.0 * 100.0),
+    );
+    insert(
+        "cabin.passenger.economy.share_pct",
+        Value::from(85.0),
+        Value::from(384.0 / 426.0 * 100.0),
+    );
+    insert(
+        "cabin.passenger.business.pitch_m",
+        Value::from(1.55),
+        Value::from(85.0 * INCH_M),
+    );
+    insert(
+        "cabin.passenger.economy.pitch_m",
+        Value::from(0.79),
+        Value::from(32.0 * INCH_M),
+    );
+    insert(
+        "cabin.passenger.economy.width_m",
+        Value::from(0.46),
+        Value::from(18.0 * INCH_M),
+    );
+    insert(
+        "cabin.passenger.economy.abreast",
+        Value::from(0),
+        Value::from(10),
+    );
+}
+
 fn add_planning_cabin_corrections(
     corrections: &mut BTreeMap<String, SourceCorrection>,
     cases: &[&str],
@@ -805,21 +1042,15 @@ fn add_planning_cabin_corrections(
     }
 }
 
-/// The native worker count.
-///
-/// `workers` moved from the frozen literal `1` to `0`, meaning "resolve
-/// against this machine": the product L-SHADE search evaluates each
-/// generation's batch in parallel at that count without changing which
-/// points it evaluates or which one it returns. The frozen
-/// reference-compatibility replay is deliberately excluded from the
-/// automatic setting - its generation loop batches only on an explicit
-/// request, because a batched generation defers the population update and is a
-/// different algorithm - so the frozen replay keeps the reference
-/// interleaving.
+/// The product search budget: every thread by default (whole-generation
+/// batches are worker-count independent), a normalized design-space spread
+/// tolerance, and the two stage budgets that replace the retired
+/// generation-count keys (see [`is_retired_solver_field`]).
 fn add_native_worker_corrections(
     corrections: &mut BTreeMap<String, SourceCorrection>,
     cases: &[&str],
 ) {
+    let product = alas_config::SolverSettings::default();
     for case in cases {
         corrections.insert(
             format!("{case}.optimizer.solver.workers"),
@@ -828,7 +1059,34 @@ fn add_native_worker_corrections(
                 corrected: Value::from(0.0),
             },
         );
+        corrections.insert(
+            format!("{case}.optimizer.solver.tolerance"),
+            SourceCorrection {
+                upstream: Value::from(0.01),
+                corrected: Value::from(product.tolerance),
+            },
+        );
+        for (stage, budget) in [
+            ("screening", &product.screening),
+            ("refinement", &product.refinement),
+        ] {
+            corrections.insert(
+                format!("{case}.optimizer.solver.{stage}"),
+                SourceCorrection {
+                    upstream: Value::String("absent upstream".to_owned()),
+                    corrected: serde_json::to_value(budget).unwrap(),
+                },
+            );
+        }
     }
+}
+
+/// The generation-count budget keys the product retired. A saved file that
+/// states them is migrated to the refinement evaluation budget at load time
+/// (tested by the load-note unit tests), so the loaded configuration has no
+/// such field to compare.
+fn is_retired_solver_field(path: &str, key: &str) -> bool {
+    matches!(key, "max_iterations" | "population_size") && path.ends_with(".solver")
 }
 
 fn add_optimizer_method_corrections(
@@ -841,6 +1099,31 @@ fn add_optimizer_method_corrections(
             SourceCorrection {
                 upstream: Value::String("absent upstream".to_owned()),
                 corrected: Value::String("differential_evolution".to_owned()),
+            },
+        );
+    }
+}
+
+/// The external-solver resource limits the Rust application added: the AVL
+/// timeout and the NASTRAN memory request. The frozen Python configuration
+/// has neither, so a loaded file receives the product defaults.
+fn add_native_solver_limit_corrections(
+    corrections: &mut BTreeMap<String, SourceCorrection>,
+    cases: &[&str],
+) {
+    for case in cases {
+        corrections.insert(
+            format!("{case}.analysis.avl_timeout_s"),
+            SourceCorrection {
+                upstream: Value::String("absent upstream".to_owned()),
+                corrected: Value::from(AnalysisConfig::default().avl_timeout_s),
+            },
+        );
+        corrections.insert(
+            format!("{case}.structures.nastran_memory_mb"),
+            SourceCorrection {
+                upstream: Value::String("absent upstream".to_owned()),
+                corrected: Value::from(StructuresConfig::default().nastran_memory_mb),
             },
         );
     }

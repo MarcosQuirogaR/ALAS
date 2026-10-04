@@ -42,7 +42,9 @@ directly.
 
 **Placement** (`wing_x_shift_m`, `tail_scale`, `fuselage_length_m`,
 `tail_x_shift_m`): where the wing sits on the fuselage and how big the
-tail is relative to it. `wing_x_shift_m` in particular is doing CG-balancing
+tail is relative to it (in a reference adaptation `tail_scale` is derived
+from the wing so the tails keep the registered tail volume coefficients, not
+searched). `wing_x_shift_m` in particular is doing CG-balancing
 work, not aerodynamic work: moving the wing fore/aft to keep the loaded
 CG inside the stability envelope as everything else changes.
 
@@ -67,24 +69,23 @@ stumbles into mid-search.
 
 ## The search: differential evolution
 
-ALAS uses SciPy's `differential_evolution`: a population-based,
-gradient-free global optimizer, which matters because the objective here
+ALAS uses differential evolution (L-SHADE under epsilon constraints): a
+population-based, gradient-free global optimizer, which matters because the objective here
 (VLM aerodynamics → drag polar → weight closure → CG check, chained
 together) isn't smooth or convex enough to trust a gradient method not to
 get stuck. AVE's own solver settings:
 
 | Setting | Value | Meaning |
 |---|---|---|
-| `strategy` | `best1bin` | Mutation strategy: perturb the current best candidate |
-| `max_iterations` | 15 | Generations to run |
-| `population_size` | 6 | Multiplier: population = 6 × 16 variables = 96 candidates/generation |
-| `tolerance` | 0.01–0.05 | Convergence tolerance on the population's spread |
+| `screening` | 30 s, 2000 evaluations | Space-filling sample plus the baseline; its diverse elite seeds the refinement |
+| `refinement` | 120 s (at most 300 s), 600 evaluations | Differential evolution at full fidelity; the budget also sets the population |
+| `tolerance` | 0.02 | Normalised spread below which a stagnated run counts as converged |
 | `seed` | 42 | Fixed for reproducible runs (`null` = random) |
-| `workers` | 1 | Set >1 to parallelize (objective must be picklable) |
+| `workers` | 0 | Every thread; the result does not depend on it |
 
-Fifteen generations at a population of 96 is roughly 1,400 full pipeline
-evaluations for one optimization run: each one a VLM solve plus mass
-model plus penalty checks. It's small by global-optimization standards on
+Each evaluation is a full coupled analysis (VLM, mass, mission sizing), so
+the default two-and-a-half minutes buys a few hundred of them: a local
+refinement around the preset, not a global search. It's small by global-optimization standards on
 purpose: ALAS's objective function is expensive enough (a real VLM
 solve, not a surrogate) that the search has to be efficient about where it
 spends evaluations, which is exactly what the next setting is for.
@@ -97,12 +98,12 @@ seed_perturbation_fraction: 0.05
 ```
 
 Rather than seed differential evolution's initial population uniformly at
-random across the full 16-dimensional box (the SciPy default), ALAS
+random across the full 16-dimensional box, ALAS
 by default clusters the starting population within ±5% of the *initial
 design*, AVE's own baseline geometry. This is a meaningful choice: a
 random population in a 16-D box this large wastes many early generations
 on physically nonsensical airframes (a 60 m span paired with a 19 m root
-chord, say) that the penalty terms have to reject before the search finds
+chord, say) that the constraints have to reject before the search finds
 its footing. Starting near a known-good design means generation 1 is
 already in a sane part of the space, and the fifteen generations you *do*
 spend go toward genuine improvement: visible directly in
@@ -112,26 +113,64 @@ starting from noise.
 
 ## The objective function
 
-What "improvement" means is a weighted sum of a primary term and a long
-list of penalties: `ObjectiveWeights` has over two dozen fields, because
-a real airframe has that many ways to be infeasible. The shape is:
+The search minimises one mission quantity, chosen with
+`optimizer.objective.kind`: block fuel (the default), takeoff mass, operating
+empty mass, or fuel per seat-kilometre. The takeoff mass is closed by the
+sizing mission, so the value is the result of a flown design mission, not a
+proxy. The Results summary shows it as an **objective tile** whose label
+carries the objective name and unit (for example block fuel in kg, or fuel per
+seat-kilometre) and whose tooltip states how the value is defined.
 
-$$
-\text{minimize} \quad -w_{L/D} \cdot \frac{L}{D} \;+\; \sum_i \; \text{penalty}_i(\text{design})
-$$
+Intrinsic study preferences (tail-volume windows, clean-sheet body-angle
+windows) add a small scaled term, `preference_weight` (default 10). They rank
+candidates against each other and never act as a constraint allowance.
 
-The primary term rewards cruise efficiency (`ld_weight`, default 1.0); the
-penalty terms cover everything from the obvious (exceed `max_wing_area_m2`,
-undershoot `min_wing_loading_kg_m2`) to the structural and geometric
-(taper realism, minimum wing position on the fuselage, tail-volume
-coefficients within a sane band, fuselage fineness ratio) to the physical
-(CG inside the envelope at every loading condition, static margin above
-the hard floor, fuel physically fits in the wing). A design that fails a
-hard check (instability, a CG envelope violation) is assigned a large
-fixed `failure_cost` rather than a graded penalty, so the search steers
-away from it decisively rather than merely disfavoring it. The full list
-of weights lives in
-[Reference → Configuration](reference/configuration.md#optimizer-solversettings-objectiveweights);
-you won't need to touch most of them, but knowing they exist explains why
-the optimizer sometimes trades a small L/D gain for a design that's
-further from every constraint boundary.
+## Constraints are hard
+
+Every constraint is hard: a candidate that violates one is invalid. There is
+no constraint policy to choose and no violation allowance; saved
+configurations that name an older policy or allowance load with those fields
+discarded, and the saved `soft_penalty_weight` is carried over as
+`preference_weight`. Invalid candidates stay in the evaluation history for
+inspection, and ranking always puts a feasible candidate ahead of any invalid
+one. If no feasible design is found, the run reports `NoFeasibleDesign` with
+the least-violating candidate as diagnostics.
+
+## Takeoff-mass modes
+
+`optimizer.objective.mtow_sizing` states what `mtow_kg` means:
+
+| Mode | Meaning |
+|---|---|
+| `fixed_requirement` (**Hard MTOW**) | `mtow_kg` is the takeoff mass the design is checked against and a ceiling it may not exceed. Default for registered presets. |
+| `sized_by_mission` | The sizing mission closes takeoff mass; `mtow_kg` is the ceiling. Default for custom configurations. |
+| `mtow_band` | Required takeoff mass must stay within `T(1 + p)` and the closed mass above `T(1 - p)` for a target `T` and fraction `p` (default 0.05). |
+| `payload_adjusted`, `unconstrained` | Mission closure without a mass ceiling. |
+
+In every mode the takeoff fuel is capped at the usable tank capacity of the
+candidate, so a mass budget can never be met by carrying fuel the tanks
+cannot hold. An explicit saved mode is always honoured.
+
+## Clean-sheet design
+
+A brief with no preset is a clean-sheet design. ALAS derives the starting
+design, the search bounds and the dependent geometry from the brief (seats,
+range, cruise Mach, engine) instead of using a registered aircraft's values;
+explicit `initial_design` and `bounds` entries override the derivation
+variable by variable.
+
+- **New aircraft.** In the desktop application, selecting a preset and
+  choosing *New aircraft* clears the preset identity and keeps its geometry
+  editable. The derivation runs when the brief is committed, not on every
+  keystroke.
+- **Seat-count cabin.** `requirements.num_passengers` is the seat target. The
+  cabin style supplies pitch, seat width, seats abreast and the class mix, and
+  the exits are the smallest arrangement whose per-exit seat allowance
+  satisfies CS-25.807(g).
+- **Auto aerodrome code.** When the brief states no ICAO aerodrome reference
+  code, `auto` picks the Annex 14 letter whose wingspan band holds the class
+  span the brief implies, and that band limits the wingspan. An explicit
+  letter, F included, is never replaced.
+
+Details and the derived-box rules are in the repository file
+`docs/optimizer-design-vector.md`.

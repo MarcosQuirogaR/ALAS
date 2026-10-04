@@ -3,7 +3,6 @@
 
 // Ported from the subprocess.run(...) calls in
 // native aerodynamic model/aerodynamics/aero_2D/mses.py and alas/physics/mses_analysis.py.
-// Reference: alas @ rust-port-baseline.
 
 //! Running one external tool: feed it keystrokes, capture its output, hold it
 //! to a timeout, and never let it flash a console window.

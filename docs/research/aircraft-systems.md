@@ -34,7 +34,6 @@ The evidence hierarchy used here is:
 
 The local EASA and NASA PDFs are repository inputs. Web links point to the official record or official publication. Equations explicitly labelled **proposed ALAS analytical model** are engineering formulations recommended by this note; they are not quotations from, nor prescribed means of compliance in, the regulatory sources. Manufacturer data describe their named products and are validation targets, not universal design constants.
 
-NotebookLM was not used because its authenticated service was unavailable during this review. No result in this note is attributed to NotebookLM.
 
 ## 1. Current ALAS baseline
 

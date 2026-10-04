@@ -3,7 +3,7 @@
 
 //! The sandbox workspace's central aircraft scene.
 //!
-//! Unlike the report wireframes, this scene shows every lifting surface as
+//! Shared with the report surface figures, this scene shows every lifting surface as
 //! its actual lofted skin: each cross-section's resolved airfoil outline is
 //! placed in aircraft axes by [`Wing::section_outlines`] (chord, twist,
 //! placement and symmetry applied), consecutive outlines are joined into
@@ -515,7 +515,7 @@ pub fn figure_sandbox_exterior(
     SandboxSceneModel::new(plane, options.max_section_points).render(camera, theme, options)
 }
 
-fn bounds(points: &[Point3D]) -> [f64; 6] {
+pub(super) fn bounds(points: &[Point3D]) -> [f64; 6] {
     let mut b = [
         f64::INFINITY,
         f64::NEG_INFINITY,

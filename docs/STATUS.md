@@ -1,524 +1,231 @@
 # Project status
 
-This is the answer to "does ALAS work today", as opposed to `docs/PORTING.md`,
-which answers a narrower question: "has this module been checked against the
-Python reference to a stated tolerance". The two used to be the same question.
-They no longer are: most of `alas-pipeline`, `alas-app` and `alas-gui` were
-written as native Rust orchestration over already-parity-tested physics
-kernels rather than translated line-by-line from a Python counterpart, so
-their `PORTING.md` rows read `todo` while the crates themselves build, run,
-and are exercised end to end below. Read `PORTING.md` for numerical parity and
-licence provenance; read this file for whether the program runs and what is
-wrong with it.
+This file answers "what does ALAS do today, and what should a user not rely
+on". `docs/PORTING.md` answers a narrower question: whether a module has been
+checked against the Python reference to a stated tolerance, and what licence
+its content carries. Most of `alas-pipeline`, `alas-gui` and `alas-app` are
+native orchestration over parity-tested kernels, so their `PORTING.md` rows
+read `todo` while the crates build and run end to end.
 
-This is a working document, like `PORTING.md` claims to be for itself: update
-it in the commit that fixes or introduces the thing it describes, rather than
-letting it drift and doing a retroactive sweep later.
+Claims here are of three kinds, kept apart: implementation (the code does the
+thing), numerical verification (it agrees with a stated reference or invariant),
+and physical validation (it agrees with a real aircraft). Only the first two
+are established by the test suite. `cargo xtask gate` enforces formatting,
+lints, tests and repository checks; it does not enforce the statements below.
 
-**Last swept:** 2026-09-23, for the 1.2 release (section below). Earlier
-sections record what earlier audits found; the "What does not work yet"
-list keeps its original dates and says where the 1.2 evidence changes an
-item. Re-verify anything older than a few weeks before relying on it; this
-file records what an audit found, not what is continuously enforced by
-`cargo xtask gate`.
+Update this file in the change that alters what it describes.
 
 ---
 
-## Release 1.2 evidence, 2026-09-23
+## Capability
 
-What was measured on the release branch, kept apart by kind of claim.
+- `cargo run --bin ALAS` launches the desktop GUI (`alas-gui`); `ALAS --gui` is
+  equivalent. Headless flags (`--config`, `--save-config`, `--no-optimize`,
+  `--seed`) drive the same pipeline; see
+  `docs/RUNNING.md`.
+- The design pipeline runs end to end: geometry, mass and CG, mission, drag
+  build-up, trim and stability, optimisation, wingbox sizing, feasibility
+  findings and figures, for hand-built and CPACS-imported aircraft.
+- Eight registered presets: A220-300, A320-200, A340-300, A380-800, ATR72-600,
+  AVE (a synthetic ALAS design), B787-9 and DC-10.
+- **Optimisation.** One search, `differential_evolution`
+  (`docs/OPTIMIZATION.md`, `docs/methods.md`): L-SHADE under the epsilon-constrained method
+  (`alas-opt::search_methods::lshade_de`) with a mission-sized objective (block
+  fuel by default; takeoff mass, empty mass and fuel per seat-kilometre are the
+  alternatives) and takeoff mass closed by the sizing mission. In the product
+  profile a reported design satisfied every hard constraint at full coupled
+  fidelity; if none is found the run returns `NoFeasibleDesign` with the
+  least-violating candidate as diagnostics. Seeded runs replay identically at
+  any worker count. A screening stage and a refinement stage each have an
+  evaluation budget and a time limit; termination is `converged`,
+  `stagnated`, `evaluation_budget`, `time_budget` or `cancelled`. MADS, SQP, NSGA-II, TuRBO, CMA-ES and the weighted
+  lift-to-drag `scipy_legacy` profile were removed; saved configurations
+  naming those tokens are migrated to `differential_evolution`
+  on load.
+- **Mass and fuel.** One item-level mass ledger with centroidal inertia tensors
+  for every named state (operating empty, zero fuel, takeoff, landing, maximum
+  fuel). Fuel is a tank state in burn order; unusable fuel belongs to operating
+  empty mass. The fuel policy decomposes the load into taxi, trip, contingency,
+  alternate, final reserve, additional and extra fuel under the EASA basic
+  scheme (default), 14 CFR 121.639 or 121.645, or a named study convention, and
+  the mission stage closes takeoff mass against it. Selecting a scheme is a
+  study assumption, not a compliance finding. The FLOPS transport mass method is
+  available beside the frozen reference methods (`docs/flops-mass-model.md`).
+- **Cabin.** One canonical cabin layout feeds sizing, mass and CG, feasibility,
+  reports and the 3-D preview (`docs/research/cabin-layout-sources.md`).
+- **Structures.** Wingbox sizing, analytical deflection, and NASTRAN deck
+  generation with native OP2 reading. MSC Nastran and NASTRAN-95 are optional
+  solvers; the analytical path needs neither.
+- **External tools.** Adapters exist for AVL, VSPAERO, OpenVSP, MSES, MSC
+  Nastran, NASTRAN-95, Patran, FLOWUnsteady and OpenFOAM with Gmsh (`alas-cfd`).
+  Each is optional and reports itself unavailable when absent. Their behaviour
+  depends on the installed tool and version, which the repository does not pin.
+- **Other workflows.** Airfoil-database screening (`alas-screen`), two-dimensional
+  OpenFOAM airfoil studies (`alas-cfd`), and fixed-wing electric UAV component
+  selection and feasibility (`alas-uav`).
 
-**Implementation verification.** `cargo xtask gate` (repository checks,
-formatting, Clippy with warnings denied, the full workspace suite with
-`--no-fail-fast`) passes on hosted Windows and on ubuntu-22.04. The Windows
-and Linux packages pass the licence-boundary suite and a headless run of the
-packaged binary in the release workflow. The first full Linux run found 21
-failures, none a Windows regression (process races, path fixtures, parity
-tiers set on the MSVC runtime); see the testkit's `REFERENCE_RUNTIME`.
+## Verification and validation status
 
-**Numerical results, all eight presets** (baseline matrix, and the
-`balanced` optimisation matrix with seed 20260922, measured at `89c565e`,
-before the physics corrections in the next paragraph):
+- Numerical verification: physics kernels translated from the Python
+  implementation are held to the tolerance tiers in `alas-testkit` against
+  fixtures under `golden/`. The tiers assume the MSVC runtime as the reference;
+  on other platforms some tiers are relaxed (`REFERENCE_RUNTIME`).
+- Registered-aircraft acceptance: every preset executes. At the 1.2 release,
+  AVE (zero-fuel CG forward of its configured range) and ATR72-600 (see below)
+  raised model findings in the baseline screening.
+- Product-profile optimisation matrix at 1.2 (`balanced` budget, 15 generations): seven presets
+  delivered a numerically feasible candidate and none converged, so every
+  termination was `iteration_limit`. ATR72-600 returned `NoFeasibleDesign`.
+  Presets are optimised clean-sheet, so fuel deltas against the registered
+  aircraft are reported as not comparable.
+- **No preset has a source-backed design mission.** Every optimisation audit row
+  records the mission as `UNVERIFIED`, and the acceptance matrix reports its
+  result as incomplete for that reason.
+- Real-aircraft parity (`docs/aircraft-parity.md`): 241 comparison rows, 74
+  scored, of which most compare registered reference inputs rather than model
+  outputs. It is not a certification or flight-test comparison.
+- Public planning CG is evaluated only for the A220-300, the one preset with a
+  registered public planning envelope.
 
-- Baseline: every preset executes. The model's own physical checks raise
-  findings for two: AVE (analysed zero-fuel CG forward of its configured
-  range) and ATR72-600 (static margin about -22 % MAC, negative nose-gear
-  load, modelled OEW 15,244 kg against 13,450 kg, cruise T/W shortfall).
-- Optimisation: seven presets deliver a numerically feasible candidate;
-  none converges within the `balanced` budget (15 generations), so every
-  termination is `iteration_limit`. ATR72-600 returns `NoFeasibleDesign`
-  (896 candidates; dominant rejections nose-gear load, MTOW-limited dispatch,
-  sizing not closed, static-margin floor). Presets are optimised clean-sheet,
-  so a candidate closes at its own take-off mass; fuel deltas against the
-  registered aircraft are reported as not comparable.
-- Public planning CG is evaluated only for the A220-300, the one preset with
-  a registered public planning envelope; elsewhere it is `NotEvaluated`.
+## Known limitations
 
-**Physics corrections found by the 1.2 review.** The Korn drag-divergence
-relation, the swept compressibility correction and the main-wing form factor
-now receive the main wing's quarter-chord sweep measured off the built
-geometry; they were given the inboard leading-edge sweep, which alone
-under-predicted wave drag (A380-800 at Mach 0.85: about 13 instead of 25
-drag counts). Korn also now takes the main wing's area-weighted mean t/c,
-the basis the form factor already used, instead of the root section's, the
-thickest station on a tapered wing. Reference-compatibility analyses keep
-the frozen inputs for the parity fixtures. The pure-FLOPS mass model already carries unusable fuel inside
-OEW, and the take-off load case no longer subtracts it a second time from
-the usable fuel (0.1 to 0.3 % of take-off mass). A consequence of the higher,
-corrected wave drag: the default AVE design at its default cruise point
-(M 0.84, 11,887 m) now needs static T/W 0.2676 against the default engine
-rating's 0.2655 and reports a thrust-margin finding in a fixed-design review;
-an optimisation run is free to move away from that point.
+Ranked by what would most surprise someone using a result.
 
-**Calibration and physical validation.** None of the above is aircraft-level
-physical validation. No preset has a source-backed design mission, so every
-optimisation row records the mission as `UNVERIFIED`. The real-aircraft
-parity report (241 rows, `docs/aircraft-parity.md`) scores 74 rows, of which
-66 compare registered reference inputs; only eight compare model outputs.
-Specific limits that release notes must not overstate:
+1. **No physical validation against flight or weighed-aircraft data** for any
+   preset. All numbers are conceptual-design estimates.
+2. **ATR72-600 is outside the mass model's validity domain.** The generic FLOPS
+   transport fuselage, furnishings and systems correlations (Eqs. 104, 106, 110)
+   are fitted to larger jet transports. The modelled OEW (about 15,244 kg
+   against 13,450 kg published) and CG are not usable until a sourced
+   regional-turboprop mass model replaces those terms. No calibration was
+   invented for it.
+3. **A380-800 fuel distribution** is an approximate ground distribution over
+   aggregate tank groups. It conserves mass and balances left/right pairs but
+   does not show fuel in all four physical feed tanks, and it does not take
+   zero-fuel mass and CG as the Airbus fuel quantity management system does.
+   It is not a certified loading schedule.
+4. **Mission assumptions** that are engineering choices rather than sourced
+   values: the generic 250 m/s TAS climb schedule used by preset routes, the
+   0.9 m bulk-hold handling clearance, and the step-climb interval (derived from
+   the modelled burn rate). The holding fuel flow is an analytic estimate at
+   minimum-drag speed. The mission model has no wind model and no CAS/Mach or
+   optimum-altitude guidance (P3 in `docs/FUEL_MISSION_ROADMAP.md`).
+5. **Tank geometry** other than the A320's is volume-consistent estimation from
+   the manufacturer's usable volumes; spanwise tank boundaries are not sourced.
+6. **Cancellation latency.** Inside the search a cancel costs at most the block
+   of candidates in flight. Finalist verification and the reporting stages check
+   the flag only between blocks and stages, so a request there can wait tens of
+   seconds on the largest presets.
+7. **Solver behaviour** (properties of the tools, not of ALAS code):
+   - NASTRAN-95 and MSC Nastran disagree on modal results (up to 61.6 % on mode
+     1, up to 9.4 % on modes 2-30 in the audited case); this is unresolved and
+     not treated as passing. NASTRAN-95 is far slower than MSC Nastran and the
+     bundled executable is built at `-O0` because of miscompilation at higher
+     optimisation; `docs/NASTRAN95-BUNDLE.md` lists the build options and the
+     remaining adoption requirements.
+   - MSES shows partial numerical non-convergence on some angles of attack.
+   - VSPAERO wake convergence fails its own gate on at least one case.
+   - FLOWUnsteady has no configured executable in the audited environments;
+     requests are rejected.
+   - MSC Nastran and Patran did not launch in the audited environment for lack
+     of a required C runtime. That is an environment issue, and Patran is
+     otherwise unvalidated.
+8. **Deliberate reference-compatible behaviour** (recorded as deviation
+   candidates in `docs/PORTING.md`, not defects):
+   - `alas-stab::modes` carries a factor-of-two phugoid-root error against AVL.
+   - The differentiable-fit atmosphere disagrees with ISA by up to 1.1 % in
+     temperature, 0.4 % in density and 0.6 % in speed of sound, as upstream does.
+   - The VORLAX influence kernel is `f32` by design.
+   - The turboprop deck is an extrapolated surrogate; no public 568F map exists
+     to calibrate it.
+   - The `new_reference_compatibility` constructors replay the historical
+     objective and DE search for the parity fixtures.
+9. **Phase-scoped CG limits: checked against two published forward limits
+   only, not validated.** Each loading state is gated only by the mechanisms
+   of its phase (`PhaseLimits`): rotation and the static-margin floor at
+   takeoff, landing trim and ground mechanisms at landing, ground mechanisms
+   at OEW. The rotation limit is the nose-wheel lift-off moment balance about
+   the main-gear contact (Sadraey 2012, sec. 9.6.2 and 12.6) at VR = 1.10 VS
+   (stall branch) with the all-engine thrust term and runway friction (mu
+   0.02, an engineering estimate), the ledger pitch inertia transferred to
+   the contact (solved exactly, quadratic in the CG), 7 deg/s^2 pitch
+   acceleration for every class (Sadraey's Table 9.6 could not be confirmed;
+   optional config overrides exist) and a tail lift at full up-elevator
+   derived from the tail geometry, downwash in ground effect, a -25 deg class
+   elevator limit, the DATCOM plain-flap large-deflection correction (0.60 at
+   25 deg; other anchors not digitised from the figure) and a tail-section
+   lift cap (does not bind on the presets): CL_h -0.85 to -0.97. Drag is
+   omitted (about 1 %MAC or less). Against published limits, on the
+   manufacturer's MAC frame:
+   - Forward, rotation at takeoff: A320 9.2 vs 17 (ACAP most-forward CG used
+     in the pavement-load analysis at MRW, not a certified limit), A220 -3.0
+     vs 18.4 at 67,585 kg (ARP Table 3, certified flight and ground limit)
+     and A340 28.3 vs 20.3 (ACAP; aft of the published value, a known
+     residual, its test is ignored). Before the large-deflection correction
+     and the tail cap these were -17.5, -37.9 and 5.6. The A320 and A220
+     can still lift the nose wheel forward of the published limits, so
+     those are set by criteria the model does not carry (finding F-ROT-1). The takeoff state's
+     forward limit is then the maximum nose load on the A320 and A220 and
+     rotation elsewhere. A380 (25.0), B787 (-0.8), DC-10 (0.6), AVE (8.8)
+     and ATR (10.9) are unanchored. The elevator effectiveness keeps the
+     thin-airfoil value times an empirical large-deflection factor, still a
+     class-generic assumption (delta_e -25 deg).
+   - Aft: the A320 aft limit is the minimum-nose-load ground limit (6 % nose
+     load) and reproduces the published 40 %MAC. Tip-back is about 5 points
+     too restrictive on the A320 (h_cg over the aft axle). The A220 aft limit
+     is not weight-dependent in the model while the published one is (31.0 to
+     37.3 %MAC), so it is too tight at mid weights. The aerodynamic aft limit
+     never governs.
+   - DC-10: its rotation limit (0.6 %MAC) no longer rejects the loaded
+     takeoff (16.5 %MAC); the registered design fails the minimum nose load
+     at OEW (23.62 against 23.58 %MAC). Its main-gear station is not anchored
+     to a source.
+   - OEW-CG residual: the A320 model OEW CG sits +7.85 %MAC aft of the ACAP
+     nominal 26.5 %, so the A320 load-trim potato leaves the ground limits
+     aft. The A320 OperationalReserve state (33.3) and the tank-burn path
+     (34.8) also disagree at the same mass.
+   - The ATR72-600 fails the ground limits at OEW.
+   - OEW residuals against the reference aggregator: ATR +6.1 %, A380 -7.2 %
+     (the census probe `alas-pipeline/examples/phase_census.rs` lists all).
+   The acceptance tests assert inequalities against the published envelopes
+   (A220 ARP; A320 17 to 40 %MAC from ACAP pavement and nose-load values), not
+   pins on the model CG.
+10. **One takeoff mass per report, one flown mass per dispatch.** Figures,
+    summary, structural loads and the V-n envelope read the report's sized
+    takeoff mass (the declared design gross weight for the structure and V-n of
+    a registered aircraft). The mission dispatch re-flies that aircraft with the
+    pipeline's mission model and keeps the sized mass when its fuel re-price
+    agrees within max(5 kg, 1e-4 of the takeoff mass); otherwise the flown mass
+    is refined separately and may differ by about that tolerance.
 
-- **A380-800 fuel distribution** is an approximate ground distribution over
-  aggregate tank groups. It conserves mass, balances left/right pairs and
-  keeps the feed-containing groups positive at the tested partial load, but
-  each group mixes feed and non-feed tanks, so it does not show fuel in all
-  four physical feed tanks. The Airbus fuel quantity management system
-  distributes fuel from zero-fuel mass and CG, which this API does not take.
-  It is not a certified fuel-loading schedule.
-- **Mission assumptions**: the generic 250 m/s TAS climb schedule used by
-  the preset routes and the 0.9 m bulk-hold handling clearance are
-  engineering assumptions, not aircraft-specific sourced values. The time
-  between step climbs is derived rather than fixed: a step of height dh is
-  taken once fuel burn has lowered the optimum altitude by dh, at the
-  modelled burn rate (about 2.9 h for a 600 m step).
-- **ATR72-600** is outside the mass model's validity domain. The wing datum
-  is sourced and the turboprop propulsion station is ordinary; the negative
-  margin comes from the generic FLOPS transport fuselage, furnishings and
-  systems correlations (Eqs. 104, 106, 110), fitted to larger jet
-  transports. At 23,000 kg MTOW furnishings and fuselage alone are 47 % of
-  the modelled OEW and put the OEW CG near 41 % MAC, against about 21 % for
-  the A320-200. No primary source for the ATR 72-600 empty-weight CG was
-  available, so no calibration was invented; ATR results are not usable
-  until a sourced regional-turboprop mass model replaces these terms.
+    Known limitation, open: the optimizer, the report and the flown mission
+    use three fuel models and disagree on the sized takeoff mass. The MDO trip
+    fuel is priced on the optimizer's polar; the dispatch flies the native
+    mission. The gap reaches +8.6 % of sized-vs-flown mass on long-haul
+    aircraft. Single-model unification is pending and its selection will be
+    based on correlation with sourced references. The A220 case (26 kg) comes
+    from the reserves being priced on the report's untrimmed sweep polar
+    against the optimizer's trimmed one.
+    `report_load_case_and_mission_share_the_sized_takeoff_mass` is ignored for
+    this reason.
 
----
+    | Preset | Mass gap | MDO trip (kg) | Native trip (kg) |
+    |---|---|---|---|
+    | A220 | +26 kg | 1,400 | 1,399 |
+    | A320 | +0.5 % | 1,936 | 2,199 |
+    | A340 | +6.4 % | 41,889 | 54,617 |
+    | A380 | -1.5 % | 76,899 | 70,670 |
+    | B787 | +5.5 % | 52,892 | 64,230 |
+    | DC-10 | +8.6 % | 50,894 | 67,348 |
+11. **Mass sizing is bound to the search.** The finalist is replayed at the
+    sized takeoff mass; the AVL branch reports at the configured MTOW.
 
-## DE-only optimizer: L-SHADE under the epsilon-constrained method, 2026-09-22
+## Related documents
 
-- **MADS, SQP, NSGA-II, TuRBO and CMA-ES are removed.** The product search
-  is now exactly one kernel: L-SHADE differential evolution under the
-  epsilon-constrained method (`alas-opt::search_methods::lshade_de`; basis
-  and citations in the module doc and in `docs/methods.md`). `search/mads.rs`,
-  `sqp_search.rs`, `gradient/`, and `search_methods/{cma_es,nsga2,turbo,
-  constrained_de}.rs` are deleted; the frozen SciPy-parity DE replay behind
-  `DesignOptimizer::new_reference_compatibility` is unchanged (it is DE, and
-  no product or GUI path constructs it).
-- **Constraint handling.** Two candidates within a shrinking `epsilon` of
-  feasible are ranked by objective alone; otherwise the less-violating one
-  wins. `epsilon` decays to exactly zero at a fifth of the generation
-  budget, after which the rule is exactly Deb's feasibility ordering. The
-  reported winner is tracked as the strict feasibility minimum over every
-  candidate the run ever evaluated, independent of which candidates the
-  epsilon-relaxed comparison lets survive inside the live population, so,
-  under the default strict constraint-relaxation policy, a design reported
-  feasible always satisfied every hard constraint at full
-  coupled fidelity (`alas-opt::mdo`: geometry/mass build, mission sizing
-  closure, trim/CG closure). No feasible candidate found returns the typed
-  `NoFeasibleDesign` error with the least-violating candidate as diagnostics,
-  never a reported optimum.
-- **Determinism.** One generation's trial vectors are built in fixed order
-  from the seeded stream, then evaluated in index order in blocks of the
-  resolved worker count; `solver.workers` changes only how the work is split
-  and spread across threads, so a seeded run replays bit-identically at any
-  worker count. The cancellation flag is read before every block, so a
-  request inside a generation costs at most the block in flight (one
-  analysis with one worker), not the rest of the generation (fixed
-  2026-09-23; the earlier once-per-generation check failed the pipeline's
-  cancellation-bound test intermittently). The frozen
-  reference-compatibility replay keeps its own pre-existing, deliberately
-  different worker-count behavior (see its own docs).
-- **Convergence.** A real termination distinction: `converged` (population
-  design-space spread and best-feasible-cost relative improvement both
-  below `tolerance` for `convergence_stagnation_generations` generations,
-  never claimed without a feasible design), `iteration_limit`, or
-  `cancelled`.
-- **Config migration.** `optimizer.solver.method` accepts only
-  `differential_evolution`. A saved configuration naming a retired token
-  (`sqp`, `nsga2`, `turbo_1`, `cma_es`, `feasibility_first_de`) is migrated
-  to it when the document loads, with a note the caller can surface
-  (`alas_config::settings_load_notes::legacy_solver_method`). A
-  `SolverSettings` built directly with a legacy token, bypassing that load
-  boundary, is rejected by `is_supported_method` rather than silently
-  running anything. New setting: `convergence_stagnation_generations`.
-  `finite_difference_step`, `constraint_tolerance`, `strategy`,
-  `seed_near_initial_design` and `seed_perturbation_fraction` remain
-  loadable (read only by the frozen replay, or unused) for saved-file
-  compatibility.
-- **GUI.** The Optimizer page's "MADS settings" group is now "Differential
-  evolution settings", showing population multiplier, max generations,
-  seed, workers, convergence tolerance and the stagnation window. The run
-  log's search diagnostics report generations completed, evaluations,
-  feasible fraction of the final population, and the epsilon level at the
-  last generation, alongside the existing counts.
-- **Not done in this pass:** the geometric wing-fuselage-junction
-  plausibility constraints and the A380 default-optimization defect are a
-  separate, concurrent lane (`mdo/residuals_geometry.rs`, `mdo/build.rs`);
-  this rewrite does not touch either file.
-
-## What runs today
-
-- `cargo run --bin ALAS` launches the desktop GUI (`alas-gui`); `ALAS --gui`
-  is equivalent, and headless flags (`--config`, `--save-config`) drive the
-  same pipeline without it, as `docs/RUNNING.md` describes.
-- The full design pipeline runs end to end: geometry build, mass/CG, mission
-  flight, drag build-up, wingbox sizing, and figure generation, for
-  hand-built and CPACS-imported aircraft alike.
-- External-tool adapters exist and drive real runs when the tool is
-  installed: AVL, VSPAERO, OpenVSP, MSES, NASTRAN-95. MSC Nastran and Patran
-  adapters exist but fail to launch in the audited environment (below).
-- Eight reference presets (A220-300, A320-200, A340-300, A380-800, ATR72-600,
-  AVE, B787-9, DC-10) build and produce output artifacts end to end.
-
-## What does not work yet, or is not known good
-
-Ranked by what would surprise someone shipping a design from this program.
-Each item names the report it was last confirmed in; a later date supersedes
-an earlier one for the same claim.
-
-1. **No preset has a verified design mission.** The 2026-09-01 independent
-   acceptance run found 0/8 presets pass end-to-end acceptance; 5/8 fail
-   basic physical screening (CG, ZFW, or passenger capacity out of bounds).
-   The project's own "no exceptions" acceptance bar is not met.
-   (the internal independent-external-acceptance-interim report (2026-09-01),
-   with its supporting native preset audit data.) **2026-09-23:** the
-   baseline screening findings are down to two presets (AVE, ATR72-600);
-   the missing source-backed design mission is unchanged (see "Release 1.2
-   evidence" above).
-2. **Propulsion is internally inconsistent.** The cycle model
-   (`alas-prop::cycle`) over-subtracts ram drag and has a choked-nozzle
-   energy inconsistency; the mission-flown model
-   (`EmpiricalTurbofanDeck`) is a separate, disconnected model from the one
-   report figures use, and always resolves throttle against the max-climb
-   rating regardless of flight phase. GUI engine-config edits do not change
-   flown fuel/thrust, and are overwritten by `AircraftBuilder::new` during
-   geometry rebuild.
-   (the internal propulsion-model-audit report (2026-08-30),
-   the internal independent-propulsion-verification report (2026-09-01);
-   not confirmed fixed since.)
-3. **CPACS round-trip is split-brained.** Re-importing a CPACS export only
-   replaces geometry; polar, trim, mass/CG and feasibility are left stale
-   from before the round-trip. P0 in
-   the internal alas-mdo-pipeline-audit report (2026-08-31).
-4. **Wingbox margin diagnostics were misleading; now fixed.** The strength
-   gate's failure message rounded the controlling margin to six decimals,
-   so any shortfall between roughly `-5e-7` and `0` displayed as the
-   ambiguous `-0.000000`, indistinguishable from float noise at the root
-   boundary. Fixed 2026-09-03: `WingboxSizing::controlling_margin` now
-   reports the raw value in scientific notation plus the controlling
-   spar/station. This is a diagnostics fix, not a tolerance policy: no
-   numerical band has been calibrated, so a genuinely small negative margin
-   still fails the gate exactly as before, now legibly.
-   (the internal wingbox-sizing-error-prevention report (2026-09-01).)
-5. **Known figure/geometry inconsistencies**, per
-   the internal alas-mdo-pipeline-audit report (2026-08-31): the three-view
-   and design-summary figures have disagreed on span (68 m vs 81.11 m) for
-   at least one case; not confirmed fixed. The V-n ordering defect is fixed
-   2026-09-05: `alas-perf` validates VS < VA <= VC < VD, an invalid order is
-   the `InvalidEnvelopeSpeedOrder` pipeline finding, and the report labels
-   the envelope invalid instead of drawing it as valid. VC is still
-   back-derived as VD/1.25 (a stated conceptual-design assumption).
-6. **Mission profile parity, resolved 2026-09-05 as an input mismatch, not
-   a numerical regression.** The 9/144 cruise-speed differences came from
-   product presets deriving their cruise schedule from Mach and altitude,
-   while the frozen Python request carried the baseline explicit TAS
-   profile. The parity test now replays that recorded baseline input; the
-   golden oracle is unchanged and the request builder agrees at `closed`.
-   The Mach-derived preset schedule remains a documented product deviation.
-7. **`alas-pipeline`'s previously known test failures are closed
-   (2026-09-05).** The tank-limited CG regression now constructs an
-   explicitly tank-limited fixture (fuel closure and MTOW raised together).
-   The fixed-design finalist test requests a brief the reviewed cabin seats;
-   the default 350-passenger brief seats only 349 in the default shell at the
-   default design vector, and that shortfall is pinned by its own test as a
-   reported finding that the optimizer's own validity flag does not see.
-8. **Route-globe fullscreen rendering** was slow (~8.4 FPS / 101.8 ms per
-   frame) after a correctness fix removed a cached-raster shortcut
-   (the internal route-globe-performance report (2026-08-31)). Resolved
-   2026-09-11: the cost was the SVG round-trip of the vector overlay (about
-   70 ms of the frame), not the sphere. Orbit views now draw the vector
-   elements as egui shapes (`SceneView::vector_overlay`) and rasterize only
-   the textured globe, whose rows run in parallel; a camera frame at 1.5x
-   density costs about 3 ms (2.7 ms texture, 0.3 ms shapes). Static cards
-   and exports keep the SVG raster path unchanged.
-
-## Audit remediation, 2026-09-05
-
-Closure record for the internal codebase-audit report (2026-09-03). "Closed"
-means the mechanism is in place and its tests pass on the working tree at
-this date; it is not a claim that any preset is a verified aircraft mission.
-
-- **F1 (gate has no enforcement point): closed.** The single workflow now
-  runs `cargo xtask gate` on Windows and a separate Linux `cargo-deny` job;
-  the workflow was edited locally and has not yet been executed remotely,
-  so its 60-minute budget is unverified. No pre-commit hook was installed;
-  `cargo xtask install-hooks` remains the local convenience.
-- **F2 (`cargo test --workspace` did not compile): closed** before this
-  sweep; the workspace builds and the full suite runs.
-- **F3/F4 (dead parity oracle): closed for every parity target.** Historical
-  fixtures are replayed as inputs; every independently sourced correction is
-  pinned two-sidedly (frozen Python value and corrected Rust value) instead
-  of being absorbed by a tolerance. Config presets and settings pin the
-  typed engine ratings (A320 120.1 kN, A380 338.7 kN, A220 97.72 kN, DC-10
-  224.2 kN) and the A320-214/A340-312 dimension corrections; the mission
-  vehicle request pins the same corrections; payload layouts replay the
-  frozen cabin frame, resolve the historical premium-economy slot in the
-  compatibility interior, and keep the loose bulk position of the frozen
-  hold grid; W6.5 replays the frozen pre-builder geometry. `PORTING.md`
-  rows are flipped only where the corresponding test passes.
-- **F5 (`include!` hid module size): closed.** `cargo xtask checks` counts
-  assembled production lines through every `include!`; the modules already
-  over 500 lines are listed with non-growing ceilings in
-  `docs/source-size-budgets.tsv` (see CONTRIBUTING.md).
-- **F6 (two thrust representations): closed.** `EngineConfig` has one
-  authoritative rating, `thrust_kn()`, derived from the typed payload; the
-  serialized legacy key is a derived mirror and legacy-only files migrate
-  through the catalogue. Readers that used the stale flat value now see the
-  typed rating (A320: 120.1 kN instead of 117.77 kN), which moves the
-  thrust-scaled propulsion mass by about 100 kg.
-- **F7 (library panic on missing Jet-A): closed;** the differentiable
-  mission path follows the rejected-iterate contract.
-- **F8 (V-n ordering): closed;** see item 5 above.
-- **F9 (NASTRAN-95 provenance and `-O0`): partially closed.** The sibling
-  solver records its upstream revision and inventories the local diff;
-  pre-existing change dates and authors are unknown and are not invented,
-  so the NOSA characterization is incomplete and redistribution stays
-  blocked. Selective optimization is opt-in and untested on this host.
-- **F10 (untracked status file): obsolete;** this file is tracked. The
-  internal evidence it cites remains unversioned by design.
-- **F11 (check backlog, no supply-chain check): closed.** Repository
-  checks pass; `cargo deny --locked check` passes on advisories, bans,
-  licenses and sources with two named maintenance-notice exceptions
-  (`docs/dependency-policy.md`). `alas-screen` gained contract tests and
-  rejects malformed sweep bounds before allocation. Units remain a naming
-  convention, not a type.
-- **F12** was affirmative evidence and needed no change.
-
-Physical findings surfaced while re-pinning the acceptance matrix on the
-source-corrected presets (all reported by the product, none suppressed):
-
-- **A220-300:** with its PW1521G-3 binding (it was previously weighed and
-  flown as a 467 kN GE9X) and the bulk-only lower hold, the policy takeoff
-  CG is 38.8% MAC in the model frame and 35.4% MAC in the Airbus
-  recovery-publication frame, inside the published planning envelope at the
-  flown takeoff mass; the operating-empty state sits forward of the model's
-  configured forward range, the published tanks cannot reach MTOW by about
-  700 kg, and the item ledger places the partial fuel load in the wing cells
-  where the lumped fuel point cannot. The acceptance test recomputes both
-  frames from their primitives and requires them to name the same station.
-- **A320-200:** the MTOW closure remainder is 16,882 kg (it was 17,733 kg
-  before the dimension, payload and engine corrections); flown at the EASA
-  basic-scheme takeoff mass the route lands below the WV017 maximum landing
-  mass, and the operating-empty state sits forward of the model's configured
-  forward range.
-- **Default brief:** the default 350-passenger shell seats 349 at the
-  default design vector.
-
-Not verified in this sweep: a rebuilt or re-timed NASTRAN-95, the remote
-execution of the CI workflow, and any physical validation of the numbers
-above against flight data.
-
-## Mass, fuel and optimization overhaul, 2026-09-06
-
-Delivered as a coherent increment on the working tree; the closure record
-for the design intent is `docs/FUEL_MISSION_ROADMAP.md` ("Delivery status")
-and the state-of-the-art basis is the three research notes under
-the three internal research notes of 2026-09-05 (fuel regulations, tank layouts,
-mass/CG/inertia methods, MDO drivers).
-
-- **One mass model for every aircraft.** The product analysis places each
-  group at a geometry-derived station (`mass_model.geometric_component_
-  stations`, default on): the integrated wingbox centroid, the tails at
-  42 percent of their mean chord, the gear at the configured nose and main
-  stations, the engines at their nacelles, the fuel in its tanks. The
-  frozen point placement stays selectable and is what the parity fixtures
-  replay. The item ledger behind those points carries a centroidal inertia
-  tensor per item, so every named state (operating empty, zero fuel, flown
-  takeoff, flown landing, maximum fuel) has a full tensor about its own
-  centre of gravity; the dynamic-mode figure reads it instead of the
-  radius-of-gyration guess. The radius-of-gyration reference was itself
-  corrected to Raymer's half-dimension definition, checked against the
-  measured B747-100 tensor (NASA CR-2144) to one percent.
-- **Fuel is a tank state, not a remainder.** Every preset declares its
-  tanks with the manufacturer's per-tank usable volumes (A320 three-tank,
-  A220, A340 with trim tank, A380 with inner/mid/outer/trim, B787-9, DC-10-30
-  with auxiliary tank, ATR 72 wing tanks, the notional AVE); a redesigned
-  wing keeps a consistent capacity through a retained calibration factor.
-  Unusable fuel belongs to the operating empty mass. The design database
-  exports every tank, state and ledger row.
-- **Regulation-based fuel allocation.** The fuel policy decomposes the load
-  into taxi, trip, contingency, alternate, final reserve, additional and
-  extra fuel under the EASA basic scheme (default), 14 CFR 121.639 or
-  121.645, or a named study convention, each quantity tagged with the rule
-  that produced it. The mission stage closes the takeoff mass against that
-  requirement, re-flying the native mission until it settles, and reports a
-  shortfall when the takeoff-mass limit or the tanks cannot carry it.
-  Selecting a scheme is a study assumption; nothing here is a compliance
-  finding.
-- **Optimization driven by the mission.** A mission-sized objective (block
-  fuel, takeoff mass, empty mass, fuel per seat-kilometre) with an inner
-  takeoff-mass closure and typed hard/soft/diagnostic requirement families
-  (mass and fuel, balance, CS-25.121 and field performance, geometry) is
-  selectable in `optimizer.objective`. (Superseded later the same day: the
-  legacy lift-to-drag objective is no longer a product objective; see
-  "Mission-driven objective only" below.)
-- **What moved.** The interactive routes are flown at the policy takeoff
-  mass rather than at MTOW: the A320-200 (LEMD-LEPA) lands below its maximum
-  landing mass, the A220-300 sits inside its published planning envelope,
-  and the acceptance matrix pins the new load cases. Geometry-derived
-  stations move the operating-empty centre of gravity forward by 3.0 to 4.2
-  percent MAC on the probed presets (A320 15.7 to 12.1, A220 21.9 to 17.7,
-  AVE 15.5 to 12.5) because podded engines now sit at their nacelle
-  mid-length ahead of the wing; at the same fuel the takeoff centre of
-  gravity moves forward on the A320 and A220 and aft on the AVE, whose tank
-  centroid lies aft of the frozen fuel point. Both the frozen and the
-  geometric operating-empty positions sit well forward of published
-  dry-operating positions for the A320 and A220 (about 25 to 30 percent
-  MAC), so the bias is in the preset wing placement or the group masses
-  rather than in the station method; a per-preset weight-and-balance
-  comparison is the next increment.
-- **Not verified.** No physical validation against flight data or an
-  operational flight plan; the holding fuel flow is an analytic estimate
-  (cruise TSFC at minimum-drag speed) rather than an engine-deck value; tank
-  spanwise boundaries other than the A320's are volume-consistent estimates.
-
-## FLOPS airframe mass and gradient-based MDO driver, 2026-09-06
-
-Delivered on the working tree; the methods are described in
-`docs/methods.md` ("FLOPS transport mass method" and "Multidisciplinary
-sizing loop and gradient-based driver").
-
-- **Complete FLOPS transport method.** `mass_model` gains
-  `structural_mass_method` and `propulsion_mass_method` beside the existing
-  `systems_mass_method`, each with a `flops_transport_v1` option, and a
-  `flops_structure` group carrying the FLOPS technology factors and
-  overrides. The structural group (wing with simplified or detailed bending
-  factor, tails, fuselage, gear, nacelles, paint) and the propulsion group
-  (scaled engine, distributed-propulsion scaling, reversers, controls,
-  starters, fuel system) are evaluated from the built geometry and the
-  declared architecture; a missing datum blocks the method with a typed
-  reason. Defaults are unchanged: every preset still uses the frozen
-  methods, and the parity fixtures are untouched.
-- **Converged sizing loop.** The mission-sized candidate is closed as a
-  multidisciplinary analysis (mass, CG, trim, polar, fuel, takeoff mass)
-  with Aitken acceleration and re-trimming on CG shift
-  (`objective.retrim_cg_tolerance_pct_mac`, default 0.1 percent MAC), so
-  the design is trimmed at its own weight. `FixedRequirement` sizing keeps
-  its single pass.
-- **`sqp` optimizer method.** A native line-search SQP driver (l1 merit,
-  damped BFGS, elastic dense interior-point QP, parallel forward
-  differences) over the converged loop, with the hard requirement residuals
-  as explicit inequality constraints and the termination reason reported.
-  Two solver settings were added (`finite_difference_step`,
-  `constraint_tolerance`). The driver is verified on analytic constrained
-  problems and on a bound-constrained delegated objective; on the native
-  objective it is exercised for one major iteration in the test suite.
-- **Verification status.** Every FLOPS group reproduces the two FLOPS-run
-  validation cases NASA Aviary distributes (simple and detailed wing) to the
-  data file's quoted precision (`crates/alas-mass/tests/
-  flops_validation_cases.rs`, data in an internal
-  FLOPS/Aviary validation-data note). The SQP driver is verified on analytic
-  constrained problems and a bound-constrained delegated objective, and
-  exercised for one major iteration on the native mission-sized objective.
-  No physical validation against weighed aircraft, and no optimization
-  study has been run to convergence on a preset yet.
-
-## Mission-driven objective only, 2026-09-06
-
-- **The lift-to-drag objective is gone from the product.** `ObjectiveKind`
-  no longer has a legacy variant; the default objective is block fuel with
-  the takeoff mass sized by the mission (`mtow_sizing = sized_by_mission`,
-  `requirements.mtow_kg` is the ceiling). The frozen weighted lift-to-drag
-  cost survives only inside `DesignObjective::new_reference_compatibility`,
-  which the parity fixtures replay; a saved configuration naming
-  `legacy_lift_to_drag` is rejected.
-- **The `enforce_physical_constraints` switch is removed.** It only relaxed
-  the frozen objective's penalties; requirement families are now governed by
-  their `optimizer.objective` policies.
-- **The AVL optimization branch is mission-sized too.** AVL supplies the
-  induced drag at the required cruise lift; the parasite build-up, trim
-  incidence and neutral point stay the native report's, and the sizing loop
-  closes mass, fuel and takeoff mass around that fixed polar
-  (`assess_candidate_with_polar`). NSGA-II's first objective and the
-  convergence figure follow the mission objective.
-- **What is inert now.** Of `optimizer.weights`, the product search reads
-  only `failure_cost` and the tail-volume window; the rest is replay-only
-  and sits in a collapsed "Reference-replay penalty weights" section of the
-  optimizer page. `docs/OPTIMIZATION.md` lists how a run is driven and every
-  input the mission-sized search reads.
-
-## External-solver integration state
-
-- **MSC Nastran** fails to launch in the audited environment: missing VC80
-  C runtime (`0xC0000135`). Environment issue, not an ALAS defect. Patran is
-  blocked on the same runtime and is otherwise unvalidated.
-- **NASTRAN-95 vs MSC Nastran modal parity** disagrees by up to 61.6% on
-  mode 1 and up to 9.4% (mean 2.5-4.4%) on modes 2-30. Unresolved; flagged
-  for a dedicated correlation study, not treated as passing.
-- **NASTRAN-95 is 49-82x slower than MSC Nastran** even after the
-  DBMEM/SYSTEM(58)/NE tuning that landed 2026-08-31. That ratio was
-  measured against a NASTRAN-95 executable compiled at global `-O0` (the
-  workaround for a miscompiled `mis/ifp1c.f` at `-O3`), so it compares an
-  unoptimised build with a production solver. 2026-09-11: the selective
-  `-O3` option was built and fails the production SOL 101 deck (fatal 321);
-  several unrelated legacy routines miscompile. A kernel-whitelist build
-  (`-O2` with loop and aliasing guards on the decomposition, substitution,
-  multiply, transpose and eigensolver families only, everything else `-O0`)
-  passes both production decks with F06 output identical to the `-O0`
-  baseline apart from time stamps: SOL 101 13.6 s against 23.6 s, SOL 103
-  270 s against 440 s on this host. The bundle still ships the `-O0`
-  executable; see `docs/NASTRAN95-BUNDLE.md` for the build options and the
-  remaining adoption requirements.
-- **FLOWUnsteady** has no configured executable in any audited environment;
-  every request returns `RequestRejected`.
-- **VSPAERO / AVL**: two real input-contract bugs were found and fixed
-  2026-09-01 (a 300s timeout was masking a false "unavailable" result at
-  900s; the AVL spanwise-vortex floor was under-specified for fine meshes).
-  VSPAERO wake convergence still fails its own convergence gate on at least
-  one case.
-- **MSES** shows genuine partial numerical non-convergence (3 of 7 angles
-  in the audited sweep), a solver behavior, not a code defect.
-- **Navdata** is pulled from an unpinned GitHub branch: not reproducible for
-  a release build.
-
-## Known-good, by design (not defects)
-
-These are documented, intentional gaps or faithfully-reproduced upstream
-quirks, not regressions. See `docs/PORTING.md` and `CONTRIBUTING.md`'s
-"Deliberate deviations" for the mechanism:
-
-- `alas-stab::modes` has an acknowledged factor-of-two phugoid-root error
-  vs. AVL, deferred to P14 (deviation-candidate).
-- The differentiable-fit atmosphere disagrees with ISA by up to 1.1% T /
-  0.4% rho / 0.6% sound speed, reproduced faithfully from upstream, not a
-  defect.
-- The VORLAX kernel is intentionally `f32` (deviation-candidate for a
-  future `f64` pass).
-- The turboprop deck is an unquantified/extrapolated surrogate; no public
-  568F map exists to calibrate it against.
-- The mission model has no wind model and no CAS/Mach or optimum-altitude
-  guidance (P3 in `docs/FUEL_MISSION_ROADMAP.md`). The maximum-available-fuel
-  load case is retained only behind `fuel_policy.fly_policy_load_case =
-  false`; the product flies the fuel-policy closure described below.
-
-## Elsewhere
-
-- `docs/PORTING.md`: numerical parity against the Python reference and
-  licence provenance, module by module. Still the enforcement point for
-  `cargo xtask gate`'s "every crate has a row" check, and still the process
-  CONTRIBUTING.md's parity rule requires for new translated physics.
-- `docs/FUEL_MISSION_ROADMAP.md`: the mission/fuel model rebuild plan.
-- `docs/C0_GUI_ACCEPTANCE_MATRIX.md`: GUI acceptance scenarios, separate
-  from and stricter than a passing Rust or SVG test.
-- Internal investigation reports, which this file
-  summarizes. Not version-controlled long-term evidence; treat as an
-  audit trail, and re-run an investigation rather than trusting an old one
-  past its relevance.
+- `docs/ARCHITECTURE.md`: crate map and data flow.
+- `docs/PORTING.md`: numerical parity and licence provenance, module by module.
+  `cargo xtask gate` requires every crate to be mentioned there.
+- `docs/methods.md`: the models. `docs/OPTIMIZATION.md`: how a run is driven.
+- `docs/FUEL_MISSION_ROADMAP.md`: the fuel and mission model, delivered scope
+  and remaining work.
+- `docs/aircraft-parity.md`: real-aircraft comparison.

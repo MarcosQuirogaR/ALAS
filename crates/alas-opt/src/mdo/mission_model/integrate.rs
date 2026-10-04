@@ -38,22 +38,30 @@
 //! configured high-lift drag increment. A step outside its limit is a
 //! validity failure, not a drag extrapolation.
 
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::rc::Rc;
+
 use alas_mass::fuel_plan::{FuelModelError, LegEstimate};
 use alas_prop::system::{FlightCondition, PropulsionRating};
 
+use super::cruise_levels::CruiseOutcome;
 use super::profile::{ProfilePlan, Segment, SegmentKind};
 use super::SegmentMissionModel;
 use crate::mdo::propulsion::{DeckError, DeckKind, OperatingPoint, ThrustLimit};
 
-/// Default midpoint steps per planned segment; the model can refine it.
 pub(crate) const DEFAULT_STEPS_PER_SEGMENT: usize = 4;
 /// Service-ceiling criterion, 100 ft/min, m/s: a rating-limited climb step
 /// slower than this is a thrust deficit, not a slow climb.
 const MINIMUM_CLIMB_RATE_M_S: f64 = 100.0 * 0.3048 / 60.0;
 /// Route-closure tolerance on the cruise distance, m.
 const CRUISE_DISTANCE_TOLERANCE_M: f64 = 1.0;
-/// Fixed-point passes on the flown descent footprint.
-const DESCENT_FOOTPRINT_PASSES: usize = 6;
+/// Fixed-point passes on the flown descent footprint. With step climbs the
+/// footprint moves with the cruise distance (the steps scale with it), and
+/// the iteration contracts by about 0.2 per pass (measured on the A320-200
+/// at 2,968 nmi), so twelve passes close a 30 km first-pass error to the
+/// 1 m tolerance.
+const DESCENT_FOOTPRINT_PASSES: usize = 12;
 /// Largest kinetic-energy budget that may remain open at the end of a leg,
 /// as a fraction of the leg's propulsive work.
 const UNREALIZED_KINETIC_FRACTION: f64 = 1.0e-3;
@@ -104,6 +112,15 @@ pub struct FlownLeg {
     pub climb_footprint_m: f64,
     /// Horizontal distance flown in the descent ladder, m.
     pub descent_footprint_m: f64,
+    /// Time from brake release to the top of the climb ladder, s.
+    pub climb_time_s: f64,
+    /// Fuel burned in the climb ladder, kg.
+    pub climb_fuel_kg: f64,
+    /// Cruise level at the top of descent, m (above `cruise_altitude_m`
+    /// after step climbs).
+    pub final_cruise_altitude_m: f64,
+    /// Where each step climb began, as fractions of the cruise distance.
+    pub step_positions: Vec<f64>,
     /// Horizontal distance integrated over every step, m; closes on the
     /// requested route to the cruise-distance tolerance.
     pub flown_distance_m: f64,
@@ -121,6 +138,10 @@ pub(super) enum FlyError {
     },
     /// A physical or numerical failure of the integration.
     Fuel(FuelModelError),
+    /// A climb-rate-recoverable failure on climb rung `rung` (0 takeoff,
+    /// 1 initial climb, 2 and 3 the step climbs), so only that rung's
+    /// commanded rate is revised.
+    Climb { rung: usize, error: FuelModelError },
 }
 
 impl From<FuelModelError> for FlyError {
@@ -136,14 +157,14 @@ impl From<DeckError> for FlyError {
 }
 
 #[derive(Clone)]
-struct Integrator<'a> {
-    model: &'a SegmentMissionModel,
-    mass_kg: f64,
+pub(super) struct Integrator<'a> {
+    pub(super) model: &'a SegmentMissionModel,
+    pub(super) mass_kg: f64,
     fuel_kg: f64,
     time_s: f64,
     distance_m: f64,
-    previous_tas_m_s: Option<f64>,
-    pending_kinetic_j: f64,
+    pub(super) previous_tas_m_s: Option<f64>,
+    pub(super) pending_kinetic_j: f64,
     ledger: EnergyLedger,
     rate_limited_steps: usize,
     minimum_climb_rate_m_s: f64,
@@ -152,7 +173,25 @@ struct Integrator<'a> {
     /// Let planned-route attempts classify an unpaid level transition as a
     /// route-fit deficit. Direct integrator tests keep the strict boundary
     /// error so they can exercise the acceptance guard itself.
-    allow_route_transition_deficit: bool,
+    pub(super) allow_route_transition_deficit: bool,
+    /// Exact memo of the rating and idle points of this flight, keyed by the
+    /// bit patterns of altitude and true airspeed and by the rating. Model,
+    /// day and gravity are fixed per flight, so a hit is bit-identical to a
+    /// fresh deck call; the descent passes and the cruise steps repeat keys.
+    pub(super) deck_memo: DeckMemo,
+}
+
+/// Rating/idle points already solved in this flight; see `Integrator::deck_memo`.
+pub(super) type DeckMemo = Rc<RefCell<HashMap<(u64, u64, u8), OperatingPoint>>>;
+
+fn rating_key(rating: PropulsionRating) -> u8 {
+    match rating {
+        PropulsionRating::TakeoffGoAround => 0,
+        PropulsionRating::MaximumContinuous => 1,
+        PropulsionRating::MaximumClimb => 2,
+        PropulsionRating::Cruise => 3,
+        PropulsionRating::FlightIdle => 4,
+    }
 }
 
 /// The planned geometry of one step.
@@ -185,7 +224,7 @@ struct StepSolution {
 
 impl Integrator<'_> {
     /// Drag at this step after the phase lift-limit gate.
-    fn phase_drag_n(
+    pub(super) fn phase_drag_n(
         &mut self,
         kind: SegmentKind,
         flight: &FlightCondition,
@@ -213,6 +252,30 @@ impl Integrator<'_> {
         Ok(drag_n)
     }
 
+    /// The deck's `rating` point (idle for `FlightIdle`) at `flight`, from
+    /// the flight's exact memo when this condition was already solved.
+    pub(super) fn memo_point(
+        &self,
+        flight: &FlightCondition,
+        rating: PropulsionRating,
+    ) -> Result<OperatingPoint, DeckError> {
+        let key = (
+            flight.altitude_m.to_bits(),
+            flight.velocity_m_s.to_bits(),
+            rating_key(rating),
+        );
+        if let Some(point) = self.deck_memo.borrow().get(&key) {
+            return Ok(*point);
+        }
+        let deck = &self.model.propulsion;
+        let point = match rating {
+            PropulsionRating::FlightIdle => deck.idle_point(*flight)?,
+            rating => deck.rated_point(*flight, rating)?,
+        };
+        self.deck_memo.borrow_mut().insert(key, point);
+        Ok(point)
+    }
+
     /// Solve one step at `mass_kg` against the pending kinetic budget.
     fn solve_step(
         &mut self,
@@ -232,8 +295,8 @@ impl Integrator<'_> {
         let pending_installment = pending / remaining_steps;
         let rate_thrust_n = drag_n + weight_n * planned_vz / v;
         let required_n = rate_thrust_n + pending_installment / (v * planned_dt);
-        let rated = deck.rated_point(*flight, step.cap)?;
-        let idle = deck.idle_point(*flight)?;
+        let rated = self.memo_point(flight, step.cap)?;
+        let idle = self.memo_point(flight, PropulsionRating::FlightIdle)?;
         let planned =
             |point: OperatingPoint, kinetic_delivered_j: f64, limited: bool| StepSolution {
                 thrust_n: point.thrust_n,
@@ -350,9 +413,9 @@ impl Integrator<'_> {
         .into())
     }
 
-    /// Fly one step with a midpoint mass predictor; returns its horizontal
-    /// distance.
+    /// Fly one midpoint-predicted step and return its horizontal distance.
     fn fly_step(&mut self, step: StepPlan) -> Result<f64, FlyError> {
+        self.model.check_cancelled()?;
         let flight = self.model.propulsion.flight_condition(
             step.altitude_m,
             step.tas_m_s,
@@ -409,13 +472,13 @@ impl Integrator<'_> {
     /// across segments, but it must close before a distinct target is opened.
     /// Otherwise the schedule could report an intermediate speed as flown
     /// even though the aircraft never attained it.
-    fn transition_tolerance_j(&self, previous: f64, target: f64) -> f64 {
+    pub(super) fn transition_tolerance_j(&self, previous: f64, target: f64) -> f64 {
         let speed_scale = previous.abs().max(target.abs());
         let kinetic_scale = 0.5 * self.mass_kg * speed_scale * speed_scale;
         BOUNDARY_KE_ABSOLUTE_TOLERANCE_J.max(BOUNDARY_KE_RELATIVE_TOLERANCE * kinetic_scale)
     }
 
-    fn target_is_distinct(&self, previous: f64, target: f64) -> bool {
+    pub(super) fn target_is_distinct(&self, previous: f64, target: f64) -> bool {
         let tolerance_j = self.transition_tolerance_j(previous, target);
         (target - previous).abs() > (2.0 * tolerance_j / self.mass_kg.max(f64::MIN_POSITIVE)).sqrt()
     }
@@ -466,7 +529,7 @@ impl Integrator<'_> {
     }
 
     /// Fly one planned segment; returns its horizontal distance.
-    fn fly_segment(&mut self, segment: &Segment) -> Result<f64, FlyError> {
+    pub(super) fn fly_segment(&mut self, segment: &Segment) -> Result<f64, FlyError> {
         let n = self.model.steps_per_segment;
         let cap = match segment.kind {
             SegmentKind::Takeoff => PropulsionRating::TakeoffGoAround,
@@ -492,109 +555,6 @@ impl Integrator<'_> {
         }
         Ok(distance_m)
     }
-
-    /// Additional level distance required to close a material speed transition
-    /// at the current bound. The cruise scheduler calls this before a distinct
-    /// target or after the final cruise rung; consecutive rungs at one target
-    /// are allowed to share the same budget. A route attempt may lower cruise
-    /// altitude and retry when the complete cruise allocation leaves too
-    /// little distance; direct callers retain the strict boundary error in
-    /// `open_transition`.
-    fn level_transition_deficit_m(&mut self, segment: &Segment) -> Result<Option<f64>, FlyError> {
-        let speed = segment.tas_m_s;
-        let pending = self.pending_kinetic_j;
-        let speed_scale = self
-            .previous_tas_m_s
-            .unwrap_or(speed)
-            .abs()
-            .max(speed.abs());
-        let kinetic_scale = 0.5 * self.mass_kg * speed_scale * speed_scale;
-        let tolerance_j =
-            BOUNDARY_KE_ABSOLUTE_TOLERANCE_J.max(BOUNDARY_KE_RELATIVE_TOLERANCE * kinetic_scale);
-        if !pending.is_finite() || pending.abs() <= tolerance_j {
-            return Ok(None);
-        }
-        let flight = self.model.propulsion.flight_condition(
-            segment.end_altitude_m,
-            speed,
-            self.model.gravity_m_s2,
-            self.model.isa_deviation_c,
-        )?;
-        let drag_n = self.phase_drag_n(SegmentKind::Cruise, &flight, self.mass_kg)?;
-        let point = if pending > 0.0 {
-            self.model
-                .propulsion
-                .rated_point(flight, PropulsionRating::Cruise)?
-        } else {
-            self.model.propulsion.idle_point(flight)?
-        };
-        let excess_power_w = (point.thrust_n - drag_n) * speed;
-        if !excess_power_w.is_finite() || pending * excess_power_w <= 0.0 {
-            return Ok(None);
-        }
-        let deficit_m = pending.abs() * speed / excess_power_w.abs();
-        if !deficit_m.is_finite() || deficit_m <= 0.0 {
-            return Ok(None);
-        }
-        Ok(Some(deficit_m))
-    }
-
-    /// Fly the cruise rungs over `cruise_distance_m` and the descent ladder;
-    /// returns the flown descent footprint.
-    fn fly_cruise_and_descent(
-        &mut self,
-        plan: &ProfilePlan,
-        cruise_distance_m: f64,
-    ) -> Result<f64, FlyError> {
-        let fraction_sum: f64 = plan.cruise_rungs.iter().map(|(_, f)| f).sum();
-        let mut last_cruise_segment: Option<Segment> = None;
-        for &(speed, fraction) in &plan.cruise_rungs {
-            let distance_m = cruise_distance_m * fraction / fraction_sum;
-            if distance_m > 1.0e-6 {
-                let segment = Segment::level(
-                    SegmentKind::Cruise,
-                    plan.cruise_altitude_m,
-                    speed,
-                    distance_m,
-                );
-                // A speed target may be split across several cruise rungs.
-                // Let a material boundary-energy budget continue through
-                // consecutive rungs at the same target; only require it to
-                // close before the next distinct target. The old check lived
-                // inside `fly_segment` and rejected every nonzero budget at
-                // the end of the first rung, even when the remaining cruise
-                // distance was ample to pay it (the ATR route at FL170).
-                if self.allow_route_transition_deficit {
-                    if let Some(previous) = last_cruise_segment {
-                        if self.target_is_distinct(previous.tas_m_s, speed) {
-                            if let Some(deficit_m) = self.level_transition_deficit_m(&previous)? {
-                                return Err(FlyError::TooShort { deficit_m });
-                            }
-                        }
-                    }
-                }
-                self.fly_segment(&segment)?;
-                last_cruise_segment = Some(segment);
-            }
-        }
-        // The descent begins at a distinct speed target. If the final cruise
-        // target still has unpaid kinetic energy, report the extra horizontal
-        // distance needed to close that boundary rather than letting the
-        // descent ladder misstate the failure. This is evaluated only after
-        // all consecutive cruise rungs have had a chance to pay it.
-        if self.allow_route_transition_deficit {
-            if let Some(last) = last_cruise_segment {
-                if let Some(deficit_m) = self.level_transition_deficit_m(&last)? {
-                    return Err(FlyError::TooShort { deficit_m });
-                }
-            }
-        }
-        let mut descent_footprint_m = 0.0;
-        for segment in &plan.descent {
-            descent_footprint_m += self.fly_segment(segment)?;
-        }
-        Ok(descent_footprint_m)
-    }
 }
 
 impl SegmentMissionModel {
@@ -615,8 +575,7 @@ impl SegmentMissionModel {
             )));
         }
         let cl = mass_kg * self.gravity_m_s2 / (dynamic_pressure_pa * self.wing_area_m2);
-        let cd =
-            self.cd0 + self.induced_factor_k * cl * cl + self.wave_drag_at(flight.mach) + delta_cd;
+        let cd = self.clean_cd(cl, flight.mach, flight.altitude_m) + delta_cd;
         if !cl.is_finite() || !cd.is_finite() || cd <= 0.0 {
             return Err(FuelModelError::NotConverged(format!(
                 "invalid drag state CL={cl}, CD={cd}"
@@ -635,13 +594,20 @@ impl SegmentMissionModel {
             .map(|(_, drag_n)| drag_n)
     }
 
-    /// Fly `plan` from `start_mass_kg`.
+    /// Fly `plan` from `start_mass_kg`, taking step climbs at the frozen
+    /// cruise-distance fractions `frozen_steps` when given, otherwise where
+    /// the cruise-level rule qualifies them (see `cruise_levels`).
     ///
     /// The climb ladder is flown first; the cruise distance is then closed
     /// against the flown climb footprint and a fixed-point estimate of the
     /// flown descent footprint, which depends only weakly on the landing
     /// mass and on any deck-limited descent steps.
-    pub(super) fn fly(&self, start_mass_kg: f64, plan: &ProfilePlan) -> Result<FlownLeg, FlyError> {
+    pub(super) fn fly(
+        &self,
+        start_mass_kg: f64,
+        plan: &ProfilePlan,
+        frozen_steps: Option<&[f64]>,
+    ) -> Result<FlownLeg, FlyError> {
         if !start_mass_kg.is_finite() || start_mass_kg <= 0.0 {
             return Err(FuelModelError::MassOutOfRange {
                 mass_kg: start_mass_kg,
@@ -662,14 +628,28 @@ impl SegmentMissionModel {
             minimum_descent_rate_m_s: f64::INFINITY,
             maximum_clean_cl: 0.0,
             allow_route_transition_deficit: true,
+            deck_memo: DeckMemo::default(),
         };
         let mut climb_footprint_m = 0.0;
+        let mut previous: Option<&Segment> = None;
         for segment in &plan.climb {
-            climb_footprint_m += climbed.fly_segment(segment)?;
+            // An unpaid speed change belongs to the rung that held it.
+            let owner = previous
+                .filter(|_| climbed.carries_unpaid_change_to(segment.tas_m_s))
+                .unwrap_or(segment);
+            climb_footprint_m += climbed
+                .fly_segment(segment)
+                .map_err(|error| plan.tag_climb_failure(owner, error))?;
+            previous = Some(segment);
         }
+        let (climb_time_s, climb_fuel_kg) = (climbed.time_s, climbed.fuel_kg);
         let mut descent_estimate_m = plan.descent_footprint_m();
-        let mut flown: Option<(Integrator<'_>, f64)> = None;
+        let mut flown: Option<(Integrator<'_>, CruiseOutcome)> = None;
+        // Step climbs decided in the first pass are kept for the later
+        // passes, so the descent fixed point closes on one level sequence.
+        let mut steps = frozen_steps.map(<[f64]>::to_vec);
         for _ in 0..DESCENT_FOOTPRINT_PASSES {
+            self.check_cancelled()?;
             let cruise_distance_m = plan.range_m - climb_footprint_m - descent_estimate_m;
             if cruise_distance_m < -CRUISE_DISTANCE_TOLERANCE_M {
                 return Err(FlyError::TooShort {
@@ -677,16 +657,31 @@ impl SegmentMissionModel {
                 });
             }
             let mut integrator = climbed.clone();
-            let descent_footprint_m =
-                integrator.fly_cruise_and_descent(plan, cruise_distance_m.max(0.0))?;
-            let mismatch_m = descent_footprint_m - descent_estimate_m;
-            flown = Some((integrator, descent_footprint_m));
+            // A speed change the climb left unpaid surfaces at the first
+            // cruise transition; it belongs to the top climb rung.
+            let cruise = integrator
+                .fly_cruise_and_descent(plan, cruise_distance_m.max(0.0), steps.as_deref())
+                .map_err(
+                    |error| match (plan.climb.last(), climbed.pending_kinetic_j) {
+                        (Some(top), pending) if pending != 0.0 => {
+                            plan.tag_climb_failure(top, error)
+                        }
+                        _ => error,
+                    },
+                )?;
+            steps.get_or_insert_with(|| cruise.step_positions.clone());
+            // A step climb that ran past its planned cruise distance is
+            // closed like extra descent footprint.
+            let footprint_m =
+                cruise.descent_footprint_m + cruise.cruise_flown_m - cruise_distance_m.max(0.0);
+            let mismatch_m = footprint_m - descent_estimate_m;
+            descent_estimate_m = footprint_m;
+            flown = Some((integrator, cruise));
             if mismatch_m.abs() <= CRUISE_DISTANCE_TOLERANCE_M {
                 break;
             }
-            descent_estimate_m = descent_footprint_m;
         }
-        let Some((integrator, descent_footprint_m)) = flown else {
+        let Some((integrator, cruise)) = flown else {
             return Err(
                 FuelModelError::NotConverged("descent footprint did not close".to_owned()).into(),
             );
@@ -727,7 +722,11 @@ impl SegmentMissionModel {
             minimum_descent_rate_m_s: integrator.minimum_descent_rate_m_s,
             maximum_clean_cl: integrator.maximum_clean_cl,
             climb_footprint_m,
-            descent_footprint_m,
+            descent_footprint_m: cruise.descent_footprint_m,
+            climb_time_s,
+            climb_fuel_kg,
+            final_cruise_altitude_m: cruise.final_altitude_m,
+            step_positions: cruise.step_positions,
             flown_distance_m: integrator.distance_m,
             ledger: EnergyLedger {
                 unrealized_kinetic_j: unrealized_j,
@@ -769,9 +768,12 @@ mod tests {
             0.0,
             0.0,
             plane.s_ref,
-            0.018,
-            0.045,
-            0.002,
+            std::sync::Arc::new(super::super::ParabolicPolar::new(
+                0.018,
+                0.045,
+                0.002,
+                requirements.cruise_mach,
+            )),
             requirements.gravity_m_s2,
             457.2,
             phase_limits,
@@ -795,6 +797,7 @@ mod tests {
             minimum_descent_rate_m_s: f64::INFINITY,
             maximum_clean_cl: 0.0,
             allow_route_transition_deficit: false,
+            deck_memo: DeckMemo::default(),
         }
     }
 
@@ -826,15 +829,52 @@ mod tests {
             610.0,
             8.0,
             plane.s_ref,
-            0.024600009989746922,
-            0.030377093904043483,
-            0.002,
+            std::sync::Arc::new(super::super::ParabolicPolar::new(
+                0.024600009989746922,
+                0.030377093904043483,
+                0.002,
+                requirements.cruise_mach,
+            )),
             requirements.gravity_m_s2,
             457.2,
             phase_limits,
             deck,
         )
         .expect("ATR mission model")
+    }
+
+    /// The flight's deck memo returns the deck's own points bit for bit, on
+    /// the first (miss) and the repeated (hit) read, for every rating.
+    #[test]
+    fn the_deck_memo_is_bitwise_identical_to_the_deck() {
+        let model = test_model();
+        let integrator = integrator(&model);
+        for (altitude_m, tas_m_s) in [(0.0, 80.0), (6_000.0, 180.0), (11_000.0, 236.0)] {
+            let flight = model
+                .propulsion
+                .flight_condition(altitude_m, tas_m_s, 9.80665, 0.0)
+                .unwrap();
+            for rating in [
+                PropulsionRating::TakeoffGoAround,
+                PropulsionRating::MaximumClimb,
+                PropulsionRating::Cruise,
+                PropulsionRating::FlightIdle,
+            ] {
+                let direct = match rating {
+                    PropulsionRating::FlightIdle => model.propulsion.idle_point(flight).unwrap(),
+                    rating => model.propulsion.rated_point(flight, rating).unwrap(),
+                };
+                for _ in 0..2 {
+                    let memo = integrator.memo_point(&flight, rating).unwrap();
+                    assert_eq!(memo.thrust_n.to_bits(), direct.thrust_n.to_bits());
+                    assert_eq!(
+                        memo.fuel_flow_kg_s.to_bits(),
+                        direct.fuel_flow_kg_s.to_bits()
+                    );
+                    assert_eq!(memo, direct);
+                }
+            }
+        }
     }
 
     #[test]

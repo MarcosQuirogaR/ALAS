@@ -38,8 +38,8 @@ const AERO_ONLY_CHORD_RATIO: f64 = 0.20;
 /// Ribs are generated fresh at the mesh's own resolution (`sizing.num_ribs`
 /// stations, `cfg.mesh_chordwise_points` chordwise points), which is generally
 /// a finer grid than the sizing pass integrated on. Cap dimensions are
-/// therefore re-derived here from the root value and the taper law rather than
-/// sampled off the sizing arrays, which are indexed on the other grid.
+/// therefore interpolated from the sizing arrays onto each cap segment. A
+/// stiffness-sized product box and its solver mesh retain the same sections.
 ///
 /// # Errors
 ///
@@ -58,14 +58,72 @@ pub fn build_wing_mesh_bdf(
     cap_mat: &MaterialSpec,
     rib_mat: &MaterialSpec,
 ) -> Result<(Deck, MeshHealthReport, MeshNodeIndex), MeshError> {
+    build_with_caps(
+        wsg, sizing, cfg, engine_cfg, mass_cfg, req, skin_mat, web_mat, cap_mat, rib_mat, false,
+    )
+}
+
+/// Build the product wingbox with separate upper/lower rectangular caps.
+///
+/// Caps use the sized section dimensions and their physical centroids; spar
+/// webs remain shell elements and are never repeated inside a beam section.
+/// [`build_wing_mesh_bdf`] retains the reference deck topology.
+/// A crossed aft section closes at its first surface intersection. A closure
+/// in the credited spar box is unsupported and fails before deck construction.
+///
+/// # Errors
+/// Returns [`MeshError`] for corrupt shell geometry or invalid cap sections.
+#[allow(clippy::too_many_arguments)] // Same physical inputs as the reference builder.
+pub fn build_wing_mesh_bdf_product(
+    wsg: &WingStructureGeometry,
+    sizing: &WingboxSizing,
+    cfg: &StructuresConfig,
+    engine_cfg: &EngineConfig,
+    mass_cfg: &MassModelConfig,
+    req: &DesignRequirements,
+    skin_mat: &MaterialSpec,
+    web_mat: &MaterialSpec,
+    cap_mat: &MaterialSpec,
+    rib_mat: &MaterialSpec,
+) -> Result<(Deck, MeshHealthReport, MeshNodeIndex), MeshError> {
+    build_with_caps(
+        wsg, sizing, cfg, engine_cfg, mass_cfg, req, skin_mat, web_mat, cap_mat, rib_mat, true,
+    )
+}
+
+// Shares both public builders' physical inputs plus the cap-law selection.
+#[allow(clippy::too_many_arguments)]
+fn build_with_caps(
+    wsg: &WingStructureGeometry,
+    sizing: &WingboxSizing,
+    cfg: &StructuresConfig,
+    engine_cfg: &EngineConfig,
+    mass_cfg: &MassModelConfig,
+    req: &DesignRequirements,
+    skin_mat: &MaterialSpec,
+    web_mat: &MaterialSpec,
+    cap_mat: &MaterialSpec,
+    rib_mat: &MaterialSpec,
+    product_caps: bool,
+) -> Result<(Deck, MeshHealthReport, MeshNodeIndex), MeshError> {
     let mut stations = wsg.get_rib_stations(
         sizing.num_ribs.max(0) as usize,
         cfg.mesh_chordwise_points.max(0) as usize,
     );
+    let trimmed = if product_caps {
+        super::section_closure::trim_aft_intersections(wsg, &mut stations)?
+    } else {
+        0
+    };
     let n_spars = wsg.spar_fracs.len();
 
     let regions = classify_ribs(wsg, &mut stations);
     let mut warnings = regions.warnings.clone();
+    if trimmed > 0 {
+        warnings.push(format!(
+            "{trimmed} rib meshes close at the first upper/lower section intersection; crossed aft material is excluded."
+        ));
+    }
 
     let mut deck = Deck::new();
     for (mid, material) in [
@@ -158,7 +216,18 @@ pub fn build_wing_mesh_bdf(
     }
     elements::add_rib_panels(&mut deck, &mut eid, &stations, &nodes, &regions);
     elements::add_trailing_edge(&mut deck, &mut eid, &stations, &nodes, &regions, cfg, wsg);
-    elements::add_spar_caps(&mut deck, &mut eid, &spar_upper, &spar_lower, sizing, wsg);
+    if product_caps {
+        super::product_caps::add_spar_caps(
+            &mut deck,
+            &mut eid,
+            &spar_upper,
+            &spar_lower,
+            sizing,
+            wsg,
+        )?;
+    } else {
+        elements::add_spar_caps(&mut deck, &mut eid, &spar_upper, &spar_lower, sizing, wsg);
+    }
 
     let root_nodes = elements::root_constraint_nodes(&stations, &nodes);
     deck.constraints.push(Spc1 {
@@ -168,7 +237,16 @@ pub fn build_wing_mesh_bdf(
     });
 
     let engine_nids = elements::add_engine_masses(
-        &mut deck, &mut eid, &stations, &nodes, &regions, wsg, engine_cfg, mass_cfg, req,
+        &mut deck,
+        &mut eid,
+        &stations,
+        &nodes,
+        &regions,
+        wsg,
+        engine_cfg,
+        mass_cfg,
+        req,
+        product_caps,
     );
 
     for (key, value) in [

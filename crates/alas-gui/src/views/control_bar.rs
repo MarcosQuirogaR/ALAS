@@ -3,8 +3,6 @@
 
 //! The bottom control bar: the run group (Analyze reference / Run), and the
 //! status/elapsed readout.
-//!
-//! A port of the reference desktop app's `ControlBar`.
 
 use egui::{RichText, Ui};
 

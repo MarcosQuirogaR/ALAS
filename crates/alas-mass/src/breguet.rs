@@ -26,15 +26,12 @@ use crate::fuel_plan::{FuelBurnModel, FuelModelError, LegEstimate};
 /// landing, for a jet transport.
 ///
 /// Attributed to Roskam, *Airplane Design, Part I*, jet-transport
-/// segment-fraction table, not Raymer's *Aircraft Design: A Conceptual
-/// Approach* Table 3.2 as a previous version of this doc comment said:
-/// Raymer's Table 3.2 lists different values for the same phases (from
-/// recollection: warm-up+takeoff 0.970, climb 0.985, landing 0.995), so the
-/// two tables cannot both be the source of these four numbers (physics
-/// review v1.2, finding F4). The Roskam table and page were not
-/// independently re-opened against the primary text in that review either;
-/// treat this attribution as the best available correction, not a verified
-/// citation.
+/// segment-fraction table. Raymer's *Aircraft Design: A Conceptual Approach*
+/// Table 3.2 lists different values for the same phases (warm-up and takeoff
+/// 0.970, climb 0.985, landing 0.995), so the two tables cannot both be the
+/// source of these four numbers. The Roskam table and page were not
+/// independently checked against the primary text; treat this attribution as
+/// the best available, not a verified citation.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SegmentFractions {
     /// Mass fraction remaining after takeoff.
@@ -93,11 +90,9 @@ pub struct BreguetFuelModel {
     /// falls with the lower Mach number, rises with the higher static
     /// temperature, and rises again at the low part-power setting a hold
     /// needs. For a high-bypass narrowbody the holding fuel flow lands within
-    /// 0.9-1.1 of the cruise fuel flow at the same mass (the sanity anchor in
-    /// the 2026-09-05 fuel-regulation research note, section 7.1), which is
-    /// where [`Self::DEFAULT_HOLDING_TSFC_FACTOR`] comes from. This is an
-    /// engineering assumption, not a manufacturer deck, and a study of a
-    /// specific engine should override it.
+    /// 0.9-1.1 of the cruise fuel flow at the same mass, so 1.0 is a sound
+    /// default. This is an engineering assumption, not a manufacturer deck,
+    /// and a study of a specific engine should override it.
     pub holding_tsfc_factor: f64,
     /// All-engines takeoff fuel flow at sea-level static, kg/s.
     pub takeoff_fuel_flow_kg_s: f64,
@@ -118,15 +113,6 @@ pub struct BreguetFuelModel {
 }
 
 impl BreguetFuelModel {
-    /// Recommended holding-to-cruise TSFC ratio; see
-    /// [`BreguetFuelModel::holding_tsfc_factor`].
-    pub const DEFAULT_HOLDING_TSFC_FACTOR: f64 = 1.0;
-
-    /// Recommended idle-to-takeoff fuel-flow ratio, matching the mission
-    /// deck's flight-idle fraction; see
-    /// [`BreguetFuelModel::idle_fuel_flow_fraction`].
-    pub const DEFAULT_IDLE_FUEL_FLOW_FRACTION: f64 = 0.07;
-
     /// Lift-to-drag ratio at `mass_kg` and `density_kg_m3`, flown at
     /// [`BreguetFuelModel::cruise_tas_m_s`], from a parabolic drag polar:
     /// `CL = m g / (q S)`, `CD = cd0 + k CL^2`.
@@ -317,22 +303,6 @@ fn checked_nonnegative_distance(distance_m: f64) -> Result<f64, FuelModelError> 
     }
 }
 
-/// Equivalent thrust-specific fuel consumption for a turboprop, from its
-/// power-specific fuel consumption and the speed and efficiency at which
-/// shaft power becomes thrust: `TSFC = PSFC * V / eta_p` (the standard
-/// turboprop equivalent-SFC relation; see e.g. Raymer, *Aircraft Design: A
-/// Conceptual Approach*, ch. 3, or Mattingly, *Elements of Gas Turbine
-/// Propulsion*, ch. 2). Useful thrust power is `eta_p` times shaft power, so
-/// fuel flow per unit of thrust is fuel flow per unit of shaft power divided
-/// by `eta_p / V`.
-pub fn equivalent_tsfc_from_psfc(
-    psfc_kg_per_w_s: f64,
-    tas_m_s: f64,
-    propeller_efficiency: f64,
-) -> f64 {
-    psfc_kg_per_w_s * tas_m_s / propeller_efficiency
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -346,9 +316,9 @@ mod tests {
             cd0: 0.020,
             induced_factor_k: 0.045,
             tsfc_cruise_kg_per_n_s: 1.70e-5, // 0.6 lb/lbf/hr
-            holding_tsfc_factor: BreguetFuelModel::DEFAULT_HOLDING_TSFC_FACTOR,
+            holding_tsfc_factor: 1.0,
             takeoff_fuel_flow_kg_s: 2.3,
-            idle_fuel_flow_fraction: BreguetFuelModel::DEFAULT_IDLE_FUEL_FLOW_FRACTION,
+            idle_fuel_flow_fraction: 0.07,
             gravity_m_s2: alas_units::STANDARD_GRAVITY,
             segment_fractions: SegmentFractions::default(),
             climb_descent_range_credit_m: 250_000.0,
@@ -403,15 +373,6 @@ mod tests {
         let leg = model.diversion(60_000.0, 0.0).unwrap();
         assert!(leg.fuel_kg > 0.0);
         assert_eq!(leg.time_s, 0.0);
-    }
-
-    #[test]
-    fn equivalent_tsfc_scales_with_speed_and_inversely_with_efficiency() {
-        let base = equivalent_tsfc_from_psfc(6.0e-8, 130.0, 0.85);
-        let faster = equivalent_tsfc_from_psfc(6.0e-8, 260.0, 0.85);
-        let less_efficient = equivalent_tsfc_from_psfc(6.0e-8, 130.0, 0.425);
-        assert!((faster - 2.0 * base).abs() < 1e-15);
-        assert!((less_efficient - 2.0 * base).abs() < 1e-15);
     }
 
     #[test]

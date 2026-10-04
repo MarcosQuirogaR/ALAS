@@ -5,10 +5,8 @@
 //!
 //! The search's `converged` and the application's feasibility verdict are two
 //! different statements, evaluated on two different meshes and two different
-//! mission models. Three of four converged application runs measured before
-//! this contract existed reported the delivered aircraft INFEASIBLE while
-//! still labelling the search converged
-//! (an internal optimizer independent-verification handoff record, section 2.3).
+//! mission models. Without this contract a converged search can deliver an
+//! aircraft the application reports INFEASIBLE.
 //!
 //! These tests hold the contract that closes that gap: a design the
 //! application rejects is never returned as a converged result, a verified
@@ -50,10 +48,11 @@ fn converged_result() -> OptimizationResult {
         history,
         wall_time_s: 48.0,
         method: "differential_evolution".to_owned(),
-        strategy: "lshade_eps_de".to_owned(),
+        strategy: "current_to_pbest_1_bin".to_owned(),
         termination: "converged".to_owned(),
         pareto_front: Vec::new(),
         search_diagnostics: Some(SearchDiagnostics {
+            restoration: None,
             converged: true,
             analysis_evaluations: 225,
             cache_hits: 0,
@@ -69,6 +68,14 @@ fn converged_result() -> OptimizationResult {
             relative_improvement: Some(0.5),
             feasible_fraction: 0.9,
             epsilon_level: 0.0,
+            stages: Vec::new(),
+            rejections: Vec::new(),
+            seed: Some(7),
+            scope: alas_opt::SEARCH_SCOPE.to_owned(),
+            baseline: None,
+            winner_history_row: None,
+            evaluation_trace: Default::default(),
+            baseline_clamped: false,
         }),
         delivered_acceptance: None,
     }
@@ -95,6 +102,8 @@ fn acceptance(verified: bool, delivered_is_search_finalist: bool) -> DeliveredAc
         candidates_evaluated: 1,
         delivered_is_search_finalist,
         wall_time_s: 1.2,
+        analyses: 2,
+        baseline: None,
     }
 }
 

@@ -3,7 +3,6 @@
 
 // Ported from alas/reporting/visualization.py, `figure_status_message`
 // (L650-692).
-// Reference: alas @ rust-port-baseline.
 
 use crate::scene::Scene;
 

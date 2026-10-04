@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/reporting/visualization.py:figure_mass_breakdown (L2105-2353)
-// Reference: alas @ rust-port-baseline.
 
 use super::common::BAR_HEIGHT;
 use super::common::{assign_label_rows, bar_label, draw_hbar};

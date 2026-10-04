@@ -16,10 +16,8 @@
 //! exact-hit shortcut and the NaN retry are each a branch that a
 //! two-line reimplementation would get subtly differently.
 //!
-//! It began private to `alas-payload::numeric`, which was the first module in
-//! the port to need it; `alas-aero::analysis` is the second, and that crate's
-//! own doc states the rule this move follows: a primitive with a second
-//! consumer lives here rather than being copied.
+//! It serves `alas-payload::numeric` and `alas-aero::analysis`; a primitive
+//! with a second consumer lives here rather than being copied.
 
 /// NumPy's `np.interp(x, xp, fp)` for one query point: piecewise-linear
 /// interpolation, clamped to the end values outside `xp`.

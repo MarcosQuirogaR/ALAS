@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-// Ported from alas/physics/structural_analysis.py
-// Reference: alas @ rust-port-baseline.
-
 //! Analytical (no-NASTRAN) wingbox deformation, stress and frequency solver.
 //!
 //! [`analyze_structure`] runs the reference's validation-stage methods on the
@@ -16,16 +13,21 @@
 //! weight plus wing-mounted engine point masses - is built from the same
 //! [`crate::loads`] primitives [`crate::sizing`] applies, so the deflection is
 //! solved under the load model the box was sized under. This module adds the
-//! engine point masses the sizing entry point is not given; it does not add
-//! the integral fuel, because a deflection is reported for the analysed
-//! aircraft state rather than for the sizing case.
+//! engine point masses the sizing entry point is not given. The original
+//! [`analyze_structure`] entry point omits integral fuel; product sizing and
+//! acceptance use [`analyze_structure_with_wing_carried_mass`] so response and
+//! sizing share one explicit design-gross-mass and fuel state.
 
 use alas_config::materials::MaterialSpec;
 use alas_config::{DesignRequirements, EngineConfig, MassModelConfig, StructuresConfig};
 use alas_geom::wing_structure::WingStructureGeometry;
 
 use crate::loads;
-use crate::sizing::WingboxSizing;
+use crate::sizing::{trapezoid, WingboxSizing};
+
+mod section;
+mod stress;
+use section::{ei_curve, mass_per_length};
 
 /// `(beta*L, sigma)` for the first four cantilever bending modes: the
 /// classical clamped-free eigenvalues and their trial-shape coefficients.
@@ -35,18 +37,6 @@ const CANTILEVER_MODES: [(f64, f64); 4] = [
     (7.8548, 0.9992),
     (10.9955, 1.0000),
 ];
-
-/// NumPy `trapezoid(y, x)`: the trapezoidal integral of `y` over `x`.
-/// Duplicated from [`crate::sizing`]'s private helper for the reason that
-/// module keeps its own copy; it is not part of either module's public
-/// surface.
-fn trapezoid(y: &[f64], x: &[f64]) -> f64 {
-    let mut acc = 0.0;
-    for i in 0..y.len().saturating_sub(1) {
-        acc += (x[i + 1] - x[i]) * (y[i + 1] + y[i]) / 2.0;
-    }
-    acc
-}
 
 /// Per-spar bending stress and margin of safety at every station.
 #[derive(Debug, Clone, PartialEq)]
@@ -65,7 +55,7 @@ pub struct SparStressResult {
 pub struct LoadCaseResult {
     /// The load-case name.
     pub name: &'static str,
-    /// The signed limit load factor.
+    /// Signed load factor: ultimate for manoeuvres, 1 for level flight.
     pub load_factor: f64,
     /// Spanwise stations, m.
     pub y: Vec<f64>,
@@ -105,109 +95,22 @@ pub struct StructuralAnalysisReport {
     pub modal: ModalResult,
 }
 
-/// Area moment of inertia of a symmetric I-section about its own centroid:
-/// `_I_section`.
-fn i_section(h: &[f64], bf: &[f64], tf: &[f64], tw: f64) -> Vec<f64> {
-    (0..h.len())
-        .map(|j| {
-            let thin = h[j] <= 2.0 * tf[j];
-            if thin {
-                bf[j] * h[j].powi(3) / 12.0
-            } else {
-                let hw = (h[j] - 2.0 * tf[j]).max(0.0);
-                tw * hw.powi(3) / 12.0 + 2.0 * bf[j] * tf[j] * ((h[j] - tf[j]) / 2.0).powi(2)
-            }
-        })
-        .collect()
-}
-
-/// Distributed mass per unit span, kg/m: `_mass_per_length`.
-fn mass_per_length(
-    sizing: &WingboxSizing,
-    cap_rho: f64,
-    web_rho: f64,
-    skin_rho: f64,
-    include_ribs: bool,
-    skin_cover_fraction: f64,
-) -> Vec<f64> {
-    let n = sizing.chord.len();
-    let mut m_y: Vec<f64> = (0..n)
-        .map(|j| 2.0 * skin_cover_fraction * sizing.chord[j] * sizing.t_skin * skin_rho)
-        .collect();
-    for s in &sizing.spars {
-        for (m, (&h, &a)) in m_y.iter_mut().zip(s.h.iter().zip(&s.a_cap)) {
-            *m += s.t_web * h * web_rho + 2.0 * a * cap_rho;
-        }
-    }
-    if include_ribs {
-        // Ribs are discrete in the mesh, but the analytical load/mode model
-        // uses a spanwise mass density.  Conserving the sized rib mass as a
-        // uniform density keeps both inertial relief and the Rayleigh modal
-        // denominator on the same mass basis as the sizing result.
-        let span = sizing
-            .y_stations
-            .last()
-            .copied()
-            .zip(sizing.y_stations.first().copied())
-            .map(|(last, first)| last - first)
-            .unwrap_or(0.0);
-        if span > 0.0 && sizing.mass_breakdown_kg.ribs.is_finite() {
-            let rib_density = sizing.mass_breakdown_kg.ribs / span;
-            for mass in &mut m_y {
-                *mass += rib_density;
-            }
-        }
-    }
-    m_y
-}
-
-/// Combined bending stiffness `EI(y)`, N.m^2: `_EI_curve`.
-fn ei_curve(sizing: &WingboxSizing, cap_mat: &MaterialSpec, skin_mat: &MaterialSpec) -> Vec<f64> {
-    let n = sizing.y_stations.len();
-    let mut ei = vec![0.0; n];
-    for s in &sizing.spars {
-        let i_cap = i_section(&s.h, &s.w_cap, &s.t_cap, 0.0);
-        for (e, &ic) in ei.iter_mut().zip(&i_cap) {
-            *e += cap_mat.e_pa * ic;
-        }
-    }
-
-    let frac_min = sizing
-        .spar_fracs
-        .iter()
-        .copied()
-        .fold(f64::INFINITY, f64::min);
-    let frac_max = sizing
-        .spar_fracs
-        .iter()
-        .copied()
-        .fold(f64::NEG_INFINITY, f64::max);
-    let n_spars = sizing.spars.len() as f64;
-    for (j, e) in ei.iter_mut().enumerate() {
-        let b_box = (frac_max - frac_min) * sizing.chord[j];
-        let h_mean: f64 = sizing.spars.iter().map(|s| s.h[j]).sum::<f64>() / n_spars;
-        let d_skin = h_mean / 2.0;
-        let i_skin = 2.0 * b_box * sizing.t_skin * d_skin.powi(2);
-        *e += skin_mat.e_pa * i_skin;
-    }
-    ei
-}
-
 /// Spanwise deflection via the unit-load (virtual work) theorem at every
-/// station: `_deflection_curve`, O(N^2).
+/// station: `_deflection_curve`, O(N) using accumulated curvature moments.
 fn deflection_curve(y: &[f64], m: &[f64], ei: &[f64]) -> Vec<f64> {
     let n = y.len();
     let mut delta = vec![0.0; n];
-    let integrand: Vec<f64> = (0..n).map(|j| m[j] / ei[j]).collect();
+    // Accumulating the zeroth and first moments of curvature is exactly the
+    // same trapezoidal unit-load quadrature as the former O(N^2) loop.
+    let mut integral_curvature = 0.0;
+    let mut integral_first_moment = 0.0;
     for k in 1..n {
-        let s_k = y[k];
-        let product: Vec<f64> = (0..=k)
-            .map(|j| {
-                let m_bar = if y[j] <= s_k { s_k - y[j] } else { 0.0 };
-                integrand[j] * m_bar
-            })
-            .collect();
-        delta[k] = trapezoid(&product, &y[..=k]);
+        let dy = y[k] - y[k - 1];
+        let left = m[k - 1] / ei[k - 1];
+        let right = m[k] / ei[k];
+        integral_curvature += 0.5 * dy * (left + right);
+        integral_first_moment += 0.5 * dy * (y[k - 1] * left + y[k] * right);
+        delta[k] = y[k] * integral_curvature - integral_first_moment;
     }
     delta
 }
@@ -221,7 +124,7 @@ fn rayleigh_frequencies(
     n_modes: i64,
 ) -> (Vec<f64>, Vec<Vec<f64>>) {
     let n = y.len();
-    let length = y[n - 1];
+    let length = y.last().copied().unwrap_or(0.0);
     let n_modes = (n_modes.max(0) as usize).min(CANTILEVER_MODES.len());
     let mut freqs = vec![0.0; n_modes];
     let mut shapes: Vec<Vec<f64>> = Vec::with_capacity(n_modes);
@@ -283,7 +186,11 @@ pub fn analyze_structure(
         web_mat,
         cap_mat,
         true,
+        true,
         (rear - front).max(0.0),
+        &[],
+        None,
+        None,
     )
 }
 
@@ -292,7 +199,7 @@ pub fn analyze_structure(
 /// The historical parity path omitted the explicitly sized rib mass from
 /// analytical inertial relief and modal mass. It remains available solely for
 /// replaying the old fixture; product callers should use [`analyze_structure`].
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments)] // mirrors upstream's own signature
 pub fn analyze_structure_reference_compatibility(
     wsg: &WingStructureGeometry,
     sizing: &WingboxSizing,
@@ -305,7 +212,132 @@ pub fn analyze_structure_reference_compatibility(
     cap_mat: &MaterialSpec,
 ) -> StructuralAnalysisReport {
     analyze_structure_with_rib_mass(
-        wsg, sizing, cfg, req, engine_cfg, mass_cfg, skin_mat, web_mat, cap_mat, false, 1.0,
+        wsg,
+        sizing,
+        cfg,
+        req,
+        engine_cfg,
+        mass_cfg,
+        skin_mat,
+        web_mat,
+        cap_mat,
+        false,
+        false,
+        1.0,
+        &[],
+        None,
+        None,
+    )
+}
+
+/// Analyze the *same design load state* used to size a wingbox.
+///
+/// `integral_fuel_kg_m` is the nonnegative running fuel mass on the sizing
+/// stations, kg/m; `wing_mounted_point_masses` contains only the modelled
+/// semi-wing's `(station m, mass kg)` pairs. Unlike [`analyze_structure`],
+/// this entry point does not silently remove the design state's fuel relief.
+/// Use identical requirements, fuel and point masses for sizing and analysis.
+/// Invalid arrays produce nonfinite results for a fail-closed assessment.
+#[allow(clippy::too_many_arguments)] // Explicit geometry, materials and carried-mass load state.
+pub fn analyze_structure_with_wing_carried_mass(
+    wsg: &WingStructureGeometry,
+    sizing: &WingboxSizing,
+    cfg: &StructuresConfig,
+    req: &DesignRequirements,
+    engine_cfg: &EngineConfig,
+    mass_cfg: &MassModelConfig,
+    skin_mat: &MaterialSpec,
+    web_mat: &MaterialSpec,
+    cap_mat: &MaterialSpec,
+    integral_fuel_kg_m: &[f64],
+    wing_mounted_point_masses: &[(f64, f64)],
+) -> StructuralAnalysisReport {
+    analyze_structure_with_running_mass(
+        wsg,
+        sizing,
+        cfg,
+        req,
+        engine_cfg,
+        mass_cfg,
+        skin_mat,
+        web_mat,
+        cap_mat,
+        integral_fuel_kg_m,
+        wing_mounted_point_masses,
+        None,
+    )
+}
+
+/// Internal product path: an explicit structural running mass keeps swept
+/// cap/web length in both the mass budget and every inertial/modal response.
+#[allow(clippy::too_many_arguments)] // Adds a conserved structural density to the public load-state inputs.
+pub(crate) fn analyze_structure_with_running_mass(
+    wsg: &WingStructureGeometry,
+    sizing: &WingboxSizing,
+    cfg: &StructuresConfig,
+    req: &DesignRequirements,
+    engine_cfg: &EngineConfig,
+    mass_cfg: &MassModelConfig,
+    skin_mat: &MaterialSpec,
+    web_mat: &MaterialSpec,
+    cap_mat: &MaterialSpec,
+    integral_fuel_kg_m: &[f64],
+    wing_mounted_point_masses: &[(f64, f64)],
+    structural_running_mass_kg_m: Option<&[f64]>,
+) -> StructuralAnalysisReport {
+    let count = sizing.y_stations.len();
+    let arrays_valid = count >= 2
+        && sizing.chord.len() == count
+        && !sizing.spars.is_empty()
+        && sizing.spars.iter().all(|spar| {
+            [
+                &spar.h,
+                &spar.w_cap,
+                &spar.t_cap,
+                &spar.a_cap,
+                &spar.frac_moment,
+            ]
+            .iter()
+            .all(|values| values.len() == count)
+        });
+    if !arrays_valid
+        || !wsg.semi_span.is_finite()
+        || wsg.semi_span <= 0.0
+        || integral_fuel_kg_m.len() != count
+        || structural_running_mass_kg_m.is_some_and(|values| {
+            values.len() != count || values.iter().any(|m| !m.is_finite() || *m < 0.0)
+        })
+        || wing_mounted_point_masses.iter().any(|(y, mass)| {
+            !y.is_finite() || *y < 0.0 || *y > wsg.semi_span || !mass.is_finite() || *mass < 0.0
+        })
+    {
+        return StructuralAnalysisReport {
+            y: sizing.y_stations.clone(),
+            ei_nm2: vec![f64::NAN; count],
+            load_cases: Vec::new(),
+            modal: ModalResult {
+                frequencies_hz: Vec::new(),
+                mode_shapes: Vec::new(),
+            },
+        };
+    }
+    let (front, rear) = crate::sizing::box_chord_band(wsg);
+    analyze_structure_with_rib_mass(
+        wsg,
+        sizing,
+        cfg,
+        req,
+        engine_cfg,
+        mass_cfg,
+        skin_mat,
+        web_mat,
+        cap_mat,
+        true,
+        true,
+        rear - front,
+        integral_fuel_kg_m,
+        Some(wing_mounted_point_masses),
+        structural_running_mass_kg_m,
     )
 }
 
@@ -323,23 +355,56 @@ fn analyze_structure_with_rib_mass(
     web_mat: &MaterialSpec,
     cap_mat: &MaterialSpec,
     include_ribs: bool,
+    credit_cover_skin: bool,
     skin_cover_fraction: f64,
+    integral_fuel_kg_m: &[f64],
+    wing_mounted_point_masses: Option<&[(f64, f64)]>,
+    structural_running_mass_kg_m: Option<&[f64]>,
 ) -> StructuralAnalysisReport {
     let y = &sizing.y_stations;
     let n = y.len();
     let semi_span = wsg.semi_span;
     let g = req.gravity_m_s2;
 
-    let ei = ei_curve(sizing, cap_mat, skin_mat);
-    let m_y = mass_per_length(
-        sizing,
-        cap_mat.rho_kg_m3,
-        web_mat.rho_kg_m3,
-        skin_mat.rho_kg_m3,
-        include_ribs,
-        skin_cover_fraction,
+    let ei = if credit_cover_skin {
+        (0..n)
+            .map(|station| {
+                crate::sizing::section::station_ei(sizing, station, skin_mat, web_mat, cap_mat)
+            })
+            .collect()
+    } else {
+        ei_curve(sizing, cap_mat, skin_mat)
+    };
+    let mut m_y = structural_running_mass_kg_m.map_or_else(
+        || {
+            mass_per_length(
+                sizing,
+                cap_mat.rho_kg_m3,
+                web_mat.rho_kg_m3,
+                skin_mat.rho_kg_m3,
+                include_ribs,
+                skin_cover_fraction,
+            )
+        },
+        <[f64]>::to_vec,
     );
-    let engine_loads = loads::engine_point_loads_n(engine_cfg, mass_cfg, req);
+    if !integral_fuel_kg_m.is_empty() {
+        if integral_fuel_kg_m.len() == n
+            && integral_fuel_kg_m
+                .iter()
+                .all(|m| m.is_finite() && *m >= 0.0)
+        {
+            for (mass, fuel) in m_y.iter_mut().zip(integral_fuel_kg_m) {
+                *mass += fuel;
+            }
+        } else {
+            m_y.fill(f64::NAN);
+        }
+    }
+    let engine_loads = wing_mounted_point_masses.map_or_else(
+        || loads::engine_point_loads_n(engine_cfg, mass_cfg, req),
+        <[(f64, f64)]>::to_vec,
+    );
 
     let m_bar_tip: Vec<f64> = y.iter().map(|&yj| semi_span - yj).collect();
 
@@ -354,8 +419,11 @@ fn analyze_structure_with_rib_mass(
         // `loads::net_distributed_load` documents.
         let q_aero = loads::elliptic_distributed_load(y, semi_span, l_total);
         let q_net = loads::net_distributed_load(&q_aero, n_factor, g, &m_y);
-        let (v, mut m) = loads::cantilever_shear_moment(y, &q_net);
+        let (mut v, mut m) = loads::cantilever_shear_moment(y, &q_net);
         loads::apply_point_mass_relief(y, &mut m, n_factor, g, &engine_loads);
+        if credit_cover_skin {
+            loads::apply_point_mass_shear_relief(y, &mut v, n_factor, g, &engine_loads);
+        }
 
         let tip_terms: Vec<f64> = (0..n).map(|j| m[j] * m_bar_tip[j] / ei[j]).collect();
         let tip_deflection_m = trapezoid(&tip_terms, y) * sign;
@@ -363,29 +431,15 @@ fn analyze_structure_with_rib_mass(
         let deflection_m: Vec<f64> = defl_curve.iter().map(|&d| d * sign).collect();
         let m_signed: Vec<f64> = m.iter().map(|&mj| mj * sign).collect();
 
-        let mut spar_stress: Vec<SparStressResult> = Vec::with_capacity(sizing.spars.len());
-        for s in &sizing.spars {
-            let stress_pa: Vec<f64> = (0..n)
-                .map(|j| {
-                    let h_eff = s.h[j] * 0.85;
-                    (s.frac_moment[j] * m_signed[j]).abs() / (s.a_cap[j] * h_eff).max(1e-12)
-                })
-                .collect();
-            let margin_of_safety: Vec<f64> = (0..n)
-                .map(|j| {
-                    if (s.frac_moment[j] * m_signed[j]).abs() > 1.0 {
-                        cap_mat.f_allow_pa / stress_pa[j].max(1e-9) - 1.0
-                    } else {
-                        f64::INFINITY
-                    }
-                })
-                .collect();
-            spar_stress.push(SparStressResult {
-                chord_fraction: s.chord_fraction,
-                stress_pa,
-                margin_of_safety,
-            });
-        }
+        let spar_stress = stress::recover(
+            sizing,
+            &m_signed,
+            &v,
+            skin_mat,
+            web_mat,
+            cap_mat,
+            credit_cover_skin,
+        );
 
         load_cases.push(LoadCaseResult {
             name: case.name,
@@ -427,6 +481,34 @@ fn analyze_structure_with_rib_mass(
 mod tests {
     use super::*;
     use crate::sizing::MassBreakdown;
+
+    #[test]
+    fn virtual_work_recovers_the_uniform_cantilever_tip_and_curve() {
+        // Bruhn, 1973, A6: delta_tip=q*L^4/(8*EI). This verifies metre,
+        // newton and EI units plus the single curvature integration.
+        let length = 12.0_f64;
+        let load = 2500.0;
+        let stiffness = 3.0e8;
+        let stations: Vec<_> = (0..401)
+            .map(|index| length * index as f64 / 400.0)
+            .collect();
+        let moment: Vec<_> = stations
+            .iter()
+            .map(|station| load * (length - station).powi(2) / 2.0)
+            .collect();
+        let deflection = deflection_curve(&stations, &moment, &vec![stiffness; stations.len()]);
+        let expected = load * length.powi(4) / (8.0 * stiffness);
+        assert!((deflection[400] / expected - 1.0).abs() < 7.0e-6);
+        assert_eq!(deflection[0], 0.0);
+        assert!(deflection.windows(2).all(|pair| pair[1] >= pair[0]));
+    }
+
+    #[test]
+    fn an_empty_station_grid_has_zero_frequencies_rather_than_a_panic() {
+        let (frequencies, shapes) = rayleigh_frequencies(&[], &[], &[], 2);
+        assert_eq!(frequencies, [0.0, 0.0]);
+        assert!(shapes.iter().all(Vec::is_empty));
+    }
 
     #[test]
     fn rib_mass_is_conserved_in_the_distributed_analytical_density() {

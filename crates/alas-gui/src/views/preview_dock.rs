@@ -3,8 +3,7 @@
 
 //! The right-side unified aircraft viewer, rendered live from the current
 //! configuration with exterior/interior visibility, drag-to-orbit, and true
-//! camera zoom. A port of the reference desktop app's `PreviewDock` +
-//! `Preview3D`; closable from here or from View > 3D Live Preview.
+//! camera zoom. Closable from here or from View > 3D Live Preview.
 
 use alas_report::scene::Scene;
 use alas_viz::SceneView;
@@ -16,6 +15,8 @@ use crate::views::tr;
 #[path = "fullscreen_preview.rs"]
 mod fullscreen_preview;
 use fullscreen_preview::show_fullscreen_preview;
+#[path = "preview_dock_cache.rs"]
+mod preview_dock_cache;
 
 const AIRCRAFT_CAMERA_ID: &str = "aircraft_3d";
 const AIRCRAFT_VIEW_KEY: &str = "preview_dock::aircraft_3d";
@@ -55,22 +56,21 @@ pub fn show_preview_dock(state: &mut AppState, ui: &mut Ui) {
 
     match &state.preview_scene {
         Some(scene) => {
-            // Clone to release the state borrow before giving the view its
-            // own mutable state slice.
-            let scene = preview_scene_for_tab(scene.clone(), state.preview_tab);
+            let (revision, tab) = (state.preview_scene_revision, state.preview_tab);
+            let scene = preview_dock_cache::dock_scene(ui.ctx(), &view_key, revision, tab, scene);
             let width = ui.available_width().max(220.0);
             // The right-side dock owns the full remaining height, so the
             // viewport stays vertical instead of becoming a wide bottom row.
             let height = ui.available_height().max(180.0);
-            let scene_revision = state.preview_scene_revision;
             let response = ui.add(
                 SceneView::new(&scene, state.view_state_mut(&view_key))
                     .desired_size(vec2(width, height))
                     .orbit_only()
+                    .vector_overlay(true)
                     .raster_scale(1.0)
                     .show_toolbar(false)
                     .cache_key(&view_key)
-                    .cache_revision(scene_revision),
+                    .cache_revision(revision),
             );
             let response = response.on_hover_text(tr("Drag to orbit the camera; scroll to zoom"));
             camera_changed |= handle_camera_response(state, &response, &active_camera_id);

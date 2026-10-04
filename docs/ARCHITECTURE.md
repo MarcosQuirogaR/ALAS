@@ -2,193 +2,218 @@
 
 ALAS sizes and analyses a conceptual transport aircraft. A design vector goes
 in; a trimmed, mass-balanced aircraft with a flown mission, a drag build-up, a
-sized wingbox and sixty-odd figures comes out.
+sized wingbox and a set of figures comes out.
 
-This document describes how that is arranged in Rust. It does not describe the
-models (those are in `docs/methods.md`) and it does not describe the
-translation from Python, which is in `docs/PORTING.md`.
+This document describes how the Rust workspace is arranged. The models are
+described in `docs/methods.md`, the numerical-parity and licence record against
+the original Python implementation is `docs/PORTING.md`, and what works today
+is `docs/STATUS.md`.
 
 ---
 
 ## Shape of the program
 
-One executable. No server, no interpreter, no sidecar process, no bundled
-runtime. The Python implementation ran a FastAPI process that the desktop shell
-talked to over loopback HTTP, and rendered every figure as an SVG on that
-process; all of that is gone.
-
-What remains is a library, a user interface drawn on top of it, and a handful
-of external solvers invoked as child processes when the user has them.
+One executable (`ALAS`, from `alas-app`). No server, no interpreter, no
+sidecar process. The desktop interface calls the library directly; the headless
+command line is a second thin caller of the same pipeline. External solvers are
+optional child processes.
 
 ```
-        alas-app  (ALAS.exe)
-             |
-        alas-gui  ------------- alas-viz
-             |                      |
-        alas-pipeline  ---------- alas-report
-             |
-  +----------+----------+----------+----------+
-  |          |          |          |          |
-alas-opt  alas-mission alas-struct alas-screen ...
-  |          |          |          |
-  +----------+----------+----------+
-             |
-     the physics crates
-             |
-   alas-geom, alas-atmo, alas-math, alas-units
+                     alas-app  (ALAS binary: GUI or headless CLI)
+                         |
+        alas-gui --------+-------- alas-report --- alas-viz
+   (desktop application)               (figures, SVG/PDF)
+      |   |   |   \                        |
+      |   |   |    alas-cfd, alas-uav      |
+      |   |   |    (OpenFOAM airfoil       |
+      |   |   |     studies; electric UAV  |
+      |   |   |     selection)             |
+      |   |   |                            |
+      +---+---+------ alas-pipeline -------+
+                       |
+        alas-opt   alas-screen   alas-struct   alas-mission
+            \          |             |            /
+             alas-mass  alas-payload  alas-stab  alas-perf
+                       alas-aero   alas-prop
+                            |
+      alas-geom   alas-route   alas-exec
+                            |
+             alas-config   alas-atmo
+                            |
+   alas-units  alas-math  alas-i18n  alas-config-derive
 ```
 
-Nothing below `alas-gui` knows a user interface exists. That is the same
-"UI-agnostic core" rule the Python implementation had, and it is what lets the
-headless command line and the desktop application be the same program: both are
-thin callers of `alas-pipeline`.
+Arrows in the sketch are indicative; the authoritative graph is each crate's
+`Cargo.toml`, which Cargo keeps acyclic. Nothing below `alas-gui` knows a user
+interface exists.
 
 ---
 
-## Crate layering
+## Crate map
 
-Crates are organized by discipline, not by layer-cake convention. The
-dependency graph is acyclic and shallow, and Cargo enforces it.
+Crates are organised by discipline. Dependencies listed are the workspace
+crates each one uses in `[dependencies]`.
 
-**L0: foundations, no ALAS concepts**
-`alas-units` (unit conversion factors), `alas-math` (linear algebra wrappers,
-splines, the Chebyshev differentiation matrices, the MINPACK root finder),
-`alas-types` (the stage status contract), `alas-i18n` (English and Spanish
-string tables), `alas-config-derive` (the settings metadata macro).
+**Foundations (no ALAS domain concepts)**
 
-**L1: description of an aircraft and its environment**
-`alas-config` (every tunable value, ~5,600 Python lines' worth),
-`alas-atmo` (the two atmosphere models).
+| Crate | Role |
+|---|---|
+| `alas-units` | Conversion factors to base SI. |
+| `alas-math` | Splines, Chebyshev operators, small dense linear algebra, root finding. |
+| `alas-i18n` | English source strings and the Spanish catalogue lookup. |
+| `alas-fonts` | Bundled typefaces shared by the GUI and the SVG rasteriser. |
+| `alas-config-derive` | `#[derive(ConfigNode)]`, the settings-metadata macro. |
+| `alas-exec` | Child-process supervision for external solvers. |
+| `alas-testkit` | Fixture loading and tolerance assertions for parity tests. |
 
-**L2: geometry and the outside world**
-`alas-geom` (airfoils, wings, fuselages, the aircraft builder, the structural
-mesh), `alas-route` (great-circle, airways, flight plans), `alas-exec`
-(child-process orchestration for external solvers).
+**Description of an aircraft and its environment**
 
-**L3: disciplinary analyses**
-`alas-aero` (both vortex-lattice methods, the airfoil surrogate, drag
-build-ups), `alas-prop` (the turbofan cycle), `alas-mass`, `alas-stab`,
-`alas-perf`, `alas-payload`.
+| Crate | Role | Depends on |
+|---|---|---|
+| `alas-atmo` | ISA, US 1976 and the fitted atmosphere used by the reference model. | math |
+| `alas-config` | Every tunable value, the registered aircraft presets, fuel policy, airport data, and the settings metadata. | atmo, config-derive, i18n |
+| `alas-geom` | Airfoils, wings, fuselages and the aircraft builder. | config, math |
+| `alas-route` | Great-circle, airway and flight-plan routes; navigation data assets. | config |
 
-**L4: composed analyses**
-`alas-mission` (the segment solver), `alas-struct` (loads, sizing, the
-finite-element bridge), `alas-opt` (the design search), `alas-screen` (airfoil
-screening).
+**Disciplinary analyses**
 
-**L5: orchestration and output**
-`alas-pipeline` (stage sequencing, concurrency, persistence), `alas-report`
-(figure scenes and their export).
+| Crate | Role | Depends on |
+|---|---|---|
+| `alas-aero` | In-process and mission vortex-lattice methods, airfoil and lift surrogates, drag build-up. | atmo, config, geom, math, exec |
+| `alas-prop` | On-design turbofan cycle. | atmo, config |
+| `alas-mass` | Component mass methods (Torenbeek, FLOPS transport), item-level mass ledger, tanks, fuel policy, dispatch closure. | geom, config, struct, units |
+| `alas-payload` | Cabin, cargo and baggage layout; payload centre of gravity. | geom, config, mass, math |
+| `alas-stab` | Static margin, neutral point, trim, dynamic modes. | aero, config, geom, atmo, math |
+| `alas-perf` | Point and field performance, V-speeds, landing-gear sizing. | config, atmo |
+| `alas-mission` | Segment-based mission solver. | aero, atmo, config, math, prop |
+| `alas-struct` | Wingbox loads and sizing, analytical deflection, Nastran and NASTRAN-95 decks, OP2 reader. | config, exec, geom |
+| `alas-uav` | Fixed-wing electric UAV component catalogue and feasibility physics. | geom, aero, atmo |
+| `alas-cfd` | Two-dimensional OpenFOAM airfoil study contract (Gmsh extrusion, case lifecycle, parsers). | exec, geom |
 
-**L6: presentation**
-`alas-viz` (drawing a scene with egui), `alas-gui` (the application),
-`alas-app` (the binary, and the headless command line).
+**Composed analyses, orchestration and output**
 
-Test-only members: `alas-testkit` (fixture loading and tolerance assertions),
-`alas-acceptance` (end-to-end comparison against the Python implementation).
-`xtask` holds the repository checks.
+| Crate | Role | Depends on |
+|---|---|---|
+| `alas-opt` | Objective evaluation, envelope checks, multidisciplinary sizing loop, L-SHADE differential evolution. | types, config, geom, atmo, mass, struct, payload, perf, aero, prop, stab, math, units, mission |
+| `alas-screen` | Airfoil-database batch screening. | config, geom, atmo, mass, aero, stab, opt |
+| `alas-pipeline` | Stage sequencing, feasibility, CPACS and OpenVSP/AVL/VSPAERO adapters, run manifests. | config, geom, atmo, mass, payload, perf, aero, stab, opt, struct, mission, prop, route, math, exec, units |
+| `alas-report` | Figure scenes, SVG/PNG/PDF export, design report. | most analysis crates, screen, opt, pipeline |
+| `alas-viz` | Draws a scene into egui, with pan, zoom and fit. | fonts, report |
+| `alas-gui` | The desktop application (egui/wgpu), including the CFD and UAV pages. | pipeline, report, viz, opt, screen, cfd, uav and others |
+| `alas-app` | The `ALAS` binary and the headless command line. | config, gui, report, pipeline, exec, route |
+
+**Verification**
+
+| Crate | Role |
+|---|---|
+| `alas-acceptance` | End-to-end acceptance matrix over the registered presets, preset audits and the benchmark binary (`alas-bench`). |
+| `xtask` | Repository tasks (`cargo xtask`): gate, checks, evidence audit, benchmarks, packaging. |
+
+---
+
+## Data flow of a design run
+
+`alas-pipeline::pipeline` runs seven numbered stages (the stage names are the
+identifiers in the run log), after configuration and geometry are resolved.
+
+0. **Configuration.** `alas-config` resolves a preset or user YAML into one
+   `AlasConfig`: design vector, geometry scaffold, requirements, engine, mass
+   model, fuel policy and solver settings. Every computational crate reads its
+   numbers from it.
+   **Geometry.** `alas-geom` builds the aircraft (wings, fuselage, tails, gear
+   scaffold) from the design vector. Nothing downstream re-derives a planform.
+1. **`baseline`.** Fast weight-and-balance and stability estimate
+   (`alas-mass`, `alas-payload`, `alas-perf`, `alas-stab`).
+2. **`optimization`.** `alas-opt` searches the design vector with L-SHADE
+   differential evolution under the epsilon-constrained method. Each
+   candidate is closed as a multidisciplinary analysis: geometry and mass build,
+   aerodynamics (`alas-aero`), propulsion (`alas-prop`), mission sizing and fuel
+   closure (`alas-mission`, `alas-mass::dispatch`), trim and CG envelope
+   (`alas-stab`), payload layout (`alas-payload`) and structural feasibility
+   (`alas-struct`). Optimisation can be skipped.
+3. **`full_analysis`.** Fine vortex-lattice polars, trim, neutral point, CG
+   envelope, mass and CG anchor for the baseline and optimised designs.
+4. **`geometry_export`.** CPACS export and geometry canonicalisation; design
+   database and Selig airfoil files.
+5. **`downstream`.** Runs concurrently: flown mission at the fuel-policy
+   takeoff mass with lateral routing (`alas-mission`, `alas-route`), MSES
+   two-dimensional transonic analysis, wingbox sizing, mesh and deck
+   construction, analytical deflection and optional Nastran or NASTRAN-95
+   solves (`alas-struct`), and the optional VSPAERO, AVL and FLOWUnsteady
+   comparisons.
+6. **`feasibility`.** Physical feasibility assessment over all results,
+   producing typed findings rather than a single pass/fail.
+7. **`finalization`.** Artifacts and the run manifest.
+
+Reporting sits on top: `alas-report` turns results into backend-neutral scenes
+and the design report; `alas-viz` draws them in the GUI and the export path
+writes SVG, PNG and PDF.
+
+`alas-screen` (airfoil screening), `alas-cfd` (OpenFOAM airfoil studies) and
+`alas-uav` (electric UAV selection) are separate workflows launched from the
+GUI; they are not stages of the transport-aircraft pipeline.
 
 ---
 
 ## Four mechanisms worth understanding
 
-Most of the codebase is straightforward: equations in, numbers out. Four pieces
-carry structural weight, and everything else is arranged around them.
+### 1. Typed analysis status
 
-### 1. The stage status contract
-
-Every analysis that can fail to happen returns a `Stage<T>`, which is one of
-`Ok`, `Error` or `NotRun`. It serializes to exactly the JSON shape the Python
-implementation produced, which is what lets the two be compared field by field.
-
-This is the type-level form of "degrade honestly". An analysis that could not
-run says so, and says why; it never returns a plausible number instead. A
-figure whose data is `NotRun` renders as a stated absence, not an empty axis.
-
-The distinction between `Error` and `NotRun` matters: a missing MSES
-installation is `NotRun` and expected, an MSES run that diverged is `Error` and
-is not.
+Every analysis that can fail to happen reports a typed status of its own (for
+example `MsesStatus`, `VspaeroAnalysisStatus`, `ResultStatus`) that
+distinguishes a result, an `Error` and `NotRun`. An analysis that could not
+run says so and says why; it never returns a plausible number instead. A figure whose data is `NotRun`
+renders as a stated absence, not an empty axis. A missing MSES installation is
+`NotRun` and expected; an MSES run that diverged is `Error` and is not.
 
 ### 2. Configuration metadata drives the interface
 
-Configuration structs carry per-field metadata (a label, a unit, a help text,
-bounds) declared once with `#[derive(ConfigNode)]` and a `#[config(...)]`
-attribute. The doc comment is the help text, so there is one place to write it.
-
-From that single declaration come the settings forms, the YAML round trip, and
-the translation keys. There is no hand-maintained table of fields anywhere, and
-the macro refuses to compile a public field that has neither metadata nor an
-explicit `skip`. In the Python implementation the same idea was implemented with
-`dataclasses.field(metadata=...)` and read reflectively at runtime; here it is
-checked at compile time, which is the one thing that arrangement could not do.
-
-The rule this enforces is "no hardcoded design values": anything a user might
-reasonably want to tune is a configuration field, and being a configuration
-field automatically means being visible, labelled and documented in the
-interface.
+Configuration structs carry per-field metadata (label, unit, help text, bounds)
+declared once with `#[derive(ConfigNode)]` and `#[config(...)]`. The settings
+forms, the YAML round trip and the translation keys all derive from that single
+declaration. The macro refuses to compile a public field that has neither
+metadata nor an explicit `skip`, which enforces the rule that anything a user
+might reasonably tune is a visible, labelled configuration field.
 
 ### 3. Figures are scenes, not drawings
 
 A figure produces a backend-neutral description (polylines, polygons, text,
-images, axes) and never touches a drawing API directly. `alas-viz` renders a
-scene into an egui panel; the export path renders the same scene to SVG, and
-from there to PNG and to a multi-page PDF.
-
-This exists because the two consumers have irreconcilable requirements. The
-interactive view needs to redraw at frame rate into a GPU surface; the export
-needs 200 dpi raster and vector output with no window open. Writing each figure
-twice would guarantee they drift. Writing them once against a scene means a
-figure is a pure function from results to geometry, which is also what makes it
-testable: the parity test checks the scene's numbers, not its pixels.
-
-Three-dimensional views are projected on the CPU and emitted as ordinary scene
-geometry. That is what Matplotlib's 3D axes do as well, so this is a faithful
-reproduction rather than a compromise.
+images, axes) and never touches a drawing API. `alas-viz` renders a scene into
+an egui panel; the export path renders the same scene to SVG, then PNG and PDF.
+A figure is therefore a pure function from results to geometry, and tests check
+the scene's numbers rather than its pixels. Three-dimensional views are
+projected on the CPU into ordinary scene geometry.
 
 ### 4. External solvers are a process boundary
 
-MSES, MSC Nastran, NASTRAN-95 and AVL are separate executables. `alas-exec`
-owns everything about running them: locating them, writing their input decks,
-feeding them the keystrokes they expect, killing the whole process tree on
-timeout, and parsing what they print.
-
-The rest of the program sees a function returning a `Stage<T>`. No analysis
-crate knows a subprocess exists.
-
-Two details are not incidental. Killing the process tree rather than the child
-matters because these solvers fork a second-level worker that survives its
-parent and goes on holding a licence seat. And every one of them is optional:
-the program computes an analytical answer where it has one, and reports the
-absence where it does not.
+MSES, MSC Nastran, NASTRAN-95, AVL, VSPAERO, OpenVSP, OpenFOAM/Gmsh and
+Patran are separate executables, all optional. `alas-exec` owns launching and
+supervising them (on Windows every child is placed in a kill-on-close Job
+Object, so ending ALAS ends them too). Adapters live beside the discipline they
+serve (`alas-struct` for Nastran, `alas-pipeline` for AVL, VSPAERO, OpenVSP and
+Patran, `alas-cfd` for OpenFOAM). The rest of the program sees each adapter's typed status;
+where an analytical answer exists it is computed without the solver, and where
+it does not, the absence is reported.
 
 ---
 
 ## Concurrency
 
-The pipeline runs its independent stages concurrently (the mission, the
-two-dimensional airfoil analysis and the structural solve do not depend on each
-other) and the airfoil screening evaluates candidates in parallel.
-
-Two things the Python implementation needed are gone. There is no module-level
-render lock, because figure construction is a pure function with no global
-drawing state to serialize. And parallelism is real: the screening's thousand
-candidates run on all cores rather than contending for one interpreter.
+The pipeline runs independent stages concurrently, the optimiser evaluates
+candidates on a bounded worker pool, and airfoil screening evaluates candidates
+in parallel. In the product profile search results do not depend on the worker count: a generation's
+trial vectors are built in fixed order from the seeded stream and evaluated in
+index order. Cancellation is a shared flag checked inside the search and at
+stage boundaries.
 
 ---
 
-## What was dropped, and why
+## Deliberate departures from the Python implementation
 
-Recorded here so that the absence is a decision rather than an oversight. Each
-also has a row in `docs/PORTING.md`.
+Each has a row in `docs/PORTING.md`.
 
 - **The HTTP sidecar and its schema, route and run-management modules.** The
-  interface calls the library directly. This removes the loopback attack
-  surface the Python implementation had to defend against with an origin
-  blocklist, and with it the AGPL section 13 question.
-- **Patran.** It only ever produced PNG images of a deformed wingbox. The
-  displacements it drew are already read from the results file, so the program
-  draws them itself.
-- **PyVista.** It backed a 3D globe that was no longer wired into the interface,
-  and it accounted for a large fraction of the frozen bundle's size.
-- **The lazy-import machinery.** Three separate mechanisms existed to defer
-  AeroSandbox's ten-second import cost off the startup path. A native binary
-  has no import cost to defer.
+  interface calls the library directly.
+- **The lazy-import machinery.** A native binary has no import cost to defer.
+- **PyVista.** The 3-D globe is drawn natively from scene geometry.
+- **Patran rendering.** Deformed-wingbox images are drawn natively from the displacements read from the results file; the optional Patran adapter (`alas-pipeline::patran`) only exports images when Patran is installed.

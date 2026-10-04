@@ -285,10 +285,60 @@ def _none_reason(figure_id):
     return "Reference registry returned None for the representative run."
 
 
+# Named results-bullet contracts recorded in the corpus, in corpus order.
+RESULT_BULLET_NAMES = [
+    "aero_panel",
+    "airfoil_comparison",
+    "airfoil_evolution",
+    "airfoil_reynolds",
+    "asb_threeviews",
+    "cabin_payload",
+    "cg_envelope",
+    "control_surfaces",
+    "design_evolution",
+    "drag_breakdown",
+    "dynamic_modes",
+    "fuel_volume_check",
+    "landing_gear_planform",
+    "lto_arrival",
+    "mass_breakdown",
+    "mass_distribution",
+    "matching_chart",
+    "mission_aero_coefficients",
+    "mission_aero_forces",
+    "mission_drag_components",
+    "mission_flight_path",
+    "mission_profile",
+    "mission_route_2d",
+    "mission_velocities",
+    "model_comparison",
+    "mses figures",
+    "optimization_history",
+    "payload_range",
+    "planform_comparison",
+    "polar_comparison",
+    "propulsion_altitude_sweep",
+    "propulsion_bpr_sensitivity",
+    "propulsion_carpet_plot",
+    "propulsion_cycle_summary",
+    "propulsion_efficiency_decomposition",
+    "span_loading",
+    "stability_metrics",
+    "stability_sideview",
+    "structures_loads",
+    "structures_modes",
+    "structures_patran",
+    "structures_sizing",
+    "structures_stress",
+    "structures_vibration",
+    "vlm_flow",
+    "vn_diagram",
+    "wireframe figures",
+]
+
+
 def _result_bullet_names():
-    text = (ROOT / "MISSING-THINGS.md").read_text(encoding="utf-8")
-    section = text.split("## Results", 1)[1].split("## Physics discrepancies", 1)[0]
-    return [match.group(1).strip() for match in re.finditer(r"^- ([^:]+):", section, re.M)]
+    return list(RESULT_BULLET_NAMES)
 
 
 def _contract_id(bullet):

@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/config/cabin_config.py (`SeatClassConfig`)
-// Reference: alas @ rust-port-baseline.
 
 //! One block of the passenger cabin.
 //!

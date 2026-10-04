@@ -8,6 +8,45 @@ pub(super) fn localize_scene_text(text: &str) -> String {
     if exact != text {
         return exact.into_owned();
     }
+    // A counted legend label, "Valid (391)": the name translates, the count
+    // passes through.
+    if let Some((label, count)) = text
+        .strip_suffix(')')
+        .and_then(|value| value.rsplit_once(" ("))
+        .filter(|(_, count)| !count.is_empty() && count.chars().all(|c| c.is_ascii_digit()))
+    {
+        let translated = alas_i18n::t(Some(label), None);
+        if translated != label {
+            return format!("{translated} ({count})");
+        }
+    }
+    if let Some(start) = text.find(|character: char| character.is_ascii_digit()) {
+        let labels: Vec<_> = text[..start].trim_end().split(" / ").collect();
+        if labels.iter().all(|label| {
+            matches!(
+                *label,
+                "Analyzed ZFW" | "Sized TOW" | "Analyzed TOW" | "Design LW"
+            )
+        }) {
+            return format!(
+                "{} {}",
+                labels
+                    .iter()
+                    .map(|label| alas_i18n::t(Some(label), None).into_owned())
+                    .collect::<Vec<_>>()
+                    .join(" / "),
+                &text[start..]
+            );
+        }
+    }
+    // A sheet title, "<aircraft>  -  <sheet name>": the aircraft name is a
+    // proper name and passes through.
+    if let Some((name, sheet)) = text.split_once("  -  ") {
+        let translated = alas_i18n::t(Some(sheet), None);
+        if translated != sheet {
+            return format!("{name}  -  {translated}");
+        }
+    }
     if let Some((heading, detail)) = text.split_once('\n') {
         let localized_heading = alas_i18n::t(Some(heading), None);
         let localized_detail = alas_i18n::t(Some(detail), None);
@@ -49,7 +88,6 @@ pub(super) fn localize_scene_text(text: &str) -> String {
     }
     for (prefix, key) in [
         ("Wingbox planform", "Wingbox planform"),
-        ("FEM vs Torenbeek wing mass", "FEM vs Torenbeek wing mass"),
         ("Lift curve", "Lift curve"),
         ("Spar x/c=", "Spar x/c="),
         ("Engine:", "Engine:"),
@@ -81,6 +119,10 @@ pub(super) fn localize_scene_text(text: &str) -> String {
         let key = format!("{prefix}: ");
         let translated = alas_i18n::t(Some(&key), None);
         if translated != key {
+            // A value that is itself a catalog phrase (an outcome or a
+            // termination reason) is translated; numbers and units pass
+            // through unchanged.
+            let value = alas_i18n::t(Some(value), None);
             return format!("{indent}{translated}{value}");
         }
     }

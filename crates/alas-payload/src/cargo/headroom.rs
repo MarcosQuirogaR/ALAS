@@ -122,6 +122,15 @@ pub(super) fn collision_contour_at(
 /// This is not an aircraft-specific handling or certification limit.
 pub(super) const MIN_BULK_HOLD_CLEAR_HEIGHT_M: f64 = 0.9;
 
+/// Whether the fuselage has no practical under-floor hold: the lower deck's
+/// clear height mid-cabin is below [`MIN_BULK_HOLD_CLEAR_HEIGHT_M`], so the
+/// baggage is stowed on the main deck ahead of and behind the seats (the
+/// ATR 72-600's arrangement, factsheet p. 22).
+pub(crate) fn lacks_underfloor_hold(geometry: &CabinGeometry) -> bool {
+    let x_mid = 0.5 * (geometry.cabin_start_x + geometry.cabin_end_x);
+    geometry.deck_height(&geometry.lower_deck, x_mid) < MIN_BULK_HOLD_CLEAR_HEIGHT_M
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

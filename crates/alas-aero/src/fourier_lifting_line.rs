@@ -27,5 +27,13 @@
 //!   "Force Calculations for Lifting Line," 2005.
 //! - L. Prandtl, NACA-TN-182, "Induced Drag of Multiplanes," 1924.
 
-include!("fourier_lifting_line_parts/part_01.rs");
-include!("fourier_lifting_line_parts/part_02.rs");
+use alas_geom::aircraft::airfoil::Airfoil;
+use alas_geom::aircraft::airplane::Airplane;
+use alas_geom::aircraft::wing::Wing;
+use alas_math::linalg;
+use std::f64::consts::PI;
+use thiserror::Error;
+
+mod surface;
+pub use surface::*;
+mod aircraft;

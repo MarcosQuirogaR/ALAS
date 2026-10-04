@@ -112,7 +112,14 @@ fn structures_config_for(overrides: &Map<String, Value>) -> StructuresConfig {
 
 fn build_geometry(case: &Case) -> WingStructureGeometry {
     let dv = DesignVector::default();
-    let wing_cfg = WingConfig::default();
+    // The frozen reference's planform: a break station at `break_span_fraction`
+    // and the outboard sweep decrement. The current default configuration also
+    // carries a kink and side-of-body station, which the reference predates.
+    let wing_cfg = WingConfig {
+        kink_span_fraction: None,
+        side_of_body_span_fraction: None,
+        ..WingConfig::default()
+    };
     let root_base =
         AirfoilLibrary::get(&wing_cfg.root_airfoil).expect("the configured root airfoil resolves");
     let root_section =

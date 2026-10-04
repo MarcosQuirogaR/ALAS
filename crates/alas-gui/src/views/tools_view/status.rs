@@ -14,6 +14,7 @@ struct ExternalToolStatus {
     built_at: f64,
     environment: RunEnvironment,
     nastran: ExecutableDiscovery,
+    nastran95: String,
     patran: ExecutableDiscovery,
     openvsp: ExecutableDiscovery,
     vspaero: ExecutableDiscovery,
@@ -70,6 +71,7 @@ pub(super) fn resolved_status(state: &AppState, ui: &mut Ui) {
                 describe_optional_directory(&config.mission.routes_dir),
             );
             status_row(ui, "NASTRAN", describe_executable(&snapshot.nastran));
+            status_row(ui, "NASTRAN-95", snapshot.nastran95.clone());
             status_row(
                 ui,
                 "MSC solver override",
@@ -97,10 +99,14 @@ pub(super) fn resolved_status(state: &AppState, ui: &mut Ui) {
 
 fn status_fingerprint(state: &AppState, config: &alas_config::AlasConfig) -> String {
     format!(
-        "{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
+        "{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
         config.mses.mses_dir,
         config.structures.nastran_exe_path,
         config.structures.nastran_solver_path,
+        config.structures.nastran95_dir_path,
+        config.structures.nastran95_runtime_path,
+        config.structures.nastran95_rf_stage_path,
+        config.structures.nastran95_open_core_words,
         config.structures.patran_exe_path,
         config.mission.navdata_dir,
         config.mission.routes_dir,
@@ -175,12 +181,42 @@ fn build_status_snapshot(
         built_at,
         environment,
         nastran: nastran_status,
+        nastran95: describe_nastran95(&config.structures),
         patran: patran_status,
         openvsp: openvsp_status,
         vspaero: vspaero_status,
         avl: avl_status,
         flowunsteady: flowunsteady_status,
         parafoam: cfd::detect_parafoam(state),
+    }
+}
+
+fn describe_nastran95(config: &alas_config::structures::StructuresConfig) -> String {
+    use alas_struct::nastran95::Nastran95Solver;
+    let directory = config.nastran95_dir_path.trim();
+    let runtime = config.nastran95_runtime_path.trim();
+    let rf_stage = config.nastran95_rf_stage_path.trim();
+    let open_core = config.nastran95_open_core_words.trim();
+    let solver = if directory.is_empty() {
+        Nastran95Solver::from_env().or_else(Nastran95Solver::from_adjacent_bundle)
+    } else {
+        Nastran95Solver::from_paths(
+            std::path::Path::new(directory),
+            (!runtime.is_empty()).then(|| std::path::Path::new(runtime)),
+            (!rf_stage.is_empty()).then(|| std::path::Path::new(rf_stage)),
+            (!open_core.is_empty()).then_some(open_core),
+        )
+    };
+    match solver {
+        Some(solver) => tr_fields(
+            "{path} (executable and rigid formats found)",
+            &[("path", solver.exe.display().to_string())],
+        ),
+        None if directory.is_empty() => tr("not configured or discovered"),
+        None => tr_fields(
+            "not found under {path} (need build/bin/nastran.exe and rf/NASINFO)",
+            &[("path", directory.to_owned())],
+        ),
     }
 }
 
@@ -201,6 +237,16 @@ mod tests {
             initial,
             "changing an expensive discovery root must invalidate the cached status"
         );
+    }
+
+    #[test]
+    fn status_cache_fingerprint_tracks_nastran95_paths() {
+        let mut state = AppState::default();
+        let initial = status_fingerprint(&state, &state.typed_config().expect("default config"));
+        state.config_values["structures"]["nastran95_dir_path"] =
+            serde_json::Value::String("C:/nastran95-test".to_owned());
+        let changed = status_fingerprint(&state, &state.typed_config().expect("updated config"));
+        assert_ne!(initial, changed);
     }
 
     #[test]

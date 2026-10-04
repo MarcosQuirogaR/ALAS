@@ -180,7 +180,7 @@ Acceptance:
 - Every output states model version, policy, provenance, validity domain, and
   uncertainty.
 
-## Delivery status, 2026-09-06
+## Delivery status
 
 The typed mass and fuel contracts (P1), the coupled required-fuel closure
 (P2) and the tank-local part of P4 are in the normal product pipeline.
@@ -213,11 +213,10 @@ has been validated against flight or operational-flight-plan data.
   implemented.
 - **Mission-sized optimization.** `optimizer.objective` selects block fuel,
   takeoff mass, empty mass or fuel per seat-kilometre over a design range
-  under the fuel policy, with the takeoff mass closed by an inner fixed
-  point and every requirement family declared hard, soft, diagnostic or
-  off; a candidate's tank capacity follows its own spar box through the
-  preset's per-cell calibration. The legacy lift-to-drag objective remains
-  the default.
+  under the fuel policy. The selected MTOW mode fixes or closes takeoff mass;
+  every constraint is hard, while intrinsic study preferences contribute to
+  the score and diagnostics report findings. A candidate's tank capacity
+  follows its own spar box through the preset's per-cell calibration.
 - **Not done:** P3 (winds, CAS/Mach schedules, legwise routing), the trim
   coupling of P4, and all of P5.
 

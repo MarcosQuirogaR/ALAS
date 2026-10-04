@@ -100,6 +100,11 @@ fn full_analysis_matches_reference_fixtures() {
 
     for (name, expected) in cases {
         let mut config = AlasConfig::default();
+        // The frozen fixtures were generated with the Python default 2 %
+        // minimum nose-gear load; the product default is now 6 %
+        // (Raymer/Torenbeek steering guidance), so the reference run pins
+        // the reference value explicitly.
+        config.mass_model.pct_load_nlg_min = 0.02;
         if name == "narrowbody" {
             config.requirements.cruise_mach = 0.78;
             config.requirements.cruise_altitude_m = 10668.0;

@@ -24,8 +24,7 @@ What the fixture records as *inputs* is the whole of what the correlations
 read: the freestream state SUAVE's own ``US_Standard_1976`` produced, and the
 per-wing lift and inviscid induced drag the vortex-lattice surrogate supplied.
 The second of those is ``alas-aero::lift_surrogate``'s output, taken here as
-data -- the same arrangement ``alas-mass::suave_transport`` uses for
-``sealevel_static_thrust``. Without it there is nothing to compare: with
+data. Without it there is nothing to compare: with
 ``span_efficiency`` at its ``None`` default the inviscid induced drag *is* the
 vortex lattice's, not a closed form.
 

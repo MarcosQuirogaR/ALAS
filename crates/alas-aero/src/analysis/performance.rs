@@ -2,14 +2,13 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/physics/aerodynamics.py
-// Reference: alas @ rust-port-baseline.
 
 //! The three entry points that run the vortex lattice and correct what it
 //! returns: `AeroAnalysis`' "performance estimates" section.
 //!
 //! Each is a different budget. [`AeroAnalysis::quick_performance`] runs two
-//! probe solves and linearizes between them, which is what the optimizer can
-//! afford inside its loop. [`AeroAnalysis::trimmed_performance`] runs exactly
+//! probe solves to estimate the target angle and a third for its drag.
+//! [`AeroAnalysis::trimmed_performance`] runs exactly
 //! one solve, at an angle and a stabilizer incidence a trim solve has already
 //! settled, so the induced drag it reports is the real trim drag rather than
 //! an added-on correction. [`AeroAnalysis::run_sweep`] runs one solve per
@@ -24,7 +23,7 @@ use alas_geom::aircraft::wing::Wing;
 use alas_math::interp;
 
 use crate::operating_point::OperatingPoint;
-use crate::vlm::{self, VlmError, VlmResult};
+use crate::vlm::{self, VlmError, VlmResult, VlmSystem};
 
 use super::{compressible_report_alpha, swept_pg_beta, AeroAnalysis};
 
@@ -54,6 +53,17 @@ pub struct TrimPoint {
     pub cl_alpha: f64,
 }
 
+/// Inviscid coefficients of one fully rotated trimmed lattice.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TrimmedInviscid {
+    /// Lift coefficient in wind axes, referenced to the aircraft area.
+    pub cl: f64,
+    /// Pitching moment coefficient about the aircraft reference, body axes.
+    pub cm_residual: f64,
+    /// Trefftz induced drag in the product, near-field on the reference path.
+    pub cd_induced: f64,
+}
+
 /// What the two-point cruise estimate reports: `quick_performance`'s dict.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct QuickPerformance {
@@ -81,7 +91,8 @@ pub struct TrimmedPerformance {
     pub cd: f64,
     /// Parasite drag coefficient at the trimmed operating point.
     pub cd_parasite: f64,
-    /// Induced drag coefficient returned by the vortex-lattice solve.
+    /// Induced drag coefficient of the vortex-lattice solve: Trefftz-plane
+    /// in the product, the near-field sum on the frozen reference path.
     pub cd_induced: f64,
     /// Wave drag coefficient from the configured compressibility correction.
     pub cd_wave: f64,
@@ -110,7 +121,8 @@ pub struct PolarSweep {
     pub cl: Vec<f64>,
     /// Total drag coefficient.
     pub cd: Vec<f64>,
-    /// The vortex lattice's induced-drag term.
+    /// The vortex lattice's induced-drag term (Trefftz-plane in the product,
+    /// near-field on the frozen reference path).
     pub cd_induced: Vec<f64>,
     /// The Korn wave-drag term.
     pub cd_wave: Vec<f64>,
@@ -123,35 +135,53 @@ pub struct PolarSweep {
 }
 
 impl AeroAnalysis<'_> {
-    /// One vortex-lattice solve at `op_point`: `_run_vlm`.
-    fn run_vlm(&self, op_point: &OperatingPoint) -> Result<VlmResult, VlmError> {
-        self.run_vlm_on(self.plane, op_point)
-    }
-
-    /// The same solve, on a specific airplane, which is only ever a
-    /// modified copy of `self.plane`, in [`Self::trimmed_performance`].
-    fn run_vlm_on(
+    /// The induced-drag coefficient of one solve of `plane`.
+    ///
+    /// The product takes it in the Trefftz plane
+    /// ([`vlm::trefftz_induced_drag_coefficient`], whose module doc measures
+    /// why): the near-field force sum gives a cambered, swept or
+    /// dihedralled lattice a spurious thrust, enough to put the span
+    /// efficiency of an untwisted planar wing above Munk's bound. The frozen
+    /// reference path keeps the near-field sum its fixtures were made with.
+    ///
+    /// `system`, when the solve came from one, caches the drag form across
+    /// solves.
+    ///
+    /// # Errors
+    ///
+    /// [`VlmError::NonFiniteResult`] when the solved panels do not form
+    /// strips or the far-field drag is not finite.
+    fn induced_drag(
         &self,
-        plane: &alas_geom::aircraft::airplane::Airplane,
+        solved: &VlmResult,
         op_point: &OperatingPoint,
-    ) -> Result<VlmResult, VlmError> {
-        // `usize` rather than the configuration's `i64`: a negative or zero
-        // resolution is not a mesh, and both fields are documented as
-        // multipliers of at least one.
-        vlm::run(
-            plane,
-            op_point,
-            self.analysis.spanwise_resolution.max(1) as usize,
-            self.analysis.chordwise_resolution.max(1) as usize,
-        )
+        system: Option<&vlm::VlmSystem<'_>>,
+        plane: &alas_geom::aircraft::airplane::Airplane,
+    ) -> Result<f64, VlmError> {
+        if self.reference_compatibility {
+            return Ok(solved.cd_drag);
+        }
+        match system {
+            Some(system) => system.trefftz_induced_drag_coefficient(solved, op_point),
+            None => vlm::trefftz_induced_drag_coefficient(solved, op_point, plane.s_ref),
+        }
+        .ok_or(VlmError::NonFiniteResult)
     }
 
     /// The mesh and factored influence matrix of `self.plane` at the
     /// configured resolution, assembled once so that a schedule of operating
     /// points pays the O(n^3) factorization a single time.
     fn system(&self) -> Result<vlm::VlmSystem<'_>, VlmError> {
-        vlm::VlmSystem::assemble(
-            self.plane,
+        let (spanwise, chordwise) = self.mesh_resolution();
+        vlm::VlmSystem::assemble(self.plane, spanwise, chordwise)
+    }
+
+    /// The configured `(spanwise, chordwise)` mesh resolution as the `usize`
+    /// pair the solver takes rather than the configuration's `i64`: floored
+    /// at one, since a negative or zero resolution is not a mesh and both
+    /// fields are documented as multipliers of at least one.
+    fn mesh_resolution(&self) -> (usize, usize) {
+        (
             self.analysis.spanwise_resolution.max(1) as usize,
             self.analysis.chordwise_resolution.max(1) as usize,
         )
@@ -167,9 +197,10 @@ impl AeroAnalysis<'_> {
     /// `quick_performance`.
     ///
     /// Two probe solves fix a lift-curve slope; the angle that reaches
-    /// `cl_target` follows from it, and the induced drag is scaled off the
-    /// low probe's own `CD`/`CL^2`. The empirical components are then added
-    /// at the physical `cl_target`, not at either probe.
+    /// `cl_target` follows from it. The product takes the far-field induced
+    /// drag of a third solve at that angle; the frozen reference path scales
+    /// the low probe's own `CD`/`CL^2`. The empirical components are then
+    /// added at the physical `cl_target`, not at either probe.
     ///
     /// # Errors
     ///
@@ -199,11 +230,20 @@ impl AeroAnalysis<'_> {
         let alpha_report =
             compressible_report_alpha(alpha_required, alpha_zero_lift, mach, self.sweep_deg);
 
-        // The 1e-9 keeps a probe that produced no lift from dividing by zero;
-        // it is upstream's, and it is why this is a two-point estimate rather
-        // than a polar fit.
-        let k_induced = low.cd_drag / (low.cl_lift * low.cl_lift + 1e-9);
-        let cd_induced = k_induced * cl_target * cl_target;
+        let cd_induced = if self.reference_compatibility {
+            // The frozen estimate scales the low probe's near-field drag by
+            // `CL^2` through the origin. The 1e-9 keeps a probe that produced
+            // no lift from dividing by zero; it is upstream's.
+            let k_induced = low.cd_drag / (low.cl_lift * low.cl_lift + 1e-9);
+            k_induced * cl_target * cl_target
+        } else {
+            // A cambered or twisted wing's induced drag is not proportional
+            // to `CL^2` through the origin, so the product solves once more at
+            // the angle that reaches the target and takes its far-field drag.
+            let op_point = Self::level_op_point(atmosphere, velocity, alpha_required);
+            let at_target = system.solve(&op_point)?;
+            self.induced_drag(&at_target, &op_point, Some(&system), self.plane)?
+        };
         let components =
             self.drag_components(mach, altitude_m, cl_target, cd_induced, Some(&atmosphere));
         Ok(QuickPerformance {
@@ -231,30 +271,18 @@ impl AeroAnalysis<'_> {
         mach: f64,
         altitude_m: f64,
     ) -> Result<TrimmedPerformance, VlmError> {
+        let inviscid = self.trimmed_inviscid(trim, mach, altitude_m)?;
         let atmosphere = Atmosphere::new(altitude_m);
-        let velocity = mach * atmosphere.speed_of_sound();
-        let op_point = Self::level_op_point(atmosphere, velocity, trim.trim_alpha_deg);
+        let cl_trim = inviscid.cl;
+        let components = self.drag_components(
+            mach,
+            altitude_m,
+            cl_trim,
+            inviscid.cd_induced,
+            Some(&atmosphere),
+        );
 
-        // Upstream overwrites every stabilizer section's twist in place and
-        // restores it in a `finally`. A copy for the duration of the solve
-        // is the same thing without the window in which an exception would
-        // leave the aircraft altered, and it is also why the restore's own
-        // quirk (it writes `xsecs[0]`'s twist back to all of them, losing any
-        // spanwise variation) has nothing to reproduce here: no section of
-        // `self.plane` is ever written to.
-        let perturbed = self.with_stabilizer_incidence(trim.trim_ih_deg);
-        let solved = match &perturbed {
-            Some(plane) => self.run_vlm_on(plane, &op_point)?,
-            None => self.run_vlm(&op_point)?,
-        };
-
-        let cl_trim = solved.cl_lift;
-        let components =
-            self.drag_components(mach, altitude_m, cl_trim, solved.cd_drag, Some(&atmosphere));
-
-        // The solve ran at the incompressible trim angle, so CL and CD, and
-        // therefore L/D and the trim drag, are already right; only the
-        // angle is reported corrected.
+        // Only the reporting angle receives the compressibility correction.
         let alpha_report = if trim.cl_alpha.abs() > CL_ALPHA_FLOOR {
             let alpha_zero_lift = trim.trim_alpha_deg - cl_trim / trim.cl_alpha;
             compressible_report_alpha(trim.trim_alpha_deg, alpha_zero_lift, mach, self.sweep_deg)
@@ -271,6 +299,50 @@ impl AeroAnalysis<'_> {
             cd_induced: components.cd_induced,
             cd_wave: components.cd_wave,
             cl: cl_trim,
+            cm_residual: inviscid.cm_residual,
+        })
+    }
+
+    /// The exact inviscid part of [`Self::trimmed_performance`]. Trim-node
+    /// iteration needs only lift, pitching moment and wake energy, so it can
+    /// omit the independent parasite/wave buildup and reporting conversion.
+    ///
+    /// # Errors
+    ///
+    /// See [`VlmError`].
+    pub fn trimmed_inviscid(
+        &self,
+        trim: &TrimPoint,
+        mach: f64,
+        altitude_m: f64,
+    ) -> Result<TrimmedInviscid, VlmError> {
+        let atmosphere = Atmosphere::new(altitude_m);
+        let velocity = mach * atmosphere.speed_of_sound();
+        let op_point = Self::level_op_point(atmosphere, velocity, trim.trim_alpha_deg);
+
+        // Upstream overwrites every stabilizer section's twist in place and
+        // restores it in a `finally`. A copy for the duration of the solve
+        // is the same thing without the window in which an exception would
+        // leave the aircraft altered, and it is also why the restore's own
+        // quirk (it writes `xsecs[0]`'s twist back to all of them, losing any
+        // spanwise variation) has nothing to reproduce here: no section of
+        // `self.plane` is ever written to.
+        let perturbed = self.with_stabilizer_incidence(trim.trim_ih_deg);
+        let plane = perturbed.as_ref().unwrap_or(self.plane);
+        let (spanwise, chordwise) = self.mesh_resolution();
+        let system = {
+            let mut cache = self
+                .vlm_cache
+                .lock()
+                .map_err(|_| VlmError::NonFiniteResult)?;
+            VlmSystem::assemble_cached(plane, spanwise, chordwise, &mut cache)?
+        };
+        let solved = system.solve(&op_point)?;
+
+        let cd_induced = self.induced_drag(&solved, &op_point, Some(&system), plane)?;
+        Ok(TrimmedInviscid {
+            cl: solved.cl_lift,
+            cd_induced,
             cm_residual: solved.cm_pitch,
         })
     }
@@ -306,6 +378,29 @@ impl AeroAnalysis<'_> {
     ///
     /// See [`VlmError`].
     pub fn run_sweep(&self, mach: f64, altitude_m: f64) -> Result<PolarSweep, VlmError> {
+        let system = self.system()?;
+        self.run_sweep_with_system(&system, mach, altitude_m)
+    }
+
+    /// [`Self::run_sweep`], reusing an already-assembled VLM system instead
+    /// of assembling a fresh one.
+    ///
+    /// `system` must be [`vlm::VlmSystem::assemble`]d from `self.plane` at
+    /// `self.analysis`'s spanwise/chordwise resolution; the influence matrix
+    /// depends on the geometry and mesh alone, so a caller that already paid
+    /// for that factorization for the same aircraft (e.g. the neutral-point
+    /// or trim probes run at the same fine mesh) reuses it here instead of
+    /// refactoring an identical matrix.
+    ///
+    /// # Errors
+    ///
+    /// See [`VlmError`].
+    pub fn run_sweep_with_system(
+        &self,
+        system: &vlm::VlmSystem<'_>,
+        mach: f64,
+        altitude_m: f64,
+    ) -> Result<PolarSweep, VlmError> {
         let atmosphere = Atmosphere::new(altitude_m);
         let velocity = mach * atmosphere.speed_of_sound();
         let alphas = linspace(
@@ -330,14 +425,16 @@ impl AeroAnalysis<'_> {
         // schedule shares one assembly and one factorization; each angle is
         // a new right-hand side.
         if !alphas.is_empty() {
-            let system = self.system()?;
             for alpha in &alphas {
-                let solved = system.solve(&Self::level_op_point(atmosphere, velocity, *alpha))?;
+                let op_point = Self::level_op_point(atmosphere, velocity, *alpha);
+                let solved = system.solve(&op_point)?;
+                let cd_induced =
+                    self.induced_drag(&solved, &op_point, Some(system), system.airplane())?;
                 let components = self.drag_components(
                     mach,
                     altitude_m,
                     solved.cl_lift,
-                    solved.cd_drag,
+                    cd_induced,
                     Some(&atmosphere),
                 );
                 sweep.alpha_deg.push(*alpha);

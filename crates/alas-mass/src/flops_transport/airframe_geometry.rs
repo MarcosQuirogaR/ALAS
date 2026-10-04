@@ -6,7 +6,7 @@
 //! the nacelle dimensions, and the spanwise stations of the detailed wing
 //! method.
 
-use alas_config::GeometryConfig;
+use alas_config::{GeometryConfig, WingConfig};
 use alas_geom::aircraft::airplane::Airplane;
 use alas_geom::aircraft::fuselage::Fuselage;
 use alas_geom::aircraft::spacing::linspace;
@@ -16,6 +16,37 @@ use super::wing_bending::{elliptical_load_intensity, WingStation};
 
 /// Spanwise integration stations per semispan for the detailed wing method.
 const DETAILED_WING_STATIONS: usize = 41;
+
+/// The built main wing and primary fuselage, with the fuselage measures the
+/// structural equations read.
+pub(super) struct BuiltFuselage<'a> {
+    /// The primary fuselage.
+    pub fuselage: &'a Fuselage,
+    /// The main wing.
+    pub wing: &'a Wing,
+    /// Maximum fuselage width `WF`, m.
+    pub width_m: f64,
+    /// Maximum fuselage depth `DF`, m.
+    pub depth_m: f64,
+    /// Fuselage length `XL`, first to last section, m.
+    pub length_m: f64,
+}
+
+impl<'a> BuiltFuselage<'a> {
+    /// Measure `fuselage` beside `wing`.
+    pub(super) fn of(wing: &'a Wing, fuselage: &'a Fuselage) -> Self {
+        let (width_m, depth_m) = super::product::max_fuselage_width_depth(fuselage);
+        let length_m = fuselage.xsecs.last().map_or(0.0, |x| x.xyz_c[0])
+            - fuselage.xsecs.first().map_or(0.0, |x| x.xyz_c[0]);
+        Self {
+            fuselage,
+            wing,
+            width_m,
+            depth_m,
+            length_m,
+        }
+    }
+}
 
 pub(super) fn find_surface<'a>(plane: &'a Airplane, name: &str, index: usize) -> Option<&'a Wing> {
     plane
@@ -52,7 +83,12 @@ pub(super) fn average_thickness(wing: &Wing) -> f64 {
     }
 }
 
-pub(super) fn dihedral_deg(wing: &Wing) -> f64 {
+/// Root-to-tip leading-edge dihedral of the main wing in its static ground
+/// shape, deg. The built wing is the 1 g flight shape, so the configured
+/// static-to-1 g tip rise is taken back off its tip
+/// ([`alas_config::WingShape`]); equation 66's dihedral term is a ground-roll
+/// clearance under the outboard engine, measured on the wing as it stands.
+pub(super) fn ground_dihedral_deg(wing: &Wing, wing_config: &WingConfig) -> f64 {
     let (Some(root), Some(tip)) = (wing.xsecs.first(), wing.xsecs.last()) else {
         return 0.0;
     };
@@ -60,7 +96,11 @@ pub(super) fn dihedral_deg(wing: &Wing) -> f64 {
     if dy <= 0.0 {
         return 0.0;
     }
-    ((tip.xyz_le[2] - root.xyz_le[2]) / dy).atan().to_degrees()
+    // The builder has already rejected an invalid rise, so none is left.
+    let tip_rise_m = wing_config.flight_tip_rise_m(dy).unwrap_or(0.0);
+    ((tip.xyz_le[2] - tip_rise_m - root.xyz_le[2]) / dy)
+        .atan()
+        .to_degrees()
 }
 
 /// Approximate wetted area of a lifting surface: twice the planform,

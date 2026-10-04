@@ -433,9 +433,9 @@ The second layer is useful for gap management. It must not be rendered as the th
 
 Use screened, traceable, verified_by_conceptual_analysis, not_evaluated, inconclusive, evaluator_failed, and future_certification_input. Reserve compliant, approved, certified, and finding_of_compliance for an actual certification workflow outside ALAS.
 
-## Explicit mapping to REQUIREMENTS_FIRST_AIRCRAFT_DESIGN.md
+## Requirements mapping
 
-The repository brief already contains the right conceptual seams. The following mapping turns each seam into a requirements-and-systems-engineering artifact.
+The requirements-first design (see `docs/design-constraints.md`) already contains the right conceptual seams. The following mapping turns each seam into a requirements-and-systems-engineering artifact.
 
 | Repository brief section or step | Requirements-engineering interpretation | ALAS data/evaluator consequence |
 |---|---|---|

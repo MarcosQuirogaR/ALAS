@@ -2,8 +2,7 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/reporting/visualization.py (`figure_payload_range`) and
-// alas/physics/performance.py (`payload_range_diagram`, `wing_fuel_volume_m3`).
-// Reference: alas @ rust-port-baseline.
+// alas/physics/performance.py (`payload_range_diagram`).
 
 //! The conceptual A-B-C-D payload-range curve from the analyzed aircraft.
 //!
@@ -12,12 +11,11 @@
 //! the inputs here prevents a renderer from quietly reverting to a plausible
 //! transport-sized set of points when the aircraft or its fuel model changes.
 
-use alas_atmo::Atmosphere;
-use alas_config::{presets, ActiveEngineModel, AlasConfig};
-use alas_geom::aircraft::wing::Wing;
-use alas_perf::performance::breguet_range_m;
+use alas_config::{presets, AlasConfig};
+use alas_mass::breakdown::OEW_KEYS;
 use alas_pipeline::feasibility::{assess_fuel_capacity, FuelCapacityEvidence};
 use alas_pipeline::full_analysis::AnalysisReport;
+use alas_pipeline::quick_analysis::corners::{corner_ranges, CornerMasses, RangeBasis};
 use alas_pipeline::quick_analysis::payload_capacity_estimate;
 
 use super::support::format_thousands;
@@ -25,26 +23,16 @@ use crate::chart_kit::draw_title;
 use crate::scene::{Axes2D, Color, Fill, Scene, SceneElement, Stroke, TextAlign, TextBaseline};
 use crate::theme::get_palette;
 
-const G: f64 = 9.81;
 const M_TO_NM: f64 = 1852.0;
 const BLUE: &str = "tab:blue";
-const OEW_KEYS: &[&str] = &[
-    "Wing",
-    "H-Stab",
-    "V-Stab",
-    "Fuselage",
-    "Gear",
-    "Propulsion",
-    "Systems",
-    "Furnishings",
-];
 
 /// One labelled corner of the conceptual payload-range curve.
 #[derive(Debug, Clone, Copy)]
 pub struct PayloadRangePoint {
     /// Which corner of the A-B-C-D curve this is.
     pub label: &'static str,
-    /// Still-air Breguet range at this corner, nautical miles.
+    /// Still-air range at this corner, nautical miles (see
+    /// [`PayloadRangeData::range_basis`]).
     pub range_nm: f64,
     /// Payload carried at this corner, kilograms.
     pub payload_kg: f64,
@@ -67,14 +55,24 @@ pub struct PayloadRangeData {
     pub payload_basis: &'static str,
     /// Modelled operating empty weight, kilograms.
     pub oew_kg: f64,
-    /// Maximum takeoff weight the curve was built on, kilograms.
+    /// Takeoff mass the curve was built on, kilograms: the mission-sized mass
+    /// when `mass_is_sized`, else the declared MTOW.
     pub mtow_kg: f64,
-    /// Range method and its provenance.
+    /// True when `mtow_kg` is the pipeline's sized takeoff mass rather than
+    /// the declared MTOW.
+    pub mass_is_sized: bool,
+    /// Reserve fuel the plan holds back at each corner (A to D), kilograms;
+    /// zero at A.
+    pub reserve_fuel_kg: [f64; 4],
+    /// What the ranges include: the reserve-inclusive fuel plan.
+    pub range_basis: RangeBasis,
+    /// Range method and its provenance, including the fuel scheme.
     pub method_note: String,
 }
 
-/// Generate an idealized Breguet payload-range curve from the report's masses,
-/// aerodynamic point, and typed fuel-capacity evidence.
+/// Generate the payload-range curve from the report's masses, fuel model
+/// and typed fuel-capacity evidence, every corner priced by the report's
+/// segment mission model with reserves (`alas_pipeline::quick_analysis::corners`).
 ///
 /// This is a conceptual model check, not an AFM/WBM operational capability
 /// envelope or a mission-certified range result.
@@ -88,7 +86,7 @@ pub fn figure_payload_range(
         let message = if report.airplane.wings.is_empty() {
             "The analyzed report has no main wing; conceptual payload range cannot be computed."
         } else {
-            "Typed usable-fuel capacity evidence is unavailable; conceptual payload range cannot be computed."
+            "Typed usable-fuel capacity evidence or the fuel model is unavailable; conceptual payload range cannot be computed."
         };
         return status_scene("Conceptual Payload-Range Diagram", message, theme);
     };
@@ -203,11 +201,26 @@ pub fn figure_payload_range(
     });
     scene.add(SceneElement::Text {
         text: format!(
-            "OEW: {} kg   |   MTOW: {} kg",
+            "OEW: {} kg   |   {}: {} kg",
             format_thousands(data.oew_kg),
+            if data.mass_is_sized {
+                "Sized TOW"
+            } else {
+                "MTOW"
+            },
             format_thousands(data.mtow_kg)
         ),
         pos: [axes.left + axes.width * 0.5, axes.top + axes.height + 56.0],
+        font_size: 7.5,
+        color: Color::from_hex(pal.tick),
+        align: TextAlign::Center,
+        baseline: TextBaseline::Bottom,
+        angle_deg: 0.0,
+        bold: false,
+    });
+    scene.add(SceneElement::Text {
+        text: format!("Range basis: {}", data.range_basis.label()),
+        pos: [axes.left + axes.width * 0.5, axes.top + axes.height + 70.0],
         font_size: 7.5,
         color: Color::from_hex(pal.tick),
         align: TextAlign::Center,
@@ -234,7 +247,16 @@ pub fn payload_range_data(
         .map(|key| masses.get(*key).copied().unwrap_or(0.0))
         .sum();
     let analyzed_payload_kg = masses.get("Payload").copied().unwrap_or(0.0);
-    let mtow_kg = config.requirements.mtow_kg;
+    // Capability corners trade payload against fuel under the aircraft's
+    // limit. Under Hard MTOW that limit is the declared MTOW, which one
+    // volume-limited load case does not lower; a mission-closed aircraft's
+    // limit is its sized takeoff mass.
+    let mtow_kg =
+        if config.optimizer.objective.mtow_sizing == alas_config::MtowSizing::FixedRequirement {
+            report.aircraft_mtow_limit_kg(config.requirements.mtow_kg)
+        } else {
+            report.analysis_takeoff_mass_kg(config.requirements.mtow_kg)
+        };
 
     // A payload-range chart is an aircraft-capability curve, not a second
     // drawing of the currently selected cabin load. The old implementation
@@ -270,7 +292,7 @@ pub fn payload_range_data(
     let (max_payload_kg, payload_basis) = (capacity.capacity_kg, capacity.basis);
 
     let fuel_capacity = assess_fuel_capacity(config, &report.design, report);
-    let fuel_capacity_kg = fuel_capacity
+    let tank_capacity_kg = fuel_capacity
         .capacity_kg
         .filter(|value| value.is_finite())?;
     let fuel_capacity_limit = match fuel_capacity.evidence {
@@ -279,134 +301,46 @@ pub fn payload_range_data(
         FuelCapacityEvidence::Unavailable => "unavailable",
     };
     let structural_capacity_kg = (mtow_kg - oew_kg).max(0.0);
-    let (fuel_capacity_kg, fuel_capacity_limit) = if fuel_capacity_kg <= structural_capacity_kg {
-        (fuel_capacity_kg, fuel_capacity_limit)
+    let (fuel_capacity_kg, fuel_capacity_limit) = if tank_capacity_kg <= structural_capacity_kg {
+        (tank_capacity_kg, fuel_capacity_limit)
     } else {
         (structural_capacity_kg, "MTOW budget")
     };
 
-    let l_over_d = report
-        .trimmed_design_point
-        .as_ref()
-        .map(|point| point.l_over_d)
-        .unwrap_or(report.design_point.l_over_d);
-    let atmo = Atmosphere::new(config.requirements.cruise_altitude_m);
-    let tas_m_s = config.requirements.cruise_mach * atmo.speed_of_sound();
-    let active_model = config.geometry.engine.active_model().ok()?;
-    let (range_nm, method_note): (Box<dyn Fn(f64, f64) -> f64>, String) = match active_model {
-        ActiveEngineModel::Turbofan(spec) => {
-            let tsfc_si = spec.cruise_tsfc_kg_kgf_hr / (G * 3600.0);
-            (
-                Box::new(move |start_kg, end_kg| {
-                    breguet_range_m(tas_m_s, l_over_d, tsfc_si, start_kg, end_kg) / M_TO_NM
-                }),
-                // Keep the stable figure label generic; the engine family is
-                // already explicit in the typed calculation branch and the
-                // footer's limitation warning.
-                "CONCEPTUAL BREGUET RANGE ONLY".to_owned(),
-            )
-        }
-        ActiveEngineModel::Turboprop(spec) => {
-            // The catalogue anchor is a two-engine figure; scale it with the
-            // installed engine count so an edited installation changes range.
-            let installed = config.geometry.engine.spanwise_positions_m.len();
-            let fuel_flow_kg_h = spec.installed_cruise_fuel_flow_kg_h(installed)?;
-            if !fuel_flow_kg_h.is_finite() || fuel_flow_kg_h <= 0.0 {
-                return None;
-            }
-            (Box::new(move |start_kg, end_kg| tas_m_s * 3600.0 * (start_kg - end_kg).max(0.0) / fuel_flow_kg_h / M_TO_NM), format!("CONCEPTUAL TURBOPROP CONSTANT-FLOW RANGE AT MAX-CRUISE ANCHOR ({fuel_flow_kg_h:.0} kg/h TOTAL); NO OFF-DESIGN DECK"))
-        }
-    };
-
-    let fuel_b = fuel_capacity_kg
-        .min(mtow_kg - oew_kg - max_payload_kg)
-        .max(0.0);
-    let tow_b = oew_kg + max_payload_kg + fuel_b;
-    let payload_c = (mtow_kg - oew_kg - fuel_capacity_kg)
-        .min(max_payload_kg)
-        .max(0.0);
-    let tow_c = oew_kg + payload_c + fuel_capacity_kg;
-    let tow_d = oew_kg + fuel_capacity_kg;
+    // The ranges come from the same routine the sandbox Quick Analysis uses,
+    // so both surfaces publish one set of corners for one report.
+    let ranges = corner_ranges(
+        config,
+        report,
+        &CornerMasses {
+            mtow_kg,
+            oew_kg,
+            max_payload_kg,
+            tank_capacity_kg,
+        },
+    )
+    .ok()?;
+    let labels = ["A", "B", "C", "D"];
+    let points = std::array::from_fn(|index| PayloadRangePoint {
+        label: labels[index],
+        range_nm: ranges.range_m[index] / M_TO_NM,
+        payload_kg: ranges.payload_kg[index],
+    });
 
     Some(PayloadRangeData {
-        points: [
-            PayloadRangePoint {
-                label: "A",
-                range_nm: 0.0,
-                payload_kg: max_payload_kg,
-            },
-            PayloadRangePoint {
-                label: "B",
-                range_nm: range_nm(tow_b, tow_b - fuel_b),
-                payload_kg: max_payload_kg,
-            },
-            PayloadRangePoint {
-                label: "C",
-                range_nm: range_nm(tow_c, tow_c - fuel_capacity_kg),
-                payload_kg: payload_c,
-            },
-            PayloadRangePoint {
-                label: "D",
-                range_nm: range_nm(tow_d, oew_kg),
-                payload_kg: 0.0,
-            },
-        ],
+        points,
         fuel_capacity_kg,
         fuel_capacity_limit,
         payload_basis,
         oew_kg,
+        mass_is_sized: report.sized_takeoff_mass_kg().is_some(),
         mtow_kg,
-        method_note,
+        reserve_fuel_kg: ranges.reserve_fuel_kg,
+        range_basis: ranges.basis,
+        method_note: ranges.note,
     })
-}
-
-// Retained as an explicit compatibility/reference correlation for standalone
-// comparison tests; product capacity comes from typed feasibility evidence.
-// It has no product caller and it has DRIFTED from the two live implementations:
-// this one uses `unfolded_area`/`unfolded_span` while
-// `families::mass_balance_layout::fuel_volume::wing_fuel_volume_m3` and
-// `alas_opt::objective_model` use `reference_area`/`reference_span`. It is a
-// second, different answer to the same question and must not be quoted as
-// agreeing with either. Delete-or-reconcile is recorded as a report-owner item.
-#[allow(dead_code)]
-fn wing_fuel_volume_m3(wing: &Wing, usable_fraction: f64) -> f64 {
-    if wing.xsecs.len() < 2 {
-        return 0.0;
-    }
-    let x: Vec<f64> = (0..=100).map(|i| i as f64 / 100.0).collect();
-    let t_over_c_root = wing.xsecs[0].airfoil.max_thickness(&x);
-    let area = wing.unfolded_area();
-    let span = wing.unfolded_span().max(1e-6);
-    let taper = wing.taper_ratio();
-    let taper_term = (1.0 + taper + taper * taper) / (1.0 + taper).powi(2);
-    let geometric_volume = 0.54 * (area * area / span) * t_over_c_root * taper_term;
-    geometric_volume * usable_fraction.clamp(0.0, 1.0)
 }
 
 fn status_scene(title: &str, message: &str, theme: Option<&str>) -> Scene {
     crate::status_figure::figure_status_message(title, message, false, theme)
-}
-
-#[cfg(test)]
-mod tests {
-    // These tests intentionally panic if their constructed fixture violates its precondition.
-    #![allow(clippy::unwrap_used, clippy::expect_used)]
-
-    use super::*;
-    use alas_geom::aircraft::airfoil::Airfoil;
-    use alas_geom::aircraft::wing::{Wing, WingXSec};
-
-    #[test]
-    fn the_wing_fuel_volume_is_zero_when_the_usable_fraction_is_zero() {
-        let airfoil = Airfoil::from_name("naca0012").unwrap();
-        let wing = Wing::new(
-            "Probe",
-            vec![
-                WingXSec::new([0.0, 0.0, 0.0], 3.0, 0.0, airfoil.clone()),
-                WingXSec::new([0.0, 8.0, 0.0], 3.0, 0.0, airfoil),
-            ],
-            true,
-        );
-        assert_eq!(wing_fuel_volume_m3(&wing, 0.0), 0.0);
-    }
 }

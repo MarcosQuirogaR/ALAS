@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/reporting/visualization.py (`figure_airfoil_evolution` L1124-1161)
-// Reference: alas @ rust-port-baseline.
 
 //! Every main-wing cross-section's airfoil outline, coloured by spanwise
 //! position with a colorbar: `figure_airfoil_evolution`.

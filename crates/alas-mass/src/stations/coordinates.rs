@@ -3,7 +3,7 @@
 
 //! The lumped ten-group coordinates read off the component stations.
 //!
-//! Every consumer of the legacy breakdown: the trim anchor, the model CG
+//! Every consumer of the lumped breakdown: the trim anchor, the model CG
 //! envelope, the figures: reads one point per group. Deriving those points
 //! from the same stations the item ledger places its rows at is what keeps
 //! the two representations from disagreeing about where the aircraft
@@ -20,8 +20,8 @@ use super::ComponentStations;
 pub const NOSE_GEAR_MASS_FRACTION: f64 = 0.15;
 
 /// Vertical offset of the no-nacelle propulsion point below the wing
-/// station, the legacy breakdown's convention for an engine drawn without a
-/// nacelle body.
+/// station, the breakdown's convention for an engine drawn without a nacelle
+/// body.
 const NO_NACELLE_PROPULSION_DROP_M: f64 = 1.0;
 
 impl ComponentStations {
@@ -37,12 +37,38 @@ impl ComponentStations {
         centroid
     }
 
-    /// The mean of the propulsion units, or the legacy wing-station point
-    /// when the aircraft was built without nacelle bodies.
+    /// The mean of the propulsion units, or the wing-station point when the
+    /// aircraft was built without nacelle bodies.
+    ///
+    /// This silently substitutes the wing centroid (offset 1 m down) for the
+    /// propulsion mass's station whenever no nacelle stations
+    /// exist, which is indistinguishable from a real fuselage/tail-mounted
+    /// engine at that exact point unless the caller separately checks
+    /// [`Self::propulsion_station_fallback`]. A caller that cares whether
+    /// this fallback is active (rather than a real nacelle centroid) should
+    /// use [`Self::propulsion_centroid_with_diagnostic_m`] instead.
     pub fn propulsion_centroid_m(&self) -> [f64; 3] {
+        self.propulsion_centroid_with_diagnostic_m().0
+    }
+
+    /// [`Self::propulsion_centroid_m`], paired with whether that point is
+    /// the no-nacelle fallback rather than a real propulsion-unit centroid.
+    ///
+    /// A design with a non-trivial propulsion mass but no nacelle stations
+    /// (e.g. a pipeline run built without engines, `include_engines =
+    /// false`) gets its engines placed at the wing centroid, roughly 3-4 m
+    /// off a typical wing-mounted nacelle's real longitudinal station. A
+    /// consumer that publishes or gates on this centroid (an audit table, a
+    /// CG verdict) should check this flag and refuse or flag the result
+    /// rather than silently reporting a lumped-in-with-the-wing propulsion
+    /// group as if it were measured.
+    pub fn propulsion_centroid_with_diagnostic_m(&self) -> ([f64; 3], bool) {
         if self.propulsion_units.is_empty() {
             let wing = self.wing.position_m;
-            return [wing[0], wing[1], wing[2] - NO_NACELLE_PROPULSION_DROP_M];
+            return (
+                [wing[0], wing[1], wing[2] - NO_NACELLE_PROPULSION_DROP_M],
+                true,
+            );
         }
         let count = self.propulsion_units.len() as f64;
         let mut centroid = [0.0; 3];
@@ -51,10 +77,18 @@ impl ComponentStations {
                 *value += unit.position_m[axis] / count;
             }
         }
-        centroid
+        (centroid, false)
     }
 
-    /// The lumped coordinates the legacy breakdown consumers read.
+    /// Whether [`Self::propulsion_centroid_m`] is currently the no-nacelle
+    /// fallback (the wing centroid, offset down) rather than a real
+    /// propulsion-unit centroid.
+    #[inline]
+    pub fn propulsion_station_fallback(&self) -> bool {
+        self.propulsion_units.is_empty()
+    }
+
+    /// The lumped coordinates the breakdown consumers read.
     ///
     /// `payload_position_m` is the detailed layout's centre when one exists
     /// and the occupied-cabin fallback otherwise; `fuel_position_m` is the
@@ -119,7 +153,7 @@ mod tests {
     }
 
     #[test]
-    fn a_missing_nacelle_falls_back_to_the_legacy_wing_point() {
+    fn a_missing_nacelle_falls_back_to_the_wing_point() {
         let centroid = stations().propulsion_centroid_m();
         assert_eq!(centroid, [30.0, 0.0, -2.0]);
         let mut with_units = stations();

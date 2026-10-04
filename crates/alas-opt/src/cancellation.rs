@@ -21,11 +21,11 @@
 //!   when the flag was read: one coupled evaluation, one screening block, or
 //!   one supervised external-solver call.
 //!
-//! The 2026-09-22 A320-200 `quick_draft` smoke reported 28.76 s of drain with
-//! no way to say which of the two it was, or which phase it was spent in. The
-//! instrumentation here answers that: every phase entry, the phase and
-//! evaluation index in flight when the request arrived, the first observation,
-//! the return, and the per-evaluation cost that sets the bound.
+//! The total drain time alone cannot say which of the two it was, or which
+//! phase it was spent in. The instrumentation here records every phase entry,
+//! the phase and evaluation index in flight when the request arrived, the
+//! first observation, the return, and the per-evaluation cost that sets the
+//! bound.
 //!
 //! # How it attaches without changing any signature
 //!
@@ -92,6 +92,8 @@ pub enum CancelPhase {
     ReportingFidelityVerification,
     /// The search has returned.
     SearchFinished,
+    /// Bounded local restoration of hard-constraint feasibility.
+    FeasibilityRestoration,
 }
 
 impl CancelPhase {
@@ -107,6 +109,7 @@ impl CancelPhase {
             Self::ExternalSolverCall => 6,
             Self::ReportingFidelityVerification => 7,
             Self::SearchFinished => 8,
+            Self::FeasibilityRestoration => 9,
         }
     }
 
@@ -123,6 +126,7 @@ impl CancelPhase {
             6 => Self::ExternalSolverCall,
             7 => Self::ReportingFidelityVerification,
             8 => Self::SearchFinished,
+            9 => Self::FeasibilityRestoration,
             _ => Self::NotStarted,
         }
     }
@@ -139,75 +143,14 @@ impl CancelPhase {
             Self::ExternalSolverCall => "external_solver_call",
             Self::ReportingFidelityVerification => "reporting_fidelity_verification",
             Self::SearchFinished => "search_finished",
+            Self::FeasibilityRestoration => "feasibility_restoration",
         }
     }
 }
 
-/// Why a run stopped, as one closed set.
-///
-/// The four outcomes this task has to keep apart - an external wall-clock
-/// guard, a cooperative cancellation, an external tool being terminated, and
-/// the search's own convergence - are four distinct variants here, so a caller
-/// cannot report one as another by reading a free-text field loosely.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum StopReason {
-    /// The search met its own convergence criterion. The only reason that is
-    /// a positive result.
-    Converged,
-    /// The coupled-analysis budget was exhausted without convergence.
-    EvaluationBudget,
-    /// The configured iteration or generation count was exhausted without
-    /// convergence.
-    IterationLimit,
-    /// The mesh contracted below its floor without meeting the improvement
-    /// criterion.
-    MeshLimit,
-    /// The search's own internal wall-clock watchdog fired. Not convergence
-    /// and not cancellation: a safety limit inside the optimizer.
-    Watchdog,
-    /// A supervisor set the cooperative cancellation flag and the search
-    /// stopped on it.
-    Cancelled,
-    /// An external wall-clock guard outside the search expired. Distinct from
-    /// [`Self::Cancelled`]: the guard is what *requests* cancellation, and a
-    /// row that reports this reason is naming the requester.
-    ExternalGuardTimeout,
-    /// A supervised external solver process was polled out or force-killed.
-    ExternalToolTerminated,
-    /// The request itself was rejected before any search ran.
-    InvalidInput,
-    /// A reason the caller could not classify, kept verbatim rather than
-    /// mapped onto a neighbour.
-    Unclassified,
-}
-
-impl StopReason {
-    /// Map the optimizer's own `termination` vocabulary onto this set.
-    ///
-    /// Unknown strings become [`Self::Unclassified`]; they are never folded
-    /// into a nearby variant, because "we do not know why it stopped" and "it
-    /// converged" must not be able to alias.
-    pub fn from_termination(termination: &str) -> Self {
-        match termination {
-            "converged" => Self::Converged,
-            "evaluation_budget" => Self::EvaluationBudget,
-            "iteration_limit" => Self::IterationLimit,
-            "mesh_limit" => Self::MeshLimit,
-            "watchdog" => Self::Watchdog,
-            "cancelled" => Self::Cancelled,
-            "invalid_input" => Self::InvalidInput,
-            _ => Self::Unclassified,
-        }
-    }
-
-    /// Whether this reason permits a run to be reported as converged.
-    ///
-    /// Exactly one variant does.
-    pub const fn is_convergence(self) -> bool {
-        matches!(self, Self::Converged)
-    }
-}
+#[path = "cancellation/stop_reason.rs"]
+mod stop_reason;
+pub use stop_reason::StopReason;
 
 /// What a recorded telemetry event is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -455,7 +398,7 @@ impl CancelWatch {
         &self.flag
     }
 
-    /// Seconds from this watch's origin, monotonic.
+    /// Nanoseconds from this watch's origin, monotonic.
     fn now_ns(&self) -> u64 {
         u64::try_from(self.origin.elapsed().as_nanos()).unwrap_or(u64::MAX - 1)
     }
@@ -714,6 +657,36 @@ impl<'a> CancelScope<'a> {
         value
     }
 
+    /// Record a batch whose candidates ran concurrently on lanes that each
+    /// poll the flag between candidates: `durations` holds one entry per
+    /// candidate that ran, with whether it finished after the request. The
+    /// longest candidate is the cancellation bound, as for [`Self::evaluation`].
+    pub fn record_concurrent(&self, durations: &[(std::time::Duration, bool)]) {
+        let Some(watch) = self.watch.as_ref() else {
+            return;
+        };
+        let count = durations.len() as u64;
+        let after = durations.iter().filter(|(_, after)| *after).count() as u64;
+        let longest = durations
+            .iter()
+            .map(|(elapsed, _)| *elapsed)
+            .max()
+            .unwrap_or_default();
+        let longest = u64::try_from(longest.as_nanos()).unwrap_or(u64::MAX - 1);
+        watch
+            .evaluations_started
+            .fetch_add(count, Ordering::Relaxed);
+        watch
+            .longest_evaluation_ns
+            .fetch_max(longest, Ordering::Relaxed);
+        watch
+            .evaluations_completed
+            .fetch_add(count, Ordering::Relaxed);
+        watch
+            .evaluations_after_request
+            .fetch_add(after, Ordering::Relaxed);
+    }
+
     /// Run and time one uninterruptible block of `evaluations` candidates.
     ///
     /// Where a search checks the flag per block rather than per evaluation,
@@ -909,6 +882,8 @@ mod tests {
             "watchdog",
             "iteration_limit",
             "evaluation_budget",
+            "time_budget",
+            "stagnated",
             "mesh_limit",
             "something_new",
         ] {
@@ -937,5 +912,41 @@ mod tests {
         second_scope.evaluation(|| ());
         assert_eq!(first.snapshot().evaluations_completed, 0);
         assert_eq!(second.snapshot().evaluations_completed, 1);
+    }
+}
+
+#[path = "cancellation/evaluation.rs"]
+mod evaluation;
+pub(crate) use evaluation::{forward_evaluation_cancellation, EvaluationCancellation};
+
+#[cfg(test)]
+mod forwarding_tests {
+    use super::*;
+    use std::time::Duration;
+    #[test]
+    fn direct_replay_cancellation_forwards_bare_flag_and_finishes_monitor_on_panic() {
+        let flag = AtomicBool::new(false);
+        let token = EvaluationCancellation::new();
+        let started = Instant::now();
+        std::thread::scope(|scope| {
+            scope.spawn(|| {
+                std::thread::sleep(Duration::from_millis(30));
+                flag.store(true, Ordering::Release);
+            });
+            forward_evaluation_cancellation(Some(&flag), &token, || {
+                while !token.requested() && started.elapsed() < Duration::from_secs(2) {
+                    std::thread::sleep(Duration::from_millis(1));
+                }
+                assert!(token.requested());
+            });
+        });
+        assert!(started.elapsed() < Duration::from_secs(1));
+        let flag = AtomicBool::new(false);
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            forward_evaluation_cancellation(Some(&flag), &EvaluationCancellation::new(), || {
+                panic!("controlled replay panic")
+            });
+        }));
+        assert!(result.is_err());
     }
 }

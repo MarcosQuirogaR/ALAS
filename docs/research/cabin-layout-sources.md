@@ -93,3 +93,37 @@ Published standards and approved manufacturer/operator data may ultimately be
 needed for certification-quality work. Where standards are paywalled or not in
 the project evidence corpus, ALAS must state `evidence-required`; it must not
 invent a value or present a familiar industry heuristic as a regulatory limit.
+
+## Cabin allocation semantics
+
+- **One canonical layout.** The cabin builder produces a single layout that
+  configuration, sizing, mass/CG, feasibility, reports, 2-D views and the 3-D
+  preview all consume. Every seat, row, aisle, exit, monument, bin segment and
+  deck carries a stable ID.
+- **Three public class slots** (First, Business, Economy), ordered forward to
+  aft. Custom accepts three desired seat-share percentages; seat counts follow
+  from the remaining compliant geometry. There is no capacity-optimization
+  switch.
+- **"100% floor usage"** means all usable cabin floor is assigned, not that all
+  of it is seats. The ledger closes as
+  `usable floor = safety/egress + accessibility + service/crew + seating zones`.
+  Seating is the last claimant. Fragments too small to serve a function are
+  reported as an allocation residual rather than stretched over. Gross, usable,
+  allocated, seat-zone and residual area or length remain separate metrics.
+- **Seat shares are not floor shares.** Target seat mixes are converted into
+  longitudinal class zones using class pitch, seats abreast, aisle geometry,
+  cabin section and reserved monuments and exits.
+- **Preset anchors** are aircraft-specific: Ryanair Boeing 737-8200 (197 seats,
+  all economy), Iberia A350-900 (348 seats; 24 Premium Economy folded into the
+  Economy slot as a documented surrogate), Emirates A380 three-class (519 seats,
+  14/76/429). They are sizing archetypes, not reproductions of approved LOPAs.
+- **Result status.** Every implemented check reports one of `geometric-screen`,
+  `operational-screen`, `certification-constraint` or `evidence-required`.
+  Geometry may reject a concept but cannot certify one. Evacuation, accessible
+  lavatory usability, crashworthiness, bin retention, oxygen-mask reach and fire
+  behavior stay inconclusive without analysis, test or approved data.
+- **No hidden minima.** CS-25 and 14 CFR Part 25 set no universal economy pitch
+  or width, and lavatories-per-passenger ratios are provisioning heuristics, not
+  compliance evidence. When the layout cannot place a required function it fails
+  explicitly; it never silently lowers a clearance, drops a monument or changes
+  a class share.

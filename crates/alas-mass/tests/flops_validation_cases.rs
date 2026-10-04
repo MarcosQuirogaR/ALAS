@@ -14,8 +14,7 @@
 //!
 //! ## Provenance
 //!
-//! The numbers below were taken from the **pinned** sources recorded in an
-//! internal manifest (2026-09-11), copied to
+//! The numbers below were taken from the **pinned** sources recorded in
 //! `docs/flops-mass-sources.json`, each with its retrieval URL and SHA-256:
 //!
 //! * Aviary commit `c7affbbe54dcbeded7373eae05f771882e2bb28a`, files
@@ -24,9 +23,6 @@
 //!   `surface_controls.py`, retrieved 2026-09-11.
 //! * NASA/TM-2017-219627 Vol. I, the NTRS PDF and its extracted text,
 //!   `sha256:819a48fc9c8f34f14595d93f3e3d54dc8454298e83e64048c14ac7bda00bb51d`.
-//!
-//! This supersedes the earlier unpinned, model-transcribed summary in an
-//! internal report, which is retained only as a narrative note.
 //!
 //! This is implementation verification against the published equations as
 //! FLOPS itself evaluates them, not physical validation against weighed
@@ -140,6 +136,7 @@ mod large_single_aisle_2 {
             rated_thrust_per_engine_n: lbf(THRUST_LBF),
             paint_area_density_kg_m2: lbm(0.07) / (FOOT * FOOT),
             nacelle_mass_override_kg: None,
+            pressurized_fuselage: None,
             painted_wetted_area_m2: ft2(8_319.07),
         }
     }
@@ -497,6 +494,7 @@ mod large_single_aisle_1 {
             rated_thrust_per_engine_n: lbf(THRUST_LBF),
             paint_area_density_kg_m2: lbm(0.037) / (FOOT * FOOT),
             nacelle_mass_override_kg: None,
+            pressurized_fuselage: None,
             painted_wetted_area_m2: ft2(8_275.86),
         });
         check(

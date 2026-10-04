@@ -115,3 +115,30 @@ fn the_meshes_the_product_ships_are_all_solvable() {
         }
     }
 }
+
+#[test]
+fn a_fin_crossing_the_plane_of_the_wing_root_does_not_condition_the_matrix() {
+    // The ATR72-600 fin spans the height of the wing root's shared-edge
+    // trailing legs, so refining the chordwise mesh puts fin collocation
+    // points millimetres from those legs. The lift does not change with
+    // that, and neither may the verdict on the matrix.
+    let (airplane, config) = preset_airplane("ATR72-600");
+    let atmosphere = Atmosphere::new(config.requirements.cruise_altitude_m);
+    let velocity = config.requirements.cruise_mach * atmosphere.speed_of_sound();
+    let op_point = OperatingPoint::new(atmosphere, velocity, 2.0, 0.0, 0.0, 0.0, 0.0);
+
+    let mut lift = Vec::new();
+    for chordwise in [16_usize, 24] {
+        let result = VlmSystem::assemble(&airplane, 1, chordwise)
+            .unwrap()
+            .solve(&op_point)
+            .unwrap_or_else(|error| panic!("1x{chordwise}: {error}"));
+        assert!(
+            result.solve_diagnostics.pivot_ratio < 100.0,
+            "1x{chordwise}: pivot ratio {}",
+            result.solve_diagnostics.pivot_ratio
+        );
+        lift.push(result.cl_lift);
+    }
+    assert!((lift[0] - lift[1]).abs() < 0.01 * lift[1], "{lift:?}");
+}

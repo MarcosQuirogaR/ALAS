@@ -226,7 +226,7 @@ pub fn domain_template(
     }
     // No separate lift-interference advisory is emitted.  A 10-chord versus
     // 25-chord pair at two angles moved the measured lift-curve slope by only
-    // 0.7 % (0.12073 -> 0.11990 per degree; internal CFD study, 2026-09-16,
+    // 0.7 % (0.12073 -> 0.11990 per degree; internal CFD study
     // cases E10/F02 against H10/H11), which agrees with classical
     // closed-boundary interference being sub-1 % at these distances.  The
     // template's residual lift excess is a viscous

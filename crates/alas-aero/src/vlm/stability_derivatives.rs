@@ -203,8 +203,9 @@ impl DerivativeEvaluation<'_> {
 ///
 /// # Errors
 ///
-/// See [`VlmError`]: any of the six underlying [`super::run`] solves can fail
-/// the same way a single one can.
+/// See [`VlmError`]: any of the eleven underlying solves (the base point and
+/// both sides of five central differences) can fail the same way a single
+/// [`super::run`] can.
 pub fn run_with_stability_derivatives(
     airplane: &Airplane,
     op_point: &OperatingPoint,
@@ -348,31 +349,12 @@ fn run_with_stability_derivatives_options(
     let mut r_minus_point = *op_point;
     r_minus_point.r -= r_step;
 
-    let alpha_minus = if policy.central_difference {
-        Some(&alpha_minus_point)
-    } else {
-        None
-    };
-    let beta_minus = if policy.central_difference {
-        Some(&beta_minus_point)
-    } else {
-        None
-    };
-    let p_minus = if policy.central_difference {
-        Some(&p_minus_point)
-    } else {
-        None
-    };
-    let q_minus = if policy.central_difference {
-        Some(&q_minus_point)
-    } else {
-        None
-    };
-    let r_minus = if policy.central_difference {
-        Some(&r_minus_point)
-    } else {
-        None
-    };
+    let central = policy.central_difference;
+    let alpha_minus = central.then_some(&alpha_minus_point);
+    let beta_minus = central.then_some(&beta_minus_point);
+    let p_minus = central.then_some(&p_minus_point);
+    let q_minus = central.then_some(&q_minus_point);
+    let r_minus = central.then_some(&r_minus_point);
 
     let evaluation = DerivativeEvaluation {
         system: &system,

@@ -1,26 +1,22 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-// Ported from alas/pipeline.py (`StructuralAnalysisResult`, `_run_structural_analysis`).
-// Reference: alas @ rust-port-baseline.
-
 //! Structural wingbox sizing, mesh generation, analytical response, and solver execution.
 //!
 //! [`run_structural_analysis`] sizes the primary wingbox (caps, webs, skin, ribs),
 //! generates the NASTRAN finite element mesh deck, calculates analytical deflection
 //! and modal estimates, and optionally launches the NASTRAN solver if configured.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::Instant;
 
 use alas_config::materials::get as get_material;
 use alas_config::AlasConfig;
 use alas_exec::RunEnvironment;
 use alas_geom::wing_structure::WingStructureGeometry;
-use alas_struct::analytical::{analyze_structure, StructuralAnalysisReport};
-use alas_struct::mesh::{build_wing_mesh_bdf, MeshHealthReport};
+use alas_struct::mesh::build_wing_mesh_bdf_product;
+use alas_struct::nastran::run_nastran_analysis;
 use alas_struct::nastran::ResultStatus;
-use alas_struct::nastran::{run_nastran_analysis, NastranResults};
 use alas_struct::nastran95::run_nastran95_from_config_or_env;
 use alas_struct::sizing::WingboxSizing;
 
@@ -29,74 +25,8 @@ use crate::patran::run_patran_export;
 use crate::pipeline::{begin_component, finish_component};
 use crate::runs::RunEvent;
 
-/// Complete structural analysis outcomes for a pipeline run.
-#[derive(Debug, Clone, PartialEq)]
-pub struct StructuralAnalysisResult {
-    /// Overall structural status (`"ok"`, `"not_run"`, or `"error"`).
-    pub status: String,
-    /// Failure message if an error occurred.
-    pub error: Option<String>,
-    /// The rib/spar wingbox geometry the sizing and mesh were built from.
-    pub wsg: Option<WingStructureGeometry>,
-    /// Sized wingbox internal structural dimensions and masses.
-    pub sizing: Option<WingboxSizing>,
-    /// Finite-element mesh geometric health validation metrics.
-    pub mesh_health: Option<MeshHealthReport>,
-    /// Closed-form analytical deflection, stress, and natural frequency estimates.
-    pub analysis: Option<StructuralAnalysisReport>,
-    /// NASTRAN finite-element solution results, if executed.
-    pub nastran: Option<NastranResults>,
-    /// Independent NASA NASTRAN-95 solution results, when run alongside MSC.
-    pub nastran95: Option<NastranResults>,
-    /// Patran deformation renders, if an external export was performed.
-    pub patran: Option<PatranExportResult>,
-    /// Empirical Torenbeek wing mass, in kg, for comparison.
-    pub torenbeek_wing_mass_kg: f64,
-}
-
-/// Output of the optional Patran deformation-render export.
-///
-/// The Python result stores an insertion-ordered dictionary of load-case names
-/// to PNG paths. A vector preserves that order without introducing a map whose
-/// iteration order would differ from the render order.
-#[derive(Debug, Clone, PartialEq)]
-pub struct PatranExportResult {
-    /// Export state (`"not_run"`, `"ok"`, or `"error"`).
-    pub status: String,
-    /// Failure or partial-export detail, when present. Error text preserves
-    /// the boundary category (absent, incomplete, invalid, launch, timeout,
-    /// or artifact validation) so the GUI can provide recovery guidance.
-    pub error: Option<String>,
-    /// Load-case names and the corresponding rendered PNG paths.
-    pub png_paths: Vec<(String, PathBuf)>,
-}
-
-impl Default for PatranExportResult {
-    fn default() -> Self {
-        Self {
-            status: "not_run".to_owned(),
-            error: None,
-            png_paths: Vec::new(),
-        }
-    }
-}
-
-impl Default for StructuralAnalysisResult {
-    fn default() -> Self {
-        Self {
-            status: "not_run".to_owned(),
-            error: None,
-            wsg: None,
-            sizing: None,
-            mesh_health: None,
-            analysis: None,
-            nastran: None,
-            nastran95: None,
-            patran: None,
-            torenbeek_wing_mass_kg: f64::NAN,
-        }
-    }
-}
+mod result;
+pub use result::{EvaluationInputs, PatranExportResult, StructuralAnalysisResult};
 
 /// Execute the wingbox structural sizing and analysis stage.
 pub fn run_structural_analysis(
@@ -138,6 +68,21 @@ pub fn run_structural_analysis_with_environment_events(
     events: Option<&(dyn Fn(RunEvent) + Sync)>,
     run_clock: Instant,
 ) -> StructuralAnalysisResult {
+    let mut result = run_evaluation(config, report, work_dir, environment, events, run_clock);
+    if result.evaluation_inputs.is_none() {
+        result.evaluation_inputs = Some(EvaluationInputs::new(config, report));
+    }
+    result
+}
+
+fn run_evaluation(
+    config: &AlasConfig,
+    report: &AnalysisReport,
+    work_dir: Option<&Path>,
+    environment: &RunEnvironment,
+    events: Option<&(dyn Fn(RunEvent) + Sync)>,
+    run_clock: Instant,
+) -> StructuralAnalysisResult {
     let scfg = &config.structures;
     let dv = &report.design;
     let req = &config.requirements;
@@ -150,16 +95,8 @@ pub fn run_structural_analysis_with_environment_events(
 
     if !scfg.enabled {
         return StructuralAnalysisResult {
-            status: "not_run".to_owned(),
-            error: None,
-            wsg: None,
-            sizing: None,
-            mesh_health: None,
-            analysis: None,
-            nastran: None,
-            nastran95: None,
-            patran: None,
             torenbeek_wing_mass_kg: torenbeek_mass,
+            ..Default::default()
         };
     }
 
@@ -218,34 +155,14 @@ pub fn run_structural_analysis_with_environment_events(
         }
     };
 
-    // Size the box the mass path weighs, not a different one. `size_wingbox`
-    // reliefs the bending moment with a geometric tank estimate and no
-    // powerplant; `alas-mass`'s wing reconciliation reliefs it with the
-    // aircraft's *declared* integral fuel capacity and its wing-mounted engine
-    // point loads. Solving one box and weighing another put 14 299.5 kg
-    // against 15 128.2 kg per semi-wing on the A340-300, a 5.5 % divergence
-    // between the structure this stage reports and the structure the mass
-    // ledger charges. Required consumer correction C2, from an internal
-    // handoff note on pushing the components results; the two call sites now
-    // share one relief.
+    // Use the same declared fuel and wing-mounted mass relief as search.
     let stations = alas_struct::sizing::sizing_stations(&wsg, scfg);
     let (box_front, box_rear) = alas_struct::sizing::box_chord_band(&wsg);
-    // The *structural design weight*, not this run's dispatch mass. The
-    // manoeuvre loads, the fuel relief bound and the engine point loads must
-    // all be built at the mass the box is designed for, which is the rule
-    // `alas-mass`'s wing reconciliation applies
-    // (`design_gross_mass_kg`: a declared FLOPS `DG` override where one
-    // exists, the requirement otherwise). `config.requirements` is the raw
-    // requirement, and under a fixed-aircraft basis the two differ whenever
-    // the pipeline evaluates at a dispatch mass - the box that is solved was
-    // then sized *and bounded* at the mission mass while the box that is
-    // weighed was sized at the design mass. Required consumer correction C1,
-    // from an internal handoff note on load-case relief, on top of C2 from
-    // the components-results push handoff note below, which made the two
-    // call sites share one relief in the first place.
+    // Bounded studies support declared design gross weight even when dispatched
+    // light. Unconstrained studies receive their closed design mass.
     let mut design_req = config.requirements.clone();
-    design_req.mtow_kg = alas_mass::wing_reconciliation::design_gross_mass_kg(config);
-    let declared_fuel_kg_m = alas_mass::wing_reconciliation::declared_integral_wing_fuel_kg_m(
+    design_req.mtow_kg = alas_opt::mdo::structural_feasibility::structural_design_mass_kg(config);
+    let declared = alas_mass::wing_reconciliation::declared_wing_fuel_case(
         config,
         dv,
         &design_req,
@@ -254,12 +171,31 @@ pub fn run_structural_analysis_with_environment_events(
         box_front,
         box_rear,
     );
-    let wing_mounted_point_masses = alas_struct::loads::engine_point_loads_n(
+    let fuel = declared
+        .as_ref()
+        .map(|case| case.running_mass_kg_m.clone())
+        .unwrap_or_else(|| {
+            alas_struct::tanks::integral_fuel_running_mass_kg_m(
+                &wsg, &stations, box_front, box_rear,
+            )
+        });
+    let wing_mounted = alas_struct::scope::wing_mounted_relief(
         &config.geometry.engine,
         &config.mass_model,
         &design_req,
     );
-    let sizing = alas_struct::sizing::size_wingbox_with_wing_carried_mass(
+    let fuel_scope = declared.as_ref().map_or(
+        alas_struct::sizing::WingFuelRelief::EnclosedBoxVolume,
+        |case| alas_struct::sizing::WingFuelRelief::Declared {
+            running_mass_kg_m: &fuel,
+            design_case: alas_struct::scope::WingFuelDesignCase::declared(
+                case.capacity_kg,
+                case.design_gross_mass_kg,
+                case.max_zero_fuel_mass_kg,
+            ),
+        },
+    );
+    let scoped = alas_struct::sizing::size_wingbox_with_scope(
         &wsg,
         scfg,
         &design_req,
@@ -267,48 +203,62 @@ pub fn run_structural_analysis_with_environment_events(
         web_mat,
         cap_mat,
         rib_mat,
-        declared_fuel_kg_m.as_deref(),
-        &wing_mounted_point_masses,
+        &fuel_scope,
+        &wing_mounted,
     );
-
-    let analytical_report = analyze_structure(
+    if !scoped.scope.relief_convergence.is_settled() {
+        return structural_error(
+            "structural inertia-relief closure did not converge".to_owned(),
+            torenbeek_mass,
+        );
+    }
+    let stiffness = alas_struct::sizing::size_for_linear_model(
         &wsg,
-        &sizing,
+        scoped.sizing,
         scfg,
-        req,
+        &design_req,
         &config.geometry.engine,
         &config.mass_model,
         skin_mat,
         web_mat,
         cap_mat,
+        &fuel,
+        &wing_mounted.point_masses_kg,
+        alas_struct::feasibility::LinearModelLimits {
+            max_curvature_relative_error: scfg.max_linear_curvature_relative_error,
+        },
     );
+    let stiffness_passes = stiffness.converged;
+    let sizing = stiffness.sizing;
+    let analytical_report = stiffness.response;
 
     // Sizing output is a physical acceptance result, not merely evidence
     // that the numerical stage executed. Never continue to mesh/deck/export
     // a wingbox with an over-wide rib layout or a negative/non-finite
     // strength margin.
-    if let Some(detail) = sizing_failure_detail(&sizing) {
+    if let Some(detail) = sizing_failure_detail(&sizing).or_else(|| {
+        (!stiffness_passes).then(|| {
+            "wingbox stiffness sizing did not satisfy the structural model domain".to_owned()
+        })
+    }) {
         return StructuralAnalysisResult {
             status: "error".to_owned(),
             error: Some(detail),
             wsg: Some(wsg),
             sizing: Some(sizing),
-            mesh_health: None,
             analysis: Some(analytical_report),
-            nastran: None,
-            nastran95: None,
-            patran: None,
             torenbeek_wing_mass_kg: torenbeek_mass,
+            ..Default::default()
         };
     }
 
-    let (mesh_deck, mesh_health, node_index) = match build_wing_mesh_bdf(
+    let (mut mesh_deck, mut mesh_health, node_index) = match build_wing_mesh_bdf_product(
         &wsg,
         &sizing,
         scfg,
         &config.geometry.engine,
         &config.mass_model,
-        req,
+        &design_req,
         skin_mat,
         web_mat,
         cap_mat,
@@ -317,19 +267,49 @@ pub fn run_structural_analysis_with_environment_events(
         Ok(res) => res,
         Err(e) => {
             return StructuralAnalysisResult {
-                status: "ok".to_owned(),
-                error: Some(format!("mesh generation warning: {e:?}")),
+                status: "error".to_owned(),
+                error: Some(format!("structural mesh generation failed: {e:?}")),
                 wsg: Some(wsg),
                 sizing: Some(sizing),
-                mesh_health: None,
                 analysis: Some(analytical_report),
-                nastran: None,
-                nastran95: None,
-                patran: None,
                 torenbeek_wing_mass_kg: torenbeek_mass,
+                ..Default::default()
             };
         }
     };
+
+    if let Some(detail) = checks::mesh_mass_failure(&mesh_deck) {
+        return StructuralAnalysisResult {
+            status: "error".to_owned(),
+            error: Some(detail),
+            wsg: Some(wsg),
+            sizing: Some(sizing),
+            mesh_health: Some(mesh_health),
+            analysis: Some(analytical_report),
+            torenbeek_wing_mass_kg: torenbeek_mass,
+            ..Default::default()
+        };
+    }
+
+    let wing_mass = WingMassComparison::new(
+        2.0 * sizing.total_mass_kg,
+        mesh_deck
+            .primary_structural_mass_kg()
+            .map(|mass| 2.0 * mass),
+        torenbeek_mass,
+    );
+    if let Some(diagnostic) = checks::mesh_mass_diagnostic(&mesh_deck, torenbeek_mass) {
+        mesh_health.warnings.push(diagnostic);
+    }
+
+    if let Err(error) =
+        alas_struct::mesh::add_distributed_fuel_mass(&mut mesh_deck, &node_index, &stations, &fuel)
+    {
+        return structural_error(
+            format!("cannot map declared structural fuel mass to FE mesh: {error:?}"),
+            torenbeek_mass,
+        );
+    }
 
     let primary_solver_stage = if environment.nastran_exe.is_some() {
         "downstream/msc_nastran"
@@ -365,7 +345,7 @@ pub fn run_structural_analysis_with_environment_events(
             &mesh_deck,
             &node_index,
             &solver_config,
-            req,
+            &design_req,
             dir,
             environment.nastran_exe.as_deref(),
         )
@@ -398,7 +378,7 @@ pub fn run_structural_analysis_with_environment_events(
                 &mesh_deck,
                 &node_index,
                 scfg,
-                req,
+                &design_req,
                 &dir.join("nastran95"),
             )
         });
@@ -478,69 +458,15 @@ pub fn run_structural_analysis_with_environment_events(
         nastran95: nastran95_results,
         patran,
         torenbeek_wing_mass_kg: torenbeek_mass,
+        wing_mass: Some(wing_mass),
+        evaluation_inputs: Some(EvaluationInputs::from_deck(config, report, &mesh_deck)),
     }
 }
 
-fn sizing_failure_detail(sizing: &WingboxSizing) -> Option<String> {
-    let mut failures = Vec::new();
-    if !sizing.rib_spacing_pass() {
-        failures.push(format!(
-            "installed rib spacing {:.6} m exceeds allowable {:.6} m",
-            sizing.installed_rib_spacing_m(),
-            sizing.rib_spacing_m
-        ));
-    }
-    if !sizing.strength_margins_pass() {
-        failures.push(match sizing.controlling_margin() {
-            Some(c) if c.margin.is_finite() => format!(
-                "wingbox strength sizing is infeasible: minimum margin {:.6e} at spar {} \
-                 (chord fraction {:.3}), station {} (y={:.4} m, eta={:.4})",
-                c.margin, c.spar_index, c.chord_fraction, c.station_index, c.y_m, c.eta,
-            ),
-            Some(c) => format!(
-                "wingbox strength sizing produced a non-finite margin at spar {}, station {} \
-                 (y={:.4} m, eta={:.4})",
-                c.spar_index, c.station_index, c.y_m, c.eta,
-            ),
-            None => "wingbox strength sizing produced no spar stations".to_owned(),
-        });
-    }
-    (!failures.is_empty()).then(|| failures.join("; "))
-}
-
-fn missing_patran_result(configured: &str) -> PatranExportResult {
-    let detail = if configured.trim().is_empty() {
-        "Patran executable absent: configure it under Setup > External Tools".to_owned()
-    } else if Path::new(configured).is_dir() {
-        format!("Patran installation incomplete at {configured}: executable launcher is missing")
-    } else if Path::new(configured).exists()
-        || Path::new(configured).parent().is_some_and(Path::is_dir)
-    {
-        format!("Patran executable path is invalid: {configured} is not a regular executable file")
-    } else {
-        format!("Patran executable absent at {configured}")
-    };
-    PatranExportResult {
-        status: "error".to_owned(),
-        error: Some(detail),
-        png_paths: Vec::new(),
-    }
-}
-
-fn structural_error(msg: String, torenbeek: f64) -> StructuralAnalysisResult {
-    StructuralAnalysisResult {
-        status: "error".to_owned(),
-        error: Some(msg),
-        wsg: None,
-        sizing: None,
-        mesh_health: None,
-        analysis: None,
-        nastran: None,
-        nastran95: None,
-        patran: None,
-        torenbeek_wing_mass_kg: torenbeek,
-    }
-}
+mod checks;
+mod wing_mass;
+use checks::{missing_patran_result, sizing_failure_detail, structural_error};
+pub use wing_mass::{PrimaryMassSource, WingMassComparison};
 
 #[cfg(test)]
 // Failed expectations and unwraps here are failed test assertions.

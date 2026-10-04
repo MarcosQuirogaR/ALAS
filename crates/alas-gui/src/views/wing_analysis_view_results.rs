@@ -35,9 +35,10 @@ pub(crate) fn show_results_tab(ui: &mut Ui) {
         )
     });
     let Some(outcome) = outcome else {
-        ui.label(tr(
-            "No wing analysis result yet. Set the condition in Setup and run the analysis.",
-        ));
+        ui.label(tr("No wing analysis result yet."))
+            .on_hover_text(tr(
+                "No wing analysis result yet. Set the condition in Setup and run the analysis.",
+            ));
         return;
     };
     ScrollArea::vertical()
@@ -74,15 +75,6 @@ fn show_point_card(outcome: &WingAnalysisOutcome, configuration: &str, ui: &mut 
             .strong()
             .size(15.0),
         );
-        if outcome.alpha_from_lift_target {
-            ui.label(
-                RichText::new(tr(
-                    "The angle of attack was solved from the lift-coefficient target.",
-                ))
-                .weak()
-                .small(),
-            );
-        }
         let condition = &outcome.condition;
         let rows: [(&str, String); 12] = [
             (
@@ -131,21 +123,23 @@ fn show_point_card(outcome: &WingAnalysisOutcome, configuration: &str, ui: &mut 
             .spacing([12.0, 4.0])
             .show(ui, |ui| {
                 for (index, (label, value)) in rows.iter().enumerate() {
-                    ui.label(tr(label));
+                    let response = ui.label(tr(label));
+                    if index == 0 && outcome.alpha_from_lift_target {
+                        response.on_hover_text(tr(
+                            "The angle of attack was solved from the lift-coefficient target.",
+                        ));
+                    }
                     ui.label(RichText::new(value).strong());
                     if (index + 1) % columns == 0 {
                         ui.end_row();
                     }
                 }
             });
-        ui.label(
-            RichText::new(tr_fields(
+        ui.label(RichText::new(tr("Induced drag only")).weak().small())
+            .on_hover_text(tr_fields(
                 "Induced drag only; this configuration omits {components}.",
                 &[("components", OMITTED_COMPONENTS.join(", "))],
-            ))
-            .weak()
-            .small(),
-        );
+            ));
     });
 }
 
@@ -204,17 +198,13 @@ fn show_span_load_card(outcome: &WingAnalysisOutcome, ui: &mut Ui) {
             .fold(f64::NEG_INFINITY, |peak, station| {
                 peak.max(station.section_cl)
             });
-        ui.label(
-            RichText::new(tr_fields(
-                "{count} strips; highest section lift coefficient {peak}.",
-                &[
-                    ("count", outcome.span_load.len().to_string()),
-                    ("peak", format!("{peak:.3}")),
-                ],
-            ))
-            .weak()
-            .small(),
-        );
+        ui.horizontal_wrapped(|ui| {
+            ui.label(tr("Spanwise strips"));
+            ui.label(RichText::new(outcome.span_load.len().to_string()).strong());
+            ui.separator();
+            ui.label(tr("Peak section CL"));
+            ui.label(RichText::new(format!("{peak:.3}")).strong());
+        });
     });
 }
 
@@ -291,20 +281,22 @@ fn show_stability_card(outcome: &WingAnalysisOutcome, configuration: &str, ui: &
                 .size(15.0),
         );
         let Some(stability) = outcome.stability else {
-            ui.label(tr(
-                "Stability is reported for the wing-empennage configuration. Switch on Include empennage in Setup and run the analysis again.",
-            ));
+            ui.label(tr("Static stability unavailable"))
+                .on_hover_text(tr(
+                    "Stability is reported for the wing-empennage configuration. Switch on Include empennage in Setup and run the analysis again.",
+                ));
             return;
         };
-        let reference = outcome.reference.moment_reference_m;
-        ui.label(tr_fields(
-            "About the stated moment reference at x = {x} m, y = {y} m, z = {z} m in geometry axes.",
-            &[
-                ("x", format!("{:.3}", reference[0])),
-                ("y", format!("{:.3}", reference[1])),
-                ("z", format!("{:.3}", reference[2])),
-            ],
+        ui.label(
+            RichText::new(tr("Fuselage, nacelles and propulsion omitted"))
+                .weak()
+                .small(),
+        )
+        .on_hover_text(tr_fields(
+            "These derivatives belong to the modelled {configuration} alone. With the fuselage, nacelles and propulsion omitted they are not aircraft stability derivatives, and the directional and lateral terms in particular miss the fuselage contribution.",
+            &[("configuration", configuration.to_lowercase())],
         ));
+        let reference = outcome.reference.moment_reference_m;
         Grid::new("wing_analysis_stability")
             .num_columns(2)
             .spacing([12.0, 4.0])
@@ -318,26 +310,40 @@ fn show_stability_card(outcome: &WingAnalysisOutcome, configuration: &str, ui: &
                     ("Cm_q (1/rad)", stability.cm_q_per_rad),
                     ("Neutral point x (m)", stability.neutral_point_x_m),
                     ("Static margin (MAC)", stability.static_margin),
+                    ("Moment reference x (m)", reference[0]),
+                    ("Moment reference y (m)", reference[1]),
+                    ("Moment reference z (m)", reference[2]),
                 ] {
-                    ui.label(tr(label));
+                    let response = ui.label(tr(label));
+                    if label.starts_with("Moment reference") {
+                        response.on_hover_text(tr_fields(
+                            "About the stated moment reference at x = {x} m, y = {y} m, z = {z} m in geometry axes.",
+                            &[
+                                ("x", format!("{:.3}", reference[0])),
+                                ("y", format!("{:.3}", reference[1])),
+                                ("z", format!("{:.3}", reference[2])),
+                            ],
+                        ));
+                    }
                     ui.label(RichText::new(format!("{value:.5}")).strong());
                     ui.end_row();
                 }
             });
-        let longitudinal = if stability.cm_alpha_per_rad < 0.0 {
-            tr("Cm_alpha is negative: this configuration is longitudinally stable about that point.")
+        let (longitudinal, explanation, color) = if stability.cm_alpha_per_rad < 0.0 {
+            (
+                tr("Model stable about selected reference"),
+                tr("Cm_alpha is negative: this configuration is longitudinally stable about that point."),
+                crate::theme::success_color(ui.visuals()),
+            )
         } else {
-            tr("Cm_alpha is not negative: this configuration is longitudinally unstable about that point.")
+            (
+                tr("Model not stable about selected reference"),
+                tr("Cm_alpha is non-negative about the moment reference, so this model is not statically stable in pitch."),
+                ui.visuals().warn_fg_color,
+            )
         };
-        ui.label(longitudinal);
-        ui.label(
-            RichText::new(tr_fields(
-                "These derivatives belong to the modelled {configuration} alone. With the fuselage, nacelles and propulsion omitted they are not aircraft stability derivatives, and the directional and lateral terms in particular miss the fuselage contribution.",
-                &[("configuration", configuration.to_lowercase())],
-            ))
-            .weak()
-            .small(),
-        );
+        ui.colored_label(color, longitudinal)
+            .on_hover_text(explanation);
     });
 }
 
@@ -345,7 +351,11 @@ fn show_stability_card(outcome: &WingAnalysisOutcome, configuration: &str, ui: &
 fn show_evidence_card(outcome: &WingAnalysisOutcome, ui: &mut Ui) {
     crate::theme::card_frame(ui).show(ui, |ui| {
         ui.set_min_width(ui.available_width());
-        ui.label(RichText::new(tr("Surfaces and solver evidence")).strong().size(15.0));
+        ui.label(
+            RichText::new(tr("Surfaces and solver evidence"))
+                .strong()
+                .size(15.0),
+        );
         Grid::new("wing_analysis_surfaces")
             .num_columns(3)
             .spacing([12.0, 4.0])
@@ -362,19 +372,30 @@ fn show_evidence_card(outcome: &WingAnalysisOutcome, ui: &mut Ui) {
                 }
             });
         let diagnostics = &outcome.diagnostics;
-        ui.label(
-            RichText::new(tr_fields(
-                "{panels} panels, spanwise multiplier {spanwise}, {chordwise} chordwise panels per strip; normalized solve residual {residual}, pivot ratio {pivot}.",
-                &[
-                    ("panels", diagnostics.panel_count.to_string()),
-                    ("spanwise", diagnostics.spanwise_resolution.to_string()),
-                    ("chordwise", diagnostics.chordwise_resolution.to_string()),
-                    ("residual", format!("{:.2e}", diagnostics.residual)),
-                    ("pivot", format!("{:.2e}", diagnostics.pivot_ratio)),
-                ],
-            ))
-            .weak()
-            .small(),
-        );
+        Grid::new("wing_analysis_diagnostics")
+            .num_columns(2)
+            .spacing([12.0, 4.0])
+            .show(ui, |ui| {
+                for (label, value) in [
+                    ("Panels", diagnostics.panel_count.to_string()),
+                    (
+                        "Spanwise panel multiplier",
+                        diagnostics.spanwise_resolution.to_string(),
+                    ),
+                    (
+                        "Chordwise panels per strip",
+                        diagnostics.chordwise_resolution.to_string(),
+                    ),
+                    (
+                        "Normalized solve residual",
+                        format!("{:.2e}", diagnostics.residual),
+                    ),
+                    ("Pivot ratio", format!("{:.2e}", diagnostics.pivot_ratio)),
+                ] {
+                    ui.label(tr(label));
+                    ui.label(RichText::new(value).strong());
+                    ui.end_row();
+                }
+            });
     });
 }

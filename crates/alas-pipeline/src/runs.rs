@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-// Ported from alas/sidecar/runs.py
-// Reference: alas @ rust-port-baseline.
-
 //! Pipeline run state tracking, bounded registry, and result summarization.
 
 use std::collections::HashMap;
@@ -139,29 +136,6 @@ impl RunRegistry {
                 let oldest = order.remove(0);
                 runs.remove(&oldest);
             }
-        }
-    }
-
-    /// Update status of a run.
-    pub fn set_status(&self, id: &str, status: &str, error: Option<String>) {
-        let mut runs = match self.runs.lock() {
-            Ok(g) => g,
-            Err(p) => p.into_inner(),
-        };
-        if let Some(run) = runs.get_mut(id) {
-            run.status = status.to_owned();
-            run.error = error;
-        }
-    }
-
-    /// Add an event to a run's event log.
-    pub fn add_event(&self, id: &str, event: RunEvent) {
-        let mut runs = match self.runs.lock() {
-            Ok(g) => g,
-            Err(p) => p.into_inner(),
-        };
-        if let Some(run) = runs.get_mut(id) {
-            run.events.push(event);
         }
     }
 

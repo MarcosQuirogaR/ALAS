@@ -85,11 +85,6 @@ impl UndoStack {
             .is_some_and(|before| before != current)
     }
 
-    /// Abandon a drag without recording it.
-    pub fn cancel_transaction(&mut self) -> Option<EditSnapshot> {
-        self.transaction.take()
-    }
-
     /// Step back: `current` moves to the redo stack and the previous state
     /// is returned for the caller to apply.
     pub fn undo(&mut self, current: EditSnapshot) -> Option<EditSnapshot> {

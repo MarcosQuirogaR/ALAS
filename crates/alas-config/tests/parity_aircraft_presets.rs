@@ -8,6 +8,8 @@
 //! explicit two-sided ledger pins independently audited corrections while all
 //! other translated fields compare directly with Python. Numbers compare by
 //! value so an upstream integer and an equivalent Rust float agree.
+//! Published landing inputs are compared to their source-derived values;
+//! their frozen legacy values remain checked separately from the source ledger.
 
 // This file is itself a test binary, so an unwrap that fails is the
 // assertion failing.
@@ -27,11 +29,13 @@ mod product_corrections;
 
 /// How many source corrections the ledger is allowed to hold.
 ///
-/// Pinned so a correction cannot be added without someone noticing. 65 became
-/// 72 when the seven frozen presets moved from a per-section spanwise
-/// subdivision multiplier to an absolute panel count; see
-/// [`add_spanwise_panel_corrections`].
-const SOURCE_CORRECTION_COUNT: usize = 72;
+/// Pinned so a correction cannot be added without someone noticing. The count
+/// includes the absolute panel counts (see [`add_spanwise_panel_corrections`]),
+/// the four registered planning-cabin seat counts, the two AVE inboard chords
+/// that keep its root-to-kink trailing edge running aft, the AVE cabin
+/// preset that seats its declared 777-9 cabin, and the default
+/// landing ratio the A220 calibration inherits.
+const SOURCE_CORRECTION_COUNT: usize = 81;
 const DC_10_UPSTREAM_DISPLAY_NAME: &str = "McDonnell Douglas DC-10";
 const DC_10_CORRECTED_DISPLAY_NAME: &str = "McDonnell Douglas DC-10-30 (572k option)";
 
@@ -433,14 +437,19 @@ fn a220_source_gear_stations_are_normalized_and_topology_is_explicit() {
     assert!(shrunk.x_mlg_m < resolved.x_mlg_m);
 }
 
+/// Gross projected area of the built planform, through every station
+/// (centreline root, side of body, kink and tip).
 fn preset_projected_area(preset: &AircraftPreset) -> f64 {
-    let semi_span = preset.design_vector.span_m / 2.0;
-    let inner_span = semi_span * preset.geometry.wing.break_span_fraction;
-    let outer_span = semi_span - inner_span;
-    2.0 * (inner_span * (preset.design_vector.root_chord_m + preset.design_vector.break_chord_m)
-        / 2.0
-        + outer_span * (preset.design_vector.break_chord_m + preset.design_vector.tip_chord_m)
-            / 2.0)
+    let planform = preset
+        .geometry
+        .wing
+        .transport_planform(&preset.design_vector)
+        .unwrap_or_else(|error| panic!("{}: {error}", preset.name));
+    planform
+        .stations()
+        .windows(2)
+        .map(|pair| (pair[1].y_m - pair[0].y_m) * (pair[0].chord_m + pair[1].chord_m))
+        .sum()
 }
 
 /// One preset in the shape the fixture records it.
@@ -476,6 +485,15 @@ fn source_corrections() -> BTreeMap<String, SourceCorrection> {
         source_correction("A320-200.requirements.cabin_preset", "Ryanair", "Custom"),
         source_correction("A220-300.requirements.cabin_preset", "Ryanair", "Custom"),
         source_correction("DC-10.requirements.cabin_preset", "Ryanair", "Custom"),
+        // AVE flies the 777-9 standard two-class cabin its reference data
+        // declares (Boeing D6-86073 Rev G Table 2-1), not an airline profile.
+        source_correction("AVE.requirements.cabin_preset", "Ryanair", "Custom"),
+        source_correction("A340-300.requirements.num_passengers", 290.0, 335.0),
+        source_correction("A380-800.requirements.num_passengers", 525.0, 555.0),
+        source_correction("A220-300.requirements.num_passengers", 130.0, 140.0),
+        source_correction("DC-10.requirements.num_passengers", 250.0, 255.0),
+        source_correction("AVE.design_vector.root_chord_m", 16.5, 16.0),
+        source_correction("AVE.design_vector.break_chord_m", 7.8, 8.0),
         source_correction(
             "A340-300.description",
             "Long-range quad-engine widebody with CFM56-5C engines.",
@@ -495,21 +513,20 @@ fn source_corrections() -> BTreeMap<String, SourceCorrection> {
             "Airbus A380-841 WV000 with Trent 970-84 engines.",
         ),
         source_correction("A380-800.design_vector.fuselage_length_m", 72.72, 72.73),
+        // Airbus A380 AC Rev 20, Figure 2-2-0-991-001-A01 sheet 2: 3.98 m tip
+        // and 17.67 m side-of-body chords; the centreline and kink chords
+        // close the 845 m^2 reference area and the 12.295 m section 7 MAC.
         source_correction(
             "A380-800.design_vector.root_chord_m",
             23.0,
-            22.952_583_900_271_1,
+            17.934_637_703_217_59,
         ),
         source_correction(
             "A380-800.design_vector.break_chord_m",
             11.3,
-            11.276_704_264_046_2,
+            11.738_539_338_676_212,
         ),
-        source_correction(
-            "A380-800.design_vector.tip_chord_m",
-            3.5,
-            3.492_784_506_562_99,
-        ),
+        source_correction("A380-800.design_vector.tip_chord_m", 3.5, 3.98),
         source_correction("A380-800.engine_name", "Trent 900", "Trent 970-84"),
         source_correction(
             "A380-800.geometry.engine.engine_name",
@@ -517,6 +534,12 @@ fn source_corrections() -> BTreeMap<String, SourceCorrection> {
             "Trent 970-84",
         ),
         source_correction("A380-800.requirements.max_wing_area_m2", 855.0, 845.0),
+        // NASA Common Research Model camber distribution (AIAA 2008-6919;
+        // NASA CRM geometry page, max-camber figure; eta 0.65 section
+        // crm.eta65.unswept31.5deg): camber rises outboard, so the SC(2)
+        // design lift is exchanged between root and tip at fixed thickness.
+        source_correction("A380-800.geometry.wing.root_airfoil", "SC2-0714", "sc20414"),
+        source_correction("A380-800.geometry.wing.tip_airfoil", "sc20410", "sc20610"),
         source_correction(
             "B787-9.requirements.max_structural_payload_kg",
             52_600.0,
@@ -545,24 +568,36 @@ fn source_corrections() -> BTreeMap<String, SourceCorrection> {
             18_643.0,
         ),
         source_correction("A220-300.requirements.mtow_kg", 70_900.0, 67_585.0),
+        // The A220 calibration spreads `MassModelConfig::default()`, so it
+        // carries the default landing ratio (the 777-9 benchmark, see
+        // `LONG_HAUL_MLW_FRACTION_MTOW`). Loading the preset replaces it with
+        // the A220's own certified 58,740 / 67,585 either way.
+        source_correction(
+            "A220-300.mass_model.mlw_fraction_mtow",
+            0.92,
+            alas_config::landing_mass_ratio::LONG_HAUL_MLW_FRACTION_MTOW,
+        ),
         source_correction(
             "DC-10.description",
             "Classic long-range trijet widebody with underwing and tail-mounted CF6-50 engines.",
             "DC-10-30 ACAP 572,000 lb option with three CF6-50C engines.",
         ),
-        source_correction("DC-10.design_vector.fuselage_length_m", 55.35, 55.55),
         source_correction("DC-10.design_vector.span_m", 50.41, 50.39),
         source_correction(
             "DC-10.design_vector.root_chord_m",
             12.8,
-            12.798_762_957_481_8,
+            10.705_424_735_302_275,
         ),
         source_correction(
             "DC-10.design_vector.break_chord_m",
             7.8,
-            7.799_246_177_215_49,
+            7.918_672_469_211_44,
         ),
-        source_correction("DC-10.design_vector.tip_chord_m", 1.8, 1.799_826_040_895_88),
+        source_correction(
+            "DC-10.design_vector.tip_chord_m",
+            1.8,
+            2.743_275_403_614_176,
+        ),
         source_correction(
             "DC-10.display_name",
             DC_10_UPSTREAM_DISPLAY_NAME,
@@ -644,17 +679,21 @@ fn add_spanwise_panel_corrections(corrections: &mut BTreeMap<String, SourceCorre
 fn add_transport_planform_corrections(corrections: &mut BTreeMap<String, SourceCorrection>) {
     for (preset, kink_fraction) in [
         ("AVE", 0.35),
-        ("A340-300", 0.362_094_754_983_253_8),
+        ("A340-300", 9.5 / 30.15),
         ("A380-800", 0.359_236_516_064_625_5),
         ("B787-9", 0.353_771_245_388_011_8),
-        ("A320-200", 0.34),
+        ("A320-200", 0.379_3),
         ("A220-300", 0.382_736_255_076_680_5),
         ("DC-10", 0.35),
     ] {
         for (field, value) in [
             (
                 "side_of_body_span_fraction",
-                if preset == "A320-200" { 0.1103 } else { 0.10 },
+                match preset {
+                    "A320-200" => 0.115_84,
+                    "A380-800" => 3.57 / 39.875,
+                    _ => 0.10,
+                },
             ),
             ("kink_span_fraction", kink_fraction),
         ] {
@@ -707,6 +746,21 @@ fn compare_values(
     actual: &Value,
     expected: &Value,
 ) {
+    if let Some((frozen, sourced)) = product_corrections::published_landing_change(path) {
+        compare_recorded_value(
+            comparison,
+            &format!("{path}: frozen landing input"),
+            expected,
+            &frozen,
+        );
+        compare_recorded_value(
+            comparison,
+            &format!("{path}: published landing input"),
+            actual,
+            &sourced,
+        );
+        return;
+    }
     if let Some((old, new)) = product_corrections::dimensions(path) {
         compare_recorded_value(
             comparison,
@@ -778,6 +832,7 @@ fn compare_values(
                     let child = format!("{path}.{key}");
                     if let Some(new) = product_corrections::engine_copy(&child)
                         .or_else(|| product_corrections::added_planform(&child))
+                        .or_else(|| product_corrections::declared_airfoil_class(&child))
                     {
                         source_corrections.remove(&child);
                         compare_recorded_value(comparison, &child, &actual[key], &new);

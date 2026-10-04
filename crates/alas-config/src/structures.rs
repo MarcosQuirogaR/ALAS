@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/config/structures_config.py
-// Reference: alas @ rust-port-baseline.
 
 //! The wingbox the structural analysis sizes, and how it is solved.
 //!
@@ -108,6 +107,22 @@ pub struct StructuresConfig {
         help = "Extra margin multiplied onto the design loads on top of the CS-25 ultimate load factors already used (DesignRequirements.ultimate_load_factor / limit_load_factor_neg). 1.0 = no extra margin beyond CS-25 ultimate."
     )]
     pub additional_safety_factor: f64,
+
+    /// Maximum relative curvature error admitted by the linear beam model.
+    ///
+    /// The small-slope approximation omits the factor
+    /// `(1 + slope^2)^(3/2)`. This numerical validity budget is not a
+    /// certification limit on wing-tip displacement.
+    #[serde(
+        default = "default_linear_curvature_error",
+        skip_serializing_if = "is_default_linear_curvature_error"
+    )]
+    #[config(
+        label = "Linear beam curvature error budget",
+        unit = "fraction",
+        help = "Maximum relative curvature error from neglecting beam rotation, evaluated as (1 + slope squared) to the power 1.5 minus 1. The default 0.05 is a 5% numerical model-validity budget, not a certification deflection limit. It gates the 1 g flight-shape case only: a wing whose 1 g shape is outside this domain requires a geometrically nonlinear structural model and cannot be accepted by this linear analysis. Ultimate tip deflection and curvature are diagnostic; deformation-induced load redistribution still needs separate substantiation. Must be finite and greater than zero."
+    )]
+    pub max_linear_curvature_relative_error: f64,
 
     /// Skin thickness.
     #[config(
@@ -298,6 +313,15 @@ pub struct StructuresConfig {
     )]
     pub timeout_s: f64,
 
+    /// Per-process MSC memory ceiling, independent of the aircraft model.
+    #[config(
+        label = "MSC Nastran memory ceiling",
+        unit = "MB",
+        help = "Estimate each solve's memory within this ceiling. Limits concurrent solvers instead of letting every process reserve half the host RAM. Increase for larger meshes."
+    )]
+    #[serde(default = "default_nastran_memory_mb")]
+    pub nastran_memory_mb: i64,
+
     /// How many modes to extract.
     #[config(
         label = "Number of modes to extract",
@@ -362,6 +386,10 @@ pub struct StructuresConfig {
     pub run_patran_export: bool,
 }
 
+fn default_nastran_memory_mb() -> i64 {
+    2048
+}
+
 impl Default for StructuresConfig {
     fn default() -> Self {
         Self {
@@ -375,6 +403,7 @@ impl Default for StructuresConfig {
             spar_cap_material: "CFRP UD".to_owned(),
             rib_material: "Al 7075-T6".to_owned(),
             additional_safety_factor: 1.0,
+            max_linear_curvature_relative_error: default_linear_curvature_error(),
             t_skin_min_m: 0.006,
             t_web_min_m: 0.002,
             t_rib_m: 0.004,
@@ -402,6 +431,7 @@ impl Default for StructuresConfig {
             // can replace it with the aircraft-specific excitation level.
             run_sol_vibration_random: true,
             timeout_s: 3600.0,
+            nastran_memory_mb: default_nastran_memory_mb(),
             // Sixteen modes is the smallest full-mesh NASTRAN-95 request
             // validated to retain all four active Rayleigh target matches.
             n_modes: 16,
@@ -414,6 +444,14 @@ impl Default for StructuresConfig {
             run_patran_export: true,
         }
     }
+}
+
+fn default_linear_curvature_error() -> f64 {
+    0.05
+}
+
+fn is_default_linear_curvature_error(value: &f64) -> bool {
+    *value == default_linear_curvature_error()
 }
 
 impl StructuresConfig {
@@ -441,6 +479,25 @@ impl StructuresConfig {
 mod tests {
     use super::*;
     use crate::{Entry, Kind, OptionSource};
+
+    #[test]
+    fn nastran_memory_budget_survives_roundtrip_and_old_files() {
+        let configured = StructuresConfig {
+            nastran_memory_mb: 4096,
+            ..StructuresConfig::default()
+        };
+        let mut json = serde_json::to_value(&configured).unwrap();
+        let restored: StructuresConfig = serde_json::from_value(json.clone()).unwrap();
+        assert_eq!(restored.nastran_memory_mb, 4096);
+        json.as_object_mut().unwrap().remove("nastran_memory_mb");
+        let old: StructuresConfig = serde_json::from_value(json).unwrap();
+        assert_eq!(old.nastran_memory_mb, 2048);
+        let mut config = crate::AlasConfig::default();
+        config.structures.nastran_memory_mb = 0;
+        assert!(crate::validation::validate(&config)
+            .iter()
+            .any(|issue| issue.field_path == "structures.nastran_memory_mb"));
+    }
 
     #[test]
     fn the_default_wingbox_is_a_two_spar_box_running_the_full_span() {

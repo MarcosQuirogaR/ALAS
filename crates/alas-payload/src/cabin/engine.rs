@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/physics/cabin_layout.py (`build_passenger_layout`)
-// Reference: alas @ rust-port-baseline.
 
 //! The passenger layout engine: seats, monuments, exits and baggage assembled
 //! into one interior.
@@ -169,6 +168,7 @@ fn build_passenger_layout_with_mass_semantics(
         mass_semantics,
         aircraft_cg_target,
         cargo,
+        &items,
     );
     items.extend(bags.items);
 
@@ -213,6 +213,9 @@ fn build_passenger_layout_with_mass_semantics(
         hold_capacity_t: bags.hold_capacity / 1000.0,
         hold_used_t: bags.hold_used / 1000.0,
         hold_ulds: bags.hold_ulds,
+        forward_hold_baggage_fraction: bags.forward_fraction,
+        hold_compartment_masses_kg: bags.compartment_masses_kg,
+        overload_kg: bags.overload_kg,
         aisle_width_m: aisle_w,
         max_abreast: seating.max_abreast,
         n_aisles: seating.max_aisles,

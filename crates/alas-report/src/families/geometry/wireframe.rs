@@ -5,34 +5,14 @@
 // (`figure_wireframe_wing` L1164-1186, `figure_wireframe_fuselage` L1189-1204,
 // `figure_wireframe_empennage` L1207-1233)
 // and alas/sidecar/figures.py (`_preview_exterior` L372-407)
-// Reference: alas @ rust-port-baseline.
 
-//! Isolated-component 3D wireframes and the exterior live-preview scene.
-//!
-//! Upstream draws these with native aerodynamic model's own `Wing.draw_wireframe`/
-//! `Fuselage.draw_wireframe` (aliases of `Airplane.draw_wireframe`), which
-//! meshes the full mplot3d surface: leading/trailing-edge lines, a camber-
-//! following thickness line, *every* cross-section's upper and lower airfoil
-//! outline (via `Wing._compute_frame_of_WingXSec`, a per-section local frame
-//! `docs/PORTING.md` records as left untranslated: meshing-only, unreached
-//! by anything but this figure family), and, for a fuselage, elliptical
-//! bulkheads sampled through `FuselageXSec.get_3D_coordinates` (also
-//! untranslated for the same reason).
-//!
-//! This port draws every line upstream does *except* the per-section airfoil
-//! outline, from the geometry that already has a translated source: the
-//! leading/trailing-edge and thickness lines come from [`Wing::mesh_line`]
-//! (`alas-geom::aircraft::mesh`, itself a P5 prerequisite and already green), and
-//! the bulkhead ellipses are computed directly from `FuselageXSec.width`/
-//! `.height`: the same two fields [`super::planform::figure_geometry`]
-//! already draws a fuselage silhouette from, rather than reproducing
-//! `get_3D_coordinates`.
+//! Aircraft surface figures and section-grid overlays using the live-preview geometry.
 
 use std::f64::consts::PI;
 
 use alas_geom::aircraft::airplane::Airplane;
 use alas_geom::aircraft::fuselage::Fuselage;
-use alas_geom::aircraft::mesh::XsecStation;
+use alas_geom::aircraft::section_outline::mirror_y;
 use alas_geom::aircraft::wing::Wing;
 
 use crate::scene::{
@@ -40,12 +20,16 @@ use crate::scene::{
 };
 use crate::theme::get_palette;
 
-use super::shared::airplane_bbox;
+use super::sandbox_scene::{FramingReference, SandboxSceneModel, SandboxSceneOptions};
 
 const BULKHEAD_SEGMENTS: usize = 24;
 const LONGERON_COUNT: usize = 8;
 const HEADER_HEIGHT: f64 = 48.0;
-const WIREFRAME_PADDING: f64 = 0.08;
+const WIREFRAME_PADDING: f64 = 0.025;
+
+mod sections;
+mod visibility;
+use sections::{draw_surface_sections, section_stations};
 
 /// A `(center, max_span)` pair sized from a data-space bounding box, with
 /// modest padding: what every wireframe figure hands [`Camera3D::project`]
@@ -71,73 +55,24 @@ pub(super) fn framing(
     (center, span)
 }
 
-fn wing_bbox(wing: &Wing) -> (f64, f64, f64, f64, f64, f64) {
-    let (mut x_min, mut x_max) = (f64::INFINITY, f64::NEG_INFINITY);
-    let (mut y_min, mut y_max) = (f64::INFINITY, f64::NEG_INFINITY);
-    let (mut z_min, mut z_max) = (f64::INFINITY, f64::NEG_INFINITY);
-    for sec in &wing.xsecs {
-        let [lx, ly, lz] = sec.xyz_le;
-        for &(x, y) in &[(lx, ly), (lx + sec.chord, ly)] {
-            x_min = x_min.min(x);
-            x_max = x_max.max(x);
-            let ys: &[f64] = if wing.symmetric { &[y, -y] } else { &[y] };
-            for &yy in ys {
-                y_min = y_min.min(yy);
-                y_max = y_max.max(yy);
-            }
-        }
-        z_min = z_min.min(lz);
-        z_max = z_max.max(lz);
-    }
-    if !x_min.is_finite() {
-        return (0.0, 1.0, -1.0, 1.0, -1.0, 1.0);
-    }
-    (x_min, x_max, y_min, y_max, z_min, z_max)
-}
-
-fn fuselage_bbox(fus: &Fuselage) -> (f64, f64, f64, f64, f64, f64) {
-    let (mut x_min, mut x_max) = (f64::INFINITY, f64::NEG_INFINITY);
-    let (mut y_min, mut y_max) = (f64::INFINITY, f64::NEG_INFINITY);
-    let (mut z_min, mut z_max) = (f64::INFINITY, f64::NEG_INFINITY);
-    for sec in &fus.xsecs {
-        let [cx, cy, cz] = sec.xyz_c;
-        x_min = x_min.min(cx);
-        x_max = x_max.max(cx);
-        y_min = y_min.min(cy - sec.width / 2.0);
-        y_max = y_max.max(cy + sec.width / 2.0);
-        z_min = z_min.min(cz - sec.height / 2.0);
-        z_max = z_max.max(cz + sec.height / 2.0);
-    }
-    if !x_min.is_finite() {
-        return (0.0, 1.0, -1.0, 1.0, -1.0, 1.0);
-    }
-    (x_min, x_max, y_min, y_max, z_min, z_max)
-}
-
 fn wing_fit_points(wing: &Wing) -> Vec<Point3D> {
-    let mut points = Vec::with_capacity(wing.xsecs.len() * if wing.symmetric { 4 } else { 2 });
-    for sec in &wing.xsecs {
-        for side in if wing.symmetric {
-            &[1.0, -1.0][..]
-        } else {
-            &[1.0][..]
-        } {
-            points.push([sec.xyz_le[0], sec.xyz_le[1] * side, sec.xyz_le[2]]);
-            points.push([
-                sec.xyz_le[0] + sec.chord,
-                sec.xyz_le[1] * side,
-                sec.xyz_le[2],
-            ]);
-        }
-    }
-    points
+    wing.section_outlines(Some(80))
+        .into_iter()
+        .flatten()
+        .flat_map(|point| {
+            if wing.symmetric {
+                vec![point, mirror_y(point)]
+            } else {
+                vec![point]
+            }
+        })
+        .collect()
 }
-
 fn fuselage_fit_points(fuselage: &Fuselage) -> Vec<Point3D> {
-    let mut points = Vec::with_capacity(fuselage.xsecs.len() * LONGERON_COUNT);
+    let mut points = Vec::with_capacity(fuselage.xsecs.len() * BULKHEAD_SEGMENTS);
     for sec in &fuselage.xsecs {
-        for index in 0..LONGERON_COUNT {
-            let theta = 2.0 * PI * index as f64 / LONGERON_COUNT as f64;
+        for index in 0..BULKHEAD_SEGMENTS {
+            let theta = 2.0 * PI * index as f64 / BULKHEAD_SEGMENTS as f64;
             points.push([
                 sec.xyz_c[0],
                 sec.xyz_c[1] + sec.width * 0.5 * theta.cos(),
@@ -159,9 +94,7 @@ pub(super) fn airplane_fit_points(plane: &Airplane) -> Vec<Point3D> {
     points
 }
 
-/// Draw one wing's leading edge, trailing edge and `x/c = 0.4` upper/lower
-/// thickness lines, mirroring both if [`Wing::symmetric`]: the reachable
-/// subset of upstream's `draw_wireframe` wing loop (see the module doc).
+/// Draw resolved airfoil sections and spanwise skin lines in aircraft axes.
 pub(crate) fn draw_wing_wireframe(
     scene: &mut Scene,
     cam: &Camera3D,
@@ -171,65 +104,59 @@ pub(crate) fn draw_wing_wireframe(
     wing: &Wing,
     color: Color,
 ) {
-    let thin = Stroke::new(color, 0.6);
-    let thick = Stroke::new(color, 1.1);
+    let outlines = wing.section_outlines(Some(40));
     let mirrors: &[bool] = if wing.symmetric {
         &[false, true]
     } else {
         &[false]
     };
-
-    let project_line = |scene: &mut Scene, pts: &[[f64; 3]], stroke: Stroke| {
+    let project_line = |scene: &mut Scene, points: &[Point3D], width, closed| {
         for &mirror in mirrors {
-            let proj: Vec<Point2D> = pts
-                .iter()
-                .map(|&p| {
-                    let p = if mirror { [p[0], -p[1], p[2]] } else { p };
-                    cam.project(p, center, max_span, viewport)
-                })
-                .collect();
-            if proj.len() >= 2 {
+            if points.len() >= 2 {
+                let mut projected = points
+                    .iter()
+                    .map(|&point| {
+                        cam.project(
+                            if mirror { mirror_y(point) } else { point },
+                            center,
+                            max_span,
+                            viewport,
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                if closed {
+                    projected.push(projected[0]);
+                }
                 scene.add(SceneElement::Polyline {
-                    points: proj,
-                    stroke: stroke.clone(),
+                    points: projected,
+                    stroke: Stroke::new(color, width),
                 });
             }
         }
     };
-
-    if let Ok(le) = wing.mesh_line(XsecStation::Scalar(0.0), XsecStation::Scalar(0.0), false) {
-        project_line(scene, &le, thick.clone());
+    for index in section_stations(wing) {
+        if let Some(outline) = outlines.get(index) {
+            project_line(scene, outline, 0.9, true);
+        }
     }
-    if let Ok(te) = wing.mesh_line(XsecStation::Scalar(1.0), XsecStation::Scalar(0.0), false) {
-        project_line(scene, &te, thick);
+    let count = outlines.iter().map(Vec::len).min().unwrap_or(0);
+    if count < 2 {
+        return;
     }
-
-    let half_thickness: Vec<f64> = wing
-        .xsecs
-        .iter()
-        .map(|xsec| xsec.airfoil.local_thickness(&[0.4])[0] / 2.0)
-        .collect();
-    if let Ok(top) = wing.mesh_line(
-        XsecStation::Scalar(0.4),
-        XsecStation::PerXsec(half_thickness.clone()),
-        true,
-    ) {
-        project_line(scene, &top, thin.clone());
-    }
-    let neg_half: Vec<f64> = half_thickness.iter().map(|t| -t).collect();
-    if let Ok(bottom) = wing.mesh_line(
-        XsecStation::Scalar(0.4),
-        XsecStation::PerXsec(neg_half),
-        true,
-    ) {
-        project_line(scene, &bottom, thin);
+    let mut chord_stations = (0..5)
+        .map(|fraction| fraction * (count - 1) / 4)
+        .collect::<Vec<_>>();
+    chord_stations.dedup();
+    for index in chord_stations {
+        let line = outlines
+            .iter()
+            .map(|outline| outline[index])
+            .collect::<Vec<_>>();
+        project_line(scene, &line, 0.35, false);
     }
 }
-
 /// Draw one fuselage's per-station bulkhead ellipses, longerons and
-/// centerline: the reachable subset of upstream's `draw_wireframe`
-/// fuselage loop (see the module doc for why the bulkhead is drawn from
-/// `width`/`height` directly rather than through `get_3D_coordinates`).
+/// centerline in aircraft axes from the stored width and height.
 pub(crate) fn draw_fuselage_wireframe(
     scene: &mut Scene,
     cam: &Camera3D,
@@ -304,184 +231,169 @@ fn title_text(scene: &mut Scene, text: &str, color: Color) {
     });
 }
 
-/// Isolated 3D wireframe of the main wing, `figure_wireframe_wing`.
+fn surface_scene(
+    plane: &Airplane,
+    camera: Option<Camera3D>,
+    theme: Option<&str>,
+    title: Option<&str>,
+) -> Scene {
+    let camera = camera.unwrap_or(Camera3D {
+        elev_deg: 30.0,
+        azim_deg: -150.0,
+        zoom: 1.0,
+    });
+    let top_offset = if title.is_some() {
+        HEADER_HEIGHT - 20.0
+    } else {
+        0.0
+    };
+    let points = airplane_fit_points(plane);
+    let bounds = points
+        .iter()
+        .map(|&point| camera.project(point, [0.0; 3], 1.0, (0.0, 0.0, 1.0, 1.0)))
+        .fold(
+            [
+                f64::INFINITY,
+                f64::NEG_INFINITY,
+                f64::INFINITY,
+                f64::NEG_INFINITY,
+            ],
+            |mut bounds, point| {
+                bounds[0] = bounds[0].min(point[0]);
+                bounds[1] = bounds[1].max(point[0]);
+                bounds[2] = bounds[2].min(point[1]);
+                bounds[3] = bounds[3].max(point[1]);
+                bounds
+            },
+        );
+    let aspect = (bounds[3] - bounds[2]) / (bounds[1] - bounds[0]).max(1e-6);
+    let height = if title.is_some() {
+        (HEADER_HEIGHT + 32.0 + 560.0 * aspect).clamp(180.0, 450.0)
+    } else {
+        500.0
+    };
+    let canvas = (600.0, height - top_offset);
+    let viewport = (20.0, 20.0, canvas.0 - 40.0, canvas.1 - 40.0);
+    let center = camera.fit_center_to_points(&points, [0.0; 3]);
+    let extent = camera.fit_span_to_points(&points, viewport, WIREFRAME_PADDING);
+    let options = SandboxSceneOptions {
+        canvas,
+        reference: Some(FramingReference { center, extent }),
+        ..SandboxSceneOptions::default()
+    };
+    let model = SandboxSceneModel::new(plane, 80);
+    let (mut scene, framing) = model.render(Some(camera), theme, &options);
+    scene
+        .elements
+        .retain(|element| !matches!(element, SceneElement::Line { .. }));
+    for element in &mut scene.elements {
+        if let SceneElement::Polygon {
+            fill: Some(fill),
+            stroke,
+            ..
+        } = element
+        {
+            let lighter = |channel| (0.7 * f64::from(channel) + 0.3 * 255.0) as u8;
+            fill.color = Color::rgb(
+                lighter(fill.color.r),
+                lighter(fill.color.g),
+                lighter(fill.color.b),
+            );
+            *stroke = Some(Stroke::new(fill.color, 0.5));
+        }
+    }
+    let section_color = Color::from_hex("#17263d");
+    let visibility = visibility::ContourVisibility::new(model.faces(), framing);
+    draw_surface_sections(&mut scene, plane, &visibility, section_color);
+    scene.height = height;
+    for element in &mut scene.elements {
+        match element {
+            SceneElement::Polygon { points, .. } | SceneElement::Polyline { points, .. } => {
+                for point in points {
+                    point[1] += top_offset;
+                }
+            }
+            SceneElement::Line { p1, p2, .. } => {
+                p1[1] += top_offset;
+                p2[1] += top_offset;
+            }
+            _ => {}
+        }
+    }
+    if let Some(title) = title {
+        title_text(&mut scene, title, Color::from_hex(get_palette(theme).title));
+        scene.render_title = true;
+    }
+    scene
+}
+
+/// Isolated main wing with the live preview's airfoil loft and surface colors.
 pub fn figure_wireframe_wing(plane: &Airplane, theme: Option<&str>) -> Scene {
-    let pal = get_palette(theme);
-    let mut scene = Scene::new(600.0, 450.0, Some(Color::from_hex(pal.bg)));
-    let wing = plane
+    let mut isolated = plane.clone();
+    isolated.wings = plane
         .wings
         .iter()
-        .find(|w| w.name == "Main Wing")
-        .or_else(|| plane.wings.first());
-    title_text(&mut scene, "Wing Wireframe", Color::from_hex(pal.title));
-    if let Some(wing) = wing {
-        let cam = Camera3D::default();
-        let viewport = (20.0, HEADER_HEIGHT, 560.0, 382.0);
-        let fit_points = wing_fit_points(wing);
-        let (x0, x1, y0, y1, z0, z1) = wing_bbox(wing);
-        let fallback = framing(x0, x1, y0, y1, z0, z1).0;
-        let center = cam.fit_center_to_points(&fit_points, fallback);
-        let span = cam.fit_span_to_points(&fit_points, viewport, WIREFRAME_PADDING);
-        draw_wing_wireframe(
-            &mut scene,
-            &cam,
-            center,
-            span,
-            viewport,
-            wing,
-            Color::from_hex("#2563eb"),
-        );
-    }
-    scene
+        .find(|wing| wing.name == "Main Wing")
+        .or_else(|| plane.wings.first())
+        .cloned()
+        .into_iter()
+        .collect();
+    isolated.fuselages.clear();
+    surface_scene(&isolated, None, theme, Some("Wing Wireframe"))
 }
 
-/// Isolated 3D wireframe of the (first) fuselage: `figure_wireframe_fuselage`.
+/// Isolated fuselage loft with its defining bulkhead outlines.
 pub fn figure_wireframe_fuselage(plane: &Airplane, theme: Option<&str>) -> Scene {
-    let pal = get_palette(theme);
-    let mut scene = Scene::new(600.0, 450.0, Some(Color::from_hex(pal.bg)));
-    let fus = plane
+    let mut isolated = plane.clone();
+    isolated.wings.clear();
+    isolated.fuselages = plane
         .fuselages
         .iter()
-        .find(|f| f.name == "Fuselage")
-        .or_else(|| plane.fuselages.first());
-    title_text(&mut scene, "Fuselage Wireframe", Color::from_hex(pal.title));
-    if let Some(fus) = fus {
-        let cam = Camera3D::default();
-        let viewport = (20.0, HEADER_HEIGHT, 560.0, 382.0);
-        let fit_points = fuselage_fit_points(fus);
-        let (x0, x1, y0, y1, z0, z1) = fuselage_bbox(fus);
-        let fallback = framing(x0, x1, y0, y1, z0, z1).0;
-        let center = cam.fit_center_to_points(&fit_points, fallback);
-        let span = cam.fit_span_to_points(&fit_points, viewport, WIREFRAME_PADDING);
-        draw_fuselage_wireframe(
-            &mut scene,
-            &cam,
-            center,
-            span,
-            viewport,
-            fus,
-            Color::from_hex("#9b59b6"),
-        );
-    }
-    scene
+        .find(|fus| fus.name == "Fuselage")
+        .or_else(|| plane.fuselages.first())
+        .cloned()
+        .into_iter()
+        .collect();
+    surface_scene(&isolated, None, theme, Some("Fuselage Wireframe"))
 }
 
-/// Isolated 3D wireframe of the horizontal and vertical stabilizers:
-/// `figure_wireframe_empennage`, with upstream's same by-name-then-by-index
-/// fallback (`plane.wings[1]`/`plane.wings[2]`) for a configuration whose
-/// tail surfaces are not named exactly `"Horizontal Stabilizer"`/
-/// `"Vertical Stabilizer"`.
+/// Horizontal and vertical tail lofts, including each resolved airfoil section.
 pub fn figure_wireframe_empennage(plane: &Airplane, theme: Option<&str>) -> Scene {
-    let pal = get_palette(theme);
-    let mut scene = Scene::new(600.0, 450.0, Some(Color::from_hex(pal.bg)));
-    title_text(
-        &mut scene,
-        "Empennage Wireframe (H-Stab & V-Stab)",
-        Color::from_hex(pal.title),
-    );
-
+    let mut isolated = plane.clone();
     let hstab = plane
         .wings
         .iter()
-        .find(|w| w.name == "Horizontal Stabilizer")
+        .find(|wing| wing.name == "Horizontal Stabilizer")
         .or_else(|| plane.wings.get(1));
     let vstab = plane
         .wings
         .iter()
-        .find(|w| w.name == "Vertical Stabilizer")
+        .find(|wing| wing.name == "Vertical Stabilizer")
         .or_else(|| plane.wings.get(2));
-
-    let mut x0 = f64::INFINITY;
-    let mut x1 = f64::NEG_INFINITY;
-    let mut y0 = f64::INFINITY;
-    let mut y1 = f64::NEG_INFINITY;
-    let mut z0 = f64::INFINITY;
-    let mut z1 = f64::NEG_INFINITY;
-    for wing in [hstab, vstab].into_iter().flatten() {
-        let (a, b, c, d, e, f) = wing_bbox(wing);
-        x0 = x0.min(a);
-        x1 = x1.max(b);
-        y0 = y0.min(c);
-        y1 = y1.max(d);
-        z0 = z0.min(e);
-        z1 = z1.max(f);
-    }
-    if !x0.is_finite() {
-        return scene;
-    }
-    let cam = Camera3D::default();
-    let viewport = (20.0, HEADER_HEIGHT, 560.0, 382.0);
-    let fit_points = [hstab, vstab]
-        .into_iter()
-        .flatten()
-        .flat_map(wing_fit_points)
-        .collect::<Vec<_>>();
-    let fallback = framing(x0, x1, y0, y1, z0, z1).0;
-    let center = cam.fit_center_to_points(&fit_points, fallback);
-    let span = cam.fit_span_to_points(&fit_points, viewport, WIREFRAME_PADDING);
-    for (index, wing) in [hstab, vstab].into_iter().flatten().enumerate() {
-        let color = if index == 0 {
-            Color::from_hex("#e67e22")
-        } else {
-            Color::from_hex("#16a085")
-        };
-        draw_wing_wireframe(&mut scene, &cam, center, span, viewport, wing, color);
-    }
-    scene
+    isolated.wings = [hstab, vstab].into_iter().flatten().cloned().collect();
+    isolated.fuselages.clear();
+    surface_scene(
+        &isolated,
+        None,
+        theme,
+        Some("Empennage Wireframe (H-Stab & V-Stab)"),
+    )
 }
 
-/// Live 3D exterior wireframe: wings blue (or grey for a surface not named
-/// with "wing"), the primary fuselage in the theme's title color and any
-/// further fuselage-shaped body (engine nacelles) in orange: port of
-/// `alas/sidecar/figures.py::_preview_exterior`.
-///
-/// Unlike the stub this replaces, `center`/`max_span` are computed from the
-/// airplane's own bounding box rather than a fixed magic-number span, so an
-/// aircraft larger or smaller than the reference default still frames
-/// correctly.
+/// Full exterior using the same loft, visibility ordering and colors as the live preview.
 pub fn figure_exterior_3d(
     plane: &Airplane,
     camera: Option<Camera3D>,
     theme: Option<&str>,
 ) -> Scene {
-    let pal = get_palette(theme);
-    let mut scene = Scene::new(600.0, 500.0, Some(Color::from_hex(pal.bg)));
-    let cam = camera.unwrap_or_default();
-    let viewport = (20.0, 20.0, 560.0, 460.0);
-
-    let (x0, x1, y0, y1, z0, z1) = airplane_bbox(plane);
-    let fit_points = airplane_fit_points(plane);
-    let fallback = framing(x0, x1, y0, y1, z0, z1).0;
-    let center = cam.fit_center_to_points(&fit_points, fallback);
-    let span = cam.fit_span_to_points(&fit_points, viewport, WIREFRAME_PADDING);
-
-    for wing in &plane.wings {
-        let color = if wing.name.to_lowercase().contains("wing") {
-            Color::from_hex("#2563eb")
-        } else {
-            // Theme-derived: a fixed light grey left the empennage at 2.35:1
-            // on the Light canvas, effectively invisible at a 1 px stroke.
-            Color::from_hex(crate::theme::secondary_surface_line(pal))
-        };
-        draw_wing_wireframe(&mut scene, &cam, center, span, viewport, wing, color);
-    }
-    for (i, fus) in plane.fuselages.iter().enumerate() {
-        let color = if i == 0 {
-            Color::from_hex(pal.title)
-        } else {
-            Color::from_hex("#ff9900")
-        };
-        draw_fuselage_wireframe(&mut scene, &cam, center, span, viewport, fus, color);
-    }
-
-    scene
+    surface_scene(plane, camera, theme, None)
 }
-
 #[cfg(test)]
 mod tests {
     // These tests intentionally panic if their constructed fixture violates its precondition.
     #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+    use super::sections::defining_stations;
     use super::*;
     use alas_geom::aircraft::airfoil::Airfoil;
     use alas_geom::aircraft::fuselage::{FuselageXSec, DEFAULT_SHAPE};
@@ -523,11 +435,103 @@ mod tests {
     }
 
     #[test]
+    fn sparse_sections_preserve_kinks_and_endpoints_across_subdivisions() {
+        let airfoil = Airfoil::from_name("naca2412").expect("naca");
+        let wing = Wing::new(
+            "Main Wing",
+            (0..=20)
+                .map(|index| {
+                    let span = f64::from(index);
+                    WingXSec::new(
+                        [(span - 7.0).max(0.0) * 0.5, span, 0.0],
+                        4.0 - 0.1 * span,
+                        0.0,
+                        airfoil.clone(),
+                    )
+                })
+                .collect(),
+            true,
+        );
+        assert_eq!(defining_stations(&wing), vec![0, 7, 20]);
+        let selected = section_stations(&wing);
+        assert!(selected.contains(&7));
+        assert!(selected.len() < wing.xsecs.len());
+    }
+
+    #[test]
+    fn profile_breaks_survive_while_linear_airfoil_blends_stay_sparse() {
+        let airfoil = Airfoil::from_name("naca2412").expect("naca");
+        let wing = Wing::new(
+            "Main Wing",
+            (0..=20)
+                .map(|index| {
+                    let span = f64::from(index);
+                    let mut section = airfoil.clone();
+                    let thickness_scale = 1.0 + 0.02 * span.min(7.0);
+                    for point in &mut section.coordinates {
+                        point.1 *= thickness_scale;
+                    }
+                    WingXSec::new([0.0, span, 0.0], 2.0, 0.0, section)
+                })
+                .collect(),
+            true,
+        );
+        assert_eq!(defining_stations(&wing), vec![0, 7, 20]);
+        assert!(section_stations(&wing).contains(&7));
+        assert!(section_stations(&wing).len() < wing.xsecs.len());
+    }
+
+    #[test]
+    fn coarse_wings_get_closed_intermediate_contours_on_the_actual_loft() {
+        let plane = Airplane {
+            name: "probe".to_owned(),
+            xyz_ref: [0.0; 3],
+            wings: vec![probe_wing(true)],
+            fuselages: vec![],
+            s_ref: 40.0,
+            c_ref: 2.0,
+            b_ref: 20.0,
+        };
+        for theme in ["light", "dark"] {
+            let (mut scene, framing) = SandboxSceneModel::new(&plane, 80).render(
+                None,
+                Some(theme),
+                &SandboxSceneOptions::default(),
+            );
+            scene.elements.clear();
+            // Verify the complete loft contours before hidden-line removal.
+            let visibility = visibility::ContourVisibility::new(&[], framing);
+            draw_surface_sections(&mut scene, &plane, &visibility, Color::rgb(0, 0, 0));
+            let rings = scene
+                .elements
+                .iter()
+                .filter_map(|element| match element {
+                    SceneElement::Polyline { points, .. } => Some(points),
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(rings.len(), 10);
+            for ring in &rings {
+                assert_eq!(ring.first(), ring.last());
+            }
+            for ((root, tip), middle) in rings[0].iter().zip(rings[2]).zip(rings[6]) {
+                for axis in 0..2 {
+                    let expected = (root[axis] + tip[axis]) * 0.5;
+                    assert!(
+                        (middle[axis] - expected).abs()
+                            <= 128.0 * f64::EPSILON * expected.abs().max(1.0)
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
     fn a_symmetric_wing_wireframe_draws_both_sides() {
         let mut scene = Scene::new(200.0, 200.0, None);
         let wing = probe_wing(true);
-        let (x0, x1, y0, y1, z0, z1) = wing_bbox(&wing);
-        let (center, span) = framing(x0, x1, y0, y1, z0, z1);
+        let reference = FramingReference::enclosing(&wing_fit_points(&wing)).expect("wing extent");
+        let (center, span) = (reference.center, reference.extent);
         draw_wing_wireframe(
             &mut scene,
             &Camera3D::default(),
@@ -537,20 +541,107 @@ mod tests {
             &wing,
             Color::rgb(0, 200, 255),
         );
-        // LE + TE + top + bottom thickness lines, doubled for symmetry.
-        assert_eq!(scene.elements.len(), 8);
+        assert_eq!(
+            scene.elements.len(),
+            2 * (section_stations(&wing).len() + 5)
+        );
         assert!(
-            wing_bbox(&wing).3 > 0.0,
+            wing_fit_points(&wing).iter().any(|point| point[1] < 0.0),
             "symmetric bbox reaches the mirrored side"
         );
+    }
+
+    #[test]
+    fn section_grid_preserves_resolved_airfoil_camber_thickness_and_twist() {
+        let mut wing = probe_wing(true);
+        wing.xsecs[1].twist = -7.0;
+        let outlines = wing.section_outlines(Some(40));
+        let reference = FramingReference::enclosing(&wing_fit_points(&wing)).expect("extent");
+        let camera = Camera3D::default();
+        let viewport = (0.0, 0.0, 600.0, 450.0);
+        let mut scene = Scene::new(600.0, 450.0, None);
+        draw_wing_wireframe(
+            &mut scene,
+            &camera,
+            reference.center,
+            reference.extent,
+            viewport,
+            &wing,
+            Color::rgb(0, 0, 0),
+        );
+        for (index, outline) in outlines.iter().enumerate() {
+            let min_z = outline
+                .iter()
+                .map(|point| point[2])
+                .fold(f64::INFINITY, f64::min);
+            let max_z = outline
+                .iter()
+                .map(|point| point[2])
+                .fold(f64::NEG_INFINITY, f64::max);
+            assert!(max_z > min_z, "resolved section has finite thickness");
+            for (side, mirror) in [false, true].into_iter().enumerate() {
+                let mut expected = outline
+                    .iter()
+                    .map(|&point| {
+                        camera.project(
+                            if mirror { mirror_y(point) } else { point },
+                            reference.center,
+                            reference.extent,
+                            viewport,
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                expected.push(expected[0]);
+                let SceneElement::Polyline { points, .. } = &scene.elements[2 * index + side]
+                else {
+                    panic!("section outline must remain a polyline");
+                };
+                assert_eq!(points, &expected);
+            }
+        }
+    }
+
+    #[test]
+    fn surface_figures_contain_opaque_loft_faces_and_respond_to_airfoil_changes() {
+        let mut plane = Airplane {
+            name: "probe".to_owned(),
+            xyz_ref: [0.0; 3],
+            wings: vec![probe_wing(true)],
+            fuselages: vec![probe_fuselage()],
+            s_ref: 40.0,
+            c_ref: 2.0,
+            b_ref: 20.0,
+        };
+        let original = figure_wireframe_wing(&plane, None);
+        assert!(original
+            .elements
+            .iter()
+            .any(|element| matches!(element, SceneElement::Polygon { fill: Some(_), .. })));
+        for element in &original.elements {
+            if let SceneElement::Polygon {
+                fill: Some(fill), ..
+            } = element
+            {
+                assert_eq!(fill.color.a, 255);
+            }
+        }
+        plane.wings[0].xsecs[1].airfoil = Airfoil::from_name("naca0018").expect("naca");
+        plane.wings[0].xsecs[1].twist = -8.0;
+        assert_ne!(original, figure_wireframe_wing(&plane, None));
+        let fuselage = figure_wireframe_fuselage(&plane, None);
+        assert!(fuselage
+            .elements
+            .iter()
+            .any(|element| matches!(element, SceneElement::Polygon { fill: Some(_), .. })));
     }
 
     #[test]
     fn a_fuselage_wireframe_draws_one_bulkhead_per_station_plus_longerons_and_centerline() {
         let mut scene = Scene::new(200.0, 200.0, None);
         let fus = probe_fuselage();
-        let (x0, x1, y0, y1, z0, z1) = fuselage_bbox(&fus);
-        let (center, span) = framing(x0, x1, y0, y1, z0, z1);
+        let reference =
+            FramingReference::enclosing(&fuselage_fit_points(&fus)).expect("fuselage extent");
+        let (center, span) = (reference.center, reference.extent);
         draw_fuselage_wireframe(
             &mut scene,
             &Camera3D::default(),
@@ -592,7 +683,9 @@ mod tests {
         };
         let scene = figure_exterior_3d(&plane, None, None);
         let points = scene.elements.iter().filter_map(|element| match element {
-            SceneElement::Polyline { points, .. } => Some(points),
+            SceneElement::Polygon { points, .. } | SceneElement::Polyline { points, .. } => {
+                Some(points)
+            }
             _ => None,
         });
         let (mut x_min, mut x_max, mut y_min, mut y_max) = (
@@ -634,7 +727,9 @@ mod tests {
             figure_wireframe_fuselage(&plane, None),
         ] {
             for points in scene.elements.iter().filter_map(|element| match element {
-                SceneElement::Polyline { points, .. } => Some(points),
+                SceneElement::Polygon { points, .. } | SceneElement::Polyline { points, .. } => {
+                    Some(points)
+                }
                 _ => None,
             }) {
                 assert!(points.iter().all(|point| point[1] >= HEADER_HEIGHT));

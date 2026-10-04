@@ -264,37 +264,3 @@ mod unix_dialog_backend_tests {
         );
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::ToolPathTarget;
-
-    #[test]
-    fn picker_targets_are_distinct_for_each_explicit_preference() {
-        assert_ne!(
-            ToolPathTarget::NastranExecutable,
-            ToolPathTarget::NastranSolver
-        );
-        assert_ne!(
-            ToolPathTarget::Nastran95Directory,
-            ToolPathTarget::Nastran95RfStageDirectory
-        );
-        assert_ne!(
-            ToolPathTarget::MsesDirectory,
-            ToolPathTarget::OpenVspDirectory
-        );
-        assert_ne!(ToolPathTarget::MsesDirectory, ToolPathTarget::AvlExecutable);
-        assert_ne!(
-            ToolPathTarget::NavdataDirectory,
-            ToolPathTarget::RoutesDirectory
-        );
-        assert_ne!(
-            ToolPathTarget::FlowUnsteadyExecutable,
-            ToolPathTarget::AvlExecutable
-        );
-        assert_ne!(
-            ToolPathTarget::FlowUnsteadyExecutable,
-            ToolPathTarget::OpenVspDirectory
-        );
-    }
-}

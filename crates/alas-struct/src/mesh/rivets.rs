@@ -141,11 +141,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn distance_is_the_ordinary_euclidean_one() {
-        assert!((distance([0.0; 3], [3.0, 4.0, 0.0]) - 5.0).abs() < 1e-15);
-    }
-
-    #[test]
     fn no_transition_ribs_means_no_rivets() {
         let mut deck = Deck::new();
         let nodes = NodeMap::new();

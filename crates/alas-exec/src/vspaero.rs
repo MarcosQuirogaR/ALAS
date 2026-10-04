@@ -12,10 +12,11 @@
 use std::fs::{self, File};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::thread;
-use std::time::{Duration, Instant};
 
-use crate::process::{kill_process_tree, NewProcessGroup, NoConsoleWindow};
+use crate::process::{
+    parent_directory, timeout_from_seconds, wait_with_timeout, DeadlineWait, NewProcessGroup,
+    NoConsoleWindow,
+};
 use crate::supervise::SupervisedSpawn;
 
 /// Wake model declared by the native `.vspaero` setup.
@@ -106,6 +107,9 @@ impl VspaeroWakeSettings {
 pub enum VspaeroProcessStatus {
     /// The `.vspgeom` or `.vspaero` input is absent.
     InputMissing,
+    /// The configured timeout was not a finite number of seconds greater
+    /// than zero; nothing was launched.
+    InvalidTimeout,
     /// The executable could not be launched.
     LaunchFailed,
     /// The process exceeded its deadline and its tree was killed.
@@ -123,6 +127,7 @@ impl VspaeroProcessStatus {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::InputMissing => "input_missing",
+            Self::InvalidTimeout => "invalid_timeout",
             Self::LaunchFailed => "launch_failed",
             Self::TimedOut => "timed_out",
             Self::SolverFailed => "solver_failed",
@@ -256,28 +261,30 @@ pub fn run_vspaero(
         ));
         return result;
     }
-    if polar_path.exists() {
-        if let Err(error) = fs::remove_file(&polar_path) {
-            result.error = Some(format!(
-                "cannot remove stale {}: {error}",
-                polar_path.display()
-            ));
+    let timeout = match timeout_from_seconds("VSPAERO", timeout_seconds) {
+        Ok(timeout) => timeout,
+        Err(error) => {
+            result.status = VspaeroProcessStatus::InvalidTimeout;
+            result.error = Some(error.to_string());
             return result;
         }
-    }
-    if history_path.exists() {
-        if let Err(error) = fs::remove_file(&history_path) {
-            result.error = Some(format!(
-                "cannot remove stale {}: {error}",
-                history_path.display()
-            ));
-            return result;
+    };
+    // The inputs are present from here on, so a failure to clear the stale
+    // outputs or open the logs is a launch failure, not a missing input.
+    for stale in [&polar_path, &history_path] {
+        if stale.exists() {
+            if let Err(error) = fs::remove_file(stale) {
+                result.status = VspaeroProcessStatus::LaunchFailed;
+                result.error = Some(format!("cannot remove stale {}: {error}", stale.display()));
+                return result;
+            }
         }
     }
 
     let stdout = match File::create(&stdout_path) {
         Ok(file) => file,
         Err(error) => {
+            result.status = VspaeroProcessStatus::LaunchFailed;
             result.error = Some(format!("cannot create {}: {error}", stdout_path.display()));
             return result;
         }
@@ -285,14 +292,12 @@ pub fn run_vspaero(
     let stderr = match File::create(&stderr_path) {
         Ok(file) => file,
         Err(error) => {
+            result.status = VspaeroProcessStatus::LaunchFailed;
             result.error = Some(format!("cannot create {}: {error}", stderr_path.display()));
             return result;
         }
     };
-    let working_directory = case_path
-        .parent()
-        .filter(|path| !path.as_os_str().is_empty())
-        .unwrap_or_else(|| Path::new("."));
+    let working_directory = parent_directory(case_path);
     // VSPAERO resolves its case argument after changing into the case
     // directory. Passing the original relative path would therefore prepend
     // that directory twice (for example `outputs/openvsp/outputs/openvsp`),
@@ -321,25 +326,21 @@ pub fn run_vspaero(
         }
     };
 
-    let deadline = Instant::now() + Duration::from_secs_f64(timeout_seconds.max(0.1));
-    let process_status = loop {
-        match child.try_wait() {
-            Ok(Some(status)) => break status,
-            Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(25)),
-            Ok(None) => {
-                kill_process_tree(child.id());
-                let _ = child.wait();
-                result.status = VspaeroProcessStatus::TimedOut;
-                result.error = Some(format!(
-                    "VSPAERO exceeded the {timeout_seconds:.1} s deadline; process tree force-killed"
-                ));
-                return result;
-            }
-            Err(error) => {
-                result.status = VspaeroProcessStatus::SolverFailed;
-                result.error = Some(format!("cannot poll VSPAERO: {error}"));
-                return result;
-            }
+    let process_status = match wait_with_timeout(&mut child, timeout) {
+        DeadlineWait::Exited(status) => status,
+        DeadlineWait::TimedOut => {
+            result.status = VspaeroProcessStatus::TimedOut;
+            result.error = Some(format!(
+                "VSPAERO exceeded the {timeout_seconds:.1} s deadline; process tree force-killed"
+            ));
+            return result;
+        }
+        DeadlineWait::PollFailed(error) => {
+            // A child that cannot be polled is still running as far as
+            // anyone knows; the wait has already killed its tree.
+            result.status = VspaeroProcessStatus::SolverFailed;
+            result.error = Some(format!("cannot poll VSPAERO: {error}"));
+            return result;
         }
     };
 
@@ -412,6 +413,49 @@ mod tests {
         }));
         assert_eq!(result.wake_settings, None);
         assert_eq!(result.wake_mode, None);
+    }
+
+    /// A case directory with the three native inputs present.
+    fn complete_case(label: &str) -> PathBuf {
+        let root = std::env::temp_dir().join(format!(
+            "alas-vspaero-{label}-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap_or_else(|error| panic!("create case root: {error}"));
+        let case = root.join("case");
+        for extension in ["vspgeom", "vkey", "vspaero"] {
+            fs::write(case.with_extension(extension), b"input")
+                .unwrap_or_else(|error| panic!("write case input: {error}"));
+        }
+        case
+    }
+
+    #[test]
+    fn a_non_finite_timeout_is_rejected_instead_of_becoming_a_short_deadline() {
+        let case = complete_case("nan-timeout");
+        let result = run_vspaero(Path::new("absent-vspaero"), &case, 1, f64::NAN);
+        assert_eq!(result.status, VspaeroProcessStatus::InvalidTimeout);
+        assert!(result
+            .error
+            .as_deref()
+            .is_some_and(|error| error.starts_with("VSPAERO timeout must be")));
+        let _ = fs::remove_dir_all(parent_directory(&case));
+    }
+
+    #[test]
+    fn an_unremovable_stale_polar_is_a_launch_failure() {
+        let case = complete_case("stale-polar");
+        fs::create_dir_all(case.with_extension("polar"))
+            .unwrap_or_else(|error| panic!("create blocking polar: {error}"));
+        let result = run_vspaero(Path::new("absent-vspaero"), &case, 1, 1.0);
+        assert_eq!(result.status, VspaeroProcessStatus::LaunchFailed);
+        assert!(result
+            .error
+            .as_deref()
+            .is_some_and(|error| error.contains("cannot remove stale")));
+        let _ = fs::remove_dir_all(parent_directory(&case));
     }
 
     #[test]

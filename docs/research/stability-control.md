@@ -412,9 +412,9 @@ Without changing source as part of this research task, the next slices should be
 6. Add independent AVL/DATCOM/external-deck regression cases and finite-difference step/convergence checks.
 7. Add gust and flexible response only after the preceding evidence is stable; keep them as finalist screening metrics at first.
 
-## 6. Mapping to `docs/REQUIREMENTS_FIRST_AIRCRAFT_DESIGN.md`
+## 6. Requirements mapping
 
-The requirements document already provides the correct contract: every requirement carries a value, unit, load case, policy, and evidence/status; hard minimums, soft targets, objectives, and diagnostics are distinct; omitted/not-yet-evaluated stages remain explicit. Apply that structure to stability/control as follows.
+The requirements-first contract (see `docs/design-constraints.md`) is: every requirement carries a value, unit, load case, policy, and evidence/status; hard minimums, soft targets, objectives, and diagnostics are distinct; omitted/not-yet-evaluated stages remain explicit. Apply that structure to stability/control as follows.
 
 | Requirements document concept | Stability/control mapping | Recommended evidence |
 |---|---|---|

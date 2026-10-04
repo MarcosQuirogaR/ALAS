@@ -35,7 +35,7 @@ struct PreviewSegment {
 ///
 /// The Advanced Mission page uses [`show_interactive_mission_profile_preview`]
 /// so a click can select a phase and open its detached editor. This wrapper is
-/// retained for the legacy mission-form renderer and for report-side previews
+/// used by the mission form and by report-side previews
 /// that only need the figure.
 pub(crate) fn show_mission_profile_preview(ui: &mut Ui, config: &AlasConfig) {
     show_mission_profile_preview_inner(None, ui, config);
@@ -65,11 +65,11 @@ fn show_mission_profile_preview_inner(
 
         let segments = preview_segments(config);
         // The schematic must never demand more width than the card actually
-        // has: forcing a fixed floor here (420 pt) used to widen the whole
+        // has: a fixed floor here (420 pt) would widen the whole
         // Inputs page past `layout::CONTENT_MIN_WIDTH` (400 pt) on a narrow
         // window, since that floor did not account for the central panel's
         // and card's own margins. The plot's own inset margins keep it
-        // legible well below the floor this replaced.
+        // legible well below a fixed floor.
         let (rect, response) =
             ui.allocate_exact_size(vec2(ui.available_width().max(1.0), 300.0), Sense::click());
         paint_profile(ui, rect, config, &segments);
@@ -90,7 +90,12 @@ fn preview_segments(config: &AlasConfig) -> Vec<PreviewSegment> {
     let profile = &config.mission.profile;
     let departure_m = airport_elevation_m(&config.departure_airport);
     let arrival_m = airport_elevation_m(&config.arrival_airport);
-    let cruise_m = config.requirements.cruise_altitude_m.max(departure_m + 1.0);
+    let cruise_m = crate::views::mission_profile_inputs::resolved_route_airports(config)
+        .map(|(origin, destination)| {
+            alas_mission::route_cruise_altitude_m(config, &origin, &destination)
+        })
+        .unwrap_or(config.requirements.cruise_altitude_m)
+        .max(departure_m + 1.0);
     let first_level_m =
         (cruise_m * profile.initial_climb_altitude_fraction).max(departure_m + 3000.0);
     let second_level_m =

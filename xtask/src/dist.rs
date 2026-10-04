@@ -17,6 +17,8 @@ use std::process::Command;
 use crate::dist_archive;
 use crate::dist_avl;
 
+mod smoke;
+
 const PACKAGE_VERSION: &str = env!("CARGO_PKG_VERSION");
 const NASTRAN_STRICT_ENV: &str = "ALAS_STRICT_BUNDLED_NASTRAN95";
 const SOURCE_MANIFEST_NAME: &str = "SOURCE-MANIFEST.json";
@@ -306,7 +308,7 @@ pub fn create_distribution(root: &Path) -> Result<(), String> {
 
     // 4. Validate the packaged standalone distribution.
     println!("\nValidating packaged standalone distribution...");
-    validate_distribution(
+    smoke::validate_distribution(
         &dst_exe,
         &sample_config,
         &release_manifest,
@@ -404,7 +406,8 @@ fn bundle_branding(root: &Path, package_dir: &Path) -> Result<(), String> {
 /// usable for the package's portable path-space round-trip check.
 fn run_save_config(exe: &Path, destination: &Path) -> Result<(), String> {
     let destination_text = path_arg(destination)?;
-    let status = Command::new(exe)
+    let status = smoke::isolated_command(exe, &destination.with_extension("profile"))
+        .env("ALAS_TOOL_DISCOVERY", "disabled")
         .args(["--save-config", &destination_text])
         .status()
         .map_err(|e| {
@@ -1361,158 +1364,6 @@ fn copy_directory(source: &Path, destination: &Path) -> Result<(), String> {
                 .map_err(|error| format!("failed to copy {}: {error}", entry.path().display()))?;
         }
     }
-    Ok(())
-}
-
-fn validate_distribution(
-    exe: &Path,
-    packaged_config: &Path,
-    release_manifest: &Path,
-    dist_root: &Path,
-    avl_status: &BundleStatus,
-) -> Result<(), String> {
-    // 1. Verify --help output.
-    let package_root = exe.parent().unwrap_or(dist_root);
-    let output = Command::new(exe)
-        .arg("--help")
-        .current_dir(package_root)
-        .env("ALAS_FROZEN", "1")
-        .output()
-        .map_err(|e| format!("failed to execute packaged binary: {e}"))?;
-
-    if !output.status.success() {
-        return Err("packaged binary --help failed".to_owned());
-    }
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    if !stdout.contains("Usage: alas") {
-        return Err("unexpected --help output from packaged binary".to_owned());
-    }
-    println!("  [OK] Standalone binary execution (--help)");
-
-    // 2. Verify the manifest and the generated package configuration before
-    // invoking the more expensive headless/AVL smoke run.
-    validate_release_manifest(release_manifest, package_root)?;
-    validate_bundled_mses_osmap(package_root)?;
-    let packaged_config_metadata = fs::metadata(packaged_config).map_err(|e| {
-        format!(
-            "packaged configuration template is missing at {}: {e}",
-            packaged_config.display()
-        )
-    })?;
-    if packaged_config_metadata.len() == 0 {
-        return Err(format!(
-            "packaged configuration template is empty: {}",
-            packaged_config.display()
-        ));
-    }
-    println!("  [OK] Release manifest and packaged configuration template");
-
-    // 3. Verify a save/read config round-trip and a writable output path that
-    // contains spaces. This catches path handling that a repository-local
-    // output directory would hide.
-    let smoke_root = env::temp_dir().join(format!("ALAS package smoke {}", std::process::id()));
-    let _ = fs::remove_dir_all(&smoke_root);
-    fs::create_dir_all(&smoke_root)
-        .map_err(|e| format!("failed to create portable smoke directory: {e}"))?;
-    let roundtrip_config = smoke_root.join("config roundtrip.yaml");
-    run_save_config(exe, &roundtrip_config)?;
-    let temp_out = smoke_root.join("run output");
-    let config_text = path_arg(&roundtrip_config)?;
-    let output_text = path_arg(&temp_out)?;
-    let status = Command::new(exe)
-        .args([
-            "--config",
-            &config_text,
-            "--no-optimize",
-            "--no-mission",
-            "--plots",
-            "--quiet",
-            "--output",
-            &output_text,
-        ])
-        .current_dir(package_root)
-        .env("ALAS_FROZEN", "1")
-        .status()
-        .map_err(|e| format!("failed to execute config round-trip smoke run: {e}"))?;
-
-    if !status.success() {
-        return Err("packaged binary config round-trip smoke run failed".to_owned());
-    }
-
-    // The AVL cross-check only runs when this package actually bundles an
-    // executable for it (see `bundle_avl`): today that is the Windows
-    // package alone. Every other target ran the smoke analysis above through
-    // ALAS's own analytical vortex-lattice stage with no AVL executable
-    // configured, so the total-force files and the "Athena AVL" overlay this
-    // block would otherwise demand never exist; requiring them there would
-    // fail every non-Windows package regardless of whether packaging itself
-    // is correct.
-    let avl_force_count = if avl_status.status == "bundled" {
-        let avl_dir = temp_out.join("avl");
-        let count = fs::read_dir(&avl_dir)
-            .map_err(|e| format!("packaged AVL output directory is missing: {e}"))?
-            .filter_map(Result::ok)
-            .filter(|entry| {
-                entry
-                    .path()
-                    .extension()
-                    .is_some_and(|extension| extension == "ft")
-            })
-            .count();
-        if count == 0 {
-            return Err("packaged run did not produce AVL total-force files".to_owned());
-        }
-        let comparison = temp_out.join("plots/model_comparison.svg");
-        let comparison_text = fs::read_to_string(&comparison)
-            .map_err(|e| format!("packaged Model Comparison figure is missing: {e}"))?;
-        if !comparison_text.contains("Athena AVL") {
-            return Err("packaged Model Comparison figure does not name Athena AVL".to_owned());
-        }
-        Some(count)
-    } else {
-        let comparison = temp_out.join("plots/model_comparison.svg");
-        if !comparison.is_file() {
-            return Err("packaged Model Comparison figure is missing".to_owned());
-        }
-        None
-    };
-
-    // The round-trip path above checks a generated config. Run the shipped
-    // template as well so a stale or malformed package file cannot hide behind
-    // the temporary copy.
-    let packaged_out = smoke_root.join("shipped config output");
-    let packaged_config_text = path_arg(packaged_config)?;
-    let packaged_output_text = path_arg(&packaged_out)?;
-    let packaged_status = Command::new(exe)
-        .args([
-            "--config",
-            &packaged_config_text,
-            "--no-optimize",
-            "--no-mission",
-            "--plots",
-            "--quiet",
-            "--output",
-            &packaged_output_text,
-        ])
-        .current_dir(package_root)
-        .env("ALAS_FROZEN", "1")
-        .status()
-        .map_err(|e| format!("failed to execute shipped configuration smoke run: {e}"))?;
-    if !packaged_status.success() {
-        return Err("packaged binary failed to read the shipped configuration template".to_owned());
-    }
-    validate_release_manifest(release_manifest, package_root)?;
-    match avl_force_count {
-        Some(count) => println!(
-            "  [OK] Config round-trip, shipped config read, and writable path-with-spaces; bundled AVL completed with {count} total-force files and Model Comparison overlay"
-        ),
-        None => println!(
-            "  [OK] Config round-trip, shipped config read, and writable path-with-spaces; no bundled AVL for this target, Model Comparison used the analytical fallback"
-        ),
-    }
-
-    let _ = fs::remove_dir_all(&smoke_root);
-    println!("  [OK] Isolated headless execution test passed");
     Ok(())
 }
 

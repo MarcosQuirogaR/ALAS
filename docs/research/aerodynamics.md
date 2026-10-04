@@ -1,6 +1,6 @@
 # Aerodynamics research and staged-fidelity plan for ALAS
 
-Status: resumed from the existing workspace archive on 2026-08-26. The literature search was not restarted. The local source archive is bib/aerodynamics/; every PDF listed below was checked as a PDF and hashed with SHA-256 after download.
+Status: research note. The local source archive is bib/aerodynamics/; every PDF listed below was checked as a PDF and hashed with SHA-256 after download.
 
 This memo is an implementation-oriented synthesis for conceptual aircraft design. It is not a certification method and it does not turn an inviscid or empirical result into a high-fidelity claim. The central recommendation is to make the aerodynamic evaluator return a coefficient, a declared scope, a validity assessment, and typed diagnostics together.
 
@@ -667,4 +667,4 @@ This research does not require source changes, but the implementation order that
 7. Add finalist MSES/external-3D/CFD evidence and compare only matching frames, references, and scopes.
 8. Train or fit reduced aero databases only from retained, valid cases and expose their uncertainty.
 
-This preserves the requirements-first flow in docs/REQUIREMENTS_FIRST_AIRCRAFT_DESIGN.md: materialize a coherent candidate, screen it cheaply, evaluate aero/trim/stability at an explicit fidelity, propagate residuals, and run finalists at higher fidelity. It also preserves the existing ALAS solver boundaries and prevents a finite low-order coefficient from becoming false precision.
+This preserves the requirements-first flow (requirement policy: docs/design-constraints.md): materialize a coherent candidate, screen it cheaply, evaluate aero/trim/stability at an explicit fidelity, propagate residuals, and run finalists at higher fidelity. It also preserves the existing ALAS solver boundaries and prevents a finite low-order coefficient from becoming false precision.

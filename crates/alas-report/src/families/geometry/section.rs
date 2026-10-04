@@ -27,7 +27,24 @@
 //! `docs/cabin-renderer-sources.md` holds the evidence register these rules
 //! come from, including what the published sources do and do not license.
 
-include!("section_parts/part_01.rs");
-include!("section_parts/part_02.rs");
-include!("section_parts/part_03.rs");
-include!("section_parts/part_04.rs");
+use crate::scene::{Color, Fill, Scene, SceneElement, Stroke, TextAlign, TextBaseline};
+use crate::theme::get_palette;
+use alas_pipeline::cabin_scene::{
+    Box3, CabinScene, CargoItem, ResolvedDeck, SeatRow, SectionStation, SourcedContour,
+    WindowAperture,
+};
+
+mod model;
+use model::*;
+mod slicing;
+use slicing::*;
+mod drawing;
+use drawing::*;
+mod annotations;
+pub use annotations::*;
+#[cfg(test)]
+// A section is judged by what it refuses to draw, so these tests build real
+// preset geometry and assert the refusals as well as the picture. A fixture
+// that cannot be built is a failed test, so they panic on it deliberately.
+#[allow(clippy::expect_used, clippy::unwrap_used)]
+mod tests;

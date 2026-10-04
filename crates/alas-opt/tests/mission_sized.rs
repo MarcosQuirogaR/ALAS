@@ -8,7 +8,8 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use alas_config::design_variables::DesignVector;
-use alas_config::{AlasConfig, ConstraintPolicy, DesignMode, MtowSizing, ObjectiveKind};
+use alas_config::{AlasConfig, DesignMode, MtowSizing, ObjectiveKind};
+use alas_opt::mdo::ResidualRole;
 use alas_opt::objective::DesignObjective;
 use alas_opt::{assess_candidate, assess_product_candidate, ConstraintFamily, DesignOptimizer};
 
@@ -16,20 +17,15 @@ fn block_fuel_config() -> AlasConfig {
     let mut config = AlasConfig::default();
     config.optimizer.objective.kind = ObjectiveKind::BlockFuel;
     // These tests isolate mission sizing and residual-family behavior. The
-    // transport body-attitude window is a separate clean-sheet design policy;
+    // transport body-attitude window is a separate clean-sheet requirement;
     // the canonical default vector is intentionally outside that preferred
     // window and is therefore not a suitable generic fixture for this file.
     config
         .optimizer
         .weights
         .transport_planform_constraints_enabled = false;
-    // The canonical vector is deliberately not a trimmed aircraft fixture;
-    // keep balance residuals visible while excluding them from the sizing
-    // assertions below so this file tests mission closure rather than a
-    // particular landing-gear/CG layout.
-    config.optimizer.objective.balance_constraints = ConstraintPolicy::Diagnostic;
-    // The single-pass closure these tests were written against; the
-    // product default sizes the takeoff mass by the mission.
+    // Single-pass closure isolates residual behavior; the clean-sheet
+    // default instead sizes the takeoff mass by the mission.
     config.optimizer.objective.mtow_sizing = MtowSizing::FixedRequirement;
     config
 }
@@ -65,6 +61,113 @@ fn the_default_design_evaluates_with_every_family_represented() {
     }
 }
 
+#[test]
+fn strict_feasibility_and_cost_follow_the_residual_ledger_bit_for_bit() {
+    let mut config = block_fuel_config();
+    config.requirements.max_wing_area_m2 = 1.0;
+    let mass_scale_kg = config.requirements.mtow_kg;
+    let objective = DesignObjective::new(config);
+    let assessment = assess_candidate(&objective, &DesignVector::default().to_array()).unwrap();
+    let constraints: Vec<_> = assessment
+        .residuals
+        .iter()
+        .filter(|row| row.role == ResidualRole::Constraint)
+        .collect();
+    let hard_sum: f64 = constraints.iter().map(|row| row.normalized_violation).sum();
+    let preference_sum: f64 = assessment
+        .residuals
+        .iter()
+        .filter(|row| row.role == ResidualRole::Preference)
+        .map(|row| row.normalized_violation)
+        .sum();
+    assert!(!assessment.hard_feasible);
+    assert_eq!(
+        assessment.hard_feasible,
+        constraints.iter().all(|row| !row.violated())
+    );
+    assert_eq!(assessment.hard_violation_sum.to_bits(), hard_sum.to_bits());
+    // Block fuel uses 30 percent of declared MTOW as its scale; study
+    // preferences retain their ten-to-one cost scale and infeasibility adds
+    // one plus the aggregate normalized hard violation.
+    let expected_cost = assessment.sized.block_fuel_kg / (0.3 * mass_scale_kg)
+        + 10.0 * preference_sum
+        + (1.0 + hard_sum);
+    assert_eq!(assessment.cost.to_bits(), expected_cost.to_bits());
+    assert!(assessment.violated_hard_ids().contains(&"wing_area"));
+}
+
+#[test]
+fn saved_strict_configuration_preserves_nondefault_preference_cost_bits() {
+    let mut config = block_fuel_config();
+    config
+        .optimizer
+        .weights
+        .transport_planform_constraints_enabled = true;
+    config.optimizer.weights.transport_shape_priors_enabled = true;
+    config.optimizer.weights.min_root_wingbox_depth_m = 100.0;
+    config.optimizer.objective.preference_weight = 37.0;
+    let mut document = serde_json::to_value(&config).unwrap();
+    let objective = document["optimizer"]["objective"].as_object_mut().unwrap();
+    objective.remove("preference_weight");
+    objective.insert("soft_penalty_weight".to_owned(), serde_json::json!(37.0));
+    for family in [
+        "mass_constraints",
+        "balance_constraints",
+        "performance_constraints",
+        "geometry_constraints",
+    ] {
+        objective.insert(family.to_owned(), serde_json::json!("hard"));
+    }
+    document["optimizer"]["relaxation"] = serde_json::json!({"enabled": false});
+    let old_file = serde_json::to_string(&document).unwrap();
+    let migrated = AlasConfig::from_value(&serde_json::from_str(&old_file).unwrap()).unwrap();
+    assert_eq!(migrated.optimizer.objective.preference_weight, 37.0);
+    let x = DesignVector::default().to_array();
+    let current = assess_candidate(&DesignObjective::new(config), &x).unwrap();
+    let restored = assess_candidate(&DesignObjective::new(migrated), &x).unwrap();
+    assert!(current.soft_violation_sum > 0.0);
+    assert_eq!(restored.cost.to_bits(), current.cost.to_bits());
+    assert_eq!(restored.hard_feasible, current.hard_feasible);
+    let expected = restored.objective_value / (0.3 * restored.sized.takeoff_mass_kg)
+        + 37.0 * restored.soft_violation_sum
+        + if restored.hard_feasible {
+            0.0
+        } else {
+            1.0 + restored.hard_violation_sum
+        };
+    assert_eq!(restored.cost.to_bits(), expected.to_bits());
+}
+
+#[test]
+fn direct_invalid_preference_weight_never_produces_a_feasible_candidate() {
+    let mut config = block_fuel_config();
+    config.optimizer.objective.preference_weight = f64::NAN;
+    let assessment = assess_candidate(
+        &DesignObjective::new(config),
+        &DesignVector::default().to_array(),
+    )
+    .unwrap();
+    assert!(!assessment.hard_feasible);
+    assert!(assessment
+        .violated_hard_ids()
+        .contains(&"candidate_state_unavailable"));
+}
+
+#[test]
+fn direct_invalid_plausibility_window_rejects_the_candidate() {
+    let mut config = block_fuel_config();
+    config.optimizer.plausibility.max_aspect_ratio = f64::NAN;
+    let assessment = assess_candidate(
+        &DesignObjective::new(config),
+        &DesignVector::default().to_array(),
+    )
+    .unwrap();
+    assert!(!assessment.hard_feasible);
+    assert!(assessment
+        .violated_hard_ids()
+        .contains(&"plausibility_configuration_invalid"));
+}
+
 /// (2) `MtowSizing::SizedByMission` closes the outer fixed point and never
 /// exceeds the takeoff-mass ceiling: `solve_dispatch` clamps every candidate
 /// takeoff mass at `mtow_kg`, so this also exercises that the outer loop
@@ -86,29 +189,122 @@ fn sized_by_mission_closes_and_never_exceeds_the_ceiling() {
     assert!(assessment.sized.takeoff_mass_kg <= ceiling_kg + 1e-6);
 }
 
-/// (3) A design range no transport can fly is `MtowLimited`, hard
-/// infeasible, and costs more than the feasible default.
-///
-/// The fixture disables the transport planform policy and records balance
-/// residuals as diagnostics; this keeps the test focused on mission range,
-/// sizing and residual accounting while the dedicated parity tests cover
-/// reference balance layouts.
+#[test]
+fn registered_hard_mtow_nominals_separate_model_defects_from_physical_findings() {
+    for name in alas_config::presets::available() {
+        let config = AlasConfig::from_value(&serde_json::json!({"preset": name})).unwrap();
+        let design = alas_config::presets::get(name).unwrap().design_vector;
+        let assessment = assess_product_candidate(&config, &design).unwrap();
+        assert_eq!(
+            config.optimizer.objective.mtow_sizing,
+            MtowSizing::FixedRequirement
+        );
+        assert_eq!(
+            assessment.sized.takeoff_mass_kg,
+            assessment.sized.zero_fuel_mass_kg
+                + (config.requirements.mtow_kg - assessment.sized.zero_fuel_mass_kg)
+                    .min(assessment.sized.usable_capacity_kg)
+        );
+        if matches!(name, "A320-200" | "DC-10") {
+            let loading = assessment.sized.takeoff_loading.unwrap();
+            assert_eq!(
+                loading.status,
+                alas_mass::loading::MtowFuelLoadingStatus::VolumeLimited
+            );
+            assert!(loading.mtow_margin_kg > 0.0);
+            assert!(!assessment.violated_hard_ids().contains(&"cg_model_error"));
+        }
+        let expected: &[&str] = match name {
+            "A220-300" => &[],
+            "A320-200" => &[],
+            // With the trimmable stabiliser at its takeoff nose-up setting
+            // the rotation boundary lies ahead of the item-level takeoff CG.
+            // At the built -2 deg incidence it did not (boundary against
+            // takeoff CG, %MAC: A340 30.8 against 26.7, B787 21.9 against
+            // 16.9).
+            "A340-300" | "B787-9" => &[],
+            // Declared-mass loading misses the nose reaction. Its maximum-fuel
+            // mission's mid-cruise lift clears Korn divergence (19.5 against
+            // 26.9 counts). The takeoff trim clears the rotation boundary
+            // that sat 0.8 %MAC aft of the flown takeoff CG (42.6 %MAC).
+            "A380-800" => &["min_nose_gear_load"],
+            // Pin update (round 3): was ["forward_cg_range",
+            // "min_nose_gear_load", "tip_back"]. The 5 deg/s^2 class pitch
+            // acceleration (Sadraey 12.3), the DATCOM K' elevator table with
+            // the measured 21.8 deg up travel, and the tail-down-aware
+            // tip-back requirement (8 deg model tail-down vs 10.7 deg
+            // tip-back, no 15 deg floor) clear the rotation and tip-back
+            // findings. The nose-gear load shortfall remains.
+            "ATR72-600" => &["min_nose_gear_load"],
+            // The maximum-fuel mission's mid-cruise lift still crosses the
+            // Korn divergence boundary (27.5 against 26.9 counts). The
+            // takeoff trim clears the rotation boundary.
+            "AVE" => &["sweep_consistent_with_cruise_mach"],
+            // The conventional Korn section factor leaves insufficient
+            // cruise thrust and sweep. The empty aircraft's CG lies 3 mm
+            // aft of the published minimum nose-gear share at its weight
+            // (0.0598 against 0.0600 of its weight, inside the chart's
+            // +-0.15 % read). The takeoff trim clears the rotation boundary
+            // that lay aft of the volume-limited takeoff CG.
+            "DC-10" => &[
+                "min_nose_gear_load",
+                "cruise_thrust",
+                "sweep_consistent_with_cruise_mach",
+            ],
+            _ => panic!("{name}: establish the registered hard-MTOW findings"),
+        };
+        let mesh_failure = assessment
+            .residuals
+            .iter()
+            .find(|row| row.id == "structural_mesh_invalid");
+        assert!(
+            mesh_failure.is_none(),
+            "{name}: mesh construction is a model-validity prerequisite"
+        );
+        let mesh = assessment
+            .residuals
+            .iter()
+            .find(|row| row.id == "structural_mesh_mass_discrepancy")
+            .unwrap_or_else(|| {
+                panic!("{name}: successful mesh construction must report its material mass")
+            });
+        assert!(mesh.actual.is_finite() && mesh.actual > 0.0);
+        let mut actual: Vec<_> = assessment
+            .violated_hard_ids()
+            .into_iter()
+            .filter(|id| *id != "structural_mesh_invalid")
+            .collect();
+        let mut expected = expected.to_vec();
+        actual.sort_unstable();
+        expected.sort_unstable();
+        assert_eq!(actual, expected, "{name}: review changed physical findings");
+        assert_eq!(
+            assessment.hard_feasible,
+            expected.is_empty() && mesh_failure.is_none(),
+            "{name}"
+        );
+    }
+}
+
+/// An impossible mission exceeds the mass limit and increases the violation cost.
 #[test]
 fn an_impossible_design_range_is_hard_infeasible_and_costs_more() {
-    let feasible_objective = DesignObjective::new(block_fuel_config());
-    let x = DesignVector::default().to_array();
-    let feasible =
-        assess_candidate(&feasible_objective, &x).unwrap_or_else(|reason| panic!("{reason}"));
-    assert!(feasible.hard_feasible);
+    let config = AlasConfig::from_value(&serde_json::json!({"preset": "A220-300"})).unwrap();
+    let design = alas_config::presets::get("A220-300").unwrap().design_vector;
+    let feasible = assess_product_candidate(&config, &design).unwrap();
+    assert!(feasible.hard_feasible, "{:?}", feasible.violated_hard_ids());
+    assert!(feasible.violated_hard_ids().is_empty());
+    assert!(feasible
+        .residuals
+        .iter()
+        .filter(|r| r.family == ConstraintFamily::Mass)
+        .all(|r| !r.violated()));
 
-    let mut impossible_config = block_fuel_config();
-    // Far beyond the default aircraft's reach, yet still a mission the
-    // model can fly to a mass excess: past about 16,000 nmi the mission
-    // itself stops closing and `mtow_ceiling` is no longer the reason.
+    let mut impossible_config = config;
+    // A trans-global mission exceeds the regional aircraft's mass and fuel
+    // limits while remaining a finite mission for the dispatch model.
     impossible_config.optimizer.objective.design_range_nmi = 12_000.0;
-    let impossible_objective = DesignObjective::new(impossible_config);
-    let impossible =
-        assess_candidate(&impossible_objective, &x).unwrap_or_else(|reason| panic!("{reason}"));
+    let impossible = assess_product_candidate(&impossible_config, &design).unwrap();
 
     assert!(!impossible.hard_feasible);
     assert!(impossible
@@ -116,42 +312,6 @@ fn an_impossible_design_range_is_hard_infeasible_and_costs_more() {
         .iter()
         .any(|residual| residual.id == "mtow_ceiling" && residual.normalized_violation > 0.0));
     assert!(impossible.cost > feasible.cost);
-}
-
-/// (4) Turning a family off removes its residuals; a `Diagnostic` family's
-/// residuals are recorded but never counted toward feasibility.
-#[test]
-fn an_off_family_is_removed_and_a_diagnostic_family_is_uncounted() {
-    let mut off_config = block_fuel_config();
-    off_config.optimizer.objective.geometry_constraints = ConstraintPolicy::Off;
-    let off_objective = DesignObjective::new(off_config);
-    let x = DesignVector::default().to_array();
-    let off_assessment =
-        assess_candidate(&off_objective, &x).unwrap_or_else(|reason| panic!("{reason}"));
-    assert!(off_assessment
-        .residuals
-        .iter()
-        .all(|residual| residual.family != ConstraintFamily::Geometry));
-
-    let mut diagnostic_config = block_fuel_config();
-    diagnostic_config.optimizer.objective.geometry_constraints = ConstraintPolicy::Diagnostic;
-    let diagnostic_objective = DesignObjective::new(diagnostic_config);
-    let diagnostic_assessment =
-        assess_candidate(&diagnostic_objective, &x).unwrap_or_else(|reason| panic!("{reason}"));
-    let geometry_residuals: Vec<_> = diagnostic_assessment
-        .residuals
-        .iter()
-        .filter(|residual| residual.family == ConstraintFamily::Geometry)
-        .collect();
-    assert!(!geometry_residuals.is_empty());
-    assert_eq!(
-        diagnostic_assessment.hard_violation_sum, off_assessment.hard_violation_sum,
-        "a diagnostic family must not add to the hard-violation sum"
-    );
-    assert_eq!(
-        diagnostic_assessment.soft_violation_sum, off_assessment.soft_violation_sum,
-        "a diagnostic family must not add to the soft-violation sum"
-    );
 }
 
 /// (5) An infeasible candidate's reject reason lists the violated hard
@@ -186,26 +346,15 @@ fn the_reject_reason_lists_violated_ids_joined_by_plus() {
     assert_eq!(history.soft_violation.len(), history.n_evaluations());
 }
 
-/// (6) A trivial differential-evolution run (population seeded from the
-/// default design plus a Latin-hypercube fill, with the default `Hard`
-/// geometry policy) returns `Ok`, or reports `NoFeasibleDesign` naming the
-/// residuals that failed; both are legitimate outcomes of this contract, so
-/// the assertion accepts either.
-///
-/// The exact default design vector is itself marginally hard-infeasible
-/// under the default `Hard` geometry policy (its built wing area sits a few
-/// parts per million over `max_wing_area_m2`, and both tail-volume
-/// coefficients sit a few percent under their configured minimum window: the
-/// legacy weighted-penalty objective these defaults were tuned against
-/// treats both as soft preferences, not hard bounds), so whether this
-/// particular seed's population contains a candidate that clears every hard
-/// residual is itself part of what the test exercises.
+/// A finite search budget need not find a design meeting every hard
+/// requirement. It must return either a hard-feasible design or a typed
+/// failure that identifies the violated residuals.
 #[test]
 fn a_trivial_de_run_returns_ok_or_names_the_failing_residuals() {
     let mut config = block_fuel_config();
     config.optimizer.solver.method = "differential_evolution".to_owned();
-    config.optimizer.solver.population_size = 1;
-    config.optimizer.solver.max_iterations = 0;
+    config.optimizer.solver.screening.max_evaluations = 8;
+    config.optimizer.solver.refinement.max_evaluations = 24;
     config.optimizer.solver.seed = Some(1);
 
     let result = DesignOptimizer::new(config).run(None, None, None);
@@ -512,9 +661,7 @@ fn landing_mass_limit_kg(assessment: &alas_opt::CandidateAssessment) -> f64 {
 /// "The three questions and the sizing basis").
 ///
 /// B787-9 is used because its mission-sized route closure converges under
-/// both modes on the baseline tree
-/// (`outputs/mass-model-consolidation/after/mission-cases.csv`,
-/// `B_baseline_sandbox_{sized_by_mission,unconstrained}_route`); it also
+/// both modes; it also
 /// carries a declared MLW, so a second case on AVE (no declared MLW) is
 /// added below to exercise the landing-limit fallback the declared-MLW
 /// aircraft cannot.
@@ -662,9 +809,8 @@ fn unconstrained_and_sized_by_mission_agree_on_a_fixed_aircraft_whose_mission_cl
 /// `mlw_fraction_mtow x declared MTOW` in every `MtowSizing` mode; it must
 /// not follow the dispatch/mission-closed mass the way
 /// `mdo::mda::converge`'s per-pass dispatch limit and the `landing_mass`
-/// residual used to before this fix (`outputs/mass-model-consolidation/after/mission-cases.csv`,
-/// `AVE,B_baseline_sandbox_unconstrained_route`, `landing_mass_limit_kg`
-/// 245,155 against the declared-basis 329,976).
+/// residual would (`landing_mass_limit_kg` 245,155 kg against the
+/// declared-basis 329,976 kg).
 #[test]
 fn ave_landing_limit_is_the_declared_mtow_fraction_in_every_mtow_sizing_mode_not_the_dispatch_mass()
 {
@@ -717,4 +863,116 @@ fn ave_landing_limit_is_the_declared_mtow_fraction_in_every_mtow_sizing_mode_not
             }
         }
     }
+}
+
+/// The B787-9 route closure on its frozen plans is a property of the
+/// aircraft, not of where the iteration starts or of the integration step
+/// count it starts from: the converged takeoff mass agrees within 0.1 % from
+/// the plan's seed (cold), from warm starts on either side of the closure,
+/// and from two other starting step counts. Before the plan was frozen per
+/// pass, the dispatch re-chose cruise levels and climb revisions at every
+/// Picard mass, and the closure changed with the start and the step count.
+///
+/// The bound: the frozen step count meets a Richardson trip-fuel error of
+/// 5e-4 (`frozen_plan::RICHARDSON_TOLERANCE`) and trip fuel is under half of
+/// the takeoff mass, so discretization moves the closure by well under
+/// 0.1 %; the outer loop's own tolerance is 1 kg.
+#[test]
+fn the_b787_closure_does_not_depend_on_its_start_or_step_count() {
+    use alas_opt::mdo::SizingControls;
+    let name = "B787-9";
+    let mut config = AlasConfig::from_value(&serde_json::json!({ "preset": name })).unwrap();
+    config.optimizer.objective.mtow_sizing = MtowSizing::SizedByMission;
+    let design = alas_config::presets::get(name).unwrap().design_vector;
+    let close = |controls: SizingControls| {
+        alas_opt::mdo::assess_product_candidate_with_controls(&config, &design, controls)
+            .unwrap_or_else(|reason| panic!("{controls:?}: {reason}"))
+            .sized
+    };
+    let cold = close(SizingControls::default());
+    assert!(cold.sizing_closed, "the cold closure must close");
+    let cold_kg = cold.takeoff_mass_kg;
+    for controls in [
+        SizingControls {
+            initial_takeoff_mass_kg: Some(0.9 * cold_kg),
+            ..SizingControls::default()
+        },
+        SizingControls {
+            initial_takeoff_mass_kg: Some(1.04 * cold_kg),
+            ..SizingControls::default()
+        },
+        SizingControls {
+            steps_per_segment: Some(2),
+            ..SizingControls::default()
+        },
+        SizingControls {
+            steps_per_segment: Some(8),
+            ..SizingControls::default()
+        },
+    ] {
+        let sized = close(controls);
+        let relative = (sized.takeoff_mass_kg - cold_kg).abs() / cold_kg;
+        assert!(
+            sized.sizing_closed && relative <= 1.0e-3,
+            "{controls:?}: {} kg against {cold_kg} kg ({relative:.2e})",
+            sized.takeoff_mass_kg
+        );
+    }
+}
+
+/// A spent work budget rejects the candidate with its own reason, whichever
+/// limit binds, rather than returning a partly closed aircraft.
+#[test]
+fn an_exhausted_sizing_budget_is_its_own_rejection_reason() {
+    use alas_opt::mdo::mission_model::{SizingBudget, SIZING_BUDGET_EXHAUSTED};
+    use alas_opt::mdo::SizingControls;
+    let name = "A320-200";
+    let mut config = AlasConfig::from_value(&serde_json::json!({ "preset": name })).unwrap();
+    config.optimizer.objective.mtow_sizing = MtowSizing::SizedByMission;
+    let design = alas_config::presets::get(name).unwrap().design_vector;
+    let unlimited = SizingBudget {
+        max_trip_flights: u32::MAX,
+        max_deck_evals: u64::MAX,
+        max_outer_passes: u32::MAX,
+    };
+    for budget in [
+        SizingBudget {
+            max_trip_flights: 3,
+            ..unlimited
+        },
+        SizingBudget {
+            max_deck_evals: 1_000,
+            ..unlimited
+        },
+        SizingBudget {
+            max_outer_passes: 1,
+            ..unlimited
+        },
+    ] {
+        let controls = SizingControls {
+            budget: Some(budget),
+            ..SizingControls::default()
+        };
+        let result =
+            alas_opt::mdo::assess_product_candidate_with_controls(&config, &design, controls);
+        assert_eq!(
+            result.err().as_deref(),
+            Some(SIZING_BUDGET_EXHAUSTED),
+            "{budget:?}"
+        );
+    }
+    // The same candidate inside an ample budget closes and reports its work.
+    let sized = alas_opt::mdo::assess_product_candidate_with_controls(
+        &config,
+        &design,
+        SizingControls {
+            budget: Some(unlimited),
+            ..SizingControls::default()
+        },
+    )
+    .unwrap()
+    .sized;
+    assert!(sized.sizing_closed);
+    assert!(sized.work.plan_freezes >= 1 && sized.work.trip_flights > 0);
+    assert!(sized.work.deck_evals > 0);
 }

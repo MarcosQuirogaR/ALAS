@@ -43,6 +43,11 @@ The single number the entire weight-and-balance pipeline is anchored to.
 Every component mass in [Weight, balance & stability](weight-balance-and-stability.md)
 is sized so that OEW + payload + fuel reconciles back to this figure; it's
 not a soft target, it's the budget the mass model has to close against.
+For registered presets this is **Hard MTOW**, the default
+[takeoff-mass mode](design-space-and-optimizer.md#takeoff-mass-modes), and the
+takeoff fuel is capped at the usable tank capacity. A brief with no preset is
+a [clean-sheet design](design-space-and-optimizer.md#clean-sheet-design), which
+derives its start, bounds and geometry from the stated requirements.
 
 ## Payload
 
@@ -77,7 +82,7 @@ max_cruise_cl: 0.95
 
 These are the boundaries of *feasible* airframes, not tuning knobs the
 optimizer aims for: a candidate design that violates any of them is
-penalized or rejected outright. `max_wing_area_m2` keeps the search from
+invalid. `max_wing_area_m2` keeps the search from
 drifting toward an oversized wing chasing marginal induced-drag gains;
 `min_wing_loading_kg_m2` keeps it from going the other way and undersizing
 the wing relative to MTOW; `max_cruise_cl` is a stall guard: any candidate

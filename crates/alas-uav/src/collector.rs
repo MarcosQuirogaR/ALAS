@@ -5,5 +5,15 @@
 //!
 //! Crawling keeps evidence and volatile procurement text outside reviewed physics.
 
-include!("collector_parts/part_01.rs");
-include!("collector_parts/part_02.rs");
+use serde::{Deserialize, Serialize};
+use std::collections::{BTreeSet, VecDeque};
+use std::time::Duration;
+mod sources;
+pub use sources::{built_in_sources, collect_sources, SourceAdapter};
+mod policy;
+pub use policy::CrawlPolicy;
+
+mod crawl;
+pub use crawl::*;
+mod extract;
+use extract::*;

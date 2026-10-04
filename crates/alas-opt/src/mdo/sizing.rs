@@ -5,143 +5,149 @@
 //! depend on the takeoff mass run once, then `mdo::mda` closes the coupled
 //! mass, centre-of-gravity, trim and mission-fuel fixed point.
 
-use alas_config::{airport_dataset, airports, AlasConfig, MtowSizing};
-use alas_geom::aircraft::airplane::Airplane;
-use alas_mass::breakdown::{MassBreakdown, MassCoordinates};
+use std::sync::Arc;
+
+use alas_atmo::Atmosphere;
+use alas_config::{AlasConfig, TailSizing};
 use alas_payload::oew::oew_and_cg;
+
+pub(crate) mod candidate_model;
+mod entry;
+mod outcome;
+pub(crate) mod planned_mission;
+mod route;
+use entry::mass_coordinates_failure;
+#[cfg(test)]
+pub(crate) use entry::run_candidate;
+pub(crate) use entry::run_candidate_with_fuselage_policy;
+pub(crate) use outcome::{SizingOutcome, TrimReuse};
 
 use super::build::first_mass_pass;
 use super::engine::static_thrust_kn_per_engine;
 use super::mda::{converge, MdaContext, MdaState};
-use super::mission_model::{PhaseAeroLimits, SegmentMissionModel};
-use super::propulsion::{max_climb_rate_ft_min, PropulsionDeck};
-use super::range::mission_range_from_coordinates;
-use super::tanks::tank_capacity_kg;
-use super::trim::{trim_and_polar, TrimmedPolar};
+use super::mission_model::SizingBudget;
+use super::tanks::usable_fuel_capacity;
+use super::trim::{trim_and_polar_with_cache, TrimmedPolar};
 use super::types::{
-    CandidateFailure, ExternalPolar, HistoryFields, PayloadCapacity, PolarConditionTolerance,
-    SizedCandidate,
+    CandidateFailure, CandidateFuelArtifacts, ExternalPolar, HistoryFields,
+    PolarConditionTolerance, SizedCandidate, SizingControls, SizingWork,
 };
 
-/// A failure with the `mass_coordinates` reason, for the engine-binding
-/// lookups beside the mass analysis.
-///
-/// This is deliberately **not** the seam for a station-placement failure. A
-/// candidate whose main-gear station cannot be placed never reaches here: the
-/// mass analysis it passes through first
-/// (`build::mass_analysis_with_structural_feedback`) already classifies that
-/// cause as `main_gear_station_not_measured` and propagates it with `?`, so
-/// a search log can separate a missing gear datum from a degenerate geometry.
-/// `a_missing_main_gear_datum_survives_the_mdo_sizing_entry_point` pins that.
-/// What is bucketed under `mass_coordinates` here is the engine binding
-/// beside the mass analysis, for the reason stated at each call site.
-fn mass_coordinates_failure() -> CandidateFailure {
-    CandidateFailure {
-        reason: "mass_coordinates",
-    }
-}
+/// A budget that never binds: the closure always carries one so its work
+/// counters are kept (`SegmentMissionModel::work`).
+const UNLIMITED_BUDGET: SizingBudget = SizingBudget {
+    max_trip_flights: u32::MAX,
+    max_deck_evals: u64::MAX,
+    max_outer_passes: u32::MAX,
+};
 
-/// Everything a mission-sized residual table is computed from, beyond the
-/// scalar summary in [`SizedCandidate`].
-pub(crate) struct SizingOutcome {
-    pub plane: Airplane,
-    pub masses: MassBreakdown,
-    pub coords: MassCoordinates,
-    pub cg_x: f64,
-    pub x_np: f64,
-    pub mac: f64,
-    pub cd0: f64,
-    pub induced_factor_k: f64,
-    /// Geometric aircraft-body angle at the cruise trim used by the mission
-    /// model, before the presentation-only compressibility correction.
-    pub geometric_body_alpha_deg: f64,
-    pub n_engines: i64,
-    pub static_thrust_kn: f64,
-    pub departure: Option<&'static airports::Airport>,
-    pub arrival: Option<&'static airports::Airport>,
-    /// Source-resolved records used for routing/elevation. A record may be
-    /// present while its runway values remain physical-only and therefore
-    /// unusable by field-performance constraints.
-    #[expect(
-        dead_code,
-        reason = "retained for finalist airport provenance reporting"
-    )]
-    pub departure_record: Option<airport_dataset::ProvenancedAirport>,
-    #[expect(
-        dead_code,
-        reason = "retained for finalist airport provenance reporting"
-    )]
-    pub arrival_record: Option<airport_dataset::ProvenancedAirport>,
-    /// Whether both configured aerodrome identifiers resolved to records.
-    pub airport_records_resolved: bool,
-    /// Whether both records carry declared operational runway distances.
-    pub declared_airport_data_complete: bool,
-    /// Whether the mission distance was explicit or could be computed from
-    /// two finite source-resolved coordinates.
-    pub mission_distance_known: bool,
-    /// Minimum still-air distance for the configured climb/descent profile.
-    pub minimum_profile_range_m: f64,
-    pub mtow_ceiling: f64,
-    pub sized: SizedCandidate,
-    pub history: HistoryFields,
-    #[expect(dead_code, reason = "retained for finalist load-case reporting")]
-    pub capacity: PayloadCapacity,
-    /// Whether the wing total represents a complete primary plus secondary
-    /// inventory. Clean-sheet movable correlations remain partial.
-    pub structural_inventory_complete: bool,
-}
-
-/// Build, size and trim one candidate design vector.
-///
-/// # Errors
-///
-/// [`CandidateFailure`] when the geometry, mass, payload layout or trim
-/// solve fails: the candidate is not a physically evaluable aircraft.
-#[cfg(test)]
-pub(crate) fn run_candidate(
-    config: &AlasConfig,
-    x: &[f64],
-) -> Result<SizingOutcome, CandidateFailure> {
-    run_candidate_with_polar_and_fuselage_policy(config, x, None, false)
-}
-
-/// Run a candidate while preserving a caller-pinned clean-sheet fuselage
-/// coordinate.  This is used by fixed desktop/reference reviews; ordinary
-/// product optimization keeps the cabin-derived sizing behavior.
-pub(crate) fn run_candidate_with_fuselage_policy(
-    config: &AlasConfig,
-    x: &[f64],
-    preserve_explicit_fuselage_length: bool,
-) -> Result<SizingOutcome, CandidateFailure> {
-    run_candidate_with_polar_and_fuselage_policy(config, x, None, preserve_explicit_fuselage_length)
-}
-
-/// [`run_candidate_with_fuselage_policy`] with an optional externally
-/// supplied cruise polar, which replaces the native trim and is held fixed
-/// through the sizing loop.
-pub(crate) fn run_candidate_with_polar_and_fuselage_policy(
+/// Build, size and trim one candidate, with an optional externally supplied
+/// cruise polar (which replaces the native trim and is held fixed through
+/// the sizing loop), deep cancellation and caller [`SizingControls`].
+pub(crate) fn run_candidate_cancellable(
     config: &AlasConfig,
     x: &[f64],
     external: Option<&ExternalPolar>,
     preserve_explicit_fuselage_length: bool,
+    cancellation: Option<crate::cancellation::EvaluationCancellation>,
+    controls: SizingControls,
 ) -> Result<SizingOutcome, CandidateFailure> {
+    run_candidate_reusing(
+        config,
+        x,
+        external,
+        preserve_explicit_fuselage_length,
+        cancellation,
+        controls,
+        None,
+    )
+}
+
+/// [`run_candidate_cancellable`], starting from `reuse`'s trim when it
+/// stands for this candidate ([`TrimReuse`]) and from its lattice cache in
+/// any case.
+pub(crate) fn run_candidate_reusing(
+    config: &AlasConfig,
+    x: &[f64],
+    external: Option<&ExternalPolar>,
+    preserve_explicit_fuselage_length: bool,
+    cancellation: Option<crate::cancellation::EvaluationCancellation>,
+    controls: SizingControls,
+    reuse: Option<&TrimReuse>,
+) -> Result<SizingOutcome, CandidateFailure> {
+    if cancellation.as_ref().is_some_and(|token| token.requested()) {
+        return Err(CandidateFailure {
+            reason: "cancelled",
+        });
+    }
     let (candidate_config, dv, mut plane) = super::build::build_geometry_with_fuselage_policy(
         config,
         x,
         preserve_explicit_fuselage_length,
     )?;
-    // The ceiling-mass cabin layout is consumed inside `first_mass_pass`;
-    // the closure re-places the cabin at every closed mass itself.
-    let (masses0, coords0, cg0, _summary, capacity, structural_reference) =
-        first_mass_pass(&candidate_config, &dv, &plane)?;
+    // The seed-mass cabin layout is consumed inside `first_mass_pass`; the
+    // closure re-places the cabin at every closed mass itself. The two
+    // design modes evaluate the first pass at their seed with the structure
+    // designed there; every other mode's seed is the declared requirement.
+    let mut plan = candidate_config.mtow_plan();
+    // A warm start replaces the seed of an iterating plan only, inside its
+    // dispatch ceiling; a fixed requirement is evaluated at the requirement.
+    if let Some(warm_kg) = controls
+        .initial_takeoff_mass_kg
+        .filter(|kg| plan.iterates && kg.is_finite() && *kg > 0.0)
+    {
+        plan.seed_kg = warm_kg.min(plan.dispatch_ceiling_kg);
+    }
+    let seeded = plan
+        .requires_mission_sized_evaluation()
+        .then(|| candidate_config.at_sized_closure_mass(plan.seed_kg));
+    let (mut masses0, mut coords0, mut cg0, _summary, capacity, structural_reference) =
+        first_mass_pass(seeded.as_ref().unwrap_or(&candidate_config), &dv, &plane)?;
+
+    // The structural pass stays at the declared design weights. Only the
+    // usable fuel and its physical moment follow the loadable takeoff case.
+    let takeoff_loading = if plan.mode == alas_config::MtowSizing::FixedRequirement {
+        let (loading, cg) = alas_mass::loading::apply_mtow_fuel_loading(
+            &candidate_config,
+            &dv,
+            &plane,
+            &mut masses0,
+            &mut coords0,
+        )
+        .map_err(|_| CandidateFailure {
+            reason: "mass_coordinates",
+        })?;
+        cg0 = cg;
+        Some(loading)
+    } else {
+        None
+    };
+    let initial_analysis_mass_kg =
+        takeoff_loading.map_or(plan.seed_kg, |load| load.takeoff_mass_kg);
 
     let req = &candidate_config.requirements;
-    let mtow_ceiling = req.mtow_kg;
-    let polar0 = match external {
+    let declared_mtow_kg = req.mtow_kg;
+    let mtow_ceiling = plan.upper_bound_kg.unwrap_or(declared_mtow_kg);
+    let untrimmed = plane.clone();
+    let vlm_cache: super::trim::CandidateVlmCache = reuse
+        .map(|reuse| reuse.vlm_cache.clone())
+        .unwrap_or_default();
+    let reused = reuse.filter(|reuse| {
+        external.is_none()
+            && reuse.stands_for(
+                &candidate_config,
+                &dv,
+                &plane,
+                cg0[0],
+                controls.screening_drag_table,
+            )
+    });
+    let initial_trim_cg_x_m = reused.map_or(cg0[0], |reuse| reuse.trim_cg_x_m);
+    let polar0 = match (external, reused) {
         // An external polar must describe this candidate at this cruise
         // point: a polar evaluated at another Mach, altitude or reference
         // area is a mismatched analysis, not a candidate.
-        Some(polar)
+        (Some(polar), _)
             if polar.is_valid()
                 && polar
                     .matches_condition(
@@ -154,12 +160,24 @@ pub(crate) fn run_candidate_with_polar_and_fuselage_policy(
         {
             TrimmedPolar::from_external(polar)
         }
-        Some(_) => {
+        (Some(_), _) => {
             return Err(CandidateFailure {
                 reason: "trim_solve",
             })
         }
-        None => trim_and_polar(&candidate_config, &mut plane, cg0[0], &dv, mtow_ceiling)?,
+        (None, Some(reuse)) => {
+            plane = reuse.trimmed.clone();
+            reuse.polar.clone()
+        }
+        (None, None) => trim_and_polar_with_cache(
+            &candidate_config,
+            &mut plane,
+            cg0[0],
+            &dv,
+            initial_analysis_mass_kg,
+            &vlm_cache,
+            controls.screening_drag_table,
+        )?,
     };
     let n_engines = candidate_config
         .geometry
@@ -171,92 +189,29 @@ pub(crate) fn run_candidate_with_polar_and_fuselage_policy(
     // Propulsion mass already required this same engine binding to resolve
     // successfully inside `first_mass_pass`, so a failure reaching here is
     // bucketed with the mass-coordinate failures it would otherwise cause.
-    let propulsion = PropulsionDeck::from_engine(
-        &candidate_config.geometry.engine,
-        req.cruise_mach,
-        req.cruise_altitude_m,
-        max_climb_rate_ft_min(candidate_config.mission.profile.initial_climb_rate_m_s),
-    )
-    .map_err(|_| mass_coordinates_failure())?;
+    let (propulsion, deck_key) =
+        candidate_model::sizing_deck(&candidate_config).map_err(|_| mass_coordinates_failure())?;
     let static_thrust_kn = static_thrust_kn_per_engine(&candidate_config.geometry.engine)
         .map_err(|_| mass_coordinates_failure())?;
 
-    let departure_record = airport_dataset::resolve(&candidate_config.departure_airport).ok();
-    let arrival_record = airport_dataset::resolve(&candidate_config.arrival_airport).ok();
-    let departure = airports::get(&candidate_config.departure_airport).ok();
-    let arrival = airports::get(&candidate_config.arrival_airport).ok();
-    let explicit_range = candidate_config.optimizer.objective.design_range_nmi > 0.0;
-    let departure_coordinates = departure_record
-        .as_ref()
-        .and_then(|airport| Some((airport.latitude_deg.value?, airport.longitude_deg.value?)));
-    let arrival_coordinates = arrival_record
-        .as_ref()
-        .and_then(|airport| Some((airport.latitude_deg.value?, airport.longitude_deg.value?)));
-    let coordinate_range = departure_coordinates.is_some() && arrival_coordinates.is_some();
-    let mission_distance_known = explicit_range || coordinate_range;
-    let range_m = mission_range_from_coordinates(
-        candidate_config.optimizer.objective.design_range_nmi,
-        departure_coordinates,
-        arrival_coordinates,
-    );
-
-    let departure_elevation_m = departure_record
-        .as_ref()
-        .and_then(|airport| airport.elevation_m.value)
-        .or_else(|| departure.map(|airport| airport.elevation_m))
-        .unwrap_or(0.0);
-    let arrival_elevation_m = arrival_record
-        .as_ref()
-        .and_then(|airport| airport.elevation_m.value)
-        .or_else(|| arrival.map(|airport| airport.elevation_m))
-        .unwrap_or(0.0);
-    let holding_altitude_m =
-        arrival_elevation_m + candidate_config.fuel_policy.holding_altitude_ft * alas_units::FOOT;
-    // The altitude the configured route is actually flown at, resolved by the
-    // same rule the published mission uses
-    // (`alas_mission::route_cruise_altitude_m`). `req.cruise_altitude_m` is
-    // the *sizing* cruise altitude - the design point the wing, the engine
-    // deck and the drag polar are built at - and it stays that everywhere
-    // else in this function, including the propulsion deck's reference point
-    // above. It is not the flight level a dispatcher files for a short
-    // declared sector, and using it as one is what made the A320-200 and the
-    // A220-300 reject every candidate on `mission_profile_range`: the
-    // climb-cruise-descent ladder to 11 278 m needs 743 km of still air and
-    // the declared LEMD-LEPA sector is 546 km. The published mission was
-    // corrected to fly the preset's own declared operational altitude; this
-    // is the same correction on the optimizer's side, so the two models size
-    // and fly one mission instead of two.
-    let flown_cruise_altitude_m = match (departure, arrival) {
-        (Some(origin), Some(destination)) => {
-            alas_mission::route_cruise_altitude_m(&candidate_config, origin, destination)
-        }
-        _ => req.cruise_altitude_m,
-    };
-    let model = SegmentMissionModel::new(
-        candidate_config.mission.profile.clone(),
-        req.cruise_mach,
-        flown_cruise_altitude_m,
-        departure_elevation_m,
-        arrival_elevation_m,
+    let route = route::resolve(&candidate_config);
+    let (departure, range_m, route_distance_m) =
+        (route.departure, route.range_m, route.route_distance_m);
+    // The same builder a consumer of the carried artifacts rebuilds this
+    // model with (`candidate_model::candidate_mission_model`).
+    let mut model = candidate_model::route_mission_model(
+        &candidate_config,
+        &route,
         plane.s_ref,
-        polar0.cd0,
-        polar0.induced_factor_k,
-        polar0.wave_drag_cd,
-        req.gravity_m_s2,
-        holding_altitude_m,
-        PhaseAeroLimits::from_config(&candidate_config),
+        polar0.drag.cruise_drag(),
         propulsion,
     )
     .map_err(|_| CandidateFailure {
         reason: "trim_solve",
-    })?
-    // The same departure ISA deviation the native mission applies to every
-    // segment, so both paths fly one ambient convention.
-    .with_isa_deviation_c(
-        departure
-            .map(|airport| airport.isa_deviation_c)
-            .unwrap_or(0.0),
-    );
+    })?;
+    if let Some(steps) = controls.steps_per_segment.filter(|&steps| steps > 0) {
+        model = model.with_steps_per_segment(steps);
+    }
     // The model is built from the candidate's own trimmed cruise point
     // rather than from an `alas-pipeline` report; an invalid polar or engine
     // binding here reflects the same aerodynamic operating point
@@ -270,17 +225,64 @@ pub(crate) fn run_candidate_with_polar_and_fuselage_policy(
     // `SegmentMissionModel::minimum_flyable_profile_range_m`.
     let minimum_profile_range_m = model.minimum_flyable_profile_range_m();
 
-    let tank_capacity = tank_capacity_kg(&candidate_config, &plane, &dv);
+    // The one capacity rule the full analysis applies too: published for an
+    // unchanged preset, else the resolved layout.
+    let capacity_assessment = usable_fuel_capacity(&candidate_config, &dv, &plane);
+    let tank_capacity = capacity_assessment.map(|capacity| capacity.kg);
 
+    model.cancellation = cancellation;
+    let design_mission = super::mtow_modes::closure_mission(
+        &plan,
+        &candidate_config,
+        &model,
+        range_m,
+        (masses0.payload, capacity.carried_passengers),
+    )?;
+    // The route is flown off-design by the closed aircraft whenever it is
+    // not the mission the closure flew: beside a design mission, and beside
+    // a great-circle sizing mission when the run planned a different route.
+    // Its dispatch is the flown load the reporting verdict checks.
+    let closes_on_design_mission = design_mission.is_some();
+    let flies_route_off_design =
+        closes_on_design_mission || (route_distance_m > 0.0 && route_distance_m != range_m);
+    let route_model = flies_route_off_design.then(|| model.clone());
+    let (model, range_m, dispatch_payload_kg, mission_distance_known, minimum_profile_range_m) =
+        match design_mission {
+            Some(mission) => {
+                let minimum_m = mission.model.minimum_flyable_profile_range_m();
+                let known = mission.distance_known;
+                (
+                    mission.model,
+                    mission.range_m,
+                    mission.payload_kg,
+                    known,
+                    minimum_m,
+                )
+            }
+            None => (
+                model,
+                range_m,
+                None,
+                route.mission_distance_known,
+                minimum_profile_range_m,
+            ),
+        };
     let context = MdaContext {
         config: &candidate_config,
         dv: &dv,
-        model,
+        model: model.with_budget(controls.budget.unwrap_or(UNLIMITED_BUDGET)),
         range_m,
+        plan,
+        dispatch_payload_kg,
         tank_capacity_kg: tank_capacity,
         retrim_allowed: external.is_none(),
+        screening_drag_table: controls.screening_drag_table,
         structural_reference: structural_reference.reference,
         structural_feedback: structural_reference.feedback,
+        structural_inventory_complete: structural_reference.inventory_complete,
+        wing_box: Default::default(),
+        vlm_cache,
+        initial_trim_cg_x_m,
     };
     let closure = converge(
         &context,
@@ -293,7 +295,25 @@ pub(crate) fn run_candidate_with_polar_and_fuselage_policy(
         },
     )?;
     let state = closure.state;
-    let polar = state.polar;
+    let trim_reuse = external.is_none().then(|| {
+        let mut without_gear = candidate_config.clone();
+        without_gear.landing_gear.derived_main_gear = None;
+        TrimReuse {
+            config: without_gear,
+            dv,
+            untrimmed,
+            trimmed: plane.clone(),
+            polar: state.polar.clone(),
+            trim_cg_x_m: closure.trim_cg_x_m,
+            screening_drag_table: controls.screening_drag_table,
+            vlm_cache: context.vlm_cache.clone(),
+        }
+    });
+    let work = SizingWork {
+        plan_freezes: closure.plan_freezes,
+        trip_flights: context.model.work().map_or(0, |(flights, _)| flights),
+        deck_evals: 0,
+    };
 
     let (operating_empty_mass_kg, _) = oew_and_cg(&state.masses, &state.coords);
     // A fixed-requirement run evaluates the aircraft at its declared MTOW;
@@ -301,71 +321,85 @@ pub(crate) fn run_candidate_with_polar_and_fuselage_policy(
     // compared against that ceiling by the mass residuals.  Keeping those
     // quantities separate prevents geometry/thrust/CG checks from using the
     // lower mission-required mass while the component ledger is closed at
-    // the declared MTOW.  Both mission-sized modes (`SizedByMission`,
-    // bounded above by the declared MTOW, and `Unconstrained`, which only
-    // seeds its first pass from it) use the converged dispatch mass for
-    // both purposes instead, since there each candidate's own closure, not
-    // the declared requirement, is what the analysis mass answers to.
-    let analysis_takeoff_mass_kg =
-        if candidate_config.optimizer.objective.mtow_sizing == MtowSizing::FixedRequirement {
-            mtow_ceiling
-        } else {
-            closure.dispatch.takeoff_mass_kg
-        };
+    // the declared MTOW.  Every mission-closed mode (`SizedByMission`,
+    // `Unconstrained`, `MtowBand`, `PayloadAdjusted`) uses the converged
+    // dispatch mass for both purposes instead, since there each candidate's
+    // own closure, not the declared requirement, is what the analysis mass
+    // answers to.
+    let analysis_takeoff_mass_kg = if plan.analyses_at_closure() {
+        closure.dispatch.takeoff_mass_kg
+    } else {
+        initial_analysis_mass_kg
+    };
+    // The last trim moved to the cruise lift of the analysis mass: the drag
+    // table spans the lift range, so the reported lift-to-drag ratio and
+    // attitude belong to the mass the residuals are evaluated at.
+    let polar = {
+        let atmosphere = Atmosphere::new(req.cruise_altitude_m);
+        let speed_m_s = req.cruise_mach * atmosphere.speed_of_sound();
+        let dynamic_pressure_pa = 0.5 * atmosphere.density() * speed_m_s * speed_m_s;
+        state.polar.at_cruise_cl(
+            analysis_takeoff_mass_kg * req.gravity_m_s2 / (dynamic_pressure_pa * plane.s_ref),
+        )
+    };
     // The design-weight basis the ledger was closed on, made explicit so a
     // report can say whether the components belong to the declared aircraft
     // or to the sized one (`alas_config::MassSizingBasis`).
-    let basis = candidate_config.mass_sizing_basis();
-    let (design_gross_mass_kg, design_landing_mass_kg) = match basis {
-        alas_config::MassSizingBasis::FixedAircraft {
-            design_gross_mass_kg,
-            design_landing_mass_kg,
-        } => (design_gross_mass_kg, design_landing_mass_kg),
-        alas_config::MassSizingBasis::Coupled => {
-            // The component ledger is closed on this candidate's own
-            // dispatched mass, which is what "coupled" means and is left
-            // alone. The *landing* limit is a different quantity and must
-            // not follow it.
-            //
-            // A maximum landing mass is a structural design weight: a
-            // fraction of the design gross weight the airframe and gear are
-            // built for. Referring it to the mass this particular sector
-            // happens to close at makes the `landing_mass` residual say
-            // "burn at least (1 - mlw_fraction) of your own take-off mass on
-            // this flight", which is a statement about the mission with no
-            // aircraft property in it, and it is unsatisfiable by
-            // construction on a short sector: measured on the shipped
-            // clean-sheet path it rejected 434 of 462 A320-200 candidates,
-            // 438 of 460 A220-300 and 603 of 605 A340-300.
-            //
-            // Under `MtowSizing::SizedByMission` - the product default - the
-            // closure is explicitly bounded above by the declared MTOW, so
-            // that declared mass *is* the design gross weight the structure
-            // must support and the closure is only this mission's dispatch.
-            // The limit is therefore taken against the ceiling there.
-            // `Unconstrained` declares no ceiling at all (see the
-            // `mtow_ceiling` residual above), so it keeps the closed mass,
-            // which is the only design weight that mode has.
-            let limit_basis_kg = if candidate_config.optimizer.objective.mtow_sizing
-                == MtowSizing::SizedByMission
-                && mtow_ceiling.is_finite()
-                && mtow_ceiling > 0.0
-            {
-                mtow_ceiling
-            } else {
-                analysis_takeoff_mass_kg
-            };
-            (
-                analysis_takeoff_mass_kg,
-                candidate_config.landing_mass_limit_kg(limit_basis_kg),
-            )
-        }
+    let (sizing_basis, design_gross_mass_kg, design_landing_mass_kg) =
+        super::mtow_modes::design_weights(
+            &candidate_config,
+            &plan,
+            analysis_takeoff_mass_kg,
+            declared_mtow_kg,
+            super::mtow_modes::landing_floor_kg(&closure.dispatch),
+        );
+    // The payload the closure flew: the design payload of a design mission,
+    // otherwise the laid-out load case. The derived design MZFW adds it to
+    // the operating empty mass.
+    let design_payload_kg = dispatch_payload_kg.unwrap_or(state.masses.payload);
+    let offdesign = match route_model.as_ref() {
+        Some(route) if route_distance_m > 0.0 => Some(super::offdesign::fly_route(
+            &candidate_config,
+            route,
+            route_distance_m,
+            &super::offdesign::ClosedAircraft {
+                polar: &polar,
+                operating_empty_mass_kg,
+                payload_kg: state.masses.payload,
+                design_payload_kg,
+                // The takeoff-mass limit the route is flown under, as the
+                // reporting dispatch takes it: the mass a design mission
+                // closed on, else the declared MTOW that bounds the closure.
+                mtow_kg: if closes_on_design_mission {
+                    analysis_takeoff_mass_kg
+                } else {
+                    declared_mtow_kg
+                },
+                planning_mass_kg: analysis_takeoff_mass_kg,
+                usable_capacity_kg: tank_capacity,
+            },
+        )?),
+        _ => None,
     };
+    // MDA updates the candidate box and current FLOPS total. An initially
+    // complete frozen-reference diagnostic cannot verify the final inventory.
+    let structural_inventory_complete = closure.structural_inventory_complete
+        && alas_mass::wing_reconciliation::primary_fits_complete_wing(
+            closure.structural_feedback.primary_mass_kg,
+            state.masses.wing,
+        );
     let sized = SizedCandidate {
         takeoff_mass_kg: analysis_takeoff_mass_kg,
-        sizing_basis: basis.as_str(),
+        takeoff_loading,
+        sizing_basis,
         design_gross_mass_kg,
         design_landing_mass_kg,
+        mtow: super::mtow_modes::MtowPlanOutcome {
+            structural_basis: plan.structural_basis.as_str(),
+            design_payload_kg,
+            derived_design_mzfw_kg: operating_empty_mass_kg + design_payload_kg,
+            offdesign,
+        },
         operating_empty_mass_kg,
         zero_fuel_mass_kg: closure.dispatch.zero_fuel_mass_kg,
         payload_kg: state.masses.payload,
@@ -376,26 +410,40 @@ pub(crate) fn run_candidate_with_polar_and_fuselage_policy(
         cargo_capacity_kg: capacity.cargo_capacity_kg,
         carried_cargo_payload_kg: capacity.carried_cargo_payload_kg,
         block_fuel_kg: closure.dispatch.plan.block_fuel_kg(),
-        takeoff_fuel_kg: closure.dispatch.plan.takeoff_fuel_kg(),
+        takeoff_fuel_kg: takeoff_loading.map_or_else(
+            || closure.dispatch.plan.takeoff_fuel_kg(),
+            |load| load.carried_usable_fuel_kg,
+        ),
         ramp_fuel_kg: closure.dispatch.plan.ramp_fuel_kg(),
         usable_capacity_kg: tank_capacity.unwrap_or(f64::NAN),
         design_range_m: range_m,
         mission_distance_known,
-        airport_records_resolved: departure_record.is_some() && arrival_record.is_some(),
-        declared_airport_data_complete: departure_record
-            .as_ref()
-            .is_some_and(airport_dataset::ProvenancedAirport::is_complete_for_declared_performance)
-            && arrival_record.as_ref().is_some_and(
-                airport_dataset::ProvenancedAirport::is_complete_for_declared_performance,
-            ),
+        airport_records_resolved: route.records_resolved(),
+        declared_airport_data_complete: route.declared_data_complete(),
         minimum_profile_range_m,
         lift_to_drag: polar.lift_to_drag,
+        design_mission_fuel_kg: closure.dispatch.plan.takeoff_fuel_kg(),
+        design_mission_trip_fuel_kg: closure.dispatch.plan.trip.kg,
+        fuel_artifacts: Arc::new(CandidateFuelArtifacts {
+            drag: polar.drag.clone(),
+            reference_area_m2: plane.s_ref,
+            deck: deck_key,
+            frozen_plan: closure.frozen_plan,
+            tail_sizing: TailSizing::of(&candidate_config.geometry.empennage, &dv),
+        }),
+        // The off-design route flies the same deck, so its evaluations are
+        // on the same counter.
+        work: SizingWork {
+            deck_evals: context.model.propulsion.evaluation_count(),
+            ..work
+        },
         dispatch: closure.dispatch,
         sizing_iterations: closure.sizing_iterations,
         sizing_closed: closure.sizing_closed,
+        takeoff_mass_settled: closure.takeoff_mass_settled,
         retrim_count: closure.retrim_count,
         cg_shift_pct_mac: closure.cg_shift_pct_mac,
-        structural_inventory_complete: structural_reference.inventory_complete,
+        structural_inventory_complete,
         structural_primary_mass_kg: closure.structural_feedback.primary_mass_kg,
         structural_secondary_mass_kg: closure.structural_feedback.secondary_mass_kg,
     };
@@ -414,29 +462,24 @@ pub(crate) fn run_candidate_with_polar_and_fuselage_policy(
         cg_x: state.cg[0],
         x_np: polar.x_np,
         mac,
-        cd0: polar.cd0,
-        induced_factor_k: polar.induced_factor_k,
         geometric_body_alpha_deg: polar.geometric_body_alpha_deg,
         n_engines: n_engines as i64,
         static_thrust_kn,
         departure,
-        arrival,
-        declared_airport_data_complete: departure_record
-            .as_ref()
-            .is_some_and(airport_dataset::ProvenancedAirport::is_complete_for_declared_performance)
-            && arrival_record.as_ref().is_some_and(
-                airport_dataset::ProvenancedAirport::is_complete_for_declared_performance,
-            ),
-        airport_records_resolved: departure_record.is_some() && arrival_record.is_some(),
-        departure_record,
-        arrival_record,
+        arrival: route.arrival,
+        declared_airport_data_complete: route.declared_data_complete(),
+        airport_records_resolved: route.records_resolved(),
+        departure_record: route.departure_record,
+        arrival_record: route.arrival_record,
         mission_distance_known,
         minimum_profile_range_m,
         mtow_ceiling,
+        plan,
         sized,
         history,
         capacity,
-        structural_inventory_complete: structural_reference.inventory_complete,
+        structural_inventory_complete,
+        trim_reuse,
     })
 }
 
@@ -469,7 +512,7 @@ mod tests {
         let mut config = AlasConfig::from_value(&serde_json::json!({ "preset": "ATR72-600" }))
             .unwrap_or_else(|error| panic!("ATR configuration: {error}"));
         // This test owns an explicitly unmeasured fixture; the registered
-        // ATR preset itself now has its published gear anchors.
+        // ATR preset itself has its published gear anchors.
         config.landing_gear.reference_station_fuselage_length_m = None;
         config.landing_gear.reference_nlg_x_fraction = None;
         config.landing_gear.reference_mlg_x_fractions = None;
@@ -488,5 +531,28 @@ mod tests {
         let config = AlasConfig::default();
         let x = DesignVector::default().to_array();
         assert!(run_candidate(&config, &x).is_ok());
+    }
+}
+
+#[cfg(test)]
+mod cancellation_tests {
+    #[test]
+    fn pre_cancelled_candidate_is_not_a_numerical_or_physical_rejection() {
+        let token = crate::cancellation::EvaluationCancellation::new();
+        token.request();
+        let result = super::run_candidate_cancellable(
+            &alas_config::AlasConfig::default(),
+            &[],
+            None,
+            false,
+            Some(token),
+            crate::mdo::types::SizingControls::default(),
+        );
+        assert!(matches!(
+            result,
+            Err(super::CandidateFailure {
+                reason: "cancelled"
+            })
+        ));
     }
 }

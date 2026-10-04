@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! Compares `alas-mass::torenbeek` against AeroSandbox's
-//! `torenbeek_weights.py`, via `golden/generators/gen_mass_torenbeek.py`.
+//! Compares `alas-mass::torenbeek` against the reference fixture generated
+//! by `golden/generators/gen_mass_torenbeek.py`.
 //!
 //! Every quantity here is closed-form `f64` arithmetic, no factorization,
 //! spline fit or iteration, so the whole row is checked at `Tier::Closed`,
@@ -19,11 +19,10 @@ use alas_mass::torenbeek::{mass_fuselage_simple, mass_wing};
 use alas_testkit::{Comparison, Tier};
 use serde::Deserialize;
 
-/// The three wings the generator builds (shaped like `aircraft_builder.py`'s
-/// main wing, hstab and vstab) rebuilt from the same literal values the
-/// generator's own docstring records. Identical to the geometry
-/// `parity_asb_wing.rs` already reconstructs; duplicated here rather than
-/// shared, since a parity test's whole point is to stand on its own.
+/// The three wings the generator builds (main wing, hstab and vstab)
+/// rebuilt from the same literal values the generator's own docstring
+/// records. Duplicated here rather than shared, since a parity test's whole
+/// point is to stand on its own.
 fn build_main_wing() -> Wing {
     let root_z_m = -2.1;
     let break_z_m = -0.3;
@@ -130,7 +129,7 @@ fn linspace(start: f64, stop: f64, num: usize) -> Vec<f64> {
 
 /// `aerosandbox.numpy.sinspace(0, 1, num)`: `1 - cos(linspace(0, pi/2,
 /// num))`, bunching points near the start, with both endpoints pinned to
-/// exactly `0.0`/`1.0` (upstream's own floating-point fixup).
+/// exactly `0.0`/`1.0`.
 fn sinspace01(num: usize) -> Vec<f64> {
     let mut values: Vec<f64> = linspace(0.0, std::f64::consts::FRAC_PI_2, num)
         .into_iter()

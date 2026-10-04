@@ -44,8 +44,8 @@ The recommended architecture is:
    to closure. A structural mass that is merely reported beside the original
    MTOW is not coupled sizing.
 
-This fits the requirements-first flow in
-docs/REQUIREMENTS_FIRST_AIRCRAFT_DESIGN.md: architecture and load-case
+This fits the requirements-first flow:
+architecture and load-case
 definition precede sizing, wingbox screening precedes optional NASTRAN/AVL/MSES,
 and final reports retain residuals and diagnostic reasons.
 
@@ -719,9 +719,9 @@ spacing and non-finite/negative strength margins. It should add analogous
 early gates for missing load cases, disconnected paths, invalid mass/CG,
 unresolved material basis, and unsupported high-fidelity claims.
 
-### REQUIREMENTS_FIRST_AIRCRAFT_DESIGN.md
+### Requirements mapping
 
-The existing document already states the key policy: load-case definition
+The requirements-first policy is: load-case definition
 comes before preliminary sizing; structural loads and wingbox sizing are a
 stage; optional NASTRAN/AVL/MSES are later evidence; failed external solvers
 must return typed reasons; and a requirement not supported at a selected

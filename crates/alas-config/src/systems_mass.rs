@@ -12,7 +12,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::{ConfigNode, Kind, Leaf};
+use crate::{CabinEquipmentMethod, ConfigNode, Kind, Leaf};
 
 /// Versioned method used for systems, equipment, and operating-item mass.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -125,12 +125,6 @@ impl FlopsInputEvidence {
             Self::UncertainEngineeringEstimate => "uncertain_engineering_estimate",
         }
     }
-
-    /// Whether this family may be described as aircraft data rather than as
-    /// a choice made for the run.
-    pub const fn is_aircraft_data(self) -> bool {
-        matches!(self, Self::SourceBacked)
-    }
 }
 
 impl Leaf for FlopsInputEvidence {
@@ -210,11 +204,6 @@ impl FlopsInputProvenance {
             && !self.location.trim().is_empty()
             && !self.applicability.trim().is_empty()
     }
-
-    /// Whether this family states how uncertain it is.
-    pub fn states_uncertainty(&self) -> bool {
-        !self.uncertainty.trim().is_empty()
-    }
 }
 
 /// Evidence carried with a completed FLOPS transport evaluation.
@@ -248,158 +237,6 @@ impl FlopsTransportProvenance {
     /// Whether every non-geometric FLOPS input family carries its evidence.
     pub fn is_complete(&self) -> bool {
         self.mission.is_declared() && self.cabin.is_declared() && self.architecture.is_declared()
-    }
-
-    /// The three families, named, in the order the coverage report lists them.
-    pub fn families(&self) -> [(&'static str, &FlopsInputProvenance); 3] {
-        [
-            ("mission", &self.mission),
-            ("cabin", &self.cabin),
-            ("architecture", &self.architecture),
-        ]
-    }
-
-    /// Whether every family is read from a document for this variant.
-    ///
-    /// This is the only condition under which a run's non-geometric inputs
-    /// may be described as aircraft data. Anything else is a scenario, and
-    /// calling it otherwise is the mistake this method exists to prevent.
-    pub fn is_entirely_source_backed(&self) -> bool {
-        self.families()
-            .iter()
-            .all(|(_, family)| family.evidence.is_aircraft_data())
-    }
-
-    /// Names of the families that state no uncertainty.
-    pub fn families_without_uncertainty(&self) -> Vec<&'static str> {
-        self.families()
-            .iter()
-            .filter(|(_, family)| !family.states_uncertainty())
-            .map(|(name, _)| *name)
-            .collect()
-    }
-}
-
-/// Which method prices the cabin equipment and the occupant-driven operating
-/// items.
-///
-/// These two groups together are where the FLOPS transport equations depart
-/// furthest from a modern aircraft, and they depart in **both** directions,
-/// which is why the choice is a method selection rather than a coefficient.
-///
-/// The comparison that establishes it uses Airbus' own accounting boundary
-/// (Fuchte 2013, Table 1: passenger seats are ATA 60-3 and galley structure
-/// ATA 60-2, both **operational items**, not furnishings), so the like-for-like
-/// quantity is FLOPS `WFURN` plus the occupant-driven part of `WOPIT`:
-///
-/// | aircraft | Airbus accounting | LTH relations | FLOPS equations |
-/// |---|---:|---:|---:|
-/// | A320-200, 150 seats | 56.3 kg/seat | 55.7 kg/seat | 54.2 kg/seat |
-/// | A340-300, 290-295 seats | 98.0 kg/seat | 99.3 kg/seat | 59.0 kg/seat |
-///
-/// On a single-aisle the three agree to within four percent. On a long-haul
-/// three-class widebody the two independent sources agree with each other and
-/// FLOPS is 40 % below both - about 11.7 t on the A340-300, which is two
-/// thirds of that aircraft's whole operating-empty-mass deficit.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum CabinEquipmentMethod {
-    /// NASA/TM-2017-219627 Vol. I equation 110 for the furnishings and
-    /// equations 119-126 for the operating items, as published.
-    ///
-    /// This is the default and the auditable baseline: it reproduces the
-    /// source equation set exactly. Its published validation population is
-    /// *"commercial transport and military aircraft developed between the
-    /// 1940s and 1970s"* (Horvath & Wells, NASA NTRS 20190000431), which
-    /// contains no three-class long-haul cabin of the modern kind.
-    #[default]
-    FlopsTransportV1,
-    /// The Luftfahrttechnisches Handbuch civil-transport relations for the
-    /// furnishings and the operating items, MA 401 12-01 B (Dorbath, 2013),
-    /// as reproduced with their coefficients by Pape (2018) equations 2.14 to
-    /// 2.16, pp. 22-23:
-    ///
-    /// * furnishings, **excluding** passenger seats:
-    ///   `m_fur = 200 + 3.35 (l_fus d_fus)^1.3368`, metres and kilograms;
-    /// * operating items, **including** passenger seats:
-    ///   `m_opp = 32.907 n_pax^1.021` on a short/medium-haul aircraft and
-    ///   `m_opp = 35.782 n_pax^1.1141` on a long-haul one.
-    ///
-    /// Stated validity, in full: *"bezieht sich ausschliesslich auf zivile
-    /// Verkehrsflugzeuge"*, restricted to those for which *"die maximale
-    /// Abflugmasse (MTOW) mindestens 40 Tonnen betraegt bzw. sich mindestens
-    /// 70 Passagiersitze an Bord befinden"* - a civil transport with a maximum
-    /// takeoff mass of **at least 40 t or at least 70 passenger seats**.
-    /// [`Self::for_civil_transport_size`] applies exactly that statement, both
-    /// clauses, and nothing else.
-    ///
-    /// The author's own operating-empty-mass errors are +2.2 % (A320-200),
-    /// +0.8 % (A330-200), +3.4 % (A340-300) and +7.5 % (B737-200), and the
-    /// author states they are **in-sample**: the relations were fitted
-    /// retroactively on the same four aircraft they are validated against
-    /// (Pape 2018, Ausblick p. 41).
-    ///
-    /// **Three limits this method does not escape.** Its furnishings term is a
-    /// single-tube `length x diameter` proxy exactly as FLOPS equation 110 is,
-    /// so it is no more in domain on a double-deck fuselage than FLOPS; its
-    /// operating-item exponent `n_pax^1.1141` is superlinear and its fitted
-    /// seat range is 130-295, so a 525-seat cabin is an extrapolation of
-    /// 78-88 % beyond the population; and that fitted population is four
-    /// turbofan aircraft of 52-233 t, which contains no turboprop even though
-    /// the seat clause of the domain statement admits one.
-    LthCivilTransportV1,
-}
-
-impl CabinEquipmentMethod {
-    /// Stable serialized name.
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::FlopsTransportV1 => "flops_transport_v1",
-            Self::LthCivilTransportV1 => "lth_civil_transport_v1",
-        }
-    }
-
-    /// The LTH relations' own stated validity domain, applied as a method
-    /// selection: MTOM **at least** 40 t **or at least** 70 passenger seats.
-    ///
-    /// This is the one selection rule in the product, used for a registered
-    /// preset and for a configuration built without one alike, so the same
-    /// aircraft cannot be priced by two different accounting systems depending
-    /// on how its configuration was produced. It reads only size; it never
-    /// reads a resulting error, and there is no per-aircraft exception.
-    ///
-    /// An earlier revision coded only the mass clause, as `MTOM > 40 t`. That
-    /// was a partial reading of the source, and it excluded the ATR 72-600 -
-    /// 23 t, 72 seats - which the seat clause admits. The rule below is the
-    /// full statement. Applying it moves the ATR 72-600 to the LTH relations,
-    /// which makes that aircraft's operating empty mass **280 kg worse**
-    /// against its published reference; the rule is applied anyway, because a
-    /// threshold that is trimmed until the answer improves is a fit, not a
-    /// domain.
-    ///
-    /// `mtom_kg` is the maximum takeoff mass in kilograms and
-    /// `passenger_seats` the installed seat count; either may be absent, and
-    /// an absent clause simply cannot admit the aircraft. With both absent the
-    /// result is the published FLOPS baseline.
-    pub fn for_civil_transport_size(mtom_kg: Option<f64>, passenger_seats: Option<i64>) -> Self {
-        /// "mindestens 40 Tonnen", kg.
-        const LTH_MINIMUM_TAKEOFF_MASS_KG: f64 = 40_000.0;
-        /// "mindestens 70 Passagiersitze".
-        const LTH_MINIMUM_PASSENGER_SEATS: i64 = 70;
-        let by_mass =
-            mtom_kg.is_some_and(|mass| mass.is_finite() && mass >= LTH_MINIMUM_TAKEOFF_MASS_KG);
-        let by_seats = passenger_seats.is_some_and(|seats| seats >= LTH_MINIMUM_PASSENGER_SEATS);
-        if by_mass || by_seats {
-            Self::LthCivilTransportV1
-        } else {
-            Self::FlopsTransportV1
-        }
-    }
-}
-
-impl Leaf for CabinEquipmentMethod {
-    fn kind(&self, _name: &str) -> Kind {
-        Kind::Str
     }
 }
 
@@ -588,7 +425,7 @@ pub struct FlopsTransportConfig {
         advanced,
         options = CabinEquipmentMethod,
         label = "Cabin equipment method",
-        help = "FLOPS equation 110 and operating-item equations 119-126 as published, or the LTH civil-transport furnishings and operating-item relations. The two agree within four percent on a single-aisle; on a long-haul three-class widebody FLOPS is about 40 percent below both the LTH relations and the manufacturer's own accounting. FLOPS remains the default and the auditable baseline."
+        help = "FLOPS equation 110 and operating-item equations 119-126 as published, or the LTH civil-transport furnishings and operating-item relations. The two agree within four percent on a single-aisle; on a long-haul three-class widebody FLOPS is about 40 percent below both the LTH relations and the manufacturer's own accounting. FLOPS remains the default and the auditable baseline. A shaft-power aircraft below 40 t takes the regional turboprop systems relation instead."
     )]
     pub cabin_equipment_method: CabinEquipmentMethod,
     /// Which LTH operating-item relation this aircraft takes.
@@ -677,15 +514,16 @@ impl FlopsTransportConfig {
             cargo_loading: Some(CargoHoldLoading::Containerized),
             containerized_baggage_fraction: None,
             // The same domain rule a registered preset gets. A configuration
-            // built without a preset used to default to the published FLOPS
-            // equations while every preset above 40 t took the LTH relations,
-            // so the identical aircraft was 16,515 kg (+10.0 %) heavier as a
-            // preset than as a clean sheet and any objective comparing the two
-            // was comparing two accounting systems. 350 seats admits this
+            // built without a preset must not default to the published FLOPS
+            // equations while every preset above 40 t takes the LTH relations: the
+            // identical aircraft would be 16,515 kg (+10.0 %) heavier as a preset
+            // than as a clean sheet, and any objective comparing the two would be
+            // comparing two accounting systems. 350 seats admits this
             // scenario through the seat clause.
             cabin_equipment_method: CabinEquipmentMethod::for_civil_transport_size(
                 None,
                 Some(350),
+                false,
             ),
             // The 7,600 nmi design range above is a long-haul scenario, and
             // the LTH relations publish a separate operating-item relation for

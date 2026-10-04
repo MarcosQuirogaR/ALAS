@@ -1,19 +1,21 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! Main-wing exposed-area approximation for the parasite drag buildup.
+//! Exposed-area approximation for the parasite drag buildup.
 //!
 //! NASA NDARC Theory v1.6, wing drag model, uses `S_wet = 2(S - c*w_fus)`.
 //! https://rotorcraft.arc.nasa.gov/Publications/files/NDARCTheory_v1_6_938.pdf
 //! Here the chord is integrated piecewise for taper, and the fuselage width
 //! is evaluated at root quarter chord and root height. This local extruded
 //! cross-section approximation does not resolve fairings, wing thickness,
-//! body curvature over the chord, or twist in the local area metric. It only applies to symmetric main wings;
-//! tails and detached wings retain their existing surface estimates.
+//! body curvature over the chord, or twist in the local area metric. It
+//! applies to any symmetric surface whose root lies inside the body (the
+//! main wing and a fuselage-mounted horizontal tail); a fin, a T-tail and a
+//! detached surface subtract nothing.
 
 use alas_geom::aircraft::{fuselage::Fuselage, wing::Wing};
 
-pub(super) fn buried_main_wing_area(wing: &Wing, body: &Fuselage) -> f64 {
+pub(super) fn buried_surface_area(wing: &Wing, body: &Fuselage) -> f64 {
     let Some(root) = wing.xsecs.first() else {
         return 0.0;
     };
@@ -96,22 +98,22 @@ mod tests {
 
     #[test]
     fn rectangular_wing_recovers_ndarc_chord_times_body_width() {
-        assert!((buried_main_wing_area(&wing(3.0, 3.0), &body()) - 12.0).abs() < 1e-12);
+        assert!((buried_surface_area(&wing(3.0, 3.0), &body()) - 12.0).abs() < 1e-12);
     }
 
     #[test]
     fn tapered_center_section_integrates_the_local_chord() {
         // c(y)=4-0.2*y; 2*integral(0..2)c(y)dy = 15.2 m2.
-        assert!((buried_main_wing_area(&wing(4.0, 2.0), &body()) - 15.2).abs() < 1e-12);
+        assert!((buried_surface_area(&wing(4.0, 2.0), &body()) - 15.2).abs() < 1e-12);
     }
 
     #[test]
     fn body_width_respects_wing_height_and_detached_geometry() {
         let low = wing(3.0, 3.0).translate([0.0, 0.0, 1.0]);
-        assert!((buried_main_wing_area(&low, &body()) - 6.0 * 3.0_f64.sqrt()).abs() < 1e-12);
+        assert!((buried_surface_area(&low, &body()) - 6.0 * 3.0_f64.sqrt()).abs() < 1e-12);
         for offset in [[0.0, 0.0, 3.0], [50.0, 0.0, 0.0], [0.0, 4.0, 0.0]] {
             assert_eq!(
-                buried_main_wing_area(&wing(3.0, 3.0).translate(offset), &body()),
+                buried_surface_area(&wing(3.0, 3.0).translate(offset), &body()),
                 0.0
             );
         }
@@ -126,9 +128,6 @@ mod tests {
                 .map(|x| FuselageXSec::new([x, 0.0, 0.0], Some(30.0), None, None, 2.0).unwrap())
                 .to_vec(),
         );
-        assert_eq!(
-            buried_main_wing_area(&narrow, &huge),
-            narrow.unfolded_area()
-        );
+        assert_eq!(buried_surface_area(&narrow, &huge), narrow.unfolded_area());
     }
 }
