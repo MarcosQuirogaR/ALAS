@@ -215,7 +215,7 @@ fn generated_fuselage_rows(
         return Vec::new();
     }
     let cabin_start_m = fuselage.cabin_start_x_m;
-    let cabin_end_m = length_m - fuselage.tailcone_length_m;
+    let cabin_end_m = fuselage.aft_body_start_m(length_m);
     let radius_m = fuselage.diameter_m / 2.0;
     let height_scale = fuselage.effective_height_m() / fuselage.diameter_m.max(1e-9);
     let mut rows = Vec::with_capacity(20);
@@ -258,14 +258,13 @@ fn generated_fuselage_rows(
     ));
     for index in 1..10 {
         let xi = index as f64 / 9.0;
-        let radius_scale = 1.0 - xi.powf(1.5);
-        let width_m = radius_m * radius_scale * 2.0;
+        let station = fuselage.aft_body_station(xi, length_m);
         rows.push((
             FuselageSection {
-                x_fraction: (cabin_end_m + xi * fuselage.tailcone_length_m) / length_m,
-                width_m,
-                height_m: width_m * height_scale,
-                z_m: fuselage.cabin_z_m + (fuselage.tail_z_m - fuselage.cabin_z_m) * xi.powf(1.5),
+                x_fraction: station.x_m / length_m,
+                width_m: station.width_m,
+                height_m: station.height_m,
+                z_m: station.z_m,
                 shape: 2.0,
             },
             GeneratedFuselageStationPart::Tail(xi),
@@ -530,6 +529,7 @@ pub fn handles(
 
     let f = &g.fuselage;
     let fus = Discipline::Fuselage;
+    let aft_body_field = f.aft_body_handle_field(design.fuselage_length_m);
     for (index, (section, part)) in generated_fuselage_rows(config, design).iter().enumerate() {
         let x = section.x_fraction * design.fuselage_length_m;
         let z = section.z_m;
@@ -540,11 +540,9 @@ pub fn handles(
             GeneratedFuselageStationPart::CabinStart => {
                 Some(("geometry.fuselage.cabin_start_x_m", 1.0))
             }
-            GeneratedFuselageStationPart::CabinEnd => {
-                Some(("geometry.fuselage.tailcone_length_m", -1.0))
-            }
+            GeneratedFuselageStationPart::CabinEnd => Some((aft_body_field, -1.0)),
             GeneratedFuselageStationPart::Tail(xi) if *xi < 1.0 - 1e-9 => {
-                Some(("geometry.fuselage.tailcone_length_m", -1.0 / (1.0 - xi)))
+                Some((aft_body_field, -1.0 / (1.0 - xi)))
             }
             GeneratedFuselageStationPart::Tail(_) => Some(("design.fuselage_length_m", 1.0)),
             _ => None,
@@ -1048,7 +1046,7 @@ fn generated_fuselage_station_fractions(state: &AppState) -> Vec<f64> {
     }
     let cabin_start = fuselage.cabin_start_x_m;
     let tailcone = fuselage.tailcone_length_m;
-    let cabin_end = length_m - tailcone;
+    let cabin_end = fuselage.aft_body_start_m(length_m);
     if !(cabin_start >= 0.0 && cabin_end >= cabin_start && tailcone >= 0.0) {
         return Vec::new();
     }
@@ -1062,7 +1060,7 @@ fn generated_fuselage_station_fractions(state: &AppState) -> Vec<f64> {
     fractions.push(cabin_end / length_m);
     for index in 1..10 {
         let xi = index as f64 / 9.0;
-        fractions.push((cabin_end + xi * tailcone) / length_m);
+        fractions.push(fuselage.aft_body_station(xi, length_m).x_m / length_m);
     }
     fractions
 }

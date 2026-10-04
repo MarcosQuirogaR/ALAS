@@ -170,7 +170,7 @@ mod custom_section_tests {
             })
             .collect();
         let design = DesignVector::default();
-        let cabin_end = design.fuselage_length_m - geometry.fuselage.tailcone_length_m;
+        let cabin_end = geometry.fuselage.aft_body_start_m(design.fuselage_length_m);
         geometry.fuselage.generated_sections[10].width_m = 8.4;
         geometry.fuselage.generated_sections[10].height_m = 7.6;
         geometry.fuselage.generated_sections[10].z_m = 1.1;

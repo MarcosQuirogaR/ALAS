@@ -121,6 +121,12 @@ pub fn a380_800() -> AircraftPreset {
             // clearances, MRW, aft CG 41 %MAC): fuselage F1 2.38 m, and the
             // F2/F3 fuselage tops 10.79 m less the 8.41 m body height.
             fuselage_ground_clearance_m: Some(2.38),
+            // No published tail-strike attitude backs this preset's aft-fuselage
+            // geometry, so its model tail-down angle is unvalidated (the generic
+            // tailcone loft understates it): keep the Raymer/Roskam 15 deg floor on
+            // top of the tail-down criterion.
+            min_tip_back_deg: 15.0,
+            takeoff_stabilizer_nose_up_deg: Some(crate::landing_gear::TRANSPORT_THS_TAKEOFF_NOSE_UP_DEG),
             ..LandingGearConfig::default()
         },
         design_vector: DesignVector {

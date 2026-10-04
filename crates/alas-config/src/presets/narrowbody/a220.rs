@@ -128,6 +128,12 @@ pub fn a220_300() -> AircraftPreset {
             // ACP Issue 013 clearance table: fuselage top 5.385 m minimum
             // less the 3.721 m body height (Figure 1, locator B).
             fuselage_ground_clearance_m: Some(1.664),
+            // No published tail-strike attitude backs this preset's aft-fuselage
+            // geometry, so its model tail-down angle is unvalidated (the generic
+            // tailcone loft understates it): keep the Raymer/Roskam 15 deg floor on
+            // top of the tail-down criterion.
+            min_tip_back_deg: 15.0,
+            takeoff_stabilizer_nose_up_deg: Some(crate::landing_gear::TRANSPORT_THS_TAKEOFF_NOSE_UP_DEG),
             ..LandingGearConfig::default()
         },
         design_vector: DesignVector {

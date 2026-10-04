@@ -212,9 +212,9 @@ pub struct LandingGearConfig {
     /// The longitudinal tip-back criterion.
     #[serde(default = "default_min_tip_back_deg")]
     #[config(
-        label = "Minimum tip-back angle",
+        label = "Minimum tip-back angle floor",
         unit = "deg",
-        help = "Longitudinal tip-back (tip-over) criterion (Raymer Ch.11, Fig. 11.4): the angle from vertical, at the most-aft main-gear axle and the most-aft design centre-of-gravity, atan((x_mlg_aft - x_cg_aft)/h_cg), must be at least this large (and at least the tail-scrape angle at rotation) or the aircraft can tip onto its tail during ground loading or rotation. 15 deg is the common transport-category design target."
+        help = "Optional extra floor on the longitudinal tip-back (tip-over) angle, the angle from vertical at the most-aft main-gear axle and the most-aft design centre of gravity, atan((x_mlg_aft - x_cg_aft)/h_cg). The tip-back angle must always clear the aircraft's own tail-down (tail-scrape) angle at the main gear (Torenbeek, Synthesis of Subsonic Airplane Design, ch. 10), so the aircraft cannot sit back onto its tail before the tail touches. The default 0 applies that criterion alone; 15 deg reproduces the Raymer/Roskam rule of thumb, which a high-wing turboprop on short sponson gear does not meet."
     )]
     pub min_tip_back_deg: f64,
 
@@ -238,13 +238,13 @@ pub struct LandingGearConfig {
     pub fuselage_ground_clearance_m: Option<f64>,
 
     /// Optional override of the required pitch angular acceleration at
-    /// rotation; `None` takes the class value (7 deg/s^2, the midpoint of the
-    /// Torenbeek/Roskam 6-8 deg/s^2 transport range).
+    /// rotation; `None` takes the class value (5 deg/s^2, the midpoint of
+    /// Sadraey's 4-6 deg/s^2 transport range).
     #[serde(default)]
     #[config(
         label = "Rotation pitch angular acceleration",
         unit = "deg/s^2",
-        help = "Optional override of the required pitch angular acceleration at rotation (V_R) in the forward-CG nose-wheel-liftoff moment balance. Leave unset to use the class value (7 deg/s^2, the midpoint of the Torenbeek/Roskam 6-8 deg/s^2 transport-category range); a conceptual-design estimate, not a certified or measured value for any specific aircraft."
+        help = "Optional override of the required pitch angular acceleration at rotation (V_R) in the forward-CG nose-wheel-liftoff moment balance. Leave unset to use the class value (5 deg/s^2, the midpoint of Sadraey's 4-6 deg/s^2 transport range for a 3-5 s takeoff rotation, Aircraft Design: A Systems Engineering Approach, 2012, sec. 12.3); a conceptual-design requirement, not a certified or measured value for any specific aircraft."
     )]
     pub rotation_pitch_acceleration_deg_s2: Option<f64>,
 
@@ -256,6 +256,28 @@ pub struct LandingGearConfig {
         help = "Optional override of the pitch radius of gyration r_y, as a fraction of MAC, in the nose-wheel-liftoff balance's pitch-inertia term. Leave unset to derive it from the mass ledger's takeoff pitch inertia (Raymer's jet-transport radius when no ledger exists); Torenbeek/Roskam give roughly 0.25-0.35 for transports."
     )]
     pub pitch_radius_of_gyration_frac_mac: Option<f64>,
+
+    /// Nose-up setting of a trimmable horizontal stabiliser available at
+    /// takeoff, deg (leading edge down, against the fuselage reference
+    /// line); `None` for a fixed stabiliser, whose built incidence then
+    /// holds at rotation.
+    #[serde(default)]
+    #[config(
+        label = "Takeoff stabiliser nose-up setting",
+        unit = "deg",
+        help = "Nose-up (leading-edge-down) setting of a trimmable horizontal stabiliser available at takeoff, measured against the fuselage reference line. The crew sets the stabiliser for the takeoff centre of gravity, further nose-up the further forward the CG, so the forward-CG nose-wheel-liftoff balance uses this setting in place of the built tail incidence whenever it gives more tail download. Leave unset for a fixed stabiliser (for example a turboprop with elevator trim tabs): the built incidence then holds at rotation."
+    )]
+    pub takeoff_stabilizer_nose_up_deg: Option<f64>,
+
+    /// Trailing-edge-up elevator travel at rotation, deg; `None` takes the
+    /// class value (25 deg).
+    #[serde(default)]
+    #[config(
+        label = "Elevator up travel at rotation",
+        unit = "deg",
+        help = "Trailing-edge-up elevator travel available at takeoff rotation, deg (positive), used by the forward-CG nose-wheel-liftoff balance with the DATCOM large-deflection correction. Leave unset to use the class value, 25 deg (Sadraey, Aircraft Design: A Systems Engineering Approach, 2012, sec. 12.6, typical transport maximum up-elevator); set it from the aircraft's own flight-control travel when one is published."
+    )]
+    pub elevator_up_travel_deg: Option<f64>,
 
     /// Wing-body lift coefficient at the ground (pre-rotation) attitude,
     /// as a fraction of `CL_max,TO`, for the same rotation criterion's
@@ -277,33 +299,13 @@ pub struct LandingGearConfig {
     pub rotation_rolling_friction_coefficient: f64,
 }
 
-const fn default_rotation_rolling_friction_coefficient() -> f64 {
-    // Conceptual-design value for a dry hard runway (engineering estimate).
-    0.02
-}
-
-const fn default_cl_ground_attitude_frac_of_cl_max_to() -> f64 {
-    // Torenbeek order-of-magnitude: the ground/pre-rotation attitude is a
-    // fraction of the flaps-down takeoff CLmax, not the full value.
-    0.40
-}
-
-const fn default_nlg_dynamic_braking_decel_g() -> f64 {
-    // 14 CFR 25.733(b)(2): 1.0g down combined with 0.31g forward.
-    0.31
-}
-
-const fn default_tire_dynamic_rating_factor() -> f64 {
-    1.5
-}
-
-const fn default_min_tip_back_deg() -> f64 {
-    15.0
-}
-
-const fn default_required_rotation_angle_deg() -> f64 {
-    10.0
-}
+mod defaults;
+pub use defaults::TRANSPORT_THS_TAKEOFF_NOSE_UP_DEG;
+use defaults::{
+    default_cl_ground_attitude_frac_of_cl_max_to, default_min_tip_back_deg,
+    default_nlg_dynamic_braking_decel_g, default_required_rotation_angle_deg,
+    default_rotation_rolling_friction_coefficient, default_tire_dynamic_rating_factor,
+};
 
 impl Default for LandingGearConfig {
     fn default() -> Self {
@@ -334,6 +336,8 @@ impl Default for LandingGearConfig {
             fuselage_ground_clearance_m: None,
             rotation_pitch_acceleration_deg_s2: None,
             pitch_radius_of_gyration_frac_mac: None,
+            takeoff_stabilizer_nose_up_deg: None,
+            elevator_up_travel_deg: None,
             cl_ground_attitude_frac_of_cl_max_to: default_cl_ground_attitude_frac_of_cl_max_to(),
             rotation_rolling_friction_coefficient: default_rotation_rolling_friction_coefficient(),
         }
@@ -519,7 +523,7 @@ mod tests {
         let config = LandingGearConfig::default();
         assert!((config.nlg_dynamic_braking_decel_g - 0.31).abs() < 1e-12);
         assert!((config.tire_dynamic_rating_factor - 1.5).abs() < 1e-12);
-        assert!((config.min_tip_back_deg - 15.0).abs() < 1e-12);
+        assert_eq!(config.min_tip_back_deg, 0.0);
         assert!((config.required_rotation_angle_deg - 10.0).abs() < 1e-12);
         assert_eq!(config.fuselage_ground_clearance_m, None);
     }

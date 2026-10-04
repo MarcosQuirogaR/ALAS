@@ -35,6 +35,11 @@ mod solver_tests;
 #[cfg(test)]
 // Test fixtures assert successful construction through unwrap and expect.
 #[allow(clippy::unwrap_used, clippy::expect_used)]
+mod n_engine_tests;
+
+#[cfg(test)]
+// Test fixtures assert successful construction through unwrap and expect.
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
 

@@ -27,7 +27,7 @@ mod wing;
 pub use empennage::{EmpennageConfig, TailSizing};
 pub use engine::{ActiveEngineModel, EngineBindingError, EngineConfig};
 pub use frame::{BodyFuselageExtent, LongitudinalStationFrame, MacFrame};
-pub use fuselage::{FuselageConfig, FuselageSection, FuselageSectionError};
+pub use fuselage::{AftBodyStation, FuselageConfig, FuselageSection, FuselageSectionError};
 pub use wing::{
     AirfoilClass, InboardAerodynamicStation, MainWingPanel, MainWingStation, MainWingStationKind,
     TransportPlanform, TransportPlanformError, WingConfig, WingHeights, WingSection,

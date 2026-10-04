@@ -183,6 +183,13 @@ pub fn atr72_600() -> AircraftPreset {
                 (1.728 + 10.772) / 27.166,
                 (1.728 + 10.772) / 27.166,
             ]),
+            // UK AAIB Bulletin AAIB-31376 (ATR 72-212A G-OASB, PW127M), p.3:
+            // pre-flight full-and-free check "left elevator range of +12.7 deg
+            // to -21.8 deg" (negative = nose-up). One airframe's measured
+            // stop, not the AMM nominal travel; the stabiliser is fixed and
+            // trimmed by elevator tabs (ATSB AO-2014-032, Fig. 4), so no
+            // takeoff stabiliser setting is credited.
+            elevator_up_travel_deg: Some(21.8),
             ..LandingGearConfig::default()
         },
         design_vector: DesignVector {
@@ -267,6 +274,12 @@ pub fn atr72_600() -> AircraftPreset {
                 cabin_z_m: 0.0,
                 tailcone_length_m: 6.0,
                 tail_z_m: 1.0,
+                // Solved so the tail-down angle is 8 deg: the ATR maintenance manual's
+                // tail skid "is designed to avoid fuselage contact with the runway when
+                // the take-off or landing attitude has an angle of 8 deg or greater"
+                // (quoted in UK AAIB Bulletin 8/2006, ATR 72-212A D-ANFH, EW/C2005/09/04,
+                // p.3); the skid sits between frames 38 and 39.
+                belly_upsweep_length_m: Some(7.8),
                 ..FuselageConfig::default()
             },
             engine,

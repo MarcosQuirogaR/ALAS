@@ -389,12 +389,13 @@ mod tests {
 
     #[test]
     fn the_embedded_table_keeps_the_reference_engines_and_adds_certified_preset_variants() {
-        assert_eq!(database().len(), 11);
+        assert_eq!(database().len(), 12); // old 11 -> 12: TP400-D6 (Airbus A400M) turboprop entry added
         assert!(get("GE9X").is_ok());
         assert!(get("CFM56-5B4/3").is_ok());
         assert!(get("CFM56-5C3/F").is_ok());
         assert!(get("Trent 970-84").is_ok());
         assert!(get("PW127M").is_ok());
+        assert!(get("TP400-D6").is_ok());
     }
 
     #[test]

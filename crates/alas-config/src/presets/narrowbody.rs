@@ -129,6 +129,7 @@ pub fn a320_200() -> AircraftPreset {
             // fuselage "bottom aft" (F2) 1.792 m above ground at MRW 78.4 t,
             // aft CG 36.8 %MAC (1.762-1.843 m across the tabulated states).
             fuselage_ground_clearance_m: Some(1.79),
+            takeoff_stabilizer_nose_up_deg: Some(crate::landing_gear::TRANSPORT_THS_TAKEOFF_NOSE_UP_DEG),
             ..LandingGearConfig::default()
         },
         // The planform is the planar wing of the Airbus plan view (Figure
@@ -254,6 +255,11 @@ pub fn a320_200() -> AircraftPreset {
                 cabin_z_m: 0.1,
                 tailcone_length_m: 7.5,
                 tail_z_m: 1.0,
+                // Solved so the tail-down angle about the main wheels on the static
+                // ground plane is the published 11.7 deg pitch to ground contact with
+                // the main gear compressed: Airbus, "Avoiding Tail Strike" (Operational Liaison Meeting, FBW; NTSB docket attachment "Airbus Material - Avoiding Tail Strike", PDF p.12).
+                // The belly then starts to rise 26.3 m aft of the nose.
+                belly_upsweep_length_m: Some(11.25),
                 ..FuselageConfig::default()
             },
             engine: EngineConfig {

@@ -20,12 +20,17 @@
 //!
 //! The tail lift at rotation is derived from the tail geometry with the
 //! plain-flap large-deflection correction and the tail-section lift cap, and
-//! the pitch inertia is transferred to the main-gear contact. The A320 and
-//! A220 rotation boundaries then lie forward of the published values (A320
-//! 9.2, A220 -3.0 %MAC; the earlier upper-bound tail lift gave -17.5 and
-//! -37.9): the inequalities hold and those published limits are set by
-//! criteria other than rotation. The A340 boundary (28.3 %MAC) lies aft of
-//! its ACAP 20.3 %MAC: a known residual, not tuned away.
+//! the pitch inertia is transferred to the main-gear contact. A trimmable
+//! stabiliser holds its takeoff nose-up setting (4.3 deg, a sourced lower
+//! bound; `alas_config::landing_gear::TRANSPORT_THS_TAKEOFF_NOSE_UP_DEG`). The
+//! A320 and A220 rotation boundaries then lie forward of the published values
+//! (A320 1.3, A220 -13.5 %MAC; 9.2 and -3.0 at the built -2 deg incidence):
+//! the inequalities hold and those published limits are set by criteria
+//! other than rotation. The A340 boundary (22.0 %MAC; 28.3 at the built
+//! incidence) lies aft of its ACAP 20.3 %MAC by more than the tolerance: a
+//! known residual, not tuned away. It closes at the setting the A330
+//! trim-versus-CG slope gives at 20.3 %MAC (about 7.3 deg nose-up: 16.0
+//! %MAC), so it is a takeoff-trim-setting uncertainty.
 
 use alas_config::AlasConfig;
 use alas_pipeline::FullAnalysis;
@@ -90,7 +95,7 @@ fn the_rotation_limit_is_not_aft_of_published_forward_limits() {
 /// a certified limit; LEMAC 28.083 m from that section's two-point statics,
 /// MAC 7.270 m (EASA TCDS).
 #[test]
-#[ignore = "known residual: model rotation limit 28.3 % vs ACAP 20.3 % MAC"]
+#[ignore = "known residual: model rotation limit 22.0 % vs ACAP 20.3 % MAC"]
 fn the_a340_300_rotation_limit_is_not_aft_of_its_published_forward_limit() {
     let rotation = rotation_limit_in_manufacturer_frame("A340-300", 28.083, 7.270);
     assert!(

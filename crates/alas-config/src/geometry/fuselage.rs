@@ -20,6 +20,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::ConfigNode;
 
+mod aft_body;
+pub use aft_body::AftBodyStation;
+
 /// An additional user-controlled fuselage section at a normalized X station.
 ///
 /// Width and height are full dimensions in metres. `shape` is the
@@ -170,6 +173,16 @@ pub struct FuselageConfig {
     )]
     pub tail_z_m: f64,
 
+    /// How far ahead of the tail tip the belly starts to rise; unset or no
+    /// longer than the tailcone keeps the tailcone law.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[config(
+        label = "Belly upsweep length",
+        unit = "m",
+        help = "Distance ahead of the tail tip at which the lower fuselage line starts to rise, as a straight line to the tail-tip bottom, while the crown and the width keep the tailcone taper. On a transport the belly rises from near the aft cargo hold, well ahead of the crown taper, and this sets the tail-down (tail-strike) angle at rotation. Leave unset, or no longer than the tailcone, to keep the tailcone law."
+    )]
+    pub belly_upsweep_length_m: Option<f64>,
+
     /// Optional user-defined sections inserted into the generated nose/cabin/
     /// tail station list.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -212,6 +225,7 @@ impl Default for FuselageConfig {
             cabin_z_m: 0.2,
             tailcone_length_m: 14.0,
             tail_z_m: 1.8,
+            belly_upsweep_length_m: None,
             custom_sections: Vec::new(),
             generated_sections: Vec::new(),
             n_subdivisions: 12,

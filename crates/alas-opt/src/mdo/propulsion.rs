@@ -763,7 +763,8 @@ pub fn turboprop_unit_model(payload: &alas_config::TurbopropEngineSpec) -> Pw127
         // The catalogue's maximum-cruise fuel flow is published for the
         // two-engine installation (`TurbopropEngineSpec` doc comment).
         reference_psfc_kg_kwh: payload.maximum_cruise_fuel_flow_kg_h
-            / (2.0 * payload.maximum_cruise_shaft_power_kw),
+            / (alas_config::TurbopropEngineSpec::FUEL_FLOW_REFERENCE_ENGINES as f64
+                * payload.maximum_cruise_shaft_power_kw),
         ..Pw127m568fModel::default()
     }
 }

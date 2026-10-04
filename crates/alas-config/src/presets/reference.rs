@@ -62,7 +62,15 @@ pub fn ave() -> AircraftPreset {
         },
         engine_name: "GE9X",
         n_engines: 2,
-        landing_gear: LandingGearConfig::default(),
+        landing_gear: LandingGearConfig {
+            // No published tail-strike attitude backs this preset's aft-fuselage
+            // geometry, so its model tail-down angle is unvalidated (the generic
+            // tailcone loft understates it): keep the Raymer/Roskam 15 deg floor on
+            // top of the tail-down criterion.
+            min_tip_back_deg: 15.0,
+            takeoff_stabilizer_nose_up_deg: Some(crate::landing_gear::TRANSPORT_THS_TAKEOFF_NOSE_UP_DEG),
+            ..LandingGearConfig::default()
+        },
         design_vector: DesignVector {
             span_m: 71.75,
             // With the 34 deg leading-edge sweep and the kink at 35 % semi-span,

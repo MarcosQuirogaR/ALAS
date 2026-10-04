@@ -99,6 +99,7 @@ pub fn a340_300() -> AircraftPreset {
             // p.44, ground clearances, aft CG): fuselage bottom ahead of the
             // wing (F2) 2.13 m; the 1.83 m BF is the belly fairing.
             fuselage_ground_clearance_m: Some(2.13),
+            takeoff_stabilizer_nose_up_deg: Some(crate::landing_gear::TRANSPORT_THS_TAKEOFF_NOSE_UP_DEG),
             ..LandingGearConfig::default()
         },
         design_vector: DesignVector {
@@ -198,6 +199,10 @@ pub fn a340_300() -> AircraftPreset {
                 cabin_z_m: 0.2,
                 tailcone_length_m: 12.0,
                 tail_z_m: 1.5,
+                // Solved so the tail-down angle about the effective main-gear station
+                // is the published 10.1 deg pitch to ground contact with the main gear
+                // compressed: Airbus, "Avoiding Tail Strike" (Operational Liaison Meeting, FBW; NTSB docket attachment "Airbus Material - Avoiding Tail Strike", PDF p.12).
+                belly_upsweep_length_m: Some(19.5),
                 ..FuselageConfig::default()
             },
             engine: EngineConfig {

@@ -111,11 +111,12 @@ pub use fuel_tanks::{
     WingTankConfig,
 };
 pub use geometry::{
-    ActiveEngineModel, AirfoilClass, BodyFuselageExtent, EmpennageConfig, EngineBindingError,
-    EngineConfig, FuselageConfig, FuselageSection, FuselageSectionError, GeometryConfig,
-    InboardAerodynamicStation, LongitudinalStationFrame, MacFrame, MainWingPanel, MainWingStation,
-    MainWingStationKind, TailSizing, TransportPlanform, TransportPlanformError, WingConfig,
-    WingHeights, WingSection, WingSectionError, WingShape, MAX_FLIGHT_TIP_RISE_SEMISPAN_FRACTION,
+    ActiveEngineModel, AftBodyStation, AirfoilClass, BodyFuselageExtent, EmpennageConfig,
+    EngineBindingError, EngineConfig, FuselageConfig, FuselageSection, FuselageSectionError,
+    GeometryConfig, InboardAerodynamicStation, LongitudinalStationFrame, MacFrame, MainWingPanel,
+    MainWingStation, MainWingStationKind, TailSizing, TransportPlanform, TransportPlanformError,
+    WingConfig, WingHeights, WingSection, WingSectionError, WingShape,
+    MAX_FLIGHT_TIP_RISE_SEMISPAN_FRACTION,
 };
 pub use landing_gear::{
     effective_main_gear_station, DerivedMainGearStation, EffectiveGearStationExt,
