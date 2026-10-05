@@ -270,7 +270,20 @@ fn the_sandbox_route_fuel_is_the_full_analysis_route_fuel_on_every_preset() {
             "{name}: design mission {design_range_m} m against great circle {} m",
             sandbox.great_circle_m
         );
-        if sandbox.excess_over_great_circle() >= 0.0 {
+        // Off-design means a route measurably longer than the design mission.
+        // Without airway data (a CI runner has none) the planner falls back to
+        // the great circle, which is the design mission itself: the two block
+        // fuels then agree to the mission-model resolution, not to a sign.
+        const OFF_DESIGN_EXCESS: f64 = 1e-3;
+        if sandbox.excess_over_great_circle() < OFF_DESIGN_EXCESS {
+            assert!(
+                (sandbox.block_fuel_kg - design_block.achieved).abs()
+                    <= OFF_DESIGN_EXCESS * design_block.achieved + tolerance_kg,
+                "{name}: route {} kg on the design mission's {} kg",
+                sandbox.block_fuel_kg,
+                design_block.achieved
+            );
+        } else {
             assert!(
                 sandbox.block_fuel_kg >= design_block.achieved - tolerance_kg,
                 "{name}: route {} kg over {:.0} km below the design mission's {} kg",
