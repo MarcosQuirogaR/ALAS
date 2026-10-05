@@ -70,6 +70,73 @@ fn check_baseline(name: &str, actual: &str) {
     );
 }
 
+/// Like [`check_baseline`], but off Windows the baseline is compared to a
+/// numeric tolerance instead of bit for bit.
+///
+/// The baseline was captured on a Windows host. The vorlax solve is a dense LU
+/// whose last bits follow the host's math runtime and SIMD dispatch, so a
+/// Linux runner reproduces every value to rounding but not every bit: the
+/// hosted ubuntu run fails the bit comparison while hosted Windows passes it.
+/// Windows keeps the strict bit check; elsewhere the tolerances are far below
+/// any change the training grid could show from a real regression.
+///
+/// - `residual_norm` / `normalized_residual` are roundoff-level (about 1e-14
+///   and 1e-16): absolute tolerance 1e-10.
+/// - Other `f64` values: relative 1e-9 with an absolute floor of 1e-12.
+/// - `f32` values (the 10-hex-digit lines, `gamma`): relative 1e-4 with an
+///   absolute floor of 1e-6.
+fn check_baseline_host_tolerant(name: &str, actual: &str) {
+    if cfg!(windows) || std::env::var_os("PERF_AERO_WRITE_BASELINE").is_some() {
+        check_baseline(name, actual);
+        return;
+    }
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/perf_aero")
+        .join(name);
+    let expected = std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("read baseline {}: {e}", path.display()))
+        .replace("\r\n", "\n");
+    let parse = |line: &str| -> (String, f64, bool) {
+        let (label, hex) = line.split_once(" = ").expect("`label = 0x...` line");
+        let digits = hex.trim().trim_start_matches("0x");
+        let bits = u64::from_str_radix(digits, 16).expect("hex bit pattern");
+        if digits.len() == 8 {
+            (
+                label.to_string(),
+                f64::from(f32::from_bits(bits as u32)),
+                true,
+            )
+        } else {
+            (label.to_string(), f64::from_bits(bits), false)
+        }
+    };
+    let actual_lines: Vec<&str> = actual.lines().collect();
+    let expected_lines: Vec<&str> = expected.lines().collect();
+    assert_eq!(
+        actual_lines.len(),
+        expected_lines.len(),
+        "baseline {} has a different number of values",
+        path.display()
+    );
+    for (got_line, want_line) in actual_lines.iter().zip(&expected_lines) {
+        let (label, got, single) = parse(got_line);
+        let (want_label, want, _) = parse(want_line);
+        assert_eq!(label, want_label, "baseline order changed");
+        let tolerance =
+            if label.ends_with("residual_norm") || label.ends_with("normalized_residual") {
+                1.0e-10
+            } else if single {
+                1.0e-4 * want.abs().max(1.0e-2)
+            } else {
+                1.0e-9 * want.abs() + 1.0e-12
+            };
+        assert!(
+            got.is_finite() && (got - want).abs() <= tolerance,
+            "{label}: {got:e} against baseline {want:e} (tolerance {tolerance:e})"
+        );
+    }
+}
+
 fn probe_wing(tag: &str, symmetric: bool, span: f64) -> VlmWing {
     VlmWing {
         tag: tag.to_string(),
@@ -187,7 +254,7 @@ fn vorlax_training_grid_is_bit_identical() {
             push_bits32(&mut out, &format!("case[{i}].gamma[{j}]"), v);
         }
     }
-    check_baseline("vorlax_training_grid.txt", &out);
+    check_baseline_host_tolerant("vorlax_training_grid.txt", &out);
 }
 
 /// A minimal airplane: one main wing, one tail surface, a fuselage and a
