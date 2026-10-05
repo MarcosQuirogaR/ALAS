@@ -114,6 +114,13 @@ impl AircraftBuilder {
         geometry.wing.flight_tip_rise_semispan_fraction = None;
         // And the tailcone loft: it has no belly upsweep.
         geometry.fuselage.belly_upsweep_length_m = None;
+        // And the single-ellipsoid nose: it has no windshield or keel profile.
+        geometry.fuselage.nose_windshield_angle_deg = None;
+        geometry.fuselage.nose_crown_end_fraction = None;
+        geometry.fuselage.nose_radome_length_fraction = None;
+        geometry.fuselage.nose_keel_exponent = None;
+        geometry.fuselage.nose_plan_exponent = None;
+        geometry.fuselage.nose_section_exponent = None;
         // And its spanwise mesh; see `mesh`.
         mesh::restore_reference_ratios(&mut geometry);
         Self {
@@ -318,11 +325,12 @@ impl AircraftBuilder {
         let mut make_xsec = |x_val: f64,
                              z_val: f64,
                              width_m: f64,
-                             height_m: f64|
+                             height_m: f64,
+                             shape_val: f64|
          -> Result<FuselageXSec, BuildError> {
             let override_section = g.generated_sections.get(generated_index);
             let (z_m, width_m, height_m, shape) =
-                override_section.map_or((z_val, width_m, height_m, DEFAULT_SHAPE), |section| {
+                override_section.map_or((z_val, width_m, height_m, shape_val), |section| {
                     (
                         section.z_m,
                         section.width_m,
@@ -344,13 +352,13 @@ impl AircraftBuilder {
         // Exclude the last point: it is the cabin start, added below.
         let x_nose = sinspace(0.0, 1.0, 10);
         for &xi in &x_nose[..x_nose.len() - 1] {
-            let z_val = g.cabin_z_m + (g.nose_z_m - g.cabin_z_m) * (1.0 - xi).powi(2);
-            let r_val = radius * (1.0 - (1.0 - xi).powi(2)).sqrt();
+            let station = g.nose_station(xi);
             stations.push(make_xsec(
-                xi * g.cabin_start_x_m,
-                z_val,
-                r_val * 2.0,
-                r_val * 2.0 * local_height_scale,
+                station.x_m,
+                station.z_m,
+                station.width_m,
+                station.height_m,
+                station.shape,
             )?);
         }
 
@@ -359,12 +367,14 @@ impl AircraftBuilder {
             g.cabin_z_m,
             radius * 2.0,
             radius * 2.0 * local_height_scale,
+            DEFAULT_SHAPE,
         )?);
         stations.push(make_xsec(
             cabin_end,
             g.cabin_z_m,
             radius * 2.0,
             radius * 2.0 * local_height_scale,
+            DEFAULT_SHAPE,
         )?);
 
         // Exclude the first point: it is the cabin end, added above.
@@ -376,6 +386,7 @@ impl AircraftBuilder {
                 station.z_m,
                 station.width_m,
                 station.height_m,
+                DEFAULT_SHAPE,
             )?);
         }
         self.append_custom_fuselage_sections(fus_len, &mut stations)?;

@@ -327,18 +327,11 @@ impl AircraftPreset {
         if let Some(planning) = self.reference.planning_cabin {
             apply_sourced_planning_cabin(&mut cabin.passenger, &planning);
         }
+        if self.name == "E195-E2" {
+            cabin.cargo.hold_compartments = super::narrowbody::e195_e2_hold_compartments();
+        }
         if self.name == "ATR72-600" {
-            cabin.cargo.hold_compartments = super::ATR72_600_BAGGAGE_COMPARTMENTS
-                .iter()
-                .map(|&(name, x_start_m, x_end_m)| crate::HoldCompartmentConfig {
-                    name: name.to_owned(),
-                    x_start_m,
-                    x_end_m,
-                    volume_m3: None,
-                    max_net_kg: None,
-                    deck: crate::HoldDeck::Main,
-                })
-                .collect();
+            cabin.cargo.hold_compartments = super::atr72_600_baggage_holds();
         }
         cabin
     }
@@ -401,12 +394,42 @@ impl AircraftPreset {
                 0.85,
                 "ANA lists Sydney among the principal Haneda routes for its Boeing 787-9 (accessed 2026-08-29)",
             ),
+            "C919" => (
+                "Frankfurt (EDDF)",
+                "Madrid Barajas (LEMD)",
+                37_000.0 * 0.3048,
+                0.78,
+                "PLACEHOLDER sector of about 1,000 nmi typical of a 158-seat narrowbody: the C919 flies only Chinese domestic routes (China Eastern Shanghai Hongqiao-Chengdu from 2023-05-28, press reports) and the airport table holds no Chinese airport, so no real C919 route can be named; not a COMAC design-mission claim",
+            ),
+            "E195-E2" => (
+                "Madrid Barajas (LEMD)",
+                "Palma de Mallorca (LEPA)",
+                35_000.0 * 0.3048,
+                0.78,
+                "Representative European short-haul pairing for a 132-seat single-class E195-E2 (Embraer lists Binter Canarias and Azul among its operators; accessed 2026-10-04); operational example only, not an Embraer design-mission claim",
+            ),
+            "A400M" => (
+                "Frankfurt (EDDF)",
+                "Madrid Barajas (LEMD)",
+                11_278.0,
+                0.72,
+                "Representative European airlift sector; operational example only, not an A400M design-mission claim (the design point is the 20 t / 6300 km brochure entry)",
+            ),
             "DC-10" => (
                 "Osaka Kansai (RJBB)",
                 "Honolulu (PHNL)",
                 37_000.0 * 0.3048,
                 0.82,
                 "Northwest Airlines 1996-10-27 timetable explicitly assigns DC-10 equipment to Osaka-Honolulu; historical because scheduled passenger DC-10 service has ended",
+            ),
+            // ESTIMATE: representative historical long-haul 747-400 route
+            // declared for this study; not checked against a timetable.
+            "B747-400" => (
+                "London Heathrow (EGLL)",
+                "Johannesburg OR Tambo (FAOR)",
+                35_000.0 * 0.3048,
+                0.85,
+                "Declared representative 747-400 long-haul route (estimate, not verified against a timetable); the design mission is the ACAP section 3.2.1 payload/range corner, not this route",
             ),
             // AVE is a synthetic reference aircraft and has no real demand history.
             _ => (
@@ -438,6 +461,9 @@ impl AircraftPreset {
                     |p| p.cl_max_to,
                 ),
             );
+        }
+        if self.name == "A400M" {
+            super::military::apply_a400m_speed_schedule(&mut profile);
         }
         if self.name == "ATR72-600" {
             apply_atr72_600_speed_schedule(

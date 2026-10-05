@@ -72,10 +72,27 @@ pub fn config_for(preset_name: &str) -> Option<StructuresConfig> {
         }),
 
         // Declared class assumption: no local primary source states this aircraft's wing box material.
+        // 1960s design, aluminium wing box; the ACAP contains no material statement.
+        // No source states the alloy. Not a verified assignment.
+        "B747-400" => Some(StructuresConfig {
+            spar_cap_material: "Al 7075-T6".to_owned(),
+            ..StructuresConfig::default()
+        }),
+
+        // Declared class assumption: no local primary source states this aircraft's wing box material.
         // The real outer wing box is understood to be composite, but neither local factsheet (2020, 2022)
         // contains the word composite or carbon. Metallic is the conservative declared choice pending a
         // real source. Not a verified assignment.
         "ATR72-600" => Some(StructuresConfig {
+            spar_cap_material: "Al 7075-T6".to_owned(),
+            ..StructuresConfig::default()
+        }),
+
+        // Declared class assumption: no local primary source states the A400M wing box
+        // material; a secondary article (Defence Turkey 2025) mentions CFRP wing skins, carried
+        // as a 0.3 FLOPS composite factor, not as a structural material. Metallic is the
+        // conservative declared choice. Not a verified assignment.
+        "A400M" => Some(StructuresConfig {
             spar_cap_material: "Al 7075-T6".to_owned(),
             ..StructuresConfig::default()
         }),
@@ -131,7 +148,14 @@ mod tests {
 
     #[test]
     fn metallic_presets_replace_composite_spar_cap_with_al_7075() {
-        for name in &["A320-200", "A340-300", "A380-800", "DC-10", "ATR72-600"] {
+        for name in &[
+            "A320-200",
+            "A340-300",
+            "A380-800",
+            "DC-10",
+            "B747-400",
+            "ATR72-600",
+        ] {
             let cfg = config_for(name).unwrap_or_else(|| panic!("{name} should be registered"));
             assert_eq!(cfg.spar_cap_material, "Al 7075-T6");
             assert_eq!(cfg.skin_material, "Al 7075-T6");

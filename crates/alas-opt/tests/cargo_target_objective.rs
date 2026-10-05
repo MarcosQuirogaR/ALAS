@@ -317,9 +317,18 @@ fn no_registered_preset_can_be_reached_by_the_cargo_objective() {
     for name in alas_config::presets::available() {
         let config = AlasConfig::from_value(&serde_json::json!({ "preset": name }))
             .unwrap_or_else(|error| panic!("{name}: {error}"));
+        // old: every preset "passenger" -> new: the A400M is the registered
+        // military freighter; its objective is still unset (checked below), so
+        // the cargo target resolves to its fixed capacity and the run is
+        // unchanged.
+        let expected_type = if name == "A400M" {
+            "cargo"
+        } else {
+            "passenger"
+        };
         assert_eq!(
-            config.requirements.aircraft_type, "passenger",
-            "{name} is a freighter; its default run would reach the cargo target"
+            config.requirements.aircraft_type, expected_type,
+            "{name}: only the A400M is a freighter and none reaches the cargo target by default"
         );
         assert_eq!(config.requirements.cargo_objective_kg, 0.0, "{name}");
         assert_eq!(

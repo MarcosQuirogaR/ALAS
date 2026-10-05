@@ -7,6 +7,8 @@
 
 mod airbus;
 mod american;
+mod b747;
 
 pub use airbus::{a340_300, a380_800};
 pub use american::{b787_9, dc_10};
+pub use b747::b747_400;

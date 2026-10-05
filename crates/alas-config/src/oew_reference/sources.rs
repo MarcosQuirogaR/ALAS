@@ -209,3 +209,16 @@ pub(super) const B777X_SECONDARY_PROJECTION: OewSource = OewSource {
     quote: "a 4-class 300-seat 777-9X has an OEW of 188,241 kg (415,000 lbs), attributed to Aspire Aviation's multiple Boeing sources",
     tier: OewSourceTier::Aggregator,
 };
+
+pub(super) const B747_400_ACAP: OewSource = OewSource {
+    document: "747-400/-400ER Airplane Characteristics for Airport Planning, D6-58326-1",
+    publisher: "Boeing",
+    revision: "Revision F",
+    date: "2024-12",
+    locator: "Section 2.1.1 General Characteristics: Model 747-400 (General Electric Engines), document page 2-2 (PDF page 19), fifth weight column and note 3",
+    url: "https://www.boeing.com/content/dam/boeing/v2/airports/acaps/747-400_Rev_F.pdf",
+    local_path: "",
+    retrieved: "2026-10-05",
+    quote: "SPEC OPERATING EMPTY WEIGHT POUNDS 394,088 KILOGRAMS 178,755 ... SPEC OPERATING EMPTY WEIGHT REFLECTS THREE-CLASS 400-PASSENGER ARRANGEMENT AND STANDARD ITEM ALLOWANCES. ACTUAL OEW WILL VARY WITH AIRPLANE CONFIGURATION",
+    tier: OewSourceTier::ManufacturerPlanningDocument,
+};

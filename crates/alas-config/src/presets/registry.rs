@@ -6,7 +6,7 @@
 use std::sync::OnceLock;
 
 use super::{
-    landing_reference, narrowbody, reference, regional, takeoff_reference, widebody,
+    landing_reference, military, narrowbody, reference, regional, takeoff_reference, widebody,
     AircraftPreset, UnknownAircraftPreset,
 };
 use crate::PerformanceConfig;
@@ -81,6 +81,10 @@ fn build() -> Vec<AircraftPreset> {
         narrowbody::a220_300(),
         regional::atr72_600(),
         widebody::dc_10(),
+        narrowbody::e195_e2(),
+        narrowbody::c919(),
+        widebody::b747_400(),
+        military::a400m(),
     ];
 
     // The engine name is stated on the preset and read off the geometry, and

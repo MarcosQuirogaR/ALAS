@@ -108,3 +108,13 @@ pub(crate) const DC_10_30: PublishedAftCgNoseLoad = PublishedAftCgNoseLoad {
     ],
     source: "Boeing DC/MD-10 ACAP DAC-67803A Rev A, Figure 7.4.2 (DC-10 Series 30/30CF/40/40CF, maximum ramp weight 583,000 lb: aft boundary of the ground CG envelope read 93.36 % on the main gear at 261,200 lb, 94.3 % from 271,300 lb to 462,000 lb, read +-0.15 % and +-2,000 lb) and section 7.3.2 (583,000 lb: wing gear 218,767 lb per strut and centre gear 94,746 lb static at the most-aft CG)",
 };
+
+/// Boeing 747-400, two wing-gear and two body-gear struts of four wheels.
+pub(crate) const B747_400: PublishedAftCgNoseLoad = PublishedAftCgNoseLoad {
+    points: &[
+        chart_point(353_260.0, 1.0 - 0.963),
+        chart_point(395_986.0, 1.0 - 4.0 * 204_500.0 / 873_000.0),
+        chart_point(397_800.0, 1.0 - 4.0 * 204_600.0 / 877_000.0),
+    ],
+    source: "Boeing 747-400 ACAP D6-58326-1 Rev F, December 2024, Figure 7.4.1 (p.7-9; 747-400, -400 Combi, -400 Domestic: aft boundary of the ground CG envelope read 96.3 % on the main gear up to 750,000 lb on the main gear, i.e. 778,800 lb total, read +-0.15 % and +-3,000 lb) and section 7.3 (p.7-8; maximum main-gear load at the most-aft CG per strut, four struts: 204,500 lb at the 873,000 lb and 204,600 lb at the 877,000 lb maximum design taxi weight)",
+};

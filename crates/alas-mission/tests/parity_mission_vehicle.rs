@@ -138,7 +138,8 @@ fn compare(
                     // input the frozen request predates; the geometry tests
                     // and the preset tail-down checks cover it.
                     if path.ends_with(".geometry_config.fuselage")
-                        && key == "belly_upsweep_length_m"
+                        && (key == "belly_upsweep_length_m"
+                            || (key.starts_with("nose_") && key != "nose_z_m"))
                     {
                         continue;
                     }

@@ -22,6 +22,8 @@ use crate::ConfigNode;
 
 mod aft_body;
 pub use aft_body::AftBodyStation;
+mod nose;
+pub use nose::{NoseShape, NoseStation};
 
 /// An additional user-controlled fuselage section at a normalized X station.
 ///
@@ -183,6 +185,55 @@ pub struct FuselageConfig {
     )]
     pub belly_upsweep_length_m: Option<f64>,
 
+    /// Optional shaped-nose parameter; see `nose_shape`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[config(
+        label = "Nose windshield angle",
+        unit = "deg",
+        help = "Side-view angle of the straight windshield to the waterline, between the radome and the crown blend. Setting any nose field replaces the single-ellipsoid nose with upper, lower and plan profiles; fields left unset take narrow-body class estimates (about 32 deg). Valid 15 to 60 deg."
+    )]
+    pub nose_windshield_angle_deg: Option<f64>,
+
+    /// Optional shaped-nose parameter; see `nose_shape`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[config(
+        label = "Nose crown end",
+        help = "Fraction of the nose length at which the upper line reaches the cabin crown with zero slope; the windshield blends into the crown there. Unset takes a narrow-body class estimate (about 0.8). Valid 0.55 to 0.95."
+    )]
+    pub nose_crown_end_fraction: Option<f64>,
+
+    /// Optional shaped-nose parameter; see `nose_shape`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[config(
+        label = "Nose radome length",
+        help = "Fraction of the nose length occupied by the radome, from the tip to the windshield base. Unset takes a narrow-body class estimate (about 0.3). Valid 0.1 to 0.45."
+    )]
+    pub nose_radome_length_fraction: Option<f64>,
+
+    /// Optional shaped-nose parameter; see `nose_shape`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[config(
+        label = "Nose keel exponent",
+        help = "Exponent of the lower nose line from the tip to the cabin keel: larger values give a deeper chin radome, smaller a straighter underside. Unset takes a narrow-body class estimate (about 2.2). Valid 1.5 to 4."
+    )]
+    pub nose_keel_exponent: Option<f64>,
+
+    /// Optional shaped-nose parameter; see `nose_shape`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[config(
+        label = "Nose plan exponent",
+        help = "Exponent of the plan-view half-width from the tip to the cabin width: smaller values give a pointier plan view. Unset takes a narrow-body class estimate (about 2). Valid 1.6 to 2.6."
+    )]
+    pub nose_plan_exponent: Option<f64>,
+
+    /// Optional shaped-nose parameter; see `nose_shape`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[config(
+        label = "Nose section exponent",
+        help = "Peak superellipse exponent of the nose cross-sections, reached mid-nose and returning to 2 (elliptical) at the tip and the cabin; larger values give flatter-sided cockpit sections. Unset takes a narrow-body class estimate (about 2.4). Valid 2 to 3.5."
+    )]
+    pub nose_section_exponent: Option<f64>,
+
     /// Optional user-defined sections inserted into the generated nose/cabin/
     /// tail station list.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -226,6 +277,12 @@ impl Default for FuselageConfig {
             tailcone_length_m: 14.0,
             tail_z_m: 1.8,
             belly_upsweep_length_m: None,
+            nose_windshield_angle_deg: None,
+            nose_crown_end_fraction: None,
+            nose_radome_length_fraction: None,
+            nose_keel_exponent: None,
+            nose_plan_exponent: None,
+            nose_section_exponent: None,
             custom_sections: Vec::new(),
             generated_sections: Vec::new(),
             n_subdivisions: 12,
