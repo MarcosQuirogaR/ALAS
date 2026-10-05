@@ -76,7 +76,8 @@ pub(super) fn apply(preset: &mut AircraftPreset) {
     }
 }
 
-const REFERENCES: [PublishedLandingReference; 7] = [
+// old 7 -> 8 published landing references: Boeing 747-400 added.
+const REFERENCES: [PublishedLandingReference; 8] = [
     PublishedLandingReference {
         preset_name: "A220-300",
         mass_kg: 129_500.0 * POUND_KG,
@@ -146,6 +147,16 @@ const REFERENCES: [PublishedLandingReference; 7] = [
         speed_uncertainty_m_s: KNOT_M_S,
         source: "Boeing Airport Compatibility Engineering, FAA Reference Code and Approach Speeds for Boeing Aircraft, 30 Mar 2016, p.3: DC-10-30 approach speed 149 kt, MLW 403,000 lb; https://www.boeing.com/content/dam/boeing/v2/airports/faq/arcandapproachspeeds.pdf; EASA IM.A.210 Issue 2, 2024: trapezoidal reference wing area 338.8 m^2",
         applicability: "Lower-MLW DC-10-30 source, not the preset's 421,000 lb option; coefficient transferred at unchanged reference area/flap configuration with sqrt(mass) speed scaling; manufacturer planning speed treated as sea-level CAS; historical certification used 1.3 VS, so this is the requested 1.23 VS1g equivalent",
+    },
+    PublishedLandingReference {
+        preset_name: "B747-400",
+        mass_kg: 630_000.0 * POUND_KG,
+        reference_area_m2: 525.0,
+        vref_m_s: 153.0 * KNOT_M_S,
+        density_kg_m3: ISA_SEA_LEVEL_DENSITY_KG_M3,
+        speed_uncertainty_m_s: KNOT_M_S,
+        source: "Boeing Airport Compatibility Engineering, FAA Reference Code and Approach Speeds for Boeing Aircraft, 30 Mar 2016, p.2: 747-400 approach speed 153 kt, MTW 877,000 lb, MLW 630,000 lb, wingspan 213.00 ft; https://www.boeing.com/content/dam/boeing/v2/airports/faq/arcandapproachspeeds.pdf; 525 m^2 reference area is Boeing's published 5,650 ft^2 (recalled, not retrieved in this session: estimate)",
+        applicability: "630,000 lb is the preset's optional landing weight (Boeing 747-400 ACAP D6-58326-1 Rev F section 2.1.1); manufacturer planning speed treated as sea-level CAS; historical certification used 1.3 VS, so this is the requested 1.23 VS1g equivalent",
     },
 ];
 
@@ -217,7 +228,15 @@ mod tests {
                 assert_eq!(performance.vapp_vstall_land_factor, VREF_VS1G);
                 assert!((performance.cl_max_land - reference.cl_max_land()).abs() < 1e-12);
             } else {
-                assert_eq!(preset.name, "AVE");
+                // AVE is notional; no landing-speed source was found for the
+                // E195-E2 (Embraer prints field lengths, not a Vref) or the
+                // C919 (no airport-planning manual is public); the A400M
+                // publishes no landing speed.
+                assert!(
+                    matches!(preset.name, "AVE" | "E195-E2" | "C919" | "A400M"),
+                    "{} has no published landing reference",
+                    preset.name
+                );
             }
         }
     }

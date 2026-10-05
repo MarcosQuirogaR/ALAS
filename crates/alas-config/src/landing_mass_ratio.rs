@@ -30,7 +30,9 @@ pub const LONG_HAUL_MLW_FRACTION_MTOW: f64 = 266_258.0 / 351_534.0;
 /// The arithmetic mean of the certified MLW/MTOW of the registry's
 /// short/medium-haul jet transports, each with the TCDS or airport-planning
 /// provenance of its preset reference block: A320-200 66,000 / 78,000 kg
-/// (0.8462) and A220-300 58,740 / 67,585 kg (0.8691), mean 0.8576.
+/// (0.8462), A220-300 58,740 / 67,585 kg (0.8691) and E195-E2 54,000 /
+/// 62,500 kg (0.8640; EASA.IM.A.071 Issue 28 Section 5 III.13), mean 0.8598
+/// (old 0.8576 without the E195-E2).
 ///
 /// The ATR 72-600 (22,350 / 23,000 kg, 0.9717) shares the haul class but is
 /// excluded: a regional turboprop flying short sectors is certified with a
@@ -40,7 +42,7 @@ pub const LONG_HAUL_MLW_FRACTION_MTOW: f64 = 266_258.0 / 351_534.0;
 /// still falls back to this jet statistic; no turboprop class default is
 /// declared.
 pub const SHORT_MEDIUM_HAUL_MLW_FRACTION_MTOW: f64 =
-    (66_000.0 / 78_000.0 + 58_740.0 / 67_585.0) / 2.0;
+    (66_000.0 / 78_000.0 + 58_740.0 / 67_585.0 + 54_000.0 / 62_500.0) / 3.0;
 
 /// The default MLW/MTOW of an aircraft in `class`.
 #[must_use]
@@ -126,6 +128,12 @@ mod tests {
             else {
                 continue;
             };
+            // The C919 MLW (67,800 / 75,100 kg, 0.9028) is a secondary-source
+            // value with no TCDS or planning manual behind it, so it is kept
+            // out of the class statistic (which stays 0.8598).
+            if preset.name == "C919" {
+                continue;
+            }
             let class = crate::preset_flops::inputs_for(preset.name)
                 .and_then(|inputs| inputs.transport.haul_class)
                 .unwrap_or_default();
@@ -138,10 +146,11 @@ mod tests {
                 OperatingHaulClass::LongHaul => long.push(mlw / mtow),
             }
         }
-        assert_eq!(short.len(), 2, "A320-200 and A220-300");
+        // old 2 -> new 3: the E195-E2 joins the A320-200 and A220-300.
+        assert_eq!(short.len(), 3, "A320-200, A220-300 and E195-E2");
         let mean = short.iter().sum::<f64>() / short.len() as f64;
         assert!((SHORT_MEDIUM_HAUL_MLW_FRACTION_MTOW - mean).abs() < 1.0e-12);
-        assert!((SHORT_MEDIUM_HAUL_MLW_FRACTION_MTOW - 0.8576).abs() < 5.0e-5);
+        assert!((SHORT_MEDIUM_HAUL_MLW_FRACTION_MTOW - 0.8598).abs() < 5.0e-5);
         let low = long.iter().copied().fold(f64::INFINITY, f64::min);
         let high = long.iter().copied().fold(f64::NEG_INFINITY, f64::max);
         assert!((low..=high + 1.0e-3).contains(&LONG_HAUL_MLW_FRACTION_MTOW));

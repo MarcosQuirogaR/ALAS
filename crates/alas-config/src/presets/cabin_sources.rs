@@ -189,3 +189,18 @@ pub const ATR72_600_PLANNING_CABIN: SourcedPlanningCabin = SourcedPlanningCabin 
     }],
     source: "ATR 72-600 Factsheet (PW127M/N edition, 2020-07) p.22 (standard configuration, 72 seats at 29 in pitch)",
 };
+
+/// The ATR 72-600 main-deck baggage compartments as cabin-config compartments.
+pub fn atr72_600_baggage_holds() -> Vec<crate::HoldCompartmentConfig> {
+    ATR72_600_BAGGAGE_COMPARTMENTS
+        .iter()
+        .map(|&(name, x_start_m, x_end_m)| crate::HoldCompartmentConfig {
+            name: name.to_owned(),
+            x_start_m,
+            x_end_m,
+            volume_m3: None,
+            max_net_kg: None,
+            deck: crate::HoldDeck::Main,
+        })
+        .collect()
+}

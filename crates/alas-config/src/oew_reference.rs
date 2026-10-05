@@ -29,6 +29,12 @@
 //! The registry never authorises a calibration: an anchor is something the
 //! model is compared with, not fitted to.
 
+#[path = "oew_reference/c919.rs"]
+mod c919;
+#[path = "oew_reference/e195_e2.rs"]
+mod e195_e2;
+#[path = "oew_reference/military.rs"]
+mod military;
 #[path = "oew_reference/records.rs"]
 mod records;
 #[path = "oew_reference/sources.rs"]
@@ -366,7 +372,12 @@ impl OewReference {
 
 /// Every registered aircraft's record, in preset registration order.
 pub fn registry() -> &'static [OewReference] {
-    records::RECORDS
+    static ALL: std::sync::OnceLock<Vec<OewReference>> = std::sync::OnceLock::new();
+    ALL.get_or_init(|| {
+        let mut all = records::RECORDS.to_vec();
+        all.push(military::A400M);
+        all
+    })
 }
 
 /// The record of one preset.

@@ -79,9 +79,17 @@ mod tests {
             search_diagnostics: None,
             delivered_acceptance: None,
         };
+        // Unique per call (process id, wall-clock nanoseconds, counter) so a
+        // directory left by an earlier or concurrent run cannot be shared.
+        static COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|elapsed| elapsed.as_nanos())
+            .unwrap_or_default();
         let directory = std::env::temp_dir().join(format!(
-            "alas-native-search-evidence-{}",
-            std::process::id()
+            "alas-native-search-evidence-{}-{nanos}-{}",
+            std::process::id(),
+            COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
         ));
         std::fs::create_dir_all(&directory).expect("test directory");
         write(&directory, &result).expect("atomic evidence publication");
@@ -96,7 +104,8 @@ mod tests {
             serde_json::from_value(record["optimization"].clone()).expect("complete search result");
         assert_eq!(restored, result);
         assert!(!directory.join("optimization_search.json.tmp").exists());
-        std::fs::remove_file(path).expect("remove test evidence");
-        std::fs::remove_dir(directory).expect("remove empty test directory");
+        // Best-effort cleanup: a scanner or indexer holding a handle on
+        // Windows must not fail a test whose assertions have all passed.
+        let _ = std::fs::remove_dir_all(&directory);
     }
 }

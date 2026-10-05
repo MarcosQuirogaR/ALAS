@@ -905,6 +905,11 @@ fn is_native_config_field(path: &str, key: &str) -> bool {
         // Python schema has no such field (unset = tailcone loft).
         || (key == "belly_upsweep_length_m"
             && (path.ends_with("FuselageConfig") || path.ends_with(".fuselage")))
+        // Optional shaped-nose parameters of the fuselage; the frozen
+        // Python schema has no such fields (all unset = ellipsoid nose).
+        || (key.starts_with("nose_")
+            && key != "nose_z_m"
+            && (path.ends_with("FuselageConfig") || path.ends_with(".fuselage")))
         // The declared section class that fixes the Korn technology factor
         // replaced the frozen global `drag_model.korn_technology_factor`; its
         // mapping and per-preset declarations are checked by the airfoil-class

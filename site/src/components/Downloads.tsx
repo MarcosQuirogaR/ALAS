@@ -3,7 +3,7 @@ import { useReleases } from '../lib/useRelease'
 
 const REPO_URL = 'https://github.com/MarcosQuirogaR/ALAS'
 const RELEASES_URL = `${REPO_URL}/releases`
-const RELEASE_VERSION = 'v1.3.0'
+const RELEASE_VERSION = 'v1.3.1'
 const RELEASE_URL = `${RELEASES_URL}/tag/${RELEASE_VERSION}`
 
 export default function Downloads() {

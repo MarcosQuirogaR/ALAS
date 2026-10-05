@@ -336,6 +336,11 @@ pub fn native_field(path: &str, key: &str) -> bool {
         // Optional belly-upsweep length; the frozen schema has no such field.
         || (key == "belly_upsweep_length_m"
             && (path.ends_with("FuselageConfig") || path.ends_with(".fuselage")))
+        // Optional shaped-nose parameters of the fuselage; the frozen
+        // Python schema has no such fields (all unset = ellipsoid nose).
+        || (key.starts_with("nose_")
+            && key != "nose_z_m"
+            && (path.ends_with("FuselageConfig") || path.ends_with(".fuselage")))
         || (path.ends_with(".landing_gear")
             && matches!(
                 key,

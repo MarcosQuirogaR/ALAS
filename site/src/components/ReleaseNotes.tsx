@@ -6,6 +6,11 @@ const RELEASES_URL = 'https://github.com/MarcosQuirogaR/ALAS/releases'
 // bodies can contain historical branding or editorial notes that do not belong
 // in the current product site.
 const RELEASE_SUMMARIES: Record<string, string[]> = {
+  'v1.3.1': [
+    'Four new presets: Embraer E195-E2 (model OEW within 0.3 % of the 35,700 kg reference), COMAC C919 (-3.1 %, airframe data from a secondary source), Boeing 747-400 (+9.3 %, smoothed upper-deck hump) and Airbus A400M (cargo transport, no passenger cabin).',
+    'Parametric nose geometry, opt-in through six nose fields; an unset nose keeps the legacy shape.',
+    'Test robustness on CI hosts without navigation data or a writable shared temporary directory.',
+  ],
   'v1.3.0': [
     'Hard MTOW as the default for presets, with takeoff fuel capped at usable tank capacity, and hard constraints throughout.',
     'Clean-sheet design from a preset-less brief, a load and trim CG sheet, and an all-evaluation optimization history.',
