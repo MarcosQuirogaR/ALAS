@@ -507,7 +507,14 @@ mod tests {
                     charted_kg <= 1.05 * config.requirements.max_structural_payload_kg,
                     "{name}: {charted_kg} kg"
                 );
-                assert_eq!(mission.payload_source, DesignPayloadSource::ChartedPoint);
+                // A cargo aircraft (the A400M) takes its configured payload,
+                // which the preset declares equal to the charted one.
+                let expected_source = if config.requirements.aircraft_type == "cargo" {
+                    DesignPayloadSource::ConfiguredPayload
+                } else {
+                    DesignPayloadSource::ChartedPoint
+                };
+                assert_eq!(mission.payload_source, expected_source);
             }
             let adjusted = with_mode(config, MtowSizing::PayloadAdjusted).mtow_plan();
             assert_eq!(

@@ -46,8 +46,8 @@ After extraction, start `ALAS.exe` (Windows) or `./ALAS` (Linux) from the
 package directory. Keep the directory intact: the executable resolves its
 adjacent `configs/`, source manifest, notices, and any separately distributed
 solver directories relative to the package. The exact archive name is
-version- and target-specific, for example `alas-v1.3.0-windows-x86_64.zip` or
-`alas-v1.3.0-linux-x86_64.tar.gz`; the release manifest records the actual
+version- and target-specific, for example `alas-v1.3.1-windows-x86_64.zip` or
+`alas-v1.3.1-linux-x86_64.tar.gz`; the release manifest records the actual
 version, target, source revision, dirty-worktree flag, and hashes.
 
 Every accepted package includes:
@@ -151,12 +151,12 @@ re-check an assembled package as an external artifact, reading only what the
 package directory contains. Point them at the directory, not the archive:
 
 ```powershell
-$env:ALAS_W55_PACKAGE_DIR = "dist/alas-v1.3.0-windows-x86_64"
+$env:ALAS_W55_PACKAGE_DIR = "dist/alas-v1.3.1-windows-x86_64"
 cargo test -p alas-acceptance --test distribution_license_boundary -- --include-ignored
 cargo test -p alas-acceptance --test distribution_acceptance -- --include-ignored
 ```
 
-(On Linux, `export ALAS_W55_PACKAGE_DIR=dist/alas-v1.3.0-linux-x86_64` and the
+(On Linux, `export ALAS_W55_PACKAGE_DIR=dist/alas-v1.3.1-linux-x86_64` and the
 same two `cargo test` commands. Both suites are ignored by default, so that an
 ordinary test run reports them as skipped rather than passing them without a
 package; `--include-ignored` runs them. Both read whatever package directory

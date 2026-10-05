@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! The eight OEW reference records, one per registered preset.
+//! The ten OEW reference records, one per registered preset.
 //!
 //! Every value here was read from the retained document named in its
 //! source; the quote is the wording on the page. A value whose document is
@@ -9,8 +9,9 @@
 
 use super::sources::{
     unknown, A220_ACP, A220_ARP, A320_ACAP_REV46, A320_F_HDRF_SHEET, A340_ACAP_REV33,
-    A380_ACAP_REV20, A380_AGGREGATOR, ATR_FACTSHEET, B777X_ACAP_REV_G, B777X_SECONDARY_PROJECTION,
-    B787_ACAP_REV_L, DC10_ACAP, DC10_ACAP_30CF, ELSEVIER_DATA_A, RETRIEVED,
+    A380_ACAP_REV20, A380_AGGREGATOR, ATR_FACTSHEET, B747_400_ACAP, B777X_ACAP_REV_G,
+    B777X_SECONDARY_PROJECTION, B787_ACAP_REV_L, DC10_ACAP, DC10_ACAP_30CF, ELSEVIER_DATA_A,
+    RETRIEVED,
 };
 use super::{
     InclusionStatus, OewApplicability, OewCaseAnchor, OewInclusionList, OewReference,
@@ -448,5 +449,45 @@ pub(super) static RECORDS: &[OewReference] = &[
         ],
         structural_payload_basis_oew_kg: Some(120_914.0),
         notes: "The ACAP defines OWE as structure, power plant, furnishing, systems, unusable fuel and other unusable propulsion agents, standard items, personnel, equipment and supplies necessary for full operation, excluding fuel and payload. The preset's 120,914 kg, 190,962 kg landing weight and 46,008 kg structural payload are exactly the passenger column with the 572,000 lb footnote applied.",
+    },
+    super::e195_e2::E195_E2_RECORD,
+    super::c919::C919_RECORD,
+    OewReference {
+        preset: "B747-400",
+        applicability: OewApplicability::ConditionalMismatch,
+        reference_oew_kg: Some(178_755.0),
+        definition_label: "Spec Operating Empty Weight, ACAP three-class 400-passenger arrangement with standard item allowances",
+        reference_configuration: OewReferenceConfiguration {
+            model: "747-400 passenger",
+            weight_variant: "875,000 lb MTOW column (396,893 kg); optional landing weight 630,000 lb (285,763 kg); optional MZFW 542,500 lb (246,073 kg)",
+            mtow_kg: Some(396_893.0),
+            engine: "CF6-80C2B1F",
+            modification_state: "ACAP Revision F planning standard (December 2024)",
+            cabin: "ACAP typical three-class 400 seats (24 first, 32 business, 302 economy, 42 upper-deck business)",
+        },
+        differences_from_preset: &[
+            "the ACAP OEW is a typical configuration figure; installed equipment and operator items are not itemized",
+            "the preset's upper-deck hump is smoothed into a constant ovoid section, so the modelled structure differs from the real body",
+        ],
+        inclusion: OewInclusionList {
+            flight_crew: InclusionStatus::Included,
+            cabin_crew: InclusionStatus::Included,
+            crew_baggage: InclusionStatus::Unknown,
+            unusable_fuel: InclusionStatus::Included,
+            engine_oil: InclusionStatus::Unknown,
+            galley_equipment_and_catering: InclusionStatus::Included,
+            potable_water: InclusionStatus::Unknown,
+            seats_and_furnishings: InclusionStatus::Included,
+            cargo_containers: InclusionStatus::Unknown,
+            manuals_and_operational_items: InclusionStatus::Included,
+            usable_fuel: InclusionStatus::Excluded,
+            payload: InclusionStatus::Excluded,
+        },
+        source: Some(B747_400_ACAP),
+        uncertainty_kg: Some(2_000.0),
+        case_anchor: None,
+        other_published_values: &[],
+        structural_payload_basis_oew_kg: Some(178_755.0),
+        notes: "The ACAP Rev F table defines OEW as structure, powerplant, furnishing, systems, unusable fuel and other unusable propulsion agents plus standard items, personnel, equipment and supplies for full operation, excluding usable fuel and payload. The 2,000 kg uncertainty is an assumed configuration spread, not a published tolerance. The preset's 246,073 kg MZFW less this OEW is the printed 67,318 kg structural payload.",
     },
 ];

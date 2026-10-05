@@ -131,6 +131,26 @@ fn the_dropdown_labels_match_the_reference() {
             assert_eq!(display_name, "ATR 72-600");
             continue;
         }
+        if name == "C919" {
+            // Not in the upstream reference: a COMAC preset added in Rust.
+            assert_eq!(display_name, "COMAC C919");
+            continue;
+        }
+        if name == "E195-E2" {
+            // Not in the upstream reference: an Embraer preset added in Rust.
+            assert_eq!(display_name, "Embraer E195-E2");
+            continue;
+        }
+        // Registered after the reference implementation: no upstream label.
+        if name == "B747-400" {
+            assert_eq!(display_name, "Boeing 747-400 (CF6-80C2B1F)");
+            continue;
+        }
+        // The A400M post-dates the frozen reference: not in its label table.
+        if name == "A400M" {
+            assert_eq!(display_name, "Airbus A400M Atlas");
+            continue;
+        }
         let upstream = fixture.display_names.get(name).map(String::as_str);
         if name == "DC-10" {
             comparison.exact(
@@ -149,7 +169,9 @@ fn the_dropdown_labels_match_the_reference() {
     }
     comparison.exact(
         "count",
-        &(presets::display_names().len() - 1),
+        // old len - 2 -> new len - 5: the ATR 72-600, E195-E2, C919, B747-400
+        // and A400M have no upstream label.
+        &(presets::display_names().len() - 5),
         &fixture.display_names.len(),
     );
     comparison.finish();

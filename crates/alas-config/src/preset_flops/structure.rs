@@ -32,7 +32,7 @@ pub(super) fn declared_structure(name: &str) -> FlopsStructureConfig {
         // The PW1521G and Trent 970 data sheets retained here do not state
         // starter inclusion. Keep equation 89 conservatively, but expose
         // that the overlap is unresolved rather than calling it verified.
-        "A220-300" | "A380-800" => FlopsStarterScope::UnknownConservativeSeparate,
+        "A220-300" | "A380-800" | "E195-E2" => FlopsStarterScope::UnknownConservativeSeparate,
         _ => FlopsStarterScope::SeparateEquation89,
     };
     config.nozzle_scope = match name {
@@ -41,7 +41,7 @@ pub(super) fn declared_structure(name: &str) -> FlopsStructureConfig {
         // hardware outside the engine type design. FLOPS has no term for that
         // known omission unless a separable Eq. 78 nozzle mass is supplied.
         // Keep the omission explicit and add no guessed kilograms.
-        "A320-200" | "A220-300" | "A380-800" => FlopsNozzleScope::OutsideUnmodelled,
+        "A320-200" | "A220-300" | "A380-800" | "E195-E2" => FlopsNozzleScope::OutsideUnmodelled,
         _ if config.baseline_engine_mass_kg.is_some() => FlopsNozzleScope::Unknown,
         _ => FlopsNozzleScope::IncludedInBaseline,
     };
@@ -180,7 +180,10 @@ fn declared_pylon_mass_method(name: &str) -> PylonMassMethod {
 fn certified_dry_engine_mass_kg(name: &str) -> Option<f64> {
     match name {
         "A320-200" => Some(2_454.8),
-        "A220-300" => Some(2_177.0),
+        // EASA.IM.E.090 Issue 11 (PW1500G series, which also lists the
+        // PW1900G): 2,177 kg dry for all models, basic engine with standard
+        // equipment. The same sheet as the A220's.
+        "A220-300" | "E195-E2" => Some(2_177.0),
         "A380-800" => Some(6_246.0),
         _ => None,
     }

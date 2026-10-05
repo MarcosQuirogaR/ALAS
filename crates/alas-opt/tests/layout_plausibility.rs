@@ -67,7 +67,10 @@ fn mission_sized_reference_geometry_passes_layout_residuals() {
                 Err(_) => continue,
             };
         for id in LAYOUT_IDS {
-            if preset == "DC-10" && *id == "sweep_consistent_with_cruise_mach" {
+            if matches!(preset, "DC-10" | "B747-400") && *id == "sweep_consistent_with_cruise_mach"
+            {
+                // B747-400 (new preset): same exception, a 1960s conventional
+                // section at the 0.87 Korn lower bound cruising at Mach 0.85.
                 // Documented exception. DC-10 cruises beyond model Mdd (0.800
                 // vs 0.82): 1970s aft-loaded DSMA airfoil class has no sourced
                 // Korn technology factor; kappa held at the conventional 0.87
@@ -120,7 +123,9 @@ fn hard_mtow_reference_layouts_keep_named_drag_divergence_findings() {
                     }
                     // The conventional factor is not calibrated to this
                     // aircraft's aft-loaded section (Mason, chapter 7).
-                    "DC-10" => Some("aft-loaded section lacks a sourced Korn technology factor"),
+                    "DC-10" | "B747-400" => {
+                        Some("aft-loaded section lacks a sourced Korn technology factor")
+                    }
                     _ => None,
                 };
                 if let Some(reason) = finding {

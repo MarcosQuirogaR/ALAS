@@ -175,7 +175,8 @@ fn tank_count_from_layout(layout: &FuelTankLayoutConfig) -> usize {
 /// handed a value nobody stands behind.
 pub fn inputs_for(preset_name: &str) -> Option<PresetFlopsInputs> {
     let preset = crate::presets::get(preset_name).ok()?;
-    let declared = declared_architecture(preset_name)?;
+    let declared = declared_architecture(preset_name)
+        .or_else(|| military::declared_architecture(preset_name))?;
 
     let engine_count = preset.geometry.engine.spanwise_positions_m.len();
     let wing_mounted = engine_count.checked_sub(declared.fuselage_mounted_engine_count)?;
@@ -236,6 +237,7 @@ pub fn inputs_for(preset_name: &str) -> Option<PresetFlopsInputs> {
     };
 
     let mut structure = declared_structure(preset_name);
+    military::adjust_structure(preset_name, &mut structure);
     // The pressurized fuselage of the regional turboprop class sizes its
     // bending at the certified maximum zero-fuel mass.
     if declared
@@ -247,16 +249,21 @@ pub fn inputs_for(preset_name: &str) -> Option<PresetFlopsInputs> {
     Some(PresetFlopsInputs {
         transport,
         structure,
-        turboprop: declared_turboprop(preset_name),
+        turboprop: military::declared_turboprop(preset_name)
+            .unwrap_or_else(|| declared_turboprop(preset_name)),
     })
 }
 
 #[path = "preset_flops/architecture.rs"]
 mod architecture;
+#[path = "preset_flops/architecture_rows.rs"]
+mod architecture_rows;
+#[path = "preset_flops/military.rs"]
+mod military;
 #[path = "preset_flops/structure.rs"]
 mod structure;
 use architecture::declared_architecture;
-pub(crate) use architecture::declared_cargo_loading;
+pub(crate) use architecture_rows::declared_cargo_loading;
 use structure::{declared_structure, declared_turboprop};
 
 #[cfg(test)]

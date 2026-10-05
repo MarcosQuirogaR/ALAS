@@ -1,15 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! TEST RUN of the Airbus A400M Atlas on the ALAS model. The A400M is not a
-//! registered preset; this builds a configuration from the ATR72-600 preset
-//! (closest registered high-wing T-tail turboprop with sponson main gear) and
-//! overrides geometry, masses, engine, fuel and requirements with the sourced
-//! A400M values of `.agent/research/a400m-data.md` (EASA TCDS A.169, E.033,
-//! P.012, Airbus brochure TMMA0026/01/2025, Bundeswehr operator page).
+//! TEST RUN of the registered Airbus A400M Atlas preset (`A400M`). The preset
+//! carries the sourced and estimated inputs of `.agent/research/a400m-data.md`
+//! (EASA TCDS A.169, E.033, P.012, Airbus brochure TMMA0026/01/2025,
+//! Bundeswehr operator page), each flagged S(ourced), I(nferred) or
+//! E(stimate) beside the number in `alas-config/src/presets/military.rs`.
 //!
-//! Every input that is NOT sourced is marked ESTIMATE in a comment. Nothing
-//! here is a calibration or a physical validation of the A400M.
+//! Nothing here is a calibration or a physical validation of the A400M.
 //!
 //! Ignored by default so the normal gate is unaffected. Run with
 //! `cargo test --release -p alas-acceptance --test a400m_test_run -- --ignored --nocapture`.
@@ -20,15 +18,12 @@
 )]
 
 use alas_config::design_variables::DesignVector;
-use alas_config::{
-    AlasConfig, CenterTankConfig, DesignMode, FeedTankConfig, MtowSizing, WingTankConfig,
-};
+use alas_config::{AlasConfig, DesignMode, MtowSizing};
 use alas_pipeline::FullAnalysis;
 
 const MTOW_KG: f64 = 141_000.0; // B1 p024, G1 (military)
 const MLW_KG: f64 = 123_000.0; // B1 p024
 const PUBLISHED_OEW_KG: f64 = 78_600.0; // G1 (MEW vs OEW not stated)
-const FUEL_DENSITY_KG_M3: f64 = 785.0; // T1 III.9 (EASA TCDS A.169)
 const FUSELAGE_LENGTH_M: f64 = 45.091; // T1 overall length
 
 /// Range-payload points of B1 p024: (payload kg, range nmi, label).
@@ -38,283 +33,27 @@ const RANGE_PAYLOAD: [(f64, f64, &str); 3] = [
     (20_000.0, 3_400.0, "20 t / 6300 km"),
 ];
 
-/// The A400M design vector. Wing: single trapezoid (no kink) with the
-/// inferred taper 0.33 reproducing the TCDS MAC 5.671 m at S = 221.5 m2
-/// (research note Item 1). All wing chords and sweep are INFERENCE/ESTIMATE.
+/// The registered A400M design vector.
 fn a400m_design() -> DesignVector {
-    let span_m = 42.357; // T1 III.4 (certified)
-    let root_chord_m = 7.86; // INFERRED from S, b and MAC (not published)
-    let tip_chord_m = 2.60; // INFERRED
-    let break_fraction = 0.32; // ESTIMATE: ALAS needs a break station; the planform has none
-    let break_chord_m = root_chord_m + (tip_chord_m - root_chord_m) * break_fraction;
-    DesignVector {
-        span_m,
-        root_chord_m,
-        break_chord_m,
-        tip_chord_m,
-        // Leading-edge sweep INFERRED from 15 deg quarter-chord sweep
-        // (secondary source S1) and taper 0.33: 18.3 deg.
-        sweep_deg: 18.3,
-        tip_twist_deg: -2.0, // ESTIMATE, unpublished
-        wing_x_shift_m: 0.0,
-        tail_scale: 1.0,
-        fuselage_length_m: FUSELAGE_LENGTH_M,
-        tail_x_shift_m: 0.0,
-        airfoil_thickness_scale: 1.0,
-        airfoil_camber_scale: 1.0,
-        ..DesignVector::default()
-    }
+    alas_config::presets::get("A400M")
+        .expect("A400M preset is registered")
+        .design_vector
 }
 
-fn wing_cell(start: f64, end: f64, burn_priority: i64, published_l: f64) -> WingTankConfig {
-    WingTankConfig {
-        enabled: true,
-        span_start_fraction: start,
-        span_end_fraction: end,
-        usable_fraction: 0.92,
-        burn_priority,
-        published_usable_volume_l: Some(published_l),
-        feed: FeedTankConfig::default(),
-    }
-}
-
-/// The A400M configuration, started from the ATR72-600 preset. `payload_kg`
-/// is the cargo mass; `design_range_nmi` feeds the mission-sized closure.
+/// The A400M configuration loaded from the registered preset. `payload_kg` is
+/// the cargo mass; `design_range_nmi` feeds the mission-sized closure.
 fn a400m_config(payload_kg: f64, design_range_nmi: f64) -> AlasConfig {
-    let mut config = AlasConfig::from_value(&serde_json::json!({ "preset": "ATR72-600" }))
-        .expect("ATR72-600 preset loads");
+    let mut config = AlasConfig::from_value(&serde_json::json!({ "preset": "A400M" }))
+        .expect("A400M preset loads");
     config.structures.run_nastran = false;
     config.structures.run_patran_export = false;
-    // The ATR seed leaks through the preset NAME: with `preset == "ATR72-600"`
-    // the FLOPS landing mass defaulted to the ATR's declared MLW of 22 350 kg
-    // (gear 1.16 t, 0.8 % of MTOW; 5.5 t once corrected). Clear the name once
-    // everything wanted from the seed is loaded, and declare the design
-    // masses explicitly (MTOW/MLW from B1 p024, military).
-    config.preset = String::new();
-    config.mass_model.flops_structure.design_gross_mass_kg = Some(MTOW_KG);
-    config.mass_model.flops_structure.design_landing_mass_kg = Some(MLW_KG);
     // Evaluate the aircraft as itself (declared MTOW), not as a clean-sheet
     // closure (see memory: alas-mass-sizing-basis).
     config.optimizer.design_space.mode = DesignMode::BaselineSandbox;
     config.optimizer.objective.mtow_sizing = MtowSizing::FixedRequirement;
     config.optimizer.objective.design_range_nmi = design_range_nmi;
-
-    // ---- requirements --------------------------------------------------
-    let req = &mut config.requirements;
-    req.cruise_mach = 0.72; // B1 p012
-    req.cruise_altitude_m = 11_278.0; // B1 p012: M0.72 at 37 000 ft
-    req.mtow_kg = MTOW_KG;
-    req.aircraft_type = "cargo".to_owned(); // military cargo hold, not a passenger cabin
-    req.cabin_preset = "Custom".to_owned();
-    req.num_passengers = 0;
-    req.optimize_passenger_capacity = false;
-    req.cargo_payload_kg = payload_kg;
-    req.max_structural_payload_kg = 37_000.0; // B1 p024
-    req.max_wing_area_m2 = 230.0; // ESTIMATE: above 221.5 m2
-    req.min_wing_loading_kg_m2 = 300.0; // ESTIMATE: loose floor (MTOW/S = 637)
-    req.dive_speed_m_s = 170.0; // ESTIMATE: VMO 154.3 m/s IAS (T1), VD not published
-
-    // ---- cargo hold ------------------------------------------------------
-    // The ATR seed carries a bulk-only lower hold with the ATR's two baggage
-    // compartments; the A400M has neither. Reset to the generic cargo deck
-    // (main-deck PMC pallets, LD3 lower holds). ESTIMATE: the real hold is
-    // 17.70 m x 4.00 m x 3.85 m (B1), loaded with 463L pallets, vehicles or
-    // paratroops, none of which the pallet loader represents.
-    config.cabin = alas_config::CabinConfig::default();
-
-    // ---- mission profile (ESTIMATES) -------------------------------------
-    // The ATR seed profile is a 140 m/s cruise at 6096 m. Replaced by an
-    // A400M-like schedule: cruise M0.72 at 11 278 m (TAS 212.4 m/s, ISA);
-    // climb 155 kt CAS then 220 kt CAS and 2000/800 ft/min (EUROCONTROL
-    // BADA-style ATC values, secondary S4, low confidence); takeoff speed
-    // chosen above the 1.0 g stall at the model CL limit of 2.44 at 141 t
-    // (64.6 m/s); landing speed Vat 130 kt (S4).
-    {
-        let p = &mut config.mission.profile;
-        p.takeoff_air_speed_m_s = 74.0;
-        p.takeoff_climb_rate_m_s = 8.0;
-        p.initial_climb_air_speed_m_s = 95.0; // 79.7 m/s (155 kt, S4) breaches the model climb CL limit 1.5 at 134 t
-        p.initial_climb_rate_m_s = 10.2;
-        p.step_climb_1_air_speed_m_s = 113.0;
-        p.step_climb_1_rate_m_s = 6.0;
-        p.step_climb_2_air_speed_m_s = 113.0;
-        p.step_climb_2_rate_m_s = 4.1;
-        p.cruise_1_air_speed_m_s = 212.4;
-        p.cruise_2_air_speed_m_s = 212.4;
-        p.cruise_3_air_speed_m_s = 212.4;
-        p.descent_1_air_speed_m_s = 125.0;
-        p.descent_1_rate_m_s = 10.0;
-        p.descent_2_air_speed_m_s = 110.0;
-        p.descent_2_rate_m_s = 8.0;
-        p.descent_3_air_speed_m_s = 95.0;
-        p.descent_3_rate_m_s = 6.0;
-        p.descent_4_air_speed_m_s = 80.0;
-        p.descent_4_rate_m_s = 4.5;
-        p.landing_air_speed_m_s = 72.0;
-    }
-
-    // ---- engine: 4 x TP400-D6 -------------------------------------------
-    let engine = &mut config.geometry.engine;
-    engine.engine_name = "TP400-D6".to_owned();
-    engine.turboprop = None;
-    engine.apply_engine_spec();
-    // ESTIMATE: nacelle silhouette is the ATR one stretched to 5.5 m, radius
-    // 1.1 m; TCDS E.033 gives engine length 4.180 m and radius 1.218 m only.
-    engine.nacelle_profile = vec![
-        (0.0, 0.35),
-        (0.64, 0.9),
-        (1.47, 1.0),
-        (4.4, 0.8),
-        (5.5, 0.35),
-    ];
-    engine.radius_scale_m = 1.1;
-    // ESTIMATE: engine stations are not published. Inner/outer at 0.285 and
-    // 0.66 semispan (21.18 m). Inner prop disc edge at 6.0 - 2.667 = 3.33 m
-    // clears the 2.8 m fuselage radius.
-    engine.spanwise_positions_m = vec![14.0, 6.0, -6.0, -14.0];
-    engine.z_m = -1.0; // ESTIMATE
-    engine.inlet_x_offset_m = 4.5; // ESTIMATE: spinner/inlet ahead of LE
-
-    // ---- wing geometry ---------------------------------------------------
-    let wing = &mut config.geometry.wing;
-    // ESTIMATE: LEMAC (hence wing placement) is unpublished (WBM not public).
-    // Chosen so the main gear (19.5 m) sits about 1.1 m behind a 30 %MAC CG:
-    // LEMAC 17.4 m; MAC-LE is 2.9 m aft of the root LE (trapezoid y_mac*tan(18.3)).
-    wing.root_datum_x_m = 14.5;
-    // ESTIMATE: high wing; root above the 2.8 m fuselage crown. Flat wing
-    // (dihedral not published, 0 deg used).
-    wing.root_z_m = 3.3;
-    wing.break_z_m = 3.3;
-    wing.tip_z_m = 3.3;
-    wing.root_twist_deg = 2.0; // ESTIMATE
-    wing.break_twist_deg = 0.6; // ESTIMATE (linear root to tip)
-    wing.break_span_fraction = 0.32;
-    wing.side_of_body_chord_ratio = None;
-    wing.outboard_sweep_decrement_deg = 0.0;
-    // ESTIMATE: airfoils are Airbus proprietary. Supercritical sections
-    // (SC(2)-0714 root, SC(2)-0410 tip) as a generic M0.72 stand-in.
-    wing.root_airfoil = "SC2-0714".to_owned();
-    wing.tip_airfoil = "sc20410".to_owned();
-    wing.airfoil_class = alas_config::AirfoilClass::Supercritical;
-
-    // ---- empennage (T-tail) ---------------------------------------------
-    // Sourced: HT span 19.03 m, sweep 32.5 deg, VT height 8.02 m (secondary
-    // S1, design-stage 2004). Everything else ESTIMATE (areas unpublished).
-    let tail = &mut config.geometry.empennage;
-    tail.tail_airfoil = "naca0012".to_owned();
-    tail.hstab_offset_from_tail_m = FUSELAGE_LENGTH_M - 36.5; // ESTIMATE
-    tail.hstab_z_m = 2.0 + 8.02; // fin root 2.0 m (ESTIMATE) + 8.02 m fin height (S1)
-    tail.hstab_root_chord_m = 4.4; // ESTIMATE
-    tail.hstab_tip_chord_m = 1.9; // ESTIMATE; HT area 59.9 m2
-    tail.hstab_root_twist_deg = 0.0;
-    tail.hstab_tip_twist_deg = 0.0;
-    // half-span 9.515 m (S1); LE sweep ESTIMATE 34 deg (32.5 deg reference
-    // line not stated).
-    tail.hstab_tip_le_m = (6.42, 9.515, 0.0);
-    tail.vstab_offset_from_tail_m = FUSELAGE_LENGTH_M - 30.9; // ESTIMATE
-    tail.vstab_z_m = 2.0; // ESTIMATE
-    tail.vstab_root_chord_m = 8.0; // ESTIMATE
-    tail.vstab_tip_chord_m = 4.4; // ESTIMATE, equals the HT root chord (T-tail join)
-    tail.vstab_tip_le_m = (5.6, 0.0, 8.02); // height from S1; sweep 35 deg ESTIMATE
-
-    // ---- fuselage --------------------------------------------------------
-    let fuselage = &mut config.geometry.fuselage;
-    fuselage.diameter_m = 5.6; // T1 "Width", read as fuselage max width
-    fuselage.height_m = None; // not published: circular section assumed (ESTIMATE)
-    fuselage.cabin_start_x_m = 8.0; // ESTIMATE: hold starts behind the flight deck
-    fuselage.tailcone_length_m = 14.0; // ESTIMATE: hold + 5.4 m ramp (23.1 m) ends at 31.1 m
-    fuselage.tail_z_m = 3.0; // ESTIMATE: strong aft upsweep for the ramp
-                             // belly upsweep length: no tail-strike angle is published; left unset.
-    fuselage.belly_upsweep_length_m = None;
-
-    // ---- landing gear ----------------------------------------------------
-    // T1 III.21: nose 2 wheels; main 12 wheels; secondary source: 3 twin-wheel
-    // legs per side in sponsons. Stations/track are ESTIMATES: wheelbase 13.4 m
-    // is a very-low-confidence secondary figure, nose gear 6.1 m aft of the
-    // nose is a guess, track 6.0 m is a guess (secondary 7.9 m is probably
-    // the outer tyre width).
-    let gear = &mut config.landing_gear;
-    gear.n_nlg_wheels = 2;
-    gear.n_mlg_struts = 6;
-    gear.wheels_per_mlg_strut = 2;
-    gear.track_diameter_factor = 6.0 / 5.6;
-    gear.reference_wheelbase_m = Some(13.4);
-    gear.reference_track_m = Some(6.0);
-    gear.reference_station_frame = Some("nose_tip_drawing_reference".to_owned());
-    gear.reference_station_fuselage_length_m = Some(FUSELAGE_LENGTH_M);
-    gear.reference_nlg_x_fraction = Some(6.1 / FUSELAGE_LENGTH_M);
-    let (x_mid, x_spread) = (6.1 + 13.4, 1.2); // ESTIMATE: leg spacing 1.2 m
-    gear.reference_mlg_x_fractions = Some(
-        [x_mid - x_spread, x_mid, x_mid + x_spread]
-            .iter()
-            .cycle()
-            .take(6)
-            .map(|x| x / FUSELAGE_LENGTH_M)
-            .collect(),
-    );
-    // Trimmable horizontal stabiliser: class takeoff setting (4.3 deg).
-    gear.takeoff_stabilizer_nose_up_deg = Some(4.3);
-    gear.elevator_up_travel_deg = None; // not published
-
-    // ---- fuel tanks (T1 III.9, normal fill, litres) ------------------------
-    // centre 14 566; inner L+R 17 143 + 17 050 = 34 193; feed tanks 1-4 sum
-    // 7 726 + 5 782 = 13 508 (modelled inside the inner cell). Total 62 267 L.
-    // Semispan stations are ESTIMATES.
-    let tanks = &mut config.fuel_tanks;
-    tanks.inner_wing = wing_cell(0.10, 0.85, 2, 34_193.0 + 13_508.0);
-    tanks.mid_wing.enabled = false;
-    tanks.outer_wing.enabled = false;
-    tanks.center = CenterTankConfig {
-        enabled: true,
-        usable_fraction: 0.80,
-        burn_priority: 1,
-        published_usable_volume_l: Some(14_566.0),
-    };
-    tanks.trim.enabled = false;
-    tanks.auxiliary.enabled = false;
-
-    // ---- mass model ------------------------------------------------------
-    let mass = &mut config.mass_model;
-    mass.fuel_density_kg_m3 = FUEL_DENSITY_KG_M3;
-    mass.mlw_fraction_mtow = MLW_KG / MTOW_KG;
-
-    let turboprop = &mut mass.flops_turboprop;
-    turboprop.engine_dry_mass_kg = Some(1_952.0); // T2: CW 1938.1 / CCW 1965.1 kg mean
-    turboprop.baseline_shaft_power_kw = Some(7_971.0); // T2
-    turboprop.gearbox_inside_engine_mass = true; // ESTIMATE: PGB listed in the engine TCDS
-    turboprop.propeller_blade_count = 8; // T3
-    turboprop.propeller_assembly_mass_kg = Some(683.0); // T3 max
-    turboprop.propeller_assembly_accessories_included = None;
-    turboprop.propeller_accessory_mass_kg = 0.0;
-    // ESTIMATES: nacelle mass/area anchor (ATR 19.7 kg/m2 area density, kept),
-    // installation 0.32 x engine dry mass (ATR ratio), oil 150 kg for 4 engines.
-    turboprop.nacelle_reference_mass_kg = None;
-    turboprop.nacelle_reference_area_m2 = None;
-    turboprop.nacelle_area_density_kg_m2 = 19.7;
-    turboprop.engine_installation_mass_kg = 0.32 * 4.0 * 1_952.0;
-    turboprop.engine_oil_mass_kg = 150.0;
-
-    let structure = &mut mass.flops_structure;
-    structure.military_cargo_floor = 1.0; // military cargo floor (FLOPS CARGF)
-    structure.composite_utilization = 0.3; // ESTIMATE: CFRP wing skins (S1)
-    structure.maximum_operating_altitude_m = Some(10_668.0); // T1 civil 35 000 ft
-    structure.design_zero_fuel_mass_kg = Some(109_600.0); // T1 civil MZFW
-    structure.baseline_engine_mass_kg = None;
-
-    let transport = &mut mass.flops_transport;
-    transport.maximum_mach = Some(0.72); // T1 MMO
-    transport.design_range_nmi = Some(design_range_nmi);
-    transport.flight_crew_count = Some(3); // ESTIMATE: 2 pilots + loadmaster
-    transport.flight_attendant_count = Some(0);
-    transport.galley_crew_count = Some(0);
-    transport.first_class_passenger_count = Some(0);
-    transport.business_class_passenger_count = Some(0);
-    transport.tourist_class_passenger_count = Some(0);
-    transport.wing_mounted_engine_count = Some(4);
-    transport.fuselage_mounted_engine_count = Some(0);
-    transport.fuel_tank_count = Some(7); // T1: centre, 2 inner, 4 feed
-    transport.maximum_fuel_capacity_kg = Some(48_879.0); // T1 normal fill
-    transport.apu_installed = true; // ESTIMATE
+    config.requirements.cargo_payload_kg = payload_kg;
+    config.mass_model.flops_transport.design_range_nmi = Some(design_range_nmi);
     config
 }
 

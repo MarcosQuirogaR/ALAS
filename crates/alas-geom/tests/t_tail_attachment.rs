@@ -12,7 +12,14 @@ use alas_geom::builder::AircraftBuilder;
 
 #[test]
 fn attached_t_tail_follows_scaled_fin_in_product_geometry() {
-    let preset = presets::get("ATR72-600").expect("ATR preset");
+    // Both registered T-tails: the ATR 72-600 and the A400M.
+    for name in ["ATR72-600", "A400M"] {
+        attached_t_tail_follows_scaled_fin(name);
+    }
+}
+
+fn attached_t_tail_follows_scaled_fin(name: &str) {
+    let preset = presets::get(name).expect("T-tail preset");
     let builder = AircraftBuilder::new(Some(preset.geometry.clone()));
     for scale in [0.7, 1.0, 1.3] {
         let mut dv = preset.design_vector;
@@ -32,7 +39,11 @@ fn attached_t_tail_follows_scaled_fin_in_product_geometry() {
 
 #[test]
 fn independent_tails_keep_their_existing_root_placement() {
-    for preset in presets::registry().iter().filter(|p| p.name != "ATR72-600") {
+    // The T-tails (ATR 72-600, A400M) attach the stabiliser to the fin tip.
+    for preset in presets::registry()
+        .iter()
+        .filter(|p| !matches!(p.name, "ATR72-600" | "A400M"))
+    {
         let builder = AircraftBuilder::new(Some(preset.geometry.clone()));
         let mut dv = preset.design_vector;
         dv.tail_scale = 1.3;
