@@ -302,6 +302,72 @@
       "turbine_inlet_temp_k": 1650.0
     },
     {
+      "bypass_ratio": 11.2,
+      "cruise_tsfc_kg_kgf_hr": 0.5,
+      "part_power_fuel_flow_ratios": [0.09743657, 0.29087104, 0.82461418, 1.0],
+      "takeoff_fuel_flow_kg_s": 0.7646,
+      "part_power_source": "ICAO EEDB v32 (EASA, 2026): 04P20PW204 PW1923G, fuel flow T/O 0.7646, C/O 0.6305, App 0.2224, Idle 0.0745 kg/s",
+      "part_power_condition": "ICAO LTO sea-level static at 7%, 30%, 85%, and 100% rated thrust",
+      "part_power_evidence": "direct",
+      "lto_uid": "04P20PW204",
+      "lto_evidence_variant": "PW1923G",
+      "lto_rated_thrust_kn": 105.934,
+      "lto_bypass_ratio": 11.2,
+      "lto_overall_pressure_ratio": 37.7,
+      "fan_diameter_m": 1.854,
+      "fan_pressure_ratio": 1.35,
+      "manufacturer": "Pratt & Whitney",
+      "nacelle_length_m": 3.4,
+      "nacelle_max_radius_m": 1.08,
+      "name": "PW1900G",
+      "display_name": "PW1923G",
+      "evidence_variant": "PW1923G",
+      "aliases": [],
+      "thrust_rating_condition": "ICAO LTO rated takeoff thrust, sea-level static",
+      "thrust_source": "EASA E.090 TCDS Issue 11 (21 Sep 2026) PW1923G normal take-off 10593 daN (23,815 lbf), flat rated to ISA +35 C; ICAO EEDB v32 UID 04P20PW204",
+      "cycle_anchor_condition": "EASA test-stand normal take-off rating, flat-rated to ISA +35 C",
+      "cycle_anchor_source": "EASA E.090 TCDS Issue 11 and ICAO EEDB v32 UID 04P20PW204 (bypass ratio 11.2 and pressure ratio 37.7 from the nvPM sheet; the gaseous sheet prints 11.16 and 37.74)",
+      "off_design": {"cruise_reference_thrust_n": 22076.0, "cruise_reference_altitude_m": 10668.0, "cruise_reference_mach": 0.78, "evidence": "openap-static-fallback", "source": "OpenAP thrust.py Svoboda fallback: 0.2 * rated thrust + 890 N per engine (Svoboda 2000 cruise thrust, 200 lbf + 0.2 F_TO), the part-power thrust at which the cruise TSFC is taken; maximum climb follows Howe 2000 from the static rating and bypass ratio. Replaces an aircraft-level excess-power calibration"},
+      "geometry_basis": "installed-nacelle-envelope",
+      "geometry_source": "conceptual installation envelope copied from the PW1500G entry (same 73 in fan; EASA E.090 Issue 11 lists one set of dimensions for every PW1500G/PW1900G model: length 3.045 m flange to flange, fan case 2.006 m); fan diameter is basic-engine data",
+      "overall_pressure_ratio": 37.74,
+      "thrust_kn": 105.93,
+      "turbine_inlet_temp_k": 1650.0
+    },
+    {
+      "bypass_ratio": 10.56,
+      "cruise_tsfc_kg_kgf_hr": 0.52,
+      "part_power_fuel_flow_ratios": [0.09827708, 0.27688135, 0.81984067, 1.0],
+      "takeoff_fuel_flow_kg_s": 0.9469,
+      "part_power_source": "ICAO EEDB v32 (EASA, 2026): 08P28CM150 LEAP-1C28, fuel flow T/O 0.9469, C/O 0.7763, App 0.2622, Idle 0.0931 kg/s",
+      "part_power_condition": "ICAO LTO sea-level static at 7%, 30%, 85%, and 100% rated thrust",
+      "part_power_evidence": "direct",
+      "lto_uid": "08P28CM150",
+      "lto_evidence_variant": "LEAP-1C28",
+      "lto_rated_thrust_kn": 129.976,
+      "lto_bypass_ratio": 10.559,
+      "lto_overall_pressure_ratio": 35.464,
+      "fan_diameter_m": 1.981,
+      "fan_pressure_ratio": 1.4,
+      "manufacturer": "CFM International",
+      "nacelle_length_m": 3.6,
+      "nacelle_max_radius_m": 1.15,
+      "name": "LEAP-1C",
+      "display_name": "LEAP-1C28",
+      "evidence_variant": "LEAP-1C28",
+      "aliases": [],
+      "thrust_rating_condition": "ICAO LTO rated takeoff thrust, sea-level static",
+      "thrust_source": "ICAO EEDB v32 UID 08P28CM150 rated thrust 129.976 kN (the 29,220 lbf / 129.98 kN COMAC C919 standard-range engine rating as printed in the Wikipedia C919 specification table, secondary source)",
+      "cycle_anchor_condition": "ICAO LTO takeoff",
+      "cycle_anchor_source": "ICAO EEDB v32 UID 08P28CM150 (bypass ratio 10.559 and pressure ratio 35.464 as printed in the gaseous sheet); cruise TSFC 0.52 kg/kgf/h is an ESTIMATE copied from the LEAP-1A entry (same 78 in fan, no public LEAP-1C cruise datum); fan pressure ratio 1.4 likewise copied from LEAP-1A",
+      "off_design": {"cruise_reference_thrust_n": 26886.0, "cruise_reference_altitude_m": 10668.0, "cruise_reference_mach": 0.785, "evidence": "openap-static-fallback", "source": "OpenAP thrust.py Svoboda fallback: 0.2 * rated thrust + 890 N per engine (Svoboda 2000 cruise thrust, 200 lbf + 0.2 F_TO), the part-power thrust at which the cruise TSFC is taken; no public LEAP-1C top-of-climb anchor"},
+      "geometry_basis": "installed-nacelle-envelope",
+      "geometry_source": "conceptual installation envelope copied from the LEAP-1A entry (same 78 in fan); ESTIMATE, no LEAP-1C nacelle drawing retained; fan diameter is basic-engine data",
+      "overall_pressure_ratio": 35.46,
+      "thrust_kn": 129.98,
+      "turbine_inlet_temp_k": 1650.0
+    },
+    {
       "bypass_ratio": 4.4,
       "cruise_tsfc_kg_kgf_hr": 0.63,
       "part_power_fuel_flow_ratios": [0.07145989, 0.28101710, 0.82200789, 1.0],
@@ -333,6 +399,36 @@
       "overall_pressure_ratio": 29.3,
       "thrust_kn": 227.0,
       "turbine_inlet_temp_k": 1500.0
+    },
+    {
+      "bypass_ratio": 5.1,
+      "cruise_tsfc_kg_kgf_hr": 0.57,
+      "part_power_fuel_flow_ratios": [0.07145989, 0.28101710, 0.82200789, 1.0],
+      "takeoff_fuel_flow_kg_s": 2.47,
+      "part_power_source": "ESTIMATE family proxy: part-power ratios of ICAO EEDB 03/2026 3GE070 CF6-50C (no CF6-80C2B1F EEDB row retrieved); takeoff fuel flow 2.47 kg/s = 9.6 mg/(N s) x 257.55 kN with an assumed takeoff TSFC of 0.34 lb/lbf/h",
+      "part_power_condition": "ICAO LTO sea-level static at 7%, 30%, 85%, and 100% rated thrust",
+      "part_power_evidence": "unvalidated-family-proxy",
+      "lto_uid": "3GE070",
+      "lto_evidence_variant": "CF6-50C",
+      "fan_diameter_m": 2.36,
+      "fan_pressure_ratio": 1.75,
+      "manufacturer": "GE Aerospace",
+      "nacelle_length_m": 5.0,
+      "nacelle_max_radius_m": 1.4,
+      "name": "CF6-80C2",
+      "display_name": "CF6-80C2B1F (57,900 lbf)",
+      "evidence_variant": "CF6-80C2B1F",
+      "aliases": [],
+      "thrust_rating_condition": "manufacturer rated takeoff thrust, sea-level static",
+      "thrust_source": "Boeing 747-400 Airplane Characteristics for Airport Planning D6-58326-1 Rev F (Dec 2024) Engines table (document pages 1-4 to 1-5, before section 2): CF6-80C2B1F 57,900 lbf (257.55 kN)",
+      "cycle_anchor_condition": "representative published family values; design condition not consistently specified",
+      "cycle_anchor_source": "ESTIMATE: bypass ratio 5.1, OPR 31, fan pressure ratio 1.75, turbine inlet temperature 1600 K, cruise TSFC 0.57 kg/kgf/h and fan diameter 2.36 m (93 in) are recalled GE CF6-80C2 family values, not retrieved in this session",
+      "off_design": {"cruise_reference_thrust_n": 52400.0, "cruise_reference_altitude_m": 10668.0, "cruise_reference_mach": 0.85, "evidence": "openap-static-fallback", "source": "OpenAP thrust.py Svoboda fallback: 0.2 * rated thrust + 890 N per engine (Svoboda 2000 cruise thrust, 200 lbf + 0.2 F_TO), the part-power thrust at which the cruise TSFC is taken; maximum climb follows Howe 2000 from the static rating and bypass ratio. Replaces an aircraft-level excess-power calibration"},
+      "geometry_basis": "installed-nacelle-envelope",
+      "geometry_source": "ESTIMATE: nacelle length 5.0 m and radius 1.4 m are not published; the 747-400 ACAP section 2.2.1 gives the GE nacelle low point 9 ft 4 in (2.84 m) above the ground",
+      "overall_pressure_ratio": 31.0,
+      "thrust_kn": 257.55,
+      "turbine_inlet_temp_k": 1600.0
     },
     {
       "name": "PW127M",
@@ -421,6 +517,32 @@
   ],
   "nacelle_profiles": {
     "CF6-50": [
+      [
+        0.0,
+        0.4
+      ],
+      [
+        0.36,
+        0.92
+      ],
+      [
+        0.6749999999999999,
+        1.0
+      ],
+      [
+        2.475,
+        1.0
+      ],
+      [
+        3.375,
+        0.82
+      ],
+      [
+        4.5,
+        0.45
+      ]
+    ],
+    "CF6-80C2": [
       [
         0.0,
         0.4
@@ -551,6 +673,58 @@
       ]
     ],
     "PW1500G": [
+      [
+        0.0,
+        0.4
+      ],
+      [
+        0.272,
+        0.92
+      ],
+      [
+        0.51,
+        1.0
+      ],
+      [
+        1.87,
+        1.0
+      ],
+      [
+        2.55,
+        0.82
+      ],
+      [
+        3.4,
+        0.45
+      ]
+    ],
+    "LEAP-1C": [
+      [
+        0.0,
+        0.4
+      ],
+      [
+        0.28800000000000003,
+        0.92
+      ],
+      [
+        0.54,
+        1.0
+      ],
+      [
+        1.9800000000000002,
+        1.0
+      ],
+      [
+        2.7,
+        0.82
+      ],
+      [
+        3.6,
+        0.45
+      ]
+    ],
+    "PW1900G": [
       [
         0.0,
         0.4

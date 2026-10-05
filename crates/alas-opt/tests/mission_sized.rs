@@ -251,6 +251,31 @@ fn registered_hard_mtow_nominals_separate_model_defects_from_physical_findings()
                 "cruise_thrust",
                 "sweep_consistent_with_cruise_mach",
             ],
+            // No hard finding at the 62,500 kg MTOW nominal (EASA.IM.A.071
+            // Issue 28): the registered E195-E2 clears every hard residual.
+            "E195-E2" => &[],
+            // No hard finding at the 75,100 kg MTOW nominal for the C919
+            // (estimated planform, secondary-source weights): it clears every
+            // hard residual once the inboard trailing edge is unswept.
+            "C919" => &[],
+            // New preset (old: not registered). Same findings as the DC-10:
+            // the conventional Korn section factor (0.87) leaves the 41 deg
+            // leading-edge sweep short at Mach 0.85, the model cruise L/D of
+            // about 15.9 needs more thrust than the four CF6-80C2B1F
+            // estimate-flagged cruise reference (52.4 kN each), and the
+            // item-level takeoff CG sits aft of the published minimum
+            // nose-gear share (6.7 % of weight at the maximum taxi weight).
+            "B747-400" => &[
+                "min_nose_gear_load",
+                "cruise_thrust",
+                "sweep_consistent_with_cruise_mach",
+            ],
+            // New preset (no earlier pin): gear stations and the aft-fuselage
+            // upsweep are estimates, so the nose reaction at the declared mass
+            // (about -1 % of weight against 6 %) and the tip-back angle
+            // (about 9.4 deg against the 15 deg floor of an unvalidated
+            // tail-down) are estimate-driven findings, not A400M facts.
+            "A400M" => &["min_nose_gear_load", "tip_back"],
             _ => panic!("{name}: establish the registered hard-MTOW findings"),
         };
         let mesh_failure = assessment

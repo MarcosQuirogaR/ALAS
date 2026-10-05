@@ -280,6 +280,12 @@ pub fn atr72_600() -> AircraftPreset {
                 // (quoted in UK AAIB Bulletin 8/2006, ATR 72-212A D-ANFH, EW/C2005/09/04,
                 // p.3); the skid sits between frames 38 and 39.
                 belly_upsweep_length_m: Some(7.8),
+                nose_windshield_angle_deg: None,
+                nose_crown_end_fraction: None,
+                nose_radome_length_fraction: None,
+                nose_keel_exponent: None,
+                nose_plan_exponent: None,
+                nose_section_exponent: None,
                 ..FuselageConfig::default()
             },
             engine,

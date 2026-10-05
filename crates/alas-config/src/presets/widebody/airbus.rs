@@ -203,6 +203,12 @@ pub fn a340_300() -> AircraftPreset {
                 // is the published 10.1 deg pitch to ground contact with the main gear
                 // compressed: Airbus, "Avoiding Tail Strike" (Operational Liaison Meeting, FBW; NTSB docket attachment "Airbus Material - Avoiding Tail Strike", PDF p.12).
                 belly_upsweep_length_m: Some(19.5),
+                nose_windshield_angle_deg: None,
+                nose_crown_end_fraction: None,
+                nose_radome_length_fraction: None,
+                nose_keel_exponent: None,
+                nose_plan_exponent: None,
+                nose_section_exponent: None,
                 ..FuselageConfig::default()
             },
             engine: EngineConfig {

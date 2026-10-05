@@ -126,11 +126,13 @@ mod tests {
                 );
             }
             // The quoted usable mass is the same inventory rounded to the
-            // kilogram at source.
+            // kilogram at source (old tolerance 0.5 kg -> 1.0 kg: the A400M
+            // TCDS quotes 48,879 kg for 62,267 L x 0.785 = 48,879.595 kg,
+            // truncated rather than rounded).
             if let Some(quoted_kg) = preset.reference.usable_fuel_mass_kg {
                 assert_eq!(dispatch.basis, UsableCapacityBasis::PublishedPreset);
                 assert!(
-                    (dispatch.kg - quoted_kg).abs() <= 0.5,
+                    (dispatch.kg - quoted_kg).abs() < 1.0,
                     "{name}: {} kg against {quoted_kg} kg quoted",
                     dispatch.kg
                 );

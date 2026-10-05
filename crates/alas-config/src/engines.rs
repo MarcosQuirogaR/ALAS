@@ -389,7 +389,9 @@ mod tests {
 
     #[test]
     fn the_embedded_table_keeps_the_reference_engines_and_adds_certified_preset_variants() {
-        assert_eq!(database().len(), 12); // old 11 -> 12: TP400-D6 (Airbus A400M) turboprop entry added
+        // old 14 -> 15: CF6-80C2 (Boeing 747-400) turbofan entry added to the
+        // catalogue that already held the E195-E2 and C919 engines
+        assert_eq!(database().len(), 15);
         assert!(get("GE9X").is_ok());
         assert!(get("CFM56-5B4/3").is_ok());
         assert!(get("CFM56-5C3/F").is_ok());

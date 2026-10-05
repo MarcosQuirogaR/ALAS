@@ -87,9 +87,15 @@ const PLAUSIBILITY_IDS: &[&str] = &[
 /// preset's rejection reasons. The defect is therefore in the cabin-derived
 /// fuselage sizing.
 ///
+/// The E195-E2 joins them: in the clean-sheet mode its 132-seat, four-abreast
+/// cabin re-derives to a fuselage of fineness 20.4 against the limit of 18.0,
+/// the same cabin-derived distortion (the four-abreast cabin is the likely
+/// cause, as for the ATR 72-600; not isolated).
+///
 /// This list is an expectation, not a permission: when the cabin/geometry
 /// owner fixes it, the assertion below fails and the entry is deleted.
-const SIZED_FUSELAGE_LEAVES_THE_DOMAIN: &[&str] = &["A220-300", "ATR72-600"];
+// old ["A220-300", "ATR72-600"] -> new: E195-E2 appended
+const SIZED_FUSELAGE_LEAVES_THE_DOMAIN: &[&str] = &["A220-300", "ATR72-600", "E195-E2"];
 
 #[test]
 fn only_the_recorded_cabin_defect_pushes_a_registered_aircraft_out_of_the_domain() {

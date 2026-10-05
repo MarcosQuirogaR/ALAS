@@ -213,11 +213,54 @@ pub fn layout_for(preset_name: &str) -> Option<FuelTankLayoutConfig> {
             },
             ..base
         },
+        // Boeing 747-400 ACAP D6-58326-1 Rev F section 2.1.1: 57,065 US gal
+        // (216,014 L) usable including the optional 3,300 US gal (12,492 L)
+        // horizontal-stabiliser tank, which is the trim tank here (filled
+        // aft in the climb and emptied first). ONLY THE TOTALS ARE SOURCED:
+        // the split of the remaining 203,522 L is an ESTIMATE, centre wing
+        // tank 62,000 L, inner mains (tanks 2 and 3, with reserve) 105,000 L
+        // and outer mains (tanks 1 and 4) 36,522 L; the spanwise stations
+        // are estimates too.
+        "B747-400" => FuelTankLayoutConfig {
+            inner_wing: wing(0.10, 0.60, 3, 105_000.0),
+            outer_wing: wing(0.60, 0.85, 4, 36_522.0),
+            center: center(2, 62_000.0),
+            trim: trim(1, 12_492.0),
+            ..base
+        },
         // ATR 72-600 (EASA.A.084): two integral wing tanks, 5,000 kg usable
         // in total at 0.794 kg/L, each with a 160 kg feeder cell at the
         // inboard end; no centre tank.
         "ATR72-600" => FuelTankLayoutConfig {
             inner_wing: wing(0.11, 0.85, 1, 6_300.0),
+            ..base
+        },
+        // COMAC C919: 24,917 L (19,560 kg) from the Wikipedia specification
+        // table (secondary), in the wing integral tanks with no centre tank
+        // (the table lists no auxiliary tank; the ER variant "retains the same
+        // fuel capacity"). ESTIMATE: the tank spans, from the side of the body
+        // (0.118 of the semispan) to 0.85, are not published.
+        "C919" => FuelTankLayoutConfig {
+            inner_wing: wing(0.12, 0.85, 1, 24_917.0),
+            ..base
+        },
+        // Embraer E195-E2 specification sheet (April 2025): 13,690 kg usable
+        // at 0.803 kg/L, 17,049 L, in the wing integral tanks (the E190-E2
+        // APM table 2.1 states the same arrangement as 16,800 L for 13,500
+        // kg). No centre tank is listed. ESTIMATE: the tank spans, from the
+        // side of the body (0.086 of the semispan) to 0.85, are not
+        // published.
+        "E195-E2" => FuelTankLayoutConfig {
+            inner_wing: wing(0.09, 0.85, 1, 17_049.0),
+            ..base
+        },
+        // A400M, EASA TCDS A.169 III.9 (normal fill, 0.785 kg/L): centre
+        // 14,566 L; inner wing left + right 17,143 + 17,050 = 34,193 L; feed
+        // tanks 1-4 sum 7,726 + 5,782 = 13,508 L, modelled inside the inner
+        // cell (total 62,267 L). The semispan stations are estimates.
+        "A400M" => FuelTankLayoutConfig {
+            inner_wing: wing(0.10, 0.85, 2, 34_193.0 + 13_508.0),
+            center: center(1, 14_566.0),
             ..base
         },
         // AVE is a 777-9-class notional twin: 52,136 US gal primary

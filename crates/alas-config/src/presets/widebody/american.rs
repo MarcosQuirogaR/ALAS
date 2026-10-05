@@ -196,6 +196,12 @@ pub fn b787_9() -> AircraftPreset {
                 // compressed-strut value was not found, so this static-ground geometry
                 // overstates the tail-down angle by the strut stroke.
                 belly_upsweep_length_m: Some(20.55),
+                nose_windshield_angle_deg: None,
+                nose_crown_end_fraction: None,
+                nose_radome_length_fraction: None,
+                nose_keel_exponent: None,
+                nose_plan_exponent: None,
+                nose_section_exponent: None,
                 ..FuselageConfig::default()
             },
             engine: EngineConfig {
