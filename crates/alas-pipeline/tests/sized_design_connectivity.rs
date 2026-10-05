@@ -184,6 +184,21 @@ fn report_load_case_flies_the_route_and_reports_the_design_mission() {
     assert_eq!(design.range_m, sized.design_range_m);
     // The route is flown off-design: a longer route needs a heavier takeoff
     // and more trip fuel than the design mission, a shorter one less.
+    //
+    // Without airway data (a CI runner has none) the planner falls back to the
+    // great circle, which is the design mission itself to rounding. The
+    // route is then the design mission, not a longer or shorter one, and the
+    // two agree to the mission-model resolution instead of by a sign.
+    let route_is_design_mission = (case.route_distance_m - design.range_m).abs() <= 1.0;
+    if route_is_design_mission {
+        assert!((case.plan.trip.kg - design.trip_fuel_kg).abs() <= 1.0e-3 * design.trip_fuel_kg);
+        assert!(
+            (load_case.takeoff_mass_kg - design.takeoff_mass_kg).abs()
+                <= 1.0e-3 * design.takeoff_mass_kg
+        );
+        assert!(case.reserve_margin_kg >= 0.0 && case.shortfall_kg == 0.0);
+        return;
+    }
     let longer = case.route_distance_m > design.range_m;
     assert_eq!(
         case.plan.trip.kg > design.trip_fuel_kg,
