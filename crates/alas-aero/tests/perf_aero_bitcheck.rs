@@ -87,8 +87,9 @@ fn check_baseline(name: &str, actual: &str) {
 ///   ubuntu-22.04 run showed spanwise loads and coefficients differing from the
 ///   Windows baseline by up to 3.8e-4 relative (cancellation amplifies the
 ///   single-precision `gamma` differences), `pivot_ratio` by 1.2e-7.
-/// - `f32` values (the 10-hex-digit lines, `gamma`): relative 1e-4 with an
-///   absolute floor of 1e-6.
+/// - `f32` values (the 10-hex-digit lines, `gamma` and `cp`): relative 5e-3
+///   (the ubuntu run differed by up to 3.6e-4 in `cp`) with an
+///   absolute floor of 5e-5.
 fn check_baseline_host_tolerant(name: &str, actual: &str) {
     if cfg!(windows) || std::env::var_os("PERF_AERO_WRITE_BASELINE").is_some() {
         check_baseline(name, actual);
@@ -131,7 +132,7 @@ fn check_baseline_host_tolerant(name: &str, actual: &str) {
             if label.ends_with("residual_norm") || label.ends_with("normalized_residual") {
                 1.0e-10
             } else if single {
-                1.0e-4 * want.abs().max(1.0e-2)
+                5.0e-3 * want.abs().max(1.0e-2)
             } else {
                 5.0e-3 * want.abs() + 1.0e-9
             };
