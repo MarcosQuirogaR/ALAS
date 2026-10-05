@@ -62,6 +62,7 @@ mod cg_envelope;
 mod evidence;
 mod gear_load;
 mod landing_reference;
+mod military;
 mod mission_evidence;
 mod narrowbody;
 mod reference;
@@ -79,8 +80,9 @@ pub use aircraft::{
     UnknownAircraftPreset,
 };
 pub use cabin_sources::{
-    ATR72_600_BAGGAGE_COMPARTMENTS, ATR72_600_EXIT_LAYOUT, ATR72_600_PLANNING_CABIN,
-    B777_9_EXIT_LAYOUT, B777_9_PLANNING_CABIN, B787_9_EXIT_LAYOUT, B787_9_PLANNING_CABIN,
+    atr72_600_baggage_holds, ATR72_600_BAGGAGE_COMPARTMENTS, ATR72_600_EXIT_LAYOUT,
+    ATR72_600_PLANNING_CABIN, B777_9_EXIT_LAYOUT, B777_9_PLANNING_CABIN, B787_9_EXIT_LAYOUT,
+    B787_9_PLANNING_CABIN,
 };
 pub use cg_envelope::{
     CgEnvelopeCondition, CgEnvelopeSource, CgEnvelopeVertex, CgLimits, PlanningCgEnvelope,

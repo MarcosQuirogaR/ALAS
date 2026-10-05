@@ -111,7 +111,7 @@ impl PublishedAftCgNoseLoad {
 
 mod published;
 
-pub(crate) use published::{A220_300, A320_200, A340_300, A380_800, B787_9, DC_10_30};
+pub(crate) use published::{A220_300, A320_200, A340_300, A380_800, B747_400, B787_9, DC_10_30};
 
 #[cfg(test)]
 mod tests {
@@ -123,7 +123,9 @@ mod tests {
 
     #[test]
     fn every_published_table_is_ascending_and_physical() {
-        for table in [A220_300, A320_200, A340_300, A380_800, B787_9, DC_10_30] {
+        for table in [
+            A220_300, A320_200, A340_300, A380_800, B747_400, B787_9, DC_10_30,
+        ] {
             assert!(!table.points.is_empty(), "{}", table.source);
             for pair in table.points.windows(2) {
                 assert!(pair[0].mass_kg < pair[1].mass_kg, "{}", table.source);

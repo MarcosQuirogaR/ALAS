@@ -22,6 +22,7 @@ use alas_config::{presets, ConfigNode, EngineConfig, Entry, Node, DESIGN_VARIABL
 use serde_json::Value;
 
 mod belly_upsweep;
+mod nose;
 
 /// The name of the reference aircraft every sandbox starts from.
 pub const REFERENCE_PRESET: &str = "AVE";
@@ -145,9 +146,8 @@ struct Spec {
     dependents: &'static [&'static str],
 }
 
-/// The sandbox validity domain for a field: its editing range and displayed
-/// decimals. Grouped because every bounded config field declares all three
-/// together (see the module doc comment).
+/// The sandbox validity domain of a field: editing range and displayed
+/// decimals, declared together by every bounded config field.
 struct Bounds {
     min: f64,
     max: f64,
@@ -699,6 +699,12 @@ const SPECS: &[Spec] = &[
         },
     ),
     belly_upsweep::SPEC,
+    nose::WINDSHIELD_ANGLE,
+    nose::CROWN_END,
+    nose::RADOME_LENGTH,
+    nose::KEEL_EXPONENT,
+    nose::PLAN_EXPONENT,
+    nose::SECTION_EXPONENT,
     cfg(
         "geometry.fuselage.nose_z_m",
         Discipline::Fuselage,
@@ -1086,6 +1092,8 @@ mod tests {
                             || field.id.contains("bump")
                             || field.id.contains("fraction")
                             || field.id.contains("ratio")
+                            // dimensionless nose profile exponents (old: no exponent field)
+                            || field.id.contains("exponent")
                             || field.id.contains("n_subdivisions"),
                         "{} has no unit",
                         field.id

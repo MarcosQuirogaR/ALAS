@@ -222,16 +222,14 @@ fn generated_fuselage_rows(
     for index in 0..9 {
         let angle = std::f64::consts::FRAC_PI_2 * index as f64 / 9.0;
         let xi = 1.0 - angle.cos();
-        let radius_scale = (1.0 - (1.0 - xi).powi(2)).sqrt();
-        let width_m = radius_m * radius_scale * 2.0;
+        let station = fuselage.nose_station(xi);
         rows.push((
             FuselageSection {
-                x_fraction: xi * cabin_start_m / length_m,
-                width_m,
-                height_m: width_m * height_scale,
-                z_m: fuselage.cabin_z_m
-                    + (fuselage.nose_z_m - fuselage.cabin_z_m) * (1.0 - xi).powi(2),
-                shape: 2.0,
+                x_fraction: station.x_m / length_m,
+                width_m: station.width_m,
+                height_m: station.height_m,
+                z_m: station.z_m,
+                shape: station.shape,
             },
             GeneratedFuselageStationPart::Nose(xi),
         ));
@@ -1054,7 +1052,7 @@ fn generated_fuselage_station_fractions(state: &AppState) -> Vec<f64> {
     for index in 0..9 {
         let angle = std::f64::consts::FRAC_PI_2 * index as f64 / 9.0;
         let xi = 1.0 - angle.cos();
-        fractions.push(xi * cabin_start / length_m);
+        fractions.push(fuselage.nose_station(xi).x_m / length_m);
     }
     fractions.push(cabin_start / length_m);
     fractions.push(cabin_end / length_m);

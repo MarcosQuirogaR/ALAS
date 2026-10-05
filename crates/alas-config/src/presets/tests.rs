@@ -20,6 +20,11 @@ fn the_dropdown_lists_the_aircraft_in_registration_order() {
             "A220-300",
             "ATR72-600",
             "DC-10",
+            "E195-E2",  // old 8 -> new 9 presets: Embraer E195-E2 appended
+            "C919",     // old 9 -> new 10 presets: COMAC C919 appended
+            "B747-400", // old 10 -> new 11 presets: Boeing 747-400 appended
+            // old 11 -> new 12 presets: the Airbus A400M is appended last.
+            "A400M",
         ]
     );
 }
@@ -209,7 +214,11 @@ fn every_real_preset_names_one_coherent_weight_variant() {
 
 #[test]
 fn every_passenger_preset_uses_candidate_geometry_for_capacity() {
-    for preset in registry().iter().filter(|preset| preset.name != "AVE") {
+    // The A400M is a cargo aircraft with no passenger cabin: excluded here.
+    for preset in registry()
+        .iter()
+        .filter(|preset| !matches!(preset.name, "AVE" | "A400M"))
+    {
         assert_eq!(
             preset.requirements.cabin_preset, "Custom",
             "{} has no sourced operator class layout",

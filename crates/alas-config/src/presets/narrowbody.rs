@@ -30,9 +30,13 @@ use crate::{
 };
 
 mod a220;
+mod c919;
+mod e195_e2;
 mod exit_layouts;
 
 pub use a220::a220_300;
+pub use c919::c919;
+pub use e195_e2::{e195_e2, e195_e2_hold_compartments};
 use exit_layouts::A320_200_CERTIFIED_EXIT_LAYOUT;
 
 /// Short and medium-range twin, the reference single-aisle.
@@ -260,6 +264,12 @@ pub fn a320_200() -> AircraftPreset {
                 // the main gear compressed: Airbus, "Avoiding Tail Strike" (Operational Liaison Meeting, FBW; NTSB docket attachment "Airbus Material - Avoiding Tail Strike", PDF p.12).
                 // The belly then starts to rise 26.3 m aft of the nose.
                 belly_upsweep_length_m: Some(11.25),
+                nose_windshield_angle_deg: None,
+                nose_crown_end_fraction: None,
+                nose_radome_length_fraction: None,
+                nose_keel_exponent: None,
+                nose_plan_exponent: None,
+                nose_section_exponent: None,
                 ..FuselageConfig::default()
             },
             engine: EngineConfig {

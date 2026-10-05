@@ -26,8 +26,10 @@ Update this file in the change that alters what it describes.
 - The design pipeline runs end to end: geometry, mass and CG, mission, drag
   build-up, trim and stability, optimisation, wingbox sizing, feasibility
   findings and figures, for hand-built and CPACS-imported aircraft.
-- Eight registered presets: A220-300, A320-200, A340-300, A380-800, ATR72-600,
-  AVE (a synthetic ALAS design), B787-9 and DC-10.
+- Twelve registered presets (old ten -> new twelve with the B747-400 and A400M):
+  A220-300, A320-200, A340-300, A380-800, A400M (military transport), ATR72-600,
+  AVE (a synthetic ALAS design), B747-400, B787-9, C919 (airframe data from a
+  secondary source), DC-10 and E195-E2.
 - **Optimisation.** One search, `differential_evolution`
   (`docs/OPTIMIZATION.md`, `docs/methods.md`): L-SHADE under the epsilon-constrained method
   (`alas-opt::search_methods::lshade_de`) with a mission-sized objective (block

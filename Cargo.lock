@@ -48,7 +48,7 @@ dependencies = [
 
 [[package]]
 name = "alas-acceptance"
-version = "1.3.0"
+version = "1.3.1"
 dependencies = [
  "alas-aero",
  "alas-app",
@@ -72,7 +72,7 @@ dependencies = [
 
 [[package]]
 name = "alas-aero"
-version = "1.3.0"
+version = "1.3.1"
 dependencies = [
  "alas-atmo",
  "alas-config",
@@ -88,7 +88,7 @@ dependencies = [
 
 [[package]]
 name = "alas-app"
-version = "1.3.0"
+version = "1.3.1"
 dependencies = [
  "alas-config",
  "alas-exec",
@@ -106,7 +106,7 @@ dependencies = [
 
 [[package]]
 name = "alas-atmo"
-version = "1.3.0"
+version = "1.3.1"
 dependencies = [
  "alas-math",
  "alas-testkit",
@@ -117,7 +117,7 @@ dependencies = [
 
 [[package]]
 name = "alas-cfd"
-version = "1.3.0"
+version = "1.3.1"
 dependencies = [
  "alas-exec",
  "alas-geom",
@@ -128,7 +128,7 @@ dependencies = [
 
 [[package]]
 name = "alas-config"
-version = "1.3.0"
+version = "1.3.1"
 dependencies = [
  "alas-atmo",
  "alas-config-derive",
@@ -142,7 +142,7 @@ dependencies = [
 
 [[package]]
 name = "alas-config-derive"
-version = "1.3.0"
+version = "1.3.1"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -151,7 +151,7 @@ dependencies = [
 
 [[package]]
 name = "alas-exec"
-version = "1.3.0"
+version = "1.3.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -161,11 +161,11 @@ dependencies = [
 
 [[package]]
 name = "alas-fonts"
-version = "1.3.0"
+version = "1.3.1"
 
 [[package]]
 name = "alas-geom"
-version = "1.3.0"
+version = "1.3.1"
 dependencies = [
  "alas-config",
  "alas-math",
@@ -176,7 +176,7 @@ dependencies = [
 
 [[package]]
 name = "alas-gui"
-version = "1.3.0"
+version = "1.3.1"
 dependencies = [
  "alas-aero",
  "alas-cfd",
@@ -206,7 +206,7 @@ dependencies = [
 
 [[package]]
 name = "alas-i18n"
-version = "1.3.0"
+version = "1.3.1"
 dependencies = [
  "alas-testkit",
  "serde",
@@ -216,7 +216,7 @@ dependencies = [
 
 [[package]]
 name = "alas-mass"
-version = "1.3.0"
+version = "1.3.1"
 dependencies = [
  "alas-atmo",
  "alas-config",
@@ -231,7 +231,7 @@ dependencies = [
 
 [[package]]
 name = "alas-math"
-version = "1.3.0"
+version = "1.3.1"
 dependencies = [
  "alas-testkit",
  "faer",
@@ -241,7 +241,7 @@ dependencies = [
 
 [[package]]
 name = "alas-mission"
-version = "1.3.0"
+version = "1.3.1"
 dependencies = [
  "alas-aero",
  "alas-atmo",
@@ -257,7 +257,7 @@ dependencies = [
 
 [[package]]
 name = "alas-opt"
-version = "1.3.0"
+version = "1.3.1"
 dependencies = [
  "alas-aero",
  "alas-atmo",
@@ -280,7 +280,7 @@ dependencies = [
 
 [[package]]
 name = "alas-payload"
-version = "1.3.0"
+version = "1.3.1"
 dependencies = [
  "alas-config",
  "alas-geom",
@@ -294,7 +294,7 @@ dependencies = [
 
 [[package]]
 name = "alas-perf"
-version = "1.3.0"
+version = "1.3.1"
 dependencies = [
  "alas-atmo",
  "alas-config",
@@ -305,7 +305,7 @@ dependencies = [
 
 [[package]]
 name = "alas-pipeline"
-version = "1.3.0"
+version = "1.3.1"
 dependencies = [
  "alas-aero",
  "alas-atmo",
@@ -334,7 +334,7 @@ dependencies = [
 
 [[package]]
 name = "alas-prop"
-version = "1.3.0"
+version = "1.3.1"
 dependencies = [
  "alas-atmo",
  "alas-config",
@@ -345,7 +345,7 @@ dependencies = [
 
 [[package]]
 name = "alas-report"
-version = "1.3.0"
+version = "1.3.1"
 dependencies = [
  "alas-aero",
  "alas-atmo",
@@ -372,7 +372,7 @@ dependencies = [
 
 [[package]]
 name = "alas-route"
-version = "1.3.0"
+version = "1.3.1"
 dependencies = [
  "alas-config",
  "alas-testkit",
@@ -384,7 +384,7 @@ dependencies = [
 
 [[package]]
 name = "alas-screen"
-version = "1.3.0"
+version = "1.3.1"
 dependencies = [
  "alas-aero",
  "alas-atmo",
@@ -399,7 +399,7 @@ dependencies = [
 
 [[package]]
 name = "alas-stab"
-version = "1.3.0"
+version = "1.3.1"
 dependencies = [
  "alas-aero",
  "alas-atmo",
@@ -412,7 +412,7 @@ dependencies = [
 
 [[package]]
 name = "alas-struct"
-version = "1.3.0"
+version = "1.3.1"
 dependencies = [
  "alas-config",
  "alas-exec",
@@ -425,7 +425,7 @@ dependencies = [
 
 [[package]]
 name = "alas-testkit"
-version = "1.3.0"
+version = "1.3.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -433,7 +433,7 @@ dependencies = [
 
 [[package]]
 name = "alas-uav"
-version = "1.3.0"
+version = "1.3.1"
 dependencies = [
  "alas-aero",
  "alas-atmo",
@@ -445,7 +445,7 @@ dependencies = [
 
 [[package]]
 name = "alas-units"
-version = "1.3.0"
+version = "1.3.1"
 dependencies = [
  "alas-testkit",
  "serde_json",
@@ -453,7 +453,7 @@ dependencies = [
 
 [[package]]
 name = "alas-viz"
-version = "1.3.0"
+version = "1.3.1"
 dependencies = [
  "alas-fonts",
  "alas-report",
@@ -4658,7 +4658,7 @@ checksum = "ec7a2a501ed189703dba8b08142f057e887dfc4b2cc4db2d343ac6376ba3e0b9"
 
 [[package]]
 name = "xtask"
-version = "1.3.0"
+version = "1.3.1"
 dependencies = [
  "proc-macro2",
  "serde_json",
