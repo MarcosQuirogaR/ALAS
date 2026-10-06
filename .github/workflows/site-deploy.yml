@@ -1,0 +1,93 @@
+name: Site deploy
+
+# Builds the landing page (site/) and the documentation (site/docs-site/) and
+# uploads them to https://alas.uvigo.es over SFTP. The university host accepts
+# password authentication only, so the credentials live in two repository
+# secrets: ALAS_SFTP_USER and ALAS_SFTP_PASSWORD. Without them the job builds
+# and stops before the upload.
+#
+# The release archives offered under /downloads are the assets of the newest
+# release with a publication date in site/src/lib/releases.ts.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "site/**"
+      - ".github/workflows/site-deploy.yml"
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: site-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: site/package-lock.json
+
+      - name: Build landing page
+        working-directory: site
+        run: |
+          npm ci
+          npm run build
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build documentation
+        run: |
+          pip install -r site/docs-site/requirements.txt
+          mkdocs build --strict -f site/docs-site/mkdocs.yml -d "$RUNNER_TEMP/docs-out"
+          mkdir -p site/dist/docs
+          cp -r "$RUNNER_TEMP/docs-out/." site/dist/docs/
+
+      - name: Fetch current release archives
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag=$(node -e "
+            const s = require('fs').readFileSync('site/src/lib/releases.ts', 'utf8');
+            const re = /tag: '([^']+)',[\s\S]*?published: (null|'[^']+')/g;
+            for (const m of s.matchAll(re)) { if (m[2] !== 'null') { console.log(m[1]); break } }
+          ")
+          test -n "$tag"
+          echo "Current release: $tag"
+          mkdir -p site/dist/downloads
+          gh release download "$tag" -R "$GITHUB_REPOSITORY" -D site/dist/downloads -p "alas-$tag-*"
+          cd site/dist/downloads && for f in *.sha256; do sha256sum -c "$f"; done
+
+      - name: Upload to alas.uvigo.es
+        env:
+          SFTP_USER: ${{ secrets.ALAS_SFTP_USER }}
+          SFTP_PASSWORD: ${{ secrets.ALAS_SFTP_PASSWORD }}
+        run: |
+          if [ -z "$SFTP_USER" ] || [ -z "$SFTP_PASSWORD" ]; then
+            echo "::warning::ALAS_SFTP_USER / ALAS_SFTP_PASSWORD are not set; skipping the upload."
+            exit 0
+          fi
+          sudo apt-get update -qq && sudo apt-get install -y -qq lftp
+          # Web root is /public. Pages and assets are uploaded every run; the
+          # archives only when their size changes. Nothing remote is deleted.
+          # lftp reads the password from LFTP_PASSWORD (--env-password), so it
+          # never appears on a command line.
+          export LFTP_PASSWORD="$SFTP_PASSWORD"
+          lftp --env-password -u "$SFTP_USER" sftp://webs9.uvigo.es -e "
+            set sftp:auto-confirm yes;
+            set net:max-retries 3;
+            mirror -R --parallel=4 --exclude-glob downloads/ site/dist /public;
+            mirror -R --parallel=2 --ignore-time site/dist/downloads /public/downloads;
+            bye"

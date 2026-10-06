@@ -35,17 +35,28 @@ export default function Colophon() {
               href={withBase('acknowledgements/')}
               className="transition-colors hover:text-fg-strong"
             >
-              Acknowledgements
+              Licences &amp; acknowledgements
             </a>
           </nav>
         </div>
 
         <div className="mt-9 flex flex-col gap-3 border-t border-rule pt-6 text-[0.78rem] text-fg-dim sm:flex-row sm:items-center sm:justify-between">
-          <p>© {year} ALAS. AGPL-3.0-or-later.</p>
+          <p>
+            © {year} ALAS. Free software under AGPL-3.0-or-later;{' '}
+            <a
+              href="https://github.com/MarcosQuirogaR/ALAS"
+              className="underline transition-colors hover:text-fg-strong"
+            >
+              source code
+            </a>
+            .
+          </p>
           <p className="max-w-lg sm:text-right">
-            Built on AeroSandbox and SUAVE (LGPL-2.1). MSC Nastran and Patran
-            integrations are optional external tools requiring your own licence.
-            Preliminary engineering models; not certified aircraft designs.
+            Contains code translated from AeroSandbox and NeuralFoil (MIT) and
+            SUAVE (LGPL-2.1). External solvers run as separate programs under their
+            own licences. Aircraft names belong to their owners
+            and are used nominatively. Preliminary engineering models; not
+            certified aircraft designs.
           </p>
         </div>
       </div>

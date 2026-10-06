@@ -1,66 +1,72 @@
 import { withBase } from '../lib/base'
-import { useReleases } from '../lib/useRelease'
+import { CURRENT, formatMB, RELEASES_URL, releaseUrl, type PlatformAsset } from '../lib/releases'
 
-const REPO_URL = 'https://github.com/MarcosQuirogaR/ALAS'
-const RELEASES_URL = `${REPO_URL}/releases`
-const RELEASE_VERSION = 'v1.3.2'
-const RELEASE_URL = `${RELEASES_URL}/tag/${RELEASE_VERSION}`
+type Platform = {
+  name: string
+  requirement: string
+  asset: PlatformAsset | undefined
+}
 
 export default function Downloads() {
-  const releases = useReleases(3)
-  const release = releases?.find((item) => item.tag === RELEASE_VERSION)
+  const assets = CURRENT.assets
 
-  const windowsUrl = release?.windowsAssetUrl ?? RELEASE_URL
-  const linuxUrl = release?.linuxAssetUrl ?? RELEASE_URL
+  const platforms: Platform[] = [
+    {
+      name: 'Windows',
+      requirement: 'Windows 10 or later, x86-64. Portable zip.',
+      asset: assets?.windows,
+    },
+    {
+      name: 'Linux',
+      requirement: 'glibc 2.35 or newer, x86-64. Portable tar.gz.',
+      asset: assets?.linux,
+    },
+  ]
 
   return (
     <section id="download" className="border-b border-rule bg-raised/40">
-      <div className="mx-auto max-w-[68rem] px-6 py-20">
+      <div className="mx-auto max-w-[68rem] px-6 py-16 sm:py-20">
         <p className="section-mark">Downloads</p>
-        <h2 className="mt-6 text-[1.65rem] font-bold leading-[1.25] tracking-[-0.015em] text-fg-strong">
-          ALAS {RELEASE_VERSION}
-        </h2>
-        <p className="mt-4 max-w-[58ch] text-[0.96rem] leading-[1.65] text-fg">
-          Native Rust packages for Windows and Linux. Each archive includes the executable,
-          release manifest, and SHA-256 checksum.
-        </p>
-
-        <div className="mt-8 grid gap-5 sm:grid-cols-2">
-          <div className="flex flex-col border border-rule bg-raised p-7">
-            <h3 className="text-[1.05rem] font-bold text-fg-strong">Windows</h3>
-            <p className="mt-3 flex-1 text-[0.92rem] leading-[1.6] text-fg-dim">
-              Portable x86-64 package for Windows 10 and later.
-            </p>
-            <a
-              href={windowsUrl}
-              className="mt-7 bg-accent px-6 py-3.5 text-center text-[0.92rem] font-semibold text-base transition-colors hover:bg-accent-bright"
-            >
-              Download for Windows
-            </a>
-          </div>
-
-          <div className="flex flex-col border border-rule bg-raised p-7">
-            <h3 className="text-[1.05rem] font-bold text-fg-strong">Linux</h3>
-            <p className="mt-3 flex-1 text-[0.92rem] leading-[1.6] text-fg-dim">
-              Portable x86-64 package for current glibc-based distributions.
-            </p>
-            <a
-              href={linuxUrl}
-              className="mt-7 border border-rule-strong px-6 py-3.5 text-center text-[0.92rem] font-semibold text-fg-strong transition-colors hover:border-accent hover:text-accent-bright"
-            >
-              Download for Linux
-            </a>
-          </div>
+        <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between sm:gap-10">
+          <h2 className="text-[1.65rem] font-bold leading-[1.25] tracking-[-0.015em] text-fg-strong">
+            ALAS {CURRENT.tag}
+          </h2>
+          <p className="text-[0.96rem] text-fg-dim sm:text-right">
+            Portable desktop app. External solvers are not included.
+          </p>
         </div>
 
-        <div className="mt-8 flex flex-wrap gap-x-6 gap-y-2 text-[0.86rem] text-fg-dim">
-          <a href={RELEASE_URL} className="prose-link">
-            Release notes and checksums →
+        <div className="mt-10 grid gap-5 sm:grid-cols-2">
+          {platforms.map((p) => (
+            <div key={p.name} className="flex min-w-0 flex-col border border-rule bg-raised p-7">
+              <div className="flex items-baseline justify-between gap-4">
+                <h3 className="text-[1.15rem] font-bold text-fg-strong">{p.name}</h3>
+                <span className="font-mono text-[0.8rem] text-fg-dim">
+                  {CURRENT.tag}
+                  {p.asset ? `, ${formatMB(p.asset.bytes)}` : ''}
+                </span>
+              </div>
+              <p className="mt-3 text-[0.9rem] text-fg-dim">{p.requirement}</p>
+
+              <a
+                href={p.asset ? withBase(`downloads/${p.asset.file}`) : releaseUrl(CURRENT.tag)}
+                download={p.asset ? true : undefined}
+                className="mt-7 bg-accent px-6 py-4 text-center text-[1rem] font-semibold text-base transition-colors hover:bg-accent-bright"
+              >
+                Download for {p.name}
+              </a>
+            </div>
+          ))}
+        </div>
+
+        <p className="mt-6 flex flex-wrap gap-x-6 gap-y-2 text-[0.84rem] text-fg-dim">
+          <a href={RELEASES_URL} className="prose-link">
+            Checksums and all releases on GitHub →
           </a>
           <a href={withBase('docs/installation/')} className="prose-link">
             Installation guide →
           </a>
-        </div>
+        </p>
       </div>
     </section>
   )

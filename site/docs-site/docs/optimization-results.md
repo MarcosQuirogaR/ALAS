@@ -1,138 +1,147 @@
 # Optimization results
 
 This chapter runs the search described in
-[Design space & optimizer](design-space-and-optimizer.md) for real
-(`alas -c configs/example_config.yaml --plots`) and shows what
-differential evolution actually does to AVE's baseline geometry over 15
-generations.
+[Design space & optimizer](design-space-and-optimizer.md) on the registered AVE
+preset (GUI Run path, seed 42, default budget: 30 s screening, 120 s refinement)
+and shows what it does to AVE's baseline geometry.
 
 ## Convergence
 
-The optimization history plots every candidate the run requested, stage by
-stage, against the request index, with a light separator at each stage
-boundary. **Valid candidates are highlighted** at full size in the accent
-colour; rejected and failed candidates are small and low-contrast, and a
-candidate whose model produced no finite objective is a tick in a strip below
-the plot, so the count of everything explored stays visible. The running best
-is taken over valid candidates only. When the screening stage scored with a
-cheaper model, its running best is a separate dashed line. Legend counts
-cover the full trace; display thinning only touches the muted points.
-
-The figure below shows the valid evaluations of the AVE run
-only.
+The history plots every requested candidate, stage by stage. Valid candidates are
+full-size in the accent colour; rejected candidates are small and muted, and a
+candidate with no finite objective is a tick in a strip below the plot. The running
+best is taken over valid candidates only, and a dashed line shows the screening
+stage's own best when it scored with a cheaper model.
 
 <figure markdown>
-  ![Optimization convergence](assets/ave-optimization-history-light.png#only-light)
-  ![Optimization convergence](assets/ave-optimization-history-dark.png#only-dark)
-  <figcaption>466 valid evaluations (of the ~1,440 the population/generation settings imply; the rest were rejected by a hard constraint before scoring). Color is span; the red line is the best-so-far L/D.</figcaption>
+  ![Optimization convergence](assets/ave-optimization-history-dark.png)
+  <figcaption>1,277 evaluations: 291 valid, 986 rejected, 0 failed. The ordinate is the search objective, block fuel from the native mission; the best valid candidate ends near 39.3 t.</figcaption>
 </figure>
 
-Two things are worth reading off this chart rather than skimming past it.
-First, the climb isn't smooth; it happens in **discrete steps** (the red
-line jumps at roughly evaluation 160 and again near 320), which is exactly
-what you'd expect from differential evolution: the population improves in
-bursts when a mutation lands in a better region, then holds while the
-population explores around that point before the next improving mutation
-is found. Second, the color gradient makes the story visible without
-reading a single number: the best designs cluster in yellow-green (larger
-span) while the early, worse designs skew teal-purple, smaller span. The
-search is visibly discovering that, within AVE's constraints, more span is
-worth its structural and wing-area cost.
+- **Almost nothing is valid in screening.** The first stage samples the whole box
+  and one candidate survives, at about 42.1 t. The leading rejections in the search
+  record are the minimum nose-gear load (584), the usable CG range (306), the
+  declared fuel capacity (246) and the tail-scrape angle (151); a candidate can
+  fail several. Constraints are hard, so a rejected candidate is not a design.
+- **Refinement starts from the diverse elite and descends in bursts**, as
+  differential evolution does, and the valid cloud tightens as it proceeds.
+- **The search stopped on its time budget, not on convergence.** Both stages ended
+  on their time limits (592 and 569 analysed candidates), so a longer run or another
+  seed would probably keep improving. This is a local refinement around the preset,
+  not a global search.
+- **The outcome varies between runs.** With the same seed, three full runs of this
+  configuration ended at spans of 71.28, 68.70 and 70.17 m, because both stages
+  stop on their wall-clock limits: the runs analysed 592, 576 and 592 screening
+  and 596, 518 and 569 refinement candidates, and planned their refinement
+  schedules from the measured throughput (557, 581 and 596 evaluations). A run
+  that stops on evaluation budgets only, or replays the recorded counts, is
+  bit-identical. Every number in this guide belongs to the one run named in the
+  [Gallery](gallery.md).
 
 !!! note "Two L/D numbers, on purpose"
-    The L/D axis here is the optimizer's **fast cruise-estimate**
-    aerodynamics: a deliberately cheaper VLM evaluation used *inside* the
-    search loop, because a full high-fidelity sweep on every one of ~1,400
-    candidate evaluations would make optimization impractically slow. Once
-    the search picks a winner, ALAS re-evaluates that *one* design
-    with the full, final drag-polar fit: a different, more accurate
-    number, reported below and used throughout the rest of this guide.
-    Seeing ~21.0 in this chart and ~19.2 in the next section isn't a bug;
-    it's the two-fidelity-level architecture doing its job.
+    The optimizer scores candidates with a cheaper in-loop VLM evaluation, because
+    a full sweep on every candidate would be impractically slow. The winner is then
+    re-evaluated with the full drag-polar fit. The winner's in-loop L/D is 19.02;
+    the final analysis reports 19.09 at the design point (19.20 trimmed). They are
+    two calculations of the same aircraft; quote the second.
 
 <figure markdown>
-  ![Every candidate planform the search evaluated, overlaid](assets/ave-design-evolution-light.png#only-light)
-  ![Every candidate planform the search evaluated, overlaid](assets/ave-design-evolution-dark.png#only-dark)
-  <figcaption>Every valid candidate's planform, overlaid with transparency: the dense red cluster is where the search spent most of its evaluations once it found a promising region.</figcaption>
+  ![Every candidate planform the search evaluated, overlaid](assets/ave-design-evolution-dark.png)
+  <figcaption>Planform of every valid candidate, overlaid and coloured by evaluation progress. The planforms are close to each other: the search stays near the preset.</figcaption>
 </figure>
 
-This is the convergence chart's L/D-vs-evaluation story redrawn in shape
-space instead of score space: the faint, scattered outlines are early,
-exploratory candidates; the solid dark-red mass is hundreds of candidates
-stacked on nearly the same planform, late in the search, refining rather
-than exploring. You can see the seeded-near-initial-design starting point
-(from [Design space & optimizer](design-space-and-optimizer.md#starting-near-home-not-from-scratch))
-directly in how tightly clustered *even the early* candidates are, span-wise,
-compared to how wide the full ±60–80 m bound would allow.
+This is the same story in shape space. The candidates cluster tightly compared with
+the full bound box because refinement starts from the screening elite (see
+[Design space & optimizer](design-space-and-optimizer.md#screening-then-refinement)).
 
-## Baseline vs. optimized, the final numbers
-
-| Metric | Baseline (AVE) | Optimized | Δ |
-|---|---|---|---|
-| Span | 71.75 m | 77.26 m | +7.7% |
-| Wing area | 529.0 m² | 567.5 m² | +7.3% |
-| Aspect ratio | 9.89 | 10.67 | +7.9% |
-| Sweep | 34.0° | 34.7° | +2.1% |
-| **L/D (final analysis)** | **17.82** | **19.22** | **+7.9%** |
-| Static margin | 0.315 | 0.281 | −0.034 |
-| Payload capacity at MTOW | 35.0 t | 50.5 t | +44% |
-| Fuel capacity at MTOW | 135.3 t | 104.7 t | −22.6% |
-
-The headline number is the 7.9% L/D improvement, but the payload/fuel
-trade underneath it is the more interesting story. MTOW is a hard
-requirement (358.67 t either way); what changed is how the airframe
-*spends* that fixed weight budget. A larger, more efficient wing let the
-optimizer close the weight equation with less fuel and more structure,
-and rather than leave that margin unused, it filled the freed-up weight
-budget with payload capacity instead. Static margin dropped slightly
-(0.315 → 0.281) but stayed well clear of the 0.05 hard floor: the search
-found a genuinely more efficient point, not one that borrowed stability
-margin to get there.
+The Optimization tab of the desktop Results page shows the same history:
 
 <figure markdown>
-  ![Drag polar, baseline vs optimized](assets/ave-polar-comparison-light.png#only-light)
-  ![Drag polar, baseline vs optimized](assets/ave-polar-comparison-dark.png#only-dark)
-  <figcaption>The optimized design's drag polar sits measurably below the baseline's across the shared CL range: the L/D gain isn't confined to one point, it holds across the polar.</figcaption>
+  ![The Results page, Optimization tab](assets/gui-results-optimization-dark.png)
+  <figcaption>The Optimization tab in the application (a shorter-budget run than this chapter's): optimization history, design evolution, airfoil comparison and spanwise airfoil evolution.</figcaption>
+</figure>
+
+## Baseline vs. optimized
+
+| Metric | Baseline (AVE preset) | Optimized | Δ |
+|---|---|---|---|
+| Span | 71.75 m | 70.17 m | −2.2 % |
+| Wing area | 525.2 m² | 531.4 m² | +1.2 % |
+| Aspect ratio | 9.80 | 9.27 | −5.4 % |
+| Leading-edge sweep | 34.0° | 37.0° | +3.0° |
+| Peak L/D (polar) | about 18.1 | about 19.3 | +7 % |
+| L/D at design CL 0.524 | | 19.09 | |
+| **Block fuel (search objective)** | **42,066 kg** | **39,286 kg** | **−6.6 %** |
+| MTOW | 358,670 kg | 358,670 kg | 0 |
+
+!!! note "Which fuel number"
+    The search objective is block fuel from the native mission. The design mission
+    the sizing closes on is the 5,497 km great circle, whose trip fuel for the
+    final design is 38.8 t, the same order as the 39.3 t objective. The final
+    analysis flies the 6,362 km SimBrief plan and burns 44.5 t. The numbers are
+    for different routes (the exact objective definition was not separated from
+    the run files); see
+    [Mission & route analysis](mission-and-route.md#fuel-burn-and-block-time).
+
+MTOW is a hard requirement (358.67 t either way) and the payload is the declared
+35.4 t load case, so there is no payload to trade: the gain appears as fuel, about
+6.6 %, with about 7 % more peak L/D behind it. The baseline objective is itself
+flagged infeasible against the hard constraints, which is part of why the optimizer
+moves.
+
+The optimized static margin is 42.6 % MAC. That is far larger than a real
+transport's and is a known model residual, not an achievement; see
+[Weight, balance & stability](weight-balance-and-stability.md#static-margin-and-the-neutral-point).
+
+!!! warning "Feasible for the optimizer, rejected after downstream analysis"
+    The optimizer's finalist was accepted at reporting fidelity. In the run with
+    every finite-element solver on, the feasibility stage then rejected the
+    delivered design on four structural strength flags from the MSC Nastran and
+    NASTRAN-95 root stresses (see
+    [Structural analysis](structural-analysis.md#finite-element-strength-flags)).
+    The optimizer does not run those solvers.
+
+<figure markdown>
+  ![Drag polar, baseline vs optimized](assets/ave-polar-comparison-dark.png)
+  <figcaption>Baseline versus optimized drag polar and L/D: the optimized peak L/D is about 19.3 against about 18.1 for the baseline.</figcaption>
 </figure>
 
 ## Planform, before and after
 
 <figure markdown>
-  ![Planform comparison](assets/ave-planform-comparison-light.png#only-light)
-  ![Planform comparison](assets/ave-planform-comparison-dark.png#only-dark)
-  <figcaption>Baseline (dashed blue) vs. optimized (solid red): wing, tail, and fuselage outline, drawn to the same scale.</figcaption>
+  ![Planform comparison](assets/ave-planform-comparison-dark.png)
+  <figcaption>Baseline (dashed, 71.75 m span) versus optimized (solid, 70.17 m span): wing and tail planform to the same scale.</figcaption>
 </figure>
 
-The optimized wing is visibly longer-spanned and the tail visibly larger:
-`tail_scale` moved from 1.00 to 1.07, consistent with the aft-CG shift that
-a longer, further-aft-loaded wing implies. This is the same information as
-the table above, but it's worth looking at directly: a 7.7% span increase
-doesn't look dramatic as a percentage, but drawn to scale against the
-baseline it's an unmistakably bigger aircraft.
+The changes are modest and mostly in shape rather than size: sweep 34.0° to 37.0°,
+root chord 16.00 m to 16.20 m, break chord 8.00 m to 8.38 m, tip twist 0° to 1.7°,
+wing shift +0.39 m, and `tail_scale` 1.00 to 1.03 (the delivered design database
+reports 1.028; the raw search record lists 1.0 for its best design, and this page
+quotes the database).
 
 ## Airfoil evolution
 
 <figure markdown>
-  ![Airfoil evolution across the optimizer's population](assets/ave-airfoil-evolution-light.png#only-light)
-  ![Airfoil evolution across the optimizer's population](assets/ave-airfoil-evolution-dark.png#only-dark)
-  <figcaption>The spread of root-airfoil shapes the search explored: thickness and camber scaling plus the four Hicks-Henne bump variables, sampled across the population.</figcaption>
+  ![Initial and optimized root airfoil](assets/ave-airfoil-comparison-dark.png)
+  <figcaption>Initial versus optimized root airfoil (SC2-0714 family, thickness scale 0.966, camber scale 0.979): the outlines nearly coincide.</figcaption>
 </figure>
 
-This is the airfoil-shape end of the same 16-D search: `airfoil_thickness_scale`
-landed at 0.90 (10% thinner than AVE's baseline section) and
-`airfoil_camber_scale` at 0.96: a thinner, slightly-less-cambered section,
-consistent with the higher aspect ratio letting the optimizer trade section
-thickness for span without paying an unacceptable wave-drag or structural
-penalty.
+<figure markdown>
+  ![Wing sections along the span](assets/ave-airfoil-evolution-dark.png)
+  <figcaption>Wing cross-sections at 25 spanwise stations, root to tip (0 to 35.1 m), coloured by span station.</figcaption>
+</figure>
 
-## What this run does and doesn't tell you
+`airfoil_thickness_scale` landed at 0.966 and `airfoil_camber_scale` at 0.979, a
+section about 3 % thinner and 2 % less cambered, plus small Hicks-Henne bump
+adjustments (a few hundredths of a percent of chord). The supercritical section is
+already close to what the objective rewards at this Mach number.
 
-This is **one** optimizer run, with a fixed seed (42) for reproducibility
-and a deliberately modest 15-generation budget (this whole guide's runs
-are sized to be reproducible in a few minutes, not to represent ALAS's
-ceiling). A longer run, a different seed, or a wider design space would
-likely find a different (plausibly better) optimum. What this run *does*
-demonstrate reliably is the shape of the tool: requirements and bounds in,
-a physically coherent, constraint-respecting airframe out, with every
-number in between traceable back to a real evaluation rather than an
-optimizer's internal fiction.
+## What this run does and does not show
+
+This is **one** run with a fixed seed and the default 2.5 minute budget. A longer
+run, a different seed or a wider space would likely find a different optimum, as the
+span spread above shows. What it demonstrates is the shape of the tool: requirements
+and bounds in, a constraint-respecting airframe out, every number traceable to a
+real evaluation. It does not show the design is a good aircraft; the static-margin
+residual and the finite-element flags are the reminders that a model-feasible
+design is not a validated one.

@@ -4,33 +4,48 @@ export default function Documentation() {
   const entries = [
     {
       href: withBase('docs/installation/'),
-      title: 'Installation & setup',
-      body: 'Binary status, environment setup, optional data packages, and developer source builds.',
+      title: 'Installation',
+      body: 'Setup, optional data, source builds.',
     },
     {
       href: withBase('docs/user-guide/'),
       title: 'User guide',
-      body: 'Desktop interface controls, configuration inputs, optimizer settings, and result inspection.',
+      body: 'Interface, Sandbox Mode, optimizer, results.',
     },
     {
       href: withBase('docs/external-tools/'),
       title: 'External tools guide',
-      body: 'Integration and status diagnostics for Athena AVL, OpenVSP/VSPAERO, MSES, and MSC Nastran.',
+      body: 'AVL, VSPAERO, MSES, OpenFOAM, Nastran.',
     },
     {
       href: withBase('docs/meet-ave/'),
       title: 'Worked example (AVE)',
-      body: 'Reference twin-aisle transport evaluated through coupled sizing, aerodynamics, and structures.',
+      body: 'Reference twin-aisle through the full pipeline.',
     },
     {
       href: withBase('docs/architecture/'),
       title: 'Pipeline architecture',
-      body: 'Crate layering, solver interface contracts, execution flow, and stage status handling.',
+      body: 'Crates, solver contracts, execution flow.',
     },
     {
       href: withBase('docs/reference/formulas/'),
       title: 'Formulas & reference',
-      body: 'Aerodynamic polar methods, wingbox sizing equations, propulsion cycles, and configuration schemas.',
+      body: 'Aerodynamic, structural and propulsion methods.',
+    },
+    {
+      href: withBase('docs/design-space-and-optimizer/'),
+      title: 'Design space & optimizer',
+      body: 'Variables, constraints, L-SHADE search.',
+    },
+    {
+      href: withBase('docs/validation/'),
+      title: 'Validation',
+      body: 'Presets vs published data, with residuals.',
+    },
+    {
+      href: withBase('docs/gallery/'),
+      title: 'Figure gallery',
+      body: 'Figures from a full AVE run.',
     },
   ]
 
@@ -39,10 +54,13 @@ export default function Documentation() {
       <div className="mx-auto max-w-[68rem] px-6 py-16 sm:py-20">
         <p className="section-mark">Documentation</p>
 
-        <div className="mt-6 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-          <h2 className="text-[1.65rem] font-bold leading-[1.25] tracking-[-0.015em] text-fg-strong">
-            Technical documentation
-          </h2>
+        <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between sm:gap-10">
+          <div>
+            <h2 className="text-[1.65rem] font-bold leading-[1.25] tracking-[-0.015em] text-fg-strong">
+              Documentation
+            </h2>
+            <p className="mt-2 text-[0.96rem] text-fg-dim">Guides, methods and reference.</p>
+          </div>
           <a href={withBase('docs/')} className="prose-link text-[0.92rem]">
             Documentation index →
           </a>
@@ -53,12 +71,12 @@ export default function Documentation() {
             <a
               key={e.href}
               href={e.href}
-              className="group bg-base p-6 transition-colors hover:bg-raised"
+              className="group bg-base p-5 transition-colors hover:bg-raised"
             >
               <h3 className="text-[0.98rem] font-bold text-fg-strong transition-colors group-hover:text-accent-bright">
                 {e.title}
               </h3>
-              <p className="mt-2 text-[0.86rem] leading-[1.6] text-fg-dim">{e.body}</p>
+              <p className="mt-1.5 text-[0.86rem] leading-snug text-fg-dim">{e.body}</p>
             </a>
           ))}
         </div>
