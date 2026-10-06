@@ -44,8 +44,28 @@ it has to be done deliberately.
 Earlier revisions of this file claimed that pushing to `main` published the
 live site. That was never true of `alas.uvigo.es`.
 
-## Releases
+## Releases and downloads
 
-Downloadable Windows and Linux packages for v1.1.0 are published on
-[GitHub Releases](https://github.com/MarcosQuirogaR/ALAS/releases). The Download
-section on this site links directly to each tagged asset and its checksums.
+Release data (dates, headlines, details, archive sizes and SHA-256 values) is
+curated in `src/lib/releases.ts`; the Downloads and Release notes sections
+render from it and need no network access. A release whose `published` is
+`null` is not rendered.
+
+To publish a release, set its `published` date and `assets` in that file,
+build, then place the archives next to the site:
+
+```
+npm run build
+pwsh scripts/fetch-downloads.ps1 -OutDir dist/downloads
+```
+
+`fetch-downloads.ps1` needs the GitHub CLI, downloads the current release
+archives and their `.sha256` files with `gh`, and verifies each checksum.
+The archives are served at `/downloads/` and mirrored on
+[GitHub Releases](https://github.com/MarcosQuirogaR/ALAS/releases).
+
+## Validation section
+
+`public/validation/manifest.json` (a bare array of figures or
+`{figures, summary}`) drives the Validation section, which is hidden when
+the manifest is missing.

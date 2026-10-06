@@ -136,8 +136,43 @@ rather than just expanded.
   manoeuvrability.
 
 **Torenbeek method**
-: A set of empirical mass equations fitted to real aircraft data, used to
-  estimate component weights before a structure exists to weigh.
+: A set of empirical mass equations fitted to real aircraft data. ALAS keeps it
+  only as an explicit comparison architecture; the default is the FLOPS
+  equations.
+
+**FLOPS mass equations**
+: The NASA FLOPS conventional-transport weight equations (NASA/TM-2017-219627)
+  ALAS uses for component masses by default. Evaluating them is not a
+  validation against a weighed aircraft.
+
+**Hard MTOW**
+: The default takeoff-mass mode for registered presets: the declared maximum
+  takeoff mass is a ceiling the design may not exceed, and takeoff fuel is
+  capped at the usable tank capacity.
+
+**Load and trim sheet**
+: The airline-style form of the CG envelope: gross weight against an index,
+  with CG in %MAC, the loading points of the worked case and the CG gate
+  verdict for each loading state.
+
+**Main-gear placement**
+: For a redesigned aircraft, the translation of the whole main-gear group to the
+  feasible station nearest the published one, subject to tip-back, nose-gear
+  load and nose-wheel lift-off at rotation.
+
+**Rotation forward-CG limit**
+: The most-forward CG at which the nose wheel can still be lifted at the
+  rotation speed, from a moment balance about the main-gear contact.
+
+**Tail-down (tail-scrape) angle**
+: The nose-up rotation about the main gear at which a lower-fuselage point aft
+  of it touches the ground.
+
+**Tip-back angle**
+: The angle from the vertical, at the most-aft main-gear axle and the most-aft
+  CG, through which the aircraft could rotate before it sits back on its tail.
+  It must clear the tail-down angle.
+
 
 ## Propulsion
 
@@ -187,6 +222,23 @@ rather than just expanded.
 
 ## Software and method
 
+**Clean-sheet design**
+: A design with no registered preset: ALAS derives the starting design, the
+  search bounds and the dependent geometry from the brief. A design promoted
+  from the sandbox is a clean-sheet design with a custom baseline.
+
+**Promote**
+: Leaving the sandbox by keeping the drawn aircraft as the guided workspace's
+  custom baseline, instead of discarding it.
+
+**Quick Analysis**
+: The sandbox's in-process estimates for the drawn aircraft. Each value is
+  tagged as the Full Analysis' own value or as an estimate with a stated bound.
+
+**Sandbox**
+: The full-window workspace for drawing an aircraft by editing its geometry
+  directly. See [Sandbox mode](sandbox.md).
+
 **Design vector**
 : The set of numbers defining one candidate aircraft. ALAS uses
   sixteen.
@@ -209,5 +261,6 @@ rather than just expanded.
   default). Constraints are hard and are not folded into it.
 
 **SUAVE**
-: The mission simulation package ALAS uses to fly a design through a
-  route, running in its own isolated environment.
+: An open-source aircraft design package (LGPL-2.1) whose mission-segment
+  methods ALAS's native mission solver is adapted from. ALAS does not run
+  SUAVE.

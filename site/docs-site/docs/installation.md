@@ -1,90 +1,137 @@
 # Installation & Setup
 
-ALAS is built in Rust as a single native executable. There is no Python runtime,
-no package manager, and no background sidecar service required.
+ALAS is a single native Rust executable. It needs no Python runtime, package
+manager or background service.
 
-## Release v1.3.2
+## Download
+
+The latest published release is **v1.3.1**. The same two packages
+are on [alas.uvigo.es](https://alas.uvigo.es/) (`/downloads/<file>`) and on the
+[GitHub release](https://github.com/MarcosQuirogaR/ALAS/releases/tag/v1.3.1),
+which is the canonical copy.
+
+| Platform | File | Notes |
+|---|---|---|
+| Windows 10 or later, x86-64 | `alas-v1.3.1-windows-x86_64.zip` | Includes AVL 3.52 |
+| Linux x86-64 | `alas-v1.3.1-linux-x86_64.tar.gz` | glibc 2.35 or newer |
+
+Each archive has a sibling `.sha256` file (for example
+`alas-v1.3.1-windows-x86_64.zip.sha256`) and contains `RELEASE-MANIFEST.json`
+and `SOURCE-MANIFEST.json`, which record the source commit and every packaged
+file. Verify the checksum before extracting.
 
 ### Windows
 
-- **Windows**: Download the portable x86-64 archive from [GitHub Releases](https://github.com/MarcosQuirogaR/ALAS/releases/tag/v1.3.2), verify its SHA-256 file, and run `ALAS.exe`.
-- **Linux**: Download the portable x86-64 `tar.gz` archive from the same release, verify its SHA-256 file, extract it, and run `./ALAS` (glibc 2.35 or newer).
-- **Windows trust**: A signed binary identifies its publisher, but a new file can still show a SmartScreen reputation prompt until Microsoft has enough clean download history. Verify the publisher and checksum before running it.
+1. Download the zip and its `.sha256` file.
+2. Check the hash in PowerShell and compare it with the value in the `.sha256`
+   file:
 
-### Other Platforms
+   ```powershell
+   Get-FileHash .\alas-v1.3.1-windows-x86_64.zip -Algorithm SHA256
+   ```
 
-The v1.3.2 release provides Windows and Linux x86-64 packages. External solver stages remain
-optional and require compatible user-supplied installations and licences.
+3. Extract the archive, keep the folder intact, and run `ALAS.exe`.
+
+Windows SmartScreen may warn about a new file with little download history.
+Compare the checksum before running it.
+
+### Linux
+
+```bash
+sha256sum -c alas-v1.3.1-linux-x86_64.tar.gz.sha256
+tar xzf alas-v1.3.1-linux-x86_64.tar.gz
+cd alas-v1.3.1-linux-x86_64
+./ALAS
+```
+
+The desktop application needs the graphics stack a normal X11 or Wayland
+session already provides (an OpenGL or Vulkan driver, fontconfig). ALAS also
+runs headless from the command line with no display; see
+[Running ALAS](running-alas.md). The package does not bundle AVL on Linux (the
+GPL source and a build note are included); the AVL cross-check is absent until
+you configure an executable.
+
+### What is in the package
+
+`ALAS` or `ALAS.exe`, the release and source manifests with the matching AGPL
+source snapshot, `configs/ave.yaml` (a generated configuration template),
+`README.md`, `LICENSE`, `NOTICE`, `THIRD-PARTY-NOTICES.md`,
+`THIRD-PARTY-CRATES.md`, `THIRD-PARTY-LICENSES.txt`, `external tools/` (AVL on
+Windows; NASTRAN-95 only when the release staged it, see its entry in
+`RELEASE-MANIFEST.json`) and `assets/mses/` (XFOIL transition data for an
+installed MSES). MSES, MSC Nastran, MSC Patran, OpenVSP/VSPAERO and FLOWUnsteady
+are never included. See [Licensing](licensing.md).
+
+### First start
+
+The application opens on **Inputs** with the AVE preset loaded. Twelve presets
+ship: AVE, A340-300, A380-800, B787-9, A320-200, A220-300, ATR72-600, DC-10,
+E195-E2, C919, B747-400 and A400M. Press **Analyze reference** in the control
+bar for a quick baseline analysis, then see the [User guide](user-guide.md). To
+draw an aircraft that is not in the list, use [Sandbox mode](sandbox.md).
+
+!!! note "Source builds are newer than the release"
+    This documentation describes the current source. The latest published
+    package is v1.3.1; features added since then are marked in the pages that
+    describe them.
 
 ---
 
-## What runs out of the box
+## What runs without external tools
 
-Within the core local application, the following capabilities execute without external solvers:
+- Parametric airframe sizing and design-space definition
+- L-SHADE optimization with epsilon constraints
+- Vortex-lattice aerodynamics and the drag build-up
+- Turbofan cycle model
+- Wingbox sizing, rib spacing and the analytical beam solution
+- Mass, CG envelope and longitudinal stability
+- Mission simulation (climb, cruise, descent, reserves)
+- Cabin layout and payload loading
+- Sandbox mode and the fixed-wing UAV workflow
 
-- Parametric airframe sizing and design space definition
-- Numerical airframe optimization (L-SHADE differential evolution, epsilon-constrained)
-- Vortex-lattice aerodynamics and empirical drag build-ups
-- Turbofan cycle thermodynamic modeling
-- Wingbox structural sizing and analytical rib spacing
-- Mass distribution, center of gravity limits, and longitudinal stability margins
-- Native mission trajectory simulation (climb, cruise, descent, reserves)
-- Passenger cabin deck arrangement and payload loading
+## Optional external tools
 
----
+All are user-supplied except AVL (included in the Windows package) and NASTRAN-95 (included only if the release staged it). Each stage
+reports itself unavailable when its tool is absent. Setup, licences and status
+codes are in the [External tools guide](external-tools.md).
 
-## Compatible external tools
+| Tool | Used for |
+|---|---|
+| MSES | Transonic section analysis |
+| AVL | Vortex-lattice cross-check |
+| OpenVSP / VSPAERO | CAD export and panel-method cross-check |
+| MSC Nastran, NASTRAN-95 | Finite-element statics and modes |
+| MSC Patran | Deformation images |
+| OpenFOAM, Gmsh, ParaView | Airfoil CFD window |
+| FLOWUnsteady | Unsteady adapter |
 
-ALAS couples with specialized external analysis tools across disciplines. For full setup
-and status code documentation, see the [External tools guide](external-tools.md). Compatible
-tools are user-supplied; each stage reports itself unavailable when a tool is absent:
-
-| Tool | Discipline | Status when absent |
-|---|---|---|
-| **MSES** | Transonic section coupled Euler/boundary-layer analysis | Reported unavailable if absent |
-| **AVL** | Extended vortex-lattice aerodynamic cross-check | Reported unavailable if absent |
-| **OpenVSP / VSPAERO** | CAD geometry generation and aerodynamic cross-check | Reported unavailable if absent |
-| **MSC Nastran / NASTRAN-95** | Finite-element structural analysis and vibration modes | Reported unavailable if absent |
-| **Patran** | Finite-element structural visualization | Reported unavailable if absent |
-
-Tool directories and executable paths are configured in the application under
-**Setup → External Tools** or through configuration files.
-
-Packaging and solver integration notes:
-
-- **AVL**: Packaging currently includes AVL with separate GPL source and notices.
-- **NASTRAN-95**: Optional and user-supplied unless a reviewed bundle is explicitly staged.
-- **MSES / MSC Nastran / Patran**: Remain user-supplied with required licenses.
-- **OpenVSP**: May run headless; preview fallback projects the actual VSPGEOM mesh, explicitly labelled, rather than a screenshot from the native GUI.
+Paths are set under the **External Tools** menu or in the configuration file.
 
 ---
 
 ## Navigation & route data <a id="optional-route-data"></a>
 
-Native mission simulation supports both great-circle tracks and published airway
-routes. Airway navigation data can be downloaded on demand through application settings
-or via the CLI:
+Missions fly a great-circle track unless route data is available. Airway
+navigation data (X-Plane community mirror, third-party GPLv3) downloads on
+demand from the **External Tools** window after you consent, or from the CLI:
 
 ```powershell
-alas --download-navdata
+ALAS --download-navdata
 ```
 
 ---
 
 ## Building from source (developers)
 
-For developers with an authorized source checkout:
-
-1. Install Visual Studio Build Tools with the **Desktop development with C++** workload.
-2. Install Rust via [rustup.rs](https://rustup.rs).
-3. Build and launch:
+From a source checkout (Rust 1.85 or newer; on Windows also the Visual Studio
+Build Tools with the **Desktop development with C++** workload):
 
 ```powershell
 # Launch interactive desktop interface
-cargo run --release --bin alas
+cargo run --release --bin ALAS
 
-# Run headless pipeline
-cargo run --release --bin alas -- --seed 42 --output outputs --plots
+# Headless run
+cargo run --release --bin ALAS -- --seed 42 --output outputs --plots
 ```
 
-The compiled binary is written to `target/release/alas.exe` (or `target/release/alas`).
+The binary is `target/release/ALAS.exe` (`ALAS` on Linux).

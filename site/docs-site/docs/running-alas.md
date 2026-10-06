@@ -1,40 +1,31 @@
 # Running ALAS
 
-ALAS can be run interactively via the desktop GUI or headlessly from the command
-line. Both execute the same underlying multidisciplinary pipeline (`alas-pipeline`),
-producing identical analytical results and diagnostic reports.
+ALAS runs from the desktop application or headlessly from the command line.
+Both call the same pipeline (`alas-pipeline`) and give the same results.
 
 ---
 
 ## The desktop application
 
-Running the executable with no arguments launches the graphical interface:
+Running the executable with no arguments opens the interface:
 
 ```powershell
-# From installed or compiled binary:
-alas.exe
-
-# Or from the Rust repository:
-cargo run --release --bin alas
+ALAS.exe                          # installed or compiled binary
+cargo run --release --bin ALAS    # from the repository
 ```
 
-The desktop window follows the engineering workflow:
-**Inputs → Design Space → Advanced Settings → Run → Results**.
+The workflow is **Inputs**, **Design Space**, optional Modeling and Advanced
+Settings edits, **Run**, then **Results**. See the [User guide](user-guide.md)
+for every page. Points specific to running:
 
-Key characteristics of the interface:
-
-- **Metadata-driven controls**: Form inputs are derived directly from the
-  underlying configuration schemas (`alas-config`). Every setting includes units,
-  bounds, and explanatory tooltips.
-- **Reference presets**: Selecting AVE, A380-800, or other presets updates the
-  geometry scaffold, propulsion definition, cabin layout, and design bounds in unison.
-  (UAS configuration presets are in active development.)
-- **Live previews**: Includes debounced 3D geometry rendering and cabin deck arrangement.
-- **Discipline-grouped results**: Stages report status dynamically. If an optional external
-  solver fails to converge or is uninstalled, its tab displays a diagnostic status
-  without aborting the overall run.
-- **Baseline evaluation**: "Analyze baseline" evaluates the nominal configuration
-  without running numerical optimization.
+- Form fields come from the configuration schema (`alas-config`) and carry units,
+  bounds and tooltips.
+- Choosing a preset replaces geometry, propulsion, cabin layout and design bounds together.
+- The live preview redraws the three-view geometry and the cabin as you edit.
+- A stage that cannot run (optional tool missing, no convergence) shows a
+  diagnostic status and the run continues.
+- **Analyze reference** evaluates the selected aircraft as given, without optimization.
+- Sandbox mode is a separate workspace for drawing an aircraft; see [Sandbox mode](sandbox.md).
 
 ---
 
@@ -47,38 +38,38 @@ scripted execution without opening a graphical window.
 
 ```powershell
 # Full optimization, baseline comparison, mission analysis, and figure generation
-alas.exe -c configs/example_config.yaml --output outputs --plots
+ALAS.exe -c configs/ave.yaml --output outputs --plots
 
 # Analyze baseline design directly (skip optimization search)
-alas.exe --no-optimize --plots
+ALAS.exe --no-optimize --plots
 
 # Headless run with fixed seed and isolated output directory
-alas.exe --seed 42 --output isolated-dir --plots
+ALAS.exe --seed 42 --output isolated-dir --plots
 
 # Skip mission simulation stage
-alas.exe --no-mission --plots
+ALAS.exe --no-mission --plots
 
 # CPACS 3.5 input evaluation
-alas.exe --cpacs-input path/to/aircraft.xml --no-optimize --no-baseline --plots
+ALAS.exe --cpacs-input path/to/aircraft.xml --no-optimize --no-baseline --plots
 
 # Write full effective configuration to YAML and exit
-alas.exe --save-config effective_config.yaml
+ALAS.exe --save-config effective_config.yaml
 
 # Download missing airway navigation data files
-alas.exe --download-navdata
+ALAS.exe --download-navdata
 ```
 
 If developing within the Rust repository:
 
 ```powershell
-cargo run --release --bin alas -- --seed 42 --output isolated-dir --plots
+cargo run --release --bin ALAS -- --seed 42 --output isolated-dir --plots
 ```
 
 ---
 
 ## Command line options
 
-All flags supported by v1.3.2:
+Flags supported by the current release:
 
 | Flag | Argument | Description |
 |---|---|---|

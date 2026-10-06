@@ -12,18 +12,9 @@ theme:
   favicon: assets/icon.png
   logo: assets/icon.png
   palette:
-    - scheme: slate
-      primary: custom
-      accent: custom
-      toggle:
-        icon: material/brightness-4
-        name: Switch to light mode
-    - scheme: default
-      primary: custom
-      accent: custom
-      toggle:
-        icon: material/brightness-7
-        name: Switch to dark mode
+    scheme: slate
+    primary: custom
+    accent: custom
   font: false
   features:
     - navigation.instant
@@ -76,13 +67,14 @@ markdown_extensions:
 
 extra_javascript:
   - javascripts/mathjax.js
-  - https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js
+  - javascripts/mathjax/tex-mml-chtml.js
 
 nav:
   - Home: index.md
   - Get started:
       - Installation: installation.md
       - User guide: user-guide.md
+      - Sandbox mode: sandbox.md
       - External tools guide: external-tools.md
       - Gallery: gallery.md
       - Meet AVE: meet-ave.md
@@ -106,6 +98,8 @@ nav:
       - How ALAS works inside: architecture.md
       - Configuration reference: reference/configuration.md
       - Formulas & theory: reference/formulas.md
+      - Validation: validation.md
   - Help:
       - Troubleshooting: troubleshooting.md
       - Glossary: glossary.md
+      - Licensing: licensing.md

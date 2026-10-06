@@ -8,45 +8,57 @@ to "which chapter explains this number."
 
 ```
 outputs/
-├── design_data.json         # the full design-database export
-├── optimized_airfoil.dat    # winning root-airfoil coordinates
-├── flight_data.csv          # mission simulation, if enabled
-└── *.png                    # every figure, if --plots was passed
+├── design_database.json         # the design-database export
+├── airfoils/optimized_root.dat  # winning root-airfoil coordinates
+├── payload_layout.json          # seat-by-seat cabin and hold layout
+├── cabin_scene_v2.json          # cabin scene for the renderer
+├── cpacs/                       # CPACS aircraft, adapter and run manifests
+├── solvers/vlm/                 # optimizer search record
+├── structures/                  # wing-box mesh and Nastran decks
+├── openvsp/, flowunsteady/      # downstream geometry and request files
+└── plots/                       # every figure, if --plots was passed
 ```
 
-### `design_data.json`
+Which files appear depends on what ran: the structures folder, for example,
+holds the decks of the analyses that were enabled. The desktop application
+adds a PDF report and a ZIP of every figure on request (File, Generate report
+and Export figures).
 
-The machine-readable handoff: everything
+### `design_database.json`
+
+The machine-readable record of the design: everything
 [Meet AVE](meet-ave.md#the-airframe-as-alas-sees-it),
 [Aerodynamic analysis](aerodynamic-analysis.md), and
 [Weight, balance & stability](weight-balance-and-stability.md) quote a
-number from ultimately traces back to this file:
+number from ultimately traces back to this file. Its top-level groups are
+`design_vector` (the sixteen variables), `geometry` (areas, spans, chords,
+sweep, the analysis mass basis), `aerodynamics` (design point, trimmed design
+point, drag coefficients, Oswald efficiency, static margin), `weights`
+(component masses, the FLOPS mass build-up, coordinates, physical CG),
+`feasibility` (cruise equilibrium, fuel loading and dispatch, mass balance),
+`cpacs` and `metadata`. A shortened excerpt:
 
 ```json
 {
-  "design_vector": { "span_m": 71.75, "root_chord_m": 16.5, ... },
-  "geometry": { "wing_area_m2": 529.04, "aspect_ratio": 9.89, ... },
+  "design_vector": { "span_m": ..., "root_chord_m": ..., ... },
+  "geometry": { "reference_area_m2": ..., "aspect_ratio": ..., ... },
   "aerodynamics": {
-    "design_point": { "alpha_deg": 1.02, "cl": 0.656, "cd": 0.037, "l_over_d": 17.82 },
+    "design_point": { "alpha_deg": ..., "cl": ..., "cd": ..., "l_over_d": ... },
     "trimmed_design_point": { ... },
-    "static_margin": 0.315
+    "static_margin": ...
   },
   "weights": {
-    "component_masses_kg": { "Wing": 41913.6, "Fuselage": 32301.3, ... },
-    "physical_cg_m": [36.27, -0.002, -1.62],
-    "mtow_kg": 358670.0
+    "component_masses_kg": { "Wing": ..., "Fuselage": ..., ... },
+    "physical_cg_m": [..., ..., ...],
+    "mtow_kg": ...
   }
 }
 ```
 
-This is also what SUAVE's mission bridge
-([Mission & route analysis](mission-and-route.md)) reads from to build a
-vehicle request: it was written from the start "as a machine-readable
-handoff," in the original design docs' own words, not repurposed after the
-fact. If you're integrating ALAS's output into another tool, this
-file is the stable contract to build against.
+If you are integrating ALAS output into another tool, this file and the CPACS
+export are the stable contracts to build against.
 
-### `optimized_airfoil.dat`
+### `optimized_root.dat`
 
 The winning root-airfoil section, as plain Selig-format coordinates:
 `x y` pairs running from the trailing edge along the upper surface, around
@@ -61,41 +73,28 @@ ALAS_Optimized
 ```
 
 Any tool that reads Selig-format `.dat` files (XFOIL, XFLR5, most airfoil
-databases) opens this directly: it's the same format ALAS's own
-`AirfoilLibrary` indexes 1,600+ reference sections from.
+databases) opens this directly.
 
-### `flight_data.csv`
+### Mission data
 
-One row per simulated timestep across the whole mission, every column
-[Mission & route analysis](mission-and-route.md)'s figures are drawn from:
-
-```
-Time_s, Segment, Altitude_m, TAS_m_s, EAS_m_s, Mach, Density_kg_m3,
-Range_m, Pitch_deg, AoA_deg, CL, CD, L_over_D, Throttle, Lift_N, Drag_N,
-Thrust_N, CD_parasite, CD_induced, CD_compressible, CD_miscellaneous,
-CD_total, Mass_kg, MassFlowRate_kg_s, SFC_kg_kgf_hr
-```
-
-Notably, this is the *full* breadth SUAVE computes (drag broken into its
-four physical components at every timestep, not just altitude/speed/mass)
-because ALAS's export was built to match everything the original
-validation script's own plotting code used, not a trimmed-down subset.
+The mission figures in [Mission & route analysis](mission-and-route.md) are
+drawn from the flown trajectory held in the run result: time, segment,
+altitude, speeds, Mach, range, pitch and angle of attack, lift, drag, thrust,
+the four drag components, mass and fuel flow at every step. They appear in the
+Results tabs and in the figure archive and PDF report.
 
 ### Figures
 
-Every `figure_*` function behind this guide's charts lives in
-`alas/reporting/visualization.py`, and every one takes an optional
-`theme` argument: figures render consistently whether they're saved as a
-static PNG (`--plots`) or drawn live in the desktop app, in either light
-or dark mode.
+Every figure is a backend-neutral vector scene (see
+[How ALAS works inside](architecture.md)), drawn with the same code whether it
+is saved as a static PNG or SVG (`--plots`) or shown live in the desktop
+application, in light or dark theme.
 
 ## Reusing outputs across runs
 
-Because `design_data.json` is a complete, self-contained description of
-one design, a natural pattern is feeding one run's output back in as a
-starting point for another, e.g., taking an optimized design and running
-[Mission & route analysis](mission-and-route.md) against a different route
-without re-running the optimizer, or loading a winning `design_vector`
-back into the GUI's Design Space tab as a new "initial value" for a
-follow-up search. Nothing in ALAS treats a design database as a
-one-way export; it's plain JSON, meant to be read back in.
+Because `design_database.json` describes one design completely, a natural
+pattern is feeding one run's winning `design_vector` back in as the initial
+design of a follow-up search, or keeping an optimized aircraft as a custom
+baseline: [promote it from the sandbox](sandbox.md#leaving-the-sandbox-promote-or-discard)
+and the saved configuration reloads it. Nothing in ALAS treats the database as
+a one-way export.

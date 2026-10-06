@@ -16,6 +16,8 @@ export default function Masthead() {
 
   const links = [
     { href: withBase('#overview'), label: 'Overview' },
+    { href: withBase('#workflows'), label: 'Workflows' },
+    { href: withBase('#validation'), label: 'Validation' },
     { href: withBase('docs/'), label: 'Documentation' },
     { href: withBase('#download'), label: 'Downloads' },
     { href: withBase('#releases'), label: 'Release notes' },

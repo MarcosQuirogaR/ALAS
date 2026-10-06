@@ -1,14 +1,10 @@
 # Mission requirements
 
-Everything ALAS does starts from one object: `DesignRequirements`. It's
-the only place you state what you *want*: the optimizer and every analysis
-stage downstream read from it, but nothing in the solver hardcodes a target
-value. Change a field here and you're designing a different aircraft, not
-patching a script.
-
-This chapter walks through every field AVE sets, in the order they appear
-on the Inputs tab (or in `configs/example_config.yaml`'s `requirements:`
-block), and what each one actually constrains.
+Everything starts from one object, `DesignRequirements`: the place where you
+state what you want. The optimizer and every analysis stage read from it; no
+solver hardcodes a target. This chapter walks through the fields the AVE preset
+sets, in the order of the Inputs page (or the `requirements:` block of a saved
+configuration such as the packaged `configs/ave.yaml`).
 
 ## Cruise design point
 
@@ -17,21 +13,17 @@ cruise_mach: 0.84
 cruise_altitude_m: 11887.2
 ```
 
-These two numbers fix the point in the flight envelope everything else is
-sized around. `cruise_mach` combined with `cruise_altitude_m` (via the
-standard atmosphere) gives a true airspeed and dynamic pressure, from
-which ALAS derives the **required cruise CL** for the current
+Mach and altitude (through the standard atmosphere) give true airspeed and
+dynamic pressure, from which ALAS derives the **required cruise CL** for the
 candidate's weight and wing area:
 
 $$
 C_L = \frac{W}{q \, S}
 $$
 
-Every VLM sweep, every drag polar, every optimizer evaluation in this guide
-is implicitly anchored to this one flight condition. Push `cruise_altitude_m`
-up and required CL drops (lower density, higher TAS for the same Mach); push
-`cruise_mach` up and wave drag starts fighting you through the Korn
-equation (see [Aerodynamic analysis](aerodynamic-analysis.md)).
+Every polar and optimizer evaluation is anchored to this condition. Higher
+altitude lowers the required CL for the same Mach; higher Mach raises wave drag
+through the Korn equation (see [Aerodynamic analysis](aerodynamic-analysis.md)).
 
 ## Weight target
 
@@ -39,11 +31,9 @@ equation (see [Aerodynamic analysis](aerodynamic-analysis.md)).
 mtow_kg: 358670.0
 ```
 
-The single number the entire weight-and-balance pipeline is anchored to.
-Every component mass in [Weight, balance & stability](weight-balance-and-stability.md)
-is sized so that OEW + payload + fuel reconciles back to this figure; it's
-not a soft target, it's the budget the mass model has to close against.
-For registered presets this is **Hard MTOW**, the default
+The budget the mass model closes against: OEW + payload + fuel must reconcile
+to this figure (see [Weight, balance & stability](weight-balance-and-stability.md)).
+For registered presets it is **Hard MTOW**, the default
 [takeoff-mass mode](design-space-and-optimizer.md#takeoff-mass-modes), and the
 takeoff fuel is capped at the usable tank capacity. A brief with no preset is
 a [clean-sheet design](design-space-and-optimizer.md#clean-sheet-design), which
@@ -56,21 +46,19 @@ aircraft_type: passenger
 num_passengers: 350
 ```
 
-`aircraft_type` switches between two completely different payload models:
-`passenger` (seat count → mass via `passenger_mass_kg`, default 100 kg/pax
-per the FAA AC 120-27E standard) or `cargo` (a direct `cargo_payload_kg`
-target). AVE is a passenger design, so `num_passengers` is what
-[Cabin & payload](cabin-and-payload.md)'s seat-placement engine actually
-fills the cabin against.
+`aircraft_type` selects the payload model: `passenger` (seat count times
+`passenger_mass_kg`, default 100 kg per passenger including baggage) or `cargo`
+(a direct `cargo_payload_kg`). AVE is a passenger design; `num_passengers` is
+the count the [Cabin & payload](cabin-and-payload.md) seat placement fills.
 
 ```yaml
-max_structural_payload_kg: 0.0   # 0 = disabled for AVE
+max_structural_payload_kg: 65000.0
 ```
 
-Left at zero for AVE: this field exists to cap how much extra revenue
-freight the lower-deck belly-fill logic can add on top of passengers and
-bags, for aircraft where you want a "max structural payload" scenario
-distinct from a "max passengers" one.
+The most the airframe may carry (MZFW minus OEW). The AVE preset sets a notional
+65,000 kg, the maximum payload of a 777-300ER. It defines the maximum-payload
+point of the payload-range diagram and caps the lower-deck belly freight added on
+top of passengers and bags. 0 disables it.
 
 ## Sizing constraints
 
@@ -80,20 +68,13 @@ min_wing_loading_kg_m2: 485.0
 max_cruise_cl: 0.95
 ```
 
-These are the boundaries of *feasible* airframes, not tuning knobs the
-optimizer aims for: a candidate design that violates any of them is
-invalid. `max_wing_area_m2` keeps the search from
-drifting toward an oversized wing chasing marginal induced-drag gains;
-`min_wing_loading_kg_m2` keeps it from going the other way and undersizing
-the wing relative to MTOW; `max_cruise_cl` is a stall guard: any candidate
-whose required cruise CL would exceed this is rejected as too close to the
-stall boundary to be a credible cruise point. When
-[Optimization results](optimization-results.md) shows the optimizer
-growing AVE's wing area from 529 m² to 567 m², it's growing inside this
-535 m² ceiling being *raised* implicitly: the requirements file used for
-that run relaxes it; the point of showing you both runs is to see the
-constraint doing its job in the baseline and getting out of the way when
-you widen it.
+These bound the feasible airframes; a candidate that violates one is invalid.
+`max_wing_area_m2` stops the search drifting toward an oversized wing,
+`min_wing_loading_kg_m2` stops it undersizing the wing for the MTOW, and
+`max_cruise_cl` rejects candidates whose required cruise CL is too close to
+stall. In [Optimization results](optimization-results.md) the optimizer moves AVE's
+wing area from 525.2 m² to 531.4 m²: it grows, but stays inside this
+535 m² ceiling, which is the constraint doing its job.
 
 ## Stability targets
 
@@ -101,32 +82,21 @@ you widen it.
 target_static_margin: 0.10
 ```
 
-Static margin (how far the center of gravity sits ahead of the neutral
-point, as a fraction of MAC) is the classic longitudinal-stability
-metric. This field sets the *target* used to place the aft CG limit
-(`Aft CG Limit = Neutral Point − target_static_margin × 100%MAC`) in the
-CG envelope built in
-[Weight, balance & stability](weight-balance-and-stability.md); it isn't
-the static margin the final design ends up with (AVE's baseline actually
-lands at 0.315 aerodynamically, 0.05 minimum-physical as a hard floor,
-comfortably clear of this target in both directions).
+Static margin is the distance of the CG ahead of the neutral point, as a
+fraction of MAC. This field sets the aft CG limit
+(`Aft CG Limit = Neutral Point - target_static_margin x 100 %MAC`) in the CG
+envelope of [Weight, balance & stability](weight-balance-and-stability.md). It is
+not the margin the final design ends up with (the optimized AVE lands at
+about 0.43 aerodynamically, against this 0.10 target and a 0.05 minimum-physical
+hard floor; see the note on this large value in
+[Weight, balance & stability](weight-balance-and-stability.md#static-margin-and-the-neutral-point)).
 
-## What's *not* here
+## What is not here
 
-A handful of things you might expect on this list live elsewhere by
-design:
-
-- **Design-space bounds** (span, sweep, chord limits, …): those describe
-  *how the optimizer is allowed to search*, not what you want; see
-  [Design space & optimizer](design-space-and-optimizer.md).
-- **Cabin class mix, ULD strategy**: `DesignRequirements` only sets the
-  passenger *count*; the actual seat map is a separate `CabinConfig`, see
-  [Cabin & payload](cabin-and-payload.md).
-- **Mission route, climb schedule**: a separate `MissionConfig`, see
-  [Mission & route analysis](mission-and-route.md).
-
-This split is deliberate: `DesignRequirements` is the one form a new user
-fills in to describe *what aircraft they want*; everything else is either
-a scaffold decision (design space, geometry family) or an analysis-fidelity
-knob (mission profile, sweep resolution) that has a sensible default and
-doesn't need touching to get a first result.
+- **Design-space bounds** (span, sweep, chords): how the optimizer may search;
+  see [Design space & optimizer](design-space-and-optimizer.md).
+- **Cabin class mix, container strategy**: `DesignRequirements` sets only the
+  passenger count; the seat map is a separate `CabinConfig`
+  ([Cabin & payload](cabin-and-payload.md)).
+- **Mission route and climb schedule**: a separate `MissionConfig`
+  ([Mission & route analysis](mission-and-route.md)).
