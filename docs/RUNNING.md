@@ -134,9 +134,7 @@ would run.
 For numerical parity against the Python reference and licence provenance,
 read `docs/PORTING.md`; every translated module has a row there. It is not
 a project-completion tracker any more, since orchestration layers such as
-`alas-pipeline` and `alas-gui` were written natively rather than translated;
-for "does the program work and what is currently wrong with it", read
-`docs/STATUS.md` instead.
+`alas-pipeline` and `alas-gui` were written natively rather than translated.
 
 ---
 

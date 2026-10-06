@@ -2,7 +2,7 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 //! TEST RUN of the registered Airbus A400M Atlas preset (`A400M`). The preset
-//! carries the sourced and estimated inputs of `.agent/research/a400m-data.md`
+//! carries sourced and estimated inputs
 //! (EASA TCDS A.169, E.033, P.012, Airbus brochure TMMA0026/01/2025,
 //! Bundeswehr operator page), each flagged S(ourced), I(nferred) or
 //! E(stimate) beside the number in `alas-config/src/presets/military.rs`.
