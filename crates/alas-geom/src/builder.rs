@@ -41,6 +41,7 @@ mod custom_sections;
 mod empennage;
 mod error;
 mod fin_root;
+mod hump;
 mod mesh;
 mod spacing;
 mod tail_attachment;
@@ -121,6 +122,16 @@ impl AircraftBuilder {
         geometry.fuselage.nose_keel_exponent = None;
         geometry.fuselage.nose_plan_exponent = None;
         geometry.fuselage.nose_section_exponent = None;
+        // And the constant crown: it has no upper-deck hump or upper deck.
+        geometry.fuselage.hump_height_m = None;
+        geometry.fuselage.hump_start_x_m = None;
+        geometry.fuselage.hump_crown_start_x_m = None;
+        geometry.fuselage.hump_crown_end_x_m = None;
+        geometry.fuselage.hump_end_x_m = None;
+        geometry.fuselage.hump_fairing_exponent = None;
+        geometry.fuselage.upper_deck_floor_height_m = None;
+        geometry.fuselage.upper_deck_start_x_m = None;
+        geometry.fuselage.upper_deck_end_x_m = None;
         // And its spanwise mesh; see `mesh`.
         mesh::restore_reference_ratios(&mut geometry);
         Self {
@@ -312,7 +323,8 @@ impl AircraftBuilder {
     /// height that differs from the diameter, e.g. an A380-style double
     /// decker) switches every station between a circular radius and a
     /// width/height pair scaled proportionally from the same equivalent
-    /// circular radius.
+    /// circular radius. An upper-deck hump raises the crown of these
+    /// stations and adds its own fairing stations (`hump`).
     fn build_fuselage(&self, dv: &DesignVector) -> Result<Fuselage, BuildError> {
         let g = &self.geometry.fuselage;
         g.validate_generated_sections()?;
@@ -328,6 +340,8 @@ impl AircraftBuilder {
                              height_m: f64,
                              shape_val: f64|
          -> Result<FuselageXSec, BuildError> {
+            // The upper-deck hump raises the crown only (unchanged without one).
+            let (z_val, height_m) = g.raise_crown(x_val, z_val, height_m);
             let override_section = g.generated_sections.get(generated_index);
             let (z_m, width_m, height_m, shape) =
                 override_section.map_or((z_val, width_m, height_m, shape_val), |section| {
@@ -390,6 +404,7 @@ impl AircraftBuilder {
             )?);
         }
         self.append_custom_fuselage_sections(fus_len, &mut stations)?;
+        self.append_hump_fuselage_sections(fus_len, &mut stations)?;
 
         Ok(Fuselage::new("Fuselage", stations))
     }

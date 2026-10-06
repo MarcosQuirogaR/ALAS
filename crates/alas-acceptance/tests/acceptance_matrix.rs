@@ -109,14 +109,20 @@ fn public_planning_cg_uses_the_source_frame_without_becoming_a_certification_cla
     // limit; the public-frame planning check below
     // (`public_planning_cg_status`) stays clean. Tail scrape (6.66 deg here)
     // is a diagnostic warning until the preset aft-fuselage contour is
-    // validated (`ModelCgConstraint::is_diagnostic`), so the A220 model
-    // envelope passes.
-    assert!(result.model_cg_envelope_ok);
+    // validated (`ModelCgConstraint::is_diagnostic`).
+    //
+    // Old: the model envelope passed. New (v1.3.2): it fails by 0.10 point of
+    // weight. The measured 5.02 m nose (was 3.2 m) moves the cabin proxy that
+    // places the systems, furnishings and fallback payload 0.9 m aft, so the
+    // OEW centre of gravity moves aft and the OEW nose-gear load drops from
+    // above to 6.62 % against the 6.72 % limit. The gear stations are fixed
+    // fractions of the unchanged body length.
+    assert!(!result.model_cg_envelope_ok);
     assert_eq!(
         result.public_planning_cg_status,
         PlanningCgStatus::WithinPublishedLimits
     );
-    assert!(result.physical_passed);
+    assert!(!result.physical_passed);
     assert!(
         !result
             .physical_findings
@@ -125,15 +131,23 @@ fn public_planning_cg_uses_the_source_frame_without_becoming_a_certification_cla
         "the bulk-hold trim keeps the loaded CG inside the public planning envelope: {:?}",
         result.physical_findings
     );
-    // No Error-severity finding: tail scrape is a warning (see above), and
-    // no nose-load shortfall or bare-OEW forward-range error is raised.
+    // The only Error-severity finding is the OEW nose-gear load shortfall
+    // above (old: none); tail scrape is a warning (see above) and no
+    // bare-OEW forward-range error is raised.
+    let errors: Vec<_> = result
+        .physical_findings
+        .iter()
+        .filter(|finding| finding.severity == alas_pipeline::FindingSeverity::Error)
+        .collect();
     assert!(
-        !result
-            .physical_findings
-            .iter()
-            .any(|finding| finding.severity == alas_pipeline::FindingSeverity::Error),
-        "{:?}",
-        result.physical_findings
+        errors.iter().all(
+            |finding| finding.code == FindingCode::MinimumNoseGearLoadViolation
+                && finding
+                    .actual
+                    .zip(finding.limit)
+                    .is_some_and(|(a, l)| l - a < 0.002)
+        ),
+        "{errors:?}"
     );
     // The remaining warnings are the operational-envelope findings (usable
     // CG-range shortfall and a potato-boundary excursion), not a bare-OEW
@@ -279,10 +293,10 @@ fn public_planning_cg_uses_the_source_frame_without_becoming_a_certification_cla
     };
     let text = format_matrix_report(&report);
     assert!(text.contains("Execution Verdict: ALL PRESETS EXECUTED"));
-    // The bulk-hold trim clears every error-level finding for this preset
-    // (tail scrape is a warning), so the planning frame reports "WITHIN" its
-    // published limit and the physical column "PASS".
-    assert!(text.contains("Physical Verdict: 0 preset finding(s) require investigation"));
+    // The planning frame reports "WITHIN" its published limit. Old: the
+    // physical column was "PASS" (0 findings); new: one finding, the OEW
+    // nose-gear load shortfall of the measured-nose cabin proxy above.
+    assert!(text.contains("Physical Verdict: 1 preset finding(s) require investigation"));
     assert!(text.contains("Design mission evidence:"));
     assert!(text.contains("A220-300: UNVERIFIED - no source-backed mission registered"));
     assert!(text.contains("Interactive route diagnostics (not preset design-mission validation):"));
@@ -402,18 +416,37 @@ fn a380_soft_static_margin_target_does_not_become_a_hard_model_constraint() {
         })
         .collect();
     assert!(!stability_constraints.is_empty());
+    // Old: no state violated the 5 % hard floor. New (v1.3.2): the analyzed
+    // zero-fuel state does, at 2.5 %: the measured 10.78 m nose (was 7.0 m)
+    // moves the cabin proxy 1.9 m aft, with the empty-aircraft centre of
+    // gravity, over a wing fixed by the published gear loads. What this test
+    // pins is that the soft preference neither adds nor removes a hard
+    // violation: each state violates the floor exactly when its margin is
+    // below it, and the finding list matches the baseline's.
     for constraint in stability_constraints {
         assert_eq!(constraint.limit, result.model_cg_static_margin_floor);
-        assert!(
-            !constraint.violated,
+        assert_eq!(
+            constraint.violated,
+            constraint.actual < constraint.limit,
             "soft preference changed {constraint:?}"
         );
     }
-    assert!(!raised_preference
-        .feasibility
-        .findings
+    let baseline_short = result
+        .physical_findings
         .iter()
-        .any(|finding| finding.code == FindingCode::InsufficientStaticMargin));
+        .any(|finding| finding.code == FindingCode::InsufficientStaticMargin);
+    assert!(
+        baseline_short,
+        "the zero-fuel static-margin shortfall is visible"
+    );
+    assert_eq!(
+        raised_preference
+            .feasibility
+            .findings
+            .iter()
+            .any(|finding| finding.code == FindingCode::InsufficientStaticMargin),
+        baseline_short
+    );
     // The drawn planform/engine stations and separate ground/flight wing
     // shapes changed the mass ledger and CG. The analyzed zero-fuel state
     // now lies aft of the minimum-nose-load boundary derived from Airbus
@@ -446,11 +479,11 @@ fn a380_soft_static_margin_target_does_not_become_a_hard_model_constraint() {
             |finding| finding.severity == alas_pipeline::FindingSeverity::Warning
                 && finding.message.contains("tail-scrape")
         ));
+    // (InsufficientStaticMargin left this list in v1.3.2: see the zero-fuel
+    // static-margin shortfall asserted above.)
     assert!(!result.physical_findings.iter().any(|finding| matches!(
         finding.code,
-        FindingCode::InsufficientStaticMargin
-            | FindingCode::NoseGearStrengthViolation
-            | FindingCode::MainGearStrengthViolation
+        FindingCode::NoseGearStrengthViolation | FindingCode::MainGearStrengthViolation
     )));
     // The same zero-fuel point starts the fuel vector, so its aft excursion
     // appears there as well as on the loading potato. These and the usable
@@ -722,7 +755,21 @@ fn ave_usable_cg_range_and_tail_scrape_are_warnings() {
         .iter()
         .filter(|finding| finding.severity == alas_pipeline::FindingSeverity::Error)
         .collect();
-    assert!(ave_errors.is_empty(), "{ave_errors:?}");
+    // Old: no Error finding. New (v1.3.2): one, the minimum nose-gear load at
+    // the analyzed takeoff state, 5.44 % against the 6 % floor. The measured
+    // 777-9 nose, 8.42 m (was 6.0 m), moves the cabin proxy that places the
+    // systems, furnishings and fallback payload 1.2 m aft, and with it the
+    // centre of gravity, over gear stations that are fixed fractions of the
+    // unchanged body length.
+    assert_eq!(ave_errors.len(), 1, "{ave_errors:?}");
+    assert_eq!(
+        ave_errors[0].code,
+        alas_pipeline::FindingCode::MinimumNoseGearLoadViolation
+    );
+    let nose_load = ave_errors[0].actual.expect("AVE nose-gear load");
+    // 5.44 % here, 5.50 % on the CI runner (Windows host difference): +-0.2 point.
+    assert!((nose_load - 0.054_38).abs() < 2.0e-3, "{nose_load}");
+    assert!((ave_errors[0].limit.expect("AVE nose-gear limit") - 0.06).abs() < 1.0e-9);
     let ave_scrape = ave
         .physical_findings
         .iter()
@@ -788,7 +835,12 @@ fn a320_source_max_payload_case_separates_net_tare_gross_and_usable_fuel() {
         LayoutSummary::Cargo(_) => panic!("A320 source case must use passenger layout"),
     };
 
-    assert_eq!(summary.total_pax, 180);
+    // Old 180 -> new 174 seats: the generic cabin floor of the clean-sheet basis
+    // starts at the end of the nose, now the measured 4.78 m (was 3.5 m), so
+    // it is 1.28 m shorter than the 180-seat certified cabin needs. Each seat
+    // carries 84 kg of occupant and 16 kg of checked baggage, so the net
+    // payload below is 600 kg under the old 20,682 kg.
+    assert_eq!(summary.total_pax, 174);
     assert_eq!(summary.seated_pax, summary.total_pax);
     assert_eq!(summary.unseated_pax, 0);
     assert!((summary.belly_cargo_t * 1_000.0 - requested_belly_cargo_kg).abs() < 1.0e-6);
@@ -798,10 +850,10 @@ fn a320_source_max_payload_case_separates_net_tare_gross_and_usable_fuel() {
         1_000.0 * (summary.seat_mass_t + summary.bag_mass_t + summary.belly_cargo_t);
     let hold_contents_kg = summary.hold_used_t * 1_000.0;
     let uld_tare_kg = hold_contents_kg - 1_000.0 * (summary.bag_mass_t + summary.belly_cargo_t);
-    assert!((net_revenue_payload_kg - 20_682.0).abs() < 1.0e-6);
+    assert!((net_revenue_payload_kg - 20_082.0).abs() < 1.0e-6);
     // 6 x 82 kg tare (see the comment above the `lower_deck_uld` assignment).
     assert!((uld_tare_kg - 492.0).abs() < 1.0e-6);
-    assert!((layout.total_mass - 21_174.0).abs() < 1.0e-6);
+    assert!((layout.total_mass - 20_574.0).abs() < 1.0e-6);
     assert!((layout.total_mass - (net_revenue_payload_kg + uld_tare_kg)).abs() < 1.0e-6);
     assert!((summary.payload_t * 1_000.0 - layout.total_mass).abs() < 1.0e-6);
 
@@ -843,7 +895,7 @@ fn a320_source_max_payload_case_separates_net_tare_gross_and_usable_fuel() {
     // tare when net passenger, bag and belly masses are held fixed.
     let source_payload_residual_kg = source_gross_payload_kg - actual_layout.total_mass;
     assert!(source_payload_residual_kg.is_finite() && source_payload_residual_kg >= -1.0e-6);
-    assert!((source_payload_residual_kg - (574.0 - actual_uld_tare_kg)).abs() < 1.0e-6);
+    assert!((source_payload_residual_kg - (1_174.0 - actual_uld_tare_kg)).abs() < 1.0e-6);
 
     let gross_fuel_kg = *report
         .component_masses

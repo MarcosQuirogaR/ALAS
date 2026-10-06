@@ -134,11 +134,14 @@ fn compare(
                     if path.ends_with(".geometry_config.wing") && key == "airfoil_class" {
                         continue;
                     }
-                    // The optional belly-upsweep length is a native fuselage
-                    // input the frozen request predates; the geometry tests
-                    // and the preset tail-down checks cover it.
+                    // The optional belly-upsweep, shaped-nose and upper-deck
+                    // hump fields are native fuselage inputs the frozen
+                    // request predates; the geometry tests and the preset
+                    // checks cover them.
                     if path.ends_with(".geometry_config.fuselage")
                         && (key == "belly_upsweep_length_m"
+                            || key.starts_with("hump_")
+                            || key.starts_with("upper_deck_")
                             || (key.starts_with("nose_") && key != "nose_z_m"))
                     {
                         continue;
@@ -435,6 +438,21 @@ fn request_corrections() -> BTreeMap<&'static str, RequestCorrection> {
             Value::Null,
             4.14,
         ),
+        // Measured nose length and tip height (v1.3.2), from the Airbus
+        // general-dimensions drawings (see the preset comments); the frozen
+        // generic nose was 27-42 % shorter.
+        correction(
+            "A320-200.geometry_config.fuselage.cabin_start_x_m",
+            3.5,
+            4.78,
+        ),
+        correction("A320-200.geometry_config.fuselage.nose_z_m", -0.3, -0.63),
+        correction(
+            "A340-300.geometry_config.fuselage.cabin_start_x_m",
+            5.5,
+            7.72,
+        ),
+        correction("A340-300.geometry_config.fuselage.nose_z_m", -0.4, -0.21),
         correction(
             "A320-200.geometry_config.wing.side_of_body_chord_ratio",
             "<absent>",

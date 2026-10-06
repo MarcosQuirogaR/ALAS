@@ -22,6 +22,12 @@ use crate::ConfigNode;
 
 mod aft_body;
 pub use aft_body::AftBodyStation;
+mod hump;
+mod sections;
+pub use hump::{
+    BodyStation, UpperDeck, UpperDeckHump, DEFAULT_HUMP_FAIRING_EXPONENT,
+    HUMP_FAIRING_EXPONENT_RANGE, HUMP_MAIN_DECK_FLOOR_FRACTION,
+};
 mod nose;
 pub use nose::{NoseShape, NoseStation};
 
@@ -198,7 +204,7 @@ pub struct FuselageConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[config(
         label = "Nose crown end",
-        help = "Fraction of the nose length at which the upper line reaches the cabin crown with zero slope; the windshield blends into the crown there. Unset takes a narrow-body class estimate (about 0.8). Valid 0.55 to 0.95."
+        help = "Fraction of the nose length at which the upper line reaches the cabin crown with zero slope; the windshield blends into the crown there. Unset takes a narrow-body class estimate (about 0.8). Valid 0.55 to 1."
     )]
     pub nose_crown_end_fraction: Option<f64>,
 
@@ -214,7 +220,7 @@ pub struct FuselageConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[config(
         label = "Nose keel exponent",
-        help = "Exponent of the lower nose line from the tip to the cabin keel: larger values give a deeper chin radome, smaller a straighter underside. Unset takes a narrow-body class estimate (about 2.2). Valid 1.5 to 4."
+        help = "Exponent of the lower nose line from the tip to the cabin keel: larger values give a deeper chin radome, smaller a straighter underside. Unset takes a narrow-body class estimate (about 2.2). Valid 1.3 to 4."
     )]
     pub nose_keel_exponent: Option<f64>,
 
@@ -222,7 +228,7 @@ pub struct FuselageConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[config(
         label = "Nose plan exponent",
-        help = "Exponent of the plan-view half-width from the tip to the cabin width: smaller values give a pointier plan view. Unset takes a narrow-body class estimate (about 2). Valid 1.6 to 2.6."
+        help = "Exponent of the plan-view half-width from the tip to the cabin width: smaller values give a pointier plan view. Unset takes a narrow-body class estimate (about 2). Valid 1 to 2.6."
     )]
     pub nose_plan_exponent: Option<f64>,
 
@@ -233,6 +239,86 @@ pub struct FuselageConfig {
         help = "Peak superellipse exponent of the nose cross-sections, reached mid-nose and returning to 2 (elliptical) at the tip and the cabin; larger values give flatter-sided cockpit sections. Unset takes a narrow-body class estimate (about 2.4). Valid 2 to 3.5."
     )]
     pub nose_section_exponent: Option<f64>,
+
+    /// Optional upper-deck hump; see `hump`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[config(
+        label = "Upper-deck hump height",
+        unit = "m",
+        help = "Rise of the crown above the main crown over the full-height part of an upper-deck hump (Boeing 747 type). Only the crown line rises; the keel, the width and the main deck are unchanged. The hump needs this height and all four hump stations; leave unset for a body without a hump."
+    )]
+    pub hump_height_m: Option<f64>,
+
+    /// Optional upper-deck hump; see `hump`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[config(
+        label = "Hump start station",
+        unit = "m",
+        help = "Distance from the nose tip at which the crown starts to rise into the hump (the windshield line of a 747)."
+    )]
+    pub hump_start_x_m: Option<f64>,
+
+    /// Optional upper-deck hump; see `hump`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[config(
+        label = "Hump crown start station",
+        unit = "m",
+        help = "Distance from the nose tip at which the hump reaches its full height; the fore fairing runs from the hump start to here."
+    )]
+    pub hump_crown_start_x_m: Option<f64>,
+
+    /// Optional upper-deck hump; see `hump`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[config(
+        label = "Hump crown end station",
+        unit = "m",
+        help = "Distance from the nose tip at which the aft fairing of the hump starts to descend."
+    )]
+    pub hump_crown_end_x_m: Option<f64>,
+
+    /// Optional upper-deck hump; see `hump`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[config(
+        label = "Hump end station",
+        unit = "m",
+        help = "Distance from the nose tip at which the aft fairing of the hump is back on the main crown."
+    )]
+    pub hump_end_x_m: Option<f64>,
+
+    /// Optional upper-deck hump; see `hump`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[config(
+        label = "Hump fairing exponent",
+        help = "Exponent of both hump fairings: 2 is tangent to the hump crown with a slope break at the fairing ends, larger values give a fuller hump, 1 a straight ramp. Unset takes 2. Valid 1 to 4."
+    )]
+    pub hump_fairing_exponent: Option<f64>,
+
+    /// Optional upper deck under the hump; see `hump`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[config(
+        label = "Upper-deck floor height",
+        unit = "m",
+        help = "Height of the upper-deck floor above the main-deck floor under the hump. Setting it makes the hump a passenger deck with its own floor, seats, exits and furnishings; unset leaves the hump as fairing only."
+    )]
+    pub upper_deck_floor_height_m: Option<f64>,
+
+    /// Optional upper deck under the hump; see `hump`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[config(
+        label = "Upper-deck start station",
+        unit = "m",
+        help = "Distance from the nose tip of the forward end of the usable upper-deck floor (aft of the flight deck). Unset takes the hump crown start."
+    )]
+    pub upper_deck_start_x_m: Option<f64>,
+
+    /// Optional upper deck under the hump; see `hump`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[config(
+        label = "Upper-deck end station",
+        unit = "m",
+        help = "Distance from the nose tip of the aft end of the usable upper-deck floor. Unset takes the hump crown end."
+    )]
+    pub upper_deck_end_x_m: Option<f64>,
 
     /// Optional user-defined sections inserted into the generated nose/cabin/
     /// tail station list.
@@ -283,6 +369,15 @@ impl Default for FuselageConfig {
             nose_keel_exponent: None,
             nose_plan_exponent: None,
             nose_section_exponent: None,
+            hump_height_m: None,
+            hump_start_x_m: None,
+            hump_crown_start_x_m: None,
+            hump_crown_end_x_m: None,
+            hump_end_x_m: None,
+            hump_fairing_exponent: None,
+            upper_deck_floor_height_m: None,
+            upper_deck_start_x_m: None,
+            upper_deck_end_x_m: None,
             custom_sections: Vec::new(),
             generated_sections: Vec::new(),
             n_subdivisions: 12,
@@ -297,121 +392,6 @@ impl FuselageConfig {
     /// default describes and the one every consumer has to be able to assume.
     pub fn effective_height_m(&self) -> f64 {
         self.height_m.unwrap_or(self.diameter_m)
-    }
-
-    /// Validate user-defined fuselage sections without changing their values.
-    pub fn validate_custom_sections(&self) -> Result<(), FuselageSectionError> {
-        let mut previous = None;
-        for (index, section) in self.custom_sections.iter().enumerate() {
-            for (field, value) in [
-                ("x_fraction", section.x_fraction),
-                ("width_m", section.width_m),
-                ("height_m", section.height_m),
-                ("z_m", section.z_m),
-                ("shape", section.shape),
-            ] {
-                if !value.is_finite() {
-                    return Err(FuselageSectionError::NonFinite {
-                        index,
-                        field,
-                        value,
-                    });
-                }
-            }
-            if !(0.0..1.0).contains(&section.x_fraction) {
-                return Err(FuselageSectionError::XOutOfRange {
-                    index,
-                    value: section.x_fraction,
-                });
-            }
-            for (field, value) in [("width", section.width_m), ("height", section.height_m)] {
-                if value <= 0.0 {
-                    return Err(FuselageSectionError::NonPositive {
-                        index,
-                        field,
-                        value,
-                    });
-                }
-            }
-            if !(1.0..=50.0).contains(&section.shape) {
-                return Err(FuselageSectionError::InvalidShape {
-                    index,
-                    value: section.shape,
-                });
-            }
-            if let Some(previous) = previous {
-                if section.x_fraction <= previous {
-                    return Err(FuselageSectionError::InvalidOrder {
-                        index,
-                        previous,
-                        current: section.x_fraction,
-                    });
-                }
-            }
-            previous = Some(section.x_fraction);
-        }
-        Ok(())
-    }
-
-    /// Return custom sections in validated nose-to-tail order.
-    pub fn custom_sections_sorted(&self) -> Result<Vec<FuselageSection>, FuselageSectionError> {
-        self.validate_custom_sections()?;
-        let mut sections = self.custom_sections.clone();
-        sections.sort_by(|left, right| left.x_fraction.total_cmp(&right.x_fraction));
-        Ok(sections)
-    }
-
-    /// Validate the optional generated-station override vector.
-    pub fn validate_generated_sections(&self) -> Result<(), FuselageSectionError> {
-        const GENERATED_STATION_COUNT: usize = 20;
-        if self.generated_sections.is_empty() {
-            return Ok(());
-        }
-        if self.generated_sections.len() != GENERATED_STATION_COUNT {
-            return Err(FuselageSectionError::GeneratedSectionCount {
-                expected: GENERATED_STATION_COUNT,
-                actual: self.generated_sections.len(),
-            });
-        }
-        for (index, section) in self.generated_sections.iter().enumerate() {
-            for (field, value) in [
-                ("x_fraction", section.x_fraction),
-                ("width_m", section.width_m),
-                ("height_m", section.height_m),
-                ("z_m", section.z_m),
-                ("shape", section.shape),
-            ] {
-                if !value.is_finite() {
-                    return Err(FuselageSectionError::NonFinite {
-                        index,
-                        field,
-                        value,
-                    });
-                }
-            }
-            if !(0.0..=1.0).contains(&section.x_fraction) {
-                return Err(FuselageSectionError::XOutOfRange {
-                    index,
-                    value: section.x_fraction,
-                });
-            }
-            for (field, value) in [("width", section.width_m), ("height", section.height_m)] {
-                if value <= 0.0 {
-                    return Err(FuselageSectionError::NonPositive {
-                        index,
-                        field,
-                        value,
-                    });
-                }
-            }
-            if !(1.0..=50.0).contains(&section.shape) {
-                return Err(FuselageSectionError::InvalidShape {
-                    index,
-                    value: section.shape,
-                });
-            }
-        }
-        Ok(())
     }
 }
 

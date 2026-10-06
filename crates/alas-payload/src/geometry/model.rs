@@ -98,8 +98,15 @@ pub struct CabinGeometry {
     pub tailcone_len: f64,
     /// Where the constant section ends.
     pub cabin_end_x: f64,
-    /// Whether this body gets two passenger decks.
+    /// Whether this body gets two full-length passenger decks.
     pub is_double_deck: bool,
+    /// The partial upper deck under an upper-deck hump (747 type), on the
+    /// product path only; see `hump_deck`.
+    pub upper_deck: Option<alas_config::UpperDeck>,
+    /// The hump's crown rise at each station (empty without an upper deck),
+    /// taken off the sampled sections to find the main lobe the main deck
+    /// and the hold are laid out in.
+    pub(super) crown_rises: Vec<f64>,
     /// Mean aerodynamic chord, which the centre of gravity is reported against.
     pub mac: f64,
     /// The main wing's aerodynamic centre, longitudinally.
@@ -231,7 +238,14 @@ impl CabinGeometry {
             x_wing_ac - AERODYNAMIC_CENTER_CHORD_FRACTION * mac
         };
 
-        let (passenger_decks, lower_deck) = if strict_envelope {
+        // A partial upper deck exists only on a single-deck body: a
+        // full-length double decker already has its upper deck.
+        let upper_deck = fg
+            .upper_deck()
+            .filter(|_| strict_envelope && !is_double_deck(fg.height_m, diameter_m));
+        let (passenger_decks, lower_deck) = if upper_deck.is_some() {
+            hump_decks()
+        } else if strict_envelope {
             decks(fg.height_m, diameter_m)
         } else {
             reference_decks(fg.height_m, diameter_m)
@@ -247,6 +261,15 @@ impl CabinGeometry {
             tailcone_len,
             cabin_end_x: x_max - tailcone_len,
             is_double_deck: is_double_deck(fg.height_m, diameter_m),
+            crown_rises: upper_deck
+                .map(|_| {
+                    x_stations
+                        .iter()
+                        .map(|&x| fg.hump_crown_rise_m(x))
+                        .collect()
+                })
+                .unwrap_or_default(),
+            upper_deck,
             mac,
             x_wing_ac,
             x_lemac,
@@ -286,23 +309,35 @@ impl CabinGeometry {
     /// Floored at 0.1 m so that the tapered ends, where the wall thickness
     /// exceeds the half-section, still divide into decks rather than
     /// inverting.
+    /// Under an upper-deck hump this is the main lobe's, the hump's crown
+    /// rise taken off.
     pub fn internal_half_height(&self, x: f64) -> f64 {
-        (self.height_at(x) / 2.0 - self.wall).max(0.1)
+        let rise = self.crown_rise_m(x);
+        ((self.height_at(x) - rise) / 2.0 - self.wall).max(0.1)
     }
 
     /// Where `deck`'s floor sits at station `x`.
     pub fn floor_z(&self, deck: &DeckSpec, x: f64) -> f64 {
+        if self.upper_deck.is_some() {
+            return self.hump_floor_z(deck, x);
+        }
         self.zc_at(x) + deck.floor_frac * self.internal_half_height(x)
     }
 
     /// Where `deck`'s ceiling sits at station `x`.
     pub fn ceil_z(&self, deck: &DeckSpec, x: f64) -> f64 {
+        if self.upper_deck.is_some() {
+            return self.hump_ceil_z(deck, x);
+        }
         self.zc_at(x) + deck.ceil_frac * self.internal_half_height(x)
     }
 
     /// The headroom on `deck` at station `x`, floored at 0.3 m for the same
     /// reason [`Self::internal_half_height`] has a floor.
     pub fn deck_height(&self, deck: &DeckSpec, x: f64) -> f64 {
+        if self.upper_deck.is_some() {
+            return (self.ceil_z(deck, x) - self.floor_z(deck, x)).max(0.3);
+        }
         ((deck.ceil_frac - deck.floor_frac) * self.internal_half_height(x)).max(0.3)
     }
 
