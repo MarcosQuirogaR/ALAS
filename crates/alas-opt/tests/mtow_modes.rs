@@ -296,15 +296,7 @@ fn the_a220_band_closes_on_its_charted_point_inside_the_declared_band() {
         .expect("route flown off-design");
     assert!(flight.dispatch.destination_landing_mass_kg <= sized.design_landing_mass_kg);
     assert!(sized.dispatch.destination_landing_mass_kg <= sized.design_landing_mass_kg + 1e-6);
-    // Old: hard feasible. New (v1.3.2): the one hard finding is the empty
-    // aircraft's minimum nose-gear load (6.62 % of weight against 6.72 %): the
-    // measured 5.02 m nose (was 3.2 m) moves the cabin proxy 0.9 m aft.
-    assert_eq!(
-        assessment.violated_hard_ids(),
-        vec!["min_nose_gear_load"],
-        "{:?}",
-        assessment.residuals
-    );
+    assert!(assessment.hard_feasible, "{:?}", assessment.residuals);
 }
 
 /// The payload-adjusted mode closes on the same charted range by default,
@@ -318,13 +310,5 @@ fn the_payload_adjusted_mode_closes_on_the_charted_range_by_default() {
     assert!((sized.design_range_m - 2_150.0 * 1_852.0).abs() < 1e-6);
     assert!(sized.takeoff_mass_kg <= config.requirements.mtow_kg);
     assert!(sized.takeoff_mass_kg > 0.85 * config.requirements.mtow_kg);
-    // Old: hard feasible. New (v1.3.2): the one hard finding is the empty
-    // aircraft's minimum nose-gear load (6.62 % of weight against 6.72 %): the
-    // measured 5.02 m nose (was 3.2 m) moves the cabin proxy 0.9 m aft.
-    assert_eq!(
-        assessment.violated_hard_ids(),
-        vec!["min_nose_gear_load"],
-        "{:?}",
-        assessment.residuals
-    );
+    assert!(assessment.hard_feasible, "{:?}", assessment.residuals);
 }

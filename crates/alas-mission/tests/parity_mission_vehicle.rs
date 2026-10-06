@@ -438,21 +438,6 @@ fn request_corrections() -> BTreeMap<&'static str, RequestCorrection> {
             Value::Null,
             4.14,
         ),
-        // Measured nose length and tip height (v1.3.2), from the Airbus
-        // general-dimensions drawings (see the preset comments); the frozen
-        // generic nose was 27-42 % shorter.
-        correction(
-            "A320-200.geometry_config.fuselage.cabin_start_x_m",
-            3.5,
-            4.78,
-        ),
-        correction("A320-200.geometry_config.fuselage.nose_z_m", -0.3, -0.63),
-        correction(
-            "A340-300.geometry_config.fuselage.cabin_start_x_m",
-            5.5,
-            7.72,
-        ),
-        correction("A340-300.geometry_config.fuselage.nose_z_m", -0.4, -0.21),
         correction(
             "A320-200.geometry_config.wing.side_of_body_chord_ratio",
             "<absent>",
