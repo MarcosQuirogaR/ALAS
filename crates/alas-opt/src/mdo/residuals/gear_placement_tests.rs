@@ -312,12 +312,7 @@ fn a_three_leg_group_translates_past_its_centre_leg_behind_the_wing_root() {
         tip_chord_m: 2.827_541_478_958_002,
         sweep_deg: 40.926_177_529_939_146,
         tip_twist_deg: -1.737_388_828_312_142_1,
-        // Old -3.977 m -> new -3.5 m: with the measured 7.42 m DC-10 nose (was
-        // 5.5 m) the cabin proxy and the empty centre of gravity sit further aft
-        // and the old shift can no longer be placed (the placement finds no
-        // translation that clears the minimum nose-gear load); -3.5 m is the
-        // nearest shift (probed at 0.5 m steps) that can.
-        wing_x_shift_m: -3.5,
+        wing_x_shift_m: -3.977_305_764_442_710_3,
         tail_scale: 1.011_511_624_181_909_5,
         airfoil_thickness_scale: 0.971_979_582_161_175_3,
         airfoil_camber_scale: 0.989_585_468_423_623_5,

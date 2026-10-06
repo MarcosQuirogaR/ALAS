@@ -102,9 +102,7 @@ mod tests {
         let (main, upper) = (&g.passenger_decks[0], &g.passenger_decks[1]);
         // The main floor is level under and aft of the hump.
         let aft = g.floor_z(main, 40.0);
-        // old 8.0 dropped: the measured 10.6 m nose (was 6.0 m) puts x = 8 m in
-        // the nose, where the section centre line still rises.
-        for x in [12.0, 16.0, 22.0, 27.0, 33.0] {
+        for x in [8.0, 12.0, 16.0, 22.0, 27.0, 33.0] {
             assert!((g.floor_z(main, x) - aft).abs() < 1e-9, "main floor at {x}");
         }
         // ACAP D6-58326-1 Rev F p. 2-29: 2.73 m floor to floor.

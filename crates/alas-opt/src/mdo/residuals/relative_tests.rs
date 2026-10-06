@@ -151,13 +151,7 @@ fn a_candidate_below_both_nominal_and_requirement_fails() {
 
 #[test]
 fn clean_sheet_has_no_nominal_and_no_relative_residuals() {
-    // The fixture keeps the legacy 3.5 m / -0.3 m A320 nose. With the measured
-    // 4.78 m nose (v1.3.2) the clean-sheet nominal of the preset's own 37.57 m
-    // design vector fails its item-level CG assessment: the mass ledger has a
-    // systems residual of -22 kg (cg_model_error), a model sensitivity of the
-    // clean-sheet mass path to the shorter compartment, recorded in the
-    // release notes rather than pinned here.
-    let config = AlasConfig::from_value(&serde_json::json!({"preset": "A320-200", "geometry": {"fuselage": {"cabin_start_x_m": 3.5, "nose_z_m": -0.3}}, "optimizer": {"design_space": {"mode": "clean_sheet"}}}))
+    let config = AlasConfig::from_value(&serde_json::json!({"preset": "A320-200", "optimizer": {"design_space": {"mode": "clean_sheet"}}}))
         .unwrap_or_else(|error| panic!("{error}"));
     assert_ne!(
         config.optimizer.design_space.mode,

@@ -190,6 +190,13 @@ pub fn atr72_600() -> AircraftPreset {
             // trimmed by elevator tabs (ATSB AO-2014-032, Fig. 4), so no
             // takeoff stabiliser setting is credited.
             elevator_up_travel_deg: Some(21.8),
+            // Tail-strike attitude 8 deg: the ATR maintenance manual's tail skid "is
+            // designed to avoid fuselage contact with the runway when the take-off or
+            // landing attitude has an angle of 8 deg or greater" (quoted in UK AAIB
+            // Bulletin 8/2006, ATR 72-212A D-ANFH, EW/C2005/09/04, p.3); the skid sits
+            // between frames 38 and 39. The generic tailcone loft understates the
+            // geometric tail-down angle, so this is the floor.
+            min_tip_back_deg: 8.0,
             ..LandingGearConfig::default()
         },
         design_vector: DesignVector {
@@ -273,12 +280,6 @@ pub fn atr72_600() -> AircraftPreset {
                 cabin_z_m: 0.0,
                 tailcone_length_m: 6.0,
                 tail_z_m: 1.0,
-                // Solved so the tail-down angle is 8 deg: the ATR maintenance manual's
-                // tail skid "is designed to avoid fuselage contact with the runway when
-                // the take-off or landing attitude has an angle of 8 deg or greater"
-                // (quoted in UK AAIB Bulletin 8/2006, ATR 72-212A D-ANFH, EW/C2005/09/04,
-                // p.3); the skid sits between frames 38 and 39.
-                belly_upsweep_length_m: Some(7.8),
                 nose_windshield_angle_deg: None,
                 nose_crown_end_fraction: None,
                 nose_radome_length_fraction: None,
