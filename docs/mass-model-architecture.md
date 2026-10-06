@@ -3,9 +3,7 @@
 This is the durable description of how ALAS asks and answers the three
 different mass questions, which item owns every kilogram of the ledger, and
 where each design weight comes from. The equation-level description of the
-NASA FLOPS transport port is [`flops-mass-model.md`](flops-mass-model.md);
-the evidence behind the registered aircraft inputs is
-[`pure-flops-aircraft-evidence.md`](pure-flops-aircraft-evidence.md). The
+NASA FLOPS transport port is [`flops-mass-model.md`](flops-mass-model.md). The
 reproducible experiment matrix behind the numbers quoted here is
 
 ```sh
