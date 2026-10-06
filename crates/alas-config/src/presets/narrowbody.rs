@@ -134,6 +134,12 @@ pub fn a320_200() -> AircraftPreset {
             // aft CG 36.8 %MAC (1.762-1.843 m across the tabulated states).
             fuselage_ground_clearance_m: Some(1.79),
             takeoff_stabilizer_nose_up_deg: Some(crate::landing_gear::TRANSPORT_THS_TAKEOFF_NOSE_UP_DEG),
+            // Published tail-strike attitude: 11.7 deg pitch to ground contact with
+            // the main gear compressed (Airbus, "Avoiding Tail Strike", Operational
+            // Liaison Meeting, FBW; NTSB docket attachment "Airbus Material -
+            // Avoiding Tail Strike", PDF p.12). The generic tailcone loft
+            // understates the geometric tail-down angle, so it is the floor.
+            min_tip_back_deg: 11.7,
             ..LandingGearConfig::default()
         },
         // The planform is the planar wing of the Airbus plan view (Figure
@@ -254,26 +260,16 @@ pub fn a320_200() -> AircraftPreset {
                 // Airbus A320 Aircraft Characteristics, general dimensions:
                 // the external cross-section is taller than it is wide.
                 height_m: Some(4.14),
-                // Measured nose (v1.3.2): Airbus A320 AC (Jul 2026) fig 2-2-0-991-004-A01 sheets 1-2, PDF pp 44-45,
-                // Outline read from the drawing, nose length = L(2 %) (full section within
-                // 2 % of D_eff), tip height from the drawn mid-line at the tip. Laws fitted at fixed
-                // length to the upper, lower and plan lines (RMS 0.02-0.04 D_eff); the section
-                // exponent is not measurable from an airport-planning drawing and stays unset.
-                nose_z_m: -0.63,
-                cabin_start_x_m: 4.78,
+                nose_z_m: -0.3,
+                cabin_start_x_m: 3.5,
                 cabin_z_m: 0.1,
                 tailcone_length_m: 7.5,
                 tail_z_m: 1.0,
-                // Solved so the tail-down angle about the main wheels on the static
-                // ground plane is the published 11.7 deg pitch to ground contact with
-                // the main gear compressed: Airbus, "Avoiding Tail Strike" (Operational Liaison Meeting, FBW; NTSB docket attachment "Airbus Material - Avoiding Tail Strike", PDF p.12).
-                // The belly then starts to rise 26.3 m aft of the nose.
-                belly_upsweep_length_m: Some(11.25),
-                nose_windshield_angle_deg: Some(33.0),
-                nose_crown_end_fraction: Some(1.0),
-                nose_radome_length_fraction: Some(0.11),
-                nose_keel_exponent: Some(2.31),
-                nose_plan_exponent: Some(1.27),
+                nose_windshield_angle_deg: None,
+                nose_crown_end_fraction: None,
+                nose_radome_length_fraction: None,
+                nose_keel_exponent: None,
+                nose_plan_exponent: None,
                 nose_section_exponent: None,
                 ..FuselageConfig::default()
             },

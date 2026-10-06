@@ -137,21 +137,11 @@ pub fn ave() -> AircraftPreset {
             },
             fuselage: FuselageConfig {
                 diameter_m: 6.2,
-                // Measured nose (v1.3.2): Boeing D6-86073 Rev G (Sep 2025) 777X ACAP sec 2.2.1 General Dimensions Model 777-9, PDF p17 (doc 2-3), vector drawing. The 777-9 is the stand-in for the AVE body (diameter 6.2 m), not a measurement of the AVE.
-                // Nose length = L(2 %) (full section within 2 % of D_eff), tip height from the
-                // drawn mid-line (extrapolated where the dimension line hides the tip).
-                nose_z_m: -0.48,
-                cabin_start_x_m: 8.42,
+                nose_z_m: -0.5,
+                cabin_start_x_m: 6.0,
                 cabin_z_m: 0.2,
                 tailcone_length_m: 14.0,
                 tail_z_m: 1.8,
-                // Laws fitted at fixed length to the upper, lower and plan lines (RMS 0.02-0.04 D_eff); section exponent unmeasured, left unset.
-                nose_windshield_angle_deg: Some(28.2),
-                nose_crown_end_fraction: Some(1.0),
-                nose_radome_length_fraction: Some(0.1),
-                nose_keel_exponent: Some(1.55),
-                nose_plan_exponent: Some(1.03),
-                nose_section_exponent: None,
                 ..FuselageConfig::default()
             },
             engine: EngineConfig {

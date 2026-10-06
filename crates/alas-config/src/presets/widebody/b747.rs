@@ -182,11 +182,11 @@ pub fn b747_400() -> AircraftPreset {
             // (drawing read, +-0.2 m).
             fuselage_ground_clearance_m: Some(1.94),
             // Boeing AERO 2007 Q1 "Tail Strikes: Prevention" gives 12.5 deg for
-            // the 747-400 with the gear extended; the belly upsweep below is
-            // solved for a model tail-down angle of about 11 deg (compressed
-            // struts, estimate), so the tip-back floor is the tail-down angle
-            // itself and no 15 deg Raymer/Roskam floor is imposed.
-            min_tip_back_deg: 0.0,
+            // the 747-400 with the gear extended; about 11 deg is the estimate
+            // for compressed struts (ESTIMATE). The generic tailcone loft
+            // understates the geometric tail-down angle, so 11 deg is the floor
+            // and no 15 deg Raymer/Roskam floor is imposed.
+            min_tip_back_deg: 11.0,
             takeoff_stabilizer_nose_up_deg: Some(crate::landing_gear::TRANSPORT_THS_TAKEOFF_NOSE_UP_DEG),
             ..LandingGearConfig::default()
         },
@@ -318,31 +318,15 @@ pub fn b747_400() -> AircraftPreset {
                 // ESTIMATE), which seats 42 business at 38 in (0.96 m) pitch.
                 upper_deck_start_x_m: Some(9.5),
                 upper_deck_end_x_m: Some(23.0),
-                // Measured nose (v1.3.2): Boeing D6-58326-1 Rev F
-                // sec 2.2.1 side view (PDF p31) and plan view, outline read at 600 dpi. The model
-                // nose is the MAIN-lobe nose: the hump rise (fields above) is subtracted from
-                // the drawn upper line before fitting. Nose length = L(2 %) = 10.60 m (1 % to
-                // 3 %: 11.52 to 9.86 m); the tip is 3.35 m above the keel, 0.27 m below the
-                // main-lobe axis. Laws fitted at fixed length to the upper, lower and plan
-                // lines (RMS 0.013 / 0.019 / 0.034 D_eff); section exponent unmeasured.
-                nose_z_m: -0.07,
-                cabin_start_x_m: 10.6,
+                // Nose tip on the body axis, 3.42 m above the keel and 5.36 m
+                // above the ground (the 600 dpi side view reads 3.35 m above
+                // the keel).
+                nose_z_m: 0.0,
+                cabin_start_x_m: 6.0,
                 cabin_z_m: 0.2,
-                nose_windshield_angle_deg: Some(32.0),
-                nose_crown_end_fraction: Some(0.58),
-                nose_radome_length_fraction: Some(0.1),
-                nose_keel_exponent: Some(1.47),
-                nose_plan_exponent: Some(1.27),
-                nose_section_exponent: None,
                 // Generic tail-cone length of the outer mould line (ESTIMATE).
                 tailcone_length_m: 17.0,
                 tail_z_m: 2.5,
-                // ESTIMATE: set so the model tail-down angle from the aft main
-                // gear is about 11 deg, against the 12.5 deg of Boeing AERO 2007
-                // Q1 "Tail Strikes: Prevention" for the 747-400 with the gear
-                // extended. The side view of ACAP section 2.2.1 shows the belly
-                // rising from about 46 m aft of the nose (22.7 m); the model scrape angle is the minimum over the lower-contour stations aft of the primary (wing) gear at 31.82 m, set by the first station, so 26.3 m gives about 11 deg with the 1.94 m keel clearance.
-                belly_upsweep_length_m: Some(26.3),
                 ..FuselageConfig::default()
             },
             engine: EngineConfig {
