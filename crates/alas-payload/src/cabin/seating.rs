@@ -149,8 +149,10 @@ pub(super) fn place_seats(
     } else {
         max_certifiable_capacity_reference_compatibility(g, pax)
     };
-    let deck_caps = geometric_deck_caps.with_source_cap(source_capacity_cap);
-    let segments = cabin_deck_segments(g);
+    let deck_caps = geometric_deck_caps.with_source_cap_for(g, source_capacity_cap);
+    let segments = super::layout_order(g, cabin_deck_segments(g));
+    let mut source_left =
+        super::RemainingSourceCap::new(g, &geometric_deck_caps, &deck_caps, source_capacity_cap);
     let exit_spec = select_exit_type(g.diameter_m);
     let est_cap = if let Some(source_exit_layout) = source_exit_layout {
         largest_pair_rating(&source_exit_layout)
@@ -170,11 +172,15 @@ pub(super) fn place_seats(
 
     let total_pax: i64 = classes.iter().map(|class| class.remaining.max(0)).sum();
     let main_deck_baggage = product_exit_capacity && crate::cargo::lacks_underfloor_hold(g);
-    for (deck_index, segment) in segments.iter().enumerate() {
+    for segment in &segments {
         let deck = segment.deck;
-        let deck_cap = deck_caps.for_deck(deck.name);
+        let deck_cap = source_left.cap(deck.name);
+        let is_main = g
+            .passenger_decks
+            .first()
+            .is_some_and(|main| main.name == deck.name);
 
-        if deck_index == 0 && product_exit_capacity && !g.door_stations.is_empty() {
+        if is_main && product_exit_capacity && !g.door_stations.is_empty() {
             let declared = place_declared_deck(
                 g, deck, segment.x0, segment.x1, pax, classes, total_pax, aisle_w, deck_cap,
             );
@@ -182,6 +188,7 @@ pub(super) fn place_seats(
             bays.extend(declared.bays);
             deck_utilization.push((deck.name, declared.utilization));
             deck_seated.push((deck.name, declared.seated));
+            source_left.seat(declared.seated);
             max_abreast = max_abreast.max(declared.max_abreast);
             max_aisles = max_aisles.max(declared.max_aisles);
             ci = classes
@@ -191,6 +198,9 @@ pub(super) fn place_seats(
             continue;
         }
 
+        if g.upper_deck.is_some() && !is_main {
+            ci = super::upper_deck::upper_deck_start_class(classes, ci);
+        }
         let (sim_len, sim_seated, sim_class_bays) = simulate_segment(
             g, classes, ci, aisle_w, deck_cap, segment.x0, segment.x1, deck,
         );
@@ -322,6 +332,7 @@ pub(super) fn place_seats(
             g.usable_width(deck, aft_bay_x - MONUMENT_LEN / 2.0),
         ));
         deck_seated.push((deck.name, seated_here));
+        source_left.seat(seated_here);
     }
 
     Seating {

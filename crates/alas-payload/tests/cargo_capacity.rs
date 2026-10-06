@@ -222,7 +222,9 @@ fn a220_registered_source_capacity_is_applied_during_row_allocation() {
     assert_eq!(segments.len(), 1);
     assert_eq!(select_exit_type(cabin.diameter_m).name, "III");
     let deck_length_m = segments[0].x1 - segments[0].x0;
-    assert!((deck_length_m - 29.75).abs() < 0.01);
+    // old 29.75 -> new 27.93 m: the measured 5.02 m A220 nose (was 3.2 m) takes
+    // 1.82 m from the generic deck (cabin_start + 0.5 to the aft bulkhead).
+    assert!((deck_length_m - 27.93).abs() < 0.01);
     let layout = alas_payload::build_payload_layout(&plane, &config, 0.0, 0.0)
         .expect("A220 source-capped payload");
     let alas_payload::LayoutSummary::Passenger(summary) = &layout.summary else {

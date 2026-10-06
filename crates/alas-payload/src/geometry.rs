@@ -45,3 +45,4 @@ mod model;
 pub use model::*;
 mod deck_tables;
 use deck_tables::*;
+mod hump_deck;

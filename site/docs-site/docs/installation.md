@@ -3,17 +3,17 @@
 ALAS is built in Rust as a single native executable. There is no Python runtime,
 no package manager, and no background sidecar service required.
 
-## Release v1.3.1
+## Release v1.3.2
 
 ### Windows
 
-- **Windows**: Download the portable x86-64 archive from [GitHub Releases](https://github.com/MarcosQuirogaR/ALAS/releases/tag/v1.3.1), verify its SHA-256 file, and run `ALAS.exe`.
+- **Windows**: Download the portable x86-64 archive from [GitHub Releases](https://github.com/MarcosQuirogaR/ALAS/releases/tag/v1.3.2), verify its SHA-256 file, and run `ALAS.exe`.
 - **Linux**: Download the portable x86-64 `tar.gz` archive from the same release, verify its SHA-256 file, extract it, and run `./ALAS` (glibc 2.35 or newer).
 - **Windows trust**: A signed binary identifies its publisher, but a new file can still show a SmartScreen reputation prompt until Microsoft has enough clean download history. Verify the publisher and checksum before running it.
 
 ### Other Platforms
 
-The v1.3.1 release provides Windows and Linux x86-64 packages. External solver stages remain
+The v1.3.2 release provides Windows and Linux x86-64 packages. External solver stages remain
 optional and require compatible user-supplied installations and licences.
 
 ---

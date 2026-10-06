@@ -18,19 +18,30 @@
 //! The shaped nose, with `Ln` the nose length, `T` and `B` the cabin crown
 //! and keel heights and `z_n` the tip height (`nose_z_m`):
 //!
-//! - upper envelope: a straight radome line from the tip to the windshield
-//!   base at `xi = radome_length`, a straight windshield at exactly the
-//!   requested angle to the waterline, and a cubic Hermite blend to the cabin
-//!   crown (zero slope) at `xi = crown_end`, flat afterwards;
+//! - upper envelope: a convex radome arc from the tip to the windshield base
+//!   at `xi = radome_length` that leaves the tip with the rounding of the keel
+//!   line and meets the windshield with the windshield slope (no kink), a
+//!   straight windshield at exactly the requested angle to the waterline,
+//!   and a cubic Hermite blend to the cabin crown (zero slope) at
+//!   `xi = crown_end`, flat afterwards;
 //! - lower envelope: `z_n + (B - z_n) (1 - (1 - xi)^2)^(1 / keel_exponent)`;
 //! - plan half-width: `(W / 2) (1 - (1 - xi)^2)^(1 / plan_exponent)`;
 //! - section exponent: `2 + (n_ws - 2) sin(pi xi)`, 2 at both ends.
 //!
+//! The radome arc, with `u = x / x_base`, `q(u) = 1 - (1 - u)^2`, `D` the rise
+//! from the tip to the windshield base and `m = min(1, tan(angle) x_base / D)`:
+//! `z = z_n + D ((1 - m) q(u)^(1 / keel_exponent) + m u)`. Its end slope is
+//! `m D / x_base = tan(angle)` (continuous with the windshield), it is concave
+//! down for every `keel_exponent >= 1`, and `m = 1` is the straight line. The
+//! base rise is `0.25` of the tip-to-crown rise, raised to `tan(angle) x_base`
+//! (at most `0.6` of the rise) when the windshield is steeper than that chord.
+//!
 //! The defaults used for fields left unset are class ESTIMATES for a
 //! narrow-body jet (engineering judgement, not measured from a drawing); no
-//! preset sets them. Limits: no upper-deck hump, no double-lobe section, no
-//! cockpit eyebrow step, no radome blister, and no independent tip radius
-//! (the tip curvature follows the plan and keel exponents).
+//! preset sets them. Limits: no double-lobe section, no cockpit eyebrow
+//! step, no radome blister, and no independent tip radius (the tip
+//! curvature follows the plan and keel exponents). An upper-deck hump is a
+//! separate crown rise added on top of these stations (`hump`).
 
 use super::FuselageConfig;
 
@@ -44,6 +55,9 @@ const WINDSHIELD_RISE_SHARE: f64 = 0.7;
 const WINDSHIELD_RUN_SHARE: f64 = 0.5;
 /// Share of the tip-to-crown rise reached at the windshield base.
 const WINDSHIELD_BASE_RISE_SHARE: f64 = 0.25;
+/// Largest share of the tip-to-crown rise the radome arc may climb before the
+/// windshield base.
+const WINDSHIELD_BASE_RISE_MAX_SHARE: f64 = 0.6;
 
 /// One generated nose station.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -92,13 +106,13 @@ impl NoseShape {
     /// Valid range of the windshield angle, degrees.
     pub const WINDSHIELD_ANGLE_DEG: (f64, f64) = (15.0, 60.0);
     /// Valid range of the crown end fraction.
-    pub const CROWN_END_FRACTION: (f64, f64) = (0.55, 0.95);
+    pub const CROWN_END_FRACTION: (f64, f64) = (0.55, 1.0);
     /// Valid range of the radome length fraction.
     pub const RADOME_LENGTH_FRACTION: (f64, f64) = (0.10, 0.45);
     /// Valid range of the keel exponent.
-    pub const KEEL_EXPONENT: (f64, f64) = (1.5, 4.0);
+    pub const KEEL_EXPONENT: (f64, f64) = (1.3, 4.0);
     /// Valid range of the plan exponent.
-    pub const PLAN_EXPONENT: (f64, f64) = (1.6, 2.6);
+    pub const PLAN_EXPONENT: (f64, f64) = (1.0, 2.6);
     /// Valid range of the section exponent.
     pub const SECTION_EXPONENT: (f64, f64) = (2.0, 3.5);
 }
@@ -209,7 +223,7 @@ impl FuselageConfig {
         self.nose_z_m + (keel - self.nose_z_m) * rounded.powf(1.0 / nose.keel_exponent)
     }
 
-    /// Upper envelope at `xi`: radome line, straight windshield, crown blend.
+    /// Upper envelope at `xi`: radome arc, straight windshield, crown blend.
     fn nose_top_z_m(&self, nose: &NoseShape, xi: f64) -> f64 {
         let length = self.cabin_start_x_m;
         let crown = self.cabin_z_m + self.nose_cabin_half_height_m();
@@ -217,14 +231,33 @@ impl FuselageConfig {
         let x = xi * length;
         let x_base = nose.radome_length_fraction * length;
         let x_crown = nose.crown_end_fraction * length;
-        let z_base = tip + WINDSHIELD_BASE_RISE_SHARE * (crown - tip);
+        let slope = nose.windshield_angle_deg.to_radians().tan();
+        let rise = crown - tip;
+        let base_rise = if rise > 0.0 {
+            (WINDSHIELD_BASE_RISE_SHARE * rise)
+                .max(slope * x_base)
+                .min(WINDSHIELD_BASE_RISE_MAX_SHARE * rise)
+        } else {
+            WINDSHIELD_BASE_RISE_SHARE * rise
+        };
+        let z_base = tip + base_rise;
         if x >= x_crown {
             return crown;
         }
         if x <= x_base {
-            return tip + (z_base - tip) * x / x_base;
+            // Convex arc: a straight share `m` (the windshield slope at the
+            // base) plus a rounded share with the keel line's tip rounding.
+            let straight = if base_rise > 0.0 {
+                (slope * x_base / base_rise).min(1.0)
+            } else {
+                1.0
+            };
+            let u = x / x_base;
+            let rounded = (1.0 - (1.0 - u).powi(2)).max(0.0);
+            return tip
+                + base_rise
+                    * ((1.0 - straight) * rounded.powf(1.0 / nose.keel_exponent) + straight * u);
         }
-        let slope = nose.windshield_angle_deg.to_radians().tan();
         let run = (WINDSHIELD_RISE_SHARE * (crown - z_base) / slope)
             .min(WINDSHIELD_RUN_SHARE * (x_crown - x_base))
             .max(0.0);
@@ -341,6 +374,87 @@ mod tests {
             let measured = ((t1 - t0) / ((xi1 - xi0) * length)).atan().to_degrees();
             assert!((measured - angle).abs() < 1.0e-9, "{measured} vs {angle}");
         }
+    }
+
+    #[test]
+    fn the_radome_is_convex_and_meets_the_windshield_without_a_kink() {
+        for (angle, radome, keel) in [(32.0, 0.1, 1.3), (45.0, 0.2, 2.2), (30.0, 0.3, 1.5)] {
+            let fuselage = FuselageConfig {
+                nose_windshield_angle_deg: Some(angle),
+                nose_radome_length_fraction: Some(radome),
+                nose_keel_exponent: Some(keel),
+                cabin_start_x_m: 8.0,
+                ..FuselageConfig::default()
+            };
+            let nose = fuselage.nose_shape().unwrap();
+            let length = fuselage.cabin_start_x_m;
+            let base = nose.radome_length_fraction;
+            let top = |xi: f64| fuselage.nose_top_z_m(&nose, xi);
+            let step = 1.0e-4;
+            let slope = |xi: f64| (top(xi + step) - top(xi - step)) / (2.0 * step * length);
+            // Concave down: the slope never rises along the arc.
+            let mut previous = f64::INFINITY;
+            for index in 1..=40 {
+                let xi = base * f64::from(index) / 41.0;
+                let s = slope(xi);
+                assert!(
+                    s <= previous + 1.0e-9,
+                    "slope rises at {xi}: {s} > {previous}"
+                );
+                assert!(s > 0.0);
+                previous = s;
+            }
+            // Continuous slope across the windshield base.
+            let tan = angle.to_radians().tan();
+            let before = slope(base - 2.0 * step);
+            let after = slope(base + 2.0 * step);
+            assert!((before - tan).abs() < 2.0e-3, "{before} vs {tan}");
+            assert!((after - tan).abs() < 1.0e-6, "{after} vs {tan}");
+        }
+    }
+
+    #[test]
+    fn the_widened_ranges_are_accepted_and_clamped_at_the_new_limits() {
+        let fuselage = FuselageConfig {
+            nose_plan_exponent: Some(1.0),
+            nose_keel_exponent: Some(1.3),
+            nose_crown_end_fraction: Some(1.0),
+            ..FuselageConfig::default()
+        };
+        let nose = fuselage.nose_shape().unwrap();
+        assert_eq!(
+            (
+                nose.plan_exponent,
+                nose.keel_exponent,
+                nose.crown_end_fraction
+            ),
+            (1.0, 1.3, 1.0)
+        );
+        let below = FuselageConfig {
+            nose_plan_exponent: Some(0.5),
+            nose_keel_exponent: Some(1.0),
+            nose_crown_end_fraction: Some(1.5),
+            ..FuselageConfig::default()
+        };
+        let nose = below.nose_shape().unwrap();
+        assert_eq!(
+            (
+                nose.plan_exponent,
+                nose.keel_exponent,
+                nose.crown_end_fraction
+            ),
+            (1.0, 1.3, 1.0)
+        );
+        let mut width = 0.0;
+        let mut top = f64::NEG_INFINITY;
+        for index in 1..=200 {
+            let s = fuselage.nose_station(f64::from(index) / 200.0);
+            assert!(s.height_m > 0.0 && s.width_m >= width - 1.0e-12);
+            assert!(s.z_m + s.height_m / 2.0 >= top - 1.0e-12);
+            width = s.width_m;
+            top = s.z_m + s.height_m / 2.0;
+        }
+        assert!((top - 3.3).abs() < 1.0e-12 && (width - 6.2).abs() < 1.0e-12);
     }
 
     #[test]

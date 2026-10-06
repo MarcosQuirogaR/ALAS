@@ -213,11 +213,22 @@ pub fn a220_300() -> AircraftPreset {
                 // ACP Issue 013 Figure 1 / table 5, locator B: 146.5 in body
                 // height.
                 height_m: Some(3.721),
-                nose_z_m: -0.2,
-                cabin_start_x_m: 3.2,
+                // Measured nose (v1.3.2): Airbus A220 ACP BD500-3AB48-13800-00 (2025-11) fig 1 sheets 1-2, PDF pp 75-76 (A220-100 drawing, the nose is shared with the -300),
+                // Outline read from the drawing, nose length = L(2 %) (full section within
+                // 2 % of D_eff), tip height from the drawn mid-line at the tip. Laws fitted at fixed
+                // length to the upper, lower and plan lines (RMS 0.02-0.04 D_eff); the section
+                // exponent is not measurable from an airport-planning drawing and stays unset.
+                nose_z_m: -0.69,
+                cabin_start_x_m: 5.02,
                 cabin_z_m: 0.1,
                 tailcone_length_m: 7.0,
                 tail_z_m: 0.8,
+                nose_windshield_angle_deg: Some(30.7),
+                nose_crown_end_fraction: Some(1.0),
+                nose_radome_length_fraction: Some(0.11),
+                nose_keel_exponent: Some(2.11),
+                nose_plan_exponent: Some(1.38),
+                nose_section_exponent: None,
                 ..FuselageConfig::default()
             },
             engine: EngineConfig {

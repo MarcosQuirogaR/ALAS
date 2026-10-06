@@ -22,7 +22,9 @@ use alas_config::{presets, ConfigNode, EngineConfig, Entry, Node, DESIGN_VARIABL
 use serde_json::Value;
 
 mod belly_upsweep;
+mod hump;
 mod nose;
+mod profile;
 
 /// The name of the reference aircraft every sandbox starts from.
 pub const REFERENCE_PRESET: &str = "AVE";
@@ -705,42 +707,18 @@ const SPECS: &[Spec] = &[
     nose::KEEL_EXPONENT,
     nose::PLAN_EXPONENT,
     nose::SECTION_EXPONENT,
-    cfg(
-        "geometry.fuselage.nose_z_m",
-        Discipline::Fuselage,
-        PROFILE,
-        "/geometry/fuselage/nose_z_m",
-        FieldKind::Float,
-        Bounds {
-            min: -5.0,
-            max: 5.0,
-            decimals: 2,
-        },
-    ),
-    cfg(
-        "geometry.fuselage.cabin_z_m",
-        Discipline::Fuselage,
-        PROFILE,
-        "/geometry/fuselage/cabin_z_m",
-        FieldKind::Float,
-        Bounds {
-            min: -5.0,
-            max: 5.0,
-            decimals: 2,
-        },
-    ),
-    cfg(
-        "geometry.fuselage.tail_z_m",
-        Discipline::Fuselage,
-        PROFILE,
-        "/geometry/fuselage/tail_z_m",
-        FieldKind::Float,
-        Bounds {
-            min: -5.0,
-            max: 10.0,
-            decimals: 2,
-        },
-    ),
+    profile::NOSE_Z,
+    profile::CABIN_Z,
+    profile::TAIL_Z,
+    hump::HEIGHT,
+    hump::START,
+    hump::CROWN_START,
+    hump::CROWN_END,
+    hump::END,
+    hump::FAIRING_EXPONENT,
+    hump::FLOOR_HEIGHT,
+    hump::DECK_START,
+    hump::DECK_END,
     cfg(
         "geometry.fuselage.n_subdivisions",
         Discipline::Fuselage,

@@ -255,11 +255,23 @@ pub fn a380_800() -> AircraftPreset {
                 // The one non-circular body in the registry: two decks make it
                 // taller than it is wide.
                 height_m: Some(8.41),
-                nose_z_m: -0.6,
-                cabin_start_x_m: 7.0,
+                // Measured nose (v1.3.2): Airbus A380 AC (Dec 2025) fig 2-2-0-991-001-A01 sheets 1-2, PDF pp 34-35,
+                // Outline read from the drawing, nose length = L(2 %) (full section within
+                // 2 % of D_eff), tip height from the drawn mid-line (extrapolated where the
+                // dimension line hides the tip). Laws fitted at fixed
+                // length to the upper, lower and plan lines (RMS 0.02-0.04 D_eff); the section
+                // exponent is not measurable from an airport-planning drawing and stays unset.
+                nose_z_m: -1.45,
+                cabin_start_x_m: 10.78,
                 cabin_z_m: 0.3,
                 tailcone_length_m: 15.0,
                 tail_z_m: 2.0,
+                nose_windshield_angle_deg: Some(36.0),
+                nose_crown_end_fraction: Some(1.0),
+                nose_radome_length_fraction: Some(0.1),
+                nose_keel_exponent: Some(2.26),
+                nose_plan_exponent: Some(1.52),
+                nose_section_exponent: None,
                 ..FuselageConfig::default()
             },
             engine: EngineConfig {

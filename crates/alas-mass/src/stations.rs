@@ -448,8 +448,15 @@ fn cabin_station(
     let (_, length, z) = fuselage_datum(fuselage);
     let cabin_start = geometry.fuselage.cabin_start_x_m;
     let cabin_len = (length - cabin_start - geometry.fuselage.tailcone_length_m).max(1.0);
+    // Floor-installed groups (a cross-section extent) include an upper deck.
+    let x = if extent_yz[0] > 0.0 {
+        let f = &geometry.fuselage;
+        f.furnished_floor_x_m(cabin_start, cabin_len, fraction)
+    } else {
+        cabin_start + fraction * cabin_len
+    };
     ComponentStation {
-        position_m: [cabin_start + fraction * cabin_len, 0.0, z],
+        position_m: [x, 0.0, z],
         extent_m: [cabin_len, extent_yz[0], extent_yz[1]],
         method,
     }
