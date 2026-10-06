@@ -28,7 +28,9 @@ pub use empennage::{EmpennageConfig, TailSizing};
 pub use engine::{ActiveEngineModel, EngineBindingError, EngineConfig};
 pub use frame::{BodyFuselageExtent, LongitudinalStationFrame, MacFrame};
 pub use fuselage::{
-    AftBodyStation, FuselageConfig, FuselageSection, FuselageSectionError, NoseShape, NoseStation,
+    AftBodyStation, BodyStation, FuselageConfig, FuselageSection, FuselageSectionError, NoseShape,
+    NoseStation, UpperDeck, UpperDeckHump, DEFAULT_HUMP_FAIRING_EXPONENT,
+    HUMP_FAIRING_EXPONENT_RANGE, HUMP_MAIN_DECK_FLOOR_FRACTION,
 };
 pub use wing::{
     AirfoilClass, InboardAerodynamicStation, MainWingPanel, MainWingStation, MainWingStationKind,

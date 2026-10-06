@@ -66,3 +66,5 @@
 
 # Local working state and internal reports. Never part of the project.
 /.agent/
+/handoff.md
+/docs/research/

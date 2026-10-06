@@ -36,9 +36,10 @@ not served by GitHub Pages and no workflow in this repository updates it.
 Publishing there is a separate upload of the built `dist/` tree over SFTP, and
 it has to be done deliberately.
 
-**The Pages mirror** is built and published by
-`.github/workflows/site-pages.yml` at the repository root whenever `site/`
-changes on `main`. It has no custom domain attached.
+**GitHub Pages** (`marcosquirogar.github.io/ALAS`) is only a redirect:
+`.github/workflows/site-pages.yml` publishes `.github/pages-redirect/index.html`
+(also as `404.html`), which forwards every path to the same path on
+`alas.uvigo.es`. It does not build or host the site.
 
 Earlier revisions of this file claimed that pushing to `main` published the
 live site. That was never true of `alas.uvigo.es`.

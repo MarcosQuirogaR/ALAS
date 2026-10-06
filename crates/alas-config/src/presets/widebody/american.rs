@@ -180,13 +180,14 @@ pub fn b787_9() -> AircraftPreset {
                 // 11 in and height 19 ft 6 in.
                 diameter_m: 5.77,
                 height_m: Some(5.94),
-                nose_z_m: -0.4,
-                // Generic nose-taper and tail-cone lengths of the outer mould
-                // line: the ACAP prints no flight-deck or aft
-                // pressure-bulkhead station. They shape the body only; the
-                // passenger cabin is bounded by the section 2.7.1 door
-                // stations (`B787_9_EXIT_LAYOUT`).
-                cabin_start_x_m: 5.5,
+                // Measured nose (v1.3.2): Boeing D6-58333 Rev Q (Oct 2025) sec 2.2.2 General Dimensions Model 787-9, PDF p22 (doc p 2-6), raster drawing (about 201 dpi).
+                // Nose length = L(2 %) (full section within 2 % of D_eff), tip height from the
+                // drawn mid-line (extrapolated where the dimension line hides the tip).
+                // The tail-cone length is a generic estimate (the ACAP prints no aft
+                // pressure-bulkhead station); the passenger cabin is bounded by the section
+                // 2.7.1 door stations (`B787_9_EXIT_LAYOUT`).
+                nose_z_m: -1.03,
+                cabin_start_x_m: 7.9,
                 cabin_z_m: 0.2,
                 tailcone_length_m: 12.0,
                 tail_z_m: 1.5,
@@ -196,11 +197,12 @@ pub fn b787_9() -> AircraftPreset {
                 // compressed-strut value was not found, so this static-ground geometry
                 // overstates the tail-down angle by the strut stroke.
                 belly_upsweep_length_m: Some(20.55),
-                nose_windshield_angle_deg: None,
-                nose_crown_end_fraction: None,
-                nose_radome_length_fraction: None,
-                nose_keel_exponent: None,
-                nose_plan_exponent: None,
+                // Laws fitted at fixed length to the upper, lower and plan lines (RMS 0.02-0.04 D_eff); section exponent unmeasured, left unset.
+                nose_windshield_angle_deg: Some(35.5),
+                nose_crown_end_fraction: Some(0.99),
+                nose_radome_length_fraction: Some(0.1),
+                nose_keel_exponent: Some(2.01),
+                nose_plan_exponent: Some(1.12),
                 nose_section_exponent: None,
                 ..FuselageConfig::default()
             },
@@ -420,8 +422,13 @@ pub fn dc_10() -> AircraftPreset {
             },
             fuselage: FuselageConfig {
                 diameter_m: 6.02,
-                nose_z_m: -0.4,
-                cabin_start_x_m: 5.5,
+                // Measured nose position, LOW confidence (v1.3.2): Boeing DC-10 airport planning
+                // document (file boeing-dc10.pdf) sec 2.2 General Airplane Dimensions, Model DC-10
+                // Series 30, PDF p15 (doc p9), 300 dpi scan. L(2 %) = 7.42 m (1 % to 3 %: 8.12 to
+                // 7.28 m), tip 0.56 m below the cabin axis. The nose shape is left on the
+                // single-ellipsoid law: the scan fit is too noisy (lower line RMS 0.05 D_eff).
+                nose_z_m: -0.36,
+                cabin_start_x_m: 7.42,
                 cabin_z_m: 0.2,
                 tailcone_length_m: 11.5,
                 tail_z_m: 1.6,

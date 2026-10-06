@@ -22,10 +22,10 @@ and the full pipeline (geometry, mass/CG, mission, drag build-up, wingbox
 sizing, figures) runs end to end for hand-built and CPACS-imported aircraft,
 against ten reference presets and the external solvers that are installed.
 None of that means it is trustworthy yet: no preset currently has a verified
-design mission, and the known limitations are listed in `docs/STATUS.md`.
+design mission. The models and their validity limits are described in
+`docs/methods.md`.
 
-`docs/STATUS.md` is the answer to "does it work and what is
-wrong with it". `docs/PORTING.md` answers a narrower, still-important
+`docs/PORTING.md` answers a narrower, still-important
 question: whether a given module has been checked against the Python
 reference to a stated tolerance, and what licence its content carries, which
 matters for the physics kernels but no longer describes the project as a

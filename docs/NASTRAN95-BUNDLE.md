@@ -100,9 +100,7 @@ production SOL 101 deck passes with an F06 of identical size, all 12,822
 displacement rows identical to the `-O0` baseline to every printed digit,
 identical epsilon values, and 13.6 s wall time against 23.6 s for the `-O0`
 executable on the same host (both under the ALAS launch contract: DBMEM 1,
-OCMEM 64,000,000 words, patched NASINFO timing constants). The SOL 103 result
-for the same build is recorded in `docs/STATUS.md` together with its modal
-correlation against the baseline.
+OCMEM 64,000,000 words, patched NASINFO timing constants).
 
 Configure and build:
 

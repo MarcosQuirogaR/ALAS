@@ -61,8 +61,12 @@ pub fn define_mass_coordinates(
     // same fuselage length, for instance.
     let x_systems = cabin_start + 0.45 * cabin_len;
     // Furnishings (seats, galleys, etc.) and operational items, also installed
-    // over the whole cabin, for the same reason.
-    let x_furn = cabin_start + 0.50 * cabin_len;
+    // over the whole cabin, for the same reason; an upper deck under a hump
+    // carries its floor-area share (`FuselageConfig::furnished_floor_x_m`,
+    // exactly this station without one).
+    let x_furn = geometry_config
+        .fuselage
+        .furnished_floor_x_m(cabin_start, cabin_len, 0.50);
     // Payload CG at the centre of the cabin it is distributed over. A lumped
     // planning payload sits on the same floor as the systems and furnishings
     // above, so it takes the same installed-cabin reference rather than the

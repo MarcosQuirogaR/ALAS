@@ -253,6 +253,29 @@ pub fn dimensions(path: &str) -> Option<(Value, Value)> {
         | "preset_then_field.geometry.empennage.vstab_tip_le_m[2]" => (8.5, 9.12),
         "B787-9.geometry.empennage.vstab_z_m"
         | "preset_then_field.geometry.empennage.vstab_z_m" => (1.8, 3.17),
+        // Measured nose lengths and tip heights (v1.3.2): the L(2 %) outline and tip
+        // height read from each manufacturer's general-dimensions drawing; the frozen
+        // generic nose was 26-42 % shorter (see the preset comments for the figures).
+        "AVE.geometry.fuselage.cabin_start_x_m" => (6.0, 8.42),
+        "AVE.geometry.fuselage.nose_z_m" => (-0.5, -0.48),
+        "A340-300.geometry.fuselage.cabin_start_x_m" => (5.5, 7.72),
+        "A340-300.geometry.fuselage.nose_z_m" => (-0.4, -0.21),
+        "A380-800.geometry.fuselage.cabin_start_x_m" => (7.0, 10.78),
+        "A380-800.geometry.fuselage.nose_z_m" => (-0.6, -1.45),
+        "B787-9.geometry.fuselage.cabin_start_x_m"
+        | "preset_then_field.geometry.fuselage.cabin_start_x_m" => (5.5, 7.9),
+        "B787-9.geometry.fuselage.nose_z_m" | "preset_then_field.geometry.fuselage.nose_z_m" => {
+            (-0.4, -1.03)
+        }
+        "A320-200.geometry.fuselage.cabin_start_x_m" => (3.5, 4.78),
+        "A320-200.geometry.fuselage.nose_z_m" => (-0.3, -0.63),
+        "A220-300.geometry.fuselage.cabin_start_x_m"
+        | "preset_only.geometry.fuselage.cabin_start_x_m" => (3.2, 5.02),
+        "A220-300.geometry.fuselage.nose_z_m" | "preset_only.geometry.fuselage.nose_z_m" => {
+            (-0.2, -0.69)
+        }
+        "DC-10.geometry.fuselage.cabin_start_x_m" => (5.5, 7.42),
+        "DC-10.geometry.fuselage.nose_z_m" => (-0.4, -0.36),
         "A320-200.geometry.wing.root_datum_x_m" => (12.9, 11.891),
         // Wing roots re-anchored so the model quarter-MAC point sits on the
         // manufacturer weight-and-balance one, derived by two-point statics
@@ -340,6 +363,9 @@ pub fn native_field(path: &str, key: &str) -> bool {
         // Python schema has no such fields (all unset = ellipsoid nose).
         || (key.starts_with("nose_")
             && key != "nose_z_m"
+            && (path.ends_with("FuselageConfig") || path.ends_with(".fuselage")))
+        // Optional upper-deck hump and upper deck (all unset = no hump).
+        || ((key.starts_with("hump_") || key.starts_with("upper_deck_"))
             && (path.ends_with("FuselageConfig") || path.ends_with(".fuselage")))
         || (path.ends_with(".landing_gear")
             && matches!(

@@ -215,7 +215,11 @@ fn registered_hard_mtow_nominals_separate_model_defects_from_physical_findings()
             assert!(!assessment.violated_hard_ids().contains(&"cg_model_error"));
         }
         let expected: &[&str] = match name {
-            "A220-300" => &[],
+            // Pin update (measured nose): was []. The 5.02 m A220 nose (was
+            // 3.2 m) moves the cabin proxy 0.9 m aft, and the empty
+            // aircraft's nose-gear share falls to 6.62 % of its weight against
+            // the 6.72 % published minimum.
+            "A220-300" => &["min_nose_gear_load"],
             "A320-200" => &[],
             // With the trimmable stabiliser at its takeoff nose-up setting
             // the rotation boundary lies ahead of the item-level takeoff CG.
@@ -227,7 +231,11 @@ fn registered_hard_mtow_nominals_separate_model_defects_from_physical_findings()
             // mission's mid-cruise lift clears Korn divergence (19.5 against
             // 26.9 counts). The takeoff trim clears the rotation boundary
             // that sat 0.8 %MAC aft of the flown takeoff CG (42.6 %MAC).
-            "A380-800" => &["min_nose_gear_load"],
+            //
+            // Pin update (measured nose): was ["min_nose_gear_load"]. The
+            // 10.78 m nose (was 7.0 m) moves the cabin proxy 1.9 m aft, and
+            // the zero-fuel static margin falls to 2.5 % against the 5 % floor.
+            "A380-800" => &["min_nose_gear_load", "static_margin_floor"],
             // Pin update (round 3): was ["forward_cg_range",
             // "min_nose_gear_load", "tip_back"]. The 5 deg/s^2 class pitch
             // acceleration (Sadraey 12.3), the DATCOM K' elevator table with
@@ -239,7 +247,11 @@ fn registered_hard_mtow_nominals_separate_model_defects_from_physical_findings()
             // The maximum-fuel mission's mid-cruise lift still crosses the
             // Korn divergence boundary (27.5 against 26.9 counts). The
             // takeoff trim clears the rotation boundary.
-            "AVE" => &["sweep_consistent_with_cruise_mach"],
+            // Pin update (measured nose): was only the sweep finding. The 8.42
+            // m 777-9 nose (was 6.0 m) moves the cabin proxy 1.2 m aft and the
+            // flown takeoff CG ahead of the nose-load floor (5.44 % of weight
+            // against 6 %).
+            "AVE" => &["min_nose_gear_load", "sweep_consistent_with_cruise_mach"],
             // The conventional Korn section factor leaves insufficient
             // cruise thrust and sweep. The empty aircraft's CG lies 3 mm
             // aft of the published minimum nose-gear share at its weight
@@ -258,13 +270,24 @@ fn registered_hard_mtow_nominals_separate_model_defects_from_physical_findings()
             // (estimated planform, secondary-source weights): it clears every
             // hard residual once the inboard trailing edge is unswept.
             "C919" => &[],
-            // New preset (old: not registered). Same findings as the DC-10:
-            // the conventional Korn section factor (0.87) leaves the 41 deg
-            // leading-edge sweep short at Mach 0.85, the model cruise L/D of
-            // about 15.9 needs more thrust than the four CF6-80C2B1F
-            // estimate-flagged cruise reference (52.4 kN each), and the
-            // item-level takeoff CG sits aft of the published minimum
-            // nose-gear share (6.7 % of weight at the maximum taxi weight).
+            // Pin update (upper-deck hump): was ["min_nose_gear_load",
+            // "cruise_thrust", "sweep_consistent_with_cruise_mach"]. The
+            // partial upper deck now seats passengers over the forward
+            // fuselage (it was an unseated full-length deck), the declared
+            // ACAP doors bound the main cabin, and the furnishings carry the
+            // upper floor's share, so the item-level takeoff CG moves forward
+            // of the published minimum nose-gear share (6.7 % of weight at
+            // the maximum taxi weight). The Korn and thrust findings remain:
+            // the conventional section factor (0.87) leaves the 41 deg
+            // leading-edge sweep short at Mach 0.85, and the model cruise
+            // L/D needs more thrust than the four CF6-80C2B1F
+            // estimate-flagged cruise reference (52.4 kN each).
+            //
+            // Pin update (measured nose): was ["cruise_thrust",
+            // "sweep_consistent_with_cruise_mach"]. The 10.6 m nose (was 6.0
+            // m) moves the cabin proxy 2.3 m aft, undoing the forward shift
+            // above: the takeoff nose-gear share is 4.05 % of weight against
+            // the 4.73 % limit.
             "B747-400" => &[
                 "min_nose_gear_load",
                 "cruise_thrust",
@@ -314,8 +337,11 @@ fn registered_hard_mtow_nominals_separate_model_defects_from_physical_findings()
 /// An impossible mission exceeds the mass limit and increases the violation cost.
 #[test]
 fn an_impossible_design_range_is_hard_infeasible_and_costs_more() {
-    let config = AlasConfig::from_value(&serde_json::json!({"preset": "A220-300"})).unwrap();
-    let design = alas_config::presets::get("A220-300").unwrap().design_vector;
+    // Old A220-300 -> new B787-9: the A220 now misses its minimum nose-gear
+    // load at the nominal (6.62 % against 6.72 %), so it is no longer a
+    // feasible baseline for this comparison.
+    let config = AlasConfig::from_value(&serde_json::json!({"preset": "B787-9"})).unwrap();
+    let design = alas_config::presets::get("B787-9").unwrap().design_vector;
     let feasible = assess_product_candidate(&config, &design).unwrap();
     assert!(feasible.hard_feasible, "{:?}", feasible.violated_hard_ids());
     assert!(feasible.violated_hard_ids().is_empty());
