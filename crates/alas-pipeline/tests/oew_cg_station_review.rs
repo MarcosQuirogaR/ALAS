@@ -65,11 +65,8 @@ fn empty_aircraft_stations_respect_the_systems_band_and_ground_equilibrium() {
             == PropulsionTechnology::Turboprop
             || config.geometry.engine.turboprop.is_some();
         if !turboprop {
-            // Upper bound old 0.50 -> new 0.51: the A380 systems group sits at 0.504
-            // of the length now that its measured 10.78 m nose (was 7.0 m) moves
-            // the cabin proxy that places it 1.9 m aft.
             assert!(
-                (0.40..=0.51).contains(&systems_fraction),
+                (0.40..=0.50).contains(&systems_fraction),
                 "{name}: systems group CG at {systems_fraction:.3} of the fuselage length"
             );
         }

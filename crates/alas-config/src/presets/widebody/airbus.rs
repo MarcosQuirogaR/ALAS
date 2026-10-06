@@ -100,6 +100,12 @@ pub fn a340_300() -> AircraftPreset {
             // wing (F2) 2.13 m; the 1.83 m BF is the belly fairing.
             fuselage_ground_clearance_m: Some(2.13),
             takeoff_stabilizer_nose_up_deg: Some(crate::landing_gear::TRANSPORT_THS_TAKEOFF_NOSE_UP_DEG),
+            // Published tail-strike attitude: 10.1 deg pitch to ground contact with
+            // the main gear compressed (Airbus, "Avoiding Tail Strike", Operational
+            // Liaison Meeting, FBW; NTSB docket attachment "Airbus Material -
+            // Avoiding Tail Strike", PDF p.12). The generic tailcone loft
+            // understates the geometric tail-down angle, so it is the floor.
+            min_tip_back_deg: 10.1,
             ..LandingGearConfig::default()
         },
         design_vector: DesignVector {
@@ -194,26 +200,16 @@ pub fn a340_300() -> AircraftPreset {
             },
             fuselage: FuselageConfig {
                 diameter_m: 5.64,
-                // Measured nose (v1.3.2): Airbus A340-200/-300 AC (Dec 2025) fig 2-2-0-991-007-A01 sheets 1-2, PDF pp 39-40,
-                // Outline read from the drawing, nose length = L(2 %) (full section within
-                // 2 % of D_eff), tip height from the drawn mid-line (extrapolated where the
-                // dimension line hides the tip). Laws fitted at fixed
-                // length to the upper, lower and plan lines (RMS 0.02-0.04 D_eff); the section
-                // exponent is not measurable from an airport-planning drawing and stays unset.
-                nose_z_m: -0.21,
-                cabin_start_x_m: 7.72,
+                nose_z_m: -0.4,
+                cabin_start_x_m: 5.5,
                 cabin_z_m: 0.2,
                 tailcone_length_m: 12.0,
                 tail_z_m: 1.5,
-                // Solved so the tail-down angle about the effective main-gear station
-                // is the published 10.1 deg pitch to ground contact with the main gear
-                // compressed: Airbus, "Avoiding Tail Strike" (Operational Liaison Meeting, FBW; NTSB docket attachment "Airbus Material - Avoiding Tail Strike", PDF p.12).
-                belly_upsweep_length_m: Some(19.5),
-                nose_windshield_angle_deg: Some(28.3),
-                nose_crown_end_fraction: Some(1.0),
-                nose_radome_length_fraction: Some(0.1),
-                nose_keel_exponent: Some(1.43),
-                nose_plan_exponent: Some(1.0),
+                nose_windshield_angle_deg: None,
+                nose_crown_end_fraction: None,
+                nose_radome_length_fraction: None,
+                nose_keel_exponent: None,
+                nose_plan_exponent: None,
                 nose_section_exponent: None,
                 ..FuselageConfig::default()
             },
