@@ -420,22 +420,24 @@ mod tests {
     /// When the ledger exists, the hard gate's analyzed-TOW
     /// centre of gravity must be the ledger's own point (the tank-fill-order,
     /// detailed-payload state the mass statement reports), not the lumped
-    /// ten-group model's -- the A220-300 is the example of the two
-    /// paths disagreeing by several percent MAC.
+    /// ten-group model's -- the B787-9 is the example of the two
+    /// paths disagreeing by several percent MAC. (Old example: the A220-300,
+    /// whose lumped and ledger flown-takeoff points came within 0.9 % MAC when
+    /// its nose was measured at 5.02 m, was 3.2 m.)
     #[test]
-    fn a220_300_hard_gate_uses_the_ledgers_takeoff_cg_not_the_lumped_one() {
-        let config = AlasConfig::from_value(&serde_json::json!({ "preset": "A220-300" }))
-            .expect("A220-300 preset config");
-        let preset = alas_config::presets::get("A220-300").expect("registered preset");
+    fn b787_9_hard_gate_uses_the_ledgers_takeoff_cg_not_the_lumped_one() {
+        let config = AlasConfig::from_value(&serde_json::json!({ "preset": "B787-9" }))
+            .expect("B787-9 preset config");
+        let preset = alas_config::presets::get("B787-9").expect("registered preset");
         let report = crate::full_analysis::FullAnalysis::new(config.clone())
             .run(&preset.design_vector, true)
-            .expect("A220-300 must analyze");
+            .expect("B787-9 must analyze");
         let feasibility =
             assess_physical_feasibility(&config, &preset.design_vector, &report, None);
         let mass_balance = feasibility
             .mass_balance
             .as_ref()
-            .expect("A220-300 builds an item-level mass ledger");
+            .expect("B787-9 builds an item-level mass ledger");
         let ledger_takeoff_pct_mac = mass_balance
             .states
             .iter()
@@ -445,7 +447,7 @@ mod tests {
         let gate_takeoff_pct_mac = feasibility
             .model_cg
             .as_ref()
-            .expect("A220-300 produces a model CG assessment")
+            .expect("B787-9 produces a model CG assessment")
             .loading_states
             .iter()
             .find(|state| state.state == alas_opt::ModelCgLoadingState::AnalyzedTakeoff)

@@ -49,6 +49,7 @@ mod exit_rules;
 mod fittings;
 mod seating;
 mod stations;
+mod upper_deck;
 
 pub(crate) use door_seating::count_declared_deck;
 pub(crate) use engine::build_passenger_layout_with_aircraft_cg_target;
@@ -64,6 +65,7 @@ pub(crate) use stations::resolve_door_stations;
 pub use stations::{
     DoorStation, MonumentKind, GALLEY_LENGTH_M, LAVATORY_LENGTH_M, MONUMENT_BAY_LENGTH_M,
 };
+pub(crate) use upper_deck::{layout_order, RemainingSourceCap};
 
 use alas_config::{CertifiedExitLayout, PassengerCabinConfig};
 
@@ -155,6 +157,13 @@ pub fn cabin_deck_segments(g: &CabinGeometry) -> Vec<DeckSegment<'_>> {
                 .flatten()
             {
                 DeckSegment { deck, x0, x1 }
+            } else if let Some(upper) = g.upper_deck.filter(|_| deck.name == crate::layout::UPPER) {
+                // The upper deck under a hump runs where its floor is.
+                DeckSegment {
+                    deck,
+                    x0: upper.start_x_m,
+                    x1: upper.end_x_m,
+                }
             } else if deck.name == crate::layout::UPPER {
                 DeckSegment {
                     deck,
@@ -296,7 +305,7 @@ pub(crate) fn max_certifiable_capacity_with_source_layout(
         per_deck.push((segment.deck.name, deck_cap));
         total += deck_cap;
     }
-    DeckCapacities { per_deck, total }.with_source_cap(source_capacity_cap)
+    DeckCapacities { per_deck, total }.with_source_cap_for(g, source_capacity_cap)
 }
 
 /// The historical capacity proxy used only by the frozen Python
@@ -340,7 +349,11 @@ pub fn abreast_and_aisles(
     x: f64,
 ) -> (i64, i64) {
     let seat_w = class.width_m.max(MIN_SEAT_WIDTH);
-    if class.abreast > 0 {
+    // A declared abreast is the main deck's; the upper deck under a hump is
+    // narrower (747-400: 10 economy abreast below, 6 above; ACAP D6-58326-1
+    // Rev F section 2.5.3), so there it is packed to its own floor width.
+    let declared_fits_deck = g.upper_deck.is_none() || deck.name != crate::layout::UPPER;
+    if class.abreast > 0 && declared_fits_deck {
         let aisles = if class.abreast <= MAX_ABREAST_SINGLE_AISLE {
             1
         } else {

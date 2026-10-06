@@ -252,7 +252,6 @@ pub fn atr72_600() -> AircraftPreset {
                 // not certified surface stations: +/-0.3 m digitization/model
                 // uncertainty. Nose x=0, barrel centre z=0, z positive up.
                 // The T-tail root and fin tip share (x,z)=(24.8,4.7) m.
-                // See docs/research/atr72-tail-geometry-provenance.md.
                 hstab_offset_from_tail_m: 27.166 - 24.8,
                 hstab_z_m: 4.7,
                 hstab_root_chord_m: 1.8,

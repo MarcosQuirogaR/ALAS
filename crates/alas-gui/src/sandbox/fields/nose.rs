@@ -28,7 +28,7 @@ pub(super) const CROWN_END: Spec = cfg(
     FieldKind::OptionalFloat,
     Bounds {
         min: 0.55,
-        max: 0.95,
+        max: 1.0,
         decimals: 2,
     },
 );
@@ -53,7 +53,7 @@ pub(super) const KEEL_EXPONENT: Spec = cfg(
     "/geometry/fuselage/nose_keel_exponent",
     FieldKind::OptionalFloat,
     Bounds {
-        min: 1.5,
+        min: 1.3,
         max: 4.0,
         decimals: 2,
     },
@@ -66,7 +66,7 @@ pub(super) const PLAN_EXPONENT: Spec = cfg(
     "/geometry/fuselage/nose_plan_exponent",
     FieldKind::OptionalFloat,
     Bounds {
-        min: 1.6,
+        min: 1.0,
         max: 2.6,
         decimals: 2,
     },

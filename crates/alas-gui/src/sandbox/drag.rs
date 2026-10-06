@@ -24,6 +24,9 @@ use crate::state::AppState;
 
 use super::fields::{self, Discipline, FieldKind, SandboxField};
 
+mod hump;
+use hump::generated_fuselage_station_fractions;
+
 /// What one handle edits.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HandleKind {
@@ -89,6 +92,10 @@ pub enum HandleKind {
     GeneratedFuselageSectionHeight,
     /// A generated fuselage station's vertical position.
     GeneratedFuselageSectionZ,
+    /// The upper-deck hump's crown height.
+    HumpHeight,
+    /// One of the upper-deck hump's four stations.
+    HumpStation,
 }
 
 /// One draggable handle.
@@ -268,6 +275,7 @@ fn generated_fuselage_rows(
             GeneratedFuselageStationPart::Tail(xi),
         ));
     }
+    hump::raise_generated_rows(fuselage, length_m, &mut rows);
     for (index, override_section) in fuselage.generated_sections.iter().enumerate() {
         let Some((section, _)) = rows.get_mut(index) else {
             break;
@@ -588,6 +596,7 @@ pub fn handles(
             index,
         ));
     }
+    hump::push_hump_handles(config, design, &mut out);
     for (index, section) in f.custom_sections.iter().enumerate() {
         let x = section.x_fraction * design.fuselage_length_m;
         let z = section.z_m;
@@ -1029,38 +1038,6 @@ fn custom_section_bounds(state: &AppState, handle: &Handle) -> (f64, f64, usize)
     } else {
         (bounds.0, bounds.1, decimals)
     }
-}
-
-fn generated_fuselage_station_fractions(state: &AppState) -> Vec<f64> {
-    let (Some(config), Some(design)) = (state.typed_config(), state.current_design()) else {
-        return Vec::new();
-    };
-    let fuselage = &config.geometry.fuselage;
-    let length_m = design.fuselage_length_m;
-    // Reject NaN explicitly: `length_m <= 0.0` alone is false for NaN, which
-    // would fall through to station fraction math on garbage input.
-    if !length_m.is_finite() || length_m <= 0.0 {
-        return Vec::new();
-    }
-    let cabin_start = fuselage.cabin_start_x_m;
-    let tailcone = fuselage.tailcone_length_m;
-    let cabin_end = fuselage.aft_body_start_m(length_m);
-    if !(cabin_start >= 0.0 && cabin_end >= cabin_start && tailcone >= 0.0) {
-        return Vec::new();
-    }
-    let mut fractions = Vec::with_capacity(20);
-    for index in 0..9 {
-        let angle = std::f64::consts::FRAC_PI_2 * index as f64 / 9.0;
-        let xi = 1.0 - angle.cos();
-        fractions.push(fuselage.nose_station(xi).x_m / length_m);
-    }
-    fractions.push(cabin_start / length_m);
-    fractions.push(cabin_end / length_m);
-    for index in 1..10 {
-        let xi = index as f64 / 9.0;
-        fractions.push(fuselage.aft_body_station(xi, length_m).x_m / length_m);
-    }
-    fractions
 }
 
 fn write_custom_section_scalar(state: &mut AppState, handle: &Handle, scalar: f64) -> bool {

@@ -910,6 +910,10 @@ fn is_native_config_field(path: &str, key: &str) -> bool {
         || (key.starts_with("nose_")
             && key != "nose_z_m"
             && (path.ends_with("FuselageConfig") || path.ends_with(".fuselage")))
+        // Optional upper-deck hump and upper deck; the frozen Python schema
+        // has no such fields (all unset = constant crown, one deck).
+        || ((key.starts_with("hump_") || key.starts_with("upper_deck_"))
+            && (path.ends_with("FuselageConfig") || path.ends_with(".fuselage")))
         // The declared section class that fixes the Korn technology factor
         // replaced the frozen global `drag_model.korn_technology_factor`; its
         // mapping and per-preset declarations are checked by the airfoil-class

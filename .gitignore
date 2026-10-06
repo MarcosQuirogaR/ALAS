@@ -67,3 +67,7 @@
 # Local working state and internal reports. Never part of the project.
 /.agent/
 /.claude/
+/CLAUDE.md
+/AGENTS.md
+/handoff.md
+/docs/research/
