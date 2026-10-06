@@ -8,7 +8,7 @@ const RELEASES_URL = 'https://github.com/MarcosQuirogaR/ALAS/releases'
 const RELEASE_SUMMARIES: Record<string, string[]> = {
   'v1.3.2': [
     'Boeing 747-400 upper-deck hump and partial upper deck, with business class upstairs and first class in the nose; the model OEW is +13.8 % over the published 178,755 kg, which exposes a FLOPS over-prediction.',
-    'Measured nose geometry on seven presets (A320-200, A220-300, A340-300, A380-800, B787-9, B747-400 and the AVE body, a 777-9 stand-in) from the manufacturers' drawings, and the nose length and tip height of the DC-10; the nose model gains a convex radome and wider parameter ranges.',
+    'Measured nose geometry on seven presets (A320-200, A220-300, A340-300, A380-800, B787-9, B747-400 and the AVE body, a 777-9 stand-in) from manufacturer drawings, and the nose length and tip height of the DC-10; the nose model gains a convex radome and wider parameter ranges.',
     'Longer noses shorten the generic cabin and move the model centre of gravity aft: the A220-300, AVE and B747-400 now report a minimum nose-gear load finding, and static margins stay unrealistic.',
   ],
   'v1.3.1': [
