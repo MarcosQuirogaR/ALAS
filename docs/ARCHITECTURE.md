@@ -6,8 +6,7 @@ sized wingbox and a set of figures comes out.
 
 This document describes how the Rust workspace is arranged. The models are
 described in `docs/methods.md`, the numerical-parity and licence record against
-the original Python implementation is `docs/PORTING.md`, and what works today
-is `docs/STATUS.md`.
+the original Python implementation is `docs/PORTING.md`.
 
 ---
 

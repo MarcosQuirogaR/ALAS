@@ -1,9 +1,8 @@
 # Porting ledger
 
 **This is a numerical-parity and licence-provenance record, not a project
-status page.** For "does ALAS work today and what is wrong with it", read
-`docs/STATUS.md` instead. The two used to answer the same question, when
-every crate was a line-by-line translation; they no longer do, because
+status page.** It used to describe the whole project, when every crate was
+a line-by-line translation; it no longer does, because
 orchestration layers such as `alas-pipeline` and `alas-gui` were built
 natively over already-parity-tested physics kernels rather than translated,
 so their rows below correctly read `todo` for "never checked against a
