@@ -121,7 +121,6 @@ export default function Acknowledgements() {
     <section id="acknowledgements" className="border-b border-rule">
       <div className="mx-auto max-w-[68rem] px-6 py-20">
         <div className="flex items-center justify-between">
-          <p className="section-mark">Acknowledgements</p>
           <a href={withBase('')} className="font-mono text-[0.75rem] text-accent hover:underline">
             ← Back to Overview
           </a>
@@ -159,8 +158,7 @@ export default function Acknowledgements() {
         </dl>
 
         <div className="mt-16 max-w-[54ch]">
-          <p className="section-mark">Licence and third-party notices</p>
-          <h2 className="mt-6 text-[1.65rem] font-bold leading-[1.25] tracking-[-0.015em] text-fg-strong">
+          <h2 className="text-[1.65rem] font-bold leading-[1.25] tracking-[-0.015em] text-fg-strong">
             Licence
           </h2>
           <p className="mt-5 text-[1rem] leading-[1.65] text-fg">

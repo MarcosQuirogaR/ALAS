@@ -30,13 +30,15 @@ stage's own best when it scored with a cheaper model.
   seed would probably keep improving. This is a local refinement around the preset,
   not a global search.
 - **The outcome varies between runs.** With the same seed, three full runs of this
-  configuration ended at spans of 71.28, 68.70 and 70.17 m, because both stages
-  stop on their wall-clock limits: the runs analysed 592, 576 and 592 screening
-  and 596, 518 and 569 refinement candidates, and planned their refinement
-  schedules from the measured throughput (557, 581 and 596 evaluations). A run
-  that stops on evaluation budgets only, or replays the recorded counts, is
-  bit-identical. Every number in this guide belongs to the one run named in the
-  [Gallery](gallery.md).
+  configuration ended at spans of 71.28, 68.70 and 70.17 m. The 71.28 m run flew
+  the preset's 5,645 km route rather than the 6,362 km SimBrief route of the
+  other two, so it optimized a different mission. The other two differ because
+  both stages stop on their wall-clock limits: they analysed 576 and 592
+  screening and 518 and 569 refinement candidates, on refinement schedules
+  planned from the measured throughput (581 and 596 evaluations). Replaying the
+  recorded counts on the same route reproduces this guide's run bit for bit, and
+  a run that stops on evaluation budgets only is likewise exact. Every number
+  in this guide belongs to the one run named in the [Gallery](gallery.md).
 
 !!! note "Two L/D numbers, on purpose"
     The optimizer scores candidates with a cheaper in-loop VLM evaluation, because

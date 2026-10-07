@@ -67,14 +67,12 @@ export default function Workflows() {
   return (
     <section id="workflows" className="border-b border-rule bg-raised/40">
       <div className="mx-auto max-w-[68rem] px-6 py-16 sm:py-20">
-        <p className="section-mark">Workflows</p>
-
-        <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between sm:gap-10">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between sm:gap-10">
           <div>
             <h2 className="text-[1.65rem] font-bold leading-[1.25] tracking-[-0.015em] text-fg-strong">
-              Three ways to start a design
+              Starting a design
             </h2>
-            <p className="mt-2 text-[0.96rem] text-fg-dim">Pick a preset, a brief, or a blank sandbox.</p>
+            <p className="mt-2 text-[0.96rem] text-fg-dim">From a registered preset, from a design brief, or in the sandbox.</p>
           </div>
           <a href={withBase('docs/user-guide/')} className="prose-link text-[0.92rem]">
             User guide →

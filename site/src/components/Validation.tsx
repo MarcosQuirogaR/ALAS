@@ -138,15 +138,13 @@ export default function Validation() {
   return (
     <section id="validation" className="border-b border-rule">
       <div className="mx-auto max-w-[68rem] px-6 py-16 sm:py-20">
-        <p className="section-mark">Validation</p>
-
-        <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between sm:gap-10">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between sm:gap-10">
           <div>
             <h2 className="text-[1.65rem] font-bold leading-[1.25] tracking-[-0.015em] text-fg-strong">
-              Checked against published data
+              Validation
             </h2>
             <p className="mt-2 text-[0.96rem] text-fg-dim">
-              Twelve presets, residuals reported as computed.
+              Model results for the registered presets compared with published values.
             </p>
           </div>
           <a href={withBase('docs/validation/')} className="prose-link text-[0.92rem]">

@@ -106,15 +106,6 @@ h4 {
   );
 }
 
-.section-mark {
-  display: block;
-  font-family: var(--font-mono);
-  font-size: 0.68rem;
-  font-weight: 500;
-  letter-spacing: 0.15em;
-  text-transform: uppercase;
-  color: var(--color-accent);
-}
 
 .prose-link {
   color: var(--color-accent);

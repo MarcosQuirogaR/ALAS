@@ -42,7 +42,7 @@ export default function Colophon() {
 
         <div className="mt-9 flex flex-col gap-3 border-t border-rule pt-6 text-[0.78rem] text-fg-dim sm:flex-row sm:items-center sm:justify-between">
           <p>
-            © {year} ALAS. Free software under AGPL-3.0-or-later;{' '}
+            © {year} Marcos Quiroga Rodríguez. ALAS is free software under AGPL-3.0-or-later;{' '}
             <a
               href="https://github.com/MarcosQuirogaR/ALAS"
               className="underline transition-colors hover:text-fg-strong"

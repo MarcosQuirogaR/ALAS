@@ -94,10 +94,11 @@ The figures are drawn by the same code path as the desktop results view and
 `payload_layout.json`, the run log and the solver files).
 
 !!! warning "Read these results with their limits"
-    - The optimizer stages stop on their time limits, so the same seed gave spans
-      of 71.28, 68.70 and 70.17 m in three runs; the numbers describe this run
-      only. Stopping on evaluation budgets only, or replaying the recorded stage
-      counts, reproduces a run exactly.
+    - The same seed gave spans of 71.28, 68.70 and 70.17 m in three runs: the
+      first flew a different route, and the optimizer stages stop on their time
+      limits. The numbers describe this run only. Stopping on evaluation budgets
+      only, or replaying the recorded stage counts on the same route, reproduces
+      a run exactly.
     - With the finite-element solvers on, the delivered design is rejected after
       downstream analysis on four root-stress flags (see
       [Structural analysis](structural-analysis.md#finite-element-strength-flags)).

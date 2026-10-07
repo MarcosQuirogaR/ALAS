@@ -83,7 +83,7 @@ Flags supported by the current release:
 | `--no-parallel` | None | Run independent pipeline stages sequentially |
 | `--plots` | None | Generate and save SVG/PNG figures into the output directory |
 | `--show` | None | Display figures interactively (implies `--plots`) |
-| `--seed` | `<INT>` | Specify integer random seed for reproducible optimization |
+| `--seed` | `<INT>` | Integer random seed; bit-identical reruns also need `optimizer.solver.stop_on_evaluations_only: true` in the configuration (the stage time limits otherwise set the stopping point) |
 | `--aero-solver` | `vlm`, `avl`, `both` | Select aerodynamic result family |
 | `--optimization-solver` | `vlm`, `avl`, `both` | Select optimizer aerodynamic backend |
 | `--quiet` | None | Suppress verbose terminal logging |

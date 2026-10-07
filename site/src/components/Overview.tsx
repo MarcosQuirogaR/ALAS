@@ -65,30 +65,28 @@ export default function Overview() {
 
   const figures: Figure[] = [
     {
-      src: withBase('demo/transonic.png'),
-      caption: 'Transonic Mach contours (MSES)',
+      src: withBase('docs/assets/ave-threeview-3d-dark.png'),
+      caption: 'AVE reference aircraft, sized geometry',
     },
     {
-      src: withBase('demo/cabin.png'),
+      src: withBase('docs/assets/ave-cabin-payload-dark.png'),
       caption: 'Cabin and payload layout',
     },
     {
-      src: withBase('demo/mission-route.png'),
-      caption: 'Mission route, fuel and mass',
+      src: withBase('docs/assets/ave-mission-route-dark.png'),
+      caption: 'Mission over a SimBrief route, London Heathrow to Dubai',
     },
   ]
 
   return (
     <section id="overview" className="border-b border-rule">
       <div className="mx-auto max-w-[68rem] px-6 py-16 sm:py-20">
-        <p className="section-mark">Overview</p>
-
-        <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between sm:gap-10">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between sm:gap-10">
           <h2 className="text-[1.65rem] font-bold leading-[1.25] tracking-[-0.015em] text-fg-strong">
-            Mission in, sized aircraft out
+            Analyses
           </h2>
           <p className="text-[0.96rem] text-fg-dim sm:text-right">
-            Payload, range, speed and field limits drive coupled analyses.
+            Payload, range, speed and field requirements are the inputs; the coupled analyses size the aircraft.
           </p>
         </div>
 

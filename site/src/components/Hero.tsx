@@ -17,19 +17,12 @@ export default function Hero() {
       <div aria-hidden="true" className="hero-fade absolute inset-0 -z-10" />
 
       <div className="mx-auto max-w-[68rem] px-6 pb-16 pt-20 sm:pb-24 sm:pt-28 lg:pb-32 lg:pt-36">
-        <div className="flex flex-wrap items-center gap-3">
-          <p className="section-mark">Aircraft preliminary design</p>
-          <span className="inline-flex items-center border border-rule bg-raised px-2.5 py-0.5 font-mono text-[0.72rem] text-fg-dim">
-            {CURRENT.tag}
-          </span>
-        </div>
-
-        <h1 className="mt-6 max-w-[28ch] text-[2.2rem] font-bold leading-[1.15] tracking-[-0.02em] text-fg-strong sm:text-[3rem]">
-          Size transport aircraft against a mission
+        <h1 className="max-w-[28ch] text-[2.2rem] font-bold leading-[1.15] tracking-[-0.02em] text-fg-strong sm:text-[3rem]">
+          Aircraft Layout, Analysis and Sizing
         </h1>
 
         <p className="mt-6 max-w-[60ch] text-[1.1rem] leading-[1.5] text-fg">
-          Geometry, aerodynamics, structures, propulsion and trajectory in one optimizer loop.
+          Conceptual design and multidisciplinary analysis of transport aircraft: geometry, aerodynamics, structures, propulsion, mass and mission.
         </p>
 
         <div className="mt-9 flex flex-col gap-3.5 sm:flex-row sm:items-center">
