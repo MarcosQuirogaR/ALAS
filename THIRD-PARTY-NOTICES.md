@@ -115,6 +115,51 @@ audit.
 Compiled by the author from published sources, each cited next to its entry.
 Not a redistribution of any third-party database.
 
+### OurAirports: public domain
+
+`crates/alas-config/data/airports_ourairports.json` carries two airport
+records (elevation, physical runway length, coordinates) taken from the
+OurAirports open data, <https://ourairports.com/data/>, retrieved 2026-09-06
+from <https://davidmegginson.github.io/ourairports-data/>. OurAirports
+publishes this data in the public domain and gives no guarantee of accuracy or
+fitness for use; the file records that statement in its own `source` block.
+Runway lengths are physical lengths, never declared performance distances. No
+licence text needs to travel with the data; the attribution is a courtesy.
+
+### DLR CPACS 3.5 schema: Apache-2.0
+
+`external tools/cpacs_schema.xsd` is the unmodified CPACS XML schema,
+Copyright (c) 2022 Deutsches Zentrum fuer Luft- und Raumfahrt e.V. (DLR),
+Institute of System Architectures in Aeronautics, <https://www.cpacs.de>,
+licensed under the Apache License, Version 2.0
+(<https://www.apache.org/licenses/LICENSE-2.0>). The licence header at the top
+of the file is retained, as the licence requires. It is used to validate the
+CPACS documents the program writes; no other DLR code is copied.
+`external tools/alas_uav_cpacs35.xsd` is this project's own toolspecific
+extension schema (AGPL-3.0-or-later) and is not a DLR work.
+
+### NASA FLOPS weight equations and Aviary reference data
+
+The transport mass model in `crates/alas-mass/src/flops_transport` implements,
+from the published equations, the relations in D. P. Wells, B. L. Horvath and
+L. A. McCullers, "The Flight Optimization System Weights Estimation Method",
+NASA/TM-2017-219627, Volume I, 2017
+(<https://ntrs.nasa.gov/citations/20170005851>). A NASA technical memorandum
+is a US Government work without copyright protection in the United States. No
+FLOPS source code is copied.
+
+The numeric reference cases the model is checked against, and the aircraft
+architecture inputs of the presets that cite them, come from OpenMDAO Aviary
+(<https://github.com/OpenMDAO/Aviary>), Copyright 2023, United States of
+America as represented by the Administrator of the National Aeronautics and
+Space Administration, licensed under the Apache License, Version 2.0. The exact
+files and commit (`c7affbbe54dc`) are pinned with SHA-256 digests in
+`docs/flops-mass-sources.json`. Aviary code is not redistributed or
+translated; only numeric input and output values of its validation cases are
+reproduced, and they serve as comparison data, not as physical aircraft
+validation. Apache-2.0 is compatible with this program's AGPL-3.0-or-later
+licence.
+
 ### CADO airplane database v1.3: ODbL-1.0
 
 Nicolas Monrolin, Thierry Druot, Nicolas Peteilh, Pascal Roches and
