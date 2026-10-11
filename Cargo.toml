@@ -18,7 +18,7 @@ winresource = { version = "0.1.31", default-features = false }
 # the graph. `alas-exec` assigns every external solver ALAS launches to one
 # kill-on-close job, so ending the application, however it ends, ends them too.
 # Held below 2.0.3, which moves to `windows` 0.61 and would add a second copy.
-win32job = ">=2.0.2, <2.0.3"
+win32job = ">=2.0.2, <2.0.4"
 serde = { version = "1", features = ["derive"] }
 # Direct DOM parsing keeps CPACS UID/reference validation separate from rendering.
 roxmltree = "0.20"
