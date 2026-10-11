@@ -1,0 +1,30 @@
+name: Preset or validation data request
+description: Request a new aircraft preset, or offer reference data to check an existing one.
+labels: ["data"]
+body:
+  - type: input
+    id: aircraft
+    attributes:
+      label: Aircraft and variant
+      description: For example "Embraer E195-E2, 2 x PW1900G, 124 seats".
+    validations:
+      required: true
+  - type: textarea
+    id: sources
+    attributes:
+      label: Public sources
+      description: Links to type certificate data sheets, manufacturer airport-planning documents, or papers. Only public sources are used; do not paste proprietary or export-controlled data.
+    validations:
+      required: true
+  - type: textarea
+    id: quantities
+    attributes:
+      label: Quantities you can provide
+      description: For example MTOW, OEW, wing area and span, fuel capacity, range at a payload, V-speeds, engine data.
+  - type: checkboxes
+    id: terms
+    attributes:
+      label: Rights
+      options:
+        - label: The data is public, or I have the right to share it under AGPL-3.0-or-later terms.
+          required: true
