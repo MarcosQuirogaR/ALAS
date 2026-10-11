@@ -1,0 +1,36 @@
+name: PR title
+
+# Pull requests are squash-merged, so the title becomes the commit subject on
+# main. This checks it against Conventional Commits with a plain regex: no
+# third-party action and no checkout.
+
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+
+permissions: {}
+
+concurrency:
+  group: pr-title-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  title:
+    name: Conventional Commits title
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Validate the pull request title
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          pattern='^(feat|fix|perf|refactor|docs|test|build|ci|chore|revert)(\([a-z0-9._/-]+\))?!?: [^ ].{2,}$'
+          if ! printf '%s' "$TITLE" | grep -Eq "$pattern"; then
+            echo "::error title=PR title::'$TITLE' does not match type(scope): summary. Types: feat fix perf refactor docs test build ci chore revert. See CONTRIBUTING.md, Commits and pull requests."
+            exit 1
+          fi
+          if [ "${#TITLE}" -gt 100 ]; then
+            echo "::error title=PR title::The title is longer than 100 characters."
+            exit 1
+          fi
+          echo "ok: $TITLE"
