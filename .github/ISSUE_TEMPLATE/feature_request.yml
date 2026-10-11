@@ -1,0 +1,19 @@
+name: Feature request
+description: Suggest a capability or an improvement to a method.
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: need
+    attributes:
+      label: What do you need to do that ALAS cannot do now?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed approach
+      description: A published method or reference makes a new model much easier to accept (CONTRIBUTING.md asks every empirical value to cite its source).
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you considered

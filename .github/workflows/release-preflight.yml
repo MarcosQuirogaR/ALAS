@@ -35,6 +35,12 @@ jobs:
       - name: Install the repository Rust toolchain
         uses: dtolnay/rust-toolchain@1.97.1
 
+      # v2.9.2
+      - name: Cache the build
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+        with:
+          prefix-key: preflight-v1
+
       - name: Record exact toolchain and target
         shell: pwsh
         run: |
@@ -97,6 +103,12 @@ jobs:
 
       - name: Install the repository Rust toolchain
         uses: dtolnay/rust-toolchain@1.97.1
+
+      # v2.9.2
+      - name: Cache the build
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+        with:
+          prefix-key: check-v1
 
       - name: Compile-check the workspace from the locked dependency graph
         run: cargo check --workspace --locked --all-targets
