@@ -1,0 +1,190 @@
+name: Workspace gate
+
+# Tiers:
+#   pull_request            quick gate on ubuntu (affected packages, fast nextest
+#                           profile), plus the dependency policy check
+#   push to main or dev     full gate on windows (every test, including the slow
+#                           tier), plus the dependency policy check
+#   nightly + dispatch      the same full gate on the default branch / chosen ref
+# Tags are not gated here: a release tag sits on a commit that already passed
+# the push gate on main, and release-package.yml verifies that before packaging.
+#
+# Branch protection: require "Quick gate (pull request)" and "Dependency
+# licenses, advisories and sources" on main and dev. Both are skipped, which
+# GitHub counts as passing, when a change touches only documentation or the
+# site (see the `changes` job).
+
+on:
+  pull_request:
+  push:
+    branches: [main, dev]
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A newer push to the same PR or to dev supersedes the running gate. Pushes to
+# main are never cancelled, so every main commit ends with a recorded result
+# (release-package.yml looks for it); nightly and manual runs are not cancelled.
+concurrency:
+  group: gate-${{ github.event.pull_request.number || github.ref }}-${{ github.event_name }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref != 'refs/heads/main') }}
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  changes:
+    name: Classify the change
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      code: ${{ steps.classify.outputs.code }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Decide whether anything other than docs or the site changed
+        id: classify
+        shell: bash
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          case "$EVENT" in
+            pull_request) range="origin/${BASE_REF}...HEAD" ;;
+            push)
+              if [ -n "$BEFORE" ] && [ "$BEFORE" != "0000000000000000000000000000000000000000" ] \
+                 && git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+                range="$BEFORE..HEAD"
+              else
+                range=""
+              fi ;;
+            *) range="" ;;
+          esac
+          if [ -z "$range" ]; then
+            echo "code=true" >> "$GITHUB_OUTPUT"; echo "no diff range: gate runs"; exit 0
+          fi
+          code=false
+          while IFS= read -r f; do
+            case "$f" in
+              site/*) ;;
+              .github/pages-redirect/*) ;;
+              .github/ISSUE_TEMPLATE/*) ;;
+              .github/CODEOWNERS) ;;
+              .github/PULL_REQUEST_TEMPLATE.md) ;;
+              .github/dependabot.yml) ;;
+              .github/workflows/site-*.yml) ;;
+              .github/workflows/pr-title.yml) ;;
+              CITATION.cff|LICENSE|NOTICE) ;;
+              docs/*.md) ;;
+              */*) code=true ;;
+              *.md) ;;
+              *) code=true ;;
+            esac
+          done < <(git diff --name-only "$range")
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+          echo "changed files require the gate: $code"
+
+  quick:
+    name: Quick gate (pull request)
+    needs: changes
+    if: github.event_name == 'pull_request' && needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install the repository Rust toolchain
+        uses: dtolnay/rust-toolchain@1.97.1
+
+      # Same list as release-package.yml: the windowing and font stacks that
+      # eframe, wgpu and font-kit link against when clippy builds alas-app.
+      - name: Install Linux system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config libwayland-dev libxkbcommon-dev libxkbcommon-x11-dev \
+            libx11-dev libxcursor-dev libxrandr-dev libxi-dev libxext-dev \
+            libgl1-mesa-dev libegl1-mesa-dev mesa-vulkan-drivers libfontconfig1-dev
+
+      # v2.9.2
+      - name: Cache the build
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+        with:
+          prefix-key: quick-v1
+
+      - name: Install cargo-nextest for the test tiers
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest
+
+      # Repository checks, rustfmt, then clippy -D warnings and the fast
+      # nextest profile (slow tier excluded) for the packages the PR affects
+      # and their dependents. The slow tier runs on push to main and nightly.
+      - name: Quick gate against the PR base
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: cargo xtask gate --quick --base "origin/${BASE_REF}"
+
+  gate:
+    name: Repository checks, formatting, clippy and workspace tests
+    needs: changes
+    if: github.event_name != 'pull_request' && needs.changes.outputs.code == 'true'
+    runs-on: windows-latest
+    timeout-minutes: 120
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install the repository Rust toolchain
+        uses: dtolnay/rust-toolchain@1.97.1
+
+      # v2.9.2
+      - name: Cache the build
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+        with:
+          prefix-key: gate-v1
+
+      - name: Install cargo-nextest for the test tiers
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest
+
+      - name: Execute the complete repository gate
+        run: cargo xtask gate
+
+  dependencies:
+    name: Dependency licenses, advisories and sources
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      # Licenses, bans and sources always block.
+      - name: Check licenses, bans and sources
+        uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          rust-version: "1.97.1"
+          command: check bans licenses sources
+          arguments: --locked
+
+      # Advisories and yanked crates change with time rather than with the
+      # diff, so on pull requests and branch pushes they warn instead of
+      # blocking. Release packaging runs the blocking form (release-package.yml).
+      - name: Check advisories and yanked crates (warning only)
+        uses: EmbarkStudios/cargo-deny-action@v2
+        continue-on-error: true
+        with:
+          rust-version: "1.97.1"
+          command: check advisories
+          arguments: --locked
