@@ -13,6 +13,11 @@ name: Release package (manual/tag, non-publishing)
 # package, a CI artifact, and an externally published release, and for the
 # pre-existing Windows-only `release-preflight.yml` this workflow adds a
 # genuine Linux lane beside rather than replaces.
+#
+# This workflow packages and smoke-tests; it does not re-run the workspace
+# test suite. On a tag or manual run the `gate-check` job requires a green
+# gate.yml run on the same commit instead, and dependency advisories are
+# checked in their blocking form here (they only warn on pull requests).
 on:
   workflow_dispatch:
   push:
@@ -31,13 +36,54 @@ permissions:
 
 concurrency:
   group: release-package-${{ github.ref }}
-  cancel-in-progress: false
+  # Tag and manual runs are never cancelled; a superseded PR run is.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  gate-check:
+    name: Require a green workspace gate on this commit
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Look for a successful gate.yml run on this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          n=$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/gate.yml/runs?head_sha=${SHA}&status=success" --jq '.total_count')
+          echo "successful gate.yml runs on ${SHA}: ${n}"
+          if [ "${n}" -lt 1 ]; then
+            echo "::error::No green Workspace gate run exists for ${SHA}. Wait for the gate on main, or run gate.yml manually on this commit, then re-run this workflow."
+            exit 1
+          fi
+
+  dependency-advisories:
+    name: Dependency advisories and yanked crates (blocking)
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Check advisories and yanked crates
+        uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          rust-version: "1.97.1"
+          command: check advisories
+          arguments: --locked
+
   package:
+    needs: [gate-check, dependency-advisories]
+    # Both checks are skipped on pull requests, which must not skip packaging.
+    if: ${{ !cancelled() && !failure() }}
     name: Build and validate the ${{ matrix.os }} package (locked, non-publishing)
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 150
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
@@ -83,6 +129,12 @@ jobs:
             libfontconfig1-dev \
             xvfb
 
+      # v2.9.2
+      - name: Cache the build
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+        with:
+          prefix-key: package-v1
+
       - name: Record exact toolchain and target
         shell: bash
         run: |
@@ -102,21 +154,6 @@ jobs:
             echo "${{ runner.os }} ${{ runner.arch }} (github.com runner image ${{ runner.name }})"
           } > "$record"
           cat "$record"
-
-      - name: Install cargo-nextest for the test tiers
-        uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-nextest
-
-      # The subset named in this task: repository checks, formatting, the
-      # deny-warnings clippy lint set, and the workspace test suite, in that
-      # order, matching what `cargo xtask gate` already runs for the
-      # Windows-only preflight workflow. Running the identical command on
-      # both platforms is deliberate: it is the only way this task can show
-      # the workspace's own test suite, not just `cargo check`, passing on
-      # Linux before a Linux package is ever assembled from it.
-      - name: Run the repository gate (repository checks, fmt, clippy -D warnings, workspace tests)
-        run: cargo xtask gate
 
       - name: Build and assemble the standalone package from the locked dependency graph
         shell: bash
