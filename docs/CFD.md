@@ -56,8 +56,9 @@ The native v2606 distribution also supplies `bin/paraFoam` as the official
 ParaView launcher.  It is a shell script, so the Windows route executes it
 through the distribution's MSYS2 `bash.exe`.  `paraFoam -vtk` selects
 ParaView's built-in OpenFOAM reader; it is not a second solver or a separate
-CFD backend.  The launcher is verified locally at
-`C:/Proyectos/OpenFOAM-v2606/msys64/home/ofuser/OpenFOAM/OpenFOAM-v2606/bin/paraFoam`.
+CFD backend.  The launcher is at
+`<OpenFOAM-v2606>/msys64/home/ofuser/OpenFOAM/OpenFOAM-v2606/bin/paraFoam` inside the
+Windows distribution.
 
 For a native Windows smoke run, configure the directories and run the example
 from the repository root:

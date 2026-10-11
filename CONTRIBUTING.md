@@ -265,19 +265,36 @@ caught it.
 
 ---
 
-## Commits
+## Commits and pull requests
 
-- Present tense, imperative: "Fix static margin sign", not "Fixed" or "Fixes".
-- The subject says what changed; the body says **why**, and what you considered
-  instead. If the reasoning is interesting, it belongs here rather than in a
-  comment.
+Commit messages follow [Conventional Commits](https://www.conventionalcommits.org/):
+
+```
+type(scope): summary in the imperative, lower case, no final period
+
+Body: why the change was made and what was considered instead.
+```
+
+- **Types:** `feat`, `fix`, `perf`, `refactor`, `docs`, `test`, `build`,
+  `ci`, `chore`, `revert`. The scope is optional and is usually a crate or area
+  (`aero`, `mass`, `opt`, `gui`, `site`). Use `!` after the scope for a breaking
+  change.
+- The subject says what changed, in the present tense, imperative: "fix static
+  margin sign", not "fixed" or "fixes". Keep it under about 72 characters.
+- The body says **why**, and what you considered instead. If the reasoning is
+  interesting, it belongs here rather than in a comment. A change that moves a
+  number says which case, which quantity, before and after.
 - One logical change per commit. Mechanical reformatting goes in its own
   commit, never mixed with behaviour.
 - A translated module and its parity test are one commit. That is the one case
   where "one logical change" spans two files by design.
-- Rebase rather than merge to keep history readable.
 - Sign off with `git commit -s`, which certifies the
   [Developer Certificate of Origin](https://developercertificate.org/).
+
+Pull requests are **squash-merged**, so the pull request title becomes the one
+commit on `main` and must follow the same format. A workflow checks the title
+(`.github/workflows/pr-title.yml`). Individual commits inside a branch are
+free-form; keep them tidy anyway, because a reviewer reads them.
 
 ---
 
