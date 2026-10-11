@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Documentation and downloads
+    url: https://alas.uvigo.es
+    about: User guide, release notes and downloads.
+  - name: Security vulnerability
+    url: https://github.com/MarcosQuirogaR/ALAS/security/advisories/new
+    about: Report security problems privately, not as a public issue.

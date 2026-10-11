@@ -1,0 +1,42 @@
+name: Bug report
+description: Something crashes, hangs, or produces a wrong or implausible number.
+labels: ["bug"]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: ALAS version
+      description: Help > About, or the release you downloaded (for example 1.3.2).
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options: [Windows, Linux, Other]
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect?
+      description: For a wrong number, give the quantity, the value you got, and the value or source you expected.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Preset or configuration file, settings changed, and the run you started. Attach the configuration (JSON) if you can.
+    validations:
+      required: true
+  - type: textarea
+    id: tools
+    attributes:
+      label: External tools involved
+      description: AVL, XFOIL, MSES, OpenVSP, NASTRAN or OpenFOAM, with versions, if the problem involves one.
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or screenshots
+      render: text
