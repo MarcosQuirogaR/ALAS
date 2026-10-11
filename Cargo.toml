@@ -75,7 +75,7 @@ rayon = "1"
 # is no standard-library facility for that.
 proc-macro2 = "1"
 quote = "1"
-syn = { version = "2", features = ["full"] }
+syn = { version = "3", features = ["full"] }
 
 # The lint set is deliberately narrow. It encodes decisions that would otherwise
 # be re-argued in review (panics, stray printing, unsafe) and stops there.
