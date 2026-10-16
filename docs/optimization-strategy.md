@@ -25,7 +25,9 @@ replayed with its recorded evaluation counts. The coordinator
 forwards cancellation to an owned token checked inside multidisciplinary and
 mission loops, including during a single long candidate evaluation.
 
-The population uses L-SHADE parameter adaptation and population reduction.
+The population uses L-SHADE population reduction; parameter adaptation
+(success-history `F`/`CR`) is off by default (`parameter_adaptation = false`)
+and static `F = 0.5`, `CR = 0.9` apply unless it is enabled.
 Feasible candidates always precede infeasible ones. The decaying epsilon boundary
 can order infeasible candidates during restoration, but cannot replace a feasible
 incumbent with a lower-cost violation. Restoration improvements adapt the search
@@ -54,6 +56,16 @@ switch that enables downstream structural files and external solvers. Loads use
 the structural design gross mass. A bounded study must support its declared MTOW;
 a light mission dispatch cannot reduce this requirement. An unconstrained study
 uses its converged design mass.
+
+Under the `mtow_band` mode the takeoff mass is itself a search variable: the
+structural design gross mass, gear, loads and fuel cap are all evaluated at the
+chosen mass `m` in `[T (1 - p), T (1 + p)]` (default `p` = 10 %), seeded at `T`,
+through the same path `fixed_requirement` uses at its requirement. A lower `m`
+saves structure when the mission does not need the mass; a higher `m` can make
+an otherwise infeasible mission feasible. Whatever `m0` makes the fixed
+requirement feasible for a design vector makes `(x, m0)` feasible in the band,
+with the same constraint values (pinned by
+`crates/alas-opt/tests/mtow_band_invariant.rs`).
 
 Strength sizing includes wing-carried fuel, engine masses and the wingbox's own
 inertia. The self-relief fixed point must converge at its configured numerical
@@ -133,7 +145,20 @@ declared material allowable. A lower value is not a material-specific strength
 certificate: element attribution, local stress interpretation and the composite
 failure model still require qualification.
 Downstream failures can revoke an earlier finalist acceptance, clear its valid
-flag and convergence claim, and retain the reasons in the final report.
+flag and convergence claim, and retain the reasons in the final report. An
+external solver that is configured and fails (for example an MSC Nastran
+static run that aborts) is such a failure; only a solver that was never
+configured is reported as not run.
+
+The maximum landing mass of a sized (clean-sheet or closure-designed) aircraft
+is a design output: `max(landing fraction x closure mass, landing mass of the
+design mission)`. The search's `landing_mass` residual and the report's hard
+arrival check compare that design mission's arrival mass with it, as one
+quantity. A route flown beyond the design range carries more contingency fuel
+and arrives heavier than the design mission; its arrival mass is reported
+against the same limit as a warning with both masses. Against a declared
+landing mass (a registered aircraft) the flown route's arrival remains the hard
+check.
 
 Shape priors are separate opt-in soft preferences. Box proportions, trailing-edge
 sweep and taper preferences cannot pay for or relax structural failures. Invalid

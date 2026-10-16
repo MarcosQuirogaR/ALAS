@@ -17,21 +17,37 @@ use crate::state::AppState;
 /// The explicit preference a picker result should update.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ToolPathTarget {
+    /// Installed NASTRAN executable.
     NastranExecutable,
+    /// NASTRAN solver binary used for runs.
     NastranSolver,
+    /// MSC NASTRAN 95 installation directory.
     Nastran95Directory,
+    /// NASTRAN 95 runtime directory.
     Nastran95RuntimeDirectory,
+    /// NASTRAN 95 RF-stage directory.
     Nastran95RfStageDirectory,
+    /// MSC Patran executable.
     PatranExecutable,
+    /// MSES installation directory.
     MsesDirectory,
+    /// Navigation data directory.
     NavdataDirectory,
+    /// Saved routes directory.
     RoutesDirectory,
+    /// AVL executable.
     AvlExecutable,
+    /// OpenVSP installation directory.
     OpenVspDirectory,
+    /// FlowUnsteady executable.
     FlowUnsteadyExecutable,
+    /// Native OpenFOAM binary directory.
     OpenFoamNativeBinDirectory,
+    /// Native OpenFOAM project directory.
     OpenFoamNativeProjectDirectory,
+    /// Gmsh executable.
     GmshExecutable,
+    /// ParaView executable.
     ParaViewExecutable,
 }
 

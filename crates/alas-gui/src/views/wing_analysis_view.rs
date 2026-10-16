@@ -97,7 +97,7 @@ pub fn show_wing_analysis_window(state: &mut AppState, ctx: &egui::Context) {
 fn show_window_contents(state: &mut AppState, ui: &mut Ui, log: &mut Vec<(String, LogKind)>) {
     let theme = state.theme.figure_theme_name().to_owned();
     let source = state.active_preset.clone();
-    let typed = state.typed_config();
+    let typed = state.typed_config_arc();
     let design = state.current_design().unwrap_or_default();
     with_window(|window| {
         if let Some(config) = &typed {

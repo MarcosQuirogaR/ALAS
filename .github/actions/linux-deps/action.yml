@@ -1,0 +1,16 @@
+name: Linux system dependencies
+description: >-
+  The windowing and font stacks that eframe, wgpu and font-kit link against
+  when clippy or the tests build alas-app on Linux. Same list as
+  release-package.yml.
+runs:
+  using: composite
+  steps:
+    - name: Install packages
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends \
+          pkg-config libwayland-dev libxkbcommon-dev libxkbcommon-x11-dev \
+          libx11-dev libxcursor-dev libxrandr-dev libxi-dev libxext-dev \
+          libgl1-mesa-dev libegl1-mesa-dev mesa-vulkan-drivers libfontconfig1-dev

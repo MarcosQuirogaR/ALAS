@@ -35,6 +35,7 @@ pub mod analysis;
 pub mod cabin;
 pub mod clean_sheet;
 pub mod control_surfaces;
+mod cruise_speed;
 pub mod design_variables;
 pub mod downstream;
 pub mod engines;
@@ -54,6 +55,7 @@ pub mod oew_reference;
 pub mod optimizer;
 pub mod performance;
 pub mod performance_presets;
+mod performance_speed_rule;
 pub mod physics;
 pub mod preset_flops;
 pub mod preset_fuel_tanks;
@@ -71,7 +73,9 @@ mod retired_keys;
 pub mod solver_presets;
 pub mod structures;
 pub mod systems_mass;
+mod turboprop_clean_sheet;
 pub mod turboprop_mass;
+pub use turboprop_clean_sheet::ResolvedTurboprop;
 pub mod validation;
 
 pub use alas_config_derive::ConfigNode;
@@ -88,8 +92,8 @@ pub use airport_dataset::{
 };
 pub use analysis::AnalysisConfig;
 pub use cabin::{
-    BaggagePolicy, CabinConfig, CargoDeckConfig, HoldCompartmentConfig, HoldDeck,
-    PassengerCabinConfig, SeatClassConfig,
+    BaggagePolicy, CabinConfig, CargoDeckConfig, FreightHoldConfig, HoldCompartmentConfig,
+    HoldDeck, PassengerCabinConfig, SeatClassConfig,
 };
 pub use cabin_method::CabinEquipmentMethod;
 pub use control_surfaces::ControlSurfacesConfig;
@@ -98,7 +102,8 @@ pub use design_variables::{
 };
 pub use downstream::DownstreamConfig;
 pub use engines::{
-    PropulsionTechnology, TurbofanEngineSpec, TurbofanOffDesignSpec, TurbopropEngineSpec,
+    NacelleParamSource, NacelleShapeV2, PropulsionTechnology, TurbofanEngineSpec,
+    TurbofanOffDesignSpec, TurbopropEngineSpec,
 };
 pub use fidelity_presets::{FidelityPreset, UnknownFidelityPreset};
 pub use flops_structure::{
@@ -110,14 +115,20 @@ pub use fuel_tanks::{
     AuxiliaryTankConfig, CenterTankConfig, FeedTankConfig, FuelTankLayoutConfig, TrimTankConfig,
     WingTankConfig,
 };
+pub use geometry::loft;
 pub use geometry::{
-    ActiveEngineModel, AftBodyStation, AirfoilClass, BodyFuselageExtent, BodyStation,
-    EmpennageConfig, EngineBindingError, EngineConfig, FuselageConfig, FuselageSection,
-    FuselageSectionError, GeometryConfig, InboardAerodynamicStation, LongitudinalStationFrame,
-    MacFrame, MainWingPanel, MainWingStation, MainWingStationKind, TailSizing, TransportPlanform,
-    TransportPlanformError, UpperDeck, UpperDeckHump, WingConfig, WingHeights, WingSection,
-    WingSectionError, WingShape, DEFAULT_HUMP_FAIRING_EXPONENT, HUMP_FAIRING_EXPONENT_RANGE,
-    HUMP_MAIN_DECK_FLOOR_FRACTION, MAX_FLIGHT_TIP_RISE_SEMISPAN_FRACTION,
+    embedded_loft, embedded_loft_ids, parse_loft_spec, preset_loft_id, ActiveEngineModel,
+    AftBodyStation, AirfoilClass, BodyFuselageExtent, BodyStation, CentreEngineInstallation,
+    DeviceStation, EmpennageConfig, EngineBindingError, EngineConfig, FuselageConfig,
+    FuselageSection, FuselageSectionError, GeometryConfig, InboardAerodynamicStation, LoftRef,
+    LoftSpec, LoftSpecError, LongitudinalStationFrame, MacFrame, MainWingPanel, MainWingStation,
+    MainWingStationKind, NacelleModel, ProfileSpline, PublishedReference, ReferenceTrapezoid,
+    ReferenceWingConfig, ReferenceWingMode, RegisteredBasis, TailSizing, TransportPlanform,
+    TransportPlanformError, UpperDeck, UpperDeckHump, WingConfig, WingDihedralStation, WingHeights,
+    WingProfileError, WingProfileInterpolation, WingSection, WingSectionError, WingShape,
+    WingThicknessStation, WingtipDevice, WingtipDeviceError, WingtipDeviceKind,
+    DEFAULT_HUMP_FAIRING_EXPONENT, HUMP_FAIRING_EXPONENT_RANGE, HUMP_MAIN_DECK_FLOOR_FRACTION,
+    MAX_FLIGHT_TIP_RISE_SEMISPAN_FRACTION, PUBLISHED_AREA_TOLERANCE,
 };
 pub use landing_gear::{
     effective_main_gear_station, DerivedMainGearStation, EffectiveGearStationExt,
@@ -139,10 +150,12 @@ pub use optimizer::{
     AerodromeReferenceCode, DesignMission, DesignMode, DesignPayloadSource, DesignRange,
     DesignSpaceConfig, MtowPlan, MtowSizing, ObjectiveConfig, ObjectiveKind, ObjectiveWeights,
     OptimizerConfig, SolverSettings, StageBudget, StructuralBasis, VariableEnvelope,
+    DEFAULT_MTOW_BAND_FRACTION, DEFAULT_REPRODUCIBLE_EVALUATIONS, DEFAULT_SEED,
     LEGACY_METHOD_TOKENS,
 };
 pub use performance::PerformanceConfig;
 pub use performance_presets::{PerformancePreset, UnknownPerformancePreset};
+pub use performance_speed_rule::{TakeoffSpeedRatios, V2_MIN_OVER_VMC};
 pub use physics::DragModelConfig;
 pub use presets::{
     applicability_label, datum_label, AftCgNoseLoadPoint, AircraftPreset, AircraftReferenceData,

@@ -16,6 +16,7 @@ use alas_geom::aircraft::airplane::Airplane;
 use alas_geom::aircraft::fuselage::Fuselage;
 use alas_geom::aircraft::wing::Wing;
 
+use super::airframe_geometry::nacelle_dimensions;
 use super::movable_area::movable_surface_area;
 use super::{
     estimate_flops_transport, FlopsTransportEvaluation, FlopsTransportInputs,
@@ -31,7 +32,7 @@ pub(super) fn main_wing(plane: &Airplane) -> Option<&Wing> {
         .filter(|wing| wing.xsecs.len() >= 2)
 }
 
-pub(super) fn primary_fuselage(plane: &Airplane) -> Option<&Fuselage> {
+pub(crate) fn primary_fuselage(plane: &Airplane) -> Option<&Fuselage> {
     plane
         .fuselages
         .iter()
@@ -194,11 +195,6 @@ pub fn evaluate_product_at_design_gross_mass(
     let compartment_length =
         (fuselage_length - geometry.fuselage.cabin_start_x_m - geometry.fuselage.tailcone_length_m)
             .max(0.0);
-    let nacelles: Vec<&Fuselage> = plane
-        .fuselages
-        .iter()
-        .filter(|body| body.name.contains("Nacelle"))
-        .collect();
     let wing_engines = match count_optional(
         flops.wing_mounted_engine_count,
         FlopsTransportUnverifiedReason::EngineMounting,
@@ -226,14 +222,8 @@ pub fn evaluate_product_at_design_gross_mass(
             0
         }
     };
-    let nacelle_diameter = if nacelles.is_empty() {
-        geometry.engine.radius_scale_m * 2.0
-    } else {
-        nacelles
-            .iter()
-            .flat_map(|body| body.xsecs.iter().map(|xsec| xsec.width))
-            .fold(0.0, f64::max)
-    };
+    // The same diameter the structure group prices the nacelles with.
+    let nacelle_diameter = nacelle_dimensions(plane, geometry).0;
     let maximum_mach = match positive_optional(
         flops.maximum_mach,
         FlopsTransportUnverifiedReason::MaximumMach,

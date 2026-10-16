@@ -20,7 +20,11 @@ pub(super) fn reset(state: &mut AppState, page: &Page) {
         return;
     };
     let fields = super::placement::visible_fields(page, "optimizer", &node.fields);
-    let Ok(defaults) = serde_json::to_value(alas_config::AlasConfig::default()) else {
+    // The desktop's own defaults: the wall-clock search, not the library's
+    // reproducible evaluation-budget one (audit SIZ-06, decision D6).
+    let mut default_config = alas_config::AlasConfig::default();
+    crate::config_edit::apply_interactive_solver(&mut default_config);
+    let Ok(defaults) = serde_json::to_value(default_config) else {
         return;
     };
     if let Some(values) = state.group_mut("optimizer") {

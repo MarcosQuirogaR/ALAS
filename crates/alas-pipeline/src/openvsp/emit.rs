@@ -201,13 +201,17 @@ pub(super) fn emit_wing(script: &mut String, index: usize, wing: &Wing) {
     // with dihedral sends a cambered/twisted root across that plane, producing
     // overlapping surfaces and a split trailing edge in VSPAERO's thin mesh.
     // An unmirrored fin still needs the rotated frame: otherwise OpenVSP's
-    // root-thickness sec(dihedral) scaling is singular at 90 degrees.
+    // root-thickness sec(dihedral) scaling is singular at 90 degrees. The same
+    // holds for a mirrored surface rooted off the symmetry plane (a wingtip
+    // device on the wing tip): it has no seam to close and its cant can
+    // approach 90 degrees.
+    let closes_seam = wing.symmetric && root.xyz_le[1].abs() < 1.0e-9;
     set_parm(
         script,
         &id,
         "RotateMatchDideralFlag",
         "XSec_0",
-        if wing.symmetric { 0.0 } else { 1.0 },
+        if closes_seam { 0.0 } else { 1.0 },
     );
 
     for section_index in 1..wing.xsecs.len() {

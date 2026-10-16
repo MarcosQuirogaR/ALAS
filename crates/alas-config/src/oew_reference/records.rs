@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! The ten OEW reference records, one per registered preset.
+//! The OEW reference records for nine of the twelve registered presets (AVE,
+//! A340-300, A380-800, B787-9, A320-200, A220-300, ATR72-600, DC-10,
+//! B747-400); E195-E2, C919 and A400M live in `e195_e2.rs`, `c919.rs` and
+//! `military.rs`.
 //!
 //! Every value here was read from the retained document named in its
 //! source; the quote is the wording on the page. A value whose document is

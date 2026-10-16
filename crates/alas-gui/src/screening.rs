@@ -234,18 +234,22 @@ impl ScreeningPreview {
         self.filter = Some(filter.to_owned());
     }
 
+    /// Airfoil names that pass the current text filter.
     pub fn filtered_names(&self) -> &[String] {
         &self.filtered_names
     }
 
+    /// Name of the airfoil currently selected, if any.
     pub fn selected(&self) -> Option<&str> {
         self.selected.as_deref()
     }
 
+    /// Coordinates of the selected airfoil as (x, y) pairs, if loaded.
     pub fn coordinates(&self) -> Option<&[(f64, f64)]> {
         self.coordinates.as_deref()
     }
 
+    /// Selects the named airfoil and loads its coordinates.
     pub fn select(&mut self, name: &str) {
         if self.selected() == Some(name) {
             return;

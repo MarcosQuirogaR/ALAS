@@ -154,8 +154,8 @@ pub struct PhysicalCgLimitsInput {
     /// (`rotation::pitch_radius_of_gyration_m`). The rotation balance adds
     /// the transfer to the main-gear contact itself.
     pub pitch_radius_of_gyration_m: f64,
-    /// Required pitch angular acceleration at rotation, deg/s^2: 7 unless
-    /// the configuration overrides it
+    /// Required pitch angular acceleration at rotation, deg/s^2: 5.0 (the
+    /// constant in `rotation.rs`) unless the configuration overrides it
     /// (`rotation::rotation_pitch_acceleration_deg_s2`).
     pub rotation_angular_accel_deg_s2: f64,
     /// Standard gravity, m/s^2 (`config.requirements.gravity_m_s2`): turns

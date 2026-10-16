@@ -21,7 +21,7 @@ fn deck_inputs(
     config.structures.additional_safety_factor = additional_safety_factor;
     let get = |name: &str| alas_config::materials::get(name).unwrap();
     let cfg = &config.structures;
-    let (deck, _, _) = alas_struct::mesh::build_wing_mesh_bdf_product(
+    let (deck, _, node_index) = alas_struct::mesh::build_wing_mesh_bdf_product(
         result.wsg.as_ref().unwrap(),
         result.sizing.as_ref().unwrap(),
         cfg,
@@ -34,7 +34,12 @@ fn deck_inputs(
         get(&cfg.rib_material),
     )
     .unwrap();
-    let inputs = crate::structural::EvaluationInputs::from_deck(&config, &report, &deck);
+    let inputs = crate::structural::EvaluationInputs::from_deck(
+        &config,
+        &report,
+        &deck,
+        &node_index.engine_nids,
+    );
     (config, inputs)
 }
 
@@ -83,7 +88,10 @@ fn attributed_stress_uses_its_material_not_the_strongest_declared_allowable() {
     let sample = case
         .samples
         .iter_mut()
-        .find(|sample| inputs.material_allowable_pa(sample.material_id) == Some(weakest))
+        .find(|sample| {
+            inputs.material_allowable_pa(sample.material_id) == Some(weakest)
+                && !inputs.in_load_introduction(sample.element_id)
+        })
         .unwrap();
     let stress = 0.5 * (weakest + strongest);
     sample.normal_x_pa = stress;
@@ -127,11 +135,40 @@ fn complete_safe_samples_pass_and_tensor_demand_cannot_hide_in_a_summary() {
     };
     let (actual, allowable) = governing_utilization(&inputs, &case).unwrap();
     assert!(actual < allowable);
-    let sample = &mut case.samples[0];
+    let sample = case
+        .samples
+        .iter_mut()
+        .find(|sample| !inputs.in_load_introduction(sample.element_id))
+        .unwrap();
     sample.normal_x_pa = 2.0 * inputs.material_allowable_pa(sample.material_id).unwrap();
     sample.von_mises_pa = 0.0;
     let (actual, allowable) = governing_utilization(&inputs, &case).unwrap();
     assert!(actual > allowable);
+}
+
+#[test]
+fn a_concentrated_peak_inside_a_load_introduction_zone_is_reviewed_but_not_a_veto() {
+    let (_, _, _, result) = crate::feasibility::structure::tests::structural_fixture();
+    let inputs = result.evaluation_inputs.unwrap();
+    let mut case = StaticShellStressCase {
+        subcase_id: 1,
+        name: "pull-up",
+        samples: samples(&inputs),
+    };
+    let sample = case
+        .samples
+        .iter_mut()
+        .find(|sample| inputs.in_load_introduction(sample.element_id))
+        .expect("the product mesh has an RBE3 spider or root clamp");
+    let allowable = inputs.material_allowable_pa(sample.material_id).unwrap();
+    sample.normal_x_pa = 3.0 * allowable;
+    sample.von_mises_pa = 3.0 * allowable;
+    // The assessed field stays below its allowable...
+    let (actual, limit) = governing_utilization(&inputs, &case).unwrap();
+    assert!(actual < limit);
+    // ...and the set-aside peak is still reported, above the allowable.
+    let (local, local_limit) = scan(&inputs, &case, Zone::LoadIntroduction).unwrap();
+    assert!(local > local_limit);
 }
 
 #[test]

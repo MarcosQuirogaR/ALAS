@@ -152,6 +152,7 @@ impl Wing {
             name: self.name.clone(),
             xsecs: new_xsecs,
             symmetric: self.symmetric,
+            reference: self.reference,
         })
     }
 }
@@ -199,8 +200,7 @@ fn allocate(extents: &[f64], panels: usize) -> Vec<usize> {
         let mut order: Vec<usize> = (0..sections).collect();
         order.sort_by(|&left, &right| {
             extents[right]
-                .partial_cmp(&extents[left])
-                .unwrap_or(std::cmp::Ordering::Equal)
+                .total_cmp(&extents[left])
                 .then(left.cmp(&right))
         });
         for &index in order.iter().take(remainder) {

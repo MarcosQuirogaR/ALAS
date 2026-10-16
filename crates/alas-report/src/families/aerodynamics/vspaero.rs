@@ -470,6 +470,7 @@ mod tests {
             }),
             comparison: VspaeroComparisonStatus::Rejected("wake residual".to_owned()),
             error: Some("wake residual".to_owned()),
+            outside_validity_alpha_deg: Vec::new(),
         }
     }
 

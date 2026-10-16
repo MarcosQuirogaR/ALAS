@@ -19,6 +19,8 @@ alas-aero = { path = "../alas-aero" }
 alas-prop = { path = "../alas-prop" }
 alas-stab = { path = "../alas-stab" }
 alas-units = { path = "../alas-units" }
+# Opt-in stage timers (`stage_profile`), re-exported for the profile example.
+alas-math = { path = "../alas-math" }
 # One function: `route_cruise_altitude_m`, the rule that decides what altitude
 # a configured route is actually flown at. The optimizer's sizing mission and
 # the published mission have to agree about it, and a policy duplicated in two
@@ -32,6 +34,8 @@ rayon = { workspace = true }
 
 [dev-dependencies]
 serde_json = { workspace = true }
+# Cross-process memo of the nominal assessments the integration tests share.
+alas-testkit = { path = "../alas-testkit" }
 
 [lints]
 workspace = true

@@ -163,7 +163,21 @@ fn maximum(values: &[f64]) -> usize {
         .0
 }
 
+/// Linear interpolation of `values` at `position` along ascending `y`.
+/// Fewer than two stations (or a short `values`) is NaN rather than an
+/// index panic; a position outside the stations clamps to the nearest end
+/// value instead of extrapolating segment 0. In range the result is the
+/// plain segment interpolation.
 fn interpolate(y: &[f64], values: &[f64], position: f64) -> f64 {
+    if y.len() < 2 || values.len() < y.len() {
+        return f64::NAN;
+    }
+    if position < y[0] {
+        return values[0];
+    }
+    if position > y[y.len() - 1] {
+        return values[y.len() - 1];
+    }
     let i = y
         .windows(2)
         .position(|pair| position >= pair[0] && position <= pair[1])
@@ -226,6 +240,20 @@ pub(super) fn write(path: &Path, rows: &[Value]) -> io::Result<()> {
 mod tests {
     use super::*;
     use std::collections::BTreeSet;
+
+    #[test]
+    fn interpolate_matches_segments_in_range_and_never_panics_outside() {
+        let y = [0.0, 2.0, 6.0];
+        let v = [1.0, 3.0, 11.0];
+        assert_eq!(interpolate(&y, &v, 1.0), 2.0);
+        assert_eq!(interpolate(&y, &v, 4.0), 7.0);
+        assert_eq!(interpolate(&y, &v, 6.0), 11.0);
+        assert_eq!(interpolate(&y, &v, -1.0), 1.0);
+        assert_eq!(interpolate(&y, &v, 7.0), 11.0);
+        assert!(interpolate(&[1.0], &[2.0], 1.0).is_nan());
+        assert!(interpolate(&[], &[], 0.0).is_nan());
+        assert!(interpolate(&y, &v[..2], 1.0).is_nan());
+    }
 
     #[test]
     fn endpoint_coverage_rejects_a_missing_interior_end_and_wrong_grid() {

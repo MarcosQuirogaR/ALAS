@@ -101,11 +101,9 @@ pub fn show_form_page_locked(state: &mut AppState, ui: &mut Ui, page: &Page, loc
         .collect();
     let lang = Some(state.language.code());
 
-    let group_node = state.schema.field(group).and_then(|f| match &f.entry {
-        alas_config::Entry::Node(n) => Some(n.fields.clone()),
-        _ => None,
-    });
-    let Some(fields) = group_node else { return };
+    let Some(visible_fields) = placement::cached_visible_fields(state, page, group) else {
+        return;
+    };
 
     ui.horizontal(|ui| {
         ui.label(RichText::new(tr("Parameter values")).strong());
@@ -123,7 +121,6 @@ pub fn show_form_page_locked(state: &mut AppState, ui: &mut Ui, page: &Page, loc
     });
     ui.add_space(4.0);
 
-    let visible_fields = placement::visible_fields(page, group, &fields);
     ui.add_enabled_ui(!locked, |ui| {
         if page.id == "mass_advanced" {
             crate::views::inputs_mtow::show_mtow_controls(state, ui);

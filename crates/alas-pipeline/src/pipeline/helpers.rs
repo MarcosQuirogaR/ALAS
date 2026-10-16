@@ -13,6 +13,7 @@ use std::path::Path;
 use alas_aero::mses::{MsesPolarResult, MsesPressureResult};
 use alas_config::design_variables::DesignVector;
 use alas_config::AlasConfig;
+use alas_geom::aircraft::airplane::Airplane;
 use serde_json::json;
 
 pub(super) fn persist_mses_raw_exports(
@@ -73,18 +74,34 @@ pub(super) fn persist_mses_polar_diagnostics(
     result: &MsesPolarResult,
     output_dir: &Path,
 ) -> std::io::Result<()> {
-    if result.point_diagnostics.is_empty() {
-        return Ok(());
-    }
     let directory = output_dir.join("mses");
-    std::fs::create_dir_all(&directory)?;
+    if !result.point_diagnostics.is_empty() {
+        std::fs::create_dir_all(&directory)?;
+        write_polar_document(result, &directory.join("polar_diagnostics.json"))?;
+    }
+    for section in &result.span_sections {
+        if section.polar.point_diagnostics.is_empty() {
+            continue;
+        }
+        std::fs::create_dir_all(&directory)?;
+        write_polar_document(
+            &section.polar,
+            &directory.join(format!("polar_diagnostics_{}.json", section.label)),
+        )?;
+    }
+    Ok(())
+}
+
+fn write_polar_document(result: &MsesPolarResult, path: &Path) -> std::io::Result<()> {
     let points = result
         .point_diagnostics
         .iter()
-        .map(|point| {
+        .enumerate()
+        .map(|(index, point)| {
             json!({
                 "requested_alpha_deg": point.requested_alpha_deg,
                 "status": point.status.as_str(),
+                "class": result.point_classes.get(index).map(|class| class.as_str()),
                 "solver_output": point.solver_output,
             })
         })
@@ -101,13 +118,19 @@ pub(super) fn persist_mses_polar_diagnostics(
             })
         })
         .collect::<Vec<_>>();
+    use alas_aero::mses::MsesPointClass as Class;
     let document = json!({
         "status": result.status.as_str(),
+        "error": result.error,
         "airfoil_name": &result.airfoil_name,
         "mach": result.mach,
         "reynolds": result.reynolds,
         "requested_alpha_count": result.requested_alpha_count,
         "converged_alpha_count": result.converged_alpha_count,
+        "design_alpha_deg": result.design_alpha_deg,
+        "design_point_class": result.design_point_class().map(|class| class.as_str()),
+        "outside_validity_domain_count": result.count_class(Class::OutsideValidityDomain),
+        "solver_failure_count": result.count_class(Class::SolverFailure),
         "transition_model_valid": result.transition_model_is_valid(),
         "osmap_required": result.osmap_required,
         "osmap_status": result.osmap_status.as_str(),
@@ -121,12 +144,13 @@ pub(super) fn persist_mses_polar_diagnostics(
         "solver_attempts": attempts,
     });
     let text = serde_json::to_string_pretty(&document).map_err(std::io::Error::other)?;
-    std::fs::write(directory.join("polar_diagnostics.json"), text)
+    std::fs::write(path, text)
 }
 
 pub(super) fn validate_bounds(bounds: &[(f64, f64)]) -> Result<(), String> {
     let expected = DesignVector::bounds().len();
-    if bounds.len() != expected {
+    // The MTOW band mode adds the takeoff mass as a 17th coordinate.
+    if bounds.len() != expected && bounds.len() != expected + 1 {
         return Err(format!(
             "design space has {} bound pairs; expected {expected}",
             bounds.len()
@@ -209,4 +233,51 @@ pub(super) fn finite_range_text(values: &[f64], decimals: usize) -> String {
         (lo.min(value), hi.max(value))
     });
     format!("{lo:.decimals$}..{hi:.decimals$}")
+}
+
+/// Carry the reference wing of `source` onto the CPACS-canonicalised
+/// `canonical` aircraft.
+///
+/// A CPACS document holds the planform and the reference length and area but
+/// not where the reference MAC starts, so the aircraft read back from it
+/// measures `%MAC` from the drawn wing's own MAC leading edge. The delivered
+/// report was balanced, trimmed and gated against `source`, whose published
+/// reference wing (`mac_le_x_m`) is the `%MAC` datum of the registered
+/// aircraft; without this the same centre of gravity reads several percent MAC
+/// away between the search and the delivered report (A220-300: 0.160 m of
+/// leading edge, 4.2 percent MAC). The main wing is matched by position: the
+/// canonical document resolves the largest projected wing to `wings[0]`, as the
+/// builder does.
+pub(super) fn carry_reference_wing(canonical: &mut Airplane, source: &Airplane) {
+    let reference = source.main_wing().and_then(|wing| wing.reference);
+    if let (Some(reference), Some(wing)) = (reference, canonical.wings.first_mut()) {
+        wing.reference = Some(reference);
+    }
+}
+
+// A failed expect in a test is the assertion failing on a registered preset.
+#[allow(clippy::expect_used)]
+#[cfg(test)]
+mod reference_wing_tests {
+    use super::*;
+    use alas_geom::builder::AircraftBuilder;
+
+    #[test]
+    fn a_canonicalised_aircraft_keeps_the_registered_percent_mac_datum() {
+        let preset = alas_config::presets::get("A220-300").expect("registered A220");
+        let source = AircraftBuilder::new(Some(preset.geometry.clone()))
+            .build(Some(&preset.design_vector), true)
+            .expect("A220 geometry");
+        let datum = source.mac_frame().expect("main wing").x_lemac_m;
+        // The CPACS read-back: same planform, no reference wing.
+        let mut canonical = source.clone();
+        canonical.wings[0].reference = None;
+        let drawn = canonical.mac_frame().expect("main wing").x_lemac_m;
+        assert!(
+            (datum - drawn).abs() > 0.1,
+            "the A220 drawn MAC leading edge {drawn} m is the published {datum} m"
+        );
+        carry_reference_wing(&mut canonical, &source);
+        assert_eq!(canonical.mac_frame(), source.mac_frame());
+    }
 }

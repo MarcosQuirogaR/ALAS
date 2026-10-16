@@ -17,7 +17,7 @@
 //! that mass, and [`SegmentMissionModel::solve_on_frozen_plans`] restarts the
 //! whole solve on a new plan frozen there, at most [`MAX_REFREEZES`] times.
 
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
 
 use alas_config::mission::CruiseAltitudePolicy;
@@ -27,6 +27,8 @@ use super::adapt::{into_model_error, Adapted};
 use super::integrate::{FlownLeg, FlyError};
 use super::profile::{LegKind, ProfilePlan};
 use super::SegmentMissionModel;
+
+mod solve;
 
 /// Reason string of a budget failure.
 pub const SIZING_BUDGET_EXHAUSTED: &str = "sizing_budget_exhausted";
@@ -154,6 +156,13 @@ pub struct FrozenMissionPlan {
 pub(crate) struct FrozenHandle {
     plan: Arc<FrozenMissionPlan>,
     refreeze_at_kg: Arc<OnceLock<f64>>,
+    /// While set, a trip the plan cannot fly records its mass and then every
+    /// trip answers [`FuelModelError::Cancelled`] at once, so the solve that
+    /// is about to be discarded for a re-freeze stops where it is instead of
+    /// adapting every later probe. Armed only by
+    /// [`SegmentMissionModel::solve_on_frozen_plans`], for a solve it will
+    /// repeat on a new plan; clones share it.
+    abort_on_request: Arc<AtomicBool>,
 }
 
 impl PartialEq for FrozenHandle {
@@ -279,6 +288,7 @@ impl SegmentMissionModel {
         self.frozen = Some(FrozenHandle {
             plan: Arc::new(plan),
             refreeze_at_kg: Arc::new(OnceLock::new()),
+            abort_on_request: Arc::new(AtomicBool::new(false)),
         });
         self
     }
@@ -286,6 +296,28 @@ impl SegmentMissionModel {
     /// The frozen plan in force, if one is set.
     pub fn frozen_plan(&self) -> Option<FrozenMissionPlan> {
         self.frozen.as_ref().map(|handle| (*handle.plan).clone())
+    }
+
+    /// The start state of every level cruise segment the frozen plan flies
+    /// from `takeoff_mass_kg`: the initial level and each step level, at the
+    /// mass, altitude and true airspeed the mission model flies them.
+    ///
+    /// # Errors
+    ///
+    /// No frozen plan, or the trip cannot be flown, as text.
+    pub fn planned_cruise_states(
+        &self,
+        takeoff_mass_kg: f64,
+    ) -> Result<Vec<super::CruiseState>, String> {
+        let range_m = self
+            .frozen
+            .as_ref()
+            .map(|handle| handle.plan.range_m)
+            .ok_or_else(|| "the model carries no frozen mission plan".to_owned())?;
+        self.fly_frozen(takeoff_mass_kg, range_m)
+            .ok_or_else(|| "the frozen plan does not cover the route".to_owned())?
+            .map(|flown| flown.cruise_states)
+            .map_err(|error| error.to_string())
     }
 
     /// Stop with [`SIZING_BUDGET_EXHAUSTED`] once `budget` is spent.
@@ -351,6 +383,10 @@ impl SegmentMissionModel {
         if plan.range_m.to_bits() != range_m.to_bits() {
             return None;
         }
+        if handle.abort_on_request.load(Ordering::Relaxed) && handle.refreeze_at_kg.get().is_some()
+        {
+            return Some(Err(FuelModelError::Cancelled));
+        }
         let fixed = (plan.cruise_altitude_m, plan.step_positions.as_slice());
         let error = match self.fly_at_scales(
             LegKind::Trip,
@@ -377,10 +413,22 @@ impl SegmentMissionModel {
         // itself is flown with the choices made at this mass, as a plan
         // frozen here would, which depends on the mass alone.
         let _ = handle.refreeze_at_kg.set(mass_kg);
+        if handle.abort_on_request.load(Ordering::Relaxed) {
+            return Some(Err(FuelModelError::Cancelled));
+        }
         Some(
             self.fly_adapted(LegKind::Trip, mass_kg, range_m, true)
                 .map(|adapted| adapted.flown),
         )
+    }
+
+    /// Arm or disarm the stop at the first re-freeze request (see
+    /// `FrozenHandle::abort_on_request`); a model with no frozen plan has
+    /// nothing to arm.
+    pub(super) fn stop_solve_at_refreeze_request(&self, armed: bool) {
+        if let Some(handle) = &self.frozen {
+            handle.abort_on_request.store(armed, Ordering::Relaxed);
+        }
     }
 
     /// The first mass at which a trip of the frozen plan could not be flown
@@ -390,47 +438,6 @@ impl SegmentMissionModel {
         self.frozen
             .as_ref()
             .and_then(|handle| handle.refreeze_at_kg.get().copied())
-    }
-
-    /// Run `solve` on a plan frozen at `takeoff_mass_kg` over `range_m`
-    /// under `policy`. When a trip of that plan asked for a re-freeze
-    /// ([`Self::refreeze_request_kg`]), `solve` restarts from nothing on a
-    /// new plan frozen at the requested mass, at most [`MAX_REFREEZES`]
-    /// times, so every answer `solve` saw, and any memo it kept by mass,
-    /// comes from the one plan returned with its result. A re-freeze that
-    /// cannot be made keeps the last result, which is consistent with its
-    /// own plan.
-    ///
-    /// # Errors
-    ///
-    /// The first freeze's error; a re-freeze's cancellation or
-    /// [`FreezeError::StepUnconverged`].
-    pub fn solve_on_frozen_plans<T>(
-        &self,
-        takeoff_mass_kg: f64,
-        range_m: f64,
-        policy: &CruiseAltitudePolicy,
-        mut solve: impl FnMut(&Self) -> T,
-    ) -> Result<(Self, T), FreezeError> {
-        let plan = self.freeze_plan(takeoff_mass_kg, range_m, policy)?;
-        let mut model = self.clone().with_frozen_plan(plan);
-        let mut solution = solve(&model);
-        for _ in 0..MAX_REFREEZES {
-            let Some(mass_kg) = model.refreeze_request_kg() else {
-                break;
-            };
-            let plan = match self.freeze_plan(mass_kg, range_m, policy) {
-                Ok(plan) => plan,
-                Err(
-                    error @ (FreezeError::StepUnconverged { .. }
-                    | FreezeError::Fuel(FuelModelError::Cancelled)),
-                ) => return Err(error),
-                Err(FreezeError::Fuel(_)) => break,
-            };
-            model = self.clone().with_frozen_plan(plan);
-            solution = solve(&model);
-        }
-        Ok((model, solution))
     }
 }
 

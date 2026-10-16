@@ -5,8 +5,7 @@
 //! empty mass or fuel per seat-kilometre, closed by the design mission under
 //! the configured fuel policy and ranked feasibility first.
 //!
-//! [`crate::objective::DesignObjective::evaluate`] delegates here for every
-//! evaluation.
+//! [`crate::objective::DesignObjective::evaluate`] delegates here.
 //!
 //! The evaluation is a pipeline of four stages, one module each:
 //! [`build`] evaluates the geometry, mass and trimmed aerodynamic operating
@@ -18,6 +17,7 @@
 //! minimises, ranking feasibility ahead of the objective value.
 
 mod build;
+pub mod cabin_sync;
 mod cost;
 pub mod cruise_mass;
 pub mod drag_table;
@@ -27,6 +27,7 @@ pub mod mission_model;
 mod mtow_modes;
 mod nominal_cache;
 mod offdesign;
+pub mod payload_limit;
 pub mod propulsion;
 mod range;
 mod residuals;
@@ -34,18 +35,45 @@ mod residuals_buffet;
 mod residuals_geometry;
 mod residuals_layout;
 mod residuals_performance;
+mod residuals_vmc;
+pub mod route_payload_cap;
 mod sizing;
+pub mod speedups;
 pub mod structural_feasibility;
 mod tail_sizing;
 mod tanks;
 mod trim;
 mod types;
-
 pub use mission_model::SegmentMissionModel;
 pub use mtow_modes::MtowPlanOutcome;
 pub use offdesign::OffDesignFlight;
 pub use residuals::reporting_relative_balance;
 pub(crate) use residuals_layout::TE_ANGLE_LIMIT_DEG;
+pub use residuals_performance::certification::{
+    evaluate_climb_checks, net_path_gradient_margin, CertificationInputs, ClimbEvaluation,
+    ClimbOutcome,
+};
+pub use residuals_performance::cruise_deck::{
+    deck_cruise_requirements, highest_cruise_level_m, planned_cruise_requirements,
+    DeckCruiseRequirements, PlannedCruise, PlannedCruiseLevel,
+};
+pub use residuals_performance::engine_match::{engine_mass_match, EngineMassMatch};
+pub use residuals_performance::improved_climb::{
+    resolve_improved_climb, top_of_climb, ImprovedClimbInputs, TopOfClimb, TOC_LEVEL_TOLERANCE_M,
+    TOC_TOLERANCE_M_S,
+};
+pub use residuals_performance::oei_deck::{
+    second_segment_evidence, EngineOutCondition, EngineOutModel, EngineOutPoint, EngineOutRating,
+    SecondSegmentEvidence, TrimDragBasis, YawAirframe,
+};
+pub use residuals_performance::thrust_uncertainty::{
+    takeoff_thrust_scatter, thrust_scatter, ScatterBasis, ThrustAssessment, ThrustMessage,
+    ThrustVerdict,
+};
+pub use residuals_vmc::{
+    evaluate_vmc, performance_with_vmc, CrosswindAssessment, VmcAssessment, VmcFailure, VmcInputs,
+    VmcOutcome, CROSSWIND_DESIGN_M_S,
+};
 pub use sizing::candidate_model::{
     baseline_closure_config, baseline_fuel_artifacts, candidate_mission_model,
 };
@@ -84,7 +112,7 @@ pub(crate) fn canonical_nominal_design(
         .contains_key("wing_x_shift_m");
     if config.derives_clean_sheet_start()
         && !explicit_shift
-        && nominal == config.configured_nominal_design()
+        && nominal.same_geometry(&config.configured_nominal_design())
     {
         if let Some(shift_m) = config.clean_sheet_wing_x_shift_m(&design) {
             // An explicit wing-shift bound still holds the re-placed wing.
@@ -94,7 +122,7 @@ pub(crate) fn canonical_nominal_design(
             });
         }
     }
-    Ok(design)
+    Ok(config.band_design(design))
 }
 
 /// The vector a run that supplies no design starts from, materialized as the
@@ -173,10 +201,11 @@ pub fn evaluate_mission_sized_with_assessment(
     objective: &mut DesignObjective,
     x: &[f64],
 ) -> (f64, Option<CandidateAssessment>) {
+    let _profile = alas_math::stage_profile::scope(alas_math::stage_profile::Stage::Evaluation);
     let weights = objective.config.optimizer.weights.clone();
     if objective.validate_design_space(x).is_err() {
         let cost = weights.failure_cost;
-        let dv = DesignVector::from_array(x).unwrap_or_default();
+        let dv = parsed_design(x);
         objective.history.record_mission_sized(
             dv,
             false,
@@ -195,8 +224,9 @@ pub fn evaluate_mission_sized_with_assessment(
         );
         return (cost, None);
     }
+    let resolved = objective.config.at_band_mass(DesignVector::band_mass_of(x));
     let outcome = residuals::gear_placement::size_with_main_gear_placement(
-        &objective.config,
+        &resolved,
         x,
         None,
         objective.preserve_explicit_fuselage_length,
@@ -205,9 +235,11 @@ pub fn evaluate_mission_sized_with_assessment(
     );
     match outcome {
         Ok((outcome, placed)) => {
-            let config = placed.as_ref().unwrap_or(&objective.config);
+            let config = placed.as_ref().unwrap_or(&resolved);
             let history = outcome.history;
             let work = outcome.sized.work;
+            let residual_profile =
+                alas_math::stage_profile::scope(alas_math::stage_profile::Stage::Residuals);
             let residuals = residuals::build(
                 &outcome,
                 config,
@@ -216,6 +248,7 @@ pub fn evaluate_mission_sized_with_assessment(
                 objective.target_cargo_payload_kg,
             );
             let assessment = cost::assemble(outcome, config, residuals);
+            drop(residual_profile);
             let reason = assessment.violated_hard_ids().join("+");
             objective.history.record_mission_sized(
                 history.dv,
@@ -238,12 +271,10 @@ pub fn evaluate_mission_sized_with_assessment(
         }
         Err(failure) => {
             let cost = weights.failure_cost;
-            // `CandidateFailure` carries only the reason, not the design
-            // vector (see its doc comment); rebuild it from `x` for the
-            // history entry, falling back to the default vector exactly as
-            // the weighted-penalty path does when `x` itself does not parse.
-
-            let dv = DesignVector::from_array(x).unwrap_or_default();
+            // `CandidateFailure` carries only the reason, not the design vector (see
+            // its doc comment); rebuild it from `x` for the history entry, recording
+            // no design exactly as the weighted-penalty path does when `x` does not parse.
+            let dv = parsed_design(x);
             // A candidate that never reached a sized takeoff mass has no
             // finite objective value or L/D; the kernels in
             // `differential_evolution::scored_point_at` already
@@ -401,12 +432,14 @@ fn assess_with(
     polar: Option<&ExternalPolar>,
     controls: SizingControls,
 ) -> Result<CandidateAssessment, String> {
+    let _profile = alas_math::stage_profile::scope(alas_math::stage_profile::Stage::Evaluation);
     objective
         .validate_design_space(x)
         .map_err(|_| "design_space".to_owned())?;
     let weights = objective.config.optimizer.weights.clone();
+    let resolved = objective.config.at_band_mass(DesignVector::band_mass_of(x));
     match residuals::gear_placement::size_with_main_gear_placement(
-        &objective.config,
+        &resolved,
         x,
         polar,
         objective.preserve_explicit_fuselage_length,
@@ -414,7 +447,9 @@ fn assess_with(
         controls,
     ) {
         Ok((outcome, placed)) => {
-            let config = placed.as_ref().unwrap_or(&objective.config);
+            let config = placed.as_ref().unwrap_or(&resolved);
+            let _residual_profile =
+                alas_math::stage_profile::scope(alas_math::stage_profile::Stage::Residuals);
             let residuals = residuals::build(
                 &outcome,
                 config,
@@ -443,6 +478,23 @@ pub fn rebuild_airplane(
 ) -> Result<alas_geom::aircraft::airplane::Airplane, String> {
     build::rebuild_airplane(config, dv, sizing)
         .map_err(|failure| format!("geometry build failed: {}", failure.reason))
+}
+
+/// The design recorded for a candidate, or `None` when its vector does not
+/// parse (wrong length). Such a row is already flagged invalid and carries no
+/// design rather than a fake default one; the warning records the cause.
+pub(crate) fn parsed_design(x: &[f64]) -> Option<DesignVector> {
+    match DesignVector::from_array(x) {
+        Ok(design) => Some(design),
+        Err(error) => {
+            tracing::warn!(
+                %error,
+                len = x.len(),
+                "malformed design vector; its history row carries no design"
+            );
+            None
+        }
+    }
 }
 
 #[cfg(test)]

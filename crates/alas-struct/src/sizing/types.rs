@@ -39,8 +39,14 @@ pub struct SparSizing {
     pub t_cap: Vec<f64>,
     /// One-flange cap area at each station, m^2.
     pub a_cap: Vec<f64>,
-    /// Uniform web thickness, m.
-    pub t_web: f64,
+    /// Web thickness at each station, m: one gauge per station, common to the
+    /// spars, sized for shear strength and clear-panel shear buckling.
+    pub t_web: Vec<f64>,
+    /// Lower-cover fatigue area added to the lower flange of this spar at each
+    /// station, m^2 (zero where no fatigue limit governs). It is mass and
+    /// strength-neutral for the response model: its stiffness is not credited
+    /// in the analytical section (conservative for deflection).
+    pub lower_extra_area: Vec<f64>,
     /// Bending-moment fraction this spar carries at each station.
     pub frac_moment: Vec<f64>,
     /// Margin of safety at each station: `+inf` where the local demand is

@@ -252,11 +252,15 @@ pub fn run_quick_analysis(
             // tank layout.
             let capacity = FullAnalysis::new(sandbox.clone())
                 .build_airplane(&request.design, true)
-                .ok()
                 .map(|plane| assess_airplane_fuel_capacity(&sandbox, &request.design, &plane))
-                .and_then(|capacity| capacity.capacity_kg.map(|kg| (kg, capacity.evidence)));
+                .map(|capacity| capacity.capacity_kg.map(|kg| (kg, capacity.evidence)));
+            let known_capacity_kg = capacity
+                .as_ref()
+                .ok()
+                .and_then(|capacity| capacity.as_ref())
+                .map(|(capacity_kg, _)| *capacity_kg);
             match capacity {
-                Some((capacity_kg, evidence)) => publisher.value(
+                Ok(Some((capacity_kg, evidence))) => publisher.value(
                     QuickMetric::FuelCapacity,
                     capacity_kg,
                     None,
@@ -265,17 +269,23 @@ pub fn run_quick_analysis(
                         fuel_capacity_basis(evidence)
                     ),
                 ),
-                None => publisher.publish(
+                Ok(None) => publisher.publish(
                     QuickMetric::FuelCapacity,
                     QuickOutcome::Unsupported(
                         "usable fuel capacity is unavailable for this design".to_owned(),
                     ),
                 ),
+                Err(error) => publisher.publish(
+                    QuickMetric::FuelCapacity,
+                    QuickOutcome::Unsupported(format!(
+                        "usable fuel capacity is unavailable: aircraft build failed: {error}"
+                    )),
+                ),
             }
             publisher.value(
                 QuickMetric::CarriedFuel,
                 sized.takeoff_fuel_kg,
-                capacity.map(|(capacity_kg, _)| capacity_kg),
+                known_capacity_kg,
                 "takeoff fuel for the declared route including reserves",
             );
             match quick_range(&sandbox, sized) {

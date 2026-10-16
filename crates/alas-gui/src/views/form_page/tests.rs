@@ -67,7 +67,7 @@ fn advanced_mass_reset_restores_its_mtow_controls_without_other_requirements_or_
         state.config_values["requirements"]["cruise_mach"] = json!(0.71);
         state.config_values["optimizer"]["objective"]["mtow_sizing"] = json!("payload_adjusted");
         state.config_values["optimizer"]["objective"]["mtow_target_kg"] = json!(456.0);
-        state.config_values["optimizer"]["objective"]["mtow_band_fraction"] = json!(0.1);
+        state.config_values["optimizer"]["objective"]["mtow_band_fraction"] = json!(0.07);
         state.config_values["optimizer"]["objective"]["design_range_nmi"] = json!(321.0);
         state.config_values["optimizer"]["objective"]["kind"] = json!("takeoff_mass");
         let solver = state.config_values["optimizer"]["solver"].clone();

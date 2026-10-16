@@ -52,7 +52,10 @@ impl LiftSurrogate {
             })
             .collect();
 
+        let train_profile =
+            alas_math::stage_profile::scope(alas_math::stage_profile::Stage::LiftSurrogateTrain);
         let results = vorlax::run(geometry, settings, &conditions)?;
+        drop(train_profile);
         let areas = &results.distribution.wing_areas_m2;
 
         let reshape = |flat: &dyn Fn(usize) -> f64| -> Vec<Vec<f64>> {

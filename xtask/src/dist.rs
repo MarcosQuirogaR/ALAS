@@ -69,11 +69,12 @@ const SOURCE_EMBEDDED_ASSET_FILES: [&str; 8] = [
 // tests during compilation. They are named explicitly so an unrelated data
 // dump added to a crate cannot enter a public source archive just because it
 // has a convenient extension.
-const SOURCE_DATA_DIRECTORY_PREFIXES: [&str; 6] = [
+const SOURCE_DATA_DIRECTORY_PREFIXES: [&str; 7] = [
     "crates/alas-aero/data",
     "crates/alas-config/data",
     "crates/alas-geom/data",
     "crates/alas-i18n/data",
+    "crates/alas-uav-db/data",
     "crates/alas-uav/data",
     "crates/alas-uav/examples/data",
 ];
@@ -87,15 +88,12 @@ const SOURCE_TEST_FIXTURE_DIRECTORY_PREFIXES: [&str; 2] = [
 // with hard-coded paths, so omitting them makes an unpacked source snapshot
 // fail at compile time. Keep the list exact and add entries only with a test
 // consumer and a provenance decision.
-const SOURCE_GOLDEN_FIXTURE_FILES: [&str; 8] = [
+const SOURCE_GOLDEN_FIXTURE_FILES: [&str; 5] = [
     "golden/report/reference_render_corpus.json",
     "golden/report/reference_render_w32.json",
     "golden/report/reference_render_w33.json",
     "golden/report/reference_render_w38.json",
     "golden/report/reference_render_w39.json",
-    "golden/prop_elec/apc_12x6e_fixture.json",
-    "golden/prop_elec/apc_performance_tables.bin",
-    "golden/prop_elec/uiuc_apc_12x6_static_benchmark.json",
 ];
 
 // The real-aircraft parity contract is the one exception admitted from
@@ -1787,7 +1785,8 @@ mod tests {
         assert!(source_path_allowed(
             "golden/report/reference_render_w39.json"
         ));
-        assert!(source_path_allowed(
+        // Propeller performance tables are fetched by the user, never shipped.
+        assert!(!source_path_allowed(
             "golden/prop_elec/apc_performance_tables.bin"
         ));
         assert!(source_path_allowed(".gitattributes"));

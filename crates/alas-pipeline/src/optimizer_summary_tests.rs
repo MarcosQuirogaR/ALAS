@@ -137,7 +137,10 @@ fn value<'a>(lines: &'a [(&'static str, String)], label: &str) -> Option<&'a str
 #[test]
 fn a_moved_wing_winner_shows_its_same_model_baseline_and_delta() {
     let result = moved_wing_result(true);
-    assert!(!result.history.design_vectors.contains(&result.best_design));
+    assert!(!result
+        .history
+        .design_vectors
+        .contains(&Some(result.best_design)));
     let summary = OptimizerRunSummary::from_result(&result, &AlasConfig::default(), None);
     let delta = summary
         .baseline
@@ -205,7 +208,11 @@ fn every_stage_states_its_own_budget_and_never_appears_over_it() {
 #[test]
 fn the_seed_shown_is_the_one_the_run_used_even_unseeded() {
     let config = AlasConfig::default();
-    assert_eq!(config.optimizer.solver.seed, None);
+    // Decision D6 (SIZ-06/07): an unconfigured run is reproducible, the default is the fixed seed.
+    assert_eq!(
+        config.optimizer.solver.seed,
+        Some(alas_config::DEFAULT_SEED)
+    );
     let summary = OptimizerRunSummary::from_result(&moved_wing_result(true), &config, None);
     assert_eq!(summary.seed, Some(1_234_567));
 }

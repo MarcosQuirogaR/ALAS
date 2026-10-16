@@ -8,7 +8,7 @@
 //! cruise ([`constraints::tw_cruise_constraint`]), engine-out second-segment
 //! climb ([`constraints::tw_oei_climb_constraint`]), take-off field length
 //! ([`constraints::tw_takeoff_constraint`]) and landing field length
-//! ([`constraints::ws_landing_limit`]). [`constraints::build_matching_chart`]
+//! ([`landing::ws_landing_limit`]). [`constraints::build_matching_chart`]
 //! assembles all four across a set of aerodromes. Production field estimates
 //! use [`field::compute_field_performance_for_propulsion`]: the jet takeoff
 //! parameter correlation or Torenbeek's propeller ground-motion, balanced-field
@@ -17,20 +17,31 @@
 //! surface with the flight envelope.
 //!
 //! Every formula is SI in and SI out unless a name says otherwise. The
-//! empirical constants (37.7, K = 0.60) belong to the retained jet transport
+//! empirical constants (37.7, K_land) belong to the retained jet transport
 //! correlations. The propeller method uses installed thrust as a function of
 //! speed and explicitly configured preliminary runway assumptions from
 //! Torenbeek, Secs. 5.4.5-5.4.6. No aircraft database distance fits are used.
 
+pub mod clmax;
 pub mod constraints;
+pub mod cruise_climb;
 pub mod envelope;
+pub mod failed_engine_drag;
 pub mod field;
+pub mod improved_climb;
+pub mod landing;
+pub mod second_segment;
+pub mod segments;
 pub mod speeds;
+pub mod yaw_balance;
 
 pub use constraints::{
     assess_oei_climb, build_matching_chart, oei_cl_at_v2, sls_tw_for_oei_condition,
-    tw_cruise_constraint, tw_oei_climb_constraint, tw_takeoff_constraint, ws_landing_limit,
-    MatchingChartData, OeiClimbAssessment, OeiClimbStatus, OeiDragIncrements, OeiV2Condition,
+    tw_cruise_constraint, tw_oei_climb_constraint, tw_takeoff_constraint, MatchingChartData,
+    OeiClimbAssessment, OeiClimbStatus, OeiDragIncrements, OeiV2Condition,
+};
+pub use cruise_climb::{
+    required_sls_tw_level, required_sls_tw_top_of_climb, TOC_MASS_FRACTION, TOC_RESIDUAL_CLIMB_M_S,
 };
 pub use envelope::{
     assess_far25_positive_limit_load_factor, build_vn_diagram,
@@ -39,6 +50,20 @@ pub use envelope::{
 pub use field::{
     compute_field_performance_for_propulsion, compute_propeller_landing_distance, FieldInputs,
     FieldPropulsion, VREF_OVER_VS1G,
+};
+pub use improved_climb::{select_improved_v2, ImprovedClimbSelection, MAX_IMPROVED_V2_OVER_VSR};
+pub use landing::{
+    landing_runway_share, ws_landing_field_limit, ws_landing_limit, JET_DRY_LANDING_SHARE,
+    WET_RUNWAY_LANDING_FACTOR,
+};
+pub use second_segment::{
+    decompose_gradient, oswald_factor, GradientDecomposition, GradientInputs,
+};
+pub use segments::{
+    cl_at_speed_ratio, cs25_115_net_path_reduction, cs25_121a_gradient, cs25_121c_final_gradient,
+    cs25_121d_approach_gradient, required_sls_thrust_to_weight, ClimbPoint, ClimbSegment,
+    APPROACH_CLIMB_MAX_OVER_VSR, APPROACH_CONFIG_MAX_VSR_OVER_LANDING,
+    CS25_119_LANDING_CLIMB_GRADIENT, FINAL_TAKEOFF_MIN_OVER_VSR, VREF_MIN_OVER_VSR0,
 };
 pub use speeds::{
     compute_field_performance, compute_field_performance_at_masses, compute_v_speeds,

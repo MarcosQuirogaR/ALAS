@@ -228,7 +228,20 @@ fn the_atr_overflow_is_not_one_aft_block_and_the_payload_leaves_the_tail() {
         summary.cg_pct_mac
     );
     assert!(summary.forward_hold_baggage_fraction > 0.2);
-    assert!(summary.forward_hold_baggage_fraction < 0.8);
+    // The two compartments share the bags (the aft one is not empty), and the
+    // forward one is loaded no further than its volume at the stowage density
+    // allows. The ATR seats sit aft of its empty-aircraft CG, so the balance
+    // target is forward of anything the cabin offers and the forward share is
+    // the forward compartment's capacity over the bags: a geometric ratio
+    // (0.8023 on the lofted cabin), not a bound of its own.
+    let holds = compartments(&built, &layout);
+    let forward_capacity_kg = holds[0].volume_m3 * STOWAGE_DENSITY_KG_M3;
+    let forward_kg = summary.forward_hold_baggage_fraction * requested_kg(&summary);
+    assert!(
+        forward_kg <= forward_capacity_kg * (1.0 + 1e-9),
+        "forward {forward_kg} kg exceeds the forward compartment's {forward_capacity_kg} kg"
+    );
+    assert!(summary.forward_hold_baggage_fraction < 1.0);
     // The bags straddle the seats, so their centroid stays within the span
     // of the two compartment centres.
     let compartments = compartments(&built, &layout);

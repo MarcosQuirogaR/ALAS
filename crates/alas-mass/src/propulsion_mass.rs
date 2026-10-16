@@ -123,6 +123,7 @@ mod tests {
             propeller_diameter_m: 3.93,
             governed_propeller_speed_rpm: 1_200.0,
             reduction_ratio: 16.7,
+            propeller_blade_count: Some(6),
             rating_source: String::new(),
             geometry_source: String::new(),
         }

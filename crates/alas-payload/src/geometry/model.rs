@@ -107,6 +107,9 @@ pub struct CabinGeometry {
     /// taken off the sampled sections to find the main lobe the main deck
     /// and the hold are laid out in.
     pub(super) crown_rises: Vec<f64>,
+    /// The level main-deck floor height of a body with a partial upper deck,
+    /// m (z up); see `hump_deck`. `None` without an upper deck.
+    pub(super) level_main_floor_z: Option<f64>,
     /// Mean aerodynamic chord, which the centre of gravity is reported against.
     pub mac: f64,
     /// The main wing's aerodynamic centre, longitudinally.
@@ -198,8 +201,17 @@ impl CabinGeometry {
 
         let x_stations: Vec<f64> = order.iter().map(|&i| fus.xsecs[i].xyz_c[0]).collect();
         let widths: Vec<f64> = order.iter().map(|&i| fus.xsecs[i].width).collect();
-        let heights: Vec<f64> = order.iter().map(|&i| fus.xsecs[i].height).collect();
-        let zcs: Vec<f64> = order.iter().map(|&i| fus.xsecs[i].xyz_c[2]).collect();
+        let mut heights: Vec<f64> = order.iter().map(|&i| fus.xsecs[i].height).collect();
+        let mut zcs: Vec<f64> = order.iter().map(|&i| fus.xsecs[i].xyz_c[2]).collect();
+        if strict_envelope {
+            // The loadable interior keeps the cabin keel up to the hold end,
+            // whatever the outer belly line does (unset: the outer loft).
+            for (i, x) in x_stations.iter().enumerate() {
+                (zcs[i], heights[i]) = geometry_config
+                    .fuselage
+                    .hold_interior_section(*x, zcs[i], heights[i]);
+            }
+        }
 
         let x_min = x_stations
             .first()
@@ -251,7 +263,7 @@ impl CabinGeometry {
             reference_decks(fg.height_m, diameter_m)
         };
 
-        Ok(Self {
+        let mut geometry = Self {
             wall: wall_thickness_m,
             x_min,
             x_max,
@@ -269,6 +281,7 @@ impl CabinGeometry {
                         .collect()
                 })
                 .unwrap_or_default(),
+            level_main_floor_z: None,
             upper_deck,
             mac,
             x_wing_ac,
@@ -283,7 +296,9 @@ impl CabinGeometry {
             widths,
             heights,
             zcs,
-        })
+        };
+        geometry.level_main_floor_z = geometry.level_main_floor();
+        Ok(geometry)
     }
 
     /// The section width at station `x`, clamped to the end sections outside

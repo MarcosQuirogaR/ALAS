@@ -4,7 +4,7 @@
 //! Reusable editing and compact-value rows for the UAV workflow.
 
 use alas_uav::optimizer::VariableBounds;
-use egui::{DragValue, RichText, TextEdit, Ui};
+use egui::{DragValue, RichText, Ui};
 
 use super::super::tr;
 
@@ -48,15 +48,6 @@ pub(super) fn usize_value(ui: &mut Ui, label: &str, value: &mut usize) {
     ui.add_sized(
         [numeric_width(ui), ui.spacing().interact_size.y],
         DragValue::new(value).range(1..=100_000),
-    );
-    ui.end_row();
-}
-
-pub(super) fn text_value(ui: &mut Ui, label: &str, value: &mut String) {
-    ui.label(RichText::new(tr(label)).strong());
-    ui.add_sized(
-        [numeric_width(ui), ui.spacing().interact_size.y],
-        TextEdit::singleline(value),
     );
     ui.end_row();
 }

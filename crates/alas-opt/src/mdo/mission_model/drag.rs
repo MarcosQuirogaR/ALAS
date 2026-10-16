@@ -21,6 +21,16 @@ pub trait CruiseDrag: Send + Sync {
     /// area.
     fn cd(&self, cl: f64, mach: f64, altitude_m: f64) -> f64;
 
+    /// The same polar for a high-lift (take-off, landing) configuration
+    /// before its configuration drag increment: without the lift-dependent
+    /// viscous term, which is a clean-polar term (Torenbeek 2013, p. 96:
+    /// Eq. 4.21 and the e = 0.75 to 0.85 range are stated for the
+    /// en-route configuration). Equal to [`Self::cd`] for a polar that has
+    /// no such term.
+    fn cd_high_lift_base(&self, cl: f64, mach: f64, altitude_m: f64) -> f64 {
+        self.cd(cl, mach, altitude_m)
+    }
+
     /// Lift coefficient of minimum drag-to-lift ratio at `mach` and
     /// `altitude_m`: the holding (endurance) point of a jet.
     fn min_drag_cl(&self, mach: f64, altitude_m: f64) -> f64;
@@ -83,6 +93,10 @@ impl CruiseDrag for TrimmedDragTable {
         TrimmedDragTable::cd(self, cl, mach, altitude_m)
     }
 
+    fn cd_high_lift_base(&self, cl: f64, mach: f64, altitude_m: f64) -> f64 {
+        TrimmedDragTable::cd_without_lift_viscous(self, cl, mach, altitude_m)
+    }
+
     /// A Mach below the table's lowest node, such as the zero the holding
     /// leg passes for "low speed", carries no Reynolds number for the skin
     /// friction (`CD0 -> 0` as `M -> 0`), so the search is made at the
@@ -132,6 +146,12 @@ impl super::SegmentMissionModel {
     /// Clean drag coefficient from the model's drag.
     pub(super) fn clean_cd(&self, cl: f64, mach: f64, altitude_m: f64) -> f64 {
         self.cruise_drag.0.cd(cl, mach, altitude_m)
+    }
+
+    /// Drag coefficient of a high-lift configuration before its increment:
+    /// the clean polar without the lift-dependent viscous term.
+    pub(super) fn high_lift_base_cd(&self, cl: f64, mach: f64, altitude_m: f64) -> f64 {
+        self.cruise_drag.0.cd_high_lift_base(cl, mach, altitude_m)
     }
 
     /// Minimum drag-to-lift lift coefficient from the model's drag.

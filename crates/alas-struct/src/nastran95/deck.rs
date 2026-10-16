@@ -35,9 +35,12 @@ mod cards;
 #[cfg(test)]
 mod tests;
 
+pub(super) use cards::{bulk as benchmark_bulk, card as benchmark_card};
 use cards::{bulk, card, eigenvalue_card, param, static_loads};
 
 use alas_config::{DesignRequirements, StructuresConfig};
+
+pub(crate) use super::units::UnitScale;
 
 use super::field::{Card, ContinuationTags, Field};
 use crate::loads::{self, LoadCase};
@@ -61,30 +64,46 @@ const SPC_SET: i64 = 1;
 /// The eigenvalue-extraction set the modes deck selects.
 const METHOD_SET: i64 = 1;
 
-/// The legacy inverse-power method needs a populated low-frequency search
-/// interval before it can identify the desired roots.  The product wingbox's
-/// target-bearing elastic modes are below 100 Hz; using the 500 Hz SOL 111
-/// response ceiling here made the solver skip the low roots altogether.
+/// The legacy default modal band for the public deck builders: the lowest
+/// sixteen roots estimated over 0-100 Hz. It is *not* what the product path
+/// uses (see [`ModalBand`] and `analysis::modal_band`): a band this wide lets
+/// inverse power skip the lowest elastic roots.
 const NASTRAN95_MODAL_SEARCH_UPPER_HZ: f64 = 100.0;
 
-/// The inverse solver's root estimate must exceed the requested modal count.
-/// A four-to-one estimate provides enough shift regions for the old solver to
-/// account for the low roots across the product wingbox's bounded 100 Hz band,
-/// while remaining much cheaper than a full-band extraction request.
+/// The inverse solver's root estimate must exceed the requested modal count;
+/// a four-to-one estimate is the legacy default.
 const NASTRAN95_MODAL_ROOT_ESTIMATE_FACTOR: i64 = 4;
 
-/// The inverse solver must extract a sufficiently broad low-frequency set even
-/// when a caller only displays a handful of modes.  A sixteen-mode floor is the
-/// smallest full-mesh request validated against the active Rayleigh targets and
-/// the MSC Nastran baseline; the analysis reader trims this set back to the
-/// configured count after filtering rigid modes.
+/// The legacy builders extract at least sixteen roots.
 const NASTRAN95_MINIMUM_EXTRACTED_MODES: i64 = 16;
+
+/// One `EIGR,,INV` search: roots in `[0, upper_hz]`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct ModalBand {
+    /// Upper edge of the search interval, Hz.
+    pub upper_hz: f64,
+    /// `NE`: estimated number of roots in the interval.
+    pub estimate: i64,
+    /// `ND`: number of roots wanted.
+    pub extract: i64,
+}
+
+impl ModalBand {
+    /// The historical 0-100 Hz band for `n_modes` requested modes.
+    pub(crate) fn legacy(n_modes: i64) -> Self {
+        let extract = n_modes.max(1).max(NASTRAN95_MINIMUM_EXTRACTED_MODES);
+        Self {
+            upper_hz: NASTRAN95_MODAL_SEARCH_UPPER_HZ,
+            estimate: extract.saturating_mul(NASTRAN95_MODAL_ROOT_ESTIMATE_FACTOR),
+            extract,
+        }
+    }
+}
 
 /// Load-set identifier bases, kept apart for the reason [`crate::nastran`]
 /// records: an earlier scheme let a pull-up force set collide with a push-down
 /// gravity set, and NASTRAN would have merged them silently.
-const GRAVITY_SID_BASE: i64 = 100;
-const FORCE_SID_BASE: i64 = 200;
+use crate::nastran::{FORCE_SID_BASE, GRAVITY_SID_BASE};
 
 /// Full-field displacement and eigenvector output is intentionally retained so
 /// the report can overlay NASTRAN-95 and MSC deformations. NASTRAN-95's
@@ -100,7 +119,7 @@ pub fn build_static_deck(
     cfg: &StructuresConfig,
     dialect: Dialect,
 ) -> String {
-    static_deck(deck, node_index, req, cfg, dialect, false)
+    static_deck(deck, node_index, req, cfg, dialect, false, UnitScale::SI)
 }
 
 /// Product static output includes actual stresses as well as displacements.
@@ -112,7 +131,45 @@ pub fn build_static_deck_product(
     cfg: &StructuresConfig,
     dialect: Dialect,
 ) -> String {
-    static_deck(deck, node_index, req, cfg, dialect, true)
+    static_deck(deck, node_index, req, cfg, dialect, true, UnitScale::SI)
+}
+
+/// The product static deck in an explicit unit system. The production
+/// NASTRAN-95 path writes [`UnitScale::DECIMETRE`]; see [`super::units`].
+pub(crate) fn build_static_deck_product_in(
+    deck: &Deck,
+    node_index: &MeshNodeIndex,
+    req: &DesignRequirements,
+    cfg: &StructuresConfig,
+    dialect: Dialect,
+    units: UnitScale,
+) -> String {
+    static_deck(deck, node_index, req, cfg, dialect, true, units)
+}
+
+/// The product static deck written in a coherent system of `length_per_m`
+/// deck length units per metre (mass unit `1 / length_per_m`, so a force unit
+/// stays one newton). This exists for scale-sensitivity studies of the
+/// 1995 solver ([`super::units`]); the product path always writes
+/// [`UnitScale::DECIMETRE`]. A non-finite or non-positive scale is written as
+/// SI.
+pub fn build_static_deck_product_at_length_scale(
+    deck: &Deck,
+    node_index: &MeshNodeIndex,
+    req: &DesignRequirements,
+    cfg: &StructuresConfig,
+    length_per_m: f64,
+) -> String {
+    let length = if length_per_m.is_finite() && length_per_m > 0.0 {
+        length_per_m
+    } else {
+        1.0
+    };
+    let units = UnitScale {
+        length,
+        mass: 1.0 / length,
+    };
+    static_deck(deck, node_index, req, cfg, Dialect::Nastran95, true, units)
 }
 
 fn static_deck(
@@ -122,6 +179,7 @@ fn static_deck(
     cfg: &StructuresConfig,
     dialect: Dialect,
     stresses: bool,
+    units: UnitScale,
 ) -> String {
     let cases = loads::load_cases(req, cfg.additional_safety_factor);
 
@@ -160,8 +218,8 @@ fn static_deck(
 
     let mut tags = ContinuationTags::new();
     param(&mut out, "COUPMASS", Field::Int(1));
-    bulk(&mut out, &mut tags, deck, dialect);
-    static_loads(&mut out, &mut tags, deck, node_index, req, &cases);
+    bulk(&mut out, &mut tags, deck, dialect, units);
+    static_loads(&mut out, &mut tags, deck, node_index, req, &cases, units);
     out.push_str("ENDDATA\n");
     out
 }
@@ -179,6 +237,25 @@ pub(crate) fn build_modes_deck_for_nodes(
     cfg: &StructuresConfig,
     dialect: Dialect,
     output_nodes: &[i64],
+) -> String {
+    build_modes_deck_banded(
+        deck,
+        cfg,
+        dialect,
+        output_nodes,
+        UnitScale::SI,
+        ModalBand::legacy(cfg.n_modes),
+    )
+}
+
+/// The normal-modes deck in an explicit unit system and `EIGR` search band.
+pub(crate) fn build_modes_deck_banded(
+    deck: &Deck,
+    cfg: &StructuresConfig,
+    dialect: Dialect,
+    output_nodes: &[i64],
+    units: UnitScale,
+    band: ModalBand,
 ) -> String {
     let mut out = String::new();
     match dialect {
@@ -208,8 +285,8 @@ pub(crate) fn build_modes_deck_for_nodes(
 
     let mut tags = ContinuationTags::new();
     param(&mut out, "COUPMASS", Field::Int(1));
-    bulk(&mut out, &mut tags, deck, dialect);
-    eigenvalue_card(&mut out, &mut tags, cfg, dialect);
+    bulk(&mut out, &mut tags, deck, dialect, units);
+    eigenvalue_card(&mut out, &mut tags, cfg, dialect, band);
     out.push_str("ENDDATA\n");
     out
 }

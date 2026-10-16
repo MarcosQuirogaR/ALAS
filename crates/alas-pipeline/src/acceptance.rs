@@ -104,6 +104,9 @@ pub use reuse::VerifiedAnalysis;
 /// in that case.
 pub struct ReportingNominal {
     design: DesignVector,
+    /// Takeoff-mass limit it was evaluated at, kg (the band mass under the MTOW
+    /// band mode).
+    mass_kg: f64,
     evaluation: Result<(FinalistVerification, Vec<&'static str>), String>,
 }
 
@@ -123,11 +126,15 @@ impl ReportingNominal {
         if config.optimizer.design_space.mode != alas_config::DesignMode::ReferenceAdaptation {
             return None;
         }
+        let mass_kg = config.at_band_mass(None).requirements.mtow_kg;
         let design = match alas_config::presets::get(&config.preset) {
-            Ok(preset) => preset.design_vector,
+            // Carries the band mass (the target) under the MTOW band mode, like the
+            // run's own nominal vector.
+            Ok(preset) => config.band_design(preset.design_vector),
             Err(error) => {
                 return Some(Ok(Self {
                     design: DesignVector::default(),
+                    mass_kg,
                     evaluation: Err(format!("registered design: {error}")),
                 }))
             }
@@ -139,7 +146,11 @@ impl ReportingNominal {
                 if let Err(error) = &evaluation {
                     tracing::warn!(%error, "the registered aircraft could not be re-evaluated at reporting fidelity");
                 }
-                Some(Ok(Self { design, evaluation }))
+                Some(Ok(Self {
+                    design,
+                    mass_kg,
+                    evaluation,
+                }))
             }
         }
     }
@@ -245,7 +256,14 @@ pub fn verify_finalist_cancellable(
     cancel: Option<&std::sync::atomic::AtomicBool>,
 ) -> Result<FinalistVerification, String> {
     let (mut verification, _) = reporting_fidelity(config, design, route, cancel, true)?;
-    hold_to_nominal(&mut verification, config, nominal);
+    hold_to_nominal_at_mass(
+        &mut verification,
+        config,
+        nominal,
+        route,
+        cancel,
+        &MassNominals::default(),
+    );
     Ok(verification)
 }
 
@@ -268,6 +286,51 @@ pub(crate) fn hold_to_nominal(
             .filter(|r| r.role == alas_opt::mdo::ResidualRole::Constraint && r.violated())
             .collect();
 }
+
+/// [`hold_to_nominal`] against the registered aircraft at the candidate's own
+/// takeoff mass. Under the MTOW band mode the in-loop guard compares a
+/// candidate with the registered aircraft evaluated at the same band mass; the
+/// run's `nominal` is at the target, so a candidate at another mass is held
+/// against a nominal re-evaluated at its mass (any other mode: `nominal`).
+pub(crate) fn hold_to_nominal_at_mass(
+    verification: &mut FinalistVerification,
+    config: &AlasConfig,
+    nominal: Option<&ReportingNominal>,
+    route: Option<&AcceptanceRoute>,
+    cancel: Option<&std::sync::atomic::AtomicBool>,
+    cache: &MassNominals,
+) {
+    let mass_kg = verification.design.mtow_kg;
+    let differs = nominal.is_some_and(|nominal| {
+        mass_kg.is_some_and(|kg| (kg - nominal.mass_kg).abs() > 1.0e-9 * nominal.mass_kg.abs())
+    });
+    let Some(mass_kg) = mass_kg.filter(|_| differs) else {
+        hold_to_nominal(verification, config, nominal);
+        return;
+    };
+    let mut entries = cache
+        .0
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let key = mass_kg.to_bits();
+    if !entries.iter().any(|(bits, _)| *bits == key) {
+        let evaluated =
+            ReportingNominal::evaluate(&config.at_band_mass(Some(mass_kg)), route, cancel)
+                .and_then(Result::ok);
+        entries.push((key, evaluated));
+    }
+    let own = entries
+        .iter()
+        .find(|(bits, _)| *bits == key)
+        .and_then(|(_, own)| own.as_ref());
+    // An unavailable nominal at this mass fails the hard guard closed, as ever.
+    hold_to_nominal(verification, config, own.or(nominal));
+}
+
+/// The registered aircraft re-evaluated at the band masses the ladder meets,
+/// one evaluation per distinct mass.
+#[derive(Default)]
+pub(crate) struct MassNominals(std::sync::Mutex<Vec<(u64, Option<ReportingNominal>)>>);
 
 /// Re-evaluate the unmodified `baseline` exactly as a finalist is and
 /// compare its native-mission trip fuel (completed missions only) with
@@ -351,6 +414,10 @@ fn reporting_fidelity(
     cancel: Option<&std::sync::atomic::AtomicBool>,
     require_hard_feasible: bool,
 ) -> Result<(FinalistVerification, Vec<&'static str>), String> {
+    // Under the MTOW band mode the candidate is the fixed requirement at its own
+    // mass: replay, report, mission and feasibility all read that configuration.
+    let resolved = config.at_band_mass(design.mtow_kg);
+    let config = &resolved;
     let assessment = alas_opt::assess_product_candidate_cancellable(config, design, cancel)
         .map_err(|error| {
             if error == "cancelled" {
@@ -586,6 +653,7 @@ mod tests {
         }
         let wider = ReportingNominal {
             design: nominal.design,
+            mass_kg: nominal.mass_kg,
             evaluation: Ok((wider, Vec::new())),
         };
         hold_to_nominal(&mut finalist, &config, Some(&wider));
@@ -608,6 +676,7 @@ mod tests {
         // No nominal at reporting fidelity: the hard guard fails closed.
         let unavailable = ReportingNominal {
             design: nominal.design,
+            mass_kg: nominal.mass_kg,
             evaluation: Err("analysis failed".to_owned()),
         };
         let mut finalist = own.clone();

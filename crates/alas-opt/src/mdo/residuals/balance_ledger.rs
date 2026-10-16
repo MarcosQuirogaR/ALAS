@@ -16,7 +16,7 @@ use alas_mass::statement::{
     LedgerMethods, LoadState, MassStatement, MassStatementInputs, PayloadItemSummary,
 };
 use alas_mass::tanks::{resolve_product_layout, TankLayoutError};
-use alas_payload::{build::build_payload_layout, oew::oew_and_cg};
+use alas_payload::oew::oew_and_cg;
 
 use super::SizingOutcome;
 use crate::envelope::{LedgerLandingState, LedgerLoadingBasis};
@@ -44,13 +44,55 @@ pub(super) fn loading_bases(
     ),
     String,
 > {
+    loading_bases_for(outcome, config, FuelLoad::Mission)
+}
+
+/// How much fuel the design loading puts in the tanks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum FuelLoad {
+    /// The fuel the closed mission carries; more than the tanks hold is an
+    /// error (the candidate is rejected, and the capacity residuals say so).
+    Mission,
+    /// The mission fuel limited to the usable tank capacity. This is the
+    /// loading of the registered aircraft a reference adaptation is held to:
+    /// the real aircraft cannot take more fuel than its tanks hold, so when
+    /// the modelled design mission needs more (a model fuel-burn or empty-mass
+    /// excess, reported by the capacity residuals) its balance reference is
+    /// the full-tank loading instead of being unavailable.
+    TankLimited,
+}
+
+/// [`loading_bases`] under an explicit [`FuelLoad`] policy.
+pub(super) fn loading_bases_for(
+    outcome: &SizingOutcome,
+    config: &AlasConfig,
+    fuel_load: FuelLoad,
+) -> Result<
+    (
+        LedgerLoadingBasis,
+        Option<(LedgerLoadingBasis, LedgerLandingState)>,
+    ),
+    String,
+> {
     let mut config = config.at_sized_closure_mass(outcome.sized.takeoff_mass_kg);
     crate::objective::apply_candidate_payload_load_case(&mut config, &outcome.history.dv)
         .map_err(|error| format!("ledger load case: {error}"))?;
     let plane = &outcome.plane;
     let (oew, x_oew) = oew_and_cg(&outcome.masses, &outcome.coords);
-    let payload = build_payload_layout(plane, &config, oew, x_oew)
-        .map_err(|error| format!("payload ledger: {error}"))?;
+    let payload =
+        crate::mdo::build::capped_payload_layout(&config, &outcome.history.dv, plane, oew, x_oew)
+            .map_err(|failure| format!("payload ledger: {}", failure.reason))?;
+    // The ledger prices the cabin the layout seats, as the closure and the
+    // report do (`cabin_sync`).
+    let (seated_requirements, seated_mass_model) =
+        crate::mdo::cabin_sync::cabin_synchronized_for_cabin(
+            &config.requirements,
+            &config.mass_model,
+            &config.cabin.passenger,
+            &payload,
+        );
+    config.requirements = seated_requirements;
+    config.mass_model = seated_mass_model;
     let summary = PayloadLayoutSummary {
         total_mass: payload.total_mass,
         cg_x: payload.cg_x,
@@ -89,6 +131,11 @@ pub(super) fn loading_bases(
         .masses
         .physical_fuel_mass_kg()
         .ok_or_else(|| "nonphysical ledger fuel mass".to_owned())?;
+    let carried_kg = if fuel_load == FuelLoad::TankLimited {
+        carried_kg.min(tanks.usable_capacity_kg())
+    } else {
+        carried_kg
+    };
     let fuel_kg = tanks.loadable_fuel_kg(carried_kg).map_err(|error| {
         fuel_load_error(
             &error,
@@ -178,9 +225,7 @@ fn fuel_load_error(
     usable_capacity_kg: f64,
     unusable_kg: f64,
 ) -> String {
-    if mode == alas_config::MtowSizing::FixedRequirement
-        && matches!(error, TankLayoutError::Overflow { .. })
-    {
+    if mode.sizes_at_declared_mass() && matches!(error, TankLayoutError::Overflow { .. }) {
         // FLOPS unusable fuel is already in OEW; the MTOW-minus-ZFW remainder
         // is usable fuel. Adding unusable fuel converts both sides to total fuel.
         format!("tank overflow at fixed MTOW: usable fuel remainder {usable_remainder_kg:.3} kg exceeds usable tank capacity {usable_capacity_kg:.3} kg by {:.3} kg; unusable fuel {unusable_kg:.3} kg is excluded from usable capacity (total fuel {:.3} kg, total capacity {:.3} kg)",

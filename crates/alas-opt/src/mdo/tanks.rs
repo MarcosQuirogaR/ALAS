@@ -67,7 +67,7 @@ pub fn usable_fuel_capacity(
 ) -> Option<UsableFuelCapacity> {
     let kg = tank_capacity_kg(config, plane, design)?;
     let published = presets::get(&config.preset).is_ok_and(|preset| {
-        *design == preset.design_vector
+        design.same_geometry(&preset.design_vector)
             && uses_registered_tank_layout(config)
             && uses_preset_fuel(config, preset)
             && (preset.reference.usable_fuel_volume_l.is_some()

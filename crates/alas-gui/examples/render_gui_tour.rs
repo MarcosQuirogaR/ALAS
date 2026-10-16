@@ -19,14 +19,25 @@
 //! any filter starting with `advanced`) opens the Advanced Settings mode: the
 //! root window takes the detached window's default size and renders its
 //! contents, because an immediate child viewport cannot be captured.
+//!
+//! `ALAS_TOUR_SIZE=WxH` (points, for example `1600x1000`) overrides the
+//! window's inner size. The shell's first frames need more than the 1 MiB
+//! default main-thread stack of a Windows process; winit requires the event
+//! loop on the main thread, so `build.rs` enlarges the main-thread stack of
+//! the examples at link time (`/STACK`, MSVC targets).
 
 #![allow(clippy::print_stdout, clippy::print_stderr)]
 
 use std::path::PathBuf;
 
 use alas_gui::state::Language;
+use alas_gui::uav::UavSection;
+
+#[path = "render_gui_tour/uav.rs"]
+mod uav;
 use alas_gui::{AlasApp, AppState, AppTheme};
 use egui::{Event, Pos2, Vec2};
+use uav::{prepare_uav_state, uav_shots};
 
 /// The shell's default size (`alas_gui::run`).
 const MAIN_SIZE: [f32; 2] = [1280.0, 820.0];
@@ -52,6 +63,8 @@ struct Shot {
     max_pages: usize,
     /// An MTOW mode to select before the shot, for the mode-dependent card.
     mtow_mode: Option<&'static str>,
+    /// The UAV section to show before the shot (UAV page shots only).
+    uav_section: Option<UavSection>,
 }
 
 fn shots(advanced: bool) -> Vec<Shot> {
@@ -72,6 +85,7 @@ fn shots(advanced: bool) -> Vec<Shot> {
                 advanced_tab,
                 max_pages: pages,
                 mtow_mode: None,
+                uav_section: None,
             };
             if advanced {
                 for page in alas_gui::sandbox::advanced::pages() {
@@ -146,6 +160,7 @@ fn shots(advanced: bool) -> Vec<Shot> {
                 },
                 max_pages: 30,
                 mtow_mode: Some(mode),
+                uav_section: None,
             };
             list.push(shot);
         }
@@ -208,6 +223,9 @@ impl Tour {
         }
         if let Some(mode) = shot.mtow_mode {
             state.config_values["optimizer"]["objective"]["mtow_sizing"] = serde_json::json!(mode);
+        }
+        if let Some(section) = shot.uav_section {
+            state.uav.active_section = section;
         }
         state.update_preview_scene();
         state.update_result_scene();
@@ -356,6 +374,19 @@ impl eframe::App for Tour {
     }
 }
 
+/// The window size requested by `ALAS_TOUR_SIZE=WxH`, if valid.
+fn size_override() -> Option<[f32; 2]> {
+    let text = std::env::var("ALAS_TOUR_SIZE").ok()?;
+    let (width, height) = text.split_once(['x', 'X'])?;
+    let size = [
+        width.trim().parse::<f32>().ok()?,
+        height.trim().parse::<f32>().ok()?,
+    ];
+    size.iter()
+        .all(|v| v.is_finite() && *v >= 320.0)
+        .then_some(size)
+}
+
 // AppState owns private caches, so it is initialized through Default.
 #[allow(clippy::field_reassign_with_default)]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -371,14 +402,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let refinement: i64 = args.next().map_or(Ok(160), |value| value.parse())?;
     let filter = args.next().unwrap_or_default();
     let advanced = filter.starts_with("advanced");
+    // `uav...` renders the fixed-wing UAV page after one small competition search.
+    let uav_tour = filter.starts_with("uav");
     std::fs::create_dir_all(&output)?;
-    let size = if filter.contains("narrow") {
+    let size = size_override().unwrap_or(if filter.contains("narrow") {
         ADVANCED_MIN_SIZE
     } else if advanced {
         ADVANCED_SIZE
     } else {
         MAIN_SIZE
-    };
+    });
 
     alas_i18n::es::install();
     let mut state = AppState::default();
@@ -395,7 +428,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     state.config_values["structures"]["run_patran_export"] = serde_json::json!(false);
     state.config_values["mses"]["enabled"] = serde_json::json!(false);
 
-    let mut list = shots(advanced);
+    if uav_tour {
+        prepare_uav_state(&mut state);
+    }
+
+    let mut list = if uav_tour {
+        uav_shots()
+    } else {
+        shots(advanced)
+    };
     if !filter.is_empty() && !advanced && filter != "narrow" {
         list.retain(|shot| shot.name.contains(&filter));
     }

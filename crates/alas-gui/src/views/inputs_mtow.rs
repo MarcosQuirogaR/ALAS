@@ -20,6 +20,7 @@ use alas_pipeline::quick_analysis::band::{
 };
 use egui::{ComboBox, DragValue, Id, RichText, Ui};
 use serde_json::{json, Value};
+use std::sync::Arc;
 
 use crate::state::AppState;
 use crate::views::form::dynamic_form;
@@ -45,7 +46,7 @@ const CHOICES: [(MtowSizing, &str); 3] = [
         MtowSizing::FixedRequirement,
         "Hard MTOW constraint (preset default)",
     ),
-    (MtowSizing::MtowBand, "MTOW objective (band)"),
+    (MtowSizing::MtowBand, "MTOW band (free mass in the band)"),
     (MtowSizing::PayloadAdjusted, "Payload-adjusted MTOW"),
 ];
 
@@ -65,7 +66,7 @@ pub(crate) fn stored_mode(state: &AppState) -> MtowSizing {
         .find(|mode| Some(mode.as_str()) == name)
         .unwrap_or_else(|| {
             state
-                .typed_config()
+                .typed_config_arc()
                 .map(|config| config.optimizer.objective.mtow_sizing)
                 .unwrap_or_default()
         })
@@ -228,7 +229,7 @@ fn drag_row(
 fn mode_help(mode: MtowSizing) -> &'static str {
     match mode {
         MtowSizing::FixedRequirement => HARD_HELP,
-        MtowSizing::MtowBand => "The take-off mass may take any value in the band shown below, with no preference toward the target. MTOW is closed on the design mission (design range at full payload), and the route from the Inputs is then checked off-design.",
+        MtowSizing::MtowBand => "A relaxed hard MTOW: the optimizer chooses the take-off mass inside the band shown below, starting at the target, and the aircraft is sized and checked at that mass exactly as under the hard constraint. A design that is feasible at a fixed mass in the band stays feasible here.",
         MtowSizing::PayloadAdjusted => "Take-off mass is closed by the mission with the selected passengers or cargo and the fuel reserves of the fuel policy.",
         MtowSizing::SizedByMission | MtowSizing::Unconstrained => "Declared MTOW. In the loaded mode it seeds the closure, and it also caps it unless the mode is unconstrained.",
     }
@@ -236,7 +237,7 @@ fn mode_help(mode: MtowSizing) -> &'static str {
 
 /// Resolve the still-air design range with the model's preset precedence.
 pub(crate) fn effective_design_range_nmi(state: &AppState) -> Option<f64> {
-    let config = state.typed_config()?;
+    let config = state.typed_config_arc()?;
     config
         .mtow_plan()
         .design_mission
@@ -286,7 +287,7 @@ fn show_design_range(state: &mut AppState, ui: &mut Ui) {
 
 fn show_band_controls(state: &mut AppState, ui: &mut Ui) {
     let declared = state
-        .typed_config()
+        .typed_config_arc()
         .map_or(0.0, |config| config.requirements.mtow_kg);
     let stored_target = objective_number(state, "mtow_target_kg").unwrap_or(0.0);
     let mut target = if stored_target > 0.0 {
@@ -309,7 +310,8 @@ fn show_band_controls(state: &mut AppState, ui: &mut Ui) {
             "MTOW target",
         );
     }
-    let fraction = objective_number(state, "mtow_band_fraction").unwrap_or(0.05);
+    let fraction = objective_number(state, "mtow_band_fraction")
+        .unwrap_or(alas_config::DEFAULT_MTOW_BAND_FRACTION);
     let mut percent = fraction * 100.0;
     let mut changed = false;
     ui.horizontal_wrapped(|ui| {
@@ -350,9 +352,9 @@ fn latest_report(state: &AppState) -> Option<&alas_pipeline::full_analysis::Anal
 /// when no analysis report is available.
 fn band_check(state: &AppState) -> Option<DesignMissionBand> {
     let report = latest_report(state)?;
-    let config: AlasConfig = state.typed_config()?;
+    let config: Arc<AlasConfig> = state.typed_config_arc()?;
     let plan = config.mtow_plan();
-    let (lo_kg, hi_kg) = (plan.lower_bound_kg?, plan.upper_bound_kg?);
+    let (lo_kg, hi_kg) = plan.band_edges_kg?;
     let payload_kg = config.design_payload_kg().0;
     let range_m = effective_design_range_nmi(state)? * NMI_M;
     Some(design_mission_band_check(

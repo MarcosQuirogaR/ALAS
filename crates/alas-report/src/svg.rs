@@ -57,6 +57,12 @@ fn write_svg(out: &mut String, scene: &Scene) -> fmt::Result {
         )?;
     }
 
+    if scene.elements.iter().any(
+        |elem| matches!(elem, SceneElement::Image { source, .. } if source == BLUE_MARBLE_SOURCE),
+    ) {
+        write_blue_marble_defs(out)?;
+    }
+
     if let Some(title) = &scene.title {
         out.push_str("  <title>");
         push_escaped_xml(out, title);
@@ -337,13 +343,35 @@ fn write_image(
         }
         write!(
             out,
-            r#"  <svg x="{x:.2}" y="{y:.2}" width="{width:.2}" height="{height:.2}" viewBox="{left:.8} {top:.8} {crop_width:.8} {crop_height:.8}" preserveAspectRatio="none" overflow="hidden"><image href=""#
+            r#"  <svg x="{x:.2}" y="{y:.2}" width="{width:.2}" height="{height:.2}" viewBox="{left:.8} {top:.8} {crop_width:.8} {crop_height:.8}" preserveAspectRatio="none" overflow="hidden">"#
         )?;
-        push_image_href(out, source);
-        out.push_str(r#"" x="0" y="0" width="1" height="1" preserveAspectRatio="none"/></svg>"#);
+        if source == BLUE_MARBLE_SOURCE {
+            out.push_str(
+                r##"<use href="#alas-blue-marble-fill" x="0" y="0" width="1" height="1"/>"##,
+            );
+        } else {
+            out.push_str(r#"<image href=""#);
+            push_escaped_xml(out, source);
+            out.push_str(r#"" x="0" y="0" width="1" height="1" preserveAspectRatio="none"/>"#);
+        }
+        out.push_str("</svg>");
+    } else if source == BLUE_MARBLE_SOURCE {
+        // `xMidYMid meet` placement computed here from the known texture size,
+        // from the same two-decimal box the inline `<image>` form printed.
+        let round = |v: f64| (v * 100.0).round() / 100.0;
+        let (x, y, width, height) = (round(x), round(y), round(width), round(height));
+        let (tex_w, tex_h) = blue_marble_size();
+        let (tex_w, tex_h) = (f64::from(tex_w), f64::from(tex_h));
+        let scale = (width / tex_w).min(height / tex_h);
+        let tx = x + (width - tex_w * scale) * 0.5;
+        let ty = y + (height - tex_h * scale) * 0.5;
+        write!(
+            out,
+            r##"  <use href="#alas-blue-marble" transform="matrix({scale} 0 0 {scale} {tx} {ty})"/>"##
+        )?;
     } else {
         out.push_str(r#"  <image href=""#);
-        push_image_href(out, source);
+        push_escaped_xml(out, source);
         write!(
             out,
             r#"" x="{x:.2}" y="{y:.2}" width="{width:.2}" height="{height:.2}" preserveAspectRatio="xMidYMid meet"/>"#
@@ -352,12 +380,35 @@ fn write_image(
     Ok(())
 }
 
-fn push_image_href(out: &mut String, source: &str) {
-    if source == BLUE_MARBLE_SOURCE {
-        out.push_str(blue_marble_data_uri());
-    } else {
-        push_escaped_xml(out, source);
-    }
+/// Emit the bundled texture once, in `<defs>`, plus a `fill` symbol that stretches it
+/// into a cropped nested viewBox. Every reference is then a short `<use>`, so a route figure that places the
+/// texture several times carries the roughly 9 MB data URI once instead of
+/// once per reference; the rendered pixels do not change.
+fn write_blue_marble_defs(out: &mut String) -> fmt::Result {
+    let (width, height) = blue_marble_size();
+    out.push_str(r#"  <defs><image id="alas-blue-marble" href=""#);
+    out.push_str(blue_marble_data_uri());
+    writeln!(out, r#"" width="{width}" height="{height}"/>"#)?;
+    writeln!(
+        out,
+        r##"  <symbol id="alas-blue-marble-fill" viewBox="0 0 {width} {height}" preserveAspectRatio="none"><use href="#alas-blue-marble"/></symbol>"##
+    )?;
+    out.push_str("  </defs>\n");
+    Ok(())
+}
+
+const BLUE_MARBLE_PNG: &[u8] = include_bytes!("../../../assets/textures/earth_blue_marble.png");
+
+/// Pixel size from the PNG IHDR chunk (big-endian width and height at byte
+/// offsets 16 and 20).
+fn blue_marble_size() -> (u32, u32) {
+    let field = |at: usize| {
+        BLUE_MARBLE_PNG
+            .get(at..at + 4)
+            .and_then(|bytes| <[u8; 4]>::try_from(bytes).ok())
+            .map_or(1, u32::from_be_bytes)
+    };
+    (field(16), field(20))
 }
 
 /// The bundled texture as a PNG data URI, encoded once per process: the PNG
@@ -366,7 +417,7 @@ fn push_image_href(out: &mut String, source: &str) {
 fn blue_marble_data_uri() -> &'static str {
     static URI: OnceLock<String> = OnceLock::new();
     URI.get_or_init(|| {
-        let bytes = include_bytes!("../../../assets/textures/earth_blue_marble.png");
+        let bytes = BLUE_MARBLE_PNG;
         let mut uri = String::from("data:image/png;base64,");
         BASE64.encode_string(bytes, &mut uri);
         uri

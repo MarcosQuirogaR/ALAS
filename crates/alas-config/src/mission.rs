@@ -16,11 +16,13 @@
 //! seen cannot be questioned.
 
 mod profile;
+mod speed_caps;
 
 pub use profile::{
     resolve_true_airspeed_m_s, CruiseAltitudePolicy, MissionProfileConfig, SpeedReference,
     CAS_SPEED_SUBDIVISIONS,
 };
+pub use speed_caps::{crossover_altitude_m, SpeedCaps};
 
 use serde::{Deserialize, Serialize};
 

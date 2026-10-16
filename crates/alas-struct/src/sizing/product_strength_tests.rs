@@ -80,10 +80,9 @@ fn assert_sizing_bits_equal(actual: &WingboxSizing, expected: &WingboxSizing, la
         ],
     );
     for (actual, expected) in actual.spars.iter().zip(&expected.spars) {
-        equal_bits(
-            &[actual.chord_fraction, actual.t_web],
-            &[expected.chord_fraction, expected.t_web],
-        );
+        equal_bits(&[actual.chord_fraction], &[expected.chord_fraction]);
+        equal_bits(&actual.t_web, &expected.t_web);
+        equal_bits(&actual.lower_extra_area, &expected.lower_extra_area);
         equal_bits(&actual.h, &expected.h);
         equal_bits(&actual.w_cap, &expected.w_cap);
         equal_bits(&actual.t_cap, &expected.t_cap);
@@ -122,11 +121,11 @@ fn narrowed_cap_search_replays_the_legacy_section_bit_for_bit() {
                 crate::loads::cantilever_shear_moment(&sizing.y_stations, &load);
             let mut expected = sizing.clone();
             for spar in &mut expected.spars {
-                spar.t_web = cfg.t_web_min_m;
+                spar.t_web.fill(cfg.t_web_min_m);
             }
             let mut actual = expected.clone();
             super::reference::size(&mut expected, &moments, &shears, cfg, skin, web, cap);
-            super::size(&mut actual, &moments, &shears, cfg, skin, web, cap);
+            super::size(&mut actual, &moments, &shears, cfg, skin, web, cap, None);
             assert_sizing_bits_equal(
                 &actual,
                 &expected,
@@ -256,7 +255,7 @@ fn product_strength_microtiming() {
                 let start = std::time::Instant::now();
                 for _ in 0..5 {
                     for spar in &mut candidate.spars {
-                        spar.t_web = cfg.t_web_min_m;
+                        spar.t_web.fill(cfg.t_web_min_m);
                     }
                     if legacy {
                         super::reference::size(
@@ -269,7 +268,7 @@ fn product_strength_microtiming() {
                             cap,
                         );
                     } else {
-                        super::size(&mut candidate, &moments, &shears, cfg, skin, web, cap);
+                        super::size(&mut candidate, &moments, &shears, cfg, skin, web, cap, None);
                     }
                     std::hint::black_box(&candidate);
                 }
@@ -281,4 +280,44 @@ fn product_strength_microtiming() {
             );
         }
     }
+}
+
+#[test]
+fn a_long_rib_bay_makes_the_stiffened_cover_critical_and_buys_flange_area() {
+    // Torenbeek (2013) Eq. 11.71: the compressive allowable of the stiffened
+    // cover falls with the rib pitch, so the same loads need more flange
+    // material in a box with fewer ribs. Nothing here is tuned to a preset.
+    let (config, geometry) = probe("A320-200");
+    let base = size_probe(&config, &geometry);
+    let mut sparse_config = config.clone();
+    sparse_config.structures.num_ribs_override = Some(6);
+    let sparse = size_probe(&sparse_config, &geometry);
+    assert!(sparse.installed_rib_spacing_m() > 2.0 * base.installed_rib_spacing_m());
+    assert!(
+        sparse.mass_breakdown_kg.spar_caps > 1.2 * base.mass_breakdown_kg.spar_caps,
+        "caps {} vs {}",
+        sparse.mass_breakdown_kg.spar_caps,
+        base.mass_breakdown_kg.spar_caps
+    );
+    assert!(sparse.total_mass_kg.is_finite() && base.total_mass_kg.is_finite());
+}
+
+#[test]
+fn the_default_aluminium_root_cover_is_nearly_strength_limited_at_its_own_rib_pitch() {
+    // At the installed rib pitch the stiffened-panel curve stays below the
+    // 380 MPa material allowable at the A380-class root, so panel buckling and
+    // strength are both active there. Measured 374.8 MPa (98.6 %) with the
+    // pull-up case alone; 345.9 MPa (91.0 %) once the torque shear flow
+    // thickens the webs, which then share the bending and leave a thinner
+    // cap and cover (CaseSet::ALL, torque of the aerodynamic load about the
+    // box axis, crate::torsion).
+    let (config, geometry) = probe("A380-800");
+    let sizing = size_probe(&config, &geometry);
+    let cfg = &config.structures;
+    let skin = materials::get(&cfg.skin_material).expect("skin material");
+    let panel = super::super::panel::CoverPanel::new(&sizing, 0);
+    let flange = super::super::panel::flange_area_m2(&sizing, 0);
+    let allowable = panel.allowable_pa(skin, flange);
+    assert!(allowable <= skin.f_allow_pa);
+    assert!(allowable > 0.85 * skin.f_allow_pa, "{allowable}");
 }

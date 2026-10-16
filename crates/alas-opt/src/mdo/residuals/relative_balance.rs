@@ -38,6 +38,7 @@ use super::super::nominal_cache::NominalCache;
 use super::super::sizing::SizingOutcome;
 use super::super::types::ConstraintFamily::Balance;
 use super::super::types::ConstraintResidual;
+use super::balance_ledger::FuelLoad;
 use super::{balance_ledger, worst_by_constraint};
 
 /// The two modelled quantities of the registered aircraft's design vector.
@@ -51,6 +52,7 @@ pub(super) struct NominalBalance {
 
 /// The envelope assessment of one sized candidate at the critical
 /// neutral-point condition set of this stage's mesh fidelity.
+#[cfg(test)]
 pub(super) fn assess(
     outcome: &SizingOutcome,
     config: &AlasConfig,
@@ -65,7 +67,16 @@ pub(super) fn assess_states(
     outcome: &SizingOutcome,
     config: &AlasConfig,
 ) -> Result<(ModelCgEnvelopeAssessment, Option<ModelCgEnvelopeAssessment>), String> {
-    let (ledger, flown) = balance_ledger::loading_bases(outcome, config)?;
+    assess_states_for(outcome, config, FuelLoad::Mission)
+}
+
+/// [`assess_states`] under an explicit fuel-loading policy.
+pub(super) fn assess_states_for(
+    outcome: &SizingOutcome,
+    config: &AlasConfig,
+    fuel_load: FuelLoad,
+) -> Result<(ModelCgEnvelopeAssessment, Option<ModelCgEnvelopeAssessment>), String> {
+    let (ledger, flown) = balance_ledger::loading_bases_for(outcome, config, fuel_load)?;
     if !config.requirements.cruise_mach.is_finite()
         || !(0.0..1.0).contains(&config.requirements.cruise_mach)
         || !config.requirements.cruise_altitude_m.is_finite()
@@ -133,7 +144,9 @@ fn resolve(config: &AlasConfig) -> Result<NominalBalance, String> {
     let outcome =
         super::super::sizing::run_candidate_with_fuselage_policy(config, &design.to_array(), false)
             .map_err(|failure| failure.reason.to_owned())?;
-    measure(&assess(&outcome, config)?).ok_or_else(|| "non-finite nominal balance".to_owned())
+    // The registered aircraft is loaded as its tanks allow (`FuelLoad`).
+    let (assessment, _) = assess_states_for(&outcome, config, FuelLoad::TankLimited)?;
+    measure(&assessment).ok_or_else(|| "non-finite nominal balance".to_owned())
 }
 
 /// The in-loop nominals, keyed on the complete configuration.

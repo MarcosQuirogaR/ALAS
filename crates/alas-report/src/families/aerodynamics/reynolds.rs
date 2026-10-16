@@ -7,6 +7,7 @@
 
 use alas_aero::neuralfoil::{self, Conditions, ModelSize};
 use alas_geom::aircraft::airfoil::Airfoil;
+use rayon::prelude::*;
 
 use super::support::{add_heatmap_grid_nan_aware, cell_edges_linear, cell_edges_log, padded_range};
 use crate::chart_kit::{draw_colorbar, draw_title};
@@ -88,23 +89,32 @@ pub fn figure_airfoil_reynolds(airfoil: &Airfoil, theme: Option<&str>) -> Scene 
     let alpha = linspace(-5.0, 12.0, 30);
     let reynolds = logspace(1e4, 1e7, 30);
     let mut fields = vec![vec![f64::NAN; alpha.len() * reynolds.len()]; 4];
-    for (iy, &a) in alpha.iter().enumerate() {
-        for (ix, &re) in reynolds.iter().enumerate() {
-            if let Ok(value) = neuralfoil::aero_from_coordinates(
+    // Each cell is an independent NeuralFoil evaluation with no shared state,
+    // so the 900 calls run on the rayon pool. `collect` on an indexed parallel
+    // iterator keeps cell order, and each cell is computed exactly as in a
+    // serial sweep, so the fields are bit-identical to the serial result.
+    let columns = reynolds.len();
+    let cells: Vec<Option<neuralfoil::NetworkAero>> = (0..alpha.len() * columns)
+        .into_par_iter()
+        .map(|i| {
+            neuralfoil::aero_from_coordinates(
                 &airfoil.coordinates,
-                &Conditions::new(a, re),
+                &Conditions::new(alpha[i / columns], reynolds[i % columns]),
                 ModelSize::Large,
-            ) {
-                let i = iy * reynolds.len() + ix;
-                fields[0][i] = value.cl;
-                fields[1][i] = value.cd;
-                fields[2][i] = if value.cd > 0.0 {
-                    value.cl / value.cd
-                } else {
-                    f64::NAN
-                };
-                fields[3][i] = value.cm;
-            }
+            )
+            .ok()
+        })
+        .collect();
+    for (i, cell) in cells.into_iter().enumerate() {
+        if let Some(value) = cell {
+            fields[0][i] = value.cl;
+            fields[1][i] = value.cd;
+            fields[2][i] = if value.cd > 0.0 {
+                value.cl / value.cd
+            } else {
+                f64::NAN
+            };
+            fields[3][i] = value.cm;
         }
     }
     let profile_y = padded_range(airfoil.coordinates.iter().map(|&(_, y)| y), 0.12);

@@ -23,7 +23,7 @@ use alas_pipeline::feasibility::{
     FuelCapacityAssessment, FuelCapacityEvidence, FuelLoadingAssessment,
 };
 use alas_pipeline::full_analysis::{AnalysisReport, DesignPoint, PolarFit, PolarFitStatus};
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 fn test_wing(name: &str, symmetric: bool) -> Wing {
     let naca = Airfoil::from_name("naca0012").unwrap();
     Wing::new(
@@ -74,7 +74,7 @@ fn test_airplane() -> Airplane {
     }
 }
 
-fn test_report(masses: HashMap<String, f64>) -> AnalysisReport {
+fn test_report(masses: BTreeMap<String, f64>) -> AnalysisReport {
     AnalysisReport {
         design: DesignVector::default(),
         airplane: test_airplane(),
@@ -108,9 +108,9 @@ fn test_report(masses: HashMap<String, f64>) -> AnalysisReport {
         trimmed_design_point: None,
         component_masses: masses,
         flops_mass_buildup: None,
-        mass_coordinates: HashMap::new(),
+        mass_coordinates: BTreeMap::new(),
         physical_cg: [17.0, 0.0, 0.0],
-        geometry_summary: HashMap::new(),
+        geometry_summary: BTreeMap::new(),
         payload_layout: None,
         cg_envelope_ok: Some(true),
         neutral_point_conditions: None,
@@ -118,8 +118,8 @@ fn test_report(masses: HashMap<String, f64>) -> AnalysisReport {
     }
 }
 
-fn full_masses() -> HashMap<String, f64> {
-    let mut m = HashMap::new();
+fn full_masses() -> BTreeMap<String, f64> {
+    let mut m = BTreeMap::new();
     m.insert(WING.to_owned(), 8500.0);
     m.insert(H_STAB.to_owned(), 900.0);
     m.insert(V_STAB.to_owned(), 500.0);
@@ -204,7 +204,7 @@ fn mass_breakdown_draws_a_red_deficit_bar_when_fuel_is_negative() {
 
 #[test]
 fn mass_breakdown_with_no_masses_renders_a_placeholder_message() {
-    let report = test_report(HashMap::new());
+    let report = test_report(BTreeMap::new());
     let scene = figure_mass_breakdown(&report, None);
     assert!(scene
         .elements

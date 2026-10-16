@@ -1,0 +1,33 @@
+         7x4E                    (7x4E.dat)
+         SYNTHETIC TEST FIXTURE: made-up numbers, NOT manufacturer data.
+         Ct and Cp follow simple linear laws in advance ratio J chosen only to exercise the parser and solver.
+
+         ====== PERFORMANCE DATA (versus advance ratio and MPH) ======
+
+         PROP RPM =    3000
+
+         V          J           Pe         Ct          Cp
+       (mph)     (Adv_Ratio)     -          -           -
+      0.00      0.0000      0.0000      0.1100      0.0450
+     10.00      0.5029      0.6966      0.0449      0.0324
+     20.00      1.0057     -1.0206     -0.0202      0.0199
+     30.00      1.5086    -10.3529     -0.0500      0.0073
+
+         PROP RPM =    6000
+
+         V          J           Pe         Ct          Cp
+       (mph)     (Adv_Ratio)     -          -           -
+      0.00      0.0000      0.0000      0.1100      0.0450
+     10.00      0.2514      0.5031      0.0775      0.0387
+     20.00      0.5029      0.6966      0.0449      0.0324
+     30.00      0.7543      0.3574      0.0124      0.0261
+
+         PROP RPM =    9000
+
+         V          J           Pe         Ct          Cp
+       (mph)     (Adv_Ratio)     -          -           -
+      0.00      0.0000      0.0000      0.1100      0.0450
+     10.00      0.1676      0.3627      0.0883      0.0408
+     20.00      0.3352      0.6099      0.0666      0.0366
+     30.00      0.5029      0.6966      0.0449      0.0324
+

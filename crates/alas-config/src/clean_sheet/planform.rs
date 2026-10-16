@@ -56,7 +56,8 @@ impl WingPlanformSummary {
         let mac_m = chord_sq / half_area;
         let leading_edge_mac_x_m = chord_x / half_area;
         let summary = Self {
-            span_m: design.span_m,
+            // Wing proper: the design span may include a tip device.
+            span_m: 2.0 * planform.tip.y_m,
             area_m2,
             mac_m,
             quarter_mac_x_m: leading_edge_mac_x_m + 0.25 * mac_m,

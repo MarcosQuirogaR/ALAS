@@ -30,6 +30,17 @@ use std::env;
 use std::fs;
 use std::path::Path;
 
+/// Mach number written on the third line of the `mses.case` deck.
+fn case_mach() -> f64 {
+    fs::read_to_string("mses.case")
+        .unwrap_or_default()
+        .lines()
+        .nth(2)
+        .and_then(|line| line.split_whitespace().next())
+        .and_then(|token| token.parse().ok())
+        .unwrap_or(f64::NAN)
+}
+
 fn main() {
     let role = env::args()
         .next()
@@ -74,6 +85,26 @@ fn main() {
                 println!("Iteration 100 rms(dR): 0.128E+00 did not converge");
             }
             return;
+        }
+        if mode == "cold_start_needs_ramp" {
+            // A cold MSET state diverges at transonic Mach; any state that
+            // has already converged at a lower Mach (marked "walked") solves.
+            let mdat = fs::read_to_string("mdat.case").unwrap_or_default();
+            if case_mach() > 0.6 && mdat.contains("mset_mesh_clean") {
+                println!("Iteration 100 rms(dR): NaN cold start diverged");
+                return;
+            }
+            let _ = fs::write("mdat.case", "walked");
+            println!("Converged on tolerance");
+            return;
+        }
+        if mode == "pressure_bridge_recovery" || mode == "fail_warmup" {
+            // Mach-ramp stages (M < 0.5) are outside these scripted
+            // sequences: they fail fast without consuming a scripted outcome.
+            if case_mach() < 0.5 {
+                println!("Iteration 100 rms(dR): 0.128E+00 ramp stage did not converge");
+                return;
+            }
         }
         if mode == "pressure_bridge_recovery" {
             // The exact requested angle (6.0 deg) fails on its first ever
@@ -1380,6 +1411,41 @@ fn pipeline_pattern_polar_then_pressure_reuses_closest_converged_checkpoint() {
             .iter()
             .any(|a| a.purpose.contains("initial MSET mesh")),
         "cold-start mesh search must not run when warm start succeeds"
+    );
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn a_failed_cold_start_is_retried_as_a_mach_walk_and_keeps_the_audit_trail() {
+    let root = temporary_directory("cold-start-mach-ramp");
+    fake_mses_installation(&root, "cold_start_needs_ramp");
+    let config = MsesConfig {
+        mses_dir: root.display().to_string(),
+        alpha_sweep_halfwidth_deg: 0.5,
+        alpha_sweep_n_points: 3,
+        ..MsesConfig::default()
+    };
+
+    let result = run_mses_polar(&airfoil(), 0.735, 6.0e7, 6.0, &config, &root);
+
+    assert_eq!(result.status, MsesStatus::Ok, "{:?}", result.error);
+    assert_eq!(result.converged_alpha_count, 3);
+    let ramp_stages: Vec<_> = result
+        .solver_attempts
+        .iter()
+        .filter(|a| a.purpose.contains("Mach continuation ramp stage"))
+        .collect();
+    assert!(
+        ramp_stages.len() >= 5,
+        "0.3 -> 0.735 in steps of at most 0.1 needs several stages: {}",
+        ramp_stages.len()
+    );
+    assert!(
+        result
+            .solver_attempts
+            .iter()
+            .any(|a| a.purpose.contains("converged by Mach continuation ramp")),
+        "the rescued point records how it converged"
     );
     let _ = fs::remove_dir_all(root);
 }

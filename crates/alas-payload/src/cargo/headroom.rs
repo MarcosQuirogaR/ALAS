@@ -40,7 +40,44 @@ pub(super) fn realized_height(
     if !conforms_to_headroom(uld) {
         return Some(uld.height);
     }
-    bulk_height_from_clearance(geometry.deck_height(deck, x), uld.height)
+    let clear = if geometry.enforces_physical_envelope() {
+        let (floor, ceil) = footprint_clearance(geometry, deck, x, uld.length);
+        ceil - floor
+    } else {
+        geometry.deck_height(deck, x)
+    };
+    bulk_height_from_clearance(clear, uld.height)
+}
+
+/// Longitudinal spacing of the footprint clearance samples, m. Matches the
+/// strict-envelope containment step so both checks see the same stations.
+const FOOTPRINT_STEP_M: f64 = 0.10;
+
+/// The flat bay a position of `length` centred at `x` actually has: the
+/// highest floor and the lowest ceiling of `deck` anywhere under its
+/// footprint, `(floor_z, ceil_z)` in metres, +up.
+///
+/// A rigid position rests on one plane and sits under one plane, so the
+/// section-by-section floor and ceiling of a lofted body (the floor rises and
+/// the crown falls through the nose and tail transitions) bound it at the
+/// worst station of its footprint, not at its centre. Sampling only the
+/// centre accepted or refused whole rows by millimetres of floor slope.
+fn footprint_clearance(
+    geometry: &CabinGeometry,
+    deck: &DeckSpec,
+    x: f64,
+    length: f64,
+) -> (f64, f64) {
+    let steps = (length / FOOTPRINT_STEP_M).ceil().max(1.0) as usize;
+    let start = x - 0.5 * length;
+    let mut floor = f64::NEG_INFINITY;
+    let mut ceil = f64::INFINITY;
+    for step in 0..=steps {
+        let sample_x = start + length * step as f64 / steps as f64;
+        floor = floor.max(geometry.floor_z(deck, sample_x));
+        ceil = ceil.min(geometry.ceil_z(deck, sample_x));
+    }
+    (floor, ceil)
 }
 
 fn bulk_height_from_clearance(clear_height_m: f64, nominal_height_m: f64) -> Option<f64> {
@@ -65,15 +102,11 @@ pub(super) fn uld_fits(
     if !geometry.enforces_physical_envelope() {
         return geometry.deck_height(deck, x) >= height;
     }
-    let z_bottom = geometry.floor_z(deck, x);
+    // The position rests on the highest floor under its footprint and must
+    // clear the lowest ceiling over it.
     let half_length = uld.length * 0.5;
-    let deck_clear = [x - half_length, x, x + half_length]
-        .into_iter()
-        .all(|sample_x| {
-            z_bottom >= geometry.floor_z(deck, sample_x) - 1.0e-9
-                && z_bottom + height <= geometry.ceil_z(deck, sample_x) + 1.0e-9
-        });
-    if !deck_clear {
+    let (z_bottom, ceil_min) = footprint_clearance(geometry, deck, x, uld.length);
+    if z_bottom + height > ceil_min + 1.0e-9 {
         return false;
     }
     let fits_orientation = |mirrored| {

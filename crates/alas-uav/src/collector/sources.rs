@@ -47,7 +47,7 @@ impl SourceAdapter {
             sitemap_url: self.sitemap_url.clone(),
             allowed_hosts: self.allowed_hosts.clone(),
             user_agent: DEFAULT_USER_AGENT.to_owned(),
-            min_request_interval_ms: 1_500,
+            min_request_interval_ms: 5_000,
             seed_category_urls: self.seed_category_urls.clone(),
             max_category_pages: self.max_category_pages,
             max_product_pages: self.max_product_pages,

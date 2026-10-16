@@ -1,412 +1,247 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! Snapshot construction and background execution for the UAV workflow.
-//!
-//! The desktop state deliberately owns only editable values. This module turns
-//! that state into immutable source-bounded solver input, so a worker cannot
-//! observe a half-edited component selection or silently revive the former
-//! manual two-point propulsion path.
+//! Competition-search requests: validation of the page inputs, the
+//! propulsion maps resolved from the catalogue, and the background worker.
 
+use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Sender;
 use std::sync::Arc;
 
+use alas_uav::catalog::{Catalog, ComponentKind};
+use alas_uav::optimization_catalog;
 use alas_uav::optimizer::{
-    optimize_with_control, MissionProfile, OptimizationError, OptimizationProblem,
-    OptimizationProgress, OptimizedUav, PropulsionMap, PropulsionOperatingPoint,
+    optimize_competition_observed, CompetitionOptimum, CompetitionProblem, CompetitionProgress,
+    DesignObjectives, GeometrySearchBounds, OptimizationError, OptimizationProblem,
+    OptimizationProgress, PreliminaryModel, PropulsionMap, SystemsDefinition, TailVolumeBounds,
 };
-use alas_uav::propulsion_electric::{
-    native_propulsion_map, simulate_catalogue_mission, CataloguePowertrainSelection,
-    ElectricFlightCondition, ElectricMissionPhase, ElectricMissionPlan, ElectricMissionResult,
-};
-use alas_uav::{
-    optimization_catalog, verify_with_shared_core, Catalog, ComponentKind, ComponentRecord,
-    SharedCoreFailure, SharedCoreVerification,
-};
+use alas_uav::propulsion_electric::prop_data::prop_data_unavailable_reason;
+use alas_uav::propulsion_electric::{native_propulsion_map, CataloguePowertrainSelection};
 
-use super::{ComponentRole, MissionPlanMode, PropulsionInputMode, UavSelections, UavWorkflowState};
+use super::{CompetitionSettings, UavWorkflowState};
 
-/// Result messages that cross from the owned solver worker to the desktop.
+/// Electronics role the search must fill (a GPS sensor in the reviewed catalogue).
+const REQUIRED_ELECTRONICS_ROLE: &str = "gps_sensor";
+/// Smallest search budget accepted by the competition search.
+pub(super) const MINIMUM_EVALUATIONS: usize = 4;
+/// Points on the speed grid of each propulsion map (plus stall and cruise).
+const SPEED_GRID_POINTS: u16 = 16;
+
+/// Messages from the search worker to the desktop.
 #[derive(Debug)]
 pub(super) enum UavWorkerMessage {
-    /// Monotonic optimizer progress suitable for the frame loop.
+    /// Monotonic search progress suitable for the frame loop.
     Progress(OptimizationProgress),
-    /// A terminal optimizer result and the independently resolved electrical mission.
-    Finished(Box<UavWorkerFinished>),
+    /// The terminal search result.
+    Finished(Box<CompetitionFinished>),
 }
 
-/// Result that retains source-solved mission output even when no geometry is feasible.
+/// Terminal result of one worker run.
 #[derive(Debug)]
-pub(super) struct UavWorkerFinished {
-    pub(super) result: Result<UavAccepted, OptimizationError>,
-    pub(super) electrical_mission: Option<ElectricMissionResult>,
+pub(super) struct CompetitionFinished {
+    pub(super) preset_id: String,
+    pub(super) result: Result<CompetitionOptimum, OptimizationError>,
 }
 
+/// Immutable snapshot of the page inputs taken when a search starts.
 #[derive(Debug)]
-pub(super) struct UavAccepted {
-    pub(super) optimized: OptimizedUav,
-    pub(super) shared_core: Result<Box<SharedCoreVerification>, SharedCoreFailure>,
-}
-
-#[derive(Debug)]
-pub(super) struct UavRunRequest {
-    catalog: Catalog,
-    propulsion_maps: Vec<PropulsionMap>,
-    mission_profile: Option<MissionProfile>,
-    electrical_mission: Option<ElectricMissionResult>,
-    objectives: alas_uav::optimizer::DesignObjectives,
-    geometry_bounds: alas_uav::optimizer::GeometrySearchBounds,
-    model: alas_uav::optimizer::PreliminaryModel,
-    systems: alas_uav::optimizer::SystemsDefinition,
-    required_electronics_role: String,
+pub(super) struct CompetitionRequest {
+    preset_id: String,
+    settings: CompetitionSettings,
+    objectives: DesignObjectives,
+    geometry_bounds: GeometrySearchBounds,
+    model: PreliminaryModel,
+    systems: SystemsDefinition,
     seed: u64,
     pub(super) evaluations: usize,
-    shared_core_inputs: alas_uav::SharedCoreInputs,
 }
 
 impl UavWorkflowState {
-    pub(super) fn run_request(&self) -> Result<UavRunRequest, String> {
-        let catalog = self.selected_catalog()?;
-        let (propulsion_maps, mission_profile, electrical_mission) = match self
-            .propulsion_input_mode
-        {
-            PropulsionInputMode::Automatic => {
-                let selection = CataloguePowertrainSelection {
-                    battery_id: self.selections.battery.clone(),
-                    motor_id: self.selections.motor.clone(),
-                    esc_id: self.selections.esc.clone(),
-                    propeller_id: self.selections.propeller.clone(),
-                    motor_count: self.propulsion_motor_count,
-                };
-                let mission_plan = self.electric_mission_plan()?;
-                let speeds = map_speeds(
-                    &mission_plan,
-                    self.objectives.maximum_stall_speed_m_s,
-                    self.objectives.cruise_speed_m_s,
-                )?;
-                let map = native_propulsion_map(
-                    &catalog,
-                    &selection,
-                    &speeds,
-                    self.model.air_density_kg_m3,
-                )
-                .map_err(|error| {
-                    format!(
-                        "Automatic propulsion calculation could not resolve the selected hardware: {error}"
-                    )
-                })?;
-                let mission = simulate_catalogue_mission(&catalog, &selection, &mission_plan)
-                    .map_err(|error| {
-                        format!(
-                            "Automatic mission calculation could not resolve every phase: {error}"
-                        )
-                    })?;
-                let profile = mission.optimizer_profile();
-                (vec![map], Some(profile), Some(mission))
-            }
-            PropulsionInputMode::AdvancedManual => {
-                if self.propulsion_evidence.trim().is_empty() {
-                    return Err(
-                        "Propulsion-map evidence is required; static thrust is not a cruise model."
-                            .to_owned(),
-                    );
-                }
-                (
-                    vec![PropulsionMap {
-                        motor_id: self.selections.motor.clone(),
-                        propeller_id: self.selections.propeller.clone(),
-                        series_cells: self.propulsion_series_cells,
-                        motor_count: self.propulsion_motor_count,
-                        evidence: self.propulsion_evidence.clone(),
-                        points: vec![
-                            PropulsionOperatingPoint {
-                                speed_m_s: self.objectives.maximum_stall_speed_m_s,
-                                thrust_n: self.stall_thrust_n,
-                                motor_current_a: self.stall_current_a,
-                                motor_power_w: self.stall_power_w,
-                            },
-                            PropulsionOperatingPoint {
-                                speed_m_s: self.objectives.cruise_speed_m_s,
-                                thrust_n: self.cruise_thrust_n,
-                                motor_current_a: self.cruise_current_a,
-                                motor_power_w: self.cruise_power_w,
-                            },
-                        ],
-                    }],
-                    None,
-                    None,
-                )
-            }
-        };
-        Ok(UavRunRequest {
-            catalog,
-            propulsion_maps,
-            mission_profile,
-            electrical_mission,
+    /// Validate the page inputs and snapshot them for the worker.
+    pub(super) fn competition_request(&self) -> Result<CompetitionRequest, String> {
+        let preset_id = self.competition.preset_id.clone();
+        if !alas_uav::score::presets::ids().contains(&preset_id.as_str()) {
+            return Err(format!("Unknown competition preset: {preset_id}"));
+        }
+        if self.evaluations < MINIMUM_EVALUATIONS {
+            return Err(format!(
+                "The competition search needs at least {MINIMUM_EVALUATIONS} evaluations."
+            ));
+        }
+        if let Some(reason) = prop_data_unavailable_reason() {
+            return Err(format!(
+                "The propulsion maps cannot be resolved from the catalogue: {reason}"
+            ));
+        }
+        Ok(CompetitionRequest {
+            preset_id,
+            settings: self.competition.clone(),
             objectives: self.objectives,
             geometry_bounds: self.geometry_bounds,
             model: self.model,
             systems: self.systems,
-            required_electronics_role: self.required_electronics_role.clone(),
             seed: self.seed,
             evaluations: self.evaluations,
-            shared_core_inputs: self.shared_core_inputs.clone(),
         })
-    }
-
-    /// Reset editable phases to the source-bounded standard mission template.
-    pub fn reset_advanced_mission(&mut self) {
-        self.mission_phases =
-            standard_mission_phases(self.objectives, self.model.air_density_kg_m3)
-                .unwrap_or_default();
-    }
-
-    fn electric_mission_plan(&self) -> Result<ElectricMissionPlan, String> {
-        let phases = match self.mission_plan_mode {
-            MissionPlanMode::Standard => {
-                standard_mission_phases(self.objectives, self.model.air_density_kg_m3)?
-            }
-            MissionPlanMode::Advanced => {
-                if self.mission_phases.is_empty() {
-                    return Err(
-                        "The advanced electrical mission needs at least one positive-duration phase."
-                            .to_owned(),
-                    );
-                }
-                self.mission_phases.clone()
-            }
-        };
-        Ok(ElectricMissionPlan {
-            evidence: match self.mission_plan_mode {
-                MissionPlanMode::Standard => {
-                    "native four-phase mission derived from endurance and range objectives"
-                        .to_owned()
-                }
-                MissionPlanMode::Advanced => {
-                    "native electrical solver with designer-entered steady mission phases"
-                        .to_owned()
-                }
-            },
-            phases,
-        })
-    }
-
-    fn selected_catalog(&self) -> Result<Catalog, String> {
-        let available = optimization_catalog().map_err(ToString::to_string)?;
-        let mut records = Vec::with_capacity(ComponentRole::ALL.len());
-        for role in ComponentRole::ALL {
-            let id = self.selections.get(role);
-            if !available
-                .records
-                .iter()
-                .any(|record| role_matches(role, &record.kind))
-            {
-                return Err(format!(
-                    "The catalogue has no priced, analysis-complete {}. Add primary-source evidence before running the solver.",
-                    role.label()
-                ));
-            }
-            let record = available
-                .get(id)
-                .filter(|record| role_matches(role, &record.kind))
-                .ok_or_else(|| format!("No source-reviewed {} is selected.", role.label()))?;
-            records.push(record.clone());
-        }
-        let catalog = Catalog {
-            schema_version: available.schema_version,
-            records,
-        };
-        catalog.validate().map_err(|error| error.to_string())?;
-        Ok(catalog)
     }
 }
 
-/// Run an immutable request in the background without touching GUI state.
+/// Rule quantities of the preset, keyed as the score engine reads them.
+fn rule_inputs(settings: &CompetitionSettings) -> BTreeMap<String, f64> {
+    BTreeMap::from([
+        ("payload_count".to_owned(), settings.payload_count),
+        ("declared_payload_count".to_owned(), settings.payload_count),
+        ("payload_volume".to_owned(), settings.payload_volume_m3),
+    ])
+}
+
+/// Propulsion maps for every motor, propeller and battery-cell count of the
+/// catalogue. For each (motor, propeller, cells) the first ESC that resolves
+/// is used. Maps are full-throttle, per propulsor, with the speed grid
+/// covering take-off (0 m/s) up to 1.5 times the larger objective speed; the reviewed tables bound the upper end.
+pub(super) fn competition_maps(
+    catalog: &Catalog,
+    objectives: &DesignObjectives,
+    air_density_kg_m3: f64,
+) -> Result<Vec<PropulsionMap>, String> {
+    let top = 1.5
+        * objectives
+            .cruise_speed_m_s
+            .max(objectives.maximum_stall_speed_m_s);
+    let mut speeds: Vec<f64> = (0..=SPEED_GRID_POINTS)
+        .map(|index| top * f64::from(index) / f64::from(SPEED_GRID_POINTS))
+        .collect();
+    speeds.push(objectives.maximum_stall_speed_m_s);
+    speeds.push(objectives.cruise_speed_m_s);
+    speeds.sort_by(f64::total_cmp);
+    speeds.dedup_by(|a, b| (*a - *b).abs() < 1e-9);
+
+    let batteries: Vec<(&str, u16)> = catalog
+        .records
+        .iter()
+        .filter_map(|record| match &record.kind {
+            ComponentKind::Battery(spec) => {
+                spec.series_cells.map(|cells| (record.id.as_str(), cells))
+            }
+            _ => None,
+        })
+        .collect();
+    let motors = ids_of(catalog, |kind| matches!(kind, ComponentKind::Motor(_)));
+    let propellers = ids_of(catalog, |kind| matches!(kind, ComponentKind::Propeller(_)));
+    let escs = ids_of(catalog, |kind| matches!(kind, ComponentKind::Esc(_)));
+    let mut cell_counts: Vec<u16> = batteries.iter().map(|(_, cells)| *cells).collect();
+    cell_counts.sort_unstable();
+    cell_counts.dedup();
+
+    let mut maps: Vec<PropulsionMap> = Vec::new();
+    // The first resolver error is kept so a refusal names its cause.
+    let mut first_error: Option<String> = None;
+    for motor in &motors {
+        for propeller in &propellers {
+            for cells in &cell_counts {
+                let Some((battery, _)) = batteries.iter().find(|(_, c)| c == cells) else {
+                    continue;
+                };
+                for esc in &escs {
+                    let selection = CataloguePowertrainSelection {
+                        battery_id: (*battery).to_owned(),
+                        motor_id: motor.clone(),
+                        esc_id: esc.clone(),
+                        propeller_id: propeller.clone(),
+                        motor_count: 1,
+                    };
+                    match native_propulsion_map(catalog, &selection, &speeds, air_density_kg_m3) {
+                        Ok(map) => {
+                            maps.push(map);
+                            break;
+                        }
+                        Err(error) => {
+                            first_error.get_or_insert_with(|| error.to_string());
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if maps.is_empty() {
+        return Err(format!(
+            "No propulsion map could be resolved from the catalogue. First resolver error: {}",
+            first_error.unwrap_or_else(|| "no motor, propeller and battery combination".to_owned())
+        ));
+    }
+    Ok(maps)
+}
+
+fn ids_of(catalog: &Catalog, keep: impl Fn(&ComponentKind) -> bool) -> Vec<String> {
+    catalog
+        .records
+        .iter()
+        .filter(|record| keep(&record.kind))
+        .map(|record| record.id.clone())
+        .collect()
+}
+
+/// Run one competition search in the background and report progress.
 pub(super) fn run_worker(
-    request: UavRunRequest,
+    request: CompetitionRequest,
     sender: Sender<UavWorkerMessage>,
     cancel_flag: Arc<AtomicBool>,
 ) {
-    let progress_sender = sender.clone();
-    let stride = (request.evaluations / 100).max(1);
-    let result = {
-        let problem = OptimizationProblem {
-            catalog: &request.catalog,
-            propulsion_maps: &request.propulsion_maps,
-            mission_profile: request.mission_profile.as_ref(),
-            objectives: request.objectives,
-            geometry_bounds: request.geometry_bounds,
-            model: request.model,
-            systems: request.systems,
-            required_electronics_role: &request.required_electronics_role,
-            seed: request.seed,
-            evaluations: request.evaluations,
-        };
-        optimize_with_control(
-            &problem,
-            |progress| {
-                if progress.evaluated_candidates == progress.total_candidates
-                    || progress.evaluated_candidates % stride == 0
-                {
-                    let _ = progress_sender.send(UavWorkerMessage::Progress(progress));
-                }
-            },
-            || cancel_flag.load(Ordering::Relaxed),
-        )
-    }
-    .and_then(|optimized| {
-        if cancel_flag.load(Ordering::Relaxed) {
-            return Err(OptimizationError::Cancelled {
-                evaluated_candidates: request.evaluations,
-            });
-        }
-        Ok(UavAccepted {
-            shared_core: verify_with_shared_core(&optimized, &request.shared_core_inputs)
-                .map(Box::new),
-            optimized,
-        })
-    });
-    let _ = sender.send(UavWorkerMessage::Finished(Box::new(UavWorkerFinished {
+    let result = run_search(&request, &sender, &cancel_flag);
+    let _ = sender.send(UavWorkerMessage::Finished(Box::new(CompetitionFinished {
+        preset_id: request.preset_id,
         result,
-        electrical_mission: request.electrical_mission,
     })));
 }
 
-pub(super) fn default_selections() -> UavSelections {
-    let mut selections = UavSelections::default();
-    if let Ok(catalog) = optimization_catalog() {
-        for role in ComponentRole::ALL {
-            if let Some(record) = catalog
-                .records
-                .iter()
-                .find(|record| role_matches(role, &record.kind))
-            {
-                selections.set(role, record.id.clone());
-            }
-        }
-        for (role, id) in [
-            (
-                ComponentRole::Battery,
-                "unmannedtech-gensace-gtech-2200-3s-45c-xt60",
-            ),
-            (ComponentRole::Motor, "tmotor-at2814-900kv"),
-            (ComponentRole::Esc, "hobbywing-skywalker-30a-v2-mini"),
-            (ComponentRole::Propeller, "apc-12x6e"),
-        ] {
-            if catalog
-                .get(id)
-                .is_some_and(|record| role_matches(role, &record.kind))
-            {
-                selections.set(role, id.to_owned());
-            }
-        }
-    }
-    selections
-}
-
-pub(super) fn selected_record(
-    selections: &UavSelections,
-    role: ComponentRole,
-) -> Option<&'static ComponentRecord> {
-    optimization_catalog()
-        .ok()
-        .and_then(|catalog| catalog.get(selections.get(role)))
-        .filter(|record| role_matches(role, &record.kind))
-}
-
-pub(super) fn role_matches(role: ComponentRole, kind: &ComponentKind) -> bool {
-    matches!(
-        (role, kind),
-        (ComponentRole::Battery, ComponentKind::Battery(_))
-            | (ComponentRole::Motor, ComponentKind::Motor(_))
-            | (ComponentRole::Esc, ComponentKind::Esc(_))
-            | (ComponentRole::Propeller, ComponentKind::Propeller(_))
-            | (ComponentRole::Servo, ComponentKind::Servo(_))
-            | (ComponentRole::Material, ComponentKind::MaterialStock(_))
-            | (ComponentRole::Receiver, ComponentKind::Receiver(_))
-            | (ComponentRole::Electronics, ComponentKind::Electronics(_))
-            | (ComponentRole::LandingGear, ComponentKind::LandingGear(_))
+fn run_search(
+    request: &CompetitionRequest,
+    sender: &Sender<UavWorkerMessage>,
+    cancel_flag: &Arc<AtomicBool>,
+) -> Result<CompetitionOptimum, OptimizationError> {
+    let catalog = optimization_catalog().map_err(|error| {
+        OptimizationError::InvalidProblem(format!("catalogue unavailable: {error}"))
+    })?;
+    let maps = competition_maps(
+        catalog,
+        &request.objectives,
+        request.model.air_density_kg_m3,
     )
-}
-
-fn map_speeds(
-    mission: &ElectricMissionPlan,
-    stall_speed_m_s: f64,
-    cruise_speed_m_s: f64,
-) -> Result<Vec<f64>, String> {
-    let mut speeds = vec![stall_speed_m_s, cruise_speed_m_s];
-    speeds.extend(mission.phases.iter().map(|phase| phase.condition.speed_m_s));
-    if speeds
-        .iter()
-        .any(|speed| !speed.is_finite() || *speed < 0.0)
-    {
-        return Err("Mission and objective speeds must be finite and non-negative.".to_owned());
-    }
-    speeds.sort_by(f64::total_cmp);
-    speeds.dedup_by(|lower, upper| (*lower - *upper).abs() <= f64::EPSILON);
-    if speeds.len() < 2 {
-        return Err(
-            "The mission needs distinct stall and cruise speeds to generate a propulsion map."
-                .to_owned(),
-        );
-    }
-    Ok(speeds)
-}
-
-fn standard_mission_phases(
-    objectives: alas_uav::optimizer::DesignObjectives,
-    air_density_kg_m3: f64,
-) -> Result<Vec<ElectricMissionPhase>, String> {
-    for (name, value) in [
-        ("endurance", objectives.endurance_s),
-        ("range", objectives.range_m),
-        ("cruise speed", objectives.cruise_speed_m_s),
-        ("stall speed", objectives.maximum_stall_speed_m_s),
-        ("air density", air_density_kg_m3),
-    ] {
-        if !value.is_finite() || value <= 0.0 {
-            return Err(format!(
-                "{name} must be positive before generating a mission plan."
-            ));
-        }
-    }
-    if objectives.cruise_speed_m_s <= objectives.maximum_stall_speed_m_s {
-        return Err("Cruise speed must exceed the maximum stall speed.".to_owned());
-    }
-    let required_duration_s = objectives
-        .endurance_s
-        .max(objectives.range_m / objectives.cruise_speed_m_s);
-    let departure_duration_s = (0.03 * required_duration_s).clamp(20.0, 60.0);
-    let climb_duration_s = (0.07 * required_duration_s).clamp(20.0, 120.0);
-    let reserve_duration_s = (0.05 * required_duration_s).clamp(20.0, 60.0);
-    let low_speed_m_s = objectives.maximum_stall_speed_m_s;
-    let climb_speed_m_s = 0.5 * (low_speed_m_s + objectives.cruise_speed_m_s);
-    let non_cruise_duration_s = departure_duration_s + climb_duration_s + reserve_duration_s;
-    let non_cruise_distance_m = low_speed_m_s * (departure_duration_s + reserve_duration_s)
-        + climb_speed_m_s * climb_duration_s;
-    let cruise_duration_s = (objectives.endurance_s - non_cruise_duration_s)
-        .max(0.0)
-        .max((objectives.range_m - non_cruise_distance_m).max(0.0) / objectives.cruise_speed_m_s)
-        .max(1.0);
-    let phase = |name: &str, duration_s, speed_m_s, throttle| ElectricMissionPhase {
-        name: name.to_owned(),
-        duration_s,
-        condition: ElectricFlightCondition {
-            speed_m_s,
-            air_density_kg_m3,
-            throttle,
-        },
+    .map_err(OptimizationError::InvalidProblem)?;
+    let base = OptimizationProblem {
+        catalog,
+        propulsion_maps: &maps,
+        mission_profile: None,
+        objectives: request.objectives,
+        geometry_bounds: request.geometry_bounds,
+        model: request.model,
+        systems: request.systems,
+        required_electronics_role: REQUIRED_ELECTRONICS_ROLE,
+        seed: request.seed,
+        evaluations: request.evaluations,
     };
-    Ok(vec![
-        phase("departure", departure_duration_s, low_speed_m_s, 1.0),
-        phase("climb", climb_duration_s, climb_speed_m_s, 0.95),
-        phase(
-            "cruise",
-            cruise_duration_s,
-            objectives.cruise_speed_m_s,
-            0.95,
-        ),
-        phase("approach reserve", reserve_duration_s, low_speed_m_s, 0.95),
-    ])
+    let problem = CompetitionProblem {
+        base,
+        preset_id: &request.preset_id,
+        preset_variant: None,
+        announced_takeoff_m: request.settings.announced_takeoff_m,
+        extra_inputs: rule_inputs(&request.settings),
+        tail_volume_bounds: TailVolumeBounds::default(),
+        population: None,
+        include_landing: true,
+    };
+    let stride = (request.evaluations / 100).max(1);
+    let mut observer = |progress: CompetitionProgress| {
+        if progress.evaluated == progress.budget || progress.evaluated % stride == 0 {
+            let _ = sender.send(UavWorkerMessage::Progress(OptimizationProgress {
+                evaluated_candidates: progress.evaluated,
+                total_candidates: progress.budget,
+                verified_candidates: progress.feasible,
+                best_score: progress.best_score,
+            }));
+        }
+        !cancel_flag.load(Ordering::Relaxed)
+    };
+    optimize_competition_observed(&problem, &mut observer)
 }

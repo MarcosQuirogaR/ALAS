@@ -4,12 +4,15 @@
 //! Airport distance findings using the active propulsion field method.
 
 use alas_config::{ActiveEngineModel, AlasConfig};
+use alas_opt::mdo::YawAirframe;
 use alas_perf::performance::{
-    compute_v_speeds_at_masses, density_ratio, tw_takeoff_constraint, ws_landing_limit,
+    compute_v_speeds_at_masses, density_ratio, tw_takeoff_constraint, ws_landing_field_limit,
 };
 
 use super::{error, static_thrust, FindingCode, PhysicalFinding};
-use crate::field_performance::{calculate, dry_landing_distance_share, report_field_polar};
+use crate::field_performance::{
+    calculate_with_airframe, landing_distance_share, report_field_polar,
+};
 use crate::full_analysis::AnalysisReport;
 
 // Aircraft masses, installed thrust and field provenance belong to one assessment.
@@ -97,8 +100,12 @@ pub(super) fn assess_airports(
             } else {
                 (0.0, 0.0)
             };
-            calculate(
+            calculate_with_airframe(
                 config,
+                Some(YawAirframe {
+                    plane: &report.airplane,
+                    cg_x_m: report.physical_cg[0],
+                }),
                 airport,
                 wing_area_m2,
                 takeoff_mass_kg,
@@ -126,7 +133,7 @@ pub(super) fn assess_airports(
         let share = if config.performance.legacy_field_correlations {
             1.0
         } else {
-            dry_landing_distance_share(config)
+            landing_distance_share(config)
         };
         let landing_field_length_m = field.ldr_m / share;
         let sigma = density_ratio(airport.elevation_m, airport.isa_deviation_c);
@@ -152,7 +159,9 @@ pub(super) fn assess_airports(
                     &[wing_loading_pa],
                     airport.toda_m,
                     sigma,
-                    config.performance.cl_max_to,
+                    config
+                        .performance
+                        .takeoff_field_cl_max(config.performance.cl_max_to),
                 )
                 .first()
                 .copied()
@@ -165,8 +174,9 @@ pub(super) fn assess_airports(
             }
         } else if !propeller {
             let landing_ws = landing_mass_kg * gravity_m_s2 / wing_area_m2;
-            let limit = ws_landing_limit(
-                airport.lda_m * share,
+            let limit = ws_landing_field_limit(
+                airport.lda_m,
+                share,
                 sigma,
                 config.performance.cl_max_land,
                 config.performance.k_land,
@@ -210,10 +220,11 @@ mod tests {
             alas_config::airports::get("LXGB").unwrap_or_else(|reason| panic!("airport: {reason}"));
         let static_thrust = static_thrust::resolve(&config, 60.0, 1.0);
         let tw = static_thrust.thrust_n / (mtow * config.requirements.gravity_m_s2);
-        let field = calculate(&config, airport, area, mtow, mlw, tw, 0.0, 0.0)
-            .unwrap_or_else(|reason| panic!("field: {reason}"));
+        let field =
+            crate::field_performance::calculate(&config, airport, area, mtow, mlw, tw, 0.0, 0.0)
+                .unwrap_or_else(|reason| panic!("field: {reason}"));
         assert!(field.ldr_m < airport.lda_m);
-        assert!(field.ldr_m / dry_landing_distance_share(&config) > airport.lda_m);
+        assert!(field.ldr_m / landing_distance_share(&config) > airport.lda_m);
         let mut findings = Vec::new();
         assess_airports(
             &config,

@@ -17,7 +17,7 @@ use alas_uav::optimizer::{
     MissionProfile, OptimizationError, OptimizationProblem, PreliminaryModel, PropulsionMap,
     PropulsionOperatingPoint, SystemsDefinition, VariableBounds,
 };
-use alas_uav::{seed_catalog, Catalog, FindingKind};
+use alas_uav::{evaluate, seed_catalog, Catalog, FindingKind};
 
 #[test]
 fn a_complete_mixed_search_returns_a_reproducible_verified_aircraft() {
@@ -589,5 +589,48 @@ fn material_mut(catalog: &mut Catalog) -> &mut MaterialStockSpec {
     match &mut catalog.records[5].kind {
         ComponentKind::MaterialStock(spec) => spec,
         _ => panic!("sixth record must remain the material"),
+    }
+}
+
+/// Stand-ins for the ACC and XC preset aircraft.  The rule presets carry gates
+/// and citations, not mission objectives, so the two objective sets below are
+/// fixture values (ACC-like endurance and range; XC-like longer endurance and
+/// range).  Transcribing the preset mission objectives is an open item.
+#[test]
+fn preset_stand_in_designs_carry_a_finite_airframe_analysis() {
+    let catalog = complete_catalog();
+    let maps = propulsion_maps(50.0);
+    let acc_like = complete_problem(&catalog, &maps, 1_024);
+    let mut xc_like = complete_problem(&catalog, &maps, 1_024);
+    xc_like.objectives.endurance_s = 1_200.0;
+    xc_like.objectives.range_m = 15_000.0;
+    for (label, problem) in [("acc-stand-in", acc_like), ("xc-stand-in", xc_like)] {
+        let optimized = optimize(&problem).expect(label);
+        let report = evaluate(&optimized.design);
+        let airframe = report
+            .airframe
+            .as_ref()
+            .unwrap_or_else(|| panic!("{label}: airframe is None: {:#?}", report.findings));
+        assert!(airframe.static_margin.is_finite(), "{label}: SM");
+        let trim = &airframe
+            .cruise_trim
+            .as_ref()
+            .unwrap_or_else(|| panic!("{label}: no cruise trim"))
+            .trim;
+        assert!(trim.delta_rad.is_finite(), "{label}: trim deflection");
+        let spar = airframe.spar.as_ref().expect("spar analysis");
+        assert!(
+            spar.bending_margin_of_safety.is_finite(),
+            "{label}: bending MoS"
+        );
+        assert!(
+            spar.shear_margin_of_safety.is_finite(),
+            "{label}: shear MoS"
+        );
+        assert!(spar.tip_deflection_m.is_finite() && spar.tip_deflection_m > 0.0);
+        assert_eq!(
+            optimized.report.airframe, report.airframe,
+            "{label}: report"
+        );
     }
 }

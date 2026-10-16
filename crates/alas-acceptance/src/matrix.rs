@@ -13,6 +13,15 @@ mod format;
 mod model_audit;
 mod preset_runs;
 
+/// Cruise lift-to-drag floor below which a preset is not physically plausible
+/// (an exclusive bound: the value must exceed it). Shared by the matrix, the
+/// optimization audit and the acceptance test so the three cannot drift.
+pub const MIN_PLAUSIBLE_L_OVER_D: f64 = 8.0;
+
+/// Fewest figure scenes a preset must build for the figure builders to count
+/// as exercised. A smoke gate on the scene count, not a content check.
+pub const MIN_FIGURE_SCENES: usize = 8;
+
 pub use evaluate::{evaluate_preset, generate_scenes_for_preset};
 pub use format::{format_matrix_json, format_matrix_report};
 pub use model_audit::PresetModelAudit;

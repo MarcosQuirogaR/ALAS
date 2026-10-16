@@ -1,0 +1,208 @@
+{
+  "id": "xc-2023",
+  "version": 1,
+  "family": "xtra_challenge",
+  "name": "XtraChallenge 2023 (edition I), rice-bag payload",
+  "status": "provisional",
+  "citation": "XtraChallenge 2023 Normativa Tecnica v3.00 (04.04.2023), s7 requirements, s8.5 circuit, s9 scoring (eq. 1-10); local copy refs/competitions/XC_XC_23_RT_V3.00.pdf. Provisional for 2026: the 2026 rules were not located, so this edition's formulas are the nearest primary text; the 2026 missions (secondary source only) differ.",
+  "gates": [
+    {
+      "id": "mtow",
+      "description": "Take-off mass <= 25 kg",
+      "margin_expr": "(25 kg - mtow) / (25 kg)",
+      "hard": true,
+      "citation": "XtraChallenge 2023 Normativa Tecnica v3.00 (04.04.2023) s7.8"
+    },
+    {
+      "id": "budget",
+      "description": "Manufacturing cost <= 300 EUR",
+      "margin_expr": "(300 EUR - cost) / (300 EUR)",
+      "hard": true,
+      "citation": "XtraChallenge 2023 Normativa Tecnica v3.00 (04.04.2023) s7.2"
+    },
+    {
+      "id": "motors",
+      "description": "A single motor",
+      "margin_expr": "0 - abs(motor_count - 1)",
+      "hard": true,
+      "citation": "XtraChallenge 2023 Normativa Tecnica v3.00 (04.04.2023) s7.4"
+    },
+    {
+      "id": "cells",
+      "description": "3S LiPo",
+      "margin_expr": "(3 - cell_count) / 3",
+      "hard": true,
+      "citation": "XtraChallenge 2023 Normativa Tecnica v3.00 (04.04.2023) s7.4"
+    },
+    {
+      "id": "pack_voltage",
+      "description": "Pack voltage <= 12.6 V",
+      "margin_expr": "(12.6 V - pack_voltage_max) / (12.6 V)",
+      "hard": true,
+      "citation": "XtraChallenge 2023 Normativa Tecnica v3.00 (04.04.2023) s7.4"
+    },
+    {
+      "id": "announcement",
+      "description": "Declared take-off 25 m or 60 m",
+      "margin_expr": "if(announced_takeoff == 25 m || announced_takeoff == 60 m, 0, -1)",
+      "hard": true,
+      "citation": "XtraChallenge 2023 Normativa Tecnica v3.00 (04.04.2023) s9.4 eq. 7"
+    },
+    {
+      "id": "takeoff_within_announcement",
+      "description": "Predicted take-off distance within the declaration (else B_despegue = 0)",
+      "margin_expr": "(announced_takeoff - takeoff_distance) / announced_takeoff",
+      "hard": false,
+      "citation": "XtraChallenge 2023 Normativa Tecnica v3.00 (04.04.2023) s9.4"
+    }
+  ],
+  "parameters": [
+    {
+      "name": "flight_valid",
+      "unit_si": "1",
+      "default": 1,
+      "min": 0,
+      "max": 1,
+      "doc": "1 when the flight is legal; 0 for a rule breach the simulator cannot see (lost part, flight-zone breach, failed static test)"
+    },
+    {
+      "name": "pl_pred_a",
+      "unit_si": "m^3",
+      "default": 2.092,
+      "min": -50,
+      "max": 50,
+      "doc": "Slope of the report's linear payload model PL[kg] = a * rho[kg/m3] + b (s9.4 eq. 4); default from Xtra2UPV's fit (competitions.md s2.2 REPORT 02 p.23), a team must replace it"
+    },
+    {
+      "name": "pl_pred_b",
+      "unit_si": "kg",
+      "default": 0.7468,
+      "min": -50,
+      "max": 50,
+      "doc": "Intercept of the payload model (see pl_pred_a)"
+    },
+    {
+      "name": "acro_points",
+      "unit_si": "1",
+      "default": 0,
+      "min": 0,
+      "max": 6,
+      "doc": "Acrobatics: 3 inside loop, 6 Cuban eight (s9.4 eq. 6)"
+    },
+    {
+      "name": "flight_clock_throttle_up",
+      "unit_si": "1",
+      "default": 0,
+      "min": 0,
+      "max": 1,
+      "doc": "Not time-critical in this edition"
+    }
+  ],
+  "segments": [
+    {
+      "name": "loading",
+      "kind": {
+        "kind": "loading",
+        "seconds": 30.0
+      }
+    },
+    {
+      "name": "takeoff",
+      "kind": {
+        "kind": "takeoff",
+        "runway_m": 60.0,
+        "surface": "grass"
+      }
+    },
+    {
+      "name": "climb",
+      "kind": {
+        "kind": "climb",
+        "end": {
+          "until": "altitude",
+          "meters": 50.0
+        }
+      }
+    },
+    {
+      "name": "circuit",
+      "kind": {
+        "kind": "laps",
+        "lap_length_m": 200.0,
+        "turn_gate": true,
+        "count": 5
+      }
+    },
+    {
+      "name": "landing",
+      "kind": {
+        "kind": "landing",
+        "zone_m": null
+      }
+    }
+  ],
+  "score": {
+    "terms": [
+      {
+        "name": "b_to",
+        "expr": "if(takeoff_distance > announced_takeoff, 0, step(announced_takeoff, 25 m, 1.1, 60 m, 1, 0))",
+        "additive_bonus": false
+      },
+      {
+        "name": "p_time",
+        "expr": "275 * rel(t_min, time_1km)",
+        "additive_bonus": false
+      },
+      {
+        "name": "p_load",
+        "expr": "200 * rel(payload_mass, c_max)",
+        "additive_bonus": false
+      },
+      {
+        "name": "pl_pred",
+        "expr": "pl_pred_a * air_density + pl_pred_b",
+        "additive_bonus": false
+      },
+      {
+        "name": "b_pred",
+        "expr": "max(0, 50 * (1 - abs(payload_mass / pl_pred - 1)))",
+        "additive_bonus": true
+      },
+      {
+        "name": "b_acro",
+        "expr": "acro_points",
+        "additive_bonus": true
+      },
+      {
+        "name": "t_load",
+        "expr": "loading_time / (1 s)",
+        "additive_bonus": false
+      },
+      {
+        "name": "b_load",
+        "expr": "if(t_load < 10, 60 * (1 - t_load / 150), if(t_load < 60, 0.021 * t_load^2 - 2.59 * t_load + 79.8, 0))",
+        "additive_bonus": true
+      }
+    ],
+    "round_expr": "((p_time + p_load + b_pred + b_acro) * flight_valid + b_load) * b_to",
+    "aggregation": {
+      "kind": "mean_drop_worst_above",
+      "rounds": 3
+    },
+    "reference_field": [
+      {
+        "name": "t_min",
+        "default": 40,
+        "unit_si": "s",
+        "note": "ASSUMPTION: fastest 1 km time of the round; no published figure"
+      },
+      {
+        "name": "c_max",
+        "default": 3.0,
+        "unit_si": "kg",
+        "note": "ASSUMPTION: heaviest payload of the round; no published figure"
+      }
+    ]
+  },
+  "variants": []
+}

@@ -114,7 +114,7 @@ fn build() -> Vec<SolverPreset> {
             settings: SolverSettings {
                 screening: stage(10_000, 15.0),
                 refinement: stage(10_000, 60.0),
-                ..SolverSettings::default()
+                ..SolverSettings::interactive()
             },
         },
         SolverPreset {
@@ -122,9 +122,9 @@ fn build() -> Vec<SolverPreset> {
             display_name: "Balanced (Recommended)",
             description: "The default tradeoff: 30 s of screening and at most 2 min of \
                           refinement.",
-            // Whatever `SolverSettings` itself defaults to, so the recommended
-            // preset and an unconfigured run are the same run.
-            settings: SolverSettings::default(),
+            // The wall-clock-limited default the desktop application starts from, so
+            // the recommended preset and an unconfigured interactive run are one run.
+            settings: SolverSettings::interactive(),
         },
         SolverPreset {
             name: "thorough",
@@ -134,7 +134,7 @@ fn build() -> Vec<SolverPreset> {
             settings: SolverSettings {
                 screening: stage(30_000, 60.0),
                 refinement: stage(30_000, 240.0),
-                ..SolverSettings::default()
+                ..SolverSettings::interactive()
             },
         },
         SolverPreset {
@@ -146,7 +146,7 @@ fn build() -> Vec<SolverPreset> {
             settings: SolverSettings {
                 screening: stage(40_000, 120.0),
                 refinement: stage(40_000, crate::optimizer::MAXIMUM_STAGE_TIME_LIMIT_S),
-                ..SolverSettings::default()
+                ..SolverSettings::interactive()
             },
         },
     ]
@@ -183,8 +183,11 @@ mod tests {
     }
 
     #[test]
-    fn the_recommended_preset_is_what_an_unconfigured_run_already_does() {
-        assert_eq!(get("balanced").unwrap().settings, SolverSettings::default());
+    fn the_recommended_preset_is_what_an_unconfigured_interactive_run_does() {
+        assert_eq!(
+            get("balanced").unwrap().settings,
+            SolverSettings::interactive()
+        );
     }
 
     #[test]

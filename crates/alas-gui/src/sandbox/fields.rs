@@ -21,7 +21,9 @@ use std::collections::BTreeMap;
 use alas_config::{presets, ConfigNode, EngineConfig, Entry, Node, DESIGN_VARIABLE_SPECS};
 use serde_json::Value;
 
+mod aft_body;
 mod belly_upsweep;
+mod empennage_placement;
 mod hump;
 mod nose;
 mod profile;
@@ -95,6 +97,8 @@ pub enum FieldKind {
     Int,
     /// A real number that may be unset.
     OptionalFloat,
+    /// An on/off switch.
+    Bool,
     /// An airfoil name from the library.
     Airfoil,
     /// A catalogue engine name.
@@ -688,19 +692,18 @@ const SPECS: &[Spec] = &[
             decimals: 2,
         },
     ),
-    cfg(
-        "geometry.fuselage.tailcone_length_m",
-        Discipline::Fuselage,
-        STATIONS,
-        "/geometry/fuselage/tailcone_length_m",
-        FieldKind::Float,
-        Bounds {
-            min: 1.0,
-            max: 50.0,
-            decimals: 2,
-        },
-    ),
+    aft_body::TAILCONE_LENGTH,
+    aft_body::HOLD_END,
     belly_upsweep::SPEC,
+    aft_body::NOSE_LENGTH,
+    aft_body::TAIL_END_Z,
+    aft_body::TAIL_END_WIDTH,
+    aft_body::TAIL_END_HEIGHT,
+    aft_body::BELLY_EXPONENT,
+    aft_body::PLAN_LENGTH,
+    aft_body::PLAN_EXPONENT,
+    aft_body::CROWN_LENGTH,
+    aft_body::CROWN_EXPONENT,
     nose::WINDSHIELD_ANGLE,
     nose::CROWN_END,
     nose::RADOME_LENGTH,
@@ -719,6 +722,12 @@ const SPECS: &[Spec] = &[
     hump::FLOOR_HEIGHT,
     hump::DECK_START,
     hump::DECK_END,
+    empennage_placement::HSTAB_ROOT_LE_X,
+    empennage_placement::HSTAB_ROOT_STATION_Y,
+    empennage_placement::VSTAB_ROOT_LE_X,
+    empennage_placement::DORSAL_X_START,
+    empennage_placement::DORSAL_HEIGHT,
+    empennage_placement::DORSAL_IN_AERO,
     cfg(
         "geometry.fuselage.n_subdivisions",
         Discipline::Fuselage,
@@ -1020,6 +1029,7 @@ pub fn value_in_domain(field: &SandboxField, value: &Value) -> bool {
                 })
             })
         }),
+        FieldKind::Bool => value.is_boolean() || value.is_null(),
         FieldKind::Airfoil | FieldKind::Engine => {
             value.as_str().is_some_and(|s| !s.trim().is_empty())
         }

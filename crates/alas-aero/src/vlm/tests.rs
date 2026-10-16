@@ -204,3 +204,51 @@ fn nonpositive_or_nonfinite_derivative_steps_are_rejected() {
         );
     }
 }
+
+/// Rectangular wing (semispan 5 m, chord 1 m) with a vertical winglet of
+/// `height` metres at the tip; coefficients stay on the bare wing's reference
+/// quantities. `name` selects whether the vortex-lattice model carries it.
+fn winglet_airplane(height: f64, name: &str) -> Airplane {
+    let mut airplane = single_wing_airplane(true);
+    if height > 0.0 {
+        airplane.wings.push(Wing::new(
+            name,
+            vec![
+                WingXSec::new([0.0, 5.0, 0.0], 1.0, 0.0, naca("naca0012")),
+                WingXSec::new([0.2, 5.0, height], 0.6, 0.0, naca("naca0012")),
+            ],
+            true,
+        ));
+    }
+    airplane
+}
+
+#[test]
+fn a_vertical_winglet_raises_the_span_efficiency_and_a_geometry_only_one_changes_nothing() {
+    use alas_geom::aircraft::wing::{WINGTIP_DEVICE_GEOMETRY_ONLY_NAME, WINGTIP_DEVICE_NAME};
+    let op_point = level_flight_point(5.0);
+    let efficiency = |airplane: &Airplane| {
+        let result = run(airplane, &op_point, 6, 6).expect("well-posed solve");
+        let aspect_ratio = airplane.b_ref * airplane.b_ref / airplane.s_ref;
+        result.cl_lift * result.cl_lift / (std::f64::consts::PI * aspect_ratio * result.cd_drag)
+    };
+    let bare = winglet_airplane(0.0, "");
+    let with = winglet_airplane(1.0, WINGTIP_DEVICE_NAME);
+    let hidden = winglet_airplane(1.0, WINGTIP_DEVICE_GEOMETRY_ONLY_NAME);
+    let (e_bare, e_with, e_hidden) = (efficiency(&bare), efficiency(&with), efficiency(&hidden));
+    // Analytic expectation: a winglet adds effective span (non-planar wake),
+    // so the induced drag at a given lift falls and e rises (Whitcomb 1976;
+    // for h/b = 0.1 the gain is of order 5-10 %).
+    assert!(
+        e_with > e_bare * 1.01,
+        "e bare {e_bare}, e winglet {e_with}"
+    );
+    assert!(
+        e_with < e_bare * 1.4,
+        "implausible gain: {e_bare} -> {e_with}"
+    );
+    assert_eq!(
+        e_hidden, e_bare,
+        "a geometry-only device must not enter the lattice"
+    );
+}

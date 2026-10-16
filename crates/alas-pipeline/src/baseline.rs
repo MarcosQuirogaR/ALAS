@@ -8,7 +8,7 @@
 //! computes the neutral point and static margin without performing an expensive
 //! polar sweep or optimizer run.
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 use alas_config::design_variables::DesignVector;
 use alas_config::AlasConfig;
@@ -30,9 +30,9 @@ pub struct BaselineReport {
     /// The built aircraft geometry, if construction succeeded.
     pub airplane: Option<Airplane>,
     /// Component masses by name, in kg.
-    pub component_masses: HashMap<String, f64>,
+    pub component_masses: BTreeMap<String, f64>,
     /// Component centroids by name, in meters `[x, y, z]`.
-    pub mass_coordinates: HashMap<String, [f64; 3]>,
+    pub mass_coordinates: BTreeMap<String, [f64; 3]>,
     /// Global physical CG coordinates `[x, y, z]`, in meters.
     pub physical_cg: [f64; 3],
     /// Aerodynamic static margin `(x_np - x_cg) / c_ref`.
@@ -64,8 +64,8 @@ fn baseline_error(
     BaselineReport {
         design: *design,
         airplane: Some(plane),
-        component_masses: HashMap::new(),
-        mass_coordinates: HashMap::new(),
+        component_masses: BTreeMap::new(),
+        mass_coordinates: BTreeMap::new(),
         physical_cg: [0.0, 0.0, 0.0],
         static_margin: f64::NAN,
         mac: 0.0,
@@ -90,8 +90,8 @@ pub fn analyze_baseline(config: &AlasConfig, design: &DesignVector) -> BaselineR
             return BaselineReport {
                 design: *design,
                 airplane: None,
-                component_masses: HashMap::new(),
-                mass_coordinates: HashMap::new(),
+                component_masses: BTreeMap::new(),
+                mass_coordinates: BTreeMap::new(),
                 physical_cg: [0.0, 0.0, 0.0],
                 static_margin: f64::NAN,
                 mac: 0.0,
@@ -123,8 +123,8 @@ pub fn analyze_baseline(config: &AlasConfig, design: &DesignVector) -> BaselineR
                 return BaselineReport {
                     design: *design,
                     airplane: Some(plane),
-                    component_masses: HashMap::new(),
-                    mass_coordinates: HashMap::new(),
+                    component_masses: BTreeMap::new(),
+                    mass_coordinates: BTreeMap::new(),
                     physical_cg: [0.0, 0.0, 0.0],
                     static_margin: f64::NAN,
                     mac: 0.0,
@@ -154,8 +154,8 @@ pub fn analyze_baseline(config: &AlasConfig, design: &DesignVector) -> BaselineR
                 // The first pass is a lumped sizing estimate.  Do not expose
                 // it as if it were a resolved baseline after detailed layout
                 // construction failed.
-                component_masses: HashMap::new(),
-                mass_coordinates: HashMap::new(),
+                component_masses: BTreeMap::new(),
+                mass_coordinates: BTreeMap::new(),
                 physical_cg: [f64::NAN; 3],
                 static_margin: f64::NAN,
                 mac: 0.0,
@@ -191,8 +191,8 @@ pub fn analyze_baseline(config: &AlasConfig, design: &DesignVector) -> BaselineR
                 return BaselineReport {
                     design: *design,
                     airplane: Some(plane),
-                    component_masses: HashMap::new(),
-                    mass_coordinates: HashMap::new(),
+                    component_masses: BTreeMap::new(),
+                    mass_coordinates: BTreeMap::new(),
                     physical_cg: [0.0, 0.0, 0.0],
                     static_margin: f64::NAN,
                     mac: 0.0,
@@ -265,14 +265,14 @@ pub fn analyze_baseline(config: &AlasConfig, design: &DesignVector) -> BaselineR
     }
 }
 
-fn breakdown_to_map(mb: &MassBreakdown) -> HashMap<String, f64> {
+fn breakdown_to_map(mb: &MassBreakdown) -> BTreeMap<String, f64> {
     mb.as_pairs()
         .into_iter()
         .map(|(k, v)| (k.to_owned(), v))
         .collect()
 }
 
-fn coordinates_to_map(mc: &MassCoordinates) -> HashMap<String, [f64; 3]> {
+fn coordinates_to_map(mc: &MassCoordinates) -> BTreeMap<String, [f64; 3]> {
     mc.as_pairs()
         .into_iter()
         .map(|(k, v)| (k.to_owned(), v))

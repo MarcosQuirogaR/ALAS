@@ -202,12 +202,13 @@ pub fn assess(
             &spar.w_cap,
             &spar.t_cap,
             &spar.a_cap,
+            &spar.lower_extra_area,
             &spar.frac_moment,
         ]
         .iter()
         .any(|values| !finite(values, count) || values.iter().any(|v| *v < 0.0))
-            || !spar.t_web.is_finite()
-            || spar.t_web <= 0.0
+            || !finite(&spar.t_web, count)
+            || spar.t_web.iter().any(|v| *v <= 0.0)
             || spar.margin_of_safety.len() != count
         {
             return invalid();

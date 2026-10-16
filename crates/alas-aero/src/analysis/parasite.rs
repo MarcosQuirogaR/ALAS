@@ -105,6 +105,25 @@ pub fn lifting_surface_form_factor(
         * (1.34 * mach.powf(0.18) * sweep_m_deg.to_radians().cos().powf(0.28))
 }
 
+/// [`lifting_surface_form_factor`] for the product buildup, with the Mach
+/// term `1.34 M^0.18` floored at 1 (DRG-07).
+///
+/// Raymer's Mach factor is a high-subsonic correlation: unclamped it falls
+/// below 1 under M = (1/1.34)^(1/0.18) = 0.195 (0.78 at M 0.05, 0.885 at
+/// M 0.10), which would make a low-speed wing's pressure drag smaller than
+/// that of the incompressible thickness factor alone. The floor leaves every
+/// M >= 0.2 value bit-identical. The frozen reference path keeps the
+/// unclamped function.
+pub fn lifting_surface_form_factor_floored(
+    thickness: f64,
+    max_thickness_x_over_c: f64,
+    mach: f64,
+    sweep_m_deg: f64,
+) -> f64 {
+    (1.0 + 0.6 / max_thickness_x_over_c * thickness + 100.0 * thickness.powf(4.0))
+        * ((1.34 * mach.powf(0.18)).max(1.0) * sweep_m_deg.to_radians().cos().powf(0.28))
+}
+
 /// Raymer 6th ed. eq. 12.31, the fuselage and smooth-canopy form factor
 /// `1 + 60/f^3 + f/400`, with `f` the length over the equivalent diameter.
 pub fn fuselage_form_factor(fineness: f64) -> f64 {
@@ -264,7 +283,7 @@ impl<'a> AeroAnalysis<'a> {
                     &wing.name,
                     lifting_surface_wetted_area(exposed, thickness),
                     wing.mean_aerodynamic_chord(),
-                    lifting_surface_form_factor(thickness, x_over_c, mach, sweep_m_deg),
+                    lifting_surface_form_factor_floored(thickness, x_over_c, mach, sweep_m_deg),
                     if index == 0 {
                         self.drag.interference_factor_wing
                     } else {
@@ -420,6 +439,30 @@ mod tests {
         // Eq. 7.10 at t/c 0.12: 2.0394 S_exp; eq. 7.9 below t/c 0.05.
         assert!((lifting_surface_wetted_area(100.0, 0.12) - 203.94).abs() < 1e-9);
         assert!((lifting_surface_wetted_area(100.0, 0.04) - 200.3).abs() < 1e-9);
+    }
+
+    #[test]
+    fn the_product_wing_form_factor_is_floored_below_mach_0_195_and_equal_above() {
+        // DRG-07: the Mach term is 1 below M = 0.195, so the ratio to the
+        // unclamped Raymer value is exactly 1 / (1.34 M^0.18).
+        for mach in [0.05_f64, 0.10, 0.15] {
+            let raymer = lifting_surface_form_factor(0.12, 0.35, mach, 25.0);
+            let floored = lifting_surface_form_factor_floored(0.12, 0.35, mach, 25.0);
+            let ratio = floored / raymer;
+            assert!(
+                (ratio - 1.0 / (1.34 * mach.powf(0.18))).abs() < 1e-12,
+                "{mach}"
+            );
+            assert!(ratio > 1.0);
+        }
+        assert!((1.34_f64 * 0.05_f64.powf(0.18) - 0.78).abs() < 5e-3);
+        for mach in [0.20, 0.45, 0.78, 0.85] {
+            assert_eq!(
+                lifting_surface_form_factor_floored(0.12, 0.35, mach, 25.0),
+                lifting_surface_form_factor(0.12, 0.35, mach, 25.0),
+                "{mach}"
+            );
+        }
     }
 
     #[test]

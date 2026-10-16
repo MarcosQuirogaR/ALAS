@@ -160,3 +160,58 @@ fn product_nastran95_rejects_missing_identity_cases_and_repeated_tables() {
         assert!(result.cases.is_empty());
     }
 }
+
+#[test]
+fn msc_assessed_stress_is_the_centroid_peak_outside_load_introduction_zones() {
+    use crate::mesh::{Rbe3, Shell};
+    use crate::op2::StressTable;
+    // Two quads in a strip: quad 10 (grids 1-2-4-3) and quad 11 (grids 3-4-6-5).
+    // An RBE3 spider on grid 1 puts quad 10 in a load-introduction zone for one
+    // layer; the second layer would reach quad 11, so use a single layer via a
+    // dedicated call and check the exclusion set the reader applies (3 layers).
+    let (mut deck, index, cases, mut op2) = fixture();
+    for (id, y) in [(4, 0.0), (5, 0.0), (6, 0.0)] {
+        deck.add_grid(id, [1.0, y, 0.0]);
+    }
+    deck.quads.push(Shell {
+        eid: 10,
+        pid: 1,
+        nodes: vec![1, 2, 5, 4],
+    });
+    deck.rigid_elements.push(Rbe3 {
+        eid: 1,
+        refgrid: 1,
+        refc: "123456",
+        weight: 1.0,
+        comp: "123456",
+        gijs: vec![],
+    });
+    // Rows per element: centroid (node 0) with two fibers, then one corner row.
+    let table = StressTable {
+        element_ids: vec![10, 10, 10, 20, 20, 20],
+        node_ids: vec![0, 0, 1, 0, 0, 1],
+        data: vec![
+            [-1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 9.0e8],
+            [1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 8.0e8],
+            [1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 2.0e9],
+            [-1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 3.0e8],
+            [1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 3.5e8],
+            [1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 9.9e8],
+        ],
+    };
+    for sid in 1..=3 {
+        op2.cquad4_stress.insert(sid, table.clone());
+    }
+    let result = read_static_product(&op2, &deck, &index, &cases);
+    // Element 10 touches the spider (excluded); element 20 is not in the deck's
+    // shell list, so it is assessed: its centroid peak is 3.5e8 and its larger
+    // corner value (9.9e8) is ignored. The global corner maximum (read_static)
+    // still reports the 2.0e9 artefact.
+    for (_, value) in result.assessed_von_mises_max_pa.iter() {
+        assert_eq!(value, 3.5e8);
+    }
+    assert_eq!(result.assessed_von_mises_max_pa.len(), 3);
+    for (_, value) in result.root_von_mises_max_pa.iter() {
+        assert_eq!(value, 2.0e9);
+    }
+}

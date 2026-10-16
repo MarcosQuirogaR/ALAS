@@ -120,7 +120,8 @@ mod tests {
             w_cap: vec![0.3; n],
             t_cap: vec![0.02; n],
             a_cap: vec![0.006; n],
-            t_web: 0.006,
+            t_web: vec![0.006; n],
+            lower_extra_area: vec![0.0; n],
             frac_moment: vec![0.5; n],
             margin_of_safety: vec![0.1; n],
         };

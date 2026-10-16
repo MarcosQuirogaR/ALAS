@@ -30,6 +30,13 @@
 //!
 //! Only the planform area and quarter-MAC position enter the solve, so it
 //! uses the unmeshed empennage build.
+//!
+//! The volume anchor is a similarity rule for a registered aircraft, not a
+//! control requirement. What the fin must deliver, the engine-out yaw balance
+//! (`VMC` at most 1.13 `VSR`) and the crosswind rudder demand, is evaluated on
+//! the built fin by `mdo::residuals_vmc`: a hard constraint for clean-sheet
+//! designs, whose fin scale is free, and a diagnostic here, where the
+//! registered fin is certified.
 
 use std::sync::OnceLock;
 

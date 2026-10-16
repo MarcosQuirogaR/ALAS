@@ -12,9 +12,11 @@ use alas_config::{AlasConfig, TailSizing};
 use alas_payload::oew::oew_and_cg;
 
 pub(crate) mod candidate_model;
+pub(crate) mod clmax_geometry;
 mod entry;
 mod outcome;
 pub(crate) mod planned_mission;
+mod profile;
 mod route;
 use entry::mass_coordinates_failure;
 #[cfg(test)]
@@ -80,11 +82,19 @@ pub(crate) fn run_candidate_reusing(
             reason: "cancelled",
         });
     }
-    let (candidate_config, dv, mut plane) = super::build::build_geometry_with_fuselage_policy(
+    // MTOW band: the fixed requirement at the mass `x` carries (idempotent).
+    let config = &config.at_band_mass(alas_config::DesignVector::band_mass_of(x));
+    let (mut candidate_config, dv, mut plane) = super::build::build_geometry_with_fuselage_policy(
         config,
         x,
         preserve_explicit_fuselage_length,
     )?;
+    // AERL-01: the candidate's CLmax follow its wing, relative to the
+    // registered geometry (identity, and `None`, at that geometry).
+    let clmax = clmax_geometry::candidate_set(config, &plane);
+    if let Some(set) = &clmax {
+        candidate_config = clmax_geometry::with_clmax(&candidate_config, set);
+    }
     // The seed-mass cabin layout is consumed inside `first_mass_pass`; the
     // closure re-places the cabin at every closed mass itself. The two
     // design modes evaluate the first pass at their seed with the structure
@@ -106,7 +116,7 @@ pub(crate) fn run_candidate_reusing(
 
     // The structural pass stays at the declared design weights. Only the
     // usable fuel and its physical moment follow the loadable takeoff case.
-    let takeoff_loading = if plan.mode == alas_config::MtowSizing::FixedRequirement {
+    let takeoff_loading = if plan.mode.sizes_at_declared_mass() {
         let (loading, cg) = alas_mass::loading::apply_mtow_fuel_loading(
             &candidate_config,
             &dv,
@@ -179,6 +189,7 @@ pub(crate) fn run_candidate_reusing(
             controls.screening_drag_table,
         )?,
     };
+    let setup_profile = alas_math::stage_profile::mission_setup();
     let n_engines = candidate_config
         .geometry
         .engine
@@ -283,7 +294,9 @@ pub(crate) fn run_candidate_reusing(
         wing_box: Default::default(),
         vlm_cache,
         initial_trim_cg_x_m,
+        retrim_tolerance_pct_mac: reused.and_then(|reuse| reuse.cg_tolerance_pct_mac),
     };
+    drop(setup_profile);
     let closure = converge(
         &context,
         &mut plane,
@@ -294,20 +307,18 @@ pub(crate) fn run_candidate_reusing(
             polar: polar0,
         },
     )?;
+    profile::record_closure(&closure, &context.model);
     let state = closure.state;
     let trim_reuse = external.is_none().then(|| {
-        let mut without_gear = candidate_config.clone();
-        without_gear.landing_gear.derived_main_gear = None;
-        TrimReuse {
-            config: without_gear,
+        TrimReuse::of_closure(
+            &candidate_config,
             dv,
             untrimmed,
-            trimmed: plane.clone(),
-            polar: state.polar.clone(),
-            trim_cg_x_m: closure.trim_cg_x_m,
-            screening_drag_table: controls.screening_drag_table,
-            vlm_cache: context.vlm_cache.clone(),
-        }
+            &plane,
+            (&state.polar, closure.trim_cg_x_m),
+            controls.screening_drag_table,
+            context.vlm_cache.clone(),
+        )
     });
     let work = SizingWork {
         plan_freezes: closure.plan_freezes,
@@ -357,6 +368,7 @@ pub(crate) fn run_candidate_reusing(
     // otherwise the laid-out load case. The derived design MZFW adds it to
     // the operating empty mass.
     let design_payload_kg = dispatch_payload_kg.unwrap_or(state.masses.payload);
+    let offdesign_profile = alas_math::stage_profile::offdesign();
     let offdesign = match route_model.as_ref() {
         Some(route) if route_distance_m > 0.0 => Some(super::offdesign::fly_route(
             &candidate_config,
@@ -381,6 +393,7 @@ pub(crate) fn run_candidate_reusing(
         )?),
         _ => None,
     };
+    drop(offdesign_profile);
     // MDA updates the candidate box and current FLOPS total. An initially
     // complete frozen-reference diagnostic cannot verify the final inventory.
     let structural_inventory_complete = closure.structural_inventory_complete
@@ -430,6 +443,7 @@ pub(crate) fn run_candidate_reusing(
             deck: deck_key,
             frozen_plan: closure.frozen_plan,
             tail_sizing: TailSizing::of(&candidate_config.geometry.empennage, &dv),
+            clmax,
         }),
         // The off-design route flies the same deck, so its evaluations are
         // on the same counter.
@@ -480,6 +494,8 @@ pub(crate) fn run_candidate_reusing(
         capacity,
         structural_inventory_complete,
         trim_reuse,
+        clmax,
+        declared_clmax: clmax.map(|_| clmax_geometry::declared_set(config)),
     })
 }
 

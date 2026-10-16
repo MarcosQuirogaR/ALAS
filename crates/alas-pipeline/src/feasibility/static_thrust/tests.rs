@@ -142,9 +142,45 @@ fn candidate_cruise_demand_matches_optimizer(mode: alas_config::MtowSizing) {
         .find(|residual| residual.id == "cruise_thrust")
         .expect("optimizer cruise residual")
         .limit;
+    // The optimizer's default basis is the engine deck: its level-flight row
+    // equals the pipeline deck requirement (same deck,
+    // same carried table), and so does the top-of-climb Diagnostic.
+    let deck = super::super::cruise_deck::jet_level_check(
+        &config,
+        &report,
+        wing_loading_pa,
+        sized.takeoff_mass_kg * config.requirements.gravity_m_s2,
+        sized.mid_cruise_mass_kg(),
+    )
+    .expect("deck cruise requirement")
+    .deck;
+    let row = |id: &str| {
+        assessment
+            .residuals
+            .iter()
+            .find(|residual| residual.id == id)
+            .unwrap_or_else(|| panic!("optimizer {id} residual"))
+            .limit
+    };
     assert!(
-        (report_demand - optimizer_demand).abs() < 1.0e-14,
-        "report {report_demand}, optimizer {optimizer_demand}"
+        (deck.level_tw - optimizer_demand).abs() < 1.0e-12,
+        "pipeline deck {}, optimizer {optimizer_demand}",
+        deck.level_tw
+    );
+    // The top-of-climb row is the mission model's residual climb at the plan
+    // level, in m/s, and holds the criterion for a registered aircraft.
+    assert!(row("toc_rate_of_climb") > 0.0);
+    // The flat-lapse form the propeller finding and the legacy basis keep is
+    // the same drag over the configured lapse.
+    let lapse_demand = artifacts.drag.cd(
+        sized_cl,
+        config.requirements.cruise_mach,
+        config.requirements.cruise_altitude_m,
+    ) / sized_cl
+        / config.performance.thrust_lapse;
+    assert!(
+        (report_demand - lapse_demand).abs() < 1.0e-14,
+        "report {report_demand}, closed form {lapse_demand}"
     );
 }
 

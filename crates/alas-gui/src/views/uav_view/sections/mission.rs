@@ -1,19 +1,21 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! Mission requirement and payload inputs.
+//! Competition, search and mission-requirement inputs.
 
-use egui::{RichText, TextEdit, Ui};
+use egui::{DragValue, RichText, Ui};
 
 use crate::theme::selectable_button;
-use crate::uav::{MissionPlanMode, UavWorkflowState};
+use crate::uav::UavWorkflowState;
 
 use super::super::presentation::{card, card_column_count};
-use super::super::uav_fields::value;
+use super::super::uav_fields::{usize_value, value};
 use super::form_grid;
 use crate::views::tr;
 
 pub(in crate::views::uav_view) fn mission_inputs(state: &mut UavWorkflowState, ui: &mut Ui) {
+    competition_card(state, ui);
+    ui.add_space(8.0);
     if card_column_count(ui.available_width()) == 2 {
         ui.columns(2, |columns| {
             mission_card(state, &mut columns[0]);
@@ -24,19 +26,57 @@ pub(in crate::views::uav_view) fn mission_inputs(state: &mut UavWorkflowState, u
         ui.add_space(8.0);
         payload_card(state, ui);
     }
-    ui.add_space(8.0);
+}
+
+fn competition_card(state: &mut UavWorkflowState, ui: &mut Ui) {
     card(
         ui,
-        "Electrical mission plan",
-        Some(
-            "The normal path derives departure, climb, cruise, and approach-reserve phases from the brief. The cruise duration is extended until both range and endurance are met.",
-        ),
+        "Competition",
+        Some("The search chooses the propulsion bundle and the airframe, flies the preset's mission and scores it with the preset's own score engine."),
         |ui| {
-            mission_mode_tabs(state, ui);
-            ui.add_space(6.0);
-            if state.mission_plan_mode == MissionPlanMode::Advanced {
-                advanced_mission_inputs(state, ui);
+            ui.label(RichText::new(tr("Competition preset")).strong());
+            let columns = card_column_count(ui.available_width()).min(2);
+            let ids = alas_uav::score::presets::ids();
+            for row in ids.chunks(columns) {
+                ui.columns(columns, |column_uis| {
+                    for (index, id) in row.iter().enumerate() {
+                        let name = alas_uav::score::presets::load(id)
+                            .map_or_else(|_| (*id).to_owned(), |preset| preset.name);
+                        let selected = state.competition.preset_id == *id;
+                        let response = column_uis[index].add_sized(
+                            [column_uis[index].available_width(), 30.0],
+                            selectable_button(RichText::new(name), selected),
+                        );
+                        if response.clicked() {
+                            state.competition.preset_id = (*id).to_owned();
+                        }
+                    }
+                });
+                ui.add_space(4.0);
             }
+            ui.add_space(6.0);
+            form_grid(ui, "uav_competition_grid", |ui| {
+                value(
+                    ui,
+                    "Announced take-off distance",
+                    &mut state.competition.announced_takeoff_m,
+                    "m",
+                );
+                value(
+                    ui,
+                    "Payload count (ACC cans gate)",
+                    &mut state.competition.payload_count,
+                    "",
+                );
+                value(
+                    ui,
+                    "Payload volume (XC gate)",
+                    &mut state.competition.payload_volume_m3,
+                    "m3",
+                );
+                usize_value(ui, "Evaluation budget", &mut state.evaluations);
+                seed_value(ui, "Random seed", &mut state.seed);
+            });
         },
     );
 }
@@ -114,94 +154,9 @@ fn payload_card(state: &mut UavWorkflowState, ui: &mut Ui) {
     });
 }
 
-fn mission_mode_tabs(state: &mut UavWorkflowState, ui: &mut Ui) {
-    let modes = [MissionPlanMode::Standard, MissionPlanMode::Advanced];
-    let columns = card_column_count(ui.available_width()).min(modes.len());
-    for row in modes.chunks(columns) {
-        ui.columns(columns, |column_uis| {
-            for (index, mode) in row.iter().enumerate() {
-                let response = column_uis[index]
-                    .add_sized(
-                        [column_uis[index].available_width(), 30.0],
-                        selectable_button(tr(mode.label()), state.mission_plan_mode == *mode),
-                    )
-                    .on_hover_text(if *mode == MissionPlanMode::Standard {
-                        tr("The standard plan keeps the normal workflow short. Each phase is solved at its own speed and command; no cruise-only energy surrogate is used.")
-                    } else {
-                        tr("Advanced phases are steady flight conditions. Their total duration and still-air distance must meet the mission objectives.")
-                    });
-                if response.clicked() {
-                    state.mission_plan_mode = *mode;
-                    if *mode == MissionPlanMode::Advanced && state.mission_phases.is_empty() {
-                        state.reset_advanced_mission();
-                    }
-                }
-            }
-        });
-        ui.add_space(4.0);
-    }
-}
-
-fn advanced_mission_inputs(state: &mut UavWorkflowState, ui: &mut Ui) {
-    ui.colored_label(
-        ui.visuals().warn_fg_color,
-        tr("Duration and distance must meet mission objectives"),
-    )
-    .on_hover_text(tr("Advanced phases are steady flight conditions. Their total duration and still-air distance must meet the mission objectives."));
-    let mut remove = None;
-    for (index, phase) in state.mission_phases.iter_mut().enumerate() {
-        egui::CollapsingHeader::new(
-            RichText::new(format!("{} {}", tr("Phase"), index + 1)).strong(),
-        )
-        .id_salt(format!("uav_mission_phase_{index}"))
-        .default_open(true)
-        .show(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.label(RichText::new(tr("Phase name")).strong());
-                ui.add_sized(
-                    [
-                        ui.available_width().clamp(140.0, 320.0),
-                        ui.spacing().interact_size.y,
-                    ],
-                    TextEdit::singleline(&mut phase.name),
-                );
-                if ui.small_button(tr("Remove")).clicked() {
-                    remove = Some(index);
-                }
-            });
-            form_grid(ui, format!("uav_mission_phase_values_{index}"), |ui| {
-                value(ui, "Duration", &mut phase.duration_s, "s");
-                value(ui, "Speed", &mut phase.condition.speed_m_s, "m/s");
-                value(
-                    ui,
-                    "Air density",
-                    &mut phase.condition.air_density_kg_m3,
-                    "kg/m3",
-                );
-                value(ui, "Throttle", &mut phase.condition.throttle, "");
-            });
-        });
-        ui.add_space(4.0);
-    }
-    if let Some(index) = remove {
-        state.mission_phases.remove(index);
-    }
-    ui.horizontal(|ui| {
-        if ui.button(tr("Add mission phase")).clicked() {
-            state
-                .mission_phases
-                .push(alas_uav::propulsion_electric::ElectricMissionPhase {
-                    name: tr("new phase"),
-                    duration_s: 60.0,
-                    condition: alas_uav::propulsion_electric::ElectricFlightCondition {
-                        speed_m_s: state.objectives.cruise_speed_m_s,
-                        air_density_kg_m3: state.model.air_density_kg_m3,
-                        throttle: 0.95,
-                    },
-                });
-        }
-        if ui.button(tr("Restore standard mission phases")).clicked() {
-            state.reset_advanced_mission();
-        }
-    });
+/// Editable integer seed of the deterministic search.
+fn seed_value(ui: &mut Ui, label: &str, seed: &mut u64) {
+    ui.label(RichText::new(tr(label)).strong());
+    ui.add(DragValue::new(seed).range(0..=u64::MAX));
+    ui.end_row();
 }

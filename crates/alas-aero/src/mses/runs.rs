@@ -133,6 +133,27 @@ pub(crate) fn installation_status(directory: &Path) -> Option<MsesStatus> {
     }
 }
 
+/// Select the closest genuinely converged checkpoint to `target_alpha_deg` from a
+/// slice of checkpoints, selecting the finite closest using [`f64::total_cmp`].
+///
+/// Returns `None` if `target_alpha_deg` is non-finite or no candidate has a finite angle.
+pub fn select_closest_checkpoint(
+    checkpoints: &[MsesConvergedCheckpoint],
+    target_alpha_deg: f64,
+) -> Option<&MsesConvergedCheckpoint> {
+    if !target_alpha_deg.is_finite() {
+        return None;
+    }
+    checkpoints
+        .iter()
+        .filter(|cp| cp.alpha_deg.is_finite())
+        .min_by(|a, b| {
+            let dist_a = (a.alpha_deg - target_alpha_deg).abs();
+            let dist_b = (b.alpha_deg - target_alpha_deg).abs();
+            dist_a.total_cmp(&dist_b)
+        })
+}
+
 #[cfg(test)]
 mod raw_export_tests {
     use super::*;

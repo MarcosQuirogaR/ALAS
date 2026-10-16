@@ -225,7 +225,7 @@ pub(super) fn quick_range(
     config: &AlasConfig,
     sized: &alas_opt::SizedCandidate,
 ) -> Result<(f64, f64), String> {
-    let model = candidate_mission_model(config, &sized.fuel_artifacts)?;
+    let model = candidate_mission_model(config, &sized.fuel_artifacts)?.for_range_search();
     let fuel_kg = (sized.takeoff_mass_kg - sized.zero_fuel_mass_kg)
         .min(sized.usable_capacity_kg)
         .max(0.0);

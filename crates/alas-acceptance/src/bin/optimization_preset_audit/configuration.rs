@@ -111,7 +111,7 @@ impl Configuration {
             overrides.push((
                 "solver",
                 "stop_on_evaluations_only",
-                json!(false),
+                json!(settings.stop_on_evaluations_only),
                 json!(true),
             ));
             settings.stop_on_evaluations_only = true;

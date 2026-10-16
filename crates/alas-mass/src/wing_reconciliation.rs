@@ -148,6 +148,12 @@ pub fn reconcile_with_design_box(
 }
 
 mod geometry;
+mod ground_droop;
+mod non_optimum;
+pub use ground_droop::{
+    complete_wing_mass_kg, one_g_tip_rise_m, support_station_m, wing_ground_deflection,
+    GroundCondition, WingGroundResponse,
+};
 mod reconcile;
 use reconcile::reconcile_structural_wing;
 pub use reconcile::{

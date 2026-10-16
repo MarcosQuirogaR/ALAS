@@ -23,7 +23,9 @@ use crate::scope::{
     WingFuelDesignCase, WingFuelDistribution, WingMountedRelief,
 };
 use crate::tanks;
+use crate::torque_sources::{PreparedTorque, TorqueSources};
 
+use super::envelope::{self, CaseSet};
 use super::law::{linspace, trapezoid, SizingLaw};
 use super::solve::size_wingbox_with_law;
 use super::types::WingboxSizing;
@@ -124,21 +126,37 @@ pub fn size_wingbox_with_scope(
         rib_mat,
         &fuel_kg_m,
         &wing_mounted.point_masses_kg,
+        &wing_mounted.torque,
         front,
         rear,
+        CaseSet::ALL,
     );
+
+    // Gust, torque and the fatigue limit are evaluated; what each leaves out
+    // is declared, not implied.
+    let gust_envelope = match envelope::discrete_gusts(wsg, req) {
+        Some(_) => GustEnvelope::quasi_static(),
+        None => GustEnvelope::not_modelled(),
+    };
+    let mut solve_omissions = vec![
+        crate::scope::TORQUE_CASES_NOT_MODELLED,
+        crate::scope::AILERON_CASES_NOT_IN_PRODUCT_SET,
+    ];
+    if envelope::fatigue_limit_pa(cfg, cap_mat, CaseSet::ALL).is_some() {
+        solve_omissions.push(crate::scope::FATIGUE_AREA_STIFFNESS_NOT_CREDITED);
+    }
 
     let scope = SizingScope {
         sizing_load_case: sizing.sizing_load_case,
         design_gross_mass_kg: req.mtow_kg,
         ultimate_load_factor: req.ultimate_load_factor * cfg.additional_safety_factor,
-        gust_envelope: GustEnvelope::not_modelled(),
+        gust_envelope,
         wing_fuel,
         wing_fuel_distribution,
         wing_mounted_omissions,
         root_datum: RootDatum::aircraft_centreline(),
         relief_convergence,
-        solve_omissions: Vec::new(),
+        solve_omissions,
     };
     SizedWingbox { sizing, scope }
 }
@@ -166,12 +184,24 @@ pub(super) fn solve_relieved(
     rib_mat: &MaterialSpec,
     fuel_kg_m: &[f64],
     wing_mounted_point_masses: &[(f64, f64)],
+    torque_sources: &TorqueSources,
     front: f64,
     rear: f64,
+    case_set: CaseSet,
 ) -> (WingboxSizing, ReliefConvergence) {
+    let y = linspace(0.0, wsg.semi_span, cfg.spanwise_stations.max(0) as usize);
+    // The torque sources resolve once per sizing: the section aerodynamics
+    // depend on the geometry and the speeds only, never on the relieved mass.
+    let prepared = if case_set.torque {
+        PreparedTorque::new(torque_sources, wsg, req, &y)
+    } else {
+        PreparedTorque::default()
+    };
     let mut relief = WingInertiaRelief {
         running_mass_kg_m: fuel_kg_m.to_vec(),
         point_masses_kg: wing_mounted_point_masses.to_vec(),
+        torque: prepared.clone(),
+        rib_count_floor: 0,
     };
     let mut result = size_wingbox_with_law(
         wsg,
@@ -183,9 +213,11 @@ pub(super) fn solve_relieved(
         rib_mat,
         SizingLaw::Product,
         &relief,
+        case_set,
     );
     let mut passes = 1usize;
     let mut relative_change = f64::INFINITY;
+    let mut rib_counts = vec![result.num_ribs];
     for _ in 1..RELIEF_PASSES {
         let structure = box_running_mass_kg_m(&result, skin_mat, web_mat, cap_mat, front, rear);
         relief.running_mass_kg_m = fuel_kg_m
@@ -203,9 +235,21 @@ pub(super) fn solve_relieved(
             rib_mat,
             SizingLaw::Product,
             &relief,
+            case_set,
         );
         relative_change =
             (next.total_mass_kg - result.total_mass_kg).abs() / result.total_mass_kg.abs().max(1.0);
+        // The rib count is an integer function of the relieved root moment:
+        // more ribs relieve more, which asks for fewer, and the iteration can
+        // cycle between two counts. The smaller count is then not self-
+        // consistent (it needs the larger one) while the larger is (it still
+        // meets the spacing at its own relief), so the larger becomes the floor.
+        rib_counts.push(next.num_ribs);
+        if let [.., a, b, c] = rib_counts[..] {
+            if c == a && c != b {
+                relief.rib_count_floor = relief.rib_count_floor.max(a.max(b));
+            }
+        }
         let settled = relative_change <= RELIEF_TOLERANCE
             && (!next.strength_margins_pass()
                 || final_strength_is_consistent(
@@ -218,8 +262,10 @@ pub(super) fn solve_relieved(
                     cap_mat,
                     fuel_kg_m,
                     wing_mounted_point_masses,
+                    &prepared,
                     front,
                     rear,
+                    case_set,
                 ));
         result = next;
         passes += 1;
@@ -249,6 +295,10 @@ pub(super) fn solve_relieved(
 /// A fully stressed fixed point must be checked against its final relief,
 /// not only against the preceding iterate's mass. Exit on the conservative
 /// side of the contraction; do not manufacture a wider strength tolerance.
+///
+/// Every demand of the sizing envelope is checked, case by case: the
+/// manoeuvre, gust and torque cases at their own shear, and the fatigue
+/// equivalent moment of the 1 g case.
 #[allow(clippy::too_many_arguments)] // Rechecks every material against the final, explicit carried-mass state.
 fn final_strength_is_consistent(
     wsg: &WingStructureGeometry,
@@ -260,40 +310,26 @@ fn final_strength_is_consistent(
     cap: &MaterialSpec,
     fuel: &[f64],
     point_masses: &[(f64, f64)],
+    prepared: &PreparedTorque,
     front: f64,
     rear: f64,
+    case_set: CaseSet,
 ) -> bool {
     let y = &sizing.y_stations;
     let mut running = box_running_mass_kg_m(sizing, skin, web, cap, front, rear);
     for (mass, fuel_mass) in running.iter_mut().zip(fuel) {
         *mass += fuel_mass;
     }
-    crate::loads::load_cases(req, cfg.additional_safety_factor)
+    let relief = WingInertiaRelief {
+        running_mass_kg_m: running,
+        point_masses_kg: point_masses.to_vec(),
+        torque: prepared.clone(),
+        rib_count_floor: 0,
+    };
+    let cases = envelope::case_loads(wsg, cfg, req, case_set, y, &relief);
+    envelope::demand_pairs(&cases)
         .iter()
-        .all(|case| {
-            let aero =
-                crate::loads::elliptic_distributed_load(y, wsg.semi_span, case.total_force_n);
-            let net = crate::loads::net_distributed_load(
-                &aero,
-                case.load_factor,
-                req.gravity_m_s2,
-                &running,
-            );
-            let (mut shear, mut moment) = crate::loads::cantilever_shear_moment(y, &net);
-            crate::loads::apply_point_mass_relief(
-                y,
-                &mut moment,
-                case.load_factor,
-                req.gravity_m_s2,
-                point_masses,
-            );
-            crate::loads::apply_point_mass_shear_relief(
-                y,
-                &mut shear,
-                case.load_factor,
-                req.gravity_m_s2,
-                point_masses,
-            );
+        .all(|(moment, shear)| {
             sizing.spars.iter().enumerate().all(|(i, spar)| {
                 moment.iter().enumerate().all(|(j, moment)| {
                     let ratio = super::section::stress_utilization(
@@ -527,17 +563,32 @@ mod tests {
     }
 
     #[test]
-    fn every_registered_aircraft_declares_the_gust_envelope_it_was_not_sized_to() {
-        // The one gap that is the same on every aircraft, and the one that can
-        // leave a box lighter than the certification envelope requires.
+    fn every_registered_aircraft_declares_what_its_gust_and_torque_cases_leave_out() {
+        // The quasi-static gust is evaluated, but the dynamic gust analysis and
+        // the torque of section moments, control surfaces and engines are not,
+        // and the second can only leave a box lighter than the certification
+        // envelope requires.
         for preset in ["A340-300", "ATR72-600", "A320-200"] {
             let scoped = size(&probe(preset), &WingFuelRelief::EnclosedBoxVolume);
+            assert!(
+                matches!(scoped.scope.gust_envelope, GustEnvelope::QuasiStatic(_)),
+                "{preset}"
+            );
             let gap = scoped
                 .scope
                 .gust_envelope
                 .not_available()
-                .expect("no aircraft here has a gust case");
-            assert_eq!(gap.direction, OmissionDirection::Lighter, "{preset}");
+                .expect("the dynamic gust analysis is a declared gap");
+            assert_eq!(gap.direction, OmissionDirection::Unknown, "{preset}");
+            assert!(
+                scoped
+                    .scope
+                    .solve_omissions
+                    .iter()
+                    .any(|gap| gap.direction == OmissionDirection::Lighter
+                        && gap.quantity.contains("CS 25.349")),
+                "{preset}"
+            );
             assert!(scoped.scope.has_unconservative_gap(), "{preset}");
         }
     }

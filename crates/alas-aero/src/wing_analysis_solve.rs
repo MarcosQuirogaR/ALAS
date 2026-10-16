@@ -13,7 +13,8 @@ use alas_geom::aircraft::airplane::Airplane;
 use alas_geom::aircraft::wing::Wing;
 use alas_geom::builder::AircraftBuilder;
 
-use crate::operating_point::{AxisFrame, OperatingPoint};
+use crate::operating_point::OperatingPoint;
+use crate::strips::{panel_lift, wing_strips};
 use crate::vlm::{run_with_stability_derivatives, VlmError, VlmResult, VlmSystem};
 
 use super::types::{
@@ -70,7 +71,7 @@ impl WingModel {
         let reference = WingReference {
             area_m2: main.reference_area(),
             span_m: main.reference_span(),
-            chord_m: main.mean_aerodynamic_chord(),
+            chord_m: main.reference_mac(),
             moment_reference_m,
         };
         if !(reference.area_m2.is_finite() && reference.area_m2 > 0.0)
@@ -355,19 +356,6 @@ fn surface_shares(
     shares
 }
 
-/// One panel's lift, N: the wind-axis `-z` component of its geometry-axis
-/// force.
-fn panel_lift(force: [f64; 3], point: &OperatingPoint) -> f64 {
-    let (_, _, wind_z) = point.convert_axes(
-        force[0],
-        force[1],
-        force[2],
-        AxisFrame::Geometry,
-        AxisFrame::Wind,
-    );
-    -wind_z
-}
-
 /// The main wing's spanwise load distribution at one solved point.
 ///
 /// A station is one chordwise strip of the first surface, including the
@@ -383,26 +371,8 @@ fn span_load(
     let semispan = 0.5 * reference.span_m;
     let dynamic_pressure = condition.dynamic_pressure_pa;
     let mut stations = Vec::new();
-    let mut leading_edge: Option<[f64; 3]> = None;
-    let mut strip_lift = 0.0;
-    let mut strip_width = 0.0;
-    let mut strip_y = 0.0;
-    for (panel, force) in result.panels.iter().zip(&result.panel_forces_geometry) {
-        if panel.wing_index != 0 {
-            continue;
-        }
-        if leading_edge.is_none() {
-            leading_edge = Some(midpoint(panel.front_left, panel.front_right));
-            strip_width = (panel.front_right[1] - panel.front_left[1]).abs();
-            strip_y = 0.5 * (panel.front_right[1] + panel.front_left[1]);
-        }
-        strip_lift += panel_lift(*force, point);
-        if !panel.is_trailing_edge {
-            continue;
-        }
-        let trailing_edge = midpoint(panel.back_left, panel.back_right);
-        let chord = leading_edge.map_or(0.0, |edge| distance(edge, trailing_edge));
-        leading_edge = None;
+    for strip in wing_strips(result, point, 0) {
+        let (strip_width, chord, strip_y) = (strip.width_m, strip.chord_m, strip.y_m);
         // A non-finite value in any of these means a diverged or invalid
         // upstream state (`dynamic_pressure_pa` is an explicit NaN sentinel
         // from `operating_point` for an unreachable atmosphere state, or the
@@ -413,10 +383,9 @@ fn span_load(
             .iter()
             .all(|&value| value.is_finite() && value > 0.0);
         if !usable {
-            strip_lift = 0.0;
             continue;
         }
-        let lift_per_span = strip_lift / strip_width;
+        let lift_per_span = strip.lift_n / strip_width;
         let section_cl = lift_per_span / (dynamic_pressure * chord);
         stations.push(SpanStation {
             y_m: strip_y,
@@ -434,27 +403,9 @@ fn span_load(
                 f64::NAN
             },
         });
-        strip_lift = 0.0;
     }
     stations.sort_by(|left, right| left.y_m.total_cmp(&right.y_m));
     stations
-}
-
-/// Midpoint of two mesh corners.
-fn midpoint(left: [f64; 3], right: [f64; 3]) -> [f64; 3] {
-    [
-        0.5 * (left[0] + right[0]),
-        0.5 * (left[1] + right[1]),
-        0.5 * (left[2] + right[2]),
-    ]
-}
-
-/// Euclidean distance between two mesh points, m.
-fn distance(from: [f64; 3], to: [f64; 3]) -> f64 {
-    let dx = to[0] - from[0];
-    let dy = to[1] - from[1];
-    let dz = to[2] - from[2];
-    (dx * dx + dy * dy + dz * dz).sqrt()
 }
 
 /// Static stability of the modelled configuration about its stated moment

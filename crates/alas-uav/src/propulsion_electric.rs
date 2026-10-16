@@ -12,16 +12,22 @@
 //! produced here before an optimizer consumes it, so the optimizer never has
 //! to invent a propulsion number.
 //!
-//! The user-supplied legacy data directory contains 436 APC `PER3` tables.
-//! Each is retained as a bounded Ct/Cp map.  The legacy equations are
-//! represented by the fixed-voltage, zero-loss model; callers can provide
-//! measured pack and ESC resistance through the public model when that
-//! evidence becomes available.
+//! Propeller Ct/Cp tables are read from the user's local data directory (see
+//! [`prop_data`]); ALAS ships none.  Each `PER3` file becomes a bounded map.
+//! Without installed tables every propeller lookup reports
+//! [`ElectricPropulsionError::PropellerDataUnavailable`] with the reason.  The
+//! legacy equations are represented by the fixed-voltage, zero-loss model;
+//! callers can provide measured pack and ESC resistance through the public
+//! model when that evidence becomes available.
 
 mod acc2026;
 mod cpacs35;
 mod fixture;
 mod mission;
+mod per3;
+pub mod prop_data;
+pub mod prop_fetch;
+mod prop_zip;
 mod solver;
 
 pub use acc2026::{
@@ -39,6 +45,7 @@ pub use mission::{
     simulate_catalogue_mission, ElectricMissionPhase, ElectricMissionPhaseResult,
     ElectricMissionPlan, ElectricMissionResult,
 };
+pub use per3::parse_per3;
 pub use solver::{
     native_propulsion_map, solve_catalogue_powertrain, solve_powertrain,
     CataloguePowertrainSelection, ElectricFlightCondition, ElectricMotorModel,
@@ -81,6 +88,14 @@ pub enum ElectricPropulsionError {
         id: String,
         /// Selected battery cell count.
         cells: u16,
+    },
+    /// No propeller performance data are installed on this machine.
+    #[error("propeller performance data for '{id}' are unavailable: {reason}")]
+    PropellerDataUnavailable {
+        /// Requested propeller identifier.
+        id: String,
+        /// Why no table can be used and how to install them.
+        reason: String,
     },
     /// No propeller performance table is reviewed for the selection.
     #[error("no reviewed performance table is available for '{id}'")]

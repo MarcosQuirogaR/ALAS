@@ -157,14 +157,17 @@ pub(super) fn buffet_residuals(
         buffet_onset_cl(mach, sweep, tc, kappa) * q_pa * area / weight_n
     };
     let n = load_factor(sweep_deg, thickness, s_ref);
-    let floor = reference_wing_basis(config).map_or(BUFFET_LOAD_FACTOR, |(sweep, tc, area)| {
-        let reference = load_factor(sweep, tc, area);
-        if reference.is_finite() {
-            reference.min(BUFFET_LOAD_FACTOR)
-        } else {
-            BUFFET_LOAD_FACTOR
-        }
-    });
+    let floor = reference_wing_basis(&outcome.registered_config(config)).map_or(
+        BUFFET_LOAD_FACTOR,
+        |(sweep, tc, area)| {
+            let reference = load_factor(sweep, tc, area);
+            if reference.is_finite() {
+                reference.min(BUFFET_LOAD_FACTOR)
+            } else {
+                BUFFET_LOAD_FACTOR
+            }
+        },
+    );
     vec![
         ConstraintResidual::scaled("buffet_margin", Performance, n, floor, "g", floor - n, role),
         ConstraintResidual::scaled(

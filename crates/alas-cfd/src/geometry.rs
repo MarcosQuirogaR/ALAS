@@ -13,18 +13,59 @@ pub struct AirfoilSnapshot {
     pub coordinates: Vec<(f64, f64)>,
     /// Stable hash of name and coordinate bytes.
     pub coordinate_hash: String,
+    /// Named correction applied to the stored database loop, if any. `None`
+    /// means the coordinates are the verbatim database entry.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub correction: Option<String>,
 }
 
-/// Resolve a database airfoil without substitution or silent repair.
+/// A documented repair to a database section whose stored loop is not a valid
+/// closed contour. The verbatim corpus (`alas-geom` `selig.txt`, digest-checked
+/// against the Selig archive) is never edited; each repair is named here,
+/// applied to the coordinates only, and recorded on the snapshot.
+struct CoordinateCorrection {
+    name: &'static str,
+    reason: &'static str,
+    apply: fn(&mut [(f64, f64)]),
+}
+
+fn close_loop_on_first_point(coordinates: &mut [(f64, f64)]) {
+    if let Some(&first) = coordinates.first() {
+        if let Some(last) = coordinates.last_mut() {
+            *last = first;
+        }
+    }
+}
+
+const COORDINATE_CORRECTIONS: &[CoordinateCorrection] = &[CoordinateCorrection {
+    name: "dsma523a",
+    reason: "trailing-edge closure: the stored final point (1.000000, 0.000498) did not \
+             close onto the first point (1.000000, 0.000308); segment 0 and the closing \
+             segment crossed near the trailing edge. Final point set to the first point.",
+    apply: close_loop_on_first_point,
+}];
+
+/// Resolve a database airfoil without substitution. Only the named, documented
+/// corrections in [`COORDINATE_CORRECTIONS`] are applied, and the snapshot
+/// records which one.
 pub fn resolve_airfoil(name: &str) -> Result<AirfoilSnapshot, String> {
     let Some(airfoil) = AirfoilLibrary::get(name) else {
         return Err(format!("Airfoil '{name}' is not present in the database."));
     };
-    validate_coordinates(&airfoil.coordinates)?;
+    let mut coordinates = airfoil.coordinates;
+    let correction = COORDINATE_CORRECTIONS
+        .iter()
+        .find(|c| c.name == name)
+        .map(|c| {
+            (c.apply)(&mut coordinates);
+            c.reason.to_owned()
+        });
+    validate_coordinates(&coordinates)?;
     Ok(AirfoilSnapshot {
         name: name.to_owned(),
-        coordinate_hash: coordinate_hash(name, &airfoil.coordinates),
-        coordinates: airfoil.coordinates,
+        coordinate_hash: coordinate_hash(name, &coordinates),
+        coordinates,
+        correction,
     })
 }
 

@@ -15,46 +15,14 @@ use alas_geom::wing_structure::WingStructureGeometry;
 
 use crate::loads::{self, LoadCase, WingInertiaRelief};
 
+use super::envelope::{self, CaseSet};
+use super::fatigue::FatigueDemand;
+
 use super::law::{
     cap_taper, gradient_unit, linspace, rib_count_from_max_spacing, station_cap_dimensions,
     trapezoid, SizingLaw,
 };
 use super::types::{CompositeProxyDeclaration, MassBreakdown, SparSizing, WingboxSizing};
-
-/// One load case's net running load and cantilever bending moment, relieved by
-/// the mass the wing carries.
-///
-/// Signed throughout: a push-down case has a negative aerodynamic load and a
-/// negative load factor, so the relief term `-n g m` adds back and reduces the
-/// magnitude, which is the same direction it acts in on the pull-up case.
-fn relieved_case_loads(
-    y: &[f64],
-    semi_span: f64,
-    case: &LoadCase,
-    gravity_m_s2: f64,
-    relief: &WingInertiaRelief,
-) -> (Vec<f64>, Vec<f64>) {
-    let q_aero = loads::elliptic_distributed_load(y, semi_span, case.total_force_n);
-    if relief.is_empty() {
-        let (_, moment) = loads::cantilever_shear_moment(y, &q_aero);
-        return (q_aero, moment);
-    }
-    let q_net = loads::net_distributed_load(
-        &q_aero,
-        case.load_factor,
-        gravity_m_s2,
-        &relief.running_mass_kg_m,
-    );
-    let (_, mut moment) = loads::cantilever_shear_moment(y, &q_net);
-    loads::apply_point_mass_relief(
-        y,
-        &mut moment,
-        case.load_factor,
-        gravity_m_s2,
-        &relief.point_masses_kg,
-    );
-    (q_net, moment)
-}
 
 // The public entry points' signature plus the law and relief they differ in.
 #[allow(clippy::too_many_arguments)]
@@ -68,30 +36,35 @@ pub(super) fn size_wingbox_with_law(
     rib_mat: &MaterialSpec,
     law: SizingLaw,
     relief: &WingInertiaRelief,
+    case_set: CaseSet,
 ) -> WingboxSizing {
     let n = cfg.spanwise_stations.max(0) as usize;
     let y = linspace(0.0, wsg.semi_span, n);
     let eta: Vec<f64> = y.iter().map(|&yi| yi / wsg.semi_span).collect();
     let chord: Vec<f64> = eta.iter().map(|&e| wsg.local_chord(e)).collect();
 
-    let cases = loads::load_cases(req, cfg.additional_safety_factor);
+    // The frozen law keeps the manoeuvre set; the product law sizes to the
+    // full envelope (manoeuvre, gust, torque, fatigue limit).
+    let set = match law {
+        SizingLaw::Product => case_set,
+        SizingLaw::Frozen => CaseSet::MANOEUVRE_ONLY,
+    };
+    let loaded = envelope::case_loads(wsg, cfg, req, set, &y, relief);
     // Sized by whichever case has the larger |root moment| once the inertia
     // the wing carries itself has been taken off it. Comparing relieved
     // moments rather than total forces is what keeps the choice honest: relief
     // is common to every case, so it can reorder them.
     let mut worst_idx = 0usize;
     let mut worst_m0 = -1.0;
-    let mut case_moments: Vec<(Vec<f64>, Vec<f64>)> = Vec::with_capacity(cases.len());
-    for (idx, case) in cases.iter().enumerate() {
-        let (q, m) = relieved_case_loads(&y, wsg.semi_span, case, req.gravity_m_s2, relief);
-        if m[0].abs() > worst_m0 {
-            worst_m0 = m[0].abs();
+    for (idx, case) in loaded.iter().enumerate() {
+        if case.moment[0].abs() > worst_m0 {
+            worst_m0 = case.moment[0].abs();
             worst_idx = idx;
         }
-        case_moments.push((q, m));
     }
-    let worst_case: &LoadCase = &cases[worst_idx];
-    let (q_sizing, m_sizing) = &case_moments[worst_idx];
+    let worst_case: &LoadCase = &loaded[worst_idx].case;
+    let q_sizing = &loaded[worst_idx].q_net;
+    let m_sizing = &loaded[worst_idx].moment;
     let (v_sizing, _) = loads::cantilever_shear_moment(&y, q_sizing);
 
     // Per-spar section height (n_spars x n), with a partial-span spar zeroed
@@ -196,7 +169,8 @@ pub(super) fn size_wingbox_with_law(
             w_cap,
             t_cap,
             a_cap,
-            t_web,
+            t_web: vec![t_web; n],
+            lower_extra_area: vec![0.0; n],
             frac_moment: frac_m.clone(),
             margin_of_safety,
         });
@@ -220,7 +194,9 @@ pub(super) fn size_wingbox_with_law(
     .max(0.5);
     let num_ribs = match cfg.num_ribs_override {
         Some(value) => value,
-        None => rib_count_from_max_spacing(wsg.semi_span, l_rib).max(10),
+        None => rib_count_from_max_spacing(wsg.semi_span, l_rib)
+            .max(10)
+            .max(relief.rib_count_floor),
     };
 
     // Mass breakdown (semi-wing).
@@ -232,7 +208,7 @@ pub(super) fn size_wingbox_with_law(
             .map(|j| 2.0 * s.a_cap[j] * cap_mat.rho_kg_m3 * dy[j])
             .sum();
         let webs: f64 = (0..n)
-            .map(|j| s.t_web * s.h[j] * web_mat.rho_kg_m3 * dy[j])
+            .map(|j| s.t_web[j] * s.h[j] * web_mat.rho_kg_m3 * dy[j])
             .sum();
         m_caps += caps;
         m_webs += webs;
@@ -318,45 +294,20 @@ pub(super) fn size_wingbox_with_law(
         composite_declaration,
     };
     if matches!(law, SizingLaw::Product) {
-        let envelope: Vec<_> = (0..n)
-            .map(|station| {
-                case_moments
-                    .iter()
-                    .map(|(_, moment)| moment[station].abs())
-                    .fold(0.0_f64, f64::max)
-            })
-            .collect();
-        let case_shears: Vec<_> = case_moments
-            .iter()
-            .zip(&cases)
-            .map(|((q, _), case)| {
-                let mut shear = loads::cantilever_shear_moment(&result.y_stations, q).0;
-                loads::apply_point_mass_shear_relief(
-                    &result.y_stations,
-                    &mut shear,
-                    case.load_factor,
-                    req.gravity_m_s2,
-                    &relief.point_masses_kg,
-                );
-                shear
-            })
-            .collect();
-        let shear_envelope: Vec<_> = (0..n)
-            .map(|station| {
-                case_shears
-                    .iter()
-                    .map(|shear| shear[station].abs())
-                    .fold(0.0_f64, f64::max)
-            })
-            .collect();
+        let demand = envelope::station_envelope(&loaded);
+        let fatigue = envelope::fatigue_limit_pa(cfg, cap_mat, set).map(|limit_pa| FatigueDemand {
+            moment_1g_nm: &demand.level_moment_nm,
+            limit_pa,
+        });
         super::product_strength::size(
             &mut result,
-            &envelope,
-            &shear_envelope,
+            &demand.moment_nm,
+            &demand.shear_n,
             cfg,
             skin_mat,
             web_mat,
             cap_mat,
+            fatigue.as_ref(),
         );
     }
     result

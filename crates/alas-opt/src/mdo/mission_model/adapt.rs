@@ -6,11 +6,10 @@
 //! flown-altitude recovery when a level cannot be held or a rating-limited
 //! ladder overruns the route.
 
-use std::sync::{Arc, Mutex};
-
 use alas_config::mission::CruiseAltitudePolicy;
 use alas_mass::fuel_plan::FuelModelError;
 
+use super::climb_revision::{revise_from_hint, Hinted};
 use super::integrate::{FlownLeg, FlyError};
 use super::profile::{LegKind, ProfileGeometry};
 use super::SegmentMissionModel;
@@ -25,13 +24,13 @@ const MINIMUM_CLIMB_RATE_M_S: f64 = 0.5;
 /// Coarse bracket scanned before the bisection, largest scale first. The
 /// halving factor is the native guidance module's own; six steps reach
 /// `2^-6`, below the floor scale of every shipped schedule.
-const CLIMB_RATE_BRACKET_FACTOR: f64 = 0.5;
-const CLIMB_RATE_BRACKET_STEPS: usize = 6;
+pub(super) const CLIMB_RATE_BRACKET_FACTOR: f64 = 0.5;
+pub(super) const CLIMB_RATE_BRACKET_STEPS: usize = 6;
 
 /// Resolution of the commanded climb-rate scale, an order finer than the
 /// rate schedule's own two significant figures, so the flown mission does
 /// not depend on where the bisection stopped.
-const CLIMB_RATE_RESOLUTION: f64 = 1.0e-3;
+pub(super) const CLIMB_RATE_RESOLUTION: f64 = 1.0e-3;
 
 /// Grid of the flown-altitude recovery, m. Searching an integer grid makes
 /// the recovered level the *highest feasible grid level*, which a warm start
@@ -39,34 +38,6 @@ const CLIMB_RATE_RESOLUTION: f64 = 1.0e-3;
 /// level, both closing on it exactly, so the answer does not depend on call
 /// history.
 const ALTITUDE_GRID_M: f64 = 1.0;
-
-/// Last recovered flown altitude per leg (grid index), shared by clones.
-#[derive(Debug, Clone, Default)]
-pub(crate) struct AdaptationMemory(Arc<Mutex<[Option<i64>; 2]>>);
-
-impl PartialEq for AdaptationMemory {
-    fn eq(&self, _other: &Self) -> bool {
-        // A warm start changes cost, never the answer.
-        true
-    }
-}
-
-impl AdaptationMemory {
-    fn slot(leg: LegKind) -> usize {
-        match leg {
-            LegKind::Trip => 0,
-            LegKind::Diversion => 1,
-        }
-    }
-
-    fn get(&self, leg: LegKind) -> Option<i64> {
-        self.0.lock().unwrap_or_else(|p| p.into_inner())[Self::slot(leg)]
-    }
-
-    fn set(&self, leg: LegKind, index: i64) {
-        self.0.lock().unwrap_or_else(|p| p.into_inner())[Self::slot(leg)] = Some(index);
-    }
-}
 
 /// A flown leg and the inputs that reproduce it.
 pub(super) struct Adapted {
@@ -188,6 +159,25 @@ impl SegmentMissionModel {
                 Err(error) => Err(into_model_error(error, range_m)),
             }
         };
+        let cannot_climb = || {
+            FuelModelError::NotConverged(format!(
+                "{deficit}; and at the gentlest commanded climb the schedule admits \
+                 ({MINIMUM_CLIMB_RATE_M_S} m/s on climb rung {rung}) it still cannot climb"
+            ))
+        };
+        self.check_cancelled()?;
+        match self
+            .memory
+            .rung_scale(leg, rung)
+            .and_then(|hint| revise_from_hint(hint, floor, &clears))
+        {
+            Some(Hinted::Scale(scale)) => {
+                self.memory.set_rung_scale(leg, rung, scale);
+                return Ok(scale);
+            }
+            Some(Hinted::CannotClimb) => return Err(cannot_climb()),
+            None => {}
+        }
         let mut bracket = None;
         let mut failed = 1.0;
         let mut scale = 1.0;
@@ -207,10 +197,7 @@ impl SegmentMissionModel {
             }
         }
         let Some((mut low, mut high)) = bracket else {
-            return Err(FuelModelError::NotConverged(format!(
-                "{deficit}; and at the gentlest commanded climb the schedule admits \
-                 ({MINIMUM_CLIMB_RATE_M_S} m/s on climb rung {rung}) it still cannot climb"
-            )));
+            return Err(cannot_climb());
         };
         while high - low > CLIMB_RATE_RESOLUTION {
             self.check_cancelled()?;
@@ -221,6 +208,7 @@ impl SegmentMissionModel {
                 high = middle;
             }
         }
+        self.memory.set_rung_scale(leg, rung, low);
         Ok(low)
     }
 
@@ -230,7 +218,7 @@ impl SegmentMissionModel {
     /// Unfixed, a level the aircraft cannot hold or a rating-limited ladder
     /// that overruns the route lowers the level on a 1 m grid. Every other
     /// failure, and any failure of a fixed plan, returns.
-    pub(super) fn fly_at_scales(
+    pub(super) fn fly_from_lift_off(
         &self,
         leg: LegKind,
         mass_kg: f64,
@@ -239,7 +227,7 @@ impl SegmentMissionModel {
         fixed: Option<Fixed<'_>>,
         plan_steps: bool,
     ) -> Result<(FlownLeg, f64), FlyError> {
-        let profile = climb_rate_revision(&self.profile, scales);
+        let mut profile = climb_rate_revision(&self.profile, scales);
         let geometry = ProfileGeometry {
             profile: &profile,
             ..self.geometry()
@@ -255,6 +243,17 @@ impl SegmentMissionModel {
                     route_fit_m
                 }
             }
+        };
+        // The first level of a route ladder is held to the same flyability rule.
+        let initial_fraction = optimum
+            .then(|| self.limited_initial_fraction(&geometry, leg, mass_kg, range_m, cruise_m))
+            .flatten();
+        if let Some(fraction) = initial_fraction {
+            profile.initial_climb_altitude_fraction = fraction;
+        }
+        let geometry = ProfileGeometry {
+            profile: &profile,
+            ..self.geometry()
         };
         let steps_cap_m = (optimum && leg == LegKind::Trip && (plan_steps || fixed.is_some()))
             .then(|| {
@@ -458,7 +457,7 @@ pub(super) fn into_model_error(error: FlyError, range_m: f64) -> FuelModelError 
 /// that does not shrink with the cruise level, so slowing it only makes
 /// short sectors unflyable. Speeds, altitudes, distance fractions and every
 /// descent rate stay exactly as configured.
-fn climb_rate_revision(
+pub(super) fn climb_rate_revision(
     profile: &alas_config::MissionProfileConfig,
     scales: [f64; 3],
 ) -> alas_config::MissionProfileConfig {

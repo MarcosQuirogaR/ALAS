@@ -17,18 +17,20 @@ pub fn figure_propulsion_bpr_sensitivity(config: &AlasConfig, theme: Option<&str
     if super::super::is_turboprop(config) {
         return super::super::technology::turboprop_rating_scene(config, theme);
     }
+    let eng = match super::super::turbofan_or_status(config, theme, (700.0, 420.0)) {
+        Ok(eng) => eng,
+        Err(scene) => return scene,
+    };
     let pal = get_palette(theme);
     let mut scene = Scene::new(700.0, 420.0, Some(Color::from_hex(pal.bg)));
     scene.title = Some(format!(
         "Bypass-Ratio Sensitivity (OPR={:.0}, TIT={:.0} K)",
-        turbofan_spec(config).overall_pressure_ratio,
-        turbofan_spec(config).turbine_inlet_temp_k
+        eng.overall_pressure_ratio, eng.turbine_inlet_temp_k
     ));
     let title = scene.title.clone().unwrap_or_default();
     draw_title(&mut scene, &title, pal);
     scene.suppress_derived_title();
 
-    let eng = turbofan_spec(config);
     let cyc_cfg = &config.propulsion_cycle;
     let req = &config.requirements;
 
@@ -44,7 +46,7 @@ pub fn figure_propulsion_bpr_sensitivity(config: &AlasConfig, theme: Option<&str
         req.cruise_altitude_m,
         cyc_cfg,
     );
-    let design_out = compute_turbofan_cycle(&design_point(config), cyc_cfg);
+    let design_out = compute_turbofan_cycle(&design_point(config, eng), cyc_cfg);
 
     let mut sfn_min = f64::INFINITY;
     let mut sfn_max = f64::NEG_INFINITY;

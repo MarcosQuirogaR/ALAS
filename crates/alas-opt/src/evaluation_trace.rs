@@ -251,7 +251,7 @@ impl crate::OptimizationResult {
             history
                 .design_vectors
                 .iter()
-                .position(|candidate| candidate == design)
+                .position(|candidate| candidate.as_ref() == Some(design))
         });
         let value_at = |values: &[f64]| row.and_then(|row| values.get(row).copied());
         diagnostics.evaluation_trace.push(

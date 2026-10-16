@@ -40,7 +40,7 @@
 // assertion failing.
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use alas_config::design_variables::DesignVector;
 use alas_config::AlasConfig;
@@ -87,9 +87,9 @@ struct FixtureCase {
     static_margin: f64,
     x_neutral_point: f64,
     physical_cg: [f64; 3],
-    geometry_summary: HashMap<String, f64>,
-    component_masses: HashMap<String, f64>,
-    mass_coordinates: HashMap<String, [f64; 3]>,
+    geometry_summary: BTreeMap<String, f64>,
+    component_masses: BTreeMap<String, f64>,
+    mass_coordinates: BTreeMap<String, [f64; 3]>,
     cg_envelope_ok: Option<bool>,
     trimmed_design_point: Option<FixtureTrimPoint>,
 }
@@ -105,6 +105,11 @@ fn full_analysis_matches_reference_fixtures() {
         // (Raymer/Torenbeek steering guidance), so the reference run pins
         // the reference value explicitly.
         config.mass_model.pct_load_nlg_min = 0.02;
+        // The frozen fixtures use the Python drag model: viscous margin 1.10
+        // and no lift-dependent viscous term. The product defaults moved to
+        // the calibrated pair (kappa 0.25 with the fitted margin).
+        config.drag_model.viscous_margin = 1.10;
+        config.drag_model.lift_dependent_viscous_fraction = 0.0;
         if name == "narrowbody" {
             config.requirements.cruise_mach = 0.78;
             config.requirements.cruise_altitude_m = 10668.0;

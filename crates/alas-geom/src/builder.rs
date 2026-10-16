@@ -42,15 +42,34 @@ mod empennage;
 mod error;
 mod fin_root;
 mod hump;
+mod loft_build;
+#[cfg(test)]
+mod loft_tests;
 mod mesh;
+mod nacelle;
+mod profile_sections;
+mod reference_wing;
+#[cfg(test)]
+mod reference_wing_tests;
+mod report;
+mod smooth_profiles;
 mod spacing;
 mod tail_attachment;
+mod tail_planform;
+#[cfg(test)]
+mod tail_planform_tests;
 #[cfg(test)]
 mod tests;
+mod wingtip;
 
 use crate::aircraft::spacing::linspace;
 pub use error::BuildError;
+pub use loft_build::POLYLINE_TOLERANCE_M;
+pub use nacelle::{centre_pod_nacelle_loft, engine_nacelle_loft};
+pub use report::{BuildReport, BuildWarning, LoftBuildInfo};
 use spacing::{n_subdivisions_usize, sinspace};
+
+pub use smooth_profiles::tip_cap_scale;
 
 use alas_config::{DesignVector, GeometryConfig, TransportPlanform, WingHeights, WingShape};
 
@@ -78,9 +97,20 @@ pub struct AircraftBuilder {
     /// The geometry scaffold every build reads from.
     pub geometry: GeometryConfig,
     geometry_contract: GeometryContract,
+    /// Explicit override of the nacelle model (tests, tools); `None` follows
+    /// `EngineConfig::nacelle_model`.
+    nacelle_v2: Option<bool>,
 }
 
 impl AircraftBuilder {
+    /// Build nacelles with catalogue `nacelle_shape_v2` data (and the DC-10
+    /// style centre pod) from the G2 revolve; everything else is unchanged.
+    #[must_use]
+    pub fn with_nacelle_v2(mut self, on: bool) -> Self {
+        self.nacelle_v2 = Some(on && self.geometry_contract == GeometryContract::Product);
+        self
+    }
+
     /// A new builder over `geometry`, defaulting to [`GeometryConfig::default`]
     /// when `None`: `AircraftBuilder.__init__`.
     ///
@@ -92,6 +122,7 @@ impl AircraftBuilder {
         Self {
             geometry,
             geometry_contract: GeometryContract::Product,
+            nacelle_v2: None,
         }
     }
 
@@ -113,6 +144,13 @@ impl AircraftBuilder {
         geometry.wing.outboard_le_sweep_deg = None;
         // The frozen builder lofts one wing shape, the configured heights.
         geometry.wing.flight_tip_rise_semispan_fraction = None;
+        // And it has no spanwise profile stations or swept-back tip (geometry round 2).
+        geometry.wing.flight_root_rise_m = None;
+        geometry.wing.nacelles_hold_ground_height = false;
+        geometry.wing.dihedral_stations.clear();
+        geometry.wing.thickness_stations.clear();
+        geometry.wing.tip_rake_start_span_fraction = None;
+        geometry.wing.tip_rake_tip_chord_m = None;
         // And the tailcone loft: it has no belly upsweep.
         geometry.fuselage.belly_upsweep_length_m = None;
         // And the single-ellipsoid nose: it has no windshield or keel profile.
@@ -122,6 +160,15 @@ impl AircraftBuilder {
         geometry.fuselage.nose_keel_exponent = None;
         geometry.fuselage.nose_plan_exponent = None;
         geometry.fuselage.nose_section_exponent = None;
+        geometry.fuselage.nose_length_m = None;
+        geometry.fuselage.tail_end_width_m = None;
+        geometry.fuselage.tail_end_height_m = None;
+        geometry.fuselage.tail_end_z_m = None;
+        geometry.fuselage.aft_belly_exponent = None;
+        geometry.fuselage.aft_plan_length_m = None;
+        geometry.fuselage.aft_plan_exponent = None;
+        geometry.fuselage.aft_crown_length_m = None;
+        geometry.fuselage.aft_crown_exponent = None;
         // And the constant crown: it has no upper-deck hump or upper deck.
         geometry.fuselage.hump_height_m = None;
         geometry.fuselage.hump_start_x_m = None;
@@ -132,11 +179,14 @@ impl AircraftBuilder {
         geometry.fuselage.upper_deck_floor_height_m = None;
         geometry.fuselage.upper_deck_start_x_m = None;
         geometry.fuselage.upper_deck_end_x_m = None;
+        // And the lofted outer surface: golden fixtures keep the linear stations.
+        geometry.fuselage.loft = None;
         // And its spanwise mesh; see `mesh`.
         mesh::restore_reference_ratios(&mut geometry);
         Self {
             geometry,
             geometry_contract: GeometryContract::ReferenceCompatibility,
+            nacelle_v2: None,
         }
     }
 
@@ -160,6 +210,24 @@ impl AircraftBuilder {
         self.build_shape(dv, include_engines, WingShape::Flight)
     }
 
+    /// [`Self::build_shape`] with the builder's account of the build: lofted
+    /// fuselage figures, substituted or ignored inputs (a rejected V2 nacelle
+    /// falls back to the legacy polyline and says so here).
+    ///
+    /// # Errors
+    ///
+    /// See [`BuildError`].
+    pub fn build_reported(
+        &self,
+        dv: Option<&DesignVector>,
+        include_engines: bool,
+        shape: WingShape,
+    ) -> Result<(Airplane, BuildReport), BuildError> {
+        let mut report = BuildReport::default();
+        let airplane = self.build_with_report(dv, include_engines, shape, &mut report)?;
+        Ok((airplane, report))
+    }
+
     /// [`Self::build`] with the main wing and its nacelles in `shape`: the
     /// static ground shape is the one ground clearance and nacelle strike
     /// are measured on.
@@ -172,6 +240,16 @@ impl AircraftBuilder {
         dv: Option<&DesignVector>,
         include_engines: bool,
         shape: WingShape,
+    ) -> Result<Airplane, BuildError> {
+        self.build_with_report(dv, include_engines, shape, &mut BuildReport::default())
+    }
+
+    fn build_with_report(
+        &self,
+        dv: Option<&DesignVector>,
+        include_engines: bool,
+        shape: WingShape,
+        report: &mut BuildReport,
     ) -> Result<Airplane, BuildError> {
         let default_dv = DesignVector::default();
         let dv = dv.unwrap_or(&default_dv);
@@ -186,19 +264,17 @@ impl AircraftBuilder {
 
         let main_wing =
             self.build_main_wing(dv, &planform, &heights, &root_section, &tip_airfoil)?;
-        let fuselage = self.build_fuselage(dv)?;
+        let fuselage = self.build_fuselage_reported(dv, report)?;
         let seat = self.fin_seat(dv, &fuselage)?;
-        let wings = vec![
-            main_wing,
-            self.build_hstab(dv, &tail_airfoil, true)?,
-            self.build_vstab(dv, &tail_airfoil, true, &seat)?,
-        ];
+        let mut wings = self.with_tail_surfaces(dv, main_wing, &tail_airfoil, &seat)?;
+        wings.extend(self.build_wingtip_device(&wings[0], &tip_airfoil)?);
 
         let mut fuselages = vec![fuselage];
         if include_engines {
-            fuselages.extend(self.build_engines(dv, shape)?);
+            fuselages.extend(self.build_engines_reported(dv, shape, report)?);
         }
 
+        self.attach_reference_wing(&mut wings, &planform, dv, report);
         let main_wing = &wings[0];
         // Projected (XY) MAC, matching `s_ref`/`b_ref` below; the
         // reference-compatibility contract keeps the unfolded chord
@@ -208,7 +284,7 @@ impl AircraftBuilder {
             GeometryContract::Product => main_wing.mac_station().chord_m,
             GeometryContract::ReferenceCompatibility => main_wing.mean_aerodynamic_chord(),
         };
-        // Initial CG seed (~quarter-MAC); refined later by the autobalance step.
+        // Initial CG seed (~quarter-MAC of the drawn wing), refined later.
         let x_wing_global = g.wing.root_datum_x_m + dv.wing_x_shift_m;
         let x_cg_seed = x_wing_global + planform.kink.leading_edge_x_m + 0.25 * mac;
 
@@ -224,7 +300,7 @@ impl AircraftBuilder {
             // `mean_aerodynamic_chord()` as unfolded compatibility
             // quantities for frozen translation fixtures.
             s_ref: main_wing.reference_area(),
-            c_ref: mac,
+            c_ref: main_wing.reference.map_or(mac, |reference| reference.mac_m),
             b_ref: main_wing.reference_span(),
             wings,
             fuselages,
@@ -269,8 +345,11 @@ impl AircraftBuilder {
             .filter(|_| g.side_of_body_chord_ratio.is_some())
         {
             let root_to_kink_fraction = side_of_body.y_m / planform.kink.y_m;
-            let side_of_body_z_m =
-                heights.root_z_m + root_to_kink_fraction * (heights.break_z_m - heights.root_z_m);
+            let side_of_body_z_m = if heights.interior.is_empty() {
+                heights.root_z_m + root_to_kink_fraction * (heights.break_z_m - heights.root_z_m)
+            } else {
+                heights.at(planform, side_of_body.y_m)
+            };
             let side_of_body_twist_deg =
                 g.root_twist_deg + root_to_kink_fraction * (g.break_twist_deg - g.root_twist_deg);
             xsecs.push(WingXSec::new(
@@ -294,6 +373,16 @@ impl AircraftBuilder {
             g.break_twist_deg,
             root_section.clone(),
         ));
+        if let Some(rake) = planform.tip_rake {
+            xsecs.push(self.tip_rake_section(
+                dv,
+                planform,
+                heights,
+                &rake,
+                root_section,
+                tip_airfoil,
+            )?);
+        }
         xsecs.push(WingXSec::new(
             [
                 planform.tip.leading_edge_x_m,
@@ -304,13 +393,21 @@ impl AircraftBuilder {
             dv.tip_twist_deg,
             tip_airfoil.clone(),
         ));
+        self.apply_wing_profiles(planform, heights, root_section, tip_airfoil, &mut xsecs)?;
         self.append_custom_wing_sections(planform, heights, &mut xsecs)?;
 
         let wing = Wing::new("Main Wing", xsecs, true);
-        let wing = mesh::for_contract(
+        let mut wing = mesh::for_contract(
             self.geometry_contract,
             &wing.translate([x_wing_global, 0.0, 0.0]),
             g.n_subdivisions,
+        )?;
+        self.smooth_wing_profiles(
+            dv,
+            planform,
+            heights,
+            (root_section, tip_airfoil),
+            &mut wing,
         )?;
         Ok(wing)
     }
@@ -377,7 +474,7 @@ impl AircraftBuilder {
         }
 
         stations.push(make_xsec(
-            g.cabin_start_x_m,
+            g.nose_loft_length_m(),
             g.cabin_z_m,
             radius * 2.0,
             radius * 2.0 * local_height_scale,
@@ -394,7 +491,7 @@ impl AircraftBuilder {
         // Exclude the first point: it is the cabin end, added above.
         let x_tail = linspace(0.0, 1.0, 10);
         for &xi in &x_tail[1..] {
-            let station = g.aft_body_station(xi, fus_len);
+            let station = g.aft_body_station(g.aft_station_fraction(xi), fus_len);
             stations.push(make_xsec(
                 station.x_m,
                 station.z_m,
@@ -407,64 +504,5 @@ impl AircraftBuilder {
         self.append_hump_fuselage_sections(fus_len, &mut stations)?;
 
         Ok(Fuselage::new("Fuselage", stations))
-    }
-
-    /// The podded engines, one small [`Fuselage`] per spanwise position:
-    /// `_build_engines`. See the module doc for the two placement branches.
-    fn build_engines(
-        &self,
-        dv: &DesignVector,
-        shape: WingShape,
-    ) -> Result<Vec<Fuselage>, BuildError> {
-        let g = &self.geometry.engine;
-        let x_wing_global = self.geometry.wing.root_datum_x_m + dv.wing_x_shift_m;
-        let wing = &self.geometry.wing;
-        let planform = wing.transport_planform(dv)?;
-        let heights = wing.heights(shape, &planform)?;
-
-        let mut nacelles = Vec::with_capacity(g.spanwise_positions_m.len());
-        for &y_pos in &g.spanwise_positions_m {
-            let (name, x_inlet, z_nacelle) = if y_pos == 0.0 {
-                // Centerline tail-mounted engine (e.g. a trijet's tail
-                // engine), placed on top of the tailcone at the base of the
-                // vstab.
-                let x_inlet = dv.fuselage_length_m - g.nacelle_length_m();
-                let z_nacelle = self.geometry.fuselage.tail_z_m + g.radius_scale_m + 0.2;
-                ("Nacelle Center".to_owned(), x_inlet, z_nacelle)
-            } else {
-                let name = if y_pos > 0.0 {
-                    "Nacelle R"
-                } else {
-                    "Nacelle L"
-                }
-                .to_owned();
-                let leading_edge_offset = match self.geometry_contract {
-                    GeometryContract::Product => planform.leading_edge_x_at(y_pos.abs())?,
-                    GeometryContract::ReferenceCompatibility => {
-                        y_pos.abs() * dv.sweep_deg.to_radians().tan()
-                    }
-                };
-                let x_inlet = x_wing_global + leading_edge_offset - g.inlet_x_offset_m;
-
-                // The local leading-edge height of the wing shape being
-                // built, so the nacelle hangs under the wing its pylon is
-                // on; then the local Z offset relative to that leading edge.
-                let z_wing = heights.at(&planform, y_pos);
-                (name, x_inlet, z_wing + g.z_m)
-            };
-
-            let mut xsecs = Vec::with_capacity(g.nacelle_profile.len());
-            for &(x, r) in &g.nacelle_profile {
-                xsecs.push(FuselageXSec::new(
-                    [x, 0.0, 0.0],
-                    Some(g.radius_scale_m * r),
-                    None,
-                    None,
-                    DEFAULT_SHAPE,
-                )?);
-            }
-            nacelles.push(Fuselage::new(name, xsecs).translate([x_inlet, y_pos, z_nacelle]));
-        }
-        Ok(nacelles)
     }
 }

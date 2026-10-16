@@ -355,8 +355,10 @@ impl Atmosphere {
     fn density_altitude_approximate(&self) -> f64 {
         // ISA sea-level reference and tropospheric lapse rate, local to this
         // formula rather than read from the layer table.
-        const TEMPERATURE_SEA_LEVEL_K: f64 = 288.15;
-        const PRESSURE_SEA_LEVEL_PA: f64 = 101_325.0;
+        use crate::airspeed::{
+            SEA_LEVEL_PRESSURE_PA as PRESSURE_SEA_LEVEL_PA,
+            SEA_LEVEL_TEMPERATURE_K as TEMPERATURE_SEA_LEVEL_K,
+        };
         const LAPSE_RATE_K_PER_M: f64 = 0.0065;
 
         let temperature_ratio = self.temperature() / TEMPERATURE_SEA_LEVEL_K;

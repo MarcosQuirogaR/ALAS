@@ -1,6 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
+//! Preset selection and reference changes load a consistent application state.
+
+// A test asserts on values it constructed or loaded from a fixture it
+// controls, so a failed unwrap there is the assertion failing.
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 use alas_config::{AlasConfig, DesignMode};
 use alas_gui::state::AppState;
 use serde_json::{json, Value};

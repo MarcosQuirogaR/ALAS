@@ -22,7 +22,7 @@ use alas_config::{FuelPolicyConfig, FuelScheme};
 use crate::fuel_plan::{FuelBurnModel, FuelModelError, FuelPlan, FuelQuantity};
 #[path = "dispatch_plan_cache.rs"]
 mod plan_cache;
-use plan_cache::PlanEvaluator;
+use plan_cache::{Inferred, PlanEvaluator};
 
 /// The first takeoff-mass guess is a multiple of the zero-fuel mass, not a
 /// physical constant: a Picard iteration on a well-posed fuel closure
@@ -61,7 +61,11 @@ pub enum DispatchStatus {
     /// The caller cancelled the burn model; this is not a physical rejection.
     Cancelled,
     /// The takeoff-mass update fell below `tolerance_kg` without hitting
-    /// MTOW or the tank.
+    /// MTOW or the tank. When the priced fuel jumps with takeoff mass (a
+    /// trip plan that changes structure at some mass) no fixed point exists
+    /// and the iteration cycles; the solution is then the lowest takeoff mass,
+    /// to `tolerance_kg`, whose loaded fuel covers the priced plan, and
+    /// [`DispatchSolution::settled_at_discontinuity`] is set.
     Converged,
     /// The fuel the mission needs, at MTOW, still exceeds MTOW: the
     /// airframe cannot carry both the payload it was given and the fuel the
@@ -126,6 +130,15 @@ pub struct DispatchSolution {
     pub landing_mass_exceeds_mlw: bool,
     /// Whether `zero_fuel_mass_kg` exceeds the declared MZFW.
     pub zero_fuel_mass_exceeds_mzfw: bool,
+    /// Whether the takeoff mass was settled on a jump of the priced fuel
+    /// rather than on a fixed point: the loaded fuel then covers the plan by
+    /// at most the size of the jump instead of by less than the tolerance.
+    pub settled_at_discontinuity: bool,
+    /// Whether the iteration stopped because it was clipped twice running to
+    /// the same edge of the masses the burn model can price: the mission
+    /// needs more mass than the model can fly, and the status is then
+    /// [`DispatchStatus::NotConverged`] (or a limit status) at that edge.
+    pub stalled_at_evaluable_edge: bool,
 }
 
 /// Close the takeoff-mass fixed point for one mission, starting the Picard
@@ -210,9 +223,14 @@ pub fn solve_dispatch_with_initial_guess(
 
 #[path = "dispatch_bracket.rs"]
 mod bracket;
+#[path = "dispatch_discontinuity.rs"]
+mod discontinuity;
+#[path = "dispatch_inputs.rs"]
+mod inputs;
 #[cfg(test)]
 use bracket::is_mass_bracketable;
 use bracket::{evaluate_bracketed, DispatchSolveError};
+use inputs::validate_inputs;
 
 // The bracketed solve takes the same separately reported dispatch inputs as
 // its public caller, plus the bracket itself.
@@ -241,12 +259,30 @@ fn try_solve(
     let mut iterates = Vec::with_capacity(max_iterations);
     let mut previous_change_kg: Option<f64> = None;
     let mut converged = false;
+    // (takeoff mass, required takeoff fuel) of every priced iterate.
+    let mut samples: Vec<(f64, f64)> = Vec::with_capacity(max_iterations + 2);
+    // The mass the previous iteration was clipped to, when it was.
+    let mut previous_clip_kg: Option<f64> = None;
+    let mut stalled_at_evaluable_edge = false;
 
     for _ in 0..max_iterations {
+        let candidate_kg = takeoff_mass_kg;
         let (evaluated_mass_kg, plan) =
             evaluate_bracketed(&mut plans, zero_fuel_mass_kg, takeoff_mass_kg)?;
+        // Clipped twice in a row to the same edge of the evaluable region
+        // (to its bisection resolution): the mission needs more mass than
+        // the model can fly. The next candidate is the edge plus the same
+        // change, which is clipped to the same edge again, so the remaining
+        // iterations only re-price the edge until `max_iterations` runs out.
+        let clipped = evaluated_mass_kg < candidate_kg;
+        let stalled = clipped
+            && previous_clip_kg.is_some_and(|previous_kg| {
+                (previous_kg - evaluated_mass_kg).abs() <= EVALUATION_BRACKET_RESOLUTION_KG
+            });
+        previous_clip_kg = clipped.then_some(evaluated_mass_kg);
         takeoff_mass_kg = evaluated_mass_kg;
         let required_takeoff_fuel_kg = plan.takeoff_fuel_kg();
+        samples.push((takeoff_mass_kg, required_takeoff_fuel_kg));
         let target_kg = (zero_fuel_mass_kg + required_takeoff_fuel_kg).min(limits.mtow_kg);
         let raw_change_kg = target_kg - takeoff_mass_kg;
 
@@ -274,6 +310,10 @@ fn try_solve(
             converged = true;
             break;
         }
+        if stalled {
+            stalled_at_evaluable_edge = true;
+            break;
+        }
     }
 
     // The last recorded plan was evaluated at the mass this iteration
@@ -286,11 +326,30 @@ fn try_solve(
     // was evaluated and classify convergence from that, not from the flag.
     let (resolved_after_loop_kg, plan_after_loop) =
         evaluate_bracketed(&mut plans, zero_fuel_mass_kg, takeoff_mass_kg)?;
+    let plan_after_loop_fuel_kg = plan_after_loop.takeoff_fuel_kg();
     let mut resolved_takeoff_mass_kg = resolved_after_loop_kg;
     let mut plan = plan_after_loop;
     let required_unclamped_kg = zero_fuel_mass_kg + plan.takeoff_fuel_kg();
     let closure_residual_kg = (resolved_takeoff_mass_kg - required_unclamped_kg).abs();
-    let converged = converged && closure_residual_kg <= tolerance_kg;
+    let mut converged = converged && closure_residual_kg <= tolerance_kg;
+    samples.push((resolved_after_loop_kg, plan_after_loop_fuel_kg));
+    let mut settled_at_discontinuity = false;
+    // An iteration that cycles across a jump of the priced fuel has no fixed
+    // point to find; settle on the covered side of the jump instead.
+    if !converged && required_unclamped_kg <= limits.mtow_kg + tolerance_kg {
+        if let Some(settled) = discontinuity::settle_on_sign_change(
+            &mut plans,
+            zero_fuel_mass_kg,
+            &samples,
+            tolerance_kg,
+        )? {
+            resolved_takeoff_mass_kg = settled.takeoff_mass_kg;
+            plan = settled.plan;
+            converged = true;
+            settled_at_discontinuity = true;
+        }
+    }
+    let required_unclamped_kg = zero_fuel_mass_kg + plan.takeoff_fuel_kg();
 
     let status = if required_unclamped_kg > limits.mtow_kg + tolerance_kg {
         // `DispatchSolution::takeoff_mass_kg`'s own contract is "clamped to
@@ -355,58 +414,11 @@ fn try_solve(
         zero_fuel_mass_exceeds_mzfw: limits
             .mzfw_kg
             .is_some_and(|mzfw_kg| zero_fuel_mass_kg > mzfw_kg),
+        settled_at_discontinuity,
+        stalled_at_evaluable_edge,
         plan,
         iterates,
     })
-}
-
-fn validate_inputs(
-    zero_fuel_mass_kg: f64,
-    initial_guess_kg: f64,
-    range_m: f64,
-    limits: &DispatchLimits,
-    max_iterations: usize,
-    tolerance_kg: f64,
-) -> Result<(), String> {
-    if !zero_fuel_mass_kg.is_finite() || zero_fuel_mass_kg <= 0.0 {
-        return Err(format!(
-            "zero-fuel mass {zero_fuel_mass_kg} kg must be finite and positive"
-        ));
-    }
-    if !initial_guess_kg.is_finite() || initial_guess_kg < zero_fuel_mass_kg {
-        return Err(format!(
-            "initial guess {initial_guess_kg} kg must be finite and at least the zero-fuel mass {zero_fuel_mass_kg} kg"
-        ));
-    }
-    if !range_m.is_finite() || range_m < 0.0 {
-        return Err(format!("range {range_m} m must be finite and nonnegative"));
-    }
-    if !limits.mtow_kg.is_finite() || limits.mtow_kg < zero_fuel_mass_kg {
-        return Err(format!(
-            "MTOW {} kg must be finite and at least the zero-fuel mass {zero_fuel_mass_kg} kg",
-            limits.mtow_kg
-        ));
-    }
-    for (name, value) in [
-        ("MZFW", limits.mzfw_kg),
-        ("MLW", limits.mlw_kg),
-        ("usable tank capacity", limits.usable_capacity_kg),
-    ] {
-        if let Some(value) = value {
-            if !value.is_finite() || value <= 0.0 {
-                return Err(format!("{name} {value} kg must be finite and positive"));
-            }
-        }
-    }
-    if !tolerance_kg.is_finite() || tolerance_kg <= 0.0 {
-        return Err(format!(
-            "tolerance {tolerance_kg} kg must be finite and positive"
-        ));
-    }
-    if max_iterations == 0 {
-        return Err("max_iterations must be at least one".to_owned());
-    }
-    Ok(())
 }
 
 /// A degenerate plan carrying only the zero-fuel mass, used when the
@@ -449,6 +461,8 @@ fn failed_solution(
         iterates: Vec::new(),
         landing_mass_exceeds_mlw: false,
         zero_fuel_mass_exceeds_mzfw: false,
+        settled_at_discontinuity: false,
+        stalled_at_evaluable_edge: false,
     }
 }
 

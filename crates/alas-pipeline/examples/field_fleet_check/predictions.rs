@@ -100,7 +100,7 @@ fn predict(aircraft: &Aircraft) -> Result<serde_json::Map<String, Value>, String
             json!(1.0 / (PI * aspect_ratio)),
         );
         output.insert("propeller_assumptions".to_owned(), json!(
-            "CADO shaft rating; ideal momentum disk with speed lapse (McCormick 1967 sec.3.1); zero failed-engine additional drag; clean CD0=0.02 conceptual assumption plus configured takeoff high-lift oei_climb_delta_cd; ideal elliptical span loading e=1; no per-aircraft drag evidence or separate gear increment. The 0.85 effective-disk-power case is a sensitivity assumption, not a sourced propeller calibration."
+            "CADO shaft rating; ideal momentum disk with speed lapse (McCormick 1967 sec.3.1); zero failed-engine additional drag; clean CD0=0.02 conceptual assumption plus configured takeoff high-lift oei_climb_delta_cd; ideal elliptical span loading e=1; no per-aircraft drag evidence; ground-roll gear drag is the configured takeoff_gear_delta_cd class value (Roskam I Table 3.6). The 0.85 effective-disk-power case is a sensitivity assumption, not a sourced propeller calibration."
         ));
         match compute_propeller_landing_distance(inputs) {
             Ok(distance_m) => {
@@ -137,6 +137,7 @@ fn predict(aircraft: &Aircraft) -> Result<serde_json::Map<String, Value>, String
                     zero_lift_drag_coefficient: takeoff_cd0,
                     induced_drag_factor: 1.0 / (PI * aspect_ratio),
                     failed_engine_drag_coefficient: 0.0,
+                    ground_roll_gear_drag_coefficient: config.takeoff_gear_delta_cd,
                 },
             );
             attach_field(&mut output, field, config, true, suffix);

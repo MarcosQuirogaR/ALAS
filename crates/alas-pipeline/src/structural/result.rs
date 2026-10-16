@@ -26,6 +26,11 @@ pub struct EvaluationInputs {
     wing: Option<alas_geom::aircraft::wing::Wing>,
     material_allowables_pa: Vec<(i64, f64)>,
     shell_identities: Vec<(i64, i64, i64)>,
+    /// Shells inside load-introduction or constraint zones of the submitted
+    /// deck; their stress is an idealisation artefact and is not assessed
+    /// against the material allowable (`alas_struct::mesh` module
+    /// `load_introduction`).
+    load_introduction: std::collections::BTreeSet<i64>,
 }
 
 impl EvaluationInputs {
@@ -36,6 +41,7 @@ impl EvaluationInputs {
             wing: report.airplane.wings.first().cloned(),
             material_allowables_pa: Vec::new(),
             shell_identities: Vec::new(),
+            load_introduction: std::collections::BTreeSet::new(),
         }
     }
 
@@ -43,8 +49,11 @@ impl EvaluationInputs {
         config: &AlasConfig,
         report: &AnalysisReport,
         deck: &alas_struct::mesh::Deck,
+        engine_nids: &[i64],
     ) -> Self {
         let mut inputs = Self::new(config, report);
+        inputs.load_introduction = deck
+            .load_introduction_elements(engine_nids, alas_struct::mesh::LOAD_INTRODUCTION_LAYERS);
         let cfg = &config.structures;
         let materials: Vec<_> = [
             &cfg.skin_material,
@@ -89,6 +98,11 @@ impl EvaluationInputs {
             .iter()
             .find(|(id, _)| *id == mid)
             .map(|(_, value)| *value)
+    }
+
+    /// Whether shell `element` lies in a load-introduction or constraint zone.
+    pub(crate) fn in_load_introduction(&self, element: i64) -> bool {
+        self.load_introduction.contains(&element)
     }
 
     pub(crate) fn shell_identities(&self) -> &[(i64, i64, i64)] {

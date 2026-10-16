@@ -181,7 +181,7 @@ fn delivered_baseline_delta(
     let row = history
         .design_vectors
         .iter()
-        .position(|design| bits(design) == target)?;
+        .position(|design| design.as_ref().is_some_and(|design| bits(design) == target))?;
     let objective = history
         .objective_value
         .get(row)

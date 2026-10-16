@@ -226,15 +226,20 @@ impl FullAnalysis {
         } else {
             stability_and_trim_with_system
         };
-        let trim = solve_trim(
+        let trim = match solve_trim(
             fine_system,
             plane,
             fine_analysis,
             cl_target,
             req.cruise_mach,
             req.cruise_altitude_m,
-        )
-        .ok()?;
+        ) {
+            Ok(trim) => trim,
+            Err(error) => {
+                tracing::warn!(%error, "trimmed design point unavailable: trim solve failed");
+                return None;
+            }
+        };
         if !trim.converged {
             return None;
         }
@@ -244,17 +249,42 @@ impl FullAnalysis {
             cl_alpha: trim.cl_alpha,
         };
 
-        let trim_perf = aero
-            .trimmed_performance(&trim_point, req.cruise_mach, req.cruise_altitude_m)
-            .ok()?;
+        let trim_perf = match aero.trimmed_performance(
+            &trim_point,
+            req.cruise_mach,
+            req.cruise_altitude_m,
+        ) {
+            Ok(perf) => perf,
+            Err(error) => {
+                tracing::warn!(%error, "trimmed design point unavailable: trimmed performance failed");
+                return None;
+            }
+        };
         if !trim_perf.cm_residual.is_finite() || trim_perf.cm_residual.abs() > 1.0e-3 {
             return None;
         }
 
+        // The flight attitude is the compressible solution when the trim ran
+        // on the Goethert-stretched lattice (AERL-02): the true body angle and
+        // the stabilizer incidence that balance the compressible moment. The
+        // lift, drag and moment residual stay the incompressible-lattice
+        // solve's (Trefftz drag is evaluated there, as before).
+        let flight = trim.attitude();
+        if !flight.converged || !flight.alpha_deg.is_finite() || !flight.incidence_deg.is_finite() {
+            return None;
+        }
         Some(TrimmedDesignPoint {
-            alpha_deg: trim_perf.alpha_deg,
-            geometric_body_alpha_deg: trim.trim_alpha_deg,
-            trim_ih_deg: trim_perf.incidence_deg,
+            alpha_deg: if flight.compressible {
+                flight.alpha_deg
+            } else {
+                trim_perf.alpha_deg
+            },
+            geometric_body_alpha_deg: flight.alpha_deg,
+            trim_ih_deg: if flight.compressible {
+                flight.incidence_deg
+            } else {
+                trim_perf.incidence_deg
+            },
             cl: trim_perf.cl,
             cd: trim_perf.cd,
             l_over_d: trim_perf.l_over_d,
@@ -266,8 +296,8 @@ impl FullAnalysis {
         &self,
         plane: &Airplane,
         design: &DesignVector,
-    ) -> HashMap<String, f64> {
-        let mut map = HashMap::new();
+    ) -> BTreeMap<String, f64> {
+        let mut map = BTreeMap::new();
         if let Some(wing) = plane.wings.first() {
             let unfolded_span_m = wing.unfolded_span();
             let unfolded_area_m2 = wing.unfolded_area();
@@ -313,7 +343,7 @@ impl FullAnalysis {
             design.tip_chord_m / design.root_chord_m,
         );
         let wing = &self.config.geometry.wing;
-        let break_semi_span_m = wing.break_span_fraction * design.span_m / 2.0;
+        let break_semi_span_m = wing.break_span_fraction * wing.wing_span_m(design.span_m) / 2.0;
         let (
             break_span_m,
             break_span_fraction,

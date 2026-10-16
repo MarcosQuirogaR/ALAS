@@ -25,6 +25,9 @@
 // controls, so a failed unwrap there is the assertion failing.
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
+pub mod memo;
+pub mod pins;
+
 use std::path::PathBuf;
 
 use serde::de::DeserializeOwned;

@@ -151,7 +151,8 @@ mod tests {
             frac_moment: vec![1.0, 1.0, 1.0],
             t_cap: vec![0.01, 0.008, 0.005],
             w_cap: vec![0.2, 0.18, 0.15],
-            t_web: 0.005,
+            t_web: vec![0.005; 3],
+            lower_extra_area: vec![0.0; 3],
             margin_of_safety: vec![0.0, 1.0, 2.0],
         };
         let sizing = WingboxSizing {

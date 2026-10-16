@@ -255,12 +255,12 @@ pub(super) fn extract_summary(
         && oew.is_finite()
         && full.design_point.l_over_d.is_finite()
         && full.x_neutral_point.is_finite()
-        && n_scenes >= 8
+        && n_scenes >= super::MIN_FIGURE_SCENES
         && public_design_matches_preset;
     let physical_passed = execution_passed
         && mtow > 0.0
         && oew > 0.0
-        && full.design_point.l_over_d > 8.0
+        && full.design_point.l_over_d > super::MIN_PLAUSIBLE_L_OVER_D
         && full.x_neutral_point > 0.0
         && res.feasibility.findings.iter().all(|finding| {
             finding.severity != FindingSeverity::Error || !finding_governs_preset(finding)

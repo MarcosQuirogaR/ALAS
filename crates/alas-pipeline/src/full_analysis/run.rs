@@ -6,6 +6,24 @@
 use super::*;
 
 impl FullAnalysis {
+    /// This analysis with its configuration resolved at the band takeoff mass
+    /// `design` carries (`AlasConfig::at_band_mass`): the fixed-requirement
+    /// problem at that mass. `None` when the mode is not the MTOW band, the
+    /// configuration is a sized closure's, or it is resolved already.
+    fn at_band_design(&self, design: &DesignVector) -> Option<Self> {
+        if self.closure_bound
+            || self.config.optimizer.objective.mtow_sizing != alas_config::MtowSizing::MtowBand
+        {
+            return None;
+        }
+        let config = self.config.at_band_mass(design.mtow_kg);
+        (config != self.config).then_some(Self {
+            config,
+            reference_compatibility: self.reference_compatibility,
+            closure_bound: self.closure_bound,
+        })
+    }
+
     /// Create a new analysis orchestrator for `config`.
     pub fn new(config: AlasConfig) -> Self {
         let reference_compatibility = config.mass_model.uses_reference_mass_methods();
@@ -14,16 +32,6 @@ impl FullAnalysis {
             reference_compatibility,
             closure_bound: false,
         }
-    }
-
-    /// Create a product analysis that preserves engine values supplied by an
-    /// imported aircraft-data document.
-    ///
-    /// Kept as an explicit interchange-data entry point. Product constructors
-    /// preserve live engine fields regardless of whether they came from CPACS,
-    /// a preset, a saved configuration, or the engine designer.
-    pub fn new_preserving_engine_config(config: AlasConfig) -> Self {
-        Self::new(config)
     }
 
     /// Construct a full analysis that reproduces the frozen Python wing point.
@@ -90,6 +98,9 @@ impl FullAnalysis {
         design: &DesignVector,
         airplane: Airplane,
     ) -> Result<AnalysisReport, String> {
+        if let Some(resolved) = self.at_band_design(design) {
+            return resolved.run_on_airplane(design, airplane);
+        }
         // Premium economy is retained in saved cabins for compatibility, but
         // the product cabin and FLOPS contract have three classes. Fold that
         // slot before either pass builds a payload or prices the cabin;
@@ -171,8 +182,12 @@ impl FullAnalysis {
         // mode's closure carries its own mission fuel.
         let loading = if self.reference_compatibility
             || (self.closure_bound
-                && self.config.optimizer.objective.mtow_sizing
-                    != alas_config::MtowSizing::FixedRequirement)
+                && !self
+                    .config
+                    .optimizer
+                    .objective
+                    .mtow_sizing
+                    .sizes_at_declared_mass())
         {
             None
         } else {

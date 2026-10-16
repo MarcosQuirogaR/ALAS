@@ -19,6 +19,8 @@ pub(super) enum EngineEditorModel {
         fan_pressure_ratio: f64,
         turbine_inlet_temp_k: f64,
         cruise_tsfc: f64,
+        cruise_tsfc_evidence: String,
+        cruise_tsfc_source: String,
         takeoff_fuel_flow_kg_s: f64,
         off_design_evidence: String,
         provenance: String,
@@ -39,6 +41,7 @@ pub(super) enum EngineEditorModel {
 }
 
 pub(super) fn engine_editor_model(engine: &EngineConfig) -> Result<EngineEditorModel, String> {
+    let catalogue = alas_config::engines::get(&engine.engine_name).ok();
     match engine.active_model().map_err(|error| error.to_string())? {
         ActiveEngineModel::Turbofan(spec) => Ok(EngineEditorModel::Turbofan {
             rated_thrust_kn: spec.rated_thrust_kn,
@@ -48,6 +51,14 @@ pub(super) fn engine_editor_model(engine: &EngineConfig) -> Result<EngineEditorM
             fan_pressure_ratio: spec.fan_pressure_ratio,
             turbine_inlet_temp_k: spec.turbine_inlet_temp_k,
             cruise_tsfc: spec.cruise_tsfc_kg_kgf_hr,
+            // The off-design payload carries the value only; its evidence
+            // class and source live on the catalogue entry it was bound to.
+            cruise_tsfc_evidence: catalogue
+                .map(|e| e.cruise_tsfc_evidence.clone())
+                .unwrap_or_default(),
+            cruise_tsfc_source: catalogue
+                .map(|e| e.cruise_tsfc_source.clone())
+                .unwrap_or_default(),
             takeoff_fuel_flow_kg_s: spec.takeoff_fuel_flow_kg_s,
             off_design_evidence: format!(
                 "{}: {}",
@@ -88,6 +99,8 @@ pub(super) fn render_engine_physics_summary(ui: &mut Ui, model: &EngineEditorMod
             fan_pressure_ratio,
             turbine_inlet_temp_k,
             cruise_tsfc,
+            cruise_tsfc_evidence,
+            cruise_tsfc_source,
             takeoff_fuel_flow_kg_s,
             off_design_evidence,
             provenance,
@@ -115,6 +128,7 @@ pub(super) fn render_engine_physics_summary(ui: &mut Ui, model: &EngineEditorMod
                     ),
                 ],
             );
+            ui.label(RichText::new(cruise_tsfc_provenance_text(cruise_tsfc_evidence, cruise_tsfc_source)).small().weak());
         }
         EngineEditorModel::Turboprop {
             takeoff_kw,
@@ -157,6 +171,28 @@ pub(super) fn render_engine_physics_summary(ui: &mut Ui, model: &EngineEditorMod
         }
         }
     });
+}
+
+/// The evidence class and source behind the catalogue cruise TSFC, so a
+/// printed value, a sibling-engine proxy and an unsourced estimate are not
+/// shown alike.
+fn cruise_tsfc_provenance_text(evidence: &str, source: &str) -> String {
+    let evidence = match evidence {
+        "published" => tr("Published"),
+        "family-proxy" => tr("Family proxy"),
+        "unsourced-estimate" => tr("Unsourced estimate (not validated)"),
+        "" => tr("Not recorded"),
+        other => other.to_owned(),
+    };
+    let source = if source.is_empty() {
+        tr("Not recorded")
+    } else {
+        source.to_owned()
+    };
+    crate::views::tr_fields(
+        "Cruise TSFC evidence: {evidence}. Source: {source}",
+        &[("evidence", evidence), ("source", source)],
+    )
 }
 
 fn readonly_metrics(ui: &mut Ui, metrics: &[(String, f64, &str)]) {

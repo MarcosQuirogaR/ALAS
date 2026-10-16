@@ -9,10 +9,31 @@ use crate::mdo::ResidualRole;
 use alas_config::airports::Airport;
 use alas_config::{AlasConfig, DesignRequirements, ObjectiveConfig, PerformanceConfig};
 use alas_perf::performance::{
-    assess_oei_climb, compute_v_speeds_at_masses, density_ratio, far25_oei_gradient, oei_cl_at_v2,
-    tw_takeoff_constraint, ws_landing_limit, OeiClimbStatus, OeiV2Condition,
+    assess_oei_climb, compute_v_speeds_at_masses, cs25_115_net_path_reduction, density_ratio,
+    far25_oei_gradient, landing_runway_share, oei_cl_at_v2, tw_takeoff_constraint,
+    ws_landing_field_limit, OeiClimbStatus, JET_DRY_LANDING_SHARE,
 };
 use alas_units::KNOT;
+
+/// Certification climb checks beyond the second segment (CS 25.121(c),(d),
+/// 25.119) and the CS 25.115 net-path diagnostic.
+pub mod certification;
+/// The cruise-altitude thrust requirements from the engine deck.
+pub mod cruise_deck;
+/// Whether the fixed engine rating still matches the closed take-off mass.
+pub mod engine_match;
+/// Improved-climb V2 resolution and the top-of-climb margin at the selected
+/// initial cruise level.
+pub mod improved_climb;
+/// The shared engine-out evidence builder (deck thrust ratio, failed-engine
+/// and asymmetric trim drag).
+pub mod oei_deck;
+pub mod planned_cruise;
+/// The scatter-aware verdict of the cruise-thrust and top-of-climb checks.
+pub mod thrust_uncertainty;
+
+use certification::{certification_residuals, net_path_gradient_margin, CertificationInputs};
+use oei_deck::{second_segment_evidence, EngineOutModel, YawAirframe};
 
 use super::sizing::SizingOutcome;
 use super::types::CandidateDrag;
@@ -27,8 +48,12 @@ pub(super) fn performance_residuals(
     config: &AlasConfig,
     role: ResidualRole,
 ) -> Vec<ConstraintResidual> {
+    // The computed minimum control speed replaces the declared estimate in
+    // every speed schedule below (CS 25.107(b), (e)); see `residuals_vmc`.
+    let vmc = super::residuals_vmc::evaluate_candidate(outcome, config);
+    let resolved = super::residuals_vmc::performance_with_vmc(config, &vmc);
+    let config = &*resolved;
     let req = &config.requirements;
-    let perf = &config.performance;
     let objective = &config.optimizer.objective;
     let sized = &outcome.sized;
     let available_tw = outcome.n_engines as f64 * outcome.static_thrust_kn * 1_000.0
@@ -38,6 +63,51 @@ pub(super) fn performance_residuals(
     let mut residuals = Vec::new();
 
     let certified_oei_gradient = far25_oei_gradient(outcome.n_engines);
+    // Engine deck and airframe geometry for the engine-out evidence. A
+    // failure leaves the evidence terms unset (an evidence gap), never a
+    // placeholder value.
+    let engine_out = EngineOutModel::new(
+        config,
+        Some(YawAirframe {
+            plane: &outcome.plane,
+            cg_x_m: outcome.cg_x,
+        }),
+        s_ref,
+        Some(outcome.static_thrust_kn * 1_000.0),
+    )
+    .ok()
+    .map(|model| model.with_weight_kg(sized.takeoff_mass_kg));
+    // Improved climb: when the schedule V2 misses the second-segment gradient,
+    // V2 is raised to the lowest speed that meets it (up to the best-climb
+    // speed) and the longer field is charged. Every speed below reads it.
+    let (improved_config, improved) = match (outcome.departure, engine_out.as_ref()) {
+        (Some(departure), Some(model)) => improved_climb::resolve_improved_climb(
+            config,
+            &improved_climb::ImprovedClimbInputs {
+                model,
+                departure,
+                mass_kg: sized.takeoff_mass_kg,
+                s_ref_m2: s_ref,
+                drag: &sized.fuel_artifacts.drag,
+                installed_tw_sls: available_tw,
+            },
+        ),
+        _ => (std::borrow::Cow::Borrowed(config), None),
+    };
+    let config = &*improved_config;
+    let perf = &config.performance;
+    if let Some(selection) = improved.filter(|selection| selection.improved) {
+        residuals.push(ConstraintResidual::direct(
+            "improved_climb_v2_over_vsr",
+            Performance,
+            selection.v2_over_vsr,
+            selection.schedule_v2_over_vsr,
+            "V2/VSR",
+            selection.v2_over_vsr - selection.schedule_v2_over_vsr,
+            0.0,
+            ResidualRole::Diagnostic,
+        ));
+    }
     let departure_speeds = outcome.departure.map(|departure| {
         compute_v_speeds_at_masses(
             sized.takeoff_mass_kg,
@@ -49,17 +119,22 @@ pub(super) fn performance_residuals(
             perf,
         )
     });
-    let oei_condition = outcome
+    let drag = &sized.fuel_artifacts.drag;
+    let oei_evidence = outcome
         .departure
         .zip(departure_speeds)
-        .map(|(departure, speeds)| OeiV2Condition {
-            departure_elevation_m: departure.elevation_m,
-            departure_isa_deviation_c: departure.isa_deviation_c,
-            v2_over_vstall: speeds.v2_ms / speeds.v_stall_to_ms,
-            condition_to_sls_thrust_ratio: perf.oei_condition_to_sls_thrust_ratio,
-            asymmetric_trim_cd: perf.oei_asymmetric_trim_cd,
-            windmilling_cd: perf.oei_windmilling_cd,
+        .map(|(departure, speeds)| {
+            second_segment_evidence(
+                engine_out.as_ref(),
+                perf,
+                departure,
+                &speeds,
+                &|mach, altitude_m, isa_deviation_c| {
+                    drag.cd_at_atmosphere(0.0, mach, altitude_m, isa_deviation_c)
+                },
+            )
         });
+    let oei_condition = oei_evidence.map(|evidence| evidence.condition);
     // The engine-out climb is flown at the V2 lift coefficient
     // `CL_V2 = CLmax_TO / (V2/VS)^2` (14 CFR 25.107(c): V2 >= 1.13 VSR, so
     // CL_V2 <= CLmax_TO / 1.13^2; the assessor uses the same relation,
@@ -69,7 +144,6 @@ pub(super) fn performance_residuals(
     // `oei_climb_cl` is the lift coefficient and the field is sea level.
     // The table is clean: the takeoff flap/slat increment enters through
     // `oei_climb_delta_cd`. The projection is used only at this selected CL.
-    let drag = &sized.fuel_artifacts.drag;
     let oei_cl = oei_condition
         .and_then(|condition| oei_cl_at_v2(perf.cl_max_to, condition.v2_over_vstall))
         .unwrap_or(perf.oei_climb_cl);
@@ -112,14 +186,64 @@ pub(super) fn performance_residuals(
         } else {
             ResidualRole::Preference
         };
-        residuals.push(ConstraintResidual::scaled(
+        // The take-off rating carries the take-off band when the requirement
+        // is the SLS-equivalent one; a conceptual in-flight estimate does not.
+        let band = if oei_assessment.status == OeiClimbStatus::SlsEquivalent {
+            thrust_uncertainty::takeoff_thrust_scatter(config)
+        } else {
+            0.0
+        };
+        residuals.extend(thrust_uncertainty::takeoff_banded_rows(
             "oei_second_segment",
-            Performance,
+            "oei_second_segment_within_takeoff_band",
+            "CS 25.121(b) second segment (static T/W)",
             available_tw,
             required_oei_tw,
-            "T/W",
-            required_oei_tw - available_tw,
+            band,
             oei_policy,
+        ));
+    }
+    // CS 25.115(b): the net path reduces the gross gradient by 0.8/0.9/1.0 %.
+    // Without an obstacle model this is a Diagnostic margin, not a constraint.
+    if let (Some(inflight_tw), Some(ratio), Some(gradient), Some(reduction)) = (
+        oei_assessment.required_inflight_tw,
+        oei_condition.and_then(|condition| condition.condition_to_sls_thrust_ratio),
+        certified_oei_gradient,
+        cs25_115_net_path_reduction(outcome.n_engines),
+    ) {
+        if let Some(margin) = net_path_gradient_margin(
+            outcome.n_engines,
+            gradient,
+            inflight_tw,
+            available_tw,
+            ratio,
+        ) {
+            residuals.push(ConstraintResidual::direct(
+                "takeoff_net_path_gradient",
+                Performance,
+                margin,
+                0.0,
+                "gradient",
+                -margin,
+                (-margin / reduction).max(0.0),
+                ResidualRole::Diagnostic,
+            ));
+        }
+    }
+    if let Some(model) = engine_out.as_ref() {
+        residuals.extend(certification_residuals(
+            &CertificationInputs {
+                config,
+                drag,
+                engine_out: model,
+                s_ref_m2: s_ref,
+                takeoff_mass_kg: sized.takeoff_mass_kg,
+                landing_mass_kg: sized.design_landing_mass_kg,
+                departure: outcome.departure,
+                arrival: outcome.arrival,
+            },
+            available_tw,
+            role,
         ));
     }
     match oei_assessment.status {
@@ -148,26 +272,32 @@ pub(super) fn performance_residuals(
         }
     }
 
-    let cruise_ws_pa = sized.takeoff_mass_kg * req.gravity_m_s2 / s_ref;
-    let cruise_atmosphere = alas_atmo::Atmosphere::new(req.cruise_altitude_m);
-    let cruise_speed_m_s = req.cruise_mach * cruise_atmosphere.speed_of_sound();
-    let cruise_q_pa = 0.5 * cruise_atmosphere.density() * cruise_speed_m_s * cruise_speed_m_s;
-    let cruise_cl = cruise_ws_pa / cruise_q_pa;
-    // Mass closure changes CL without rebuilding a CG-compatible table.
-    // Evaluate its drag at that CL; a tangent at the original design lift
-    // does not retain a shifted induced polar or nonlinear wave drag.
-    let required_cruise_tw =
-        drag.cd(cruise_cl, req.cruise_mach, req.cruise_altitude_m) / cruise_cl / perf.thrust_lapse;
-    residuals.push(ConstraintResidual::scaled(
-        "cruise_thrust",
-        Performance,
-        available_tw,
-        required_cruise_tw,
-        "T/W",
-        required_cruise_tw - available_tw,
+    // Diagnostic only: a fixed engine rating that no longer matches the
+    // closed take-off mass (outside the configured band) is a warning, not a
+    // constraint.
+    if let Some(matched) = engine_match::engine_mass_match(config, sized.takeoff_mass_kg) {
+        residuals.push(ConstraintResidual::direct(
+            "engine_mass_match",
+            Performance,
+            matched.ratio,
+            1.0,
+            "ratio",
+            matched.ratio - 1.0,
+            matched.normalized_excess(),
+            ResidualRole::Diagnostic,
+        ));
+    }
+
+    residuals.extend(cruise_deck::toc_rows(config, &sized.fuel_artifacts, role));
+    residuals.extend(cruise_deck::cruise_rows(
+        engine_out.as_ref(),
+        drag,
+        config,
+        (sized.takeoff_mass_kg, sized.mid_cruise_mass_kg()),
+        (s_ref, available_tw),
+        &sized.fuel_artifacts,
         role,
     ));
-
     if !outcome.airport_records_resolved {
         residuals.push(ConstraintResidual::direct(
             "airport_unknown",
@@ -230,7 +360,9 @@ pub(super) fn performance_residuals(
             s_ref,
             req.gravity_m_s2,
             departure,
-            perf.cl_max_to,
+            // An improved-climb V2 lengthens the field (same T/W correlation, lower
+            // effective CLmax).
+            perf.takeoff_field_cl_max(perf.cl_max_to),
             role,
         ));
     }
@@ -241,6 +373,7 @@ pub(super) fn performance_residuals(
         ));
     }
 
+    residuals.extend(super::residuals_vmc::vmc_residuals(&vmc, role));
     residuals
 }
 
@@ -288,7 +421,7 @@ fn departure_polar(
     isa_deviation_c: f64,
 ) -> (f64, f64) {
     (
-        drag.cd_at_atmosphere(cl, mach, altitude_m, isa_deviation_c),
+        drag.cd_airport_base_at_atmosphere(cl, mach, altitude_m, isa_deviation_c),
         0.0,
     )
 }
@@ -308,7 +441,15 @@ fn landing_and_approach_residuals(
 ) -> Vec<ConstraintResidual> {
     let sized = &outcome.sized;
     let sigma = density_ratio(arrival.elevation_m, arrival.isa_deviation_c);
-    let ws_land_limit_pa = ws_landing_limit(arrival.lda_m, sigma, perf.cl_max_land, perf.k_land);
+    // Same definition as the delivery gate and the matching chart: the actual
+    // distance k_land (W/S)/(sigma CLmax) may use 0.6 of the LDA.
+    let ws_land_limit_pa = ws_landing_field_limit(
+        arrival.lda_m,
+        landing_runway_share(JET_DRY_LANDING_SHARE, perf.wet_landing_runway),
+        sigma,
+        perf.cl_max_land,
+        perf.k_land,
+    );
     let landing_ws_pa = sized.design_landing_mass_kg * req.gravity_m_s2 / s_ref;
 
     let mut residuals = vec![ConstraintResidual::scaled(
@@ -345,5 +486,11 @@ fn landing_and_approach_residuals(
     residuals
 }
 
+#[cfg(test)]
+mod deck_altitude_probe;
+#[cfg(test)]
+mod deck_takeoff_probe;
+#[cfg(test)]
+mod gradient_probe;
 #[cfg(test)]
 mod tests;

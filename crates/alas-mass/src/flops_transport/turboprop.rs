@@ -53,20 +53,13 @@
 //! one. Left undeclared it is zero and visible as an accounting gap; on a
 //! turboprop of this class the quantity is a few tens of kilograms.
 
+use super::units::{kg, lb};
 use alas_config::{FlopsTurbopropConfig, PropellerConstruction};
-use alas_units::{FOOT, POUND_MASS};
+use alas_units::FOOT;
 
 use super::propulsion::fuel_system_kg;
 
 const WATTS_PER_SHP: f64 = 745.699_872;
-
-fn kg(pounds: f64) -> f64 {
-    pounds * POUND_MASS
-}
-
-fn lb(kilograms: f64) -> f64 {
-    kilograms / POUND_MASS
-}
 
 /// A finite, strictly positive declared quantity. A `NaN` is not positive, so
 /// it is refused by name rather than propagating through a power law.

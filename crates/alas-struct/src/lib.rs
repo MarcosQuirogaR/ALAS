@@ -33,11 +33,18 @@
 pub mod allowables;
 pub mod analytical;
 pub mod feasibility;
+mod flap_charts;
+pub mod flex_check;
+pub mod ground_deflection;
+pub mod gust;
 pub mod loads;
 pub mod mesh;
 pub mod nastran;
 pub mod nastran95;
+pub mod non_optimum;
 pub mod op2;
 pub mod scope;
 pub mod sizing;
 pub mod tanks;
+pub mod torque_sources;
+pub mod torsion;

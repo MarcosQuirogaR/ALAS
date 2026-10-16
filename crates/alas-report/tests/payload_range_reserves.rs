@@ -155,7 +155,11 @@ fn the_band_check_follows_the_range_at_each_band_end() {
         )
     };
 
-    let inside = band(1_500.0, 0.85, 1.0);
+    // The band's light end (0.85 MTOW, 15,000 kg payload) reaches 1,507 nmi
+    // and its heavy end 3,151 nmi on the range-search model (A320-200
+    // probe; the declared-sector model capped at FL280 reached 1,434 and
+    // 3,025 nmi), so a 1,800 nmi design range lies inside the band.
+    let inside = band(1_800.0, 0.85, 1.0);
     assert_eq!(inside.status, BandStatus::Inside, "{inside:?}");
     assert!(inside.range_at_lo_m < inside.range_at_hi_m);
     assert!(inside.note.contains("quick estimate"));

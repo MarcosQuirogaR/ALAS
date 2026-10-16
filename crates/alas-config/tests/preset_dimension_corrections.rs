@@ -5,6 +5,10 @@
 
 use alas_config::presets;
 
+/// The pin file of the derived areas below: `tests/golden/<SUITE>.json`, rewritten by
+/// `cargo xtask repin preset_dimension_corrections`.
+const SUITE: &str = "preset_dimension_corrections";
+
 #[test]
 fn atr_active_planform_closes_published_area_and_mac() {
     // ATR 72-600 factsheet 2020 p.22: 61 m^2 reference area; JCAB TCDS
@@ -40,7 +44,13 @@ fn a320_planar_wing_closes_published_area_and_mac_with_an_unswept_inboard_traili
         .wing
         .transport_planform(&preset.design_vector)
         .unwrap_or_else(|error| panic!("{error}"));
-    assert!((2.0 * planform.tip.y_m - 34.10).abs() < 1e-12);
+    // Geometry freeze 2026-10-12: the planar wing proper is 34.1078 m (sharklet device excluded; the
+    // published 35.8 m includes the device), 7.8 mm over the 34.10 m of the drawing.
+    assert!(
+        (2.0 * planform.tip.y_m - 34.107_797_106_133_944).abs() < 1e-9,
+        "planar span {} m",
+        2.0 * planform.tip.y_m
+    );
     assert!((planform.tip.chord_m - 1.64).abs() < 1e-12);
     let (mut half_area, mut chord_moment) = (0.0, 0.0);
     for panel in planform.panels() {
@@ -90,7 +100,15 @@ fn airbus_dimensions_preserve_cross_section_and_engine_symmetry() {
         .wing
         .transport_planform(&a340.design_vector)
         .unwrap_or_else(|error| panic!("{error}"));
-    assert_eq!(planform.tip.chord_m, 2.5);
+    // Geometry round 2: the 2.5 m straight-edge tip chord stays the design tip
+    // chord; the drawn tip is swept back, so the chord at the extreme tip is
+    // 0.86 m (the drawing's silhouette 0.15 m inboard of the tip) and the
+    // kink chord closes the 361.6 m^2 reference area.
+    // Geometry freeze 2026-10-12: the wing trailing edge is fitted to the drawn plan view along the whole span
+    // (root 12.26, kink 8.3 m / 7.70 m, straight-edge tip chord 2.35 m; the chord at the rake start, 2.63 m, is
+    // the drawing's 2.5 m dimension within 0.13 m). The 361.6 m^2 is now the Published reference wing.
+    assert_eq!(a340.design_vector.tip_chord_m, 2.35);
+    assert_eq!(planform.tip.chord_m, 0.86);
     assert_eq!(2.0 * planform.tip.y_m, 60.3);
     let area: f64 = planform
         .panels()
@@ -100,7 +118,10 @@ fn airbus_dimensions_preserve_cross_section_and_engine_symmetry() {
                 * (panel.inboard.chord_m + panel.outboard.chord_m)
         })
         .sum();
-    assert!((area - 361.6).abs() < 1e-10, "{area}");
+    let reference = a340.geometry.wing.reference_wing;
+    assert_eq!(reference.mode, alas_config::ReferenceWingMode::Published);
+    assert_eq!(reference.published_area_m2, Some(361.6));
+    alas_testkit::pins::assert_pinned(SUITE, "A340-300/drawn_planform_area_m2", area);
 }
 
 #[test]
@@ -123,7 +144,7 @@ fn the_a380_tailplane_spans_its_published_dimension() {
     // trapezoidal planform is 193.15 m^2.
     let area =
         (empennage.hstab_root_chord_m + empennage.hstab_tip_chord_m) * empennage.hstab_tip_le_m.1;
-    assert!((area - 193.1532).abs() < 1e-4, "{area}");
+    alas_testkit::pins::assert_pinned(SUITE, "A380-800/hstab_trapezoid_area_m2", area);
 }
 
 #[test]

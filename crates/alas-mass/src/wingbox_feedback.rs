@@ -39,6 +39,15 @@ pub struct SizedWingboxMass {
     pub centroid_m: [f64; 3],
     /// Spatial extent represented by `mass_kg` and `centroid_m`.
     pub extent: WingExtent,
+    /// What the sized box is made of, for the item-by-item non-optimum
+    /// penalties of [`alas_struct::non_optimum`] (complete wing, whatever
+    /// `extent` says). `None` for a box that did not come from the sizer: the
+    /// clean-sheet inventory then carries no non-optimum items.
+    pub box_quantities: Option<alas_struct::non_optimum::BoxQuantities>,
+    /// Share of the main-gear load carried by legs attached to the wing (0
+    /// for a fuselage-mounted gear, 2/n for the wing pair of an n-leg gear),
+    /// resolved from the built geometry; `None` when not resolved.
+    pub main_gear_wing_fraction: Option<f64>,
 }
 
 impl SizedWingboxMass {
@@ -48,6 +57,8 @@ impl SizedWingboxMass {
             mass_kg,
             centroid_m,
             extent: WingExtent::FullWing,
+            box_quantities: None,
+            main_gear_wing_fraction: None,
         }
     }
 
@@ -57,7 +68,24 @@ impl SizedWingboxMass {
             mass_kg,
             centroid_m,
             extent: WingExtent::SymmetricSemiWing,
+            box_quantities: None,
+            main_gear_wing_fraction: None,
         }
+    }
+
+    /// The same box with the quantities its non-optimum penalties are driven by.
+    pub const fn with_box_quantities(
+        mut self,
+        quantities: alas_struct::non_optimum::BoxQuantities,
+    ) -> Self {
+        self.box_quantities = Some(quantities);
+        self
+    }
+
+    /// The same box with the wing share of the main-gear load.
+    pub const fn with_main_gear_wing_fraction(mut self, fraction: f64) -> Self {
+        self.main_gear_wing_fraction = Some(fraction);
+        self
     }
 }
 

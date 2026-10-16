@@ -11,6 +11,10 @@
 //! (the previous order) painted wing and tail roots over the fuselage;
 //! the partition order must not.
 
+// A test asserts on values it constructed or loaded from a fixture it
+// controls, so a failed unwrap there is the assertion failing.
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 mod common;
 
 use alas_gui::sandbox::scene::{build_sandbox_airplane, build_sandbox_model, SANDBOX_CAMERA_ID};
@@ -360,6 +364,11 @@ fn compare(state: &AppState, model: &SandboxSceneModel) -> (usize, usize, usize)
 }
 
 #[test]
+// The per-camera mismatch report is the diagnostic when this test fails.
+#[allow(
+    clippy::print_stdout,
+    reason = "the test prints its per-camera mismatch report for the run log"
+)]
 fn nearer_fuselage_skin_covers_wing_and_tail_roots_from_every_camera() {
     let mut state = AppState::default();
     state.sandbox.viewport_size = Some((WIDTH as f32, HEIGHT as f32));

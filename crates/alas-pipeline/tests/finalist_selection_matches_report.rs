@@ -56,6 +56,7 @@ fn r5_finalist_design() -> DesignVector {
         bump_upper_rear: -0.0006249999999999997,
         bump_lower_mid: 0.002,
         bump_lower_rear: -0.004,
+        mtow_kg: None,
     }
 }
 
@@ -96,11 +97,7 @@ fn replay(config: &AlasConfig, design: &DesignVector) -> Replay {
     let assessment = alas_opt::assess_product_candidate(config, design)
         .expect("finalist re-evaluates under the same mission-sized objective");
     let report = FullAnalysis::new(config.clone())
-        .run_at_sized_takeoff_mass(
-            &assessment.resolved.design,
-            true,
-            assessment.sized.takeoff_mass_kg,
-        )
+        .run_sized_candidate(&assessment.resolved.design, &assessment.sized)
         .expect("finalist report binds to the same closed takeoff mass");
     Replay { assessment, report }
 }
@@ -285,14 +282,27 @@ fn the_neutral_point_resolution_difference_is_pinned_and_purely_aerodynamic() {
     let design = r5_finalist_design();
     let Replay { assessment, report } = replay(&config, &design);
 
-    let np_difference_pct_mac = 100.0
-        * (assessment.resolved.x_neutral_point_m - report.x_neutral_point).abs()
-        / assessment.resolved.mac_m;
+    // Like with like: the search trims at the cruise Mach on the
+    // Goethert/Prandtl-Glauert stretched lattice (`alas_stab::trim::compressible`,
+    // decision D1), so it is compared with the report's clean cruise-condition
+    // neutral point (`neutral_point_conditions.cruise`), not with the report's
+    // fixed low-speed `x_neutral_point`, which the report publishes next to it.
+    // The two reported values differ by the compressibility shift, which is a
+    // property of the condition and not of the resolution.
+    let conditions = report
+        .neutral_point_conditions
+        .as_ref()
+        .expect("the report carries the multi-condition neutral point");
+    let mac_m = assessment.resolved.mac_m;
+    let np_difference_pct_mac =
+        100.0 * (assessment.resolved.x_neutral_point_m - conditions.cruise).abs() / mac_m;
+    let compressibility_shift_pct_mac =
+        100.0 * (conditions.cruise - report.x_neutral_point).abs() / mac_m;
     assert!(
         np_difference_pct_mac < 1.0,
-        "search neutral point {} m (search-resolution trim) and report neutral point {} m \
-         (fine-resolution solve) differ by {np_difference_pct_mac}% MAC",
+        "search neutral point {} m (cruise-Mach trim, search resolution) and report cruise          neutral point {} m (fine resolution) differ by {np_difference_pct_mac}% MAC; the report's          fixed low-speed neutral point {} m is {compressibility_shift_pct_mac}% MAC from the cruise one",
         assessment.resolved.x_neutral_point_m,
+        conditions.cruise,
         report.x_neutral_point,
     );
 

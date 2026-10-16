@@ -98,6 +98,11 @@ impl DesignOptimizer {
         let default_bounds = DesignVector::bounds();
         let requested = bounds.unwrap_or(&default_bounds);
         validate_bounds(requested)?;
+        // The band mode searches one more coordinate, the takeoff mass; a
+        // caller's 17th pair is intersected with the band, a 16-pair box is
+        // extended by it.
+        let requested_mass = requested.get(default_bounds.len()).copied();
+        let requested = &requested[..default_bounds.len()];
         let nominal = self.nominal_design(initial_design)?;
         let design_space = &self.config.optimizer.design_space;
         let declared = self.config.design_envelope(&nominal);
@@ -122,7 +127,7 @@ impl DesignOptimizer {
                 .map(|variable| (variable.lower, variable.upper))
                 .collect();
             validate_bounds(&envelope)?;
-            return Ok(envelope);
+            return self.with_band_mass_bound(envelope, requested_mass);
         }
         let mut effective = Vec::with_capacity(requested.len());
         for (index, (&(requested_lower, requested_upper), variable)) in
@@ -163,7 +168,29 @@ impl DesignOptimizer {
             }
             effective.push((lower, upper));
         }
-        Ok(effective)
+        self.with_band_mass_bound(effective, requested_mass)
+    }
+
+    /// `bounds` plus the band takeoff-mass coordinate `[T (1 - p), T (1 + p)]`
+    /// (intersected with `requested`) when the mode searches one.
+    fn with_band_mass_bound(
+        &self,
+        mut bounds: Vec<(f64, f64)>,
+        requested: Option<(f64, f64)>,
+    ) -> Result<Vec<(f64, f64)>, OptimizationError> {
+        if self.config.optimizer.objective.mtow_sizing != alas_config::MtowSizing::MtowBand {
+            return Ok(bounds);
+        }
+        let (band_lower, band_upper) = self.config.mtow_band_limits_kg();
+        let (request_lower, request_upper) = requested.unwrap_or((band_lower, band_upper));
+        let (lower, upper) = (request_lower.max(band_lower), request_upper.min(band_upper));
+        if lower > upper {
+            return Err(OptimizationError::InvalidBounds(format!(
+                "band takeoff-mass bound [{request_lower}, {request_upper}] does not intersect the MTOW band [{band_lower}, {band_upper}]"
+            )));
+        }
+        bounds.push((lower, upper));
+        Ok(bounds)
     }
 
     /// The search box and canonical baseline of a run given no caller
@@ -268,6 +295,9 @@ impl DesignOptimizer {
         let cap = crate::search::work_cap::nominal_work_cap(&objective, &nominal);
         objective.sizing_controls.budget = cap;
 
+        // The band mode searches the takeoff mass too: the caller's vector starts
+        // at the target unless it carries a mass of its own.
+        let band_initial = initial_design.map(|design| self.config.band_design(*design));
         let search_initial = if bounds.is_none()
             && self
                 .config
@@ -277,7 +307,7 @@ impl DesignOptimizer {
         {
             Some(&nominal)
         } else {
-            initial_design.or(Some(&nominal))
+            band_initial.as_ref().or(Some(&nominal))
         };
         let mut parallel = native_pool::NativeObjective::new(
             &mut objective,
@@ -367,6 +397,7 @@ impl DesignOptimizer {
         self.validate_request(bounds)?;
         let effective_bounds = self.effective_bounds(bounds, initial_design)?;
         let nominal = self.nominal_design(initial_design)?;
+        let band_initial = initial_design.map(|design| self.config.band_design(*design));
         let search_initial = if bounds.is_none()
             && self
                 .config
@@ -376,10 +407,13 @@ impl DesignOptimizer {
         {
             Some(&nominal)
         } else {
-            initial_design.or(Some(&nominal))
+            band_initial.as_ref().or(Some(&nominal))
         };
-        let mut objective =
-            DelegatedObjective::new(evaluator, self.config.optimizer.weights.failure_cost);
+        let mut objective = DelegatedObjective::new(
+            evaluator,
+            self.config.optimizer.weights.failure_cost,
+            cancel,
+        );
         // A delegated evaluator is an external, serial model: the refinement
         // starts from the baseline without a screening stage.
         let result = self.run_product_search(
@@ -450,7 +484,7 @@ mod evidence_tests {
             best_cost: 1.0,
             best_valid: valid,
             history: OptimizationHistory {
-                design_vectors: vec![design],
+                design_vectors: vec![Some(design)],
                 valid: vec![valid],
                 cost: vec![1.0],
                 objective_value: vec![2.0],

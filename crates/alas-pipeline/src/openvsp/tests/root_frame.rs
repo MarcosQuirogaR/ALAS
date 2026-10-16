@@ -18,9 +18,18 @@ fn preset_exports_close_symmetric_roots_without_flattening_vertical_fins() {
         for (index, wing) in airplane.wings.iter().enumerate() {
             let root = &wing.xsecs[0];
             let tip = &wing.xsecs[1];
-            if wing.symmetric {
+            // A mirrored surface rooted off the plane (wingtip device) has no
+            // seam to close and takes the rotated root frame like a fin.
+            let closes_seam = wing.symmetric && root.xyz_le[1].abs() < 1.0e-9;
+            if closes_seam {
                 symmetric_roots += 1;
-                assert!(root.xyz_le[1].abs() < 1.0e-9, "{} root plane", preset.name);
+            } else if wing.symmetric {
+                assert!(
+                    wing.name.starts_with("Wingtip Device"),
+                    "{} {} off-plane root",
+                    preset.name,
+                    wing.name
+                );
             } else if (tip.xyz_le[1] - root.xyz_le[1]).abs() < 1.0e-9
                 && (tip.xyz_le[2] - root.xyz_le[2]).abs() > 1.0e-6
             {
@@ -28,7 +37,7 @@ fn preset_exports_close_symmetric_roots_without_flattening_vertical_fins() {
             }
             let expected = format!(
                 "SetParmVal( wing_{index}, \"RotateMatchDideralFlag\", \"XSec_0\", {:.12} );",
-                if wing.symmetric { 0.0 } else { 1.0 }
+                if closes_seam { 0.0 } else { 1.0 }
             );
             assert!(
                 script.contains(&expected),

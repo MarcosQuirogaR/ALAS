@@ -19,8 +19,8 @@ use alas_geom::wing_structure::{RibStation, WingStructureGeometry};
 
 use super::cards::{Deck, Mat1, Param, ParamValue, Pshell, Spc1};
 use super::elements::{
-    MID_CAP, MID_RIB, MID_SKIN, MID_WEB, PID_MAIN_RIB, PID_SEC_RIB, PID_SKIN, PID_TE_STRIP,
-    PID_WEB_BASE,
+    station_value, MID_CAP, MID_RIB, MID_SKIN, MID_WEB, PID_MAIN_RIB, PID_SEC_RIB, PID_SKIN,
+    PID_TE_STRIP, PID_WEB_BASE,
 };
 use super::nodes::{NodeMap, Surface};
 use super::{
@@ -32,6 +32,11 @@ use crate::sizing::WingboxSizing;
 /// carries no structure; it is aerodynamic surface only, and is left out of
 /// the mesh entirely.
 const AERO_ONLY_CHORD_RATIO: f64 = 0.20;
+
+/// Property identifiers between consecutive spars of the web panels: panel
+/// `index` of spar `spar` is `PID_WEB_BASE + spar * STRIDE + index`, below
+/// [`PID_CAP_BASE`](super::elements) for up to three spars of 1000 panels.
+const WEB_PANEL_PID_STRIDE: i64 = 1000;
 
 /// Build the semi-wing wingbox deck: `build_wing_mesh_bdf`.
 ///
@@ -153,15 +158,17 @@ fn build_with_caps(
             mid2: mid,
         });
     }
-    for (index, spar) in sizing.spars.iter().enumerate().take(n_spars) {
-        deck.shell_properties.push(Pshell {
-            pid: PID_WEB_BASE + index as i64,
-            mid1: MID_WEB,
-            t: spar.t_web,
-            mid2: MID_WEB,
-        });
-    }
 
+    if !product_caps {
+        for (index, spar) in sizing.spars.iter().enumerate().take(n_spars) {
+            deck.shell_properties.push(Pshell {
+                pid: PID_WEB_BASE + index as i64,
+                mid1: MID_WEB,
+                t: spar.t_web.first().copied().unwrap_or(0.0),
+                mid2: MID_WEB,
+            });
+        }
+    }
     let mut nodes = NodeMap::new();
     for (rib, station) in stations.iter().enumerate() {
         for (point, xyz) in station.extrados.iter().enumerate() {
@@ -201,6 +208,28 @@ fn build_with_caps(
     }
     for (spar, (upper, lower)) in spar_upper.iter().zip(&spar_lower).enumerate() {
         for index in 0..upper.len().saturating_sub(1) {
+            let pid = if product_caps {
+                // One web property per panel: the gauge follows the span, read
+                // at the panel's mid-station like the cap bars.
+                let (a, b) = (deck.grid_xyz(upper[index]), deck.grid_xyz(upper[index + 1]));
+                let (Some(a), Some(b)) = (a, b) else {
+                    return Err(MeshError::InvalidCapGeometry {
+                        spar,
+                        segment: index,
+                    });
+                };
+                let eta = ((a[1] + b[1]) / (2.0 * wsg.semi_span)).clamp(0.0, 1.0);
+                let pid = PID_WEB_BASE + spar as i64 * WEB_PANEL_PID_STRIDE + index as i64;
+                deck.shell_properties.push(Pshell {
+                    pid,
+                    mid1: MID_WEB,
+                    t: station_value(eta, &sizing.eta_stations, &sizing.spars[spar].t_web),
+                    mid2: MID_WEB,
+                });
+                pid
+            } else {
+                PID_WEB_BASE + spar as i64
+            };
             elements::add_quad(
                 &mut deck,
                 &mut eid,
@@ -210,7 +239,7 @@ fn build_with_caps(
                     lower[index + 1],
                     lower[index],
                 ],
-                PID_WEB_BASE + spar as i64,
+                pid,
             );
         }
     }
@@ -266,6 +295,7 @@ fn build_with_caps(
         wsg.semi_span,
         sizing.num_ribs,
         eid,
+        product_caps,
     );
 
     let mut report = health::check_mesh_health(&deck, &stations, &regions, &spar_upper, wsg)?;
@@ -276,18 +306,22 @@ fn build_with_caps(
     report.n_elements = deck.element_count();
 
     let front_upper = spar_upper.first().cloned().unwrap_or_default();
+    let (Some(&root_nid), Some(&tip_nid)) = (front_upper.first(), front_upper.last()) else {
+        return Err(MeshError::EmptySparLine);
+    };
+    let kink_nid = front_upper
+        .iter()
+        .copied()
+        .min_by(|&a, &b| {
+            (deck.node_y(a) - wsg.y_break)
+                .abs()
+                .total_cmp(&(deck.node_y(b) - wsg.y_break).abs())
+        })
+        .unwrap_or(root_nid);
     let node_index = MeshNodeIndex {
-        root_nid: front_upper.first().copied().unwrap_or(0),
-        tip_nid: front_upper.last().copied().unwrap_or(0),
-        kink_nid: front_upper
-            .iter()
-            .copied()
-            .min_by(|&a, &b| {
-                (deck.node_y(a) - wsg.y_break)
-                    .abs()
-                    .total_cmp(&(deck.node_y(b) - wsg.y_break).abs())
-            })
-            .unwrap_or(0),
+        root_nid,
+        tip_nid,
+        kink_nid,
         spar_upper_nids: spar_upper,
         spar_lower_nids: spar_lower,
         engine_nids,

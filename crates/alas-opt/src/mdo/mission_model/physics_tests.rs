@@ -4,7 +4,6 @@
 //! Physical invariants and error bounds of the cruise-level, climb-revision
 //! and frozen-plan numerics on registered presets.
 
-use alas_atmo::Atmosphere;
 use alas_config::design_variables::DesignVector;
 use alas_config::mission::CruiseAltitudePolicy;
 use alas_config::AlasConfig;
@@ -43,7 +42,8 @@ fn preset_model_at(preset: &str, operational: bool) -> (SegmentMissionModel, Ala
         flown_altitude_m = declared;
     } else if preset != "ATR72-600" {
         let req = &config.requirements;
-        let tas = req.cruise_mach * Atmosphere::new(req.cruise_altitude_m).speed_of_sound();
+        let tas = req.cruise_mach
+            * alas_atmo::us1976_compute_values(req.cruise_altitude_m, 0.0).speed_of_sound_m_s;
         let p = &mut config.mission.profile;
         p.cruise_1_air_speed_m_s = tas;
         p.cruise_2_air_speed_m_s = tas;
@@ -56,7 +56,7 @@ fn preset_model_at(preset: &str, operational: bool) -> (SegmentMissionModel, Ala
         .unwrap_or_else(|failure| panic!("{preset} geometry: {}", failure.reason));
     let req = &config.requirements;
     let deck = PropulsionDeck::from_engine(
-        &config.geometry.engine,
+        &super::fixture_engine(&config.geometry.engine),
         req.cruise_mach,
         req.cruise_altitude_m,
         max_climb_rate_ft_min(config.mission.profile.initial_climb_rate_m_s),
@@ -82,6 +82,25 @@ fn preset_model_at(preset: &str, operational: bool) -> (SegmentMissionModel, Ala
     )
     .unwrap_or_else(|error| panic!("{preset} model: {error}"));
     (model, config)
+}
+
+/// The A320-200 fixture with its MMO/VMO gate removed.
+///
+/// The frozen-plan pins below were written when the A320 ladder flew 300 KCAS
+/// all the way to the 11,278 m design level (M 0.87 at FL350, 0.91 at FL370),
+/// where the climb ran out of thrust above about 62 t and a plan frozen at
+/// 50 t had to be re-frozen. With the type certificate MMO (0.82) holding the
+/// Mach number the same aircraft climbs to the design level at every mass up
+/// to MTOW (measured: no re-freeze between 60 and 78 t), which is the physical
+/// correction, not a regression. The re-freeze mechanism is a property of the
+/// frozen-plan code, so it is still exercised on the pre-gate schedule as a
+/// stress fixture; it is not a statement about the aircraft.
+fn without_operating_limits(mut model: SegmentMissionModel, preset: &str) -> SegmentMissionModel {
+    if preset == "A320-200" {
+        model.profile.max_operating_mach = 0.0;
+        model.profile.max_operating_cas_m_s = 0.0;
+    }
+    model
 }
 
 fn dispatch(
@@ -377,7 +396,7 @@ fn the_initial_level_is_the_highest_qualifying_altitude_and_never_rises_with_mas
         .unwrap_or_else(|failure| panic!("geometry: {}", failure.reason));
     let req = &config.requirements;
     let deck = PropulsionDeck::from_engine(
-        &config.geometry.engine,
+        &super::fixture_engine(&config.geometry.engine),
         req.cruise_mach,
         req.cruise_altitude_m,
         max_climb_rate_ft_min(config.mission.profile.initial_climb_rate_m_s),
@@ -468,12 +487,15 @@ fn an_unpaid_climb_acceleration_is_revised_on_the_rung_that_owns_it() {
 
 /// A frozen plan is a fixed function of mass, as the exact dispatch memo
 /// keyed by mass requires: an A320-200 plan frozen at 50 t that cannot climb
-/// to its level at 66 t flies that trip adapted and records the mass, and prices
+/// to its level at 92 t flies that trip adapted and records the mass, and prices
 /// the 50 t trip bit-identically before and after. (The plan re-frozen in
-/// place at 66 t priced the same 50 t trip 1.5 % higher afterwards.)
+/// place at the unflyable mass priced the same 50 t trip 1.5 % higher
+/// afterwards. The fixture engine is uprated by 25 %, see `fixture_engine`,
+/// which moved the unflyable mass from 66 t to 92 t.)
 #[test]
 fn a_frozen_plan_answers_a_mass_the_same_after_an_unflyable_trip() {
     let (model, _) = preset_model("A320-200");
+    let model = without_operating_limits(model, "A320-200");
     let range = 2_120.0 * NMI;
     let policy = model.profile.cruise_altitude_policy;
     let plan = model
@@ -486,9 +508,9 @@ fn a_frozen_plan_answers_a_mass_the_same_after_an_unflyable_trip() {
             .map(|flown| flown.leg.fuel_kg)
     };
     let before = trip(50_000.0).unwrap_or_else(|error| panic!("50 t: {error}"));
-    let heavy = trip(66_000.0).unwrap_or_else(|error| panic!("66 t: {error}"));
+    let heavy = trip(92_000.0).unwrap_or_else(|error| panic!("92 t: {error}"));
     assert!(heavy > before);
-    assert_eq!(frozen.refreeze_request_kg(), Some(66_000.0));
+    assert_eq!(frozen.refreeze_request_kg(), Some(92_000.0));
     let after = trip(50_000.0).unwrap_or_else(|error| panic!("50 t: {error}"));
     assert_eq!(before.to_bits(), after.to_bits());
     assert_eq!(frozen.frozen_plan(), Some(plan));
@@ -506,6 +528,7 @@ fn a_re_frozen_dispatch_replays_exactly_on_its_carried_plan() {
         ("ATR72-600", 16_000.0, 20_290.0, 758.0),
     ] {
         let (model, config) = preset_model(preset);
+        let model = without_operating_limits(model, preset);
         let range = range_nmi * NMI;
         let policy = model.profile.cruise_altitude_policy;
         let solve = |frozen: &SegmentMissionModel| dispatch(frozen, &config, zfw_kg, range);
@@ -534,4 +557,309 @@ fn a_re_frozen_dispatch_replays_exactly_on_its_carried_plan() {
             replay.takeoff_mass_kg
         );
     }
+}
+
+/// Probe of fix lane C1 (not an assertion): trip fuel and time of each
+/// registered preset on a representative sector with (a) the retired shared
+/// literal-TAS ladder, (b) the preset's CAS/Mach ladder without the ground
+/// roll, and (c) the full C1 model. The fixture polar is representative, not
+/// the preset's own, so the numbers size the change and are not references.
+/// Run with `--ignored --nocapture`.
+#[test]
+#[ignore = "probe: prints the before/after of the C1 speed ladders"]
+// A probe prints its numbers for the lane report; it asserts nothing.
+#[allow(clippy::print_stdout)]
+fn probe_c1_ladders() {
+    for (preset, mass_fraction, range_nmi) in [
+        ("A220-300", 1.0, 800.0),
+        ("A320-200", 1.0, 1_000.0),
+        ("A340-300", 1.0, 4_000.0),
+        ("A380-800", 1.0, 5_000.0),
+        ("B787-9", 1.0, 5_000.0),
+        ("B747-400", 1.0, 5_000.0),
+        ("C919", 1.0, 1_000.0),
+        ("E195-E2", 1.0, 800.0),
+        ("DC-10", 1.0, 4_000.0),
+        ("AVE", 1.0, 5_000.0),
+        ("ATR72-600", 1.0, 300.0),
+    ] {
+        let (model, config) = preset_model_at(preset, true);
+        let mass_kg = mass_fraction * config.requirements.mtow_kg;
+        let range_m = range_nmi * NMI;
+        let fly = |model: &SegmentMissionModel| {
+            model
+                .fly_trip(mass_kg, range_m)
+                .map(|flown| (flown.leg.fuel_kg, flown.leg.time_s / 3600.0))
+        };
+        let mut no_roll = model.clone();
+        no_roll.profile.takeoff_roll_time_s = 0.0;
+        let mut old = no_roll.clone();
+        let cruise = old.profile.cruise_1_air_speed_m_s;
+        old.profile = alas_config::mission::MissionProfileConfig {
+            cruise_1_air_speed_m_s: cruise,
+            cruise_2_air_speed_m_s: cruise,
+            cruise_3_air_speed_m_s: cruise,
+            takeoff_roll_time_s: 0.0,
+            ..alas_config::mission::MissionProfileConfig::default()
+        };
+        if matches!(preset, "A320-200" | "ATR72-600") {
+            old.profile = no_roll.profile.clone();
+            old.profile.max_operating_mach = 0.0;
+            old.profile.max_operating_cas_m_s = 0.0;
+        }
+        println!(
+            "C1 PROBE {preset:10} {range_nmi:6.0} nmi  old {:?}  ladder {:?}  full {:?}",
+            fly(&old),
+            fly(&no_roll),
+            fly(&model)
+        );
+    }
+}
+
+/// Probe (not an assertion): the lightest A320-200 mass at which a plan
+/// frozen at 50 t can no longer climb to its level and is re-frozen.
+#[test]
+#[ignore = "probe: finds the re-freeze threshold mass used by the frozen-plan pins"]
+// A probe prints its numbers for the lane report; it asserts nothing.
+#[allow(clippy::print_stdout)]
+fn probe_a320_refreeze_threshold() {
+    let (model, _) = preset_model("A320-200");
+    let range = 2_120.0 * NMI;
+    let policy = model.profile.cruise_altitude_policy;
+    let plan = model.freeze_plan(50_000.0, range, &policy).unwrap();
+    for mass_kg in (60..=100).step_by(4).map(|t| f64::from(t) * 1_000.0) {
+        let frozen = model.clone().with_frozen_plan(plan.clone());
+        let result = frozen.fly_trip(mass_kg, range).map(|f| f.leg.fuel_kg);
+        println!(
+            "C1 PROBE refreeze {mass_kg:8.0} kg -> {:?} request {:?}",
+            result,
+            frozen.refreeze_request_kg()
+        );
+    }
+}
+
+/// The take-off segment carries the take-off flap increment (gear up, the
+/// second-segment configuration) and the landing segment the landing flap
+/// plus gear increments of the per-phase configuration drag (lane A1 fields).
+#[test]
+fn the_phase_drag_increments_come_from_the_per_phase_configuration_drag() {
+    let mut config = AlasConfig::default();
+    config.performance.oei_climb_delta_cd = 0.015;
+    config.performance.landing_flap_delta_cd = 0.040;
+    config.performance.landing_gear_delta_cd = 0.020;
+    let limits = PhaseAeroLimits::from_config(&config);
+    assert_eq!(limits.high_lift_delta_cd, 0.015);
+    assert!((limits.landing_delta_cd - 0.060).abs() < 1.0e-15);
+}
+
+/// The top-of-climb rate the `toc_rate_of_climb` residual reports is the one
+/// the level search holds: judged at the speeds the plan flies at that level
+/// (the first cruise rung and the top climb rung, the lower of the two), not
+/// at the constant-Mach speed `M a(h)`. Below the configured level the rung is
+/// capped at `VC = VD / 1.25` in equivalent airspeed, so the plan is slower
+/// than `M a(h)` there and the constant-Mach rate understates what it flies
+/// (A220-300 over 251 nmi at FL250: 0.66 m/s at 241.6 m/s, 3.5 m/s at the
+/// 209 m/s the plan flies).
+#[test]
+fn the_top_of_climb_rate_is_judged_at_the_speeds_the_plan_flies() {
+    use super::cruise_levels::{CLIMB_MASS_FRACTION, RESIDUAL_CLIMB_M_S};
+    let (model, config) = preset_model("A320-200");
+    let geometry = model.geometry();
+    let range_m = 1_500.0 * NMI;
+    let mass_kg = 0.9 * config.requirements.mtow_kg;
+    let altitude_m = 7_620.0;
+    assert!(altitude_m < config.requirements.cruise_altitude_m - 1_000.0);
+    let plan = geometry
+        .plan_at(LegKind::Trip, range_m, altitude_m)
+        .expect("plan");
+    let cruise = plan.cruise_rungs[0].0;
+    let climb = plan.climb.last().expect("climb").tas_m_s;
+    let mach_tas = model
+        .cruise_true_airspeed_m_s(plan.cruise_altitude_m)
+        .expect("Mach speed");
+    assert!(
+        cruise < mach_tas - 5.0,
+        "the plan flies {cruise} m/s below the configured level, constant Mach {mach_tas} m/s"
+    );
+    let toc_kg = mass_kg * CLIMB_MASS_FRACTION;
+    let rate = |tas| {
+        model
+            .residual_climb_m_s(toc_kg, plan.cruise_altitude_m, tas)
+            .expect("residual")
+    };
+    let reported = model
+        .top_of_climb_rate_m_s(mass_kg, altitude_m, range_m, [1.0; 3])
+        .expect("rate");
+    assert_eq!(reported.to_bits(), rate(cruise).min(rate(climb)).to_bits());
+    assert!(
+        reported > rate(mach_tas) + 0.5,
+        "{reported} m/s at the plan speeds against {} m/s at constant Mach",
+        rate(mach_tas)
+    );
+    // The search's margin is this rate less the criterion.
+    let level_m =
+        model.initial_cruise_level_m(&geometry, LegKind::Trip, mass_kg, range_m, altitude_m);
+    assert!(
+        model
+            .top_of_climb_rate_m_s(mass_kg, level_m - 1.0, range_m, [1.0; 3])
+            .expect("rate at the level")
+            >= RESIDUAL_CLIMB_M_S
+    );
+}
+
+/// The warm-started climb revision is the full search's answer: a model
+/// flying a mass sweep up and down (its memory warm with the previous rung
+/// scales) prices every trip to the bit, and fails the same way, as a model
+/// that has never revised a rung. The B787-9 fixture at 319 t over 7,000 nmi
+/// revises its second climb rung (`an_unpaid_climb_acceleration_is_revised_on_the_rung_that_owns_it`).
+#[test]
+fn a_warm_started_climb_revision_prices_every_trip_as_a_cold_one_does() {
+    let (warm, _) = preset_model("B787-9");
+    let range = 7_000.0 * NMI;
+    let cold_trip = |mass_kg: f64| {
+        let mut cold = warm.clone();
+        cold.memory = super::adapt_memory::AdaptationMemory::default();
+        cold.fly_trip(mass_kg, range)
+            .map(|flown| {
+                (
+                    flown.leg.fuel_kg.to_bits(),
+                    flown.leg.time_s.to_bits(),
+                    flown.adapted,
+                )
+            })
+            .map_err(|error| error.to_string())
+    };
+    let masses: Vec<f64> = (0..=28)
+        .map(|step| 312_000.0 + 500.0 * f64::from(step))
+        .collect();
+    let mut checked = 0;
+    for order in [
+        masses.clone(),
+        masses.iter().rev().copied().collect::<Vec<_>>(),
+    ] {
+        for mass_kg in order {
+            let warm_trip = warm
+                .fly_trip(mass_kg, range)
+                .map(|flown| {
+                    (
+                        flown.leg.fuel_kg.to_bits(),
+                        flown.leg.time_s.to_bits(),
+                        flown.adapted,
+                    )
+                })
+                .map_err(|error| error.to_string());
+            assert_eq!(warm_trip, cold_trip(mass_kg), "{mass_kg} kg");
+            checked += 1;
+        }
+    }
+    assert_eq!(checked, 58);
+}
+
+/// A solve stopped at its re-freeze request (the answer would be discarded
+/// for the re-frozen plan) leaves the answer of the solve exactly as the
+/// unstopped algorithm gave it: every plan and result equals a reference run
+/// of freeze, solve, re-freeze at the first request, solve again. The model
+/// handed back flies an unflyable mass adapted, not stopped.
+#[test]
+fn stopping_a_solve_at_its_refreeze_request_leaves_the_answer_exact() {
+    for (preset, first_kg, zfw_kg, range_nmi) in [
+        ("A320-200", 50_000.0, 62_500.0, 2_120.0),
+        ("B787-9", 170_000.0, 400_000.0 * LB, 5_300.0),
+        ("ATR72-600", 16_000.0, 20_290.0, 758.0),
+    ] {
+        let (model, config) = preset_model(preset);
+        let model = without_operating_limits(model, preset);
+        let range = range_nmi * NMI;
+        let policy = model.profile.cruise_altitude_policy;
+        let solve = |frozen: &SegmentMissionModel| dispatch(frozen, &config, zfw_kg, range);
+        let (carried, closure) = model
+            .solve_on_frozen_plans(first_kg, range, &policy, solve)
+            .unwrap_or_else(|error| panic!("{preset}: {error}"));
+        let plan = model
+            .freeze_plan(first_kg, range, &policy)
+            .unwrap_or_else(|error| panic!("{preset}: {error}"));
+        let mut reference = model.clone().with_frozen_plan(plan);
+        let mut reference_closure = solve(&reference);
+        for _ in 0..frozen_plan::MAX_REFREEZES {
+            let Some(mass_kg) = reference.refreeze_request_kg() else {
+                break;
+            };
+            let Ok(plan) = model.freeze_plan(mass_kg, range, &policy) else {
+                break;
+            };
+            reference = model.clone().with_frozen_plan(plan);
+            reference_closure = solve(&reference);
+        }
+        assert_eq!(closure, reference_closure, "{preset}");
+        assert_eq!(carried.frozen_plan(), reference.frozen_plan(), "{preset}");
+        // Disarmed: a trip the carried plan cannot fly is flown adapted.
+        let heavy_kg = 3.0 * closure.takeoff_mass_kg;
+        let _ = carried.fly_trip(heavy_kg, range);
+        let adapted = carried
+            .fly_trip(closure.takeoff_mass_kg * 1.01, range)
+            .map(|flown| flown.leg.fuel_kg);
+        assert!(
+            !matches!(adapted, Err(FuelModelError::Cancelled)),
+            "{preset}: the returned model is still armed"
+        );
+    }
+}
+
+/// Where no plan can be made at the takeoff-mass ceiling the solve is run on
+/// a plan made at a lighter mass, starting its dispatch there; where one can,
+/// the answer is that of `solve_on_frozen_plans` to the bit.
+#[test]
+fn a_ceiling_no_plan_can_be_made_at_is_planned_at_a_lighter_mass() {
+    let (model, config) = preset_model("A320-200");
+    let model = without_operating_limits(model, "A320-200");
+    let range = 2_120.0 * NMI;
+    let policy = model.profile.cruise_altitude_policy;
+    let zfw_kg = 62_500.0;
+    let ceiling_kg = 130_000.0;
+    assert!(model.freeze_plan(ceiling_kg, range, &policy).is_err());
+    let started_at = std::cell::Cell::new(f64::NAN);
+    let (carried, closure, planned_at_kg) = model
+        .solve_on_descending_plans(ceiling_kg, zfw_kg, range, &policy, |frozen, start_kg| {
+            started_at.set(start_kg);
+            dispatch(frozen, &config, zfw_kg, range)
+        })
+        .unwrap_or_else(|error| panic!("no lighter plan: {error}"));
+    assert!(planned_at_kg < ceiling_kg && planned_at_kg > zfw_kg);
+    assert_eq!(started_at.get().to_bits(), planned_at_kg.to_bits());
+    assert!(matches!(closure.status, DispatchStatus::Converged));
+    assert!(carried.frozen_plan().is_some());
+
+    let solve = |frozen: &SegmentMissionModel| dispatch(frozen, &config, zfw_kg, range);
+    let (direct, direct_closure) = model
+        .solve_on_frozen_plans(50_000.0, range, &policy, solve)
+        .unwrap_or_else(|error| panic!("direct: {error}"));
+    let (planned, planned_closure, at_kg) = model
+        .solve_on_descending_plans(50_000.0, zfw_kg, range, &policy, |frozen, _| solve(frozen))
+        .unwrap_or_else(|error| panic!("descending: {error}"));
+    assert_eq!(at_kg.to_bits(), 50_000.0_f64.to_bits());
+    assert_eq!(planned_closure, direct_closure);
+    assert_eq!(planned.frozen_plan(), direct.frozen_plan());
+}
+
+/// A route ladder's first level is held to the planner's flyability rule: the
+/// heavy B747-400 starts lower (and the dispatch then closes on the route),
+/// the light one keeps the level the ladder configured, and a canonical
+/// profile (no ladder) is never touched.
+#[test]
+fn a_route_ladders_first_level_starts_lower_when_heavy() {
+    let (mut model, config) = preset_model("B747-400");
+    let range = 3_000.0 * NMI;
+    let cruise_m = config.requirements.cruise_altitude_m;
+    let canonical = model.clone();
+    alas_mission::configure_cruise_legs(&mut model.profile, 2, cruise_m, 0.0);
+    let fraction = |model: &SegmentMissionModel, mass_kg: f64| {
+        let geometry = model.geometry();
+        model.limited_initial_fraction(&geometry, LegKind::Trip, mass_kg, range, cruise_m)
+    };
+    let heavy = fraction(&model, 396_000.0).expect("the heavy aircraft starts lower");
+    assert!(heavy < model.profile.initial_climb_altitude_fraction);
+    assert!(fraction(&model, 250_000.0).is_none_or(|f| f > heavy));
+    assert_eq!(fraction(&canonical, 396_000.0), None);
+    let flown = model.fly_trip(396_000.0, range);
+    assert!(flown.is_ok(), "{flown:?}");
 }

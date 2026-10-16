@@ -3,6 +3,7 @@
 
 //! Layout-derived aircraft metrics shown above the result figures.
 
+mod cruise_levels;
 #[cfg(test)]
 mod layout_export;
 mod metrics;
@@ -16,6 +17,7 @@ use egui::Ui;
 use crate::state::AppState;
 
 use super::external::show_tool_status_cards;
+use cruise_levels::{cruise_level_rows, cruise_level_summary, localize_thrust_message};
 use metrics::*;
 use propulsion::*;
 use widgets::*;
@@ -62,7 +64,7 @@ pub(super) fn objective_value_text(
         history
             .design_vectors
             .iter()
-            .rposition(|design| *design == optimization.best_design)
+            .rposition(|design| *design == Some(optimization.best_design))
             .and_then(|row| history.objective_value.get(row).copied())
     } else {
         Some(optimization.best_cost)
@@ -106,6 +108,17 @@ pub(super) fn show_summary(state: &AppState, ui: &mut Ui, result: &alas_pipeline
 
     section_title(ui, "Mission");
     show_stat_tiles(ui, &mission_metrics(result));
+    if let Some(summary) = cruise_level_summary(result) {
+        section_title(ui, "Cruise levels and thrust");
+        show_stat_tiles(ui, &cruise_level_rows(&summary));
+        if let Some(note) = &summary.shortfall_note {
+            ui.label(
+                egui::RichText::new(localize_thrust_message(note))
+                    .small()
+                    .weak(),
+            );
+        }
+    }
 
     section_title(ui, "Mass and balance");
     show_stat_tiles(ui, &mass_metrics(result));
@@ -115,7 +128,11 @@ pub(super) fn show_summary(state: &AppState, ui: &mut Ui, result: &alas_pipeline
 
     if let Some(layout) = result_payload_layout(result) {
         section_title(ui, "Payload and cabin");
-        show_stat_tiles(ui, &payload_summary_metrics(layout));
+        let mut metrics = payload_summary_metrics(layout);
+        if result.config.cabin.cargo.freight_hold.is_some() {
+            metrics = freight_hold_labels(metrics);
+        }
+        show_stat_tiles(ui, &metrics);
     }
 
     section_title(ui, "Propulsion cycle details");

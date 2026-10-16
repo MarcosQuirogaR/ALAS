@@ -1,0 +1,134 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://alas.uvigo.es/schemas/alas.loft.v1.schema.json",
+  "title": "ALAS lofted body, schema v1",
+  "description": "crates/alas-config/data/lofts/<preset_id>.json. Constraints beyond the structure: n >= 2 (curvature diverges below 2); a point closure needs A = E = 0, n = 2, k = 0 at the end, A and E rising into the body with tip_radius_m equal to the mean of A (prime)/2 and E (prime)/2; interior knot multiplicity <= degree - 2; end multiplicity = degree + 1. Five clamped B-spline curves of u = x / reference_length_m on [0, 1]: A = a^2 (m^2), E = e^2 (m^2), zc (m), n (-), k (-). Section: y = a*eta, z = zc + e*(zeta + k*(1 - zeta^2)), |eta|^n + |zeta|^n = 1. Frame: x aft of the nose tip, y right, z up, metres. Minor 1.1 (additive, schema stays 1): optional residual block = up to four clamped B-splines b_j(u) of the body degree; the upper arc (zeta > 0) becomes y = a*eta*(1 + R(zeta)), R = sum_j b_j B_{j+3,6}(zeta) (Bernstein degree 6, first three coefficients pinned to zero so R = R' = R'' = 0 at the widest point); z, crown, keel, plan and side silhouettes are unchanged; the evaluator refuses sections that are not convex or whose arc exceeds the shoulder width. Files without it are unchanged. The Rust validation (alas-config LoftSpec::validate) is authoritative for ranges and continuity.",
+  "type": "object",
+  "required": ["schema", "preset", "reference_length_m", "degree", "curves", "front", "rear", "cabin", "fairness"],
+  "additionalProperties": false,
+  "properties": {
+    "schema": {"const": 1},
+    "preset": {"type": "string"},
+    "body": {"type": "string", "default": "fuselage"},
+    "reference_length_m": {"type": "number", "exclusiveMinimum": 0},
+    "degree": {"enum": [3, 5]},
+    "frame": {"type": "string"},
+    "curves": {
+      "type": "object",
+      "required": ["A", "E", "zc", "n", "k"],
+      "additionalProperties": false,
+      "properties": {
+        "A": {"$ref": "#/$defs/spline"},
+        "E": {"$ref": "#/$defs/spline"},
+        "zc": {"$ref": "#/$defs/spline"},
+        "n": {"$ref": "#/$defs/spline"},
+        "k": {"$ref": "#/$defs/spline"}
+      }
+    },
+    "front": {"$ref": "#/$defs/closure"},
+    "rear": {"$ref": "#/$defs/closure"},
+    "cabin": {
+      "type": "object",
+      "required": ["x_start_m", "x_end_m"],
+      "additionalProperties": false,
+      "properties": {
+        "x_start_m": {"type": "number", "minimum": 0},
+        "x_end_m": {"type": "number", "minimum": 0}
+      }
+    },
+    "fairness": {
+      "type": "object",
+      "required": ["inflections", "tv_ratio_max"],
+      "additionalProperties": false,
+      "properties": {
+        "inflections": {
+          "type": "object",
+          "required": ["crown", "keel", "plan"],
+          "additionalProperties": false,
+          "properties": {
+            "crown": {"type": "integer", "minimum": 0},
+            "keel": {"type": "integer", "minimum": 0},
+            "plan": {"type": "integer", "minimum": 0}
+          }
+        },
+        "tv_ratio_max": {"type": "number", "minimum": 1}
+      }
+    },
+    "fit": {
+      "type": "object",
+      "properties": {
+        "rms_m": {"type": "number"},
+        "max_m": {"type": "number"},
+        "lambda": {"type": "number"},
+        "tool_version": {"type": "string"}
+      }
+    },
+    "residual": {
+      "type": "object",
+      "description": "Optional upper-arc cross-section residual (schema 1.1, additive). terms[j] is the coefficient curve b_j(u); at most four; abs(b) <= 5 and 1 + R >= 0.05; each a clamped B-spline of the body degree on [0, 1] (zero outside the region where the section needs the correction).",
+      "required": ["terms"],
+      "additionalProperties": false,
+      "properties": {
+        "terms": {"type": "array", "minItems": 1, "maxItems": 4, "items": {"$ref": "#/$defs/spline"}}
+      }
+    },
+    "provenance": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["group"],
+        "properties": {
+          "group": {"type": "string"},
+          "kind": {"enum": ["measured", "dimension", "template"]},
+          "drawing": {
+            "type": "object",
+            "properties": {
+              "id": {"type": "string"},
+              "title": {"type": "string"},
+              "page": {"type": ["string", "integer"], "description": "page, figure or section of the document; an integer is read as its decimal text, 0 as none"},
+              "sha256": {"type": "string"},
+              "path": {"type": "string"}
+            }
+          },
+          "view": {"type": "string"},
+          "px_per_m": {"type": "number"},
+          "n_samples": {"type": "integer", "minimum": 0},
+          "rms_m": {"type": "number"},
+          "max_m": {"type": "number"},
+          "confidence": {"enum": ["A", "B", "C"]},
+          "note": {"type": "string"}
+        }
+      }
+    }
+  },
+  "$defs": {
+    "spline": {
+      "type": "object",
+      "required": ["knots", "coeffs"],
+      "additionalProperties": false,
+      "properties": {
+        "knots": {"type": "array", "items": {"type": "number", "minimum": 0, "maximum": 1}, "minItems": 8},
+        "coeffs": {"type": "array", "items": {"type": "number"}, "minItems": 4, "maxItems": 200}
+      }
+    },
+    "closure": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["kind", "tip_radius_m"],
+          "additionalProperties": false,
+          "properties": {
+            "kind": {"const": "point"},
+            "tip_radius_m": {"type": "number", "exclusiveMinimum": 0}
+          }
+        },
+        {
+          "type": "object",
+          "required": ["kind"],
+          "additionalProperties": false,
+          "properties": {"kind": {"const": "base"}}
+        }
+      ]
+    }
+  }
+}

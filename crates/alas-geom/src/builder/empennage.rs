@@ -8,6 +8,7 @@
 use alas_config::DesignVector;
 
 use super::fin_root::{FinSeat, FinTrapezoid};
+use super::tail_planform::hstab_planform;
 use super::{mesh, tail_attachment, AircraftBuilder, BuildError, GeometryContract};
 use crate::aircraft::airfoil::Airfoil;
 use crate::aircraft::wing::{Wing, WingXSec};
@@ -23,22 +24,18 @@ impl AircraftBuilder {
         let g = &self.geometry.empennage;
         let ts = dv.tail_scale;
         let [x_hstab, _, z_hstab] = tail_attachment::root(g, dv, self.geometry_contract);
-        let (tip_x, tip_y, tip_z) = g.hstab_tip_le_m;
-
+        let planform = hstab_planform(g, ts)?;
         let wing = Wing::new(
             "Horizontal Stabilizer",
             vec![
                 WingXSec::new(
                     [0.0, 0.0, 0.0],
-                    g.hstab_root_chord_m * ts,
-                    g.hstab_root_twist_deg,
+                    planform.root_chord_m,
+                    planform.root_twist_deg,
                     tail_airfoil.clone(),
                 ),
-                // Only the in-plane (x, y) tip offset scales with the tail
-                // scale; the vertical placement does not: `tip_le[2]`
-                // reproduced unscaled from the Python source.
                 WingXSec::new(
-                    [tip_x * ts, tip_y * ts, tip_z],
+                    planform.tip_le_m,
                     g.hstab_tip_chord_m * ts,
                     g.hstab_tip_twist_deg,
                     tail_airfoil.clone(),
@@ -46,7 +43,11 @@ impl AircraftBuilder {
             ],
             true,
         );
-        let wing = wing.translate([x_hstab, 0.0, z_hstab]);
+        let wing = wing.translate([
+            x_hstab + planform.root_shift_m[0],
+            0.0,
+            z_hstab + planform.root_shift_m[2],
+        ]);
         if !meshed {
             return Ok(wing);
         }
@@ -73,7 +74,7 @@ impl AircraftBuilder {
     ) -> Result<Wing, BuildError> {
         let g = &self.geometry.empennage;
         let ts = dv.tail_scale * g.vstab_scale_ratio;
-        let x_vstab = (dv.fuselage_length_m - g.vstab_offset_from_tail_m) + dv.tail_x_shift_m;
+        let x_vstab = tail_attachment::vstab_x(g, dv);
         let (tip_x, tip_y, tip_z) = g.vstab_tip_le_m;
         // Only the in-plane (x, z) tip offset scales with the tail scale;
         // the spanwise placement does not: `tip_le[1]` reproduced unscaled
@@ -139,7 +140,7 @@ impl AircraftBuilder {
     /// [`BuildError::UnresolvedAirfoil`] when the tail airfoil is unknown.
     pub fn build_empennage(&self, dv: &DesignVector) -> Result<(Wing, Wing), BuildError> {
         let tail_airfoil = Self::resolve(&self.geometry.empennage.tail_airfoil)?;
-        let fuselage = self.build_fuselage(dv)?;
+        let fuselage = self.build_fuselage_reported(dv, &mut super::BuildReport::default())?;
         let seat = self.fin_seat(dv, &fuselage)?;
         Ok((
             self.build_hstab(dv, &tail_airfoil, false)?,

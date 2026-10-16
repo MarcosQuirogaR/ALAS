@@ -3,40 +3,30 @@
 
 //! Workflow navigation and execution controls for the fixed-wing UAV page.
 
-use alas_uav::{TopologyAvailability, UavAnalysisPath, UavTopology};
-use egui::{Button, Color32, RichText, Ui};
+use egui::{Button, RichText, Ui};
 
 use crate::theme::{card_frame, selectable_button, success_color};
-use crate::uav::{
-    ComponentRole, MissionPlanMode, PropulsionInputMode, UavExecutionStatus, UavSection,
-    UavWorkflowOutcome, UavWorkflowState,
-};
+use crate::uav::{UavExecutionStatus, UavSection, UavWorkflowState};
 
 use super::super::{tr, tr_fields};
-use super::presentation::card_column_count;
 
 /// Smallest width for one workflow-tab button.
 const MIN_WORKFLOW_TAB_WIDTH: f32 = 156.0;
 /// Capping the row at three tabs keeps labels easy to scan at wide sizes.
 const MAX_WORKFLOW_TAB_COLUMNS: usize = 3;
 
-/// The fixed-wing UAV page is visible for product discovery but remains gated
-/// until its catalogue and engineering inputs are release-ready.
-pub(super) const UAV_RELEASE_BLOCKED: bool = true;
-
-/// Make the release gate explicit before any editable or executable workflow
-/// control is shown.
-pub(super) fn release_blocker(ui: &mut Ui) {
+/// Persistent notice above every UAV page state: the outputs are preliminary
+/// and no measured flight data supports them yet.
+pub(super) fn preliminary_banner(ui: &mut Ui) {
     card_frame(ui).show(ui, |ui| {
         ui.set_min_width(ui.available_width());
-        ui.heading(tr("Fixed-Wing UAV")).on_hover_text(tr(
-            "The fixed-wing UAV module is unavailable in the release app while its engineering and catalogue inputs are completed.",
-        ));
         ui.colored_label(
             ui.visuals().warn_fg_color,
-            RichText::new(tr("Work in progress")).strong(),
+            RichText::new(tr(
+                "Preliminary: not validated against measured flight data",
+            ))
+            .strong(),
         );
-        ui.label(RichText::new(tr("UAV workflow is blocked for this release.")).strong());
     });
 }
 
@@ -131,42 +121,20 @@ fn section_status(state: &UavWorkflowState, section: UavSection) -> WorkflowStat
                 objectives.payload_dimensions.length_m,
                 objectives.payload_dimensions.width_m,
                 objectives.payload_dimensions.height_m,
+                state.competition.announced_takeoff_m,
             ]
             .into_iter()
             .all(positive_finite)
-                && (state.mission_plan_mode == MissionPlanMode::Standard
-                    || !state.mission_phases.is_empty())
+                && state.evaluations >= 4
         }
-        UavSection::Hardware => state.selected_evidence_gaps().is_empty(),
-        UavSection::Propulsion => match state.propulsion_input_mode {
-            PropulsionInputMode::Automatic => {
-                state.propulsion_motor_count > 0
-                    && [
-                        ComponentRole::Battery,
-                        ComponentRole::Motor,
-                        ComponentRole::Esc,
-                        ComponentRole::Propeller,
-                    ]
-                    .into_iter()
-                    .all(|role| state.selected_record(role).is_some())
-            }
-            PropulsionInputMode::AdvancedManual => {
-                state.propulsion_motor_count > 0 && !state.propulsion_evidence.trim().is_empty()
-            }
-        },
-        UavSection::Airframe => matches!(
-            state
-                .topology
-                .availability(UavAnalysisPath::PreliminaryOptimization),
-            TopologyAvailability::Available
-        ),
-        UavSection::Verification => {
-            !state.shared_core_inputs.main_airfoil_name.trim().is_empty()
-                && !state.shared_core_inputs.tail_airfoil_name.trim().is_empty()
-        }
+        UavSection::Airframe => true,
         UavSection::Results => match &state.outcome {
-            UavWorkflowOutcome::NotRun => return WorkflowStatus::Pending,
-            outcome => outcome_is_verified(outcome),
+            crate::uav::UavWorkflowOutcome::NotRun => return WorkflowStatus::Pending,
+            crate::uav::UavWorkflowOutcome::Competition(result) => result
+                .optimum
+                .best
+                .as_ref()
+                .is_some_and(|best| best.evaluation.feasible),
         },
     };
     if complete {
@@ -180,57 +148,11 @@ fn positive_finite(value: f64) -> bool {
     value.is_finite() && value > 0.0
 }
 
-/// Select a design convention while keeping unsupported engineering claims explicit.
-pub(super) fn topology_selector(state: &mut UavWorkflowState, ui: &mut Ui) {
-    card_frame(ui).show(ui, |ui| {
-        ui.set_min_width(ui.available_width());
-        ui.label(RichText::new(tr("Design convention")).strong())
-            .on_hover_text(tr(
-                "Choose the airframe arrangement first. A selectable convention is not automatically a supported mass or control model.",
-            ));
-        ui.add_space(4.0);
-        let columns = card_column_count(ui.available_width()).min(UavTopology::ALL.len());
-        for row in UavTopology::ALL.chunks(columns) {
-            ui.columns(columns, |columns| {
-                for (index, topology) in row.iter().enumerate() {
-                    let response = columns[index].add_sized(
-                        [columns[index].available_width(), 30.0],
-                        selectable_button(tr(topology.label()), state.topology == *topology),
-                    );
-                    let clicked = response.clicked();
-                    response.on_hover_text(tr(topology.description()));
-                    if clicked {
-                        state.topology = *topology;
-                    }
-                }
-            });
-            ui.add_space(4.0);
-        }
-        match state
-            .topology
-            .availability(UavAnalysisPath::PreliminaryOptimization)
-        {
-            TopologyAvailability::Available => ui.colored_label(
-                success_color(ui.visuals()),
-                tr("Preliminary sizing is available for this design convention."),
-            ),
-            TopologyAvailability::Unavailable(reason) => ui.colored_label(
-                Color32::from_rgb(220, 150, 70),
-                tr_fields(
-                    "Preliminary sizing unavailable: {reason}",
-                    &[("reason", tr(reason.description()))],
-                ),
-            ),
-        };
-    });
-}
-
 /// Render the start/cancel action in an independent, consistently bounded bar.
 pub(super) fn action_bar(state: &mut UavWorkflowState, ui: &mut Ui) {
     card_frame(ui).show(ui, |ui| {
         ui.set_min_width(ui.available_width());
-        let running = state.is_running();
-        if running {
+        if state.is_running() {
             ui.horizontal(|ui| {
                 ui.spinner();
                 if ui.button(tr("Cancel UAV search")).clicked() {
@@ -239,29 +161,11 @@ pub(super) fn action_bar(state: &mut UavWorkflowState, ui: &mut Ui) {
             });
             return;
         }
-
-        let unavailable_reason = match state
-            .topology
-            .availability(UavAnalysisPath::PreliminaryOptimization)
-        {
-            TopologyAvailability::Available => None,
-            TopologyAvailability::Unavailable(reason) => Some(reason),
-        };
-        let response = ui.add_enabled(
-            unavailable_reason.is_none(),
-            Button::new(RichText::new(tr("Generate and verify UAV")).strong()),
-        );
+        let response = ui.add(Button::new(
+            RichText::new(tr("Run competition search")).strong(),
+        ));
         if response.clicked() {
             state.start();
-        }
-        if let Some(reason) = unavailable_reason {
-            ui.colored_label(
-                ui.visuals().warn_fg_color,
-                tr_fields(
-                    "Choose a supported convention before starting preliminary sizing: {reason}",
-                    &[("reason", tr(reason.description()))],
-                ),
-            );
         }
     });
 }
@@ -274,80 +178,56 @@ pub(super) fn execution_status(state: &UavWorkflowState, ui: &mut Ui) {
     card_frame(ui).show(ui, |ui| {
         ui.set_min_width(ui.available_width());
         match &state.execution {
-        UavExecutionStatus::Idle => {}
-        UavExecutionStatus::Running(progress) | UavExecutionStatus::CancelRequested(progress) => {
-            let fraction = if progress.total_candidates == 0 {
-                0.0
-            } else {
-                progress.evaluated_candidates as f32 / progress.total_candidates as f32
-            };
-            let text = tr_fields(
-                "Evaluated {done} of {total} candidates; {verified} verified.",
-                &[
-                    ("done", progress.evaluated_candidates.to_string()),
-                    ("total", progress.total_candidates.to_string()),
-                    ("verified", progress.verified_candidates.to_string()),
-                ],
-            );
-            ui.add(egui::ProgressBar::new(fraction).text(text));
-            if matches!(state.execution, UavExecutionStatus::CancelRequested(_)) {
-                ui.weak(tr("Cancellation requested; finishing the current candidate."));
-            }
-        }
-        UavExecutionStatus::Completed => {
-            if !outcome_is_verified(&state.outcome) {
-                ui.colored_label(
-                    ui.visuals().warn_fg_color,
-                    tr("UAV search completed without a verified production result."),
+            UavExecutionStatus::Idle => {}
+            UavExecutionStatus::Running(progress)
+            | UavExecutionStatus::CancelRequested(progress) => {
+                let fraction = if progress.total_candidates == 0 {
+                    0.0
+                } else {
+                    progress.evaluated_candidates as f32 / progress.total_candidates as f32
+                };
+                let text = tr_fields(
+                    "Evaluated {done} of {total} candidates; {verified} feasible.",
+                    &[
+                        ("done", progress.evaluated_candidates.to_string()),
+                        ("total", progress.total_candidates.to_string()),
+                        ("verified", progress.verified_candidates.to_string()),
+                    ],
                 );
-            } else {
+                ui.add(egui::ProgressBar::new(fraction).text(text));
+                if let Some(score) = progress.best_score {
+                    ui.weak(tr_fields(
+                        "Best feasible score so far: {score} points",
+                        &[("score", format!("{score:.1}"))],
+                    ));
+                }
+                if matches!(state.execution, UavExecutionStatus::CancelRequested(_)) {
+                    ui.weak(tr("Cancellation requested; finishing the current candidate."));
+                }
+            }
+            UavExecutionStatus::Completed => {
                 ui.colored_label(success_color(ui.visuals()), tr("UAV search completed."));
             }
-        }
-        UavExecutionStatus::Cancelled {
-            evaluated_candidates,
-        } => {
-            ui.colored_label(
-                ui.visuals().warn_fg_color,
-                tr_fields(
-                    "UAV search cancelled after {count} candidates; the last completed result is retained.",
-                    &[("count", evaluated_candidates.to_string())],
-                ),
-            );
-        }
+            UavExecutionStatus::Cancelled {
+                evaluated_candidates,
+            } => {
+                ui.colored_label(
+                    ui.visuals().warn_fg_color,
+                    tr_fields(
+                        "UAV search cancelled after {count} candidates; the last completed result is retained.",
+                        &[("count", evaluated_candidates.to_string())],
+                    ),
+                );
+            }
             UavExecutionStatus::Failed(message) => {
-            ui.colored_label(
-                ui.visuals().error_fg_color,
-                tr_fields(
-                    "UAV search failed: {error}",
-                    &[("error", translated_worker_error(message))],
-                ),
-            );
-            ui.weak(tr("The last completed UAV result is retained."));
+                ui.colored_label(
+                    ui.visuals().error_fg_color,
+                    tr_fields("UAV search failed: {error}", &[("error", message.clone())]),
+                );
+                ui.weak(tr("The last completed UAV result is retained."));
             }
         }
     });
-}
-
-fn translated_worker_error(message: &str) -> String {
-    if let Some(error) = message.strip_prefix("Could not start the UAV optimization worker: ") {
-        return tr_fields(
-            "Could not start the UAV optimization worker: {error}",
-            &[("error", error.to_owned())],
-        );
-    }
-    tr(message)
-}
-
-/// Whether the latest result passed the independent production-core check.
-pub(super) fn outcome_is_verified(outcome: &UavWorkflowOutcome) -> bool {
-    matches!(
-        outcome,
-        UavWorkflowOutcome::PreliminaryFeasible {
-            shared_core: Ok(verification),
-            ..
-        } if verification.lift_verdict == alas_uav::SharedCoreLiftVerdict::Passed
-    )
 }
 
 #[cfg(test)]
