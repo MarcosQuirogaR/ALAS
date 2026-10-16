@@ -9,6 +9,7 @@
 use std::fmt::{self, Write};
 use std::sync::OnceLock;
 
+use alas_pipeline::earth_texture::earth_texture_png;
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 
 use crate::scene::{
@@ -22,7 +23,7 @@ use crate::scene::{
 /// fallback keeps exported SVG text readable when it is opened elsewhere.
 const SVG_FONT_FAMILY: &str = "'Noto Sans', 'Noto Sans Math', sans-serif";
 
-/// Source identifier of the bundled NASA Blue Marble texture.
+/// Source identifier of the optional Earth texture (see `alas_pipeline::earth_texture`).
 const BLUE_MARBLE_SOURCE: &str = "embedded://nasa-blue-marble";
 
 /// Render a complete [`Scene`] to a standalone XML SVG string.
@@ -333,6 +334,10 @@ fn write_image(
     [x, y, width, height]: [f64; 4],
     source_rect: Option<[f64; 4]>,
 ) -> fmt::Result {
+    if source == BLUE_MARBLE_SOURCE && earth_texture_png().is_none() {
+        // No Earth texture configured (ALAS_EARTH_TEXTURE): the plain background stays.
+        return Ok(());
+    }
     if let Some([left, top, crop_width, crop_height]) = source_rect {
         let left = left.clamp(0.0, 1.0);
         let top = top.clamp(0.0, 1.0);
@@ -360,7 +365,9 @@ fn write_image(
         // from the same two-decimal box the inline `<image>` form printed.
         let round = |v: f64| (v * 100.0).round() / 100.0;
         let (x, y, width, height) = (round(x), round(y), round(width), round(height));
-        let (tex_w, tex_h) = blue_marble_size();
+        let Some((tex_w, tex_h)) = blue_marble_size() else {
+            return Ok(());
+        };
         let (tex_w, tex_h) = (f64::from(tex_w), f64::from(tex_h));
         let scale = (width / tex_w).min(height / tex_h);
         let tx = x + (width - tex_w * scale) * 0.5;
@@ -385,9 +392,12 @@ fn write_image(
 /// texture several times carries the roughly 9 MB data URI once instead of
 /// once per reference; the rendered pixels do not change.
 fn write_blue_marble_defs(out: &mut String) -> fmt::Result {
-    let (width, height) = blue_marble_size();
+    let (Some((width, height)), Some(uri)) = (blue_marble_size(), blue_marble_data_uri()) else {
+        // No Earth texture configured: references are skipped, so no defs are needed.
+        return Ok(());
+    };
     out.push_str(r#"  <defs><image id="alas-blue-marble" href=""#);
-    out.push_str(blue_marble_data_uri());
+    out.push_str(uri);
     writeln!(out, r#"" width="{width}" height="{height}"/>"#)?;
     writeln!(
         out,
@@ -397,31 +407,30 @@ fn write_blue_marble_defs(out: &mut String) -> fmt::Result {
     Ok(())
 }
 
-const BLUE_MARBLE_PNG: &[u8] = include_bytes!("../../../assets/textures/earth_blue_marble.png");
-
 /// Pixel size from the PNG IHDR chunk (big-endian width and height at byte
-/// offsets 16 and 20).
-fn blue_marble_size() -> (u32, u32) {
+/// offsets 16 and 20). `None` when no Earth texture is configured.
+fn blue_marble_size() -> Option<(u32, u32)> {
+    let png = earth_texture_png()?;
     let field = |at: usize| {
-        BLUE_MARBLE_PNG
-            .get(at..at + 4)
+        png.get(at..at + 4)
             .and_then(|bytes| <[u8; 4]>::try_from(bytes).ok())
             .map_or(1, u32::from_be_bytes)
     };
-    (field(16), field(20))
+    Some((field(16), field(20)))
 }
 
-/// The bundled texture as a PNG data URI, encoded once per process: the PNG
-/// is about 7 MB, and a route figure references it from more than one
-/// element.
-fn blue_marble_data_uri() -> &'static str {
-    static URI: OnceLock<String> = OnceLock::new();
+/// The configured Earth texture as a PNG data URI, encoded once per process:
+/// the PNG can be several MB, and a route figure references it from more than
+/// one element. `None` when no Earth texture is configured.
+fn blue_marble_data_uri() -> Option<&'static str> {
+    static URI: OnceLock<Option<String>> = OnceLock::new();
     URI.get_or_init(|| {
-        let bytes = BLUE_MARBLE_PNG;
+        let bytes = earth_texture_png()?;
         let mut uri = String::from("data:image/png;base64,");
         BASE64.encode_string(bytes, &mut uri);
-        uri
+        Some(uri)
     })
+    .as_deref()
 }
 
 /// Append `s` with the five XML special characters replaced by entities, so
@@ -533,8 +542,11 @@ mod tests {
     }
 
     #[test]
-    fn the_bundled_texture_is_embedded_as_a_base64_png_data_uri() {
+    fn the_configured_texture_is_embedded_as_a_base64_png_data_uri() {
         use base64::Engine as _;
+        let Some(expected_png) = earth_texture_png() else {
+            return;
+        };
         let mut scene = Scene::new(200.0, 100.0, None);
         scene.add(SceneElement::Image {
             source: BLUE_MARBLE_SOURCE.to_owned(),
@@ -550,7 +562,7 @@ mod tests {
         let png = BASE64.decode(&svg[start..end]).unwrap();
         assert_eq!(
             png,
-            include_bytes!("../../../assets/textures/earth_blue_marble.png")
+            expected_png
         );
     }
 

@@ -65,7 +65,7 @@ fn local_route_rows(state: &mut AppState, ui: &mut Ui) {
     sub_heading(ui, "Local route data").on_hover_text(format!(
         "{}\n\n{}",
         tr("Navigation data and imported route files are kept in locations you choose. They are saved per user and never copied beside the application executable."),
-        tr("The NASA Blue Marble route texture is bundled inside ALAS as a compressed PNG; it has no user path to configure."),
+        tr("The Earth texture is optional: set ALAS_EARTH_TEXTURE to a local equirectangular PNG, for example a copy of the NASA Blue Marble. Without it, route figures use a plain globe."),
     ));
     let mut navdata = str_field(&state.config_values, "mission", "navdata_dir");
     if text_row(

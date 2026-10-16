@@ -183,13 +183,6 @@ file does not reproduce the database. Anyone who distributes the database, or
 a database derived from it, must keep this attribution and offer that database
 under the ODbL (share-alike).
 
-### NASA Blue Marble
-
-Public domain NASA raster. `assets/textures/earth_blue_marble.png` is checked
-into this repository, embedded at compile time by the route/report/pipeline
-renderers, and included in release source archives. It is not downloaded on
-demand and is not user-configurable at runtime.
-
 ### XFOIL 6.99 Orr–Sommerfeld map: GPL-2.0-or-later
 
 The release includes `assets/mses/osmapDP.dat`, an unmodified

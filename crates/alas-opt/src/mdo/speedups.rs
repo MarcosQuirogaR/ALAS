@@ -5,7 +5,7 @@
 //!
 //! Each lever changes how much work one candidate evaluation repeats, not
 //! the model: results move only within the stated closure tolerances (see
-//! `.agent/reports/p2-closure-speed-2026-10-12.md` for the equivalence
+//! the internal report `p2-closure-speed-2026-10-12.md` for the equivalence
 //! evidence). All levers are ON by default. The environment variable
 //! `ALAS_SPEEDUPS_OFF` (comma-separated lever names, or `all`) turns levers
 //! off for a whole process, which reproduces the pre-lane numbers for a

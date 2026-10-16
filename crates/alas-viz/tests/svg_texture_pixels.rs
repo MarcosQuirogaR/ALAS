@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! The exported SVG shares one embedded Blue Marble definition between image
+//! With ALAS_EARTH_TEXTURE set, the exported SVG shares one embedded texture definition between image
 //! references; the rasterized pixels must stay what the per-reference inline
 //! form produced.
 
@@ -53,6 +53,9 @@ fn texture_scene() -> Scene {
 
 #[test]
 fn shared_texture_definition_rasterizes_like_inline_references() {
+    if alas_report::earth_texture::earth_texture_png().is_none() {
+        return;
+    }
     let svg = render_svg(&texture_scene());
     assert_eq!(
         svg.matches("data:image/png;base64,").count(),

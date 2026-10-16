@@ -130,7 +130,7 @@ pub const DEFAULT_LIFT_DEPENDENT_VISCOUS_FRACTION: f64 = 0.25;
 /// (CFM56 0.545, CF6-80C2 0.564), the bleed and power-extraction loss entered
 /// the engine deck, the LTO part-power dip left the cruise bucket and the
 /// cruise Mach became the requirement's: m_hat 0.9805, band 0.936 to 1.023,
-/// J_min 7.17 on 5 dof (final model, `.agent/fuelchain-pr/cal/v2`: 0.9814, band
+/// J_min 7.17 on 5 dof (final model, the internal fuel-chain calibration run `cal/v2`: 0.9814, band
 /// 0.937 to 1.024). A value below 1 would be a negative excrescence
 /// allowance, so the physical lower bound 1.00 (inside the band, J 7.3) is
 /// adopted. Jenkinson's up-to-10 % allowance (m 1.10) gives J 15.5. The final
