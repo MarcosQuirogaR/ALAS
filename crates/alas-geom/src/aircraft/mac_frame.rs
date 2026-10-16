@@ -131,7 +131,7 @@ impl Airplane {
     /// `None` only when this airplane has no wing at all, which no
     /// constructible [`Airplane`] in this crate has.
     pub fn mac_frame(&self) -> Option<MacFrame> {
-        let x_lemac_m = self.main_wing()?.mac_station().x_le_m;
+        let x_lemac_m = self.main_wing()?.reference_mac_station_le_x();
         Some(MacFrame {
             chord_m: self.c_ref,
             x_lemac_m,

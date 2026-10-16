@@ -181,6 +181,8 @@ struct ParasiteComponent {
 #[derive(Debug, Clone, PartialEq)]
 pub struct TrimmedDragTable {
     aspect_ratio: f64,
+    /// Lift-dependent viscous drag fraction `kappa`: `CDv = kappa CD0 CL^2`.
+    viscous_lift_fraction: f64,
     design_cl: f64,
     design_mach: f64,
     reference_altitude_m: f64,
@@ -243,6 +245,7 @@ impl TrimmedDragTable {
             .collect();
         let mut table = Self {
             aspect_ratio,
+            viscous_lift_fraction: aero.lift_dependent_viscous_fraction(),
             design_cl: design.cl,
             design_mach: design.mach,
             reference_altitude_m: design.altitude_m,
@@ -265,7 +268,8 @@ impl TrimmedDragTable {
 
     /// Total drag coefficient at `cl`, `mach` and ISA altitude `altitude_m`.
     pub fn cd(&self, cl: f64, mach: f64, altitude_m: f64) -> f64 {
-        self.cd0(mach, altitude_m) + self.induced_cd(cl) + self.wave_cd(cl, mach)
+        let cd0 = self.cd0(mach, altitude_m);
+        cd0 + self.viscous_lift_cd(cl, cd0) + self.induced_cd(cl) + self.wave_cd(cl, mach)
     }
 
     /// Trimmed induced drag, trim drag included, from its checked CL cell.
@@ -301,7 +305,10 @@ impl TrimmedDragTable {
     /// `cl`, `mach` and `altitude_m`, retaining trim and wave drag's local slope.
     pub fn parabolic_equivalent_at(&self, cl: f64, mach: f64, altitude_m: f64) -> (f64, f64) {
         let cd = self.cd(cl, mach, altitude_m);
-        let slope = self.induced.value_and_slope(cl).1 + self.wave_value_and_slope(cl, mach).1;
+        let cd0 = self.cd0(mach, altitude_m);
+        let slope = self.induced.value_and_slope(cl).1
+            + self.wave_value_and_slope(cl, mach).1
+            + 2.0 * self.viscous_lift_fraction * cd0 * cl;
         let k = slope / (2.0 * cl);
         (cd - k * cl * cl, k)
     }
@@ -478,7 +485,8 @@ impl TrimmedDragTable {
             for pair in self.cl.windows(2) {
                 let cl = 0.5 * (pair[0] + pair[1]);
                 let wave_error = self.wave_cd(cl, mach) - aero.wave_drag(mach, cl, None);
-                let error = (parasite_error + wave_error).abs();
+                let viscous_error = self.viscous_lift_cd(cl, parasite_error);
+                let error = (parasite_error + viscous_error + wave_error).abs();
                 worst = worst.max(if error.is_finite() {
                     error
                 } else {

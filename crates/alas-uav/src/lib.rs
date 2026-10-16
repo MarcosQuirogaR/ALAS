@@ -12,18 +12,26 @@
 //! propulsion, control, energy, and structural constraints without silently
 //! manufacturing data the vendor did not publish.
 
+pub mod aero;
+pub mod airframe;
 pub mod catalog;
 mod catalog_equipment;
 pub mod catalog_readiness;
 pub mod collector;
+pub mod coupled;
 pub mod feasibility;
 mod model;
 pub mod optimizer;
 mod packaging;
+pub mod perf;
+pub mod power;
 pub mod procurement;
 pub mod production_verdict;
 pub mod propulsion_electric;
+pub mod score;
 pub mod shared_core;
+pub mod spec;
+pub mod studio;
 pub mod topology;
 
 pub use catalog::{

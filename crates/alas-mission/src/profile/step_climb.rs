@@ -6,7 +6,7 @@
 //! frozen review size; see `docs/source-size-budgets.tsv`.
 
 use alas_atmo::{pressure_isa, temperature_isa};
-use alas_config::mission::{resolve_true_airspeed_m_s, MissionProfileConfig, SpeedReference};
+use alas_config::mission::{MissionProfileConfig, SpeedCaps};
 
 /// ISA/US Standard Atmosphere 1976 pressure scale height in the stratosphere
 /// (the isothermal 216.65 K layer from 11 km to 20 km; ICAO Doc 7488 tabulates
@@ -221,7 +221,12 @@ pub(super) fn estimate_non_cruise_distance(
             *current_m = target_m;
             return Ok::<(), String>(());
         }
-        let speed_m_s = resolved_profile_speed(profile, speed_m_s, midpoint_m)?;
+        let caps = if target_m < *current_m {
+            profile.descent_caps()
+        } else {
+            profile.climb_caps()
+        };
+        let speed_m_s = resolved_profile_speed(profile, speed_m_s, midpoint_m, caps)?;
         if !speed_m_s.is_finite() || speed_m_s <= 0.0 || !rate_m_s.is_finite() || rate_m_s <= 0.0 {
             return Err(format!(
                 "mission proposal needs positive finite speed/rate, got speed={speed_m_s}, rate={rate_m_s}"
@@ -335,19 +340,15 @@ fn resolved_profile_speed(
     profile: &MissionProfileConfig,
     configured_speed_m_s: f64,
     altitude_m: f64,
+    caps: SpeedCaps,
 ) -> Result<f64, String> {
-    match profile.climb_descent_speed_reference {
-        SpeedReference::TrueAirspeed => Ok(configured_speed_m_s),
-        SpeedReference::CalibratedAirspeed => resolve_true_airspeed_m_s(
-            SpeedReference::CalibratedAirspeed,
-            configured_speed_m_s,
-            pressure_isa(altitude_m),
-            temperature_isa(altitude_m),
-        )
-        .map_err(|error| {
-            format!("mission proposal could not resolve calibrated airspeed: {error}")
-        }),
-    }
+    caps.true_airspeed_m_s(
+        profile.climb_descent_speed_reference,
+        configured_speed_m_s,
+        pressure_isa(altitude_m),
+        temperature_isa(altitude_m),
+    )
+    .map_err(|error| format!("mission proposal could not resolve calibrated airspeed: {error}"))
 }
 
 /// The altitude ladder `estimate_non_cruise_distance` climbs through, up to

@@ -31,7 +31,6 @@
 /assets/navdata/
 /assets/textures/*
 !/assets/textures/
-!/assets/textures/earth_blue_marble.png
 !/assets/textures/natural_earth_110m_land.geojson
 !/assets/textures/README.md
 

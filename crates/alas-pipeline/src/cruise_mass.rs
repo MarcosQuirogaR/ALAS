@@ -15,7 +15,7 @@
 //! Units: masses kg, dynamic pressure Pa, area m^2, gravity m/s^2; lift and
 //! drag coefficients refer to the report's reference area.
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 use alas_aero::analysis::PolarSweep;
 use alas_mass::breakdown::{OEW_KEYS, PAYLOAD};
@@ -202,7 +202,7 @@ pub fn cruise_point_at_cl(
 
 /// Zero-fuel mass of a report's component map: the operating empty mass plus
 /// the carried payload.
-pub fn zero_fuel_mass_kg(component_masses: &HashMap<String, f64>) -> f64 {
+pub fn zero_fuel_mass_kg(component_masses: &BTreeMap<String, f64>) -> f64 {
     let mass = |key: &str| component_masses.get(key).copied().unwrap_or(0.0);
     OEW_KEYS.iter().map(|key| mass(key)).sum::<f64>() + mass(PAYLOAD)
 }

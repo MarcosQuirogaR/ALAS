@@ -9,6 +9,7 @@ use std::path::PathBuf;
 use alas_aero::mses::{MsesPressureResult, MsesStatus};
 use alas_config::AlasConfig;
 use alas_exec::RunEnvironment;
+use alas_opt::mdo::CandidateDrag;
 use alas_pipeline::{DesignPipeline, PipelineOptions};
 use serde_json::json;
 
@@ -135,12 +136,7 @@ fn installed_mses_keeps_the_requested_local_section_condition_visible() {
     config.structures.enabled = false;
     config.mses.enabled = true;
     let freestream_mach = config.requirements.cruise_mach;
-    let inboard_twist_deg = config
-        .geometry
-        .wing
-        .inboard_aerodynamic_station(&alas_config::DesignVector::default())
-        .unwrap_or_else(|error| panic!("the default inboard station is valid: {error}"))
-        .twist_deg;
+    let config_for_condition = config.clone();
     let alpha_sweep_halfwidth_deg = config.mses.alpha_sweep_halfwidth_deg;
     let alpha_sweep_n_points = config.mses.alpha_sweep_n_points as usize;
     let options = PipelineOptions {
@@ -166,27 +162,51 @@ fn installed_mses_keeps_the_requested_local_section_condition_visible() {
             .optimized_report
             .as_ref()
             .unwrap_or_else(|| panic!("MSES condition uses the analyzed report"));
+        // The product maps the analyzed report to the exposed-root section
+        // proxy in `pipeline::mses_condition::mses_section_condition`:
+        //   M_section = M_inf * cos(built quarter-chord sweep),
+        //   alpha = body alpha + inboard-station twist - atan(CDi / CL),
+        // with CDi the wake-power induced drag of the candidate drag model at
+        // the trimmed CL. This test restates that formula from public items
+        // so it cannot silently track an old design-sweep / Oswald-e proxy.
+        let sweep_deg = alas_aero::analysis::AeroAnalysis::quarter_chord_sweep_deg(
+            &report.airplane,
+            report.design.sweep_deg,
+        );
+        let inboard_twist_deg = config_for_condition
+            .geometry
+            .wing
+            .inboard_aerodynamic_station(&report.design)
+            .map_or(
+                config_for_condition.geometry.wing.root_twist_deg,
+                |station| station.twist_deg,
+            );
+        let body_alpha_deg = report
+            .trimmed_design_point
+            .map_or(report.design_point.alpha_deg, |trim| {
+                trim.geometric_body_alpha_deg
+            });
+        let cl = report
+            .trimmed_design_point
+            .map_or(report.design_point.cl, |trim| trim.cl);
+        let induced_cd = report
+            .fuel
+            .artifacts(&config_for_condition, &report.design)
+            .ok()
+            .map(|artifacts| match &artifacts.drag {
+                CandidateDrag::Table(table) => table.induced_cd(cl),
+                CandidateDrag::External(polar) => polar.induced_factor_k * cl * cl,
+            })
+            .filter(|value| value.is_finite() && *value >= 0.0);
+        let induced_angle_deg = match induced_cd {
+            Some(cdi) if cl.is_finite() && cl.abs() > f64::EPSILON => {
+                (cdi / cl).atan().to_degrees()
+            }
+            _ => 0.0,
+        };
         (
-            freestream_mach * report.design.sweep_deg.to_radians().cos(),
-            {
-                let body_alpha_deg = report
-                    .trimmed_design_point
-                    .map_or(report.design_point.alpha_deg, |trim| {
-                        trim.geometric_body_alpha_deg
-                    });
-                let cl = report
-                    .trimmed_design_point
-                    .map_or(report.design_point.cl, |trim| trim.cl);
-                let denominator = std::f64::consts::PI
-                    * report.polar_fit.aspect_ratio
-                    * report.polar_fit.oswald_e;
-                let induced_angle_deg = if denominator.is_finite() && denominator > 1e-9 {
-                    (cl / denominator).atan().to_degrees()
-                } else {
-                    0.0
-                };
-                body_alpha_deg + inboard_twist_deg - induced_angle_deg
-            },
+            freestream_mach * sweep_deg.to_radians().cos(),
+            body_alpha_deg + inboard_twist_deg - induced_angle_deg,
         )
     };
     let polar = result

@@ -50,6 +50,16 @@ pub struct Differentials {
     pub integrate: Vec<Vec<f64>>,
 }
 
+/// One row of an integration operator contracted against sampled `values`:
+/// `sum_j row[j] * values[j]`, accumulated left to right (the order the
+/// acceptance pins were taken in, so do not reassociate).
+pub(crate) fn integrate_row(row: &[f64], values: &[f64]) -> f64 {
+    row.iter()
+        .zip(values)
+        .map(|(&weight, &value)| weight * value)
+        .sum()
+}
+
 /// mission analysis model's `Numerics` conditions container for one mission segment.
 ///
 /// The defaults reproduce `Numerics.__defaults__`: sixteen control points, a

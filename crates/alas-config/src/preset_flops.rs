@@ -37,10 +37,12 @@
 //!   layout's; where it does not, the cabin is declared all-economy and the
 //!   evidence kind says who decided that.
 //! * A "percent composite by structural weight" figure is not FLOPS `FCOMP`.
-//!   `FCOMP` is a technology coefficient running from a metallic wing to the
-//!   maximum composite benefit the fits were built around, and no
-//!   manufacturer publishes it. It stays at the metallic value unless a
-//!   source establishes otherwise, which none does.
+//!   `FCOMP` is the TM's 0..1 composite-utilization index of the wing
+//!   structure (nomenclature p. 78: 0.0 for no composites, 1.0 for maximum
+//!   use of composites), and no manufacturer publishes it. It is set per
+//!   aircraft from the wing-box construction fact in
+//!   `preset_flops/composite.rs`, never from the OEW, and stays 0.0 where no
+//!   construction fact is retained.
 
 use crate::{
     CargoHoldLoading, FlopsInputEvidence, FlopsInputProvenance, FlopsStructureConfig,
@@ -258,12 +260,14 @@ pub fn inputs_for(preset_name: &str) -> Option<PresetFlopsInputs> {
 mod architecture;
 #[path = "preset_flops/architecture_rows.rs"]
 mod architecture_rows;
+#[path = "preset_flops/composite.rs"]
+mod composite;
 #[path = "preset_flops/military.rs"]
 mod military;
 #[path = "preset_flops/structure.rs"]
 mod structure;
 use architecture::declared_architecture;
-pub(crate) use architecture_rows::declared_cargo_loading;
+pub(crate) use architecture_rows::{declared_cargo_loading, declared_haul_class};
 use structure::{declared_structure, declared_turboprop};
 
 #[cfg(test)]

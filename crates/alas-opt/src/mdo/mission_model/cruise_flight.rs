@@ -8,7 +8,7 @@
 use alas_prop::system::PropulsionRating;
 
 use super::cruise_levels::{
-    CruiseOutcome, CRUISE_EPSILON_M, RESIDUAL_CLIMB_M_S, STEP_DECISION_INTERVAL_M,
+    CruiseOutcome, CruiseState, CRUISE_EPSILON_M, RESIDUAL_CLIMB_M_S, STEP_DECISION_INTERVAL_M,
 };
 use super::integrate::{FlyError, Integrator};
 use super::profile::{ProfilePlan, Segment, SegmentKind};
@@ -44,7 +44,7 @@ impl Integrator<'_> {
         let flight = self.model.propulsion.flight_condition(
             segment.end_altitude_m,
             speed,
-            self.model.gravity_m_s2,
+            self.model.gravity_at(segment.end_altitude_m),
             self.model.isa_deviation_c,
         )?;
         let drag_n = self.phase_drag_n(SegmentKind::Cruise, &flight, self.mass_kg)?;
@@ -89,7 +89,13 @@ impl Integrator<'_> {
                 .specific_air_range_m_kg(mass_kg, next_m, next_speed)
                 .ok()?;
             let residual = model.residual_climb_m_s(mass_kg, next_m, next_speed).ok()?;
-            Some((residual - RESIDUAL_CLIMB_M_S, there / here - 1.0))
+            let ceiling = model
+                .cruise_ceiling_margin_m_s(mass_kg, next_m, next_speed)
+                .ok()?;
+            Some((
+                (residual - RESIDUAL_CLIMB_M_S).min(ceiling),
+                there / here - 1.0,
+            ))
         };
         let start_kg = self.mass_kg;
         let end_kg = start_kg
@@ -273,6 +279,11 @@ impl Integrator<'_> {
                         }
                     }
                 }
+                self.cruise_states.push(CruiseState {
+                    altitude_m,
+                    tas_m_s: speed,
+                    mass_kg: self.mass_kg,
+                });
                 self.fly_segment(&segment)?;
                 flown_m += distance_m;
                 last_cruise_segment = Some(segment);

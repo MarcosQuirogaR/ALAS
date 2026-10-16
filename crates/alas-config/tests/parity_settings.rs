@@ -619,13 +619,13 @@ fn preset_source_corrections() -> BTreeMap<String, SourceCorrection> {
     add_b787_9_typical_cabin_corrections(&mut corrections, &["B787-9"]);
     add_ave_777_9_cabin_corrections(&mut corrections);
     for (case, kink_fraction) in [
-        ("A340-300", 9.5 / 30.15),
+        ("A340-300", 0.275_290_215_588_723_1),
         ("A380-800", 0.359_236_516_064_625_5),
         ("AVE", 0.35),
-        ("B787-9", 0.353_771_245_388_011_8),
+        ("B787-9", 0.3696),
         ("A320-200", 0.377_380_002_280_241_9),
-        ("A220-300", 0.382_736_255_076_680_5),
-        ("DC-10", 0.35),
+        ("A220-300", 0.34),
+        ("DC-10", 0.3747),
     ] {
         corrections.insert(
             format!("{case}.geometry.wing.kink_span_fraction"),
@@ -645,6 +645,15 @@ fn preset_source_corrections() -> BTreeMap<String, SourceCorrection> {
         &mut corrections,
         &[
             "A220-300", "A320-200", "A340-300", "A380-800", "AVE", "B787-9", "DC-10",
+        ],
+    );
+    add_lower_cover_fatigue_corrections(
+        &mut corrections,
+        &[
+            ("A320-200", 75.0e6),
+            ("A340-300", 110.0e6),
+            ("A380-800", 110.0e6),
+            ("DC-10", 110.0e6),
         ],
     );
     add_random_force_psd_corrections(
@@ -756,11 +765,11 @@ fn saved_file_source_corrections() -> BTreeMap<String, SourceCorrection> {
         ),
         // Wing roots re-anchored to the manufacturer quarter-MAC point
         // (see support/product_corrections.rs).
-        correction("preset_only.geometry.wing.root_datum_x_m", 13.3, 12.760),
+        correction("preset_only.geometry.wing.root_datum_x_m", 13.3, 12.7791),
         correction(
             "preset_then_field.geometry.wing.root_datum_x_m",
             21.0,
-            21.552,
+            21.5737,
         ),
         // B787-9 root section matched to the CRM thickness distribution
         // (see support/product_corrections.rs).
@@ -784,7 +793,7 @@ fn saved_file_source_corrections() -> BTreeMap<String, SourceCorrection> {
         correction(
             "preset_then_field.geometry.engine.inlet_x_offset_m",
             3.5,
-            6.118,
+            6.1466,
         ),
         correction("preset_only.landing_gear.n_mlg_struts", 0, 2),
         correction("preset_only.landing_gear.n_nlg_wheels", 0, 2),
@@ -839,14 +848,14 @@ fn saved_file_source_corrections() -> BTreeMap<String, SourceCorrection> {
         "preset_then_field.geometry.wing.kink_span_fraction".to_owned(),
         SourceCorrection {
             upstream: Value::String("absent upstream".to_owned()),
-            corrected: Value::from(0.353_771_245_388_011_8),
+            corrected: Value::from(0.3696),
         },
     );
     corrections.insert(
         "preset_only.geometry.wing.kink_span_fraction".to_owned(),
         SourceCorrection {
             upstream: Value::String("absent upstream".to_owned()),
-            corrected: Value::from(0.382_736_255_076_680_5),
+            corrected: Value::from(0.34),
         },
     );
     add_transport_objective_weight_corrections(
@@ -1059,6 +1068,15 @@ fn add_native_worker_corrections(
                 corrected: Value::from(0.0),
             },
         );
+        // Audit SIZ-06 (decision D6): a file that does not state a seed
+        // gets the fixed default seed; the frozen default is the clock.
+        corrections.insert(
+            format!("{case}.optimizer.solver.seed"),
+            SourceCorrection {
+                upstream: Value::Null,
+                corrected: Value::from(alas_config::DEFAULT_SEED),
+            },
+        );
         corrections.insert(
             format!("{case}.optimizer.solver.tolerance"),
             SourceCorrection {
@@ -1144,6 +1162,25 @@ fn add_random_force_psd_corrections(
     }
 }
 
+/// The lower-cover fatigue stress limit is a native product addition declared
+/// by the metallic civil presets (Torenbeek 2013, section 11.7.1: 75 MPa for
+/// the short-haul class, 110 MPa for the long-haul class); the frozen schema
+/// has no such field.
+fn add_lower_cover_fatigue_corrections(
+    corrections: &mut BTreeMap<String, SourceCorrection>,
+    cases: &[(&str, f64)],
+) {
+    for (case, limit_pa) in cases {
+        corrections.insert(
+            format!("{case}.structures.lower_cover_fatigue_stress_1g_pa"),
+            SourceCorrection {
+                upstream: Value::String("absent upstream".to_owned()),
+                corrected: Value::from(*limit_pa),
+            },
+        );
+    }
+}
+
 fn add_transport_planform_corrections(
     corrections: &mut BTreeMap<String, SourceCorrection>,
     cases: &[&str],
@@ -1171,7 +1208,7 @@ fn add_transport_objective_weight_corrections(
     let native_fields = [
         ("transport_planform_constraints_enabled", Value::Bool(true)),
         ("transport_shape_priors_enabled", Value::Bool(false)),
-        ("geometric_body_alpha_min_deg", Value::from(2.0)),
+        ("geometric_body_alpha_min_deg", Value::from(0.0)),
         ("geometric_body_alpha_max_deg", Value::from(4.0)),
         ("geometric_body_alpha_penalty_scale", Value::from(200.0)),
         ("min_root_wingbox_depth_m", Value::from(1.20)),

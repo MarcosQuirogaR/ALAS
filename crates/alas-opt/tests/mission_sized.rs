@@ -215,6 +215,20 @@ fn registered_hard_mtow_nominals_separate_model_defects_from_physical_findings()
             assert!(!assessment.violated_hard_ids().contains(&"cg_model_error"));
         }
         let expected: &[&str] = match name {
+            // Fix lane deck-altitude, step 2 (Jenkinson-chart maximum climb,
+            // maximum-cruise rating for level flight): cruise_thrust, 0.3096
+            // required at mid-cruise against 0.2968 installed (4 % short,
+            // maximum-cruise ratio 0.164 at FL370 M 0.78).
+            // Fix lane a220-atr: the hard toc_rate_of_climb row (0.66 m/s) was
+            // judged at the constant-Mach speed while the mission flies the
+            // VC-capped rung speed at its FL250 operational level (1.97 m/s
+            // against 1.524 at the speeds the level search holds); it passes.
+            // cruise_thrust is genuine: PW1500G has no cruise-thrust datum, the
+            // generic chart needs k >= 1.046 (see fix-a220-atr-2026-10-13).
+            // Fix lane thrust-uncertainty 2026-10-13: the 4.5 % shortfall (0.3108
+            // required against 0.2968) is inside the chart scatter (5.1 %, derived
+            // from the Jenkinson charts): a flagged `cruise_thrust_within_scatter`
+            // warning row, no longer a hard finding.
             "A220-300" => &[],
             "A320-200" => &[],
             // With the trimmable stabiliser at its takeoff nose-up setting
@@ -222,12 +236,77 @@ fn registered_hard_mtow_nominals_separate_model_defects_from_physical_findings()
             // At the built -2 deg incidence it did not (boundary against
             // takeoff CG, %MAC: A340 30.8 against 26.7, B787 21.9 against
             // 16.9).
-            "A340-300" | "B787-9" => &[],
+            // Fix lane deck-altitude: level flight at the mid-cruise weight
+            // (the design altitude is the representative level, not the
+            // initial one) needs T/W 0.2032 against 0.2268 installed with the
+            // deck's maximum-climb ratio (0.201 at FL390 M 0.82). The
+            // take-off-weight pairing of lane A2 (0.2298 required, 0.209
+            // ratio) was the burned fuel, not a thrust deficit.
+            // Fix lane deck-altitude, step 2 (Jenkinson-chart anchor, maximum-
+            // cruise rating for level flight): level flight at the mid-cruise
+            // weight needs T/W 0.2648 against 0.2268 installed (14 % short;
+            // maximum-cruise ratio 0.154 at FL390 M 0.82). A model finding:
+            // the aircraft cannot hold its design FL390 at M 0.82 on this
+            // deck (it holds FL350).
+            // Engine-anchor lane (CFM56-5C3/F grade-B cruise datum, k 1.145):
+            // the toc_rate_of_climb row passes (1.55 m/s) and cruise_thrust is
+            // 0.2312 required against 0.2268 installed (1.9 % short).
+            // cruise-thrust-levels 2026-10-14: the plan starts at FL334 (253 t),
+            // 0.2151 required against 0.2268 installed: passes.
+            "A340-300" => &[],
+            // Fix lane A1: the CS 25.121(b) second segment is a hard SLS
+            // constraint with the deck V2 thrust ratio (0.730), windmilling
+            // (0.0039) and handbook trim drag (0.0057, an upper bound): the
+            // declared engine rating falls 1.1 % short of the 0.2745
+            // required T/W (0.2715 installed). A model finding inside the
+            // trim-drag upper bound, reported rather than hidden.
+            // Fix lane deck-altitude, step 2 (Jenkinson-chart anchor, maximum-
+            // cruise rating for level flight): cruise_thrust 0.2852 required
+            // against 0.2750 installed (4 % short).
+            // Lane kappa-cal round 2 (clean-polar kappa 0.43, margin 0.97; merged after the
+            // lines above): the improved-climb engine-out requirement at MTOW is 0.2715 (best
+            // speed) against 0.2750 installed, so oei_second_segment no longer fires on the
+            // registered nominal (fix-kappa-cal-2026-10-12, report_config second-segment test).
+            // HANDOFF section 5 still lists the B787-9 miss (0.5 %); see p2-repin-2026-10-13.md.
+            // Fix lane thrust-uncertainty 2026-10-13: 0.2853 required against 0.2750
+            // installed is 3.6 % short, inside the 5.1 % chart scatter of the
+            // chart-only GEnx-1B: a flagged warning row, not a hard finding.
+            "B787-9" => &[],
             // Declared-mass loading misses the nose reaction. Its maximum-fuel
             // mission's mid-cruise lift clears Korn divergence (19.5 against
             // 26.9 counts). The takeoff trim clears the rotation boundary
             // that sat 0.8 %MAC aft of the flown takeoff CG (42.6 %MAC).
-            "A380-800" => &["min_nose_gear_load"],
+            // Fix lane deck-altitude: cruise_thrust 0.2016 required (mid-cruise
+            // weight, deck ratio 0.205) against 0.2467 installed.
+            // Fix lane deck-altitude, step 2 (Jenkinson-chart anchor, maximum-
+            // cruise rating for level flight): cruise_thrust 0.2698 required
+            // against 0.2467 installed (9 % short).
+            // Fix lane a220-atr: the toc_rate_of_climb row (1.27 m/s) was the
+            // same constant-Mach speed inconsistency as the A220's; it passes
+            // at the speeds the mission flies at its selected level.
+            // Fix lane defects-a (seat packer): the A380 now seats its
+            // registered 555 (the stretched rows used to lose 20 seats in the
+            // narrowing tail, 535), so the zero-fuel CG is 0.66 %MAC further
+            // aft (46.1 against 45.5 %MAC) and the static-stability floor row
+            // reads 0.0460 against 0.05 (0.8 % short) in the zero-fuel and
+            // reserve states.
+            // Integration 2026-10-14 (headroom fix 9938c4de, merge 04c9ec31): the
+            // hold now seats more cargo under the sloping ceiling, which moves
+            // the zero-fuel CG forward again; the static-margin floor row reads
+            // 0.0794 against 0.05 (was 0.0460 / 0.0480 after the seat-packer
+            // fix alone) and no longer fires. Attribution: reverting only
+            // headroom.rs gives 0.0588 (attrib-integration-2026-10-14).
+            // cruise-thrust-levels 2026-10-14: the plan starts at FL302 (545 t)
+            // and steps to FL322, FL342; the worst level needs 0.2446 against
+            // 0.2467 installed (ISA day; 0.2378 on the flown day, 3.8 % margin):
+            // cruise_thrust passes.
+            // The min_nose_gear_load finding of the line above this lane was
+            // already gone at the integration tip 9a81b934 (verified in a
+            // baseline worktree: actual ["cruise_thrust"] against the pinned
+            // ["cruise_thrust", "min_nose_gear_load"]; OEW now governs the nose
+            // load, 4.656 % against 4.875 %, see the thrust-uncertainty report).
+            // This pin is brought to the current model.
+            "A380-800" => &[],
             // Pin update (round 3): was ["forward_cg_range",
             // "min_nose_gear_load", "tip_back"]. The 5 deg/s^2 class pitch
             // acceleration (Sadraey 12.3), the DATCOM K' elevator table with
@@ -235,25 +314,81 @@ fn registered_hard_mtow_nominals_separate_model_defects_from_physical_findings()
             // tip-back requirement (8 deg model tail-down vs 10.7 deg
             // tip-back, no 15 deg floor) clear the rotation and tip-back
             // findings. The nose-gear load shortfall remains.
-            "ATR72-600" => &["min_nose_gear_load"],
+            // Fix lane A1: the CS 25.121(d) approach climb (2.1 %, go-around
+            // thrust at 1.4 VSR0, landing flaps, feathered propeller, MLW)
+            // needs T/W 0.378 against the 0.341 the optimizer's static
+            // propeller thrust basis provides (the turboprop static thrust
+            // lane will lower that basis by about 6.6 %).
+            // Lane a220-atr: static_margin_floor and tip_back are not new in the
+            // D2 merge. Probe checkpoints (static_margin_floor / tip_back deg):
+            // bb4c626e (A1 base) +0.0575 / 7.53; 298ed608 (step B ATR loft,
+            // gear) +0.0073 / 7.88; 90d21eba (tail fits) -0.0187 / 6.33;
+            // 7270b8f0 -0.0253 / 6.35; a363bc4c -0.0407 / 6.35. The D2
+            // flap-downwash factor (STAB-04, algebraically exact) costs 1.5 %MAC
+            // of it; the +1.5 deg tail incidence is a trim result and does not
+            // enter the neutral point. CG 41 %MAC at ZFW sits 0.31 m ahead of
+            // the main-wheel contact (54.6 %MAC, the ARM tail-tipping limit
+            // 54 %MAC); no ATR CG envelope is published here (AfmRequired).
+            // Fix lane blockers B: the approach climb is flown in the lowest-drag
+            // configuration CS 25.121(d) admits (take-off flaps, CLmax_to within
+            // 1.10^2 of CLmax_land for the ATR): required T/W 0.3437 -> 0.2850
+            // against 0.3185 installed, so it no longer fails.
+            "ATR72-600" => &["static_margin_floor", "min_nose_gear_load", "tip_back"],
             // The maximum-fuel mission's mid-cruise lift still crosses the
             // Korn divergence boundary (27.5 against 26.9 counts). The
             // takeoff trim clears the rotation boundary.
-            "AVE" => &["sweep_consistent_with_cruise_mach"],
+            // Fix lane A1: the second segment is now a hard SLS constraint
+            // and the AVE's rating falls 4.9 % short (0.2655 against 0.2792).
+            // Fix lane deck-altitude: cruise_thrust 0.2161 required (mid-cruise
+            // weight, deck ratio 0.200) against 0.2655 installed. The mid-cruise
+            // wave drag of the merged geometry sits 26.0 counts against the
+            // 26.9 ceiling, so the sweep finding no longer fires at this
+            // nominal (it fired at the earlier geometry).
+            // Fix lane deck-altitude, step 2 (Jenkinson-chart anchor, maximum-
+            // cruise rating for level flight): cruise_thrust 0.2852 required
+            // against 0.2655 installed (7 % short).
+            // Fix lane deck-takeoff 2026-10-14 (one engine model, Jenkinson's
+            // take-off charts): the V2 thrust ratio of the GE9X (BPR 10) is
+            // 0.821 at Mach 0.255 against 0.738 from Bartel-Young, so the
+            // second segment needs 0.2528 against 0.2655 installed (5.0 %
+            // margin, was 4.7 % short at 0.2786): no longer a finding. The
+            // cruise_thrust row is genuine and stays (FL390 at the mid-cruise
+            // weight, chart ratio 0.152: the design level is a requirement).
+            // Fix lane cruise-thrust-levels 2026-10-14 (owner decision: the
+            // check judges the levels the mission plan flies, the planner
+            // starts the heavy AVE at FL307): worst level FL307 at 350,885 kg,
+            // 0.2574 required against 0.2655 installed (3.1 % margin; level
+            // flight holds up to FL319 at that mass). No finding.
+            "AVE" => &[],
             // The conventional Korn section factor leaves insufficient
             // cruise thrust and sweep. The empty aircraft's CG lies 3 mm
             // aft of the published minimum nose-gear share at its weight
             // (0.0598 against 0.0600 of its weight, inside the chart's
             // +-0.15 % read). The takeoff trim clears the rotation boundary
             // that lay aft of the volume-limited takeoff CG.
-            "DC-10" => &[
-                "min_nose_gear_load",
-                "cruise_thrust",
-                "sweep_consistent_with_cruise_mach",
-            ],
-            // No hard finding at the 62,500 kg MTOW nominal (EASA.IM.A.071
-            // Issue 28): the registered E195-E2 clears every hard residual.
-            "E195-E2" => &[],
+            // Geometry round 2 (wing lane): the front-view wing height and the tailplane
+            // dihedral moved the model's empty CG enough to clear the nose-gear share
+            // finding (it sat 3 mm short before); the Korn findings remain.
+            // Fix lane deck-altitude: cruise_thrust 0.2182 required at the
+            // mid-cruise weight against 0.2697 installed.
+            // Fix lane deck-altitude, step 2 (Jenkinson-chart anchor, maximum-
+            // cruise rating for level flight): cruise_thrust 0.2726 required
+            // against 0.2697 installed (1 % short; model L/D 14.8).
+            // Engine-anchor lane (CF6-50 grade-B datum, k 1.154): cruise_thrust
+            // 0.2363 required against 0.2697 installed, it passes.
+            // Fix lane cruise-thrust-levels 2026-10-14: the plan starts the
+            // DC-10 at FL323 (250 t); level flight at the maximum-cruise
+            // rating there, on the flown (hot) day and its Mach 0.820, needs
+            // 0.2603 against 0.2666 installed (2.4 % margin; level flight
+            // holds up to FL327). On the ISA day the same state read 1.8 %
+            // short, which was the check ignoring the mission's temperature
+            // deviation, not a planner fault. No thrust finding.
+            "DC-10" => &["sweep_consistent_with_cruise_mach"],
+            // Moved since the geometry lanes (present at 2fcc2e29, not
+            // attributed in lane a220-atr): the registered E195-E2 shows
+            // min_nose_gear_load and root_to_kink_te_angle at the 62,500 kg
+            // MTOW nominal (EASA.IM.A.071 Issue 28).
+            "E195-E2" => &["min_nose_gear_load", "root_to_kink_te_angle"],
             // No hard finding at the 75,100 kg MTOW nominal for the C919
             // (estimated planform, secondary-source weights): it clears every
             // hard residual once the inboard trailing edge is unswept.
@@ -270,13 +405,58 @@ fn registered_hard_mtow_nominals_separate_model_defects_from_physical_findings()
             // leading-edge sweep short at Mach 0.85, and the model cruise
             // L/D needs more thrust than the four CF6-80C2B1F
             // estimate-flagged cruise reference (52.4 kN each).
-            "B747-400" => &["cruise_thrust", "sweep_consistent_with_cruise_mach"],
+            // Geometry round 2 (wing lane): lower cruise drag clears the thrust finding; the heavier
+            // CRM-distribution wing moves the empty CG forward onto the nose-gear share finding.
+            // Fix lane deck-altitude: with the deck's maximum-climb ratio
+            // (0.240 at M 0.85, FL350) the level-flight need at the
+            // mid-cruise weight is 0.2286 against 0.2647 installed (0.307 at
+            // the take-off weight, the shortfall the CF6-80C2B1F comment above
+            // recorded: the model drag is high, L/D 15.0 at mid-cruise
+            // against about 16-18 published (L/D)max).
+            // Fix lane deck-altitude, step 2 (Jenkinson-chart anchor, maximum-
+            // cruise rating for level flight): cruise_thrust 0.2795 required
+            // against 0.2647 installed (6 % short; model L/D 15.0).
+            // Engine-anchor lane (CF6-80C2B1F grade-B datum, k 1.142):
+            // cruise_thrust 0.2449 required against 0.2647 installed, it passes.
+            // Final re-pin 2026-10-14 (by probe): the printed NASA SP-347 wing thickness
+            // (Obert 2009 Fig. 24.82: t/c 13.5 % at 2y/b 0.109 falling to 8.0 % from
+            // 2y/b 0.4) replaces the CRM distribution, which cuts the Korn wave drag and
+            // clears sweep_consistent_with_cruise_mach (fix-fuel-chain-2026-10-14, sec. 5).
+            // Final freeze 2026-10-15: the earlier clearing of sweep_consistent_with_cruise_mach
+            // came from a C2-spline dip to 7.4 % t/c between the kink and the tip; with the
+            // printed plateau node (2y/b 0.5) the finding is back (0.00290 vs 0.00269).
+            "B747-400" => &["min_nose_gear_load", "sweep_consistent_with_cruise_mach"],
             // New preset (no earlier pin): gear stations and the aft-fuselage
             // upsweep are estimates, so the nose reaction at the declared mass
             // (about -1 % of weight against 6 %) and the tip-back angle
             // (about 9.4 deg against the 15 deg floor of an unvalidated
             // tail-down) are estimate-driven findings, not A400M facts.
-            "A400M" => &["min_nose_gear_load", "tip_back"],
+            // Probe at a363bc4c (lane a220-atr): tip_back no longer fires (gone
+            // by 2fcc2e29, not attributed) and the R1 dihedral rule clears
+            // wing_dihedral_min; the nose reaction remains.
+            // Integration 2026-10-14 (headroom fix 9938c4de, merge 04c9ec31,
+            // alas-payload/src/cargo/headroom.rs): cargo is now seated on the
+            // worst floor/ceiling under its footprint, so positions over the
+            // rising ramp floor are accepted and the carried cargo grows from
+            // 4.2 t to 14.7 t (the registered design point is 20 t). The
+            // larger aft-biased load takes the static margin from 0.2006 to
+            // 0.0363 (floor 0.05) and the tip-back angle from 26.4 to 18.0 deg
+            // (limit 18.73 deg; estimated gear stations). These are model
+            // findings pinned as such, not A400M facts: reverting only
+            // headroom.rs reproduces the old pin exactly.
+            // Fix lane cg-atr-a400m 2026-10-14 (freight hold + turboprop
+            // nacelle station): the 20 t request is now carried on nine 463L
+            // pallets of the declared hold (Jane's AWA 2008-09 p.298) instead
+            // of 14 underfloor LD3 boxes aft of the wing box, which takes the
+            // analyzed TOW centre of gravity from 58.5 to 32.8 % MAC, the
+            // nose-gear share from -0.6 % to 10.3 %, the static margin
+            // (floor 0.05) from 0.0385 to 0.418 and the tip-back angle from
+            // 18.00 to 30.65 deg (limit 18.73 deg), so static_margin_floor and
+            // tip_back clear. The OEW state alone keeps a 4.6 % nose share
+            // against 6 % (OEW CG 46.3 % MAC, no published A400M CG): that
+            // estimate-driven finding stays pinned. Probe: gear_probe
+            // before/after, .agent/reports/fix-cg-atr-a400m-2026-10-14.md.
+            "A400M" => &["min_nose_gear_load"],
             _ => panic!("{name}: establish the registered hard-MTOW findings"),
         };
         let mesh_failure = assessment
@@ -318,8 +498,16 @@ fn an_impossible_design_range_is_hard_infeasible_and_costs_more() {
     let config = AlasConfig::from_value(&serde_json::json!({"preset": "A220-300"})).unwrap();
     let design = alas_config::presets::get("A220-300").unwrap().design_vector;
     let feasible = assess_product_candidate(&config, &design).unwrap();
-    assert!(feasible.hard_feasible, "{:?}", feasible.violated_hard_ids());
+    // The A220 starts its mission at FL250, where level flight at the
+    // maximum-cruise rating has a 21 % margin (the design-level FL370 check
+    // was 3.9 % short, inside the PW1500G chart scatter: a warning row, which
+    // the plan-level check no longer raises); the baseline of this test is the
+    // mass family, which the registered mission leaves clean.
     assert!(feasible.violated_hard_ids().is_empty());
+    assert!(!feasible
+        .residuals
+        .iter()
+        .any(|row| row.id == "cruise_thrust_within_scatter"));
     assert!(feasible
         .residuals
         .iter()

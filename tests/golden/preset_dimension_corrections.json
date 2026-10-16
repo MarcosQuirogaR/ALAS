@@ -1,0 +1,19 @@
+{
+  "pins": {
+    "A340-300/drawn_planform_area_m2": {
+      "abs_tol": 0.5,
+      "note": "Drawn trapezoidal planform area of the A340-300 wing (m^2) against the published 361.6 m^2 reference area; the drawn planform is larger than the reference wing by design.",
+      "rel_tol": 0.0,
+      "value": 383.6
+    },
+    "A380-800/hstab_trapezoid_area_m2": {
+      "abs_tol": 0.0001,
+      "note": "Horizontal tailplane trapezoid area (m^2) from the dimensioned 30.37 m span (Airbus A380 AC 2-2-0, Rev 20 Dec 01/25) with the 3.67 m tip chord and 9.75 m root chord fitted to the drawing at the geometry freeze (was 3.72 m and a 9.0 m estimate).",
+      "rel_tol": 0.0,
+      "value": 203.7827
+    }
+  },
+  "producer": {
+    "cargo": ["test", "-p", "alas-config", "--test", "preset_dimension_corrections"]
+  }
+}

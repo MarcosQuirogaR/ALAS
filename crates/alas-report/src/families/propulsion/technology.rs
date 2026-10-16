@@ -7,6 +7,7 @@ use crate::chart_kit::{draw_legend, draw_title, LegendMarker};
 use crate::scene::{Axes2D, Color, Scene, SceneElement, Stroke, TextAlign, TextBaseline};
 use crate::theme::get_palette;
 use alas_config::{ActiveEngineModel, AlasConfig, TurbopropEngineSpec};
+use alas_opt::mdo::propulsion::turboprop_unit_model;
 use alas_prop::turboprop::{
     Pw127m568fModel, Pw127mRating, TurbopropCommand, TurbopropCondition, TurbopropMode,
     TurbopropOutput,
@@ -39,20 +40,9 @@ fn spec(config: &AlasConfig) -> &TurbopropEngineSpec {
     }
 }
 
+/// The single catalogue-to-unit-model mapping the mission deck also uses.
 fn model(config: &AlasConfig) -> Pw127m568fModel {
-    let spec = spec(config);
-    Pw127m568fModel {
-        normal_takeoff_power_w: spec.takeoff_shaft_power_kw * 1_000.0,
-        maximum_takeoff_reserve_power_w: spec.maximum_reserve_shaft_power_kw * 1_000.0,
-        maximum_continuous_power_w: spec.maximum_continuous_shaft_power_kw * 1_000.0,
-        maximum_climb_power_w: spec.maximum_climb_shaft_power_kw * 1_000.0,
-        maximum_cruise_power_w: spec.maximum_cruise_shaft_power_kw * 1_000.0,
-        governed_propeller_speed_rpm: spec.governed_propeller_speed_rpm,
-        propeller_diameter_m: spec.propeller_diameter_m,
-        reference_psfc_kg_kwh: spec.maximum_cruise_fuel_flow_kg_h
-            / (2.0 * spec.maximum_cruise_shaft_power_kw),
-        ..Pw127m568fModel::default()
-    }
+    turboprop_unit_model(spec(config))
 }
 
 fn output(

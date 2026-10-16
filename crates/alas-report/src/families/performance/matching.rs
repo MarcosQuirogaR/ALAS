@@ -6,12 +6,15 @@
 //! The configuration- and report-driven aircraft sizing matching chart.
 
 use alas_config::AlasConfig;
+use alas_opt::mdo::{second_segment_evidence, EngineOutModel, YawAirframe};
 use alas_perf::performance::{
-    assess_oei_climb, build_matching_chart, compute_v_speeds, far25_oei_gradient, oei_cl_at_v2,
-    MatchingChartData, OeiV2Condition,
+    assess_oei_climb, build_matching_chart, compute_v_speeds, far25_oei_gradient,
+    landing_runway_share, oei_cl_at_v2, MatchingChartData,
 };
+use alas_pipeline::feasibility::landing_mass_limit_kg;
 use alas_pipeline::field_reference::candidate_field_polar;
 use alas_pipeline::full_analysis::AnalysisReport;
+use alas_pipeline::report_config::config_for_report;
 
 use crate::chart_kit::{draw_legend, draw_title, LegendMarker};
 use crate::families::performance::support::{
@@ -68,16 +71,26 @@ pub fn figure_matching_chart(
         }
     };
 
-    let performance = &config.performance;
-    let requirements = &config.requirements;
     // The sized takeoff mass when the report carries one; the declared MTOW
     // is only the unsized fallback.
-    let takeoff_mass_kg = report.analysis_takeoff_mass_kg(requirements.mtow_kg);
+    let takeoff_mass_kg = report.analysis_takeoff_mass_kg(config.requirements.mtow_kg);
     let wing_area = report
         .geometry_summary
         .get("wing_area_m2")
         .copied()
         .unwrap_or(report.airplane.s_ref);
+    // The V speeds use the computed minimum control speed (CS 25.107), like
+    // the feasibility gate; the declared ratio is only the fallback.
+    let resolved = config_for_report(
+        config,
+        report,
+        takeoff_mass_kg,
+        landing_mass_limit_kg(config, report),
+        wing_area,
+    );
+    let config = &*resolved;
+    let performance = &config.performance;
+    let requirements = &config.requirements;
     let n_engines = config.geometry.engine.spanwise_positions_m.len() as i64;
     let oei_gradient = far25_oei_gradient(n_engines).unwrap_or(performance.oei_gradient);
     let tw_design = static_thrust_to_weight(config, takeoff_mass_kg, 0.30);
@@ -136,7 +149,7 @@ pub fn figure_matching_chart(
         wing_area,
         n_engines,
         &[departure.clone(), arrival.clone()],
-        Some(performance.cl_max_to),
+        Some(performance.takeoff_field_cl_max(performance.cl_max_to)),
         Some(performance.cl_max_land),
         Some(performance.thrust_lapse),
         Some(oei_gradient),
@@ -164,9 +177,43 @@ pub fn figure_matching_chart(
         })
         .collect();
 
+    let landing_mass_kg = landing_mass_limit_kg(config, report);
+    for (_, limit) in &mut data.ws_land_limits {
+        *limit = landing_limit_on_takeoff_axis(
+            *limit,
+            landing_mass_kg,
+            takeoff_mass_kg,
+            performance.wet_landing_runway,
+        );
+    }
+
     // The chart's y-axis is installed sea-level-static T/W.  A generic cruise
-    // lapse is not a valid conversion for the OEI V2 condition, so only use a
-    // condition-specific ratio when departure/V2 evidence is present.
+    // lapse is not a valid conversion for the OEI V2 condition: the thrust
+    // ratio, failed-engine drag and asymmetric trim drag come from the same
+    // evidence builder as the optimizer residual and the feasibility finding.
+    let static_per_engine_n =
+        tw_design * takeoff_mass_kg * requirements.gravity_m_s2 / n_engines.max(1) as f64;
+    let engine_out = EngineOutModel::new(
+        config,
+        Some(YawAirframe {
+            plane: &report.airplane,
+            cg_x_m: report.physical_cg[0],
+        }),
+        wing_area,
+        Some(static_per_engine_n),
+    )
+    .ok();
+    let evidence = second_segment_evidence(
+        engine_out.as_ref(),
+        performance,
+        departure,
+        &v_speeds,
+        &|mach, altitude_m, isa_deviation_c| {
+            artifacts
+                .drag
+                .cd_at_atmosphere(0.0, mach, altitude_m, isa_deviation_c)
+        },
+    );
     data.oei_climb_assessment = assess_oei_climb(
         cd0,
         k,
@@ -175,17 +222,31 @@ pub fn figure_matching_chart(
         cl_v2,
         performance.oei_climb_delta_cd,
         performance.cl_max_to,
-        Some(OeiV2Condition {
-            departure_elevation_m: departure.elevation_m,
-            departure_isa_deviation_c: departure.isa_deviation_c,
-            v2_over_vstall: v_speeds.v2_ms / v_speeds.v_stall_to_ms,
-            condition_to_sls_thrust_ratio: performance.oei_condition_to_sls_thrust_ratio,
-            asymmetric_trim_cd: performance.oei_asymmetric_trim_cd,
-            windmilling_cd: performance.oei_windmilling_cd,
-        }),
+        Some(evidence.condition),
     );
 
     draw_matching_chart(&data, oei_gradient, theme)
+}
+
+/// A landing wing-loading limit on the chart's take-off wing-loading axis.
+///
+/// The limit is a wing loading at the maximum landing mass, while the x-axis
+/// is the take-off wing loading: the same landing condition sits at
+/// `W_TO/S = limit * MTOW/MLW` on that axis (FLD-06). A wet runway
+/// (CAT.POL.A.235) shrinks the usable share of the LDA by 1/1.15 first. An
+/// unusable landing mass leaves the limit on its own axis, unconverted.
+fn landing_limit_on_takeoff_axis(
+    limit_pa: f64,
+    landing_mass_kg: f64,
+    takeoff_mass_kg: f64,
+    wet_runway: bool,
+) -> f64 {
+    let limit_pa = limit_pa * landing_runway_share(1.0, wet_runway);
+    if landing_mass_kg.is_finite() && landing_mass_kg > 0.0 && takeoff_mass_kg > 0.0 {
+        limit_pa * takeoff_mass_kg / landing_mass_kg
+    } else {
+        limit_pa
+    }
 }
 
 fn draw_matching_chart(data: &MatchingChartData, oei_gradient: f64, theme: Option<&str>) -> Scene {
@@ -433,6 +494,27 @@ mod tests {
             element,
             SceneElement::Text { text, .. } if text.contains("OEI climb >=")
         )));
+    }
+
+    #[test]
+    fn the_landing_limit_is_drawn_on_the_takeoff_wing_loading_axis() {
+        // MLW 0.9 MTOW: a landing wing loading of 8000 Pa at MLW is
+        // 8000 / 0.9 at MTOW.
+        let on_axis = landing_limit_on_takeoff_axis(8_000.0, 63_000.0, 70_000.0, false);
+        assert!((on_axis - 8_000.0 / 0.9).abs() < 1e-9);
+        // Equal masses leave the dry limit untouched.
+        assert_eq!(
+            landing_limit_on_takeoff_axis(8_000.0, 70_000.0, 70_000.0, false),
+            8_000.0
+        );
+        // A wet runway divides it by 1.15; an unusable landing mass leaves it
+        // unconverted.
+        let wet = landing_limit_on_takeoff_axis(8_000.0, 70_000.0, 70_000.0, true);
+        assert!((wet - 8_000.0 / 1.15).abs() < 1e-9);
+        assert_eq!(
+            landing_limit_on_takeoff_axis(8_000.0, f64::NAN, 70_000.0, false),
+            8_000.0
+        );
     }
 
     fn chart_data(design: Option<(f64, f64)>) -> MatchingChartData {

@@ -38,11 +38,14 @@
 use serde::{Deserialize, Serialize};
 
 mod fuel_scheme;
+mod input_bounds;
 mod mass_model;
 mod mtow_sizing;
 mod wave_drag;
 
 use crate::AlasConfig;
+
+pub use input_bounds::{MAX_SOLVER_WORKERS, NUM_RIBS_OVERRIDE_RANGE};
 
 /// Sea-level density the equivalent airspeed is referred to, in kg/m^3.
 ///
@@ -100,6 +103,10 @@ pub fn validate(config: &AlasConfig) -> Vec<ValidationIssue> {
     issues.extend(passenger_and_mass_inputs_are_coherent(config));
     issues.extend(custom_geometry_is_physical(config));
     issues.extend(vlm_mesh_is_solvable(config));
+    issues.extend(input_bounds::fuel_policy_and_tank_layout_are_valid(config));
+    issues.extend(input_bounds::solver_workers_are_in_range(config));
+    issues.extend(input_bounds::rib_count_override_is_in_range(config));
+    issues.extend(input_bounds::preset_is_registered(config));
     if config.structures.nastran_memory_mb <= 0 {
         issues.push(ValidationIssue {
             severity: Severity::Error,
@@ -756,6 +763,82 @@ mod tests {
     use super::*;
 
     use crate::{FuelScheme, PropulsionTechnology};
+
+    fn paths(config: &AlasConfig) -> Vec<String> {
+        validate(config)
+            .into_iter()
+            .map(|issue| issue.field_path)
+            .collect()
+    }
+
+    #[test]
+    fn an_unregistered_preset_is_a_blocking_error_and_registered_or_blank_ones_are_not() {
+        let mut config = AlasConfig::default();
+        assert!(!paths(&config).contains(&"preset".to_owned()));
+        for preset in crate::presets::registry() {
+            config.preset = preset.name.to_owned();
+            assert!(
+                !paths(&config).contains(&"preset".to_owned()),
+                "{}",
+                preset.name
+            );
+        }
+        config.preset = "not-a-registered-aircraft".to_owned();
+        let issues = validate(&config);
+        let issue = issues
+            .iter()
+            .find(|issue| issue.field_path == "preset")
+            .unwrap();
+        assert_eq!(issue.severity, Severity::Error);
+        assert!(issue.message.contains("A320-200"), "{}", issue.message);
+    }
+
+    #[test]
+    fn fuel_policy_and_tank_layout_failures_reach_the_production_validator() {
+        let mut config = AlasConfig::default();
+        config.fuel_policy.taxi_time_min = -1.0;
+        config.fuel_tanks.inner_wing.usable_fraction = 2.0;
+        let found = paths(&config);
+        assert!(found.contains(&"fuel_policy".to_owned()), "{found:?}");
+        assert!(found.contains(&"fuel_tanks".to_owned()), "{found:?}");
+    }
+
+    #[test]
+    fn solver_workers_and_rib_override_are_bounded() {
+        let mut config = AlasConfig::default();
+        for workers in [0, 1, 64, MAX_SOLVER_WORKERS] {
+            config.optimizer.solver.workers = workers;
+            assert!(!paths(&config).contains(&"optimizer.solver.workers".to_owned()));
+        }
+        for workers in [-1, MAX_SOLVER_WORKERS + 1] {
+            config.optimizer.solver.workers = workers;
+            assert!(paths(&config).contains(&"optimizer.solver.workers".to_owned()));
+        }
+        config.optimizer.solver.workers = 0;
+        for ribs in [None, Some(2), Some(1000)] {
+            config.structures.num_ribs_override = ribs;
+            assert!(!paths(&config).contains(&"structures.num_ribs_override".to_owned()));
+        }
+        for ribs in [-3, 0, 1, 1001] {
+            config.structures.num_ribs_override = Some(ribs);
+            assert!(paths(&config).contains(&"structures.num_ribs_override".to_owned()));
+        }
+    }
+
+    #[test]
+    fn negative_landing_gear_counts_are_blocking() {
+        let mut config = AlasConfig::default();
+        config.landing_gear.n_mlg_struts = -2;
+        config.landing_gear.n_nlg_wheels = -1;
+        config.landing_gear.wheels_per_mlg_strut = -4;
+        let found = paths(&config);
+        for field in ["n_mlg_struts", "n_nlg_wheels", "wheels_per_mlg_strut"] {
+            assert!(
+                found.contains(&format!("landing_gear.{field}")),
+                "{found:?}"
+            );
+        }
+    }
 
     #[test]
     fn the_shipped_configuration_is_one_nothing_objects_to() {

@@ -17,11 +17,17 @@ alas-aero = { path = "../alas-aero" }
 # VLM operating points use the production atmosphere model at the user-set
 # altitude rather than accepting an unrelated density approximation.
 alas-atmo = { path = "../alas-atmo" }
+# Component ids in the design tree refer to rows of the provenance-tracked
+# component database; the database crate has no physics dependency.
+alas-uav-db = { path = "../alas-uav-db" }
 # Component records cross the scraper/reviewer boundary as stable typed JSON.
 serde = { workspace = true }
 serde_json = { workspace = true }
 # Error types derive `Display` and `Error` the way the other library crates do.
 thiserror = { workspace = true }
+# Inflates deflated entries when a user imports a zip of propeller tables;
+# already in the graph through the image stack, so it adds no new crate.
+miniz_oxide = "0.8"
 
 [lints]
 workspace = true

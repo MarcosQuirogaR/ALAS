@@ -10,13 +10,18 @@
 mod affected;
 mod bench;
 mod checks;
+mod dev_env;
 mod dist;
 mod dist_archive;
 mod dist_avl;
 mod evidence;
 mod gate;
 mod ledger;
+mod memo;
+mod repin;
+mod smoke;
 mod source_size;
+mod tiers;
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
@@ -29,8 +34,13 @@ fn main() -> ExitCode {
     let outcome = match task.as_deref() {
         Some("gate") => gate::run(&root, &args[1..]),
         Some("checks") => run_checks(&root),
+        Some("test") => gate::test(&root, &args[1..]),
+        Some("smoke") => smoke::run(&root, &args[1..]),
+        Some("tiers") => tiers::run(&root, &args[1..]),
+        Some("repin") => repin::run(&root, &args[1..]),
         Some("evidence-audit") => run_evidence_audit(&root),
-        Some("install-hooks") => install_hooks(&root),
+        Some("install-hooks") => install_hooks(&root, args.iter().any(|a| a == "--force")),
+        Some("dev-env") => dev_env::run(&args[1..]),
         Some("bench") => bench::run_benchmarks(&root),
         Some("dist") | Some("package") => dist::create_distribution(&root),
         Some("backup") => backup(&root),
@@ -59,13 +69,27 @@ fn usage() {
         "cargo xtask <task>\n\
          \n\
          gate           full tier: repository checks, formatting, lints and all tests\n\
-         gate --quick [--base <ref>]\n\
+         gate --quick [--base <ref>] [--part lint|tests]\n\
                         checks, formatting, then lints and fast tests of affected packages\n\
-         gate --slow    only the slow test tier (needs cargo-nextest)\n\
+         gate --integration\n\
+                        only the heavy integration test tier, alias --slow (needs cargo-nextest)\n\
+         gate --medium  only the medium tier (5 s+ tests outside the integration tier)\n\
+         gate --nightly only the nightly tier (tests named *_nightly)\n\
+         test [nextest args]\n\
+                        cargo nextest run with the shared test-result store enabled\n\
+         smoke [--presets A,B] [--evaluations N] [--cells N] [--workers N]\n\
+                        every preset: native baseline + 24+24 evaluation search, in parallel\n\
+         tiers <junit.xml> [--write]\n\
+                        regenerate the nextest tier filters from a full-profile JUnit report\n\
+         repin <suite> [--dry-run]\n\
+                        rewrite tests/golden/<suite>.json from what its producer computes\n\
          checks         the repository checks alone, without invoking Cargo\n\
          evidence-audit audit ledger, fixture and generator evidence bookkeeping\n\
-         install-hooks  install the pre-commit hook that runs the quick gate\n\
-         bench          build and execute the release computational benchmark suite\n\
+         install-hooks [--force]\n\
+                        install the pre-commit hook that runs the quick gate\n\
+         dev-env [--shell powershell|sh] [--target-dir DIR] [--sccache] [--run -- CMD]\n\
+                        print (or apply to one command) the lld linker and per-lane target environment\n\
+         bench         build and execute the release computational benchmark suite\n\
          dist           compile release binary and assemble standalone distribution archive\n\
          package        alias for dist\n\
          backup         write a git bundle to the synced backup directory"
@@ -111,9 +135,20 @@ pub(crate) fn run_checks(root: &Path) -> Result<(), String> {
     Err(format!("checks: {} finding(s)", findings.len()))
 }
 
-fn install_hooks(root: &Path) -> Result<(), String> {
+fn install_hooks(root: &Path, force: bool) -> Result<(), String> {
     let hook = root.join(".git").join("hooks").join("pre-commit");
     let body = "#!/bin/sh\nexec cargo xtask gate --quick\n";
+    // Never silently replace a hook that is not ours.
+    if !force {
+        if let Ok(existing) = std::fs::read_to_string(&hook) {
+            if !existing.contains("cargo xtask gate") {
+                return Err(format!(
+                    "{} exists and is not the ALAS hook; rerun with --force to overwrite it",
+                    hook.display()
+                ));
+            }
+        }
+    }
     std::fs::write(&hook, body).map_err(|e| format!("cannot write {}: {e}", hook.display()))?;
     println!("installed {}", hook.display());
     Ok(())
@@ -150,10 +185,20 @@ fn backup(root: &Path) -> Result<(), String> {
 }
 
 pub(crate) fn cargo(root: &Path, args: &[&str]) -> Result<(), String> {
+    cargo_env(root, args, &[])
+}
+
+/// As [`cargo`], with extra environment variables for the child.
+pub(crate) fn cargo_env(
+    root: &Path,
+    args: &[&str],
+    env: &[(String, String)],
+) -> Result<(), String> {
     println!("\ncargo {}", args.join(" "));
     let status = Command::new(env!("CARGO"))
         .current_dir(root)
         .args(args)
+        .envs(env.iter().map(|(k, v)| (k, v)))
         .status()
         .map_err(|e| format!("cannot run cargo: {e}"))?;
 

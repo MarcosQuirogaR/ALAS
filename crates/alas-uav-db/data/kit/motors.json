@@ -1,0 +1,1645 @@
+{
+ "schema_version": 2,
+ "sources": [],
+ "components": [
+  {
+   "id": "hobbywing-skywalker-2814-sl-1000kv",
+   "mpn": "Skywalker 2814 SL 1000KV",
+   "manufacturer": "Hobbywing",
+   "status": "active",
+   "schema_version": 2,
+   "valid_from": "2026-10-12",
+   "valid_to": null,
+   "created_at": "2026-10-12",
+   "updated_at": "2026-10-12",
+   "category": "motor",
+   "spec": {
+    "kv_rad_s_per_v": {
+     "value": 104.71975511965977,
+     "unit_si": "rad/s/V",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "1000KV",
+     "confidence": 0.7
+    },
+    "rm_ohm": {
+     "value": 0.029,
+     "unit_si": "Ohm",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "29.0 mOhm",
+     "confidence": 0.7
+    },
+    "i0_a": {
+     "value": 2.0,
+     "unit_si": "A",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "2.0A/14.8V",
+     "confidence": 0.7,
+     "test": {
+      "voltage_v": 14.8
+     }
+    },
+    "i0_test_v": {
+     "value": 14.8,
+     "unit_si": "V",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "2.0A/14.8V",
+     "confidence": 0.7
+    },
+    "i_max_burst_a": {
+     "value": 55.2,
+     "unit_si": "A",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "55.2A/43s (page label: Maximum continuous current)",
+     "confidence": 0.7,
+     "test": {
+      "load": "time limited, 43s"
+     }
+    },
+    "burst_s": {
+     "value": 43.0,
+     "unit_si": "s",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "43s",
+     "confidence": 0.7
+    },
+    "p_max_w": {
+     "value": 815.8,
+     "unit_si": "W",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "815.8W/43s (page label: Maximum continuous power)",
+     "confidence": 0.7,
+     "test": {
+      "load": "time limited, 43s"
+     }
+    },
+    "n_poles": {
+     "value": 14,
+     "unit_si": "1",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "12N14P",
+     "confidence": 0.7
+    },
+    "mass_kg": {
+     "value": 0.115,
+     "unit_si": "kg",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "115g",
+     "confidence": 0.7
+    },
+    "diameter_m": {
+     "value": 0.0351,
+     "unit_si": "m",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "35.1mm (Motor Size)",
+     "confidence": 0.7
+    },
+    "length_m": {
+     "value": 0.054,
+     "unit_si": "m",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "54mm (Motor Size; shaft inclusion not stated)",
+     "confidence": 0.6
+    },
+    "shaft_d_m": {
+     "value": 0.005,
+     "unit_si": "m",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "5mm",
+     "confidence": 0.7
+    },
+    "cells_min": {
+     "value": 3,
+     "unit_si": "1",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "3-4S LIPO",
+     "confidence": 0.7
+    },
+    "cells_max": {
+     "value": 4,
+     "unit_si": "1",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "3-4S LIPO",
+     "confidence": 0.7
+    }
+   }
+  },
+  {
+   "id": "hobbywing-skywalker-2814-sl-1250kv",
+   "mpn": "Skywalker 2814 SL 1250KV",
+   "manufacturer": "Hobbywing",
+   "status": "active",
+   "schema_version": 2,
+   "valid_from": "2026-10-12",
+   "valid_to": null,
+   "created_at": "2026-10-12",
+   "updated_at": "2026-10-12",
+   "category": "motor",
+   "spec": {
+    "kv_rad_s_per_v": {
+     "value": 130.89969389957471,
+     "unit_si": "rad/s/V",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "1250KV",
+     "confidence": 0.7
+    },
+    "rm_ohm": {
+     "value": 0.0197,
+     "unit_si": "Ohm",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "19.7 mOhm",
+     "confidence": 0.7
+    },
+    "i0_a": {
+     "value": 2.98,
+     "unit_si": "A",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "2.98A/14.8V",
+     "confidence": 0.7,
+     "test": {
+      "voltage_v": 14.8
+     }
+    },
+    "i0_test_v": {
+     "value": 14.8,
+     "unit_si": "V",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "2.98A/14.8V",
+     "confidence": 0.7
+    },
+    "i_max_burst_a": {
+     "value": 75.1,
+     "unit_si": "A",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "75.1A/35s (page label: Maximum continuous current)",
+     "confidence": 0.7,
+     "test": {
+      "load": "time limited, 35s"
+     }
+    },
+    "burst_s": {
+     "value": 35.0,
+     "unit_si": "s",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "35s",
+     "confidence": 0.7
+    },
+    "p_max_w": {
+     "value": 1111.5,
+     "unit_si": "W",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "1111.5W/35s (page label: Maximum continuous power)",
+     "confidence": 0.7,
+     "test": {
+      "load": "time limited, 35s"
+     }
+    },
+    "n_poles": {
+     "value": 14,
+     "unit_si": "1",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "12N14P",
+     "confidence": 0.7
+    },
+    "mass_kg": {
+     "value": 0.114,
+     "unit_si": "kg",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "114g",
+     "confidence": 0.7
+    },
+    "diameter_m": {
+     "value": 0.0351,
+     "unit_si": "m",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "35.1mm (Motor Size)",
+     "confidence": 0.7
+    },
+    "length_m": {
+     "value": 0.054,
+     "unit_si": "m",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "54mm (Motor Size; shaft inclusion not stated)",
+     "confidence": 0.6
+    },
+    "shaft_d_m": {
+     "value": 0.005,
+     "unit_si": "m",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "5mm",
+     "confidence": 0.7
+    },
+    "cells_min": {
+     "value": 3,
+     "unit_si": "1",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "3-4S LIPO",
+     "confidence": 0.7
+    },
+    "cells_max": {
+     "value": 4,
+     "unit_si": "1",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "3-4S LIPO",
+     "confidence": 0.7
+    }
+   }
+  },
+  {
+   "id": "hobbywing-skywalker-2814-sl-1400kv",
+   "mpn": "Skywalker 2814 SL 1400KV",
+   "manufacturer": "Hobbywing",
+   "status": "active",
+   "schema_version": 2,
+   "valid_from": "2026-10-12",
+   "valid_to": null,
+   "created_at": "2026-10-12",
+   "updated_at": "2026-10-12",
+   "category": "motor",
+   "spec": {
+    "kv_rad_s_per_v": {
+     "value": 146.60765716752368,
+     "unit_si": "rad/s/V",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "1400KV",
+     "confidence": 0.7
+    },
+    "rm_ohm": {
+     "value": 0.016800000000000002,
+     "unit_si": "Ohm",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "16.8 mOhm",
+     "confidence": 0.7
+    },
+    "i0_a": {
+     "value": 3.3,
+     "unit_si": "A",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "3.3A/14.8V",
+     "confidence": 0.7,
+     "test": {
+      "voltage_v": 14.8
+     }
+    },
+    "i0_test_v": {
+     "value": 14.8,
+     "unit_si": "V",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "3.3A/14.8V",
+     "confidence": 0.7
+    },
+    "i_max_burst_a": {
+     "value": 77.5,
+     "unit_si": "A",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "77.5A/44s (page label: Maximum continuous current)",
+     "confidence": 0.7,
+     "test": {
+      "load": "time limited, 44s"
+     }
+    },
+    "burst_s": {
+     "value": 44.0,
+     "unit_si": "s",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "44s",
+     "confidence": 0.7
+    },
+    "p_max_w": {
+     "value": 1148.6,
+     "unit_si": "W",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "1148.6W/44s (page label: Maximum continuous power)",
+     "confidence": 0.7,
+     "test": {
+      "load": "time limited, 44s"
+     }
+    },
+    "n_poles": {
+     "value": 14,
+     "unit_si": "1",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "12N14P",
+     "confidence": 0.7
+    },
+    "mass_kg": {
+     "value": 0.115,
+     "unit_si": "kg",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "115g",
+     "confidence": 0.7
+    },
+    "diameter_m": {
+     "value": 0.0351,
+     "unit_si": "m",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "35.1mm (Motor Size)",
+     "confidence": 0.7
+    },
+    "length_m": {
+     "value": 0.054,
+     "unit_si": "m",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "54mm (Motor Size; shaft inclusion not stated)",
+     "confidence": 0.6
+    },
+    "shaft_d_m": {
+     "value": 0.005,
+     "unit_si": "m",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "5mm",
+     "confidence": 0.7
+    },
+    "cells_min": {
+     "value": 3,
+     "unit_si": "1",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "3-4S LIPO",
+     "confidence": 0.7
+    },
+    "cells_max": {
+     "value": 4,
+     "unit_si": "1",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "3-4S LIPO",
+     "confidence": 0.7
+    }
+   }
+  },
+  {
+   "id": "hobbywing-skywalker-2820-sl-550kv",
+   "mpn": "Skywalker 2820 SL 550KV",
+   "manufacturer": "Hobbywing",
+   "status": "active",
+   "schema_version": 2,
+   "valid_from": "2026-10-12",
+   "valid_to": null,
+   "created_at": "2026-10-12",
+   "updated_at": "2026-10-12",
+   "category": "motor",
+   "spec": {
+    "kv_rad_s_per_v": {
+     "value": 57.59586531581287,
+     "unit_si": "rad/s/V",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "550KV",
+     "confidence": 0.7
+    },
+    "rm_ohm": {
+     "value": 0.0608,
+     "unit_si": "Ohm",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "60.8 mOhm",
+     "confidence": 0.7
+    },
+    "i0_a": {
+     "value": 1.38,
+     "unit_si": "A",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "1.38A/22.2V",
+     "confidence": 0.7,
+     "test": {
+      "voltage_v": 22.2
+     }
+    },
+    "i0_test_v": {
+     "value": 22.2,
+     "unit_si": "V",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "1.38A/22.2V",
+     "confidence": 0.7
+    },
+    "i_max_burst_a": {
+     "value": 40.9,
+     "unit_si": "A",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "40.9A/46s (page label: Maximum continuous current)",
+     "confidence": 0.7,
+     "test": {
+      "load": "time limited, 46s"
+     }
+    },
+    "burst_s": {
+     "value": 46.0,
+     "unit_si": "s",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "46s",
+     "confidence": 0.7
+    },
+    "p_max_w": {
+     "value": 910.2,
+     "unit_si": "W",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "910.2W/46s (page label: Maximum continuous power)",
+     "confidence": 0.7,
+     "test": {
+      "load": "time limited, 46s"
+     }
+    },
+    "n_poles": {
+     "value": 14,
+     "unit_si": "1",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "12N14P",
+     "confidence": 0.7
+    },
+    "mass_kg": {
+     "value": 0.1445,
+     "unit_si": "kg",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "144.5g",
+     "confidence": 0.7
+    },
+    "diameter_m": {
+     "value": 0.0351,
+     "unit_si": "m",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "35.1mm (Motor Size)",
+     "confidence": 0.7
+    },
+    "length_m": {
+     "value": 0.06,
+     "unit_si": "m",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "60mm (Motor Size; shaft inclusion not stated)",
+     "confidence": 0.6
+    },
+    "shaft_d_m": {
+     "value": 0.005,
+     "unit_si": "m",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "5mm",
+     "confidence": 0.7
+    },
+    "cells_min": {
+     "value": 6,
+     "unit_si": "1",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "6S LIPO",
+     "confidence": 0.7
+    },
+    "cells_max": {
+     "value": 6,
+     "unit_si": "1",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "6S LIPO",
+     "confidence": 0.7
+    }
+   }
+  },
+  {
+   "id": "hobbywing-skywalker-2820-sl-1000kv",
+   "mpn": "Skywalker 2820 SL 1000KV",
+   "manufacturer": "Hobbywing",
+   "status": "active",
+   "schema_version": 2,
+   "valid_from": "2026-10-12",
+   "valid_to": null,
+   "created_at": "2026-10-12",
+   "updated_at": "2026-10-12",
+   "category": "motor",
+   "spec": {
+    "kv_rad_s_per_v": {
+     "value": 104.71975511965977,
+     "unit_si": "rad/s/V",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "1000KV",
+     "confidence": 0.7
+    },
+    "rm_ohm": {
+     "value": 0.0214,
+     "unit_si": "Ohm",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "21.4 mOhm",
+     "confidence": 0.7
+    },
+    "i0_a": {
+     "value": 2.65,
+     "unit_si": "A",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "2.65A/14.8V",
+     "confidence": 0.7,
+     "test": {
+      "voltage_v": 14.8
+     }
+    },
+    "i0_test_v": {
+     "value": 14.8,
+     "unit_si": "V",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "2.65A/14.8V",
+     "confidence": 0.7
+    },
+    "i_max_burst_a": {
+     "value": 77.0,
+     "unit_si": "A",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "77.0A/46s (page label: Maximum continuous current)",
+     "confidence": 0.7,
+     "test": {
+      "load": "time limited, 46s"
+     }
+    },
+    "burst_s": {
+     "value": 46.0,
+     "unit_si": "s",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "46s",
+     "confidence": 0.7
+    },
+    "p_max_w": {
+     "value": 1139.7,
+     "unit_si": "W",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "1139.7W/46s (page label: Maximum continuous power)",
+     "confidence": 0.7,
+     "test": {
+      "load": "time limited, 46s"
+     }
+    },
+    "n_poles": {
+     "value": 14,
+     "unit_si": "1",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "12N14P",
+     "confidence": 0.7
+    },
+    "mass_kg": {
+     "value": 0.145,
+     "unit_si": "kg",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "145g",
+     "confidence": 0.7
+    },
+    "diameter_m": {
+     "value": 0.0351,
+     "unit_si": "m",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "35.1mm (Motor Size)",
+     "confidence": 0.7
+    },
+    "length_m": {
+     "value": 0.06,
+     "unit_si": "m",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "60mm (Motor Size; shaft inclusion not stated)",
+     "confidence": 0.6
+    },
+    "shaft_d_m": {
+     "value": 0.005,
+     "unit_si": "m",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "5mm",
+     "confidence": 0.7
+    },
+    "cells_min": {
+     "value": 3,
+     "unit_si": "1",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "3-4S LIPO",
+     "confidence": 0.7
+    },
+    "cells_max": {
+     "value": 4,
+     "unit_si": "1",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "3-4S LIPO",
+     "confidence": 0.7
+    }
+   }
+  },
+  {
+   "id": "hobbywing-skywalker-2820-sl-1250kv",
+   "mpn": "Skywalker 2820 SL 1250KV",
+   "manufacturer": "Hobbywing",
+   "status": "active",
+   "schema_version": 2,
+   "valid_from": "2026-10-12",
+   "valid_to": null,
+   "created_at": "2026-10-12",
+   "updated_at": "2026-10-12",
+   "category": "motor",
+   "spec": {
+    "kv_rad_s_per_v": {
+     "value": 130.89969389957471,
+     "unit_si": "rad/s/V",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "1250KV",
+     "confidence": 0.7
+    },
+    "rm_ohm": {
+     "value": 0.0148,
+     "unit_si": "Ohm",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "14.8 mOhm",
+     "confidence": 0.7
+    },
+    "i0_a": {
+     "value": 3.7,
+     "unit_si": "A",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "3.7A/14.8V",
+     "confidence": 0.7,
+     "test": {
+      "voltage_v": 14.8
+     }
+    },
+    "i0_test_v": {
+     "value": 14.8,
+     "unit_si": "V",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "3.7A/14.8V",
+     "confidence": 0.7
+    },
+    "i_max_burst_a": {
+     "value": 81.8,
+     "unit_si": "A",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "81.8A/1min49s (page label: Maximum continuous current)",
+     "confidence": 0.7,
+     "test": {
+      "load": "time limited, 1min49s"
+     }
+    },
+    "burst_s": {
+     "value": 109.0,
+     "unit_si": "s",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "1min49s",
+     "confidence": 0.7
+    },
+    "p_max_w": {
+     "value": 1110.7,
+     "unit_si": "W",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "1110.7W/4min3s (page label: Maximum continuous power)",
+     "confidence": 0.7,
+     "test": {
+      "load": "time limited, 4min3s"
+     }
+    },
+    "n_poles": {
+     "value": 14,
+     "unit_si": "1",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "12N14P",
+     "confidence": 0.7
+    },
+    "mass_kg": {
+     "value": 0.1455,
+     "unit_si": "kg",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "145.5g",
+     "confidence": 0.7
+    },
+    "diameter_m": {
+     "value": 0.0351,
+     "unit_si": "m",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "35.1mm (Motor Size)",
+     "confidence": 0.7
+    },
+    "length_m": {
+     "value": 0.06,
+     "unit_si": "m",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "60mm (Motor Size; shaft inclusion not stated)",
+     "confidence": 0.6
+    },
+    "shaft_d_m": {
+     "value": 0.005,
+     "unit_si": "m",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "5mm",
+     "confidence": 0.7
+    },
+    "cells_min": {
+     "value": 3,
+     "unit_si": "1",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "3-4S LIPO",
+     "confidence": 0.7
+    },
+    "cells_max": {
+     "value": 4,
+     "unit_si": "1",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "3-4S LIPO",
+     "confidence": 0.7
+    }
+   }
+  },
+  {
+   "id": "hobbywing-skywalker-2826-sl-540kv",
+   "mpn": "Skywalker 2826 SL 540KV",
+   "manufacturer": "Hobbywing",
+   "status": "active",
+   "schema_version": 2,
+   "valid_from": "2026-10-12",
+   "valid_to": null,
+   "created_at": "2026-10-12",
+   "updated_at": "2026-10-12",
+   "category": "motor",
+   "spec": {
+    "kv_rad_s_per_v": {
+     "value": 56.548667764616276,
+     "unit_si": "rad/s/V",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "540KV",
+     "confidence": 0.7
+    },
+    "rm_ohm": {
+     "value": 0.0439,
+     "unit_si": "Ohm",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "43.9 mOhm",
+     "confidence": 0.7
+    },
+    "i0_a": {
+     "value": 1.58,
+     "unit_si": "A",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "1.58A/22.2V",
+     "confidence": 0.7,
+     "test": {
+      "voltage_v": 22.2
+     }
+    },
+    "i0_test_v": {
+     "value": 22.2,
+     "unit_si": "V",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "1.58A/22.2V",
+     "confidence": 0.7
+    },
+    "i_max_burst_a": {
+     "value": 49.7,
+     "unit_si": "A",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "49.7A/1min (page label: Maximum continuous current)",
+     "confidence": 0.7,
+     "test": {
+      "load": "time limited, 1min"
+     }
+    },
+    "burst_s": {
+     "value": 60.0,
+     "unit_si": "s",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "1min",
+     "confidence": 0.7
+    },
+    "p_max_w": {
+     "value": 1106.5,
+     "unit_si": "W",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "1106.5W/1min (page label: Maximum continuous power)",
+     "confidence": 0.7,
+     "test": {
+      "load": "time limited, 1min"
+     }
+    },
+    "n_poles": {
+     "value": 14,
+     "unit_si": "1",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "12N14P",
+     "confidence": 0.7
+    },
+    "mass_kg": {
+     "value": 0.1755,
+     "unit_si": "kg",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "175.5g",
+     "confidence": 0.7
+    },
+    "diameter_m": {
+     "value": 0.0351,
+     "unit_si": "m",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "35.1mm (Motor Size)",
+     "confidence": 0.7
+    },
+    "length_m": {
+     "value": 0.066,
+     "unit_si": "m",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "66mm (Motor Size; shaft inclusion not stated)",
+     "confidence": 0.6
+    },
+    "shaft_d_m": {
+     "value": 0.005,
+     "unit_si": "m",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "5mm",
+     "confidence": 0.7
+    },
+    "cells_min": {
+     "value": 6,
+     "unit_si": "1",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "6S LIPO",
+     "confidence": 0.7
+    },
+    "cells_max": {
+     "value": 6,
+     "unit_si": "1",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "6S LIPO",
+     "confidence": 0.7
+    }
+   }
+  },
+  {
+   "id": "hobbywing-skywalker-2826-sl-850kv",
+   "mpn": "Skywalker 2826 SL 850KV",
+   "manufacturer": "Hobbywing",
+   "status": "active",
+   "schema_version": 2,
+   "valid_from": "2026-10-12",
+   "valid_to": null,
+   "created_at": "2026-10-12",
+   "updated_at": "2026-10-12",
+   "category": "motor",
+   "spec": {
+    "kv_rad_s_per_v": {
+     "value": 89.0117918517108,
+     "unit_si": "rad/s/V",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "850KV",
+     "confidence": 0.7
+    },
+    "rm_ohm": {
+     "value": 0.0205,
+     "unit_si": "Ohm",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "20.5 mOhm",
+     "confidence": 0.7
+    },
+    "i0_a": {
+     "value": 2.55,
+     "unit_si": "A",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "2.55A/14.8V",
+     "confidence": 0.7,
+     "test": {
+      "voltage_v": 14.8
+     }
+    },
+    "i0_test_v": {
+     "value": 14.8,
+     "unit_si": "V",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "2.55A/14.8V",
+     "confidence": 0.7
+    },
+    "i_max_burst_a": {
+     "value": 69.0,
+     "unit_si": "A",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "69.0A/2min11s (page label: Maximum continuous current)",
+     "confidence": 0.7,
+     "test": {
+      "load": "time limited, 2min11s"
+     }
+    },
+    "burst_s": {
+     "value": 131.0,
+     "unit_si": "s",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "2min11s",
+     "confidence": 0.7
+    },
+    "p_max_w": {
+     "value": 1006.5,
+     "unit_si": "W",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "1006.5W/1min49s (page label: Maximum continuous power)",
+     "confidence": 0.7,
+     "test": {
+      "load": "time limited, 1min49s"
+     }
+    },
+    "n_poles": {
+     "value": 14,
+     "unit_si": "1",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "12N14P",
+     "confidence": 0.7
+    },
+    "mass_kg": {
+     "value": 0.1762,
+     "unit_si": "kg",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "176.2g",
+     "confidence": 0.7
+    },
+    "diameter_m": {
+     "value": 0.0351,
+     "unit_si": "m",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "35.1mm (Motor Size)",
+     "confidence": 0.7
+    },
+    "length_m": {
+     "value": 0.066,
+     "unit_si": "m",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "66mm (Motor Size; shaft inclusion not stated)",
+     "confidence": 0.6
+    },
+    "shaft_d_m": {
+     "value": 0.005,
+     "unit_si": "m",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "5mm",
+     "confidence": 0.7
+    },
+    "cells_min": {
+     "value": 3,
+     "unit_si": "1",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "3-4S LIPO",
+     "confidence": 0.7
+    },
+    "cells_max": {
+     "value": 4,
+     "unit_si": "1",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "3-4S LIPO",
+     "confidence": 0.7
+    }
+   }
+  },
+  {
+   "id": "hobbywing-skywalker-2826-sl-1100kv",
+   "mpn": "Skywalker 2826 SL 1100KV",
+   "manufacturer": "Hobbywing",
+   "status": "active",
+   "schema_version": 2,
+   "valid_from": "2026-10-12",
+   "valid_to": null,
+   "created_at": "2026-10-12",
+   "updated_at": "2026-10-12",
+   "category": "motor",
+   "spec": {
+    "kv_rad_s_per_v": {
+     "value": 115.19173063162575,
+     "unit_si": "rad/s/V",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "1100KV",
+     "confidence": 0.7
+    },
+    "rm_ohm": {
+     "value": 0.01408,
+     "unit_si": "Ohm",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "14.08 mOhm",
+     "confidence": 0.7
+    },
+    "i0_a": {
+     "value": 3.7,
+     "unit_si": "A",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "3.7A/14.8V",
+     "confidence": 0.7,
+     "test": {
+      "voltage_v": 14.8
+     }
+    },
+    "i0_test_v": {
+     "value": 14.8,
+     "unit_si": "V",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "3.7A/14.8V",
+     "confidence": 0.7
+    },
+    "i_max_burst_a": {
+     "value": 82.4,
+     "unit_si": "A",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "82.4A/2min15s (page label: Maximum continuous current)",
+     "confidence": 0.7,
+     "test": {
+      "load": "time limited, 2min15s"
+     }
+    },
+    "burst_s": {
+     "value": 135.0,
+     "unit_si": "s",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "2min15s",
+     "confidence": 0.7
+    },
+    "p_max_w": {
+     "value": 1218.9,
+     "unit_si": "W",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "1218.9W/2min15s (page label: Maximum continuous power)",
+     "confidence": 0.7,
+     "test": {
+      "load": "time limited, 2min15s"
+     }
+    },
+    "n_poles": {
+     "value": 14,
+     "unit_si": "1",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "12N14P",
+     "confidence": 0.7
+    },
+    "mass_kg": {
+     "value": 0.1758,
+     "unit_si": "kg",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "175.8g",
+     "confidence": 0.7
+    },
+    "diameter_m": {
+     "value": 0.0351,
+     "unit_si": "m",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "35.1mm (Motor Size)",
+     "confidence": 0.7
+    },
+    "length_m": {
+     "value": 0.066,
+     "unit_si": "m",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "66mm (Motor Size; shaft inclusion not stated)",
+     "confidence": 0.6
+    },
+    "shaft_d_m": {
+     "value": 0.005,
+     "unit_si": "m",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "5mm",
+     "confidence": 0.7
+    },
+    "cells_min": {
+     "value": 3,
+     "unit_si": "1",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "3-4S LIPO",
+     "confidence": 0.7
+    },
+    "cells_max": {
+     "value": 4,
+     "unit_si": "1",
+     "source_id": "hobbywing-skywalker-sl-motors",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "3-4S LIPO",
+     "confidence": 0.7
+    }
+   }
+  },
+  {
+   "id": "tmotor-at8025-kv160",
+   "mpn": "AT8025 KV160",
+   "manufacturer": "T-MOTOR",
+   "status": "active",
+   "schema_version": 2,
+   "valid_from": "2026-10-12",
+   "valid_to": null,
+   "created_at": "2026-10-12",
+   "updated_at": "2026-10-12",
+   "category": "motor",
+   "spec": {
+    "kv_rad_s_per_v": {
+     "value": 16.755160819145562,
+     "unit_si": "rad/s/V",
+     "source_id": "tmotor-at8025-page",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "KV160",
+     "confidence": 0.7
+    },
+    "rm_ohm": {
+     "value": 0.014,
+     "unit_si": "Ohm",
+     "source_id": "tmotor-at8025-page",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "14 mOhm",
+     "confidence": 0.7
+    },
+    "i0_a": {
+     "value": 4.0,
+     "unit_si": "A",
+     "source_id": "tmotor-at8025-page",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "4.0A (Idle Current(10V))",
+     "confidence": 0.7,
+     "test": {
+      "voltage_v": 10.0
+     }
+    },
+    "i0_test_v": {
+     "value": 10.0,
+     "unit_si": "V",
+     "source_id": "tmotor-at8025-page",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "Idle Current(10V)",
+     "confidence": 0.7
+    },
+    "i_max_burst_a": {
+     "value": 115.0,
+     "unit_si": "A",
+     "source_id": "tmotor-at8025-page",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "115A (Peak Current(180s))",
+     "confidence": 0.7,
+     "test": {
+      "load": "180 s"
+     }
+    },
+    "burst_s": {
+     "value": 180.0,
+     "unit_si": "s",
+     "source_id": "tmotor-at8025-page",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "180s",
+     "confidence": 0.7
+    },
+    "p_max_w": {
+     "value": 5800.0,
+     "unit_si": "W",
+     "source_id": "tmotor-at8025-page",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "5000W/12S, 5800W/14S (Max Power (180S))",
+     "confidence": 0.7,
+     "test": {
+      "load": "180 s"
+     }
+    },
+    "n_poles": {
+     "value": 28,
+     "unit_si": "1",
+     "source_id": "tmotor-at8025-page",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "24N28P",
+     "confidence": 0.7
+    },
+    "mass_kg": {
+     "value": 0.985,
+     "unit_si": "kg",
+     "source_id": "tmotor-at8025-page",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "985g (Weight (Incl. Cable))",
+     "confidence": 0.7
+    },
+    "diameter_m": {
+     "value": 0.09,
+     "unit_si": "m",
+     "source_id": "tmotor-at8025-page",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "90mm (Motor Dimensions 90*75.8mm)",
+     "confidence": 0.7
+    },
+    "length_m": {
+     "value": 0.07579999999999999,
+     "unit_si": "m",
+     "source_id": "tmotor-at8025-page",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "75.8mm (Motor Dimensions 90*75.8mm; shaft inclusion not stated)",
+     "confidence": 0.6
+    },
+    "shaft_d_m": {
+     "value": 0.01,
+     "unit_si": "m",
+     "source_id": "tmotor-at8025-page",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "IN: 12mm, OUT: 10mm (output shaft taken)",
+     "confidence": 0.6
+    },
+    "cells_min": {
+     "value": 10,
+     "unit_si": "1",
+     "source_id": "tmotor-at8025-page",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "Rated Voltage(LiPo) 10-14S",
+     "confidence": 0.7
+    },
+    "cells_max": {
+     "value": 14,
+     "unit_si": "1",
+     "source_id": "tmotor-at8025-page",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "Rated Voltage(LiPo) 10-14S",
+     "confidence": 0.7
+    }
+   }
+  },
+  {
+   "id": "tmotor-at8025-kv190",
+   "mpn": "AT8025 KV190",
+   "manufacturer": "T-MOTOR",
+   "status": "active",
+   "schema_version": 2,
+   "valid_from": "2026-10-12",
+   "valid_to": null,
+   "created_at": "2026-10-12",
+   "updated_at": "2026-10-12",
+   "category": "motor",
+   "spec": {
+    "kv_rad_s_per_v": {
+     "value": 19.896753472735355,
+     "unit_si": "rad/s/V",
+     "source_id": "tmotor-at8025-page",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "KV190",
+     "confidence": 0.7
+    },
+    "rm_ohm": {
+     "value": 0.01,
+     "unit_si": "Ohm",
+     "source_id": "tmotor-at8025-page",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "10 mOhm",
+     "confidence": 0.7
+    },
+    "i0_a": {
+     "value": 5.0,
+     "unit_si": "A",
+     "source_id": "tmotor-at8025-page",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "5.0A (Idle Current(10V))",
+     "confidence": 0.7,
+     "test": {
+      "voltage_v": 10.0
+     }
+    },
+    "i0_test_v": {
+     "value": 10.0,
+     "unit_si": "V",
+     "source_id": "tmotor-at8025-page",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "Idle Current(10V)",
+     "confidence": 0.7
+    },
+    "i_max_burst_a": {
+     "value": 135.0,
+     "unit_si": "A",
+     "source_id": "tmotor-at8025-page",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "135A (Peak Current(180s))",
+     "confidence": 0.7,
+     "test": {
+      "load": "180 s"
+     }
+    },
+    "burst_s": {
+     "value": 180.0,
+     "unit_si": "s",
+     "source_id": "tmotor-at8025-page",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "180s",
+     "confidence": 0.7
+    },
+    "p_max_w": {
+     "value": 6000.0,
+     "unit_si": "W",
+     "source_id": "tmotor-at8025-page",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "6000W/12S (Max Power (180S))",
+     "confidence": 0.7,
+     "test": {
+      "load": "180 s"
+     }
+    },
+    "n_poles": {
+     "value": 28,
+     "unit_si": "1",
+     "source_id": "tmotor-at8025-page",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "24N28P",
+     "confidence": 0.7
+    },
+    "mass_kg": {
+     "value": 0.99,
+     "unit_si": "kg",
+     "source_id": "tmotor-at8025-page",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "990g (Weight (Incl. Cable))",
+     "confidence": 0.7
+    },
+    "diameter_m": {
+     "value": 0.09,
+     "unit_si": "m",
+     "source_id": "tmotor-at8025-page",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "90mm (Motor Dimensions 90*75.8mm)",
+     "confidence": 0.7
+    },
+    "length_m": {
+     "value": 0.07579999999999999,
+     "unit_si": "m",
+     "source_id": "tmotor-at8025-page",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "75.8mm (Motor Dimensions 90*75.8mm; shaft inclusion not stated)",
+     "confidence": 0.6
+    },
+    "shaft_d_m": {
+     "value": 0.01,
+     "unit_si": "m",
+     "source_id": "tmotor-at8025-page",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "IN: 12mm, OUT: 10mm (output shaft taken)",
+     "confidence": 0.6
+    },
+    "cells_min": {
+     "value": 10,
+     "unit_si": "1",
+     "source_id": "tmotor-at8025-page",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "Rated Voltage(LiPo) 10-12S",
+     "confidence": 0.7
+    },
+    "cells_max": {
+     "value": 12,
+     "unit_si": "1",
+     "source_id": "tmotor-at8025-page",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "Rated Voltage(LiPo) 10-12S",
+     "confidence": 0.7
+    }
+   }
+  }
+ ]
+}

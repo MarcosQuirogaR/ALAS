@@ -503,6 +503,7 @@ mod tests {
             coordinate_hash: coordinate_hash(&name, &coordinates),
             name,
             coordinates,
+            correction: None,
         };
         let artifact = build_gmsh_geo(&CfdStudyConfig::default(), &airfoil)
             .unwrap_or_else(|e| panic!("diamond mesh: {e}"));
@@ -528,6 +529,7 @@ mod tests {
                 (0.25, 0.05),
             ],
             coordinate_hash: "wrong".to_owned(),
+            correction: None,
         };
         let result = build_gmsh_geo(&CfdStudyConfig::default(), &airfoil);
         assert!(
@@ -576,6 +578,7 @@ mod tests {
             name: "closed-fixture".to_owned(),
             coordinate_hash: coordinate_hash("closed-fixture", &coordinates),
             coordinates,
+            correction: None,
         };
         let artifact = match build_gmsh_geo(&CfdStudyConfig::default(), &airfoil) {
             Ok(artifact) => artifact,

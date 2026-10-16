@@ -15,7 +15,7 @@ use alas_geom::asb::wing::{Wing, WingXSec};
 use alas_pipeline::full_analysis::{AnalysisReport, DesignPoint, PolarFit, PolarFitStatus};
 use alas_report::families::performance;
 use alas_report::svg::render_svg;
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 /// A report on the scale of the default configuration's 358.67 t
 /// long-range twin: about 510 m^2 of wing (the configuration's area cap is
@@ -42,7 +42,7 @@ fn sample_report(payload_kg: f64) -> AnalysisReport {
         wings: vec![wing],
         fuselages: Vec::new(),
     };
-    let mut component_masses = HashMap::new();
+    let mut component_masses = BTreeMap::new();
     for (name, mass) in [
         ("Wing", 37_600.0),
         ("H-Stab", 4_700.0),
@@ -89,9 +89,9 @@ fn sample_report(payload_kg: f64) -> AnalysisReport {
         trimmed_design_point: None,
         component_masses,
         flops_mass_buildup: None,
-        mass_coordinates: HashMap::new(),
+        mass_coordinates: BTreeMap::new(),
         physical_cg: [4.0, 0.0, 0.0],
-        geometry_summary: HashMap::new(),
+        geometry_summary: BTreeMap::new(),
         payload_layout: None,
         cg_envelope_ok: None,
         neutral_point_conditions: None,

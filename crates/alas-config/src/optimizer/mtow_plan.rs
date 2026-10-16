@@ -19,7 +19,7 @@
 //! | `FixedRequirement` | cap | cap | cap | none | route, one pass | cap |
 //! | `SizedByMission` | cap | cap | cap | none | route | design-mode basis |
 //! | `Unconstrained` | cap | none | none | none | route | design-mode basis |
-//! | `MtowBand` | `T` | `T (1 + p)` | `T (1 + p)` | `T (1 - p)` | design mission | closure |
+//! | `MtowBand` | `m` | `m` | `m` | none | route, one pass | `m` |
 //! | `PayloadAdjusted` | cap | none | none | none | design range, or route | closure |
 //!
 //! The design range is the objective's explicit value, else the registered
@@ -27,10 +27,19 @@
 //! only when neither exists.
 //!
 //! "cap" is `requirements.mtow_kg`; `T` is `mtow_target_kg` (zero means the
-//! cap) and `p` is `mtow_band_fraction`. An explicit
+//! cap) and `p` is `mtow_band_fraction`. `MtowBand` is `FixedRequirement`
+//! with the cap replaced by a mass `m` in `[T (1 - p), T (1 + p)]` that the
+//! search chooses (the 17th element of the design vector,
+//! [`AlasConfig::at_band_mass`] writes it into `requirements.mtow_kg`), so the
+//! two modes share one sizing path and the plan of a band configuration at
+//! `m` equals the fixed plan at `m` field for field except [`MtowPlan::mode`],
+//! [`MtowPlan::band_edges_kg`] and the objective scale
+//! [`MtowPlan::normalisation_kg`] (the target `T`, so objectives stay
+//! comparable across `m`). An explicit
 //! `flops_structure.design_gross_mass_kg` keeps the structure at that
 //! declared weight in every mode.
 
+use crate::design_variables::DesignVector;
 use crate::optimizer::{DesignMode, MtowSizing};
 use crate::{AlasConfig, MassSizingBasis};
 
@@ -141,6 +150,9 @@ pub struct MtowPlan {
     pub upper_bound_kg: Option<f64>,
     /// Lower takeoff-mass residual limit, kg, when the mode has one.
     pub lower_bound_kg: Option<f64>,
+    /// `(T (1 - p), T (1 + p))`, kg, under the band mode: the interval the
+    /// chosen mass is searched in. A report value; no residual reads it.
+    pub band_edges_kg: Option<(f64, f64)>,
     /// Whether the sizing loop iterates rather than taking one pass.
     pub iterates: bool,
     /// The mission closed instead of the route, when the mode flies one; the
@@ -172,7 +184,7 @@ impl MtowPlan {
 
     /// Whether the report's analysis mass is the closure rather than the cap.
     pub const fn analyses_at_closure(&self) -> bool {
-        !matches!(self.mode, MtowSizing::FixedRequirement)
+        !self.mode.sizes_at_declared_mass()
     }
 }
 
@@ -260,6 +272,76 @@ impl AlasConfig {
         }
     }
 
+    /// The band centre `T`, kg: `mtow_target_kg`, or the requirement MTOW
+    /// when no target is set.
+    pub fn mtow_band_target_kg(&self) -> f64 {
+        let target_kg = self.optimizer.objective.mtow_target_kg;
+        if target_kg.is_finite() && target_kg > 0.0 {
+            target_kg
+        } else {
+            self.requirements.mtow_kg
+        }
+    }
+
+    /// The interval `[T (1 - p), T (1 + p)]`, kg, the band mode searches the
+    /// takeoff mass in.
+    pub fn mtow_band_limits_kg(&self) -> (f64, f64) {
+        let target_kg = self.mtow_band_target_kg();
+        let p = self.optimizer.objective.mtow_band_fraction;
+        (target_kg * (1.0 - p), target_kg * (1.0 + p))
+    }
+
+    /// `design` carrying the band mass the configuration's mode needs: under
+    /// `MtowBand` the target `T` when it has none, so a vector built without
+    /// the 17th element starts the search at the seed; under every other
+    /// mode the element is dropped, so the vector matches the sixteen
+    /// geometric bounds.
+    pub fn band_design(&self, mut design: DesignVector) -> DesignVector {
+        if self.optimizer.objective.mtow_sizing == MtowSizing::MtowBand {
+            design.mtow_kg = design.mtow_kg.or(Some(self.mtow_band_target_kg()));
+        } else {
+            design.mtow_kg = None;
+        }
+        design
+    }
+
+    /// This configuration evaluated at the band mass `chosen_kg`: under
+    /// `MtowBand`, `requirements.mtow_kg` becomes the chosen mass `m` (the
+    /// target `T` is pinned first, so resolving is idempotent), which makes
+    /// the configuration the fixed-requirement problem at `m`. `None` means
+    /// the configuration's current mass when it lies inside the band (so a
+    /// resolved configuration stays resolved), else the target `T`, the seed of
+    /// the search. Any other mode is returned unchanged.
+    ///
+    /// A non-finite or non-positive `chosen_kg` is treated as `None`; a mass
+    /// outside the band is kept, and rejected by the evaluator boundary
+    /// (`validate_design_space`) rather than silently clamped.
+    pub fn at_band_mass(&self, chosen_kg: Option<f64>) -> Self {
+        if self.optimizer.objective.mtow_sizing != MtowSizing::MtowBand {
+            return self.clone();
+        }
+        let target_kg = self.mtow_band_target_kg();
+        let (lower_kg, upper_kg) = self.mtow_band_limits_kg();
+        let current_kg = self.requirements.mtow_kg;
+        // No chosen mass keeps a mass already inside the band (a resolved
+        // configuration, as the reference aircraft's nominal is evaluated
+        // under), else the target.
+        let default_kg = if current_kg >= lower_kg - 1.0e-9 * upper_kg
+            && current_kg <= upper_kg + 1.0e-9 * upper_kg
+        {
+            current_kg
+        } else {
+            target_kg
+        };
+        let mass_kg = chosen_kg
+            .filter(|kg| kg.is_finite() && *kg > 0.0)
+            .unwrap_or(default_kg);
+        let mut config = self.clone();
+        config.optimizer.objective.mtow_target_kg = target_kg;
+        config.requirements.mtow_kg = mass_kg;
+        config
+    }
+
     /// Resolve the configured takeoff-mass sizing mode into numbers.
     pub fn mtow_plan(&self) -> MtowPlan {
         let objective = &self.optimizer.objective;
@@ -295,6 +377,7 @@ impl AlasConfig {
             aitken_ceiling_kg: cap,
             upper_bound_kg: Some(cap),
             lower_bound_kg: None,
+            band_edges_kg: None,
             iterates: true,
             design_mission: None,
             structural_basis: follows_design_mode,
@@ -308,6 +391,17 @@ impl AlasConfig {
                 structural_basis: StructuralBasis::DeclaredCap,
                 ..base
             },
+            // The band is the fixed plan at the chosen mass `m`, which is
+            // `requirements.mtow_kg` once the candidate is resolved. The
+            // objective scale is the target, so a lighter `m` is not
+            // rescaled into looking equal.
+            MtowSizing::MtowBand => MtowPlan {
+                iterates: false,
+                structural_basis: StructuralBasis::DeclaredCap,
+                band_edges_kg: Some((target_kg * (1.0 - p), target_kg * (1.0 + p))),
+                normalisation_kg: target_kg,
+                ..base
+            },
             MtowSizing::SizedByMission => base,
             MtowSizing::Unconstrained => MtowPlan {
                 dispatch_ceiling_kg: UNBOUNDED_DISPATCH_MTOW_KG,
@@ -315,20 +409,6 @@ impl AlasConfig {
                 upper_bound_kg: None,
                 ..base
             },
-            MtowSizing::MtowBand => {
-                let upper_kg = target_kg * (1.0 + p);
-                MtowPlan {
-                    seed_kg: target_kg,
-                    dispatch_ceiling_kg: upper_kg,
-                    aitken_ceiling_kg: upper_kg,
-                    upper_bound_kg: Some(upper_kg),
-                    lower_bound_kg: Some(target_kg * (1.0 - p)),
-                    design_mission: Some(self.design_mission()),
-                    structural_basis: design_structure,
-                    normalisation_kg: target_kg,
-                    ..base
-                }
-            }
             MtowSizing::PayloadAdjusted => {
                 let explicit_range = objective.design_range_nmi;
                 let range = if explicit_range.is_finite() && explicit_range > 0.0 {
@@ -402,17 +482,35 @@ mod tests {
         assert_eq!(free.dispatch_ceiling_kg, UNBOUNDED_DISPATCH_MTOW_KG);
         assert!(free.aitken_ceiling_kg.is_infinite());
 
-        let band = with_mode(base.clone(), MtowSizing::MtowBand).mtow_plan();
-        assert!(band.requires_mission_sized_evaluation() && band.checks_offdesign());
-        assert_eq!(band.seed_kg, 90_000.0);
-        assert!((band.dispatch_ceiling_kg - 99_000.0).abs() < 1e-9);
-        assert_eq!(band.upper_bound_kg, Some(band.dispatch_ceiling_kg));
-        assert!((band.lower_bound_kg.unwrap() - 81_000.0).abs() < 1e-9);
+        // The band is the fixed plan at the chosen mass: resolved at `m` it
+        // equals the fixed plan at `m` except for the mode, the band edges
+        // and the objective scale (the target).
+        let band_config = with_mode(base.clone(), MtowSizing::MtowBand);
+        let chosen_kg = 95_000.0;
+        let band = band_config.at_band_mass(Some(chosen_kg)).mtow_plan();
+        let mut fixed_config = with_mode(base.clone(), MtowSizing::FixedRequirement);
+        fixed_config.requirements.mtow_kg = chosen_kg;
+        let fixed_at_m = fixed_config.mtow_plan();
+        assert!(!band.requires_mission_sized_evaluation() && !band.checks_offdesign());
+        assert!(!band.iterates && !band.closes_mass() && !band.analyses_at_closure());
+        assert_eq!(band.seed_kg, chosen_kg);
+        assert_eq!(band.upper_bound_kg, Some(chosen_kg));
+        assert_eq!(band.lower_bound_kg, None);
+        assert_eq!(band.design_mission, None);
+        assert_eq!(band.structural_basis, StructuralBasis::DeclaredCap);
         assert_eq!(band.normalisation_kg, 90_000.0);
-        assert_eq!(band.structural_basis, StructuralBasis::ClosureMass);
-        let mission = band.design_mission.unwrap();
-        assert_eq!(mission.range, DesignRange::FlopsDesignRange(7_600.0));
-        assert!(mission.payload_kg.unwrap() > 0.0);
+        let (lower_kg, upper_kg) = band.band_edges_kg.unwrap();
+        assert!((lower_kg - 81_000.0).abs() < 1e-9 && (upper_kg - 99_000.0).abs() < 1e-9);
+        assert_eq!(
+            MtowPlan {
+                mode: fixed_at_m.mode,
+                band_edges_kg: None,
+                normalisation_kg: fixed_at_m.normalisation_kg,
+                target_kg: fixed_at_m.target_kg,
+                ..band
+            },
+            fixed_at_m
+        );
 
         let adjusted = with_mode(base.clone(), MtowSizing::PayloadAdjusted).mtow_plan();
         assert_eq!(adjusted.seed_kg, 100_000.0);
@@ -425,6 +523,44 @@ mod tests {
         let mission = ranged.mtow_plan().design_mission.unwrap();
         assert_eq!(mission.range, DesignRange::Objective(2_000.0));
         assert_eq!(mission.payload_kg, None);
+    }
+
+    #[test]
+    fn resolving_a_band_mass_is_idempotent_and_leaves_other_modes_alone() {
+        let mut band = with_mode(AlasConfig::default(), MtowSizing::MtowBand);
+        band.requirements.mtow_kg = 80_000.0;
+        assert_eq!(band.optimizer.objective.mtow_band_fraction, 0.10);
+        let (lower_kg, upper_kg) = band.mtow_band_limits_kg();
+        assert!((lower_kg - 72_000.0).abs() < 1e-9 && (upper_kg - 88_000.0).abs() < 1e-9);
+        // No chosen mass means the target, the seed of the search.
+        assert_eq!(band.at_band_mass(None).requirements.mtow_kg, 80_000.0);
+        let resolved = band.at_band_mass(Some(75_000.0));
+        assert_eq!(resolved.requirements.mtow_kg, 75_000.0);
+        assert_eq!(resolved.optimizer.objective.mtow_target_kg, 80_000.0);
+        assert_eq!(resolved.mtow_band_limits_kg(), band.mtow_band_limits_kg());
+        assert_eq!(resolved.at_band_mass(Some(75_000.0)), resolved);
+        // A non-finite or non-positive mass is the default, never a silent zero:
+        // the current mass of the configuration while it is in the band.
+        for bad in [f64::NAN, 0.0, -1.0, f64::INFINITY] {
+            assert_eq!(band.at_band_mass(Some(bad)).requirements.mtow_kg, 80_000.0);
+            assert_eq!(
+                resolved.at_band_mass(Some(bad)).requirements.mtow_kg,
+                75_000.0
+            );
+        }
+        assert_eq!(resolved.at_band_mass(None), resolved);
+        // A current mass outside the band falls back to the target.
+        let mut outside = band.clone();
+        outside.requirements.mtow_kg = 200_000.0;
+        outside.optimizer.objective.mtow_target_kg = 80_000.0;
+        assert_eq!(outside.at_band_mass(None).requirements.mtow_kg, 80_000.0);
+        let fixed = with_mode(AlasConfig::default(), MtowSizing::FixedRequirement);
+        assert_eq!(fixed.at_band_mass(Some(1.0)), fixed);
+        // The vector carries the mass only in the band mode.
+        let design = DesignVector::default();
+        assert_eq!(band.band_design(design).mtow_kg, Some(80_000.0));
+        assert_eq!(fixed.band_design(band.band_design(design)).mtow_kg, None);
+        assert_eq!(band.band_design(design).to_array().len(), 17);
     }
 
     #[test]

@@ -198,6 +198,7 @@ mod tests {
         Wing {
             name: "Main Wing".to_owned(),
             symmetric: true,
+            reference: None,
             xsecs: vec![
                 WingXSec::new([0.0, 0.0, 0.0], 6.0, 0.0, airfoil.clone()),
                 WingXSec::new([2.0, 9.0, 0.0], 4.5, 0.0, airfoil.clone()),
@@ -218,6 +219,7 @@ mod tests {
         Wing {
             name: "Main Wing".to_owned(),
             symmetric: true,
+            reference: None,
             xsecs: vec![
                 WingXSec::new([0.0, 0.0, 0.0], 6.0, 0.0, airfoil.clone()),
                 WingXSec::new([2.0, 9.0, 0.0], 4.5, 0.0, airfoil.clone()),

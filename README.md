@@ -20,7 +20,7 @@ have is written down.
 Running, not finished. `cargo run --bin ALAS` launches the desktop interface,
 and the full pipeline (geometry, mass/CG, mission, drag build-up, wingbox
 sizing, figures) runs end to end for hand-built and CPACS-imported aircraft,
-against ten reference presets and the external solvers that are installed.
+against twelve reference presets and the external solvers that are installed.
 None of that means it is trustworthy yet: no preset currently has a verified
 design mission. The models and their validity limits are described in
 `docs/methods.md`.

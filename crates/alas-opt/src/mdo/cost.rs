@@ -11,8 +11,9 @@
 //! the band target in the MTOW band mode), called the ceiling below; block fuel
 //! is normalized by three tenths of the ceiling, a generous upper bound on
 //! trip fuel fraction for a long-range transport; fuel per seat-kilometre is
-//! normalized by 1e-3 kg/(seat km), the order of magnitude of a modern
-//! narrowbody's block fuel efficiency.
+//! normalized by 2.22e-2 kg/(seat km), a modern narrowbody's block fuel
+//! efficiency (about 5 t over 1500 km for 150 seats), so the normalized
+//! value is of order one, like the mass objectives.
 
 use crate::mdo::ResidualRole;
 
@@ -26,8 +27,11 @@ use super::types::{
 /// Fraction of the takeoff-mass ceiling used to normalize a block-fuel objective.
 const BLOCK_FUEL_NORMALIZATION_FRACTION: f64 = 0.3;
 
-/// Reference fuel-per-seat-kilometre scale, kg/(seat km).
-const FUEL_PER_SEAT_KM_NORMALIZATION: f64 = 1.0e-3;
+/// Reference fuel-per-seat-kilometre scale, kg/(seat km): a modern
+/// narrowbody, about 5 t of block fuel for 150 seats over 1500 km. The earlier
+/// 1e-3 was 22 times too small and inflated the objective against the
+/// dimensionless preference and violation terms of the cost.
+const FUEL_PER_SEAT_KM_NORMALIZATION: f64 = 2.22e-2;
 
 /// The configured mission quantity, before normalization.
 fn objective_value(
@@ -165,5 +169,20 @@ pub(crate) fn assemble(
         soft_violation_sum,
         objective_value,
         cost,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_fuel_per_seat_kilometre_scale_is_the_narrowbody_nominal() {
+        // About 5 t of block fuel for 150 seats over 1500 km.
+        let nominal = 5_000.0 / (150.0 * 1_500.0);
+        assert!((FUEL_PER_SEAT_KM_NORMALIZATION / nominal - 1.0).abs() < 0.01);
+        // A nominal narrowbody scores about one, as the mass objectives do.
+        let score = nominal / FUEL_PER_SEAT_KM_NORMALIZATION;
+        assert!((score - 1.0).abs() < 0.01);
     }
 }

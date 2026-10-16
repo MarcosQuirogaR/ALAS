@@ -5,10 +5,14 @@
 
 use alas_config::airports::Airport;
 use alas_config::{ActiveEngineModel, AlasConfig};
+use alas_opt::mdo::YawAirframe;
 use alas_perf::performance::{compute_v_speeds_at_masses, FieldPerformance};
-use alas_pipeline::field_performance::{calculate, dry_landing_distance_share, report_field_polar};
+use alas_pipeline::field_performance::{
+    calculate_with_airframe, dry_landing_distance_share, report_field_polar,
+};
 use alas_pipeline::field_reference::sea_level_static_thrust_n;
 use alas_pipeline::full_analysis::AnalysisReport;
+use alas_pipeline::report_config::config_for_report;
 
 pub(super) fn field_performance(
     report: &AnalysisReport,
@@ -40,6 +44,10 @@ pub(super) fn field_performance(
     {
         return Err("Field masses and wing area must be finite and positive.".to_owned());
     }
+    // The V speeds use the computed minimum control speed (CS 25.107), the same
+    // resolution as the feasibility gate and the ISA reference.
+    let resolved = config_for_report(config, report, takeoff_mass_kg, landing_mass_kg, area_m2);
+    let config = &*resolved;
     let perf = &config.performance;
     let speeds_at = |field: &Airport| {
         compute_v_speeds_at_masses(
@@ -74,8 +82,14 @@ pub(super) fn field_performance(
         // Jets and historical replay do not consume the propeller roll polar.
         (0.0, 0.0)
     };
-    let mut field = calculate(
+    // The propeller failed-engine state needs the fin and the centre of gravity,
+    // as in the ISA reference.
+    let mut field = calculate_with_airframe(
         config,
+        Some(YawAirframe {
+            plane: &report.airplane,
+            cg_x_m: report.physical_cg[0],
+        }),
         airport,
         area_m2,
         takeoff_mass_kg,
@@ -96,6 +110,7 @@ mod tests {
     use super::*;
     use crate::families::performance::figure_lto_for_airport_at_masses;
     use crate::scene::{Scene, SceneElement};
+    use alas_pipeline::field_performance::calculate;
     use alas_pipeline::field_reference::report_isa_sea_level_field_reference;
     use alas_pipeline::full_analysis::FullAnalysis;
 

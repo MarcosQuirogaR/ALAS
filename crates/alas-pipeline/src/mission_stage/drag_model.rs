@@ -34,11 +34,17 @@ impl MissionDragModel for CandidateMissionDrag {
         reynolds_number_per_m: f64,
     ) -> MissionDragCoefficients {
         match &self.drag {
-            CandidateDrag::Table(table) => MissionDragCoefficients {
-                parasite: table.cd0_at_reynolds_per_m(mach, reynolds_number_per_m),
-                induced: table.induced_cd(lift_coefficient),
-                wave: table.wave_cd(lift_coefficient, mach),
-            },
+            CandidateDrag::Table(table) => {
+                let cd0 = table.cd0_at_reynolds_per_m(mach, reynolds_number_per_m);
+                MissionDragCoefficients {
+                    // The viscous (parasite) term carries the lift-dependent
+                    // viscous drag `kappa CD0 CL^2` (zero unless configured),
+                    // so `.breakdown()` consumers keep three terms.
+                    parasite: cd0 + table.viscous_lift_cd(lift_coefficient, cd0),
+                    induced: table.induced_cd(lift_coefficient),
+                    wave: table.wave_cd(lift_coefficient, mach),
+                }
+            }
             // External-solver candidates carry one measured polar instead of
             // a native buildup; reuse that same polar without inventing one.
             CandidateDrag::External(polar) => MissionDragCoefficients {

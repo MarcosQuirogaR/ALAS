@@ -43,9 +43,25 @@ fn product_caps_have_two_physical_flange_centroids_and_no_extra_beam_web() {
         bars.len(),
         2 * old.iter().filter(|card| card.name == "CBAR").count()
     );
+    // The web shells keep their nodes and elements; the web property is per
+    // panel in the product mesh (one gauge per station) and per spar in the
+    // reference, so the property id is compared as the spar it belongs to.
+    let product_spar = |pid: i64| {
+        if (100..10_000).contains(&pid) {
+            100 + (pid - 100) / 1000
+        } else {
+            pid
+        }
+    };
+    let keyed = |quads: &[alas_struct::mesh::Shell], map: &dyn Fn(i64) -> i64| {
+        quads
+            .iter()
+            .map(|quad| (quad.eid, map(quad.pid), quad.nodes.clone()))
+            .collect::<Vec<_>>()
+    };
     assert_eq!(
-        product.quads(),
-        reference.quads(),
+        keyed(product.quads(), &product_spar),
+        keyed(reference.quads(), &|pid| pid),
         "web/skin shells are unchanged"
     );
     assert_eq!(bars.len(), 2 * properties.len());

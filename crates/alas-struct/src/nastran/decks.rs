@@ -29,8 +29,8 @@ const SPC_SET: i64 = 1;
 /// earlier `sid * 10` / `sid * 20` scheme did not manage: pull-up's force set
 /// collided with push-down's gravity set, and the two cards' loads would have
 /// merged silently under one identifier.
-const GRAVITY_SID_BASE: i64 = 100;
-const FORCE_SID_BASE: i64 = 200;
+pub(crate) const GRAVITY_SID_BASE: i64 = 100;
+pub(crate) const FORCE_SID_BASE: i64 = 200;
 
 /// Distribute `total_force_n` over `nid_y` with the same half-ellipse
 /// [`crate::loads::elliptic_distributed_load`] uses, discretized onto the
@@ -165,8 +165,8 @@ fn load_case_cards(
     semi_span: f64,
 ) -> Vec<String> {
     let gravity_magnitude = case.load_factor.abs() * req.gravity_m_s2;
-    let lift_sign = if case.total_force_n >= 0.0 { 1.0 } else { -1.0 };
-    let gravity_sign: f64 = if case.load_factor >= 0.0 { -1.0 } else { 1.0 };
+    let lift_sign = case.lift_sign();
+    let gravity_sign = case.gravity_sign();
 
     let mut out = vec![
         format!("$ ---- {}: n={:+.2} ----", case.name, case.load_factor),
@@ -216,6 +216,9 @@ pub fn build_sol103_bulk(cfg: &StructuresConfig, mesh_include: &str) -> String {
     .join("\n")
 }
 
+/// The most FREQ1 increments a deck may request.
+const MAX_FREQUENCY_INCREMENTS: i64 = 1_000_000;
+
 /// The bulk cards both SOL 111 decks share: the modal basis, the frequency
 /// sweep, the damping table, and the unit harmonic force: `_dynamic_bulk`.
 fn dynamic_bulk(
@@ -233,8 +236,11 @@ fn dynamic_bulk(
         (((cfg.freq_sweep_max_hz - step_hz) / step_hz).floor() as i64).max(0)
     } else {
         ((cfg.freq_sweep_max_hz / step_hz) as i64).max(1)
-    };
-    let frequency_points = frequency_increments + 1;
+    }
+    // The float-to-int casts saturate; cap the count so a pathological step
+    // cannot write an unusable FREQ1 card or overflow the point count.
+    .min(MAX_FREQUENCY_INCREMENTS);
+    let frequency_points = frequency_increments.saturating_add(1);
     let damping = free_field(cfg.modal_damping_ratio);
     let sweep_max = free_field(cfg.freq_sweep_max_hz);
     // Constant damping has no physical cutoff. Cover all aircraft modes rather
@@ -253,13 +259,13 @@ fn dynamic_bulk(
         if msc_product {
             format!(
                 "$ ---- Frequency range: {} to {} Hz ({frequency_points} points) ----",
-                python_str(cfg.freq_step_hz),
+                python_str(step_hz),
                 python_str(cfg.freq_sweep_max_hz)
             )
         } else {
             format!(
                 "$ ---- Frequency range: {} to {} Hz ({frequency_increments} steps) ----",
-                python_str(cfg.freq_step_hz),
+                python_str(step_hz),
                 python_str(cfg.freq_sweep_max_hz)
             )
         },

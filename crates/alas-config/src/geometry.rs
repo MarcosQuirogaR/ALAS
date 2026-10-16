@@ -18,12 +18,16 @@
 //!
 //! Lengths are metres and angles are degrees unless a field says otherwise.
 
+mod centre_engine;
 mod empennage;
 mod engine;
 mod frame;
 mod fuselage;
+pub mod loft;
+mod nacelle_model;
 mod wing;
 
+pub use centre_engine::CentreEngineInstallation;
 pub use empennage::{EmpennageConfig, TailSizing};
 pub use engine::{ActiveEngineModel, EngineBindingError, EngineConfig};
 pub use frame::{BodyFuselageExtent, LongitudinalStationFrame, MacFrame};
@@ -32,10 +36,19 @@ pub use fuselage::{
     NoseStation, UpperDeck, UpperDeckHump, DEFAULT_HUMP_FAIRING_EXPONENT,
     HUMP_FAIRING_EXPONENT_RANGE, HUMP_MAIN_DECK_FLOOR_FRACTION,
 };
+pub use loft::{
+    embedded_loft, embedded_loft_ids, parse_loft_spec, preset_loft_id, LoftRef, LoftSpec,
+    LoftSpecError,
+};
+pub use nacelle_model::NacelleModel;
 pub use wing::{
-    AirfoilClass, InboardAerodynamicStation, MainWingPanel, MainWingStation, MainWingStationKind,
-    TransportPlanform, TransportPlanformError, WingConfig, WingHeights, WingSection,
-    WingSectionError, WingShape, MAX_FLIGHT_TIP_RISE_SEMISPAN_FRACTION,
+    AirfoilClass, DeviceStation, InboardAerodynamicStation, MainWingPanel, MainWingStation,
+    MainWingStationKind, ProfileSpline, PublishedReference, ReferenceTrapezoid,
+    ReferenceWingConfig, ReferenceWingMode, RegisteredBasis, TransportPlanform,
+    TransportPlanformError, WingConfig, WingDihedralStation, WingHeights, WingProfileError,
+    WingProfileInterpolation, WingSection, WingSectionError, WingShape, WingThicknessStation,
+    WingtipDevice, WingtipDeviceError, WingtipDeviceKind, MAX_FLIGHT_TIP_RISE_SEMISPAN_FRACTION,
+    PUBLISHED_AREA_TOLERANCE,
 };
 
 use serde::{Deserialize, Serialize};
@@ -78,6 +91,10 @@ pub struct GeometryConfig {
     pub engine: EngineConfig,
 
     /// Wetted area of a wing, as a multiple of its planform area.
+    ///
+    /// Read only by the frozen reference-compatibility drag buildup; the
+    /// product path uses Raymer's thickness-ratio-dependent factor and
+    /// ignores this field.
     #[config(
         label = "Wing wetted-area factor",
         help = "Ratio of wetted (exposed, both sides) surface area to planform area for a thin wing. Used by the drag buildup."
@@ -85,6 +102,10 @@ pub struct GeometryConfig {
     pub wing_wetted_area_factor: f64,
 
     /// How much less wetted area a tapered body has than a cylinder.
+    ///
+    /// Read only by the frozen reference-compatibility drag buildup; the
+    /// product path takes fuselage wetted area from the lofted body and
+    /// ignores this field.
     #[config(
         label = "Fuselage wetted-area factor",
         help = "Correction factor on pi*diameter*length for a non-cylindrical (tapered nose/tail) fuselage body."

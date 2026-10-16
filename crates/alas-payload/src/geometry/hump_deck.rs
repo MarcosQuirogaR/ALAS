@@ -11,9 +11,25 @@
 //! deck's ceiling stops one deck separation below the upper floor. The
 //! physical envelope checks keep reading the full section.
 //!
+//! # A level floor
+//!
+//! A floor is a plane, but the lofted section's keel is not: the wing-body
+//! belly fairing deepens it under the wing and the nose and tail sweep it up.
+//! Read as a fraction of the local half-height, the main floor followed that
+//! keel (B747-400: 0.10 m high at x = 8 m, 0.22 m low under the wing, relative
+//! to the cylindrical section). The main floor is instead one level,
+//! the highest the section rule puts it under the upper deck (the least depth
+//! the hold under the hump may have), held from the nose to the end of the
+//! hump; aft of the hump it stays there until the tail's upsweep takes the
+//! section rule above it. The hold's ceiling moves with the floor so the two
+//! never overlap.
+//!
 //! Frame: x aft of the nose tip, z up, metres.
 
 use super::{CabinGeometry, DeckSpec, MIN_DECK_SEPARATION_FRAC};
+
+/// Spacing of the stations that find the level main floor, m.
+const LEVEL_SAMPLE_STEP_M: f64 = 0.25;
 
 impl CabinGeometry {
     /// The hump's crown rise at `x`, m; zero without a partial upper deck.
@@ -32,13 +48,42 @@ impl CabinGeometry {
         self.zc_at(x) - 0.5 * self.crown_rise_m(x)
     }
 
-    /// The main-deck floor at `x`, the datum of the upper floor.
-    fn main_floor_z(&self, x: f64) -> f64 {
+    /// The main-deck floor the section rule puts at `x`: its fraction of the
+    /// local main lobe. Follows the keel, so it is not the floor itself.
+    fn section_main_floor_z(&self, x: f64) -> f64 {
         let main = self
             .passenger_decks
             .first()
             .map_or(0.0, |deck| deck.floor_frac);
         self.main_lobe_zc_at(x) + main * self.internal_half_height(x)
+    }
+
+    /// The level main floor of a body with an upper deck: the highest
+    /// section-rule floor under the upper deck, sampled every
+    /// [`LEVEL_SAMPLE_STEP_M`] and at both ends.
+    pub(super) fn level_main_floor(&self) -> Option<f64> {
+        let deck = self.upper_deck?;
+        let steps = ((deck.end_x_m - deck.start_x_m) / LEVEL_SAMPLE_STEP_M)
+            .ceil()
+            .max(1.0) as usize;
+        (0..=steps)
+            .map(|i| {
+                let t = i as f64 / steps as f64;
+                self.section_main_floor_z(deck.start_x_m + t * (deck.end_x_m - deck.start_x_m))
+            })
+            .reduce(f64::max)
+    }
+
+    /// The main-deck floor at `x`, the datum of the upper floor: the level
+    /// floor, or the section rule where the section's tail upsweep rises
+    /// above it aft of the hump.
+    fn main_floor_z(&self, x: f64) -> f64 {
+        let section = self.section_main_floor_z(x);
+        match (self.level_main_floor_z, self.upper_deck) {
+            (Some(level), Some(deck)) if x <= deck.end_x_m => level,
+            (Some(level), _) => level.max(section),
+            (None, _) => section,
+        }
     }
 
     /// Whether the upper-deck floor spans station `x`.
@@ -56,15 +101,21 @@ impl CabinGeometry {
     pub(super) fn hump_floor_z(&self, deck: &DeckSpec, x: f64) -> f64 {
         match self.upper_floor_z(x) {
             Some(upper) if deck.name == crate::layout::UPPER => upper,
+            _ if deck.name == crate::layout::MAIN => self.main_floor_z(x),
             _ => self.main_lobe_zc_at(x) + deck.floor_frac * self.internal_half_height(x),
         }
     }
 
     pub(super) fn hump_ceil_z(&self, deck: &DeckSpec, x: f64) -> f64 {
         let b = self.internal_half_height(x);
-        let lobe = self.main_lobe_zc_at(x) + deck.ceil_frac * b;
+        let mut lobe = self.main_lobe_zc_at(x) + deck.ceil_frac * b;
         if deck.name == crate::layout::UPPER {
             return lobe + self.crown_rise_m(x);
+        }
+        if deck.name == crate::layout::LOWER {
+            // The hold's ceiling is its fraction below the section-rule main
+            // floor; it moves with the level floor's offset from that rule.
+            lobe += self.main_floor_z(x) - self.section_main_floor_z(x);
         }
         match self.upper_floor_z(x) {
             Some(upper) if deck.name == crate::layout::MAIN && self.under_upper_floor(x) => {

@@ -367,3 +367,26 @@ fn every_preset_states_a_high_lift_system_rather_than_inheriting_one() {
         assert!(preset.performance.is_some(), "{}", preset.name);
     }
 }
+
+#[test]
+fn only_a_declared_freight_hold_seeds_a_pallet_deck_into_the_cargo_cabin() {
+    // The A400M declares the Jane's 2008-2009 p.298 hold (17.71 m floor,
+    // 5.40 m ramp, 4.00 m wide); no passenger aircraft declares one, so the
+    // airliner cargo configuration of every other preset is untouched.
+    for preset in registry() {
+        let cargo = preset.planning_cabin_config().cargo;
+        if preset.name == "A400M" {
+            let hold = cargo
+                .freight_hold
+                .expect("the A400M declares a freight hold");
+            assert!(hold.is_valid());
+            assert_eq!(cargo.main_deck_uld, "463L");
+            assert_eq!(hold.floor_length_m, 17.71);
+            assert_eq!(hold.ramp_length_m, 5.40);
+            assert_eq!(hold.clear_width_m, 4.00);
+        } else {
+            assert!(cargo.freight_hold.is_none(), "{}", preset.name);
+            assert_eq!(cargo.main_deck_uld, "PMC", "{}", preset.name);
+        }
+    }
+}

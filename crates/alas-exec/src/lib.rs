@@ -29,8 +29,11 @@ pub mod download;
 pub mod flowunsteady;
 pub mod openfoam;
 pub mod process;
+pub mod sha256;
 pub mod storage;
 pub mod supervise;
+pub mod tool_cache;
+pub mod tool_runtime;
 pub mod tools;
 pub mod vspaero;
 

@@ -241,3 +241,18 @@ fn bridge_to_target_honors_cancellation_before_any_intermediate_solve() {
         "a cancelled bridge must never record an intermediate attempt"
     );
 }
+
+#[test]
+fn separation_only_gaps_are_outside_the_validity_domain_never_ok() {
+    assert_eq!(
+        classified_completion_status(7, 4, 3),
+        MsesStatus::OutsideValidityDomain
+    );
+    // One solver failure among the gaps keeps the sweep a partial failure.
+    assert_eq!(
+        classified_completion_status(7, 4, 2),
+        MsesStatus::PartialConvergence
+    );
+    assert_eq!(classified_completion_status(7, 7, 0), MsesStatus::Ok);
+    assert_eq!(classified_completion_status(7, 0, 0), MsesStatus::Error);
+}

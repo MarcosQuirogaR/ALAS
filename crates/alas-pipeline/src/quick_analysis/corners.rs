@@ -8,17 +8,20 @@
 //! largest still-air distance whose full fuel plan (trip, contingency,
 //! alternate, final reserve; [`alas_mass::payload_range`]) fits that fuel,
 //! priced by the report's fuel model
-//! ([`crate::fuel_model::report_mission_model`]) under the configuration's
-//! fuel policy, every probed trip flown on the plan frozen for its own
-//! takeoff mass and range ([`alas_opt::mdo::PlannedTrips`]), step climbs
-//! included, as the sizing closure flies its own. Tank fuel is loaded at the ramp and taxi fuel is burned
-//! before brake release, so a tank-limited corner carries the tank capacity
-//! less taxi fuel at takeoff.
+//! ([`crate::fuel_model::report_mission_model`], flown as a range search:
+//! [`alas_opt::SegmentMissionModel::for_range_search`], so a corner several
+//! times longer than the declared sector is not capped at that sector's
+//! level) under the configuration's fuel policy, every probed trip flown on
+//! the plan frozen for its own takeoff mass and range
+//! ([`alas_opt::mdo::PlannedTrips`]), step climbs included, as the sizing
+//! closure flies its own. Tank fuel is loaded at the ramp and taxi fuel is
+//! burned before brake release, so a tank-limited corner carries the tank
+//! capacity less taxi fuel at takeoff.
 //!
 //! A corner the model cannot price has no range: the chart is unavailable,
 //! never drawn on another basis.
 
-use alas_config::AlasConfig;
+use alas_config::{AlasConfig, FuelPolicyConfig, FuelScheme};
 use alas_mass::fuel_plan::FuelBurnModel;
 use alas_mass::payload_range::{max_range_with_reserves, RangeStatus};
 use serde::{Deserialize, Serialize};
@@ -119,7 +122,7 @@ pub fn corner_ranges(
     report: &AnalysisReport,
     masses: &CornerMasses,
 ) -> Result<CornerRanges, String> {
-    let model = report_mission_model(config, report)?;
+    let model = report_mission_model(config, report)?.for_range_search();
     let policy = &config.fuel_policy;
     let taxi_kg = model
         .taxi_fuel_flow_kg_s()
@@ -154,4 +157,212 @@ pub fn corner_ranges(
         ranges.reserve_fuel_kg[index + 1] = corner.reserve_fuel_kg;
     }
     Ok(ranges)
+}
+
+/// The reserve rule a published chart prints in its own notes. Every field
+/// left `None` is not printed on that chart, and the configured fuel policy
+/// supplies it (EASA basic by default), so a chart is flown under its own
+/// stated convention wherever it states one and under the configured one
+/// where it does not: the same rule for every chart.
+///
+/// Post-diagnosis definition fix (2026-10-13, owner decision 2): the
+/// DC-10 and 747-400 charts print FAR reserves (14 CFR 121.645: ten percent of
+/// the trip time), which the corners used to price as EASA five percent.
+#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ChartReserveRule {
+    /// Operating rule printed on the chart.
+    pub scheme: Option<FuelScheme>,
+    /// Destination-alternate distance printed on the chart, nmi.
+    pub alternate_distance_nmi: Option<f64>,
+    /// Final-reserve hold printed on the chart, min.
+    pub final_reserve_hold_min: Option<f64>,
+}
+
+impl ChartReserveRule {
+    /// The rule printed on a chart that prints none: the configured policy.
+    pub const NOT_PRINTED: Self = Self {
+        scheme: None,
+        alternate_distance_nmi: None,
+        final_reserve_hold_min: None,
+    };
+
+    /// Read the optional `reserve_rule` object of a chart-mass entry; extra
+    /// keys (source, page, note) are provenance and are ignored.
+    ///
+    /// # Errors
+    ///
+    /// Returns the reason when the object does not parse.
+    pub fn from_json(value: Option<&serde_json::Value>) -> Result<Self, String> {
+        match value {
+            None | Some(serde_json::Value::Null) => Ok(Self::NOT_PRINTED),
+            Some(value) => serde_json::from_value(value.clone())
+                .map_err(|error| format!("reserve_rule: {error}")),
+        }
+    }
+
+    /// The fuel policy the chart is flown under: `base` with the printed
+    /// fields replaced.
+    pub fn apply(&self, base: &FuelPolicyConfig) -> FuelPolicyConfig {
+        let mut policy = base.clone();
+        if let Some(scheme) = self.scheme {
+            policy.scheme = scheme;
+        }
+        if let Some(nmi) = self.alternate_distance_nmi {
+            policy.alternate_distance_nmi = nmi;
+        }
+        if let Some(min) = self.final_reserve_hold_min {
+            policy.final_reserve_hold_min = min;
+        }
+        policy
+    }
+}
+
+/// The masses of a published payload-range chart, kg: the inputs of a
+/// chart-mass corner flight. They are chart quantities (takeoff-mass line,
+/// usable fuel of the chart's document, payload or zero-fuel-mass difference
+/// between corners B and C), never a modelled mass and never a chart range.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ChartMasses {
+    /// Takeoff mass of the chart's line, kg.
+    pub tow_kg: f64,
+    /// Usable fuel capacity at the ramp, kg.
+    pub tank_kg: f64,
+    /// Payload (or zero-fuel mass) at corner B less that at corner C, kg.
+    pub delta_payload_kg: f64,
+    /// Reserve rule the chart prints ([`ChartReserveRule::NOT_PRINTED`] when
+    /// it prints none).
+    pub reserve_rule: ChartReserveRule,
+    /// Cruise Mach the chart prints (the 787-9 box "MACH 0.85 CRUISE", the
+    /// 747-400 title "0.85 Mach Cruise", the A340 "M = 0.82"); `None` when
+    /// it prints none and the configured requirement is flown.
+    pub cruise_mach: Option<f64>,
+}
+
+/// Corners B and C flown at chart masses, in still air under the chart's
+/// printed reserve rule (the configured fuel policy where it prints none),
+/// priced by the report's segment mission model.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ChartCorners {
+    /// Fuel scheme the corners were flown under (the chart's own where it
+    /// prints one).
+    pub scheme: FuelScheme,
+    /// Destination-alternate distance of that policy, nmi.
+    pub alternate_distance_nmi: f64,
+    /// Final-reserve hold of that policy, min.
+    pub final_reserve_hold_min: f64,
+    /// Taxi fuel burned before brake release, kg.
+    pub taxi_kg: f64,
+    /// Takeoff fuel of corner B: tank less taxi less the payload difference, kg.
+    pub fuel_b_kg: f64,
+    /// Takeoff fuel of corner C: tank less taxi, kg.
+    pub fuel_c_kg: f64,
+    /// Range of corner B, m.
+    pub range_b_m: f64,
+    /// Range of corner C, m.
+    pub range_c_m: f64,
+    /// Reserve fuel held back at corner B, kg.
+    pub reserve_b_kg: f64,
+    /// Reserve fuel held back at corner C, kg.
+    pub reserve_c_kg: f64,
+}
+
+/// Price corners B and C at the masses of a published chart.
+///
+/// Both corners lie on the chart's takeoff-mass line `tow_kg`: corner C
+/// carries the tank less taxi fuel, corner B carries that less the payload
+/// difference. The ranges therefore do not depend on the modelled empty
+/// mass; the report's drag, propulsion, mission schedule and fuel policy are
+/// what is tested. Flown as a range search
+/// ([`alas_opt::SegmentMissionModel::for_range_search`]), as
+/// [`corner_ranges`]. The reserve rule is the one printed on the chart
+/// ([`ChartReserveRule`]). This is the path of the kappa calibration probe and
+/// of the matrix validation block.
+///
+/// # Errors
+///
+/// Returns the reason when the fuel model cannot be built or a corner cannot
+/// be priced on it.
+pub fn chart_mass_corners(
+    config: &AlasConfig,
+    report: &AnalysisReport,
+    masses: &ChartMasses,
+) -> Result<ChartCorners, String> {
+    let config = &config.with_cruise_mach(masses.cruise_mach);
+    let model = report_mission_model(config, report)?.for_range_search();
+    let taxi_kg = model
+        .taxi_fuel_flow_kg_s()
+        .map_err(|error| format!("taxi fuel flow: {error}"))?
+        * config.fuel_policy.taxi_time_min
+        * SECONDS_PER_MINUTE;
+    let policy = masses.reserve_rule.apply(&config.fuel_policy);
+    let fuel_c_kg = masses.tank_kg - taxi_kg;
+    let fuel_b_kg = fuel_c_kg - masses.delta_payload_kg;
+    let price = |fuel_kg: f64| -> Result<(f64, f64), String> {
+        let corner = max_range_with_reserves(
+            masses.tow_kg,
+            fuel_kg,
+            &policy,
+            &PlannedTrips(&model),
+            CORNER_TOLERANCE_M,
+        );
+        match corner.status {
+            RangeStatus::ModelFailed(reason) => Err(reason),
+            _ => Ok((corner.range_m, corner.reserve_fuel_kg)),
+        }
+    };
+    let (range_b_m, reserve_b_kg) = price(fuel_b_kg)?;
+    let (range_c_m, reserve_c_kg) = price(fuel_c_kg)?;
+    Ok(ChartCorners {
+        scheme: policy.scheme,
+        alternate_distance_nmi: policy.alternate_distance_nmi,
+        final_reserve_hold_min: policy.final_reserve_hold_min,
+        taxi_kg,
+        fuel_b_kg,
+        fuel_c_kg,
+        range_b_m,
+        range_c_m,
+        reserve_b_kg,
+        reserve_c_kg,
+    })
+}
+
+// Tests construct every fixture they assert on, so a failed unwrap is the
+// assertion failing rather than a library invariant breaking.
+#[allow(clippy::unwrap_used)]
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_chart_that_prints_no_rule_flies_the_configured_policy() {
+        let base = FuelPolicyConfig::default();
+        assert_eq!(ChartReserveRule::NOT_PRINTED.apply(&base), base);
+        assert_eq!(
+            ChartReserveRule::from_json(None).unwrap(),
+            ChartReserveRule::NOT_PRINTED
+        );
+        // Provenance keys beside the rule are ignored.
+        let rule = ChartReserveRule::from_json(Some(&serde_json::json!({"source": "AC p1"})));
+        assert_eq!(rule.unwrap(), ChartReserveRule::NOT_PRINTED);
+    }
+
+    #[test]
+    fn printed_fields_replace_the_policy_and_unprinted_ones_stay() {
+        let base = FuelPolicyConfig::default();
+        let rule = ChartReserveRule::from_json(Some(&serde_json::json!({
+            "scheme": "faa_flag_supplemental",
+            "alternate_distance_nmi": 100.0,
+            "source": "chart note",
+        })))
+        .unwrap();
+        let policy = rule.apply(&base);
+        assert_eq!(policy.scheme, FuelScheme::FaaFlagSupplemental);
+        assert_eq!(policy.alternate_distance_nmi, 100.0);
+        assert_eq!(policy.final_reserve_hold_min, base.final_reserve_hold_min);
+        assert_eq!(policy.taxi_time_min, base.taxi_time_min);
+        assert!(
+            ChartReserveRule::from_json(Some(&serde_json::json!({"scheme": "bogus"}))).is_err()
+        );
+    }
 }

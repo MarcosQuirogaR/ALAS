@@ -19,10 +19,19 @@ pub(super) struct EngineConfigWire {
     #[serde(skip_serializing_if = "Option::is_none")]
     turboprop: Option<TurbopropEngineSpec>,
     nacelle_profile: Vec<(f64, f64)>,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "is_legacy_nacelle_model")]
+    nacelle_model: NacelleModel,
     radius_scale_m: f64,
     spanwise_positions_m: Vec<f64>,
     z_m: f64,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    z_per_engine_m: Vec<f64>,
     inlet_x_offset_m: f64,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    centre_engine: Option<CentreEngineInstallation>,
     #[serde(default)]
     thrust_kn: Option<f64>,
     bypass_ratio: f64,
@@ -48,10 +57,13 @@ impl From<EngineConfig> for EngineConfigWire {
             turbofan: value.turbofan,
             turboprop: value.turboprop,
             nacelle_profile: value.nacelle_profile,
+            nacelle_model: value.nacelle_model,
             radius_scale_m: value.radius_scale_m,
             spanwise_positions_m: value.spanwise_positions_m,
             z_m: value.z_m,
+            z_per_engine_m: value.z_per_engine_m,
             inlet_x_offset_m: value.inlet_x_offset_m,
+            centre_engine: value.centre_engine,
             thrust_kn,
             bypass_ratio: value.bypass_ratio,
             overall_pressure_ratio: value.overall_pressure_ratio,
@@ -77,10 +89,13 @@ impl TryFrom<EngineConfigWire> for EngineConfig {
             turbofan: value.turbofan,
             turboprop: value.turboprop,
             nacelle_profile: value.nacelle_profile,
+            nacelle_model: value.nacelle_model,
             radius_scale_m: value.radius_scale_m,
             spanwise_positions_m: value.spanwise_positions_m,
             z_m: value.z_m,
+            z_per_engine_m: value.z_per_engine_m,
             inlet_x_offset_m: value.inlet_x_offset_m,
+            centre_engine: value.centre_engine,
             bypass_ratio: value.bypass_ratio,
             overall_pressure_ratio: value.overall_pressure_ratio,
             fan_pressure_ratio: value.fan_pressure_ratio,

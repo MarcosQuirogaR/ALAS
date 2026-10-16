@@ -16,7 +16,7 @@ pub(super) fn rating_limit_name(rating: Pw127mRating) -> &'static str {
     }
 }
 
-pub(super) const PROVENANCE: &str = "PW127M take-off/continuous ratings and flat-rating temperatures (take-off to 39 C, maximum continuous to 48 C): EASA TCDS IM.E.041 section 5; ATR 72-600 climb/cruise ratings and 568F-1 diameter: ATR manufacturer factsheet; rated shaft power is flat down to the density of sea-level pressure at the flat-rating temperature and lapses as (rho/rho_corner)^0.728 below it (Nita 2008 eq. 3.5.11, PW120 maximum-cruise chart fit), floored at 0.15, a class relation rather than an OEM engine deck; fuel flow is shaft power times a class PSFC of 0.2945 kg/kWh at 249.65 K (measured PW120A, Majeed 2009 Tab. 3.3) scaled as sqrt(T/T_ref), flat in power over the sourced 46-100 percent band and held flat below it as an unsourced assumption; ATR's 762 kg/h maximum-cruise flow is a validation point, not a calibration anchor; propeller coefficients: generic six-blade surrogate (not OEM 568F data), bounded by one-dimensional actuator-disk momentum theory evaluated on the blade-efficiency share of shaft power rather than on the whole of it, so no operating point sits on the loss-free ideal bound; blade efficiency blends the 0.70 static figure of merit (class preliminary-design value, 0.65-0.80 band) into a declared forward-flight 0.86, the conservative end of the 0.86-0.91 band that NASA TM-83458 p.8 interpolation and Nita 2008 Table 3.4 (Scholz chart read for the ATR 72) agree on; the blend shape between the two ends is a surrogate and the resulting cruise efficiency carries about -0/+6 percent; propulsive efficiency is additionally capped at 0.88 as a guard; flight-idle propeller force is the neutral zero-force hypothesis because no OEM idle/windmilling map is available";
+pub(super) const PROVENANCE: &str = "PW127M take-off/continuous ratings and flat-rating temperatures (take-off to 39 C, maximum continuous to 48 C): EASA TCDS IM.E.041 section 5; ATR 72-600 climb/cruise ratings and 568F-1 diameter: ATR manufacturer factsheet; rated shaft power is flat down to the density of sea-level pressure at the flat-rating temperature and lapses as (rho/rho_corner)^0.728 below it (Nita 2008 eq. 3.5.11, PW120 maximum-cruise chart fit), floored at 0.15, a class relation rather than an OEM engine deck; fuel flow is shaft power times a class PSFC of 0.2945 kg/kWh at 249.65 K (measured PW120A, Majeed 2009 Tab. 3.3) scaled as sqrt(T/T_ref), flat in power over the sourced 46-100 percent band and rising below it by a FLAGGED class multiplier (knee/phi)^0.667 shaped on Raymer Table 3.4 cruise/loiter C_bhp 0.5/0.6 at an assumed 35 percent loiter power (no PW100 part-power deck retrieved); no per-engine PSFC exists for the TP400-D6, so A400M fuel is unvalidated; ATR's 762 kg/h maximum-cruise flow is a validation point, not a calibration anchor; propeller coefficients: generic six-blade surrogate (not OEM 568F data), thrust is the one-dimensional actuator-disk momentum bound evaluated on the blade-efficiency share of shaft power (the CT/CP surrogate is no longer a thrust source and only reports an indicative blade angle), multiplied by a FLAGGED helical-tip-Mach compressibility factor 1 - 4 (M_h - 0.89)^2 above M_h = 0.89, so eta <= eta_ideal <= 1 by construction; blade efficiency blends the 0.70 static figure of merit (class preliminary-design value, 0.65-0.80 band) into a declared forward-flight 0.86, the conservative end of the 0.86-0.91 band that NASA TM-83458 p.8 interpolation and Nita 2008 Table 3.4 (Scholz chart read for the ATR 72) agree on; the blend shape between the two ends is a surrogate and the resulting cruise efficiency carries about -0/+6 percent; propulsive efficiency is additionally capped at 0.88 as a guard; flight-idle propeller force is the neutral zero-force hypothesis because no OEM idle/windmilling map is available";
 
 /// Technology-neutral adapter for an N-engine PW127M/568F-class installation
 /// (N >= 2, even: symmetric port/starboard pairs; the ATR 72 is N = 2).
@@ -151,7 +151,16 @@ impl Atr72TurbopropSystem {
             PropulsionDemand::NormalizedForce(value)
                 if value.is_finite() && (0.0..=1.0).contains(&value) =>
             {
-                Ok((takeoff, value))
+                // A normalized throttle is a fraction of the maximum-climb
+                // force with all engines running (the turbofan deck's
+                // convention), not of the take-off rating: a full command in
+                // climb or cruise must not draw take-off power (PROP-13). The
+                // one-engine-inoperative case keeps the automatic reserve.
+                if active_count + 1 == self.unit_count() {
+                    Ok((takeoff, value))
+                } else {
+                    Ok((Pw127mRating::MaximumClimb, value))
+                }
             }
             PropulsionDemand::NormalizedForce(value) => Err(PropulsionError::InvalidInput {
                 field: "normalized propulsion demand",

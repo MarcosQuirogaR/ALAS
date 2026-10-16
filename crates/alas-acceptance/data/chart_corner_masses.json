@@ -1,0 +1,104 @@
+{
+  "note": "Published payload-range chart masses, the inputs of a chart-mass corner flight (alas_pipeline::quick_analysis::corners::chart_mass_corners, the kappa_calibration_probe path). tow_kg is the chart takeoff-mass line (or the preset variant MTOW when the chart does not print it), fuel_tank_kg the usable fuel of the chart's own document, delta_payload_kg the payload (A320, A340) or zero-fuel-mass (B787-9, OEW-free) difference between chart corners B and C. They are masses only: no chart range is stored here, so the flight cannot leak a reference into the model. Source: the kappa-calibration lane target files (v4_targets.json of fix-kappa-cal-2026-10-12); the chart-weight closures are discussed in that report. Units kg. reserve_rule: the reserve convention printed on each chart (scheme, alternate distance, final-reserve hold; absent fields are not printed and take the configured policy), with source and page; applied identically to every chart by chart_mass_corners (post-diagnosis definition fix 2026-10-13). cruise_mach (optional): the cruise Mach the chart prints, with source; when present chart_mass_corners flies the corners at it (the single cruise-Mach source is requirements.cruise_mach, which every printed value equals today).",
+  "presets": [
+    {
+      "preset": "A320-200",
+      "tow_kg": 78000,
+      "fuel_tank_kg": 19333,
+      "delta_payload_kg": 3490,
+      "reserve_rule": {
+        "source": "Airbus A320 AC (Jul 01/26) 3-2-1 p3, Fig 3-2-1-991-017-A01 (PDF p170): NOTE prints only 'information only'; reserve rule not printed on the chart: the configured fuel policy (EASA basic) is flown"
+      }
+    },
+    {
+      "preset": "A340-300",
+      "tow_kg": 260000,
+      "fuel_tank_kg": 110402,
+      "delta_payload_kg": 28577,
+      "cruise_mach": 0.82,
+      "cruise_mach_source": "Airbus A340 AC 3-2-1 Fig 3-2-1-991-013-A01 (PDF p169): 'CRUISE CONDITIONS ISA 39000 ft M = 0.82'",
+      "reserve_rule": {
+        "source": "Airbus A340-200/-300 AC (Dec 01/25) 3-2-1 Fig 3-2-1-991-013-A01 (PDF p169): prints 'ISA 39000 ft M = 0.82' and no reserves; reserve rule not printed on the chart: the configured fuel policy (EASA basic) is flown"
+      }
+    },
+    {
+      "preset": "B787-9",
+      "tow_kg": 254012,
+      "fuel_tank_kg": 101444,
+      "delta_payload_kg": 29030,
+      "cruise_mach": 0.85,
+      "cruise_mach_source": "Boeing D6-58333 Rev Q Sec 3.2.2 p3-3 (PDF p38), page image: box 'STANDARD DAY, ZERO WIND / MACH 0.85 CRUISE / STEP CLIMB AT 2000 FT INCREMENTS / NORMAL POWER EXTRACTION AND AIR CONDITIONING BLEED / TYPICAL MISSION RULES' under the heading 'Payload/Range for Long-Range Cruise'; the printed Mach is 0.85, not a lower LRC Mach",
+      "reserve_rule": {
+        "source": "Boeing D6-58333 Rev Q Sec 3.2.2 p3-3 (PDF p38): prints 'typical mission rules' without quantities; reserve rule not printed on the chart: the configured fuel policy (EASA basic) is flown"
+      }
+    },
+    {
+      "preset": "A220-300",
+      "tow_kg": 67585,
+      "fuel_tank_kg": 17726,
+      "delta_payload_kg": 5933,
+      "reserve_rule": {
+        "source": "Airbus A220 ACP Issue 001 DM BD500-A-J00-00-00-13AAB-030A-A Fig 1 (PDF p175): prints '3100 NM range', no reserves; reserve rule not printed on the chart: the configured fuel policy (EASA basic) is flown"
+      }
+    },
+    {
+      "preset": "A380-800",
+      "tow_kg": 560000,
+      "fuel_tank_kg": 253983,
+      "delta_payload_kg": 49210,
+      "reserve_rule": {
+        "scheme": "easa_basic",
+        "alternate_distance_nmi": 200.0,
+        "final_reserve_hold_min": 30.0,
+        "source": "Airbus A380 AC (Dec 01/25) 3-2-1 p2, Fig 3-2-1-991-001-A01 (PDF p132): '5% trip fuel allowance, 30 min holding, 200 nm diversion' (the EASA basic contingency of 5 % of trip fuel)"
+      }
+    },
+    {
+      "preset": "DC-10",
+      "tow_kg": 259454,
+      "fuel_tank_kg": 111387,
+      "delta_payload_kg": 19003,
+      "reserve_rule": {
+        "scheme": "faa_flag_supplemental",
+        "alternate_distance_nmi": 200.0,
+        "source": "Boeing DC-10 ACAP (2023) Sec 3.2.1 doc p47 (PDF p54), note 1: 'Fuel reserves based on FAR 121.645 at 200 N MI' (121.645: ten percent of the trip time, alternate, 30 min hold; hold left at the policy value, 30 min)"
+      }
+    },
+    {
+      "preset": "B747-400",
+      "tow_kg": 396893,
+      "fuel_tank_kg": 173459,
+      "delta_payload_kg": 23609,
+      "cruise_mach": 0.85,
+      "cruise_mach_source": "Boeing D6-58326-1 Rev F Sec 3.2.1 p3-2 (PDF p63): title 'Payload/Range: Model 747-400, -400 Combi, 0.85 Mach Cruise'",
+      "reserve_rule": {
+        "scheme": "faa_flag_supplemental",
+        "alternate_distance_nmi": 200.0,
+        "final_reserve_hold_min": 30.0,
+        "source": "Boeing D6-58326-1 Rev F Sec 3.2.1 p3-2 (PDF p63) notes: 'FAR international reserves, 10% trip air time, 200-nmi alternate, 1/2 hour hold at 1,500 ft'"
+      }
+    },
+    {
+      "preset": "E195-E2",
+      "tow_kg": 61500,
+      "fuel_tank_kg": 13690,
+      "delta_payload_kg": 4150,
+      "cruise_mach": 0.78,
+      "cruise_mach_source": "Embraer E-Jets E2 APM 5824 Fig 3.3 (PDF p63): the chart prints MAX CRUISE, M0.78 and LRC curves; the M0.78 curve is the reference flown",
+      "reserve_rule": {
+        "alternate_distance_nmi": 100.0,
+        "final_reserve_hold_min": 45.0,
+        "source": "Embraer E-Jets E2 APM 5824 Fig 3.3 (PDF p63): 'RESERVE: 100 nm ALTERNATE + 45 min FLIGHT'; the contingency rule is not printed (configured policy)"
+      }
+    },
+    {
+      "preset": "C919",
+      "tow_kg": 75100,
+      "fuel_tank_kg": 19470,
+      "delta_payload_kg": 8970,
+      "reserve_rule": {
+        "source": "C919 payload-range table (refs C919.json): reserves and Mach not printed; reserve rule not printed on the chart: the configured fuel policy (EASA basic) is flown"
+      }
+    }
+  ]
+}

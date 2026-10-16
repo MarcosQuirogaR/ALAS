@@ -111,6 +111,11 @@ fn parity_screening() {
     // The translated screening fixture used 9.81 m/s^2. Keep that value at
     // this compatibility boundary; product analyses use 9.80665 m/s^2.
     config.requirements.gravity_m_s2 = 9.81;
+    // The frozen reference prices the drag with margin 1.10 and no lift-dependent viscous term;
+    // the product defaults are 1.01 and kappa 0.25 (lane kappa-jenkinson), so the fixture states the
+    // frozen values explicitly, as the full-analysis parity fixture does.
+    config.drag_model.viscous_margin = 1.10;
+    config.drag_model.lift_dependent_viscous_fraction = 0.0;
     let dv = DesignVector::default();
 
     // 1. Cruise condition (Closed tier)

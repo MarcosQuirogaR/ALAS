@@ -25,6 +25,14 @@ fn named_plot_colors_do_not_fall_back_to_black() {
 }
 
 #[test]
+fn non_ascii_hex_input_is_black_instead_of_panicking() {
+    // 6 bytes but 3 characters: byte slicing would split a code point.
+    assert_eq!(Color::from_hex("#\u{e9}\u{e9}\u{e9}"), Color::rgb(0, 0, 0));
+    assert_eq!(Color::from_hex("\u{20ac}\u{20ac}"), Color::rgb(0, 0, 0));
+    assert_eq!(Color::from_hex("#2563eb"), Color::rgb(0x25, 0x63, 0xeb));
+}
+
+#[test]
 fn contrast_measurement_composites_transparent_foregrounds() {
     let black = Color::rgb(0, 0, 0);
     let white = Color::rgb(255, 255, 255);

@@ -38,9 +38,17 @@ pub struct SizedFuel {
     pub trip_fuel_kg: f64,
     /// Design-mission range the closure was flown over, m.
     pub design_range_m: f64,
+    /// Destination landing mass of the closure's design mission, kg: the
+    /// quantity the `landing_mass` residual and the design landing mass limit
+    /// are built on.
+    pub design_landing_mass_kg: f64,
     /// Physical maximum-fuel loading under Hard MTOW, separate from the
     /// required design-mission plan used by dispatch and mission replay.
     pub takeoff_loading: Option<alas_mass::loading::MtowFuelLoading>,
+    /// Mid-cruise mass of the design mission flown from the candidate's own
+    /// takeoff loading, kg: the mass the optimizer's level-cruise thrust row
+    /// is evaluated at (`SizedCandidate::mid_cruise_mass_kg`).
+    pub mid_cruise_mass_kg: f64,
 }
 
 impl SizedFuel {
@@ -52,7 +60,9 @@ impl SizedFuel {
             takeoff_fuel_kg: sized.design_mission_fuel_kg,
             trip_fuel_kg: sized.design_mission_trip_fuel_kg,
             design_range_m: sized.design_range_m,
+            design_landing_mass_kg: sized.design_mission_landing_mass_kg().unwrap_or(f64::NAN),
             takeoff_loading: sized.takeoff_loading,
+            mid_cruise_mass_kg: sized.mid_cruise_mass_kg(),
         }
     }
 }

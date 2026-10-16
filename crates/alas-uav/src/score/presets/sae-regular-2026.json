@@ -1,0 +1,145 @@
+{
+  "id": "sae-regular-2026",
+  "version": 1,
+  "family": "sae_aero_design",
+  "name": "SAE Aero Design 2026, Regular class (bottle cargo)",
+  "status": "official",
+  "citation": "SAE Aero Design 2026 Rules 2026.0 (2025-09-05), s7 Regular class (requirements printed p.30-32, scoring s7.6 printed p.33); local copy refs/competitions/SAE2026_AeroDesign_rules.pdf; scoring equation checked on the rendered page",
+  "gates": [
+    {
+      "id": "span_band",
+      "description": "72 in < span < 120 in",
+      "margin_expr": "min(span - 72 in, 120 in - span) / (72 in)",
+      "hard": true,
+      "citation": "SAE Aero Design 2026 Rules 2026.0 (2025-09-05) Regular s7 dimension requirement, printed p.31"
+    },
+    {
+      "id": "chord_min",
+      "description": "Wing chord > 4 in",
+      "margin_expr": "(chord_min - 4 in) / (4 in)",
+      "hard": true,
+      "citation": "SAE Aero Design 2026 Rules 2026.0 (2025-09-05) Regular dimension requirement, printed p.31"
+    },
+    {
+      "id": "body_length",
+      "description": "Body-axis length < 120 in",
+      "margin_expr": "(120 in - body_length) / (120 in)",
+      "hard": true,
+      "citation": "SAE Aero Design 2026 Rules 2026.0 (2025-09-05) Regular dimension requirement, printed p.31"
+    },
+    {
+      "id": "no_frp",
+      "description": "No fibre-reinforced plastic",
+      "margin_expr": "0 - frp_used",
+      "hard": true,
+      "citation": "SAE Aero Design 2026 Rules 2026.0 (2025-09-05) Regular material restrictions, printed p.31"
+    },
+    {
+      "id": "motors",
+      "description": "Two or four electric motors",
+      "margin_expr": "if(motor_count == 2 || motor_count == 4, 0, -1)",
+      "hard": true,
+      "citation": "SAE Aero Design 2026 Rules 2026.0 (2025-09-05) Regular propulsion, printed p.31"
+    },
+    {
+      "id": "cells",
+      "description": "4S LiPo pack",
+      "margin_expr": "0 - abs(cell_count - 4)",
+      "hard": true,
+      "citation": "SAE Aero Design 2026 Rules 2026.0 (2025-09-05) Regular battery, printed p.31"
+    },
+    {
+      "id": "capacity",
+      "description": "Pack capacity <= 2200 mAh",
+      "margin_expr": "(2200 mAh - battery_capacity) / (2200 mAh)",
+      "hard": true,
+      "citation": "SAE Aero Design 2026 Rules 2026.0 (2025-09-05) Regular battery, printed p.31"
+    },
+    {
+      "id": "prop",
+      "description": "Propeller diameter <= 12 in (2 motors) or 9 in (4 motors)",
+      "margin_expr": "(if(motor_count == 4, 9 in, 12 in) - prop_diameter) / (12 in)",
+      "hard": true,
+      "citation": "SAE Aero Design 2026 Rules 2026.0 (2025-09-05) Regular propeller requirements, printed p.31"
+    }
+  ],
+  "parameters": [
+    {
+      "name": "empty_bottles",
+      "unit_si": "1",
+      "default": 0,
+      "min": 0,
+      "max": 100,
+      "doc": "Empty bottles (>= 1 lb) unloaded within 1 min (Regular scoring)"
+    },
+    {
+      "name": "filled_bottles",
+      "unit_si": "1",
+      "default": 0,
+      "min": 0,
+      "max": 100,
+      "doc": "Filled bottles (>= 4 lb) unloaded within 1 min"
+    },
+    {
+      "name": "predicted_score",
+      "unit_si": "1",
+      "default": 0,
+      "min": 0,
+      "max": 1000,
+      "doc": "PS: predicted maximum flight score at the event density altitude, read from the TDS curve (s4.5); 0 = no prediction made"
+    }
+  ],
+  "segments": [
+    {
+      "name": "takeoff",
+      "kind": {
+        "kind": "takeoff",
+        "runway_m": 100.0,
+        "surface": "hard"
+      }
+    },
+    {
+      "name": "climb",
+      "kind": {
+        "kind": "climb",
+        "end": {
+          "until": "altitude",
+          "meters": 30.0
+        }
+      }
+    },
+    {
+      "name": "circuit",
+      "kind": {
+        "kind": "laps",
+        "lap_length_m": 600.0,
+        "turn_gate": true,
+        "count": 3
+      }
+    },
+    {
+      "name": "landing",
+      "kind": {
+        "kind": "landing",
+        "zone_m": null
+      }
+    }
+  ],
+  "score": {
+    "terms": [
+      {
+        "name": "fs",
+        "expr": "4 * empty_bottles + 15 * filled_bottles",
+        "additive_bonus": false
+      }
+    ],
+    "round_expr": "fs",
+    "aggregation": {
+      "kind": "mean_best_k_plus_bonus",
+      "k": 3,
+      "bonus_expr": "max(10 - (round_score - predicted_score)^2, 0)"
+    },
+    "reference_field": []
+  },
+  "variants": []
+}

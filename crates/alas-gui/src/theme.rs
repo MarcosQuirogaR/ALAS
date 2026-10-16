@@ -97,6 +97,7 @@ pub fn selectable_button(
         .rounding(Rounding::same(SELECTABLE_CONTROL_RADIUS))
 }
 
+/// Frame used for grouped content cards, filled with the window color.
 pub fn card_frame(ui: &Ui) -> Frame {
     Frame::group(ui.style())
         .fill(ui.visuals().window_fill())
@@ -121,10 +122,14 @@ pub fn navigation_overlay_frame(ui: &Ui, expansion: f32) -> Frame {
     let expansion = expansion.clamp(0.0, 1.0);
     let padding = 14.0 * expansion;
     Frame::group(ui.style())
+        // At rest the rail is a quiet 8 pt strip: the accent only tints the
+        // panel colour (60 %), because a saturated accent at the window edge
+        // reads as a rendering defect on dark pages. It reaches the plain
+        // panel fill as the navigation opens.
         .fill(blend_color(
             ui.visuals().hyperlink_color,
             ui.visuals().panel_fill,
-            expansion,
+            0.6 + 0.4 * expansion,
         ))
         .stroke(Stroke::new(
             1.0_f32,

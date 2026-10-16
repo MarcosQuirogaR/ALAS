@@ -39,38 +39,60 @@
 //! approaching one answer. That convergence is the row's tier;
 //! `parity_nastran95.rs` holds it.
 //!
-//! **Normal modes are written but not cross-validated, and that is a finding.**
-//! [`build_modes_deck`] produces a valid `EIGR` deck both solvers run without a
-//! fatal, but NASTRAN-95's 1970s real-eigenvalue methods: Givens, inverse
-//! power, FEER, do not reliably return a modern solver's lowest modes for this
-//! model. Its mass matrix is singular on the rotational freedoms (shells and
-//! concentrated masses give translational inertia and little rotary), which
-//! Givens cannot reduce, and inverse power finds a band-dependent, incomplete
-//! set of roots rather than the fundamentals: the modern solver's first mode is
-//! near 2 Hz where inverse power over `[0, 20]` reports its lowest near 8. The
-//! total mass the two build is identical to five figures, so this is the
-//! eigensolver and not the model. Matching the lowest modes across the two
-//! solvers is left as an open question for the ledger rather than asserted here.
+//! **Normal modes are extracted in a narrow band and audited with Sturm counts.**
+//! NASTRAN-95's inverse power (`EIGR,,INV`) returns whichever roots its shifts
+//! converge on inside the requested band. Over the former fixed `[0, 100]` Hz
+//! band it skipped the lowest elastic roots (A320 wingbox: the first reported
+//! root was 15.5 Hz with 19 roots below it, the first wing bending at 1.84 Hz
+//! among them, against MSC's 1.83 Hz), and its "low frequency end not found"
+//! message cannot be trusted either way. The total mass of the two decks is
+//! identical to five figures, so the model was not the cause. The adapter now
+//! tries bands of 4, 8, 16, ... Hz and accepts the lowest roots only when the
+//! printed Sturm `ROOTS BELOW` counts account for every reported root
+//! ([`completeness`]); only that gap-free prefix is returned, and a run that
+//! cannot confirm any root is a modal `Error`, never a set of arbitrary modes.
+//! Higher modes of the 1995 shell (no drilling stiffness) still differ from
+//! MSC's by several percent; only the first modes are compared.
+//!
+//! **The product deck is written in decimetre - 10 kg - newton** ([`units`]):
+//! NASTRAN-95's `CQUAD4` rejects, with an absolute length-unit-dependent
+//! threshold, elements a modern solver accepts (trailing-edge rib panels of
+//! 0.5 mm height on the B747-400, DC-10 and E195-E2 wingboxes), and its results
+//! move with the length unit, so the unit is chosen where it matches MSC.
+//! The public `build_*_deck` builders keep SI.
 //!
 //! Modal frequency response -- the modern deck's two `SOL 111` solutions -- has
 //! no NASTRAN-95 equivalent at all and is not written.
 
 mod analysis;
+mod closed_form;
+mod completeness;
 mod deck;
 mod field;
+mod modal_search;
+mod quad_guard;
 mod run;
 mod section;
 mod static_spanwise;
 mod static_stress;
+mod units;
 
 pub use analysis::{
     run_nastran95_analysis, run_nastran95_from_config_or_env, run_nastran95_from_env,
 };
-pub use deck::{build_modes_deck, build_static_deck, build_static_deck_product, Dialect};
+pub use closed_form::{run_cantilever_benchmark, BenchmarkOutcome, CantileverBox, LoadCaseOutcome};
+pub use deck::{
+    build_modes_deck, build_static_deck, build_static_deck_product,
+    build_static_deck_product_at_length_scale, Dialect,
+};
 pub use field::{real, Card, ContinuationTags, Field};
+pub use quad_guard::{
+    degeneracy_message, degenerate_quads, DegenerateQuad, GUARD_MARGIN, QUAD4_DEGENERACY_LIMIT,
+};
 pub use run::{
     displacement_of, read_displacement_tables, read_eigenvalues, read_eigenvector_tables,
-    run_nastran95, Mode, Nastran95Solver, RunOutcome,
+    run_nastran95, EigenvectorModeError, EigenvectorTables, Mode, Nastran95Solver, RunOutcome,
+    MAX_EIGENVECTOR_MODE,
 };
 pub use section::{i_section, rectangle, BarConstants};
 pub use static_spanwise::read_static_spanwise_print;

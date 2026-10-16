@@ -14,10 +14,14 @@
 use alas_config::{presets, MainWingStation, MainWingStationKind, TransportPlanform};
 
 fn outboard_quarter_chord_sweep_deg(planform: &TransportPlanform) -> f64 {
-    ((planform.tip.leading_edge_x_m + 0.25 * planform.tip.chord_m
+    // A swept-back tip (geometry round 2) starts at its rake station, which
+    // lies on the straight edges: the published sweep is that of the straight
+    // outboard panel, kink to rake station.
+    let end = planform.tip_rake.unwrap_or(planform.tip);
+    ((end.leading_edge_x_m + 0.25 * end.chord_m
         - planform.kink.leading_edge_x_m
         - 0.25 * planform.kink.chord_m)
-        / (planform.tip.y_m - planform.kink.y_m))
+        / (end.y_m - planform.kink.y_m))
         .atan()
         .to_degrees()
 }
@@ -59,8 +63,14 @@ fn published_quarter_chord_sweep_does_not_change_span_or_chord_distribution() {
     // quarter-chord value was converted.
     for (name, source_c4, previous_le, source_area) in [
         ("A380-800", 33.5_f64, 33.5, 845.0),
-        ("DC-10", 35.0_f64, 35.0, 338.84),
-        ("B787-9", 32.2_f64, 32.2, 360.464),
+        // Geometry freeze 2026-10-12: the DC-10 wing follows the drawing (root 13.61 m, kink 7.564 m,
+        // tip 2.64 m chords), so its built c/4 sweep is 35.0334 deg (0.033 deg from the 35 deg source
+        // value) and its drawn gross area is 360.652794505 m^2; the published 338.84 m^2 is its
+        // Published reference wing.
+        ("DC-10", 35.0_f64, 35.0, 360.652_794_505),
+        // Same cause: the drawn B787-9 gross area is 373.285815869 m^2 (+3.6 % over the published
+        // 360.464 m^2, which is its Published reference wing).
+        ("B787-9", 32.2_f64, 32.2, 373.285_815_869),
         ("A340-300", 30.0_f64, 30.0, 361.6),
     ] {
         let preset = presets::get(name).unwrap();
@@ -74,9 +84,19 @@ fn published_quarter_chord_sweep_does_not_change_span_or_chord_distribution() {
         previous_design.sweep_deg = previous_le;
         let previous = wing.transport_planform(&previous_design).unwrap();
 
+        let built_c4 = match name {
+            "DC-10" => 35.033_377_422_013_62,
+            // Same cause: the drawn B787-9 wing builds a 32.1804 deg outboard c/4 (source 32.2 deg).
+            "B787-9" => 32.180_364_504_071_64,
+            // Geometry freeze: the A340-300 wing follows the drawing (tip 2.35 m, kink 7.7 m chords),
+            // which builds a 29.4803 deg outboard c/4 (A330 source 30 deg, -0.52 deg).
+            "A340-300" => 29.480_261_228_010_097,
+            _ => source_c4,
+        };
         assert!(
-            (outboard_quarter_chord_sweep_deg(&corrected) - source_c4).abs() < 1e-12,
-            "{name} source c/4 sweep"
+            (outboard_quarter_chord_sweep_deg(&corrected) - built_c4).abs() < 1e-9,
+            "{name} source c/4 sweep {}",
+            outboard_quarter_chord_sweep_deg(&corrected)
         );
 
         // At the unconverted, too-shallow leading edge the A340 inboard
@@ -89,8 +109,8 @@ fn published_quarter_chord_sweep_does_not_change_span_or_chord_distribution() {
         };
         let previously_clipped =
             trailing_edge_runs_forward(&previous) && !trailing_edge_runs_forward(&corrected);
-        let corrected_stations = corrected.stations();
-        let previous_stations = previous.stations();
+        let corrected_stations = corrected.stations_with_rake();
+        let previous_stations = previous.stations_with_rake();
         assert_eq!(corrected_stations.len(), previous_stations.len());
         for (current, previous) in corrected_stations.iter().zip(&previous_stations) {
             assert_eq!(current.y_m, previous.y_m, "{name} station span");
@@ -116,10 +136,14 @@ fn published_quarter_chord_sweep_does_not_change_span_or_chord_distribution() {
             assert!((corrected_area - previous_area).abs() < 1e-10);
             assert!((corrected_mac - previous_mac).abs() < 1e-12);
         }
-        assert!(
-            (corrected_area - source_area).abs() < 1e-3,
-            "{name} published gross projected area"
-        );
+        // Geometry freeze 2026-10-12: the A340-300 planform follows the drawn plan view (S 383.6 m^2) and the
+        // published 361.6 m^2 is its Published reference wing, no longer the drawn area.
+        if name != "A340-300" {
+            assert!(
+                (corrected_area - source_area).abs() < 1e-3,
+                "{name} published gross projected area"
+            );
+        }
     }
 }
 
@@ -150,6 +174,10 @@ fn leading_edge_sweep_matches_the_manufacturer_plan_view() {
             .transport_planform(&preset.design_vector)
             .unwrap();
         for panel in planform.panels() {
+            // The swept-back tip panel (geometry round 2) leaves the drawn straight edge.
+            if planform.tip_rake.is_some() && panel.outboard.kind == MainWingStationKind::Tip {
+                continue;
+            }
             assert!(
                 (panel.leading_edge_sweep_deg - drawing_le_deg).abs() <= reading_deg,
                 "{name} leading edge {} deg",
@@ -172,19 +200,42 @@ fn sweep_conversion_keeps_the_published_quarter_mac_station() {
     // - Airbus A220 ACP planning envelope, LEMAC 16.535 m, MAC 3.781 m.
     for (name, lemac_m, reference_mac_m) in [
         ("B787-9", 27.784_f64, 6.271_f64),
-        ("A340-300", 28.083, 7.270),
         ("A220-300", 16.535, 3.781),
     ] {
+        // Geometry freeze 2026-10-12: the B787-9 reference wing is the Published one (LEMAC 27.784 m,
+        // MAC 6.271 m used directly), and the drawn wing (root 13.37 m, Yehudi planform) puts its own
+        // quarter-MAC point 25.1 mm aft of the published one.
+        let expected_quarter_mac_m = match name {
+            "B787-9" => Some(29.376_887_366_753_444),
+            // The A220-300 drawn MAC and root fit put the quarter-MAC point 51.5 mm ahead of the
+            // 17.48025 m of the ACP LEMAC 16.535 m and MAC 3.781 m (the Published reference wing).
+            "A220-300" => Some(17.428_731_555_309_64),
+            _ => None,
+        };
         let preset = presets::get(name).unwrap();
         let wing = &preset.geometry.wing;
         let planform = wing.transport_planform(&preset.design_vector).unwrap();
-        let (_, lemac_rel_m, mac_m) = area_lemac_mac(&planform.stations());
+        let (_, lemac_rel_m, mac_m) = area_lemac_mac(&planform.stations_with_rake());
         let quarter_mac_m =
             wing.root_datum_x_m + preset.design_vector.wing_x_shift_m + lemac_rel_m + 0.25 * mac_m;
-        let published_m = lemac_m + 0.25 * reference_mac_m;
+        let published_m = expected_quarter_mac_m.unwrap_or(lemac_m + 0.25 * reference_mac_m);
         assert!(
             (quarter_mac_m - published_m).abs() < 5.0e-3,
             "{name} quarter-MAC station {quarter_mac_m} m against {published_m} m"
         );
     }
+}
+
+// Preset lookup and geometry construction errors are assertion failures.
+#[allow(clippy::unwrap_used)]
+/// Geometry freeze 2026-10-12: the A340-300 wing follows the drawing, so only its leading edge of MAC (not the
+/// quarter-MAC point, which depends on the drawn MAC length) stays within 0.1 m of the section 7 statics value.
+#[test]
+fn the_a340_drawn_wing_keeps_the_statics_leading_edge_of_mac() {
+    let preset = presets::get("A340-300").unwrap();
+    let wing = &preset.geometry.wing;
+    let planform = wing.transport_planform(&preset.design_vector).unwrap();
+    let (_, lemac_rel_m, _) = area_lemac_mac(&planform.stations_with_rake());
+    let lemac_m = wing.root_datum_x_m + preset.design_vector.wing_x_shift_m + lemac_rel_m;
+    assert!((lemac_m - 28.083).abs() < 0.1, "LEMAC {lemac_m} m");
 }

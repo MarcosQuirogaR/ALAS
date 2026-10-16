@@ -53,7 +53,7 @@ pub(super) fn utilization(
     let area: f64 = sizing
         .spars
         .iter()
-        .map(|spar| spar.t_web * clear_height(spar, station))
+        .map(|spar| spar.t_web[station] * clear_height(spar, station))
         .sum();
     let tau = shear.abs() / area;
     let sigma = material.e_pa * curvature.abs() * height / 2.0;
@@ -62,14 +62,15 @@ pub(super) fn utilization(
     // interaction. A peak shear-flow analysis remains a shell-model check.
     let strength = sigma.hypot(3.0_f64.sqrt() * tau) / bending_allowable_pa(material);
     let critical = buckling_scale(height, sizing.installed_rib_spacing_m(), material)
-        * (spar.t_web / height).powi(2);
+        * (spar.t_web[station] / height).powi(2);
     strength.max(tau / critical)
 }
 
-/// Enlarge a common uniform web gauge to satisfy all current clear panels.
+/// Enlarge the web gauge of every station whose clear panels need it.
 /// The normal stress is recovered from current EI, and caps can be resized
 /// next. t_strength follows sigma^2+3*tau^2=f^2. Combining tau=V/(t*sum(h))
-/// with tau_cr=K*(t/h)^2 gives t_buckling^3=V*h^2/(K*sum(h)).
+/// with tau_cr=K*(t/h)^2 gives t_buckling^3=V*h^2/(K*sum(h)). The gauge never
+/// decreases and each station keeps its own value.
 pub(super) fn ensure_thickness(
     sizing: &mut WingboxSizing,
     moments: &[f64],
@@ -78,14 +79,10 @@ pub(super) fn ensure_thickness(
     web: &MaterialSpec,
     cap: &MaterialSpec,
 ) -> bool {
-    let current = sizing
-        .spars
-        .iter()
-        .map(|spar| spar.t_web)
-        .fold(0.0_f64, f64::max);
     let allowable = bending_allowable_pa(web);
-    let mut required = current;
+    let mut changed = false;
     for (station, moment) in moments.iter().enumerate() {
+        let current = sizing.spars[0].t_web[station];
         let height_sum: f64 = sizing
             .spars
             .iter()
@@ -94,6 +91,7 @@ pub(super) fn ensure_thickness(
         if height_sum <= 0.0 || shears[station].abs() <= 1.0 {
             continue;
         }
+        let mut required = current;
         let shear_per_gauge = shears[station].abs() / height_sum;
         let curvature = moment.abs() / station_ei(sizing, station, skin, web, cap);
         for spar in &sizing.spars {
@@ -113,17 +111,18 @@ pub(super) fn ensure_thickness(
             .cbrt();
             required = required.max(strength_gauge).max(buckling_gauge);
         }
+        if !required.is_finite() || required <= current * (1.0 + super::MARGIN_NUMERICAL_ZERO) {
+            continue;
+        }
+        // Choose the feasible side of the arithmetic boundary; this is floating
+        // point closure, not a changed physical or acceptance tolerance.
+        let installed = required * (1.0 + super::MARGIN_NUMERICAL_ZERO);
+        for spar in &mut sizing.spars {
+            spar.t_web[station] = installed;
+        }
+        changed = true;
     }
-    if !required.is_finite() || required <= current * (1.0 + super::MARGIN_NUMERICAL_ZERO) {
-        return false;
-    }
-    // Choose the feasible side of the arithmetic boundary; this is floating
-    // point closure, not a changed physical or acceptance tolerance.
-    let installed = required * (1.0 + super::MARGIN_NUMERICAL_ZERO);
-    for spar in &mut sizing.spars {
-        spar.t_web = installed;
-    }
-    true
+    changed
 }
 
 #[cfg(test)]

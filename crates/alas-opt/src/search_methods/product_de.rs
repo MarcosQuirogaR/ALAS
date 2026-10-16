@@ -263,7 +263,7 @@ mod tests {
     #[test]
     fn native_population_is_worker_independent_and_saturates_to_the_budget() {
         for budget in [1, 31, 32, 120, 240, 5_000] {
-            let mut solver = SolverSettings::default();
+            let mut solver = SolverSettings::interactive();
             solver.refinement.max_evaluations = budget;
             let budget = usize::try_from(budget).expect("positive test budget");
             let mut reference = refinement_settings(&solver, 1, 7, budget);
@@ -300,7 +300,7 @@ mod tests {
         assert_eq!(initial_population(5_000, 13), 78);
         assert_eq!(initial_population(10, 13), 10);
         assert_eq!(initial_population(600, 2), 24);
-        let mut solver = SolverSettings::default();
+        let mut solver = SolverSettings::interactive();
         solver.refinement.max_evaluations = 400;
         let serial = configured(
             &SolverSettings {
@@ -326,7 +326,7 @@ mod tests {
 
     #[test]
     fn the_verification_reserve_sits_inside_the_refinement_budget_and_limit() {
-        let solver = SolverSettings::default();
+        let solver = SolverSettings::interactive();
         let settings = configured(&solver, 13, 1);
         let reserve = verification_reserve(&solver);
         let budget = usize::try_from(solver.refinement.max_evaluations).unwrap_or(0);
@@ -344,7 +344,7 @@ mod tests {
 
     #[test]
     fn a_replay_or_an_evaluations_only_run_ignores_the_time_limits() {
-        let mut solver = SolverSettings::default();
+        let mut solver = SolverSettings::interactive();
         assert!(configured(&solver, 13, 1).time_limit.is_some());
         solver.stop_on_evaluations_only = true;
         assert_eq!(configured(&solver, 13, 1).time_limit, None);
@@ -357,7 +357,7 @@ mod tests {
 
     #[test]
     fn a_replay_count_stops_early_without_changing_the_schedule() {
-        let mut solver = SolverSettings::default();
+        let mut solver = SolverSettings::interactive();
         solver.refinement.max_evaluations = 300;
         let normal = configured(&solver, 13, 1);
         solver.refinement.replay_evaluations = Some(137);
@@ -375,7 +375,7 @@ mod tests {
 
     #[test]
     fn the_planned_budget_follows_the_measured_rate_inside_its_clamps() {
-        let mut solver = SolverSettings::default();
+        let mut solver = SolverSettings::interactive();
         solver.refinement.max_evaluations = 20_000;
         solver.refinement.time_limit_s = 120.0;
         let search_s = 120.0 * (1.0 - VERIFICATION_RESERVE_TIME_FRACTION);

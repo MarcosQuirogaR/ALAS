@@ -12,7 +12,8 @@
 //! general-aviation and hybrid-wing-body branches of each equation are not
 //! transport equations and are not translated.
 
-use alas_units::{FOOT, INCH, POUND_FORCE, POUND_MASS};
+use super::units::{ft, ft2, kg, lb};
+use alas_units::{INCH, POUND_FORCE};
 
 pub(super) mod gear_length;
 pub mod pressurized_fuselage;
@@ -27,22 +28,6 @@ const A4: f64 = 0.34;
 const A5: f64 = 0.60;
 const A6: f64 = 0.035;
 const A7: f64 = 1.50;
-
-fn ft(metres: f64) -> f64 {
-    metres / FOOT
-}
-
-fn ft2(square_metres: f64) -> f64 {
-    square_metres / (FOOT * FOOT)
-}
-
-fn lb(kilograms: f64) -> f64 {
-    kilograms / POUND_MASS
-}
-
-fn kg(pounds: f64) -> f64 {
-    pounds * POUND_MASS
-}
 
 /// Where the wing equivalent bending material factor comes from.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -465,6 +450,7 @@ pub fn estimate_flops_structure(inputs: &FlopsStructureInputs) -> FlopsStructure
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alas_units::{FOOT, POUND_MASS};
 
     /// A 737-800-class wing: 125 ft^2 movable area is about a third of the
     /// 1,341 ft^2 reference area; the published FLOPS defaults elsewhere.
@@ -535,6 +521,35 @@ mod tests {
         assert!(
             (composite.shear_and_control_kg / metallic.shear_and_control_kg - 0.83).abs() < 1e-9
         );
+
+        // Hand evaluation of NASA/TM-2017-219627 Eqs. 33-37 in US units for
+        // FCOMP = 0, 0.5, 1 (lane E1): the factors are (1 - 0.4F), (1 - 0.17F)
+        // and (1 - 0.3F) on W1NIR, W2 and W3, and the total is
+        // (DG CAYE W1NIR + W2 + W3) / (1 + W1NIR). Constants are written out
+        // here, not read from the module.
+        let ft = 1.0 / 0.3048;
+        let lb = 1.0 / 0.453_592_37;
+        let (span, area, dg): (f64, f64, f64) = (34.3 * ft, 124.6 * ft * ft, 79_000.0 * lb);
+        let bt = simplified_bending_factor(span * span / area, 0.28, 25.0, 0.115, 0.0, 0.0);
+        let caye = 1.0 - 0.03 * 2.0;
+        let mut previous = f64::INFINITY;
+        for fcomp in [0.0_f64, 0.5, 1.0] {
+            let w1nir =
+                8.80 * bt * (1.0 + (6.25 / span).sqrt()) * 3.75 * span * (1.0 - 0.4 * fcomp)
+                    / 1.0e6;
+            let w2 = 0.68 * (1.0 - 0.17 * fcomp) * (41.5 * ft * ft).powf(0.34) * dg.powf(0.60);
+            let w3 = 0.035 * (1.0 - 0.3 * fcomp) * area.powf(1.50);
+            let expected_kg = (dg * caye * w1nir + w2 + w3) / (1.0 + w1nir) / lb;
+            let mut inputs = narrowbody_wing();
+            inputs.composite_utilization = fcomp;
+            let got = wing_mass(&inputs).total_kg;
+            assert!(
+                (got - expected_kg).abs() < 1e-9 * expected_kg,
+                "FCOMP {fcomp}: {got} vs hand {expected_kg}"
+            );
+            assert!(got < previous, "wing mass must fall as FCOMP rises");
+            previous = got;
+        }
 
         let mut clean_wing = narrowbody_wing();
         clean_wing.wing_mounted_engine_count = 0;

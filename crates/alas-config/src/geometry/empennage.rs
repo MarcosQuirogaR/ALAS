@@ -140,6 +140,59 @@ pub struct EmpennageConfig {
     )]
     pub vstab_tip_le_m: (f64, f64, f64),
 
+    /// Absolute fin placement; replaces `vstab_offset_from_tail_m`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[config(
+        label = "V-stab root leading edge x (from nose)",
+        unit = "m",
+        help = "Absolute position, measured aft from the nose tip, of the vertical-stabiliser leading edge on its root line (the V-stab vertical offset height, usually the fuselage crown). When set it replaces the offset forward of the tail tip, so the fin does not move with the fuselage length; the tail x shift still applies. Leave unset to place the fin by the offset."
+    )]
+    pub vstab_root_le_x_m: Option<f64>,
+
+    /// Absolute tailplane placement; replaces `hstab_offset_from_tail_m`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[config(
+        label = "H-stab root leading edge x (from nose)",
+        unit = "m",
+        help = "Absolute position, measured aft from the nose tip, of the horizontal-stabiliser leading edge at its root station. When set it replaces the offset forward of the tail tip; the tail x shift still applies. Leave unset to place the tailplane by the offset."
+    )]
+    pub hstab_root_le_x_m: Option<f64>,
+
+    /// Spanwise station of the drawn tailplane root.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[config(
+        label = "H-stab drawn root station y",
+        unit = "m",
+        help = "Distance from the centreline of the station where the tailplane root chord, root incidence, vertical offset and root leading edge x are drawn (the fuselage side). The tip leading edge y stays the half-span from the centreline; its x and z are relative to this station. The builder extends the straight leading and trailing edges to the centreline, so the reference area is the trapezoid carried through the fuselage. Leave unset when the root values are those at the centreline."
+    )]
+    pub hstab_root_station_y_m: Option<f64>,
+
+    /// Dorsal fin: x where the fillet starts on the fin root line.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[config(
+        label = "Dorsal fin start x (from nose)",
+        unit = "m",
+        help = "Absolute position, measured aft from the nose tip, where the dorsal fillet starts on the fin root line. The fillet is a strip ahead of the fin leading edge that ends on that edge at the dorsal height. Needs the dorsal height too; leave both unset for a fin without a dorsal."
+    )]
+    pub vstab_dorsal_x_start_m: Option<f64>,
+
+    /// Dorsal fin: height of the fillet above the fin root line.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[config(
+        label = "Dorsal fin height",
+        unit = "m",
+        help = "Height above the fin root line at which the dorsal fillet meets the fin leading edge. Needs the dorsal start x too; leave both unset for a fin without a dorsal."
+    )]
+    pub vstab_dorsal_height_m: Option<f64>,
+
+    /// Whether the dorsal fillet is a lifting surface in the aero model.
+    #[serde(default, skip_serializing_if = "is_false")]
+    #[config(
+        label = "Dorsal fin in aerodynamic model",
+        help = "Add the dorsal fillet to the airplane's lifting surfaces (vortex lattice, drag build-up). Off keeps the aerodynamic model of the plain fin and uses the fillet for geometry only."
+    )]
+    pub vstab_dorsal_in_aero: bool,
+
     /// Fin scale relative to the design vector's tail scale.
     ///
     /// Derived by the tail auto-sizing step so the fin holds its nominal
@@ -180,6 +233,10 @@ impl TailSizing {
     }
 }
 
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
 fn unit_vstab_scale_ratio() -> f64 {
     1.0
 }
@@ -203,6 +260,12 @@ impl Default for EmpennageConfig {
             vstab_root_chord_m: 9.5,
             vstab_tip_chord_m: 3.2,
             vstab_tip_le_m: (9.0, 0.0, 9.8),
+            vstab_root_le_x_m: None,
+            hstab_root_le_x_m: None,
+            hstab_root_station_y_m: None,
+            vstab_dorsal_x_start_m: None,
+            vstab_dorsal_height_m: None,
+            vstab_dorsal_in_aero: false,
             vstab_scale_ratio: 1.0,
         }
     }

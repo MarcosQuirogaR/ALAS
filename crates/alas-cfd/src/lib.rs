@@ -265,6 +265,22 @@ mod tests {
     }
 
     #[test]
+    fn dsma523a_trailing_edge_closure_is_a_named_correction() {
+        // The verbatim database loop self-intersects at the trailing edge; the
+        // documented closure correction must make it valid, and only it.
+        let raw = alas_geom::airfoil_library::AirfoilLibrary::get("dsma523a")
+            .expect("dsma523a is in the database")
+            .coordinates;
+        assert!(validate_coordinates(&raw).is_err());
+        let resolved = resolve_airfoil("dsma523a").expect("corrected loop resolves");
+        assert!(resolved.correction.is_some());
+        assert_eq!(resolved.coordinates.len(), raw.len());
+        assert_eq!(resolved.coordinates.last(), resolved.coordinates.first());
+        let untouched = resolve_airfoil("SC2-0714").expect("SC2-0714 resolves");
+        assert!(untouched.correction.is_none());
+    }
+
+    #[test]
     fn case_generation_preserves_airfoil_identity_and_named_patches() {
         let path = test_case_dir("generation");
         let config = CfdStudyConfig::default();
@@ -536,6 +552,57 @@ mod tests {
     }
 
     #[test]
+    fn force_decomposition_matches_sorted_times_and_skips_gaps() {
+        let decomposition = parse_force_decomposition("# Time total_x total_y total_z pressure_x pressure_y pressure_z viscous_x viscous_y viscous_z
+1 0 0 0 1 0 0 0 0 0
+2 0 0 0 2 0 0 0 0 0
+3 0 0 0 3 0 0 0 0 0
+");
+        let sample = |time| ForceSample {
+            time,
+            cd: 0.0,
+            cl: 0.0,
+            cm: 0.0,
+            cd_pressure: None,
+            cd_viscous: None,
+            cl_pressure: None,
+            cl_viscous: None,
+        };
+        let mut samples = vec![sample(3.0), sample(1.0), sample(2.5), sample(2.0)];
+        apply_force_decomposition(
+            &mut samples,
+            &decomposition,
+            1.0,
+            2.0,
+            1.0,
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+        );
+        let drag: Vec<_> = samples.iter().map(|s| s.cd_pressure).collect();
+        assert_eq!(drag, [Some(1.5), Some(0.5), None, Some(1.0)]);
+    }
+
+    #[test]
+    fn compressible_validation_rejects_far_field_overrides() {
+        let mut config = CfdStudyConfig::default();
+        config.speed_m_s = 150.0;
+        config.reynolds = 5.0e6;
+        config.boundaries.far_field_turbulence = FarFieldTurbulenceCondition::FixedValue;
+        let low = config.clone();
+        assert!(config.flow_regime().is_compressible());
+        // Reynolds-derived effective speed may differ; only assert on the override messages.
+        let errors = config.validate().err().unwrap_or_default();
+        assert!(errors.iter().any(|e| e.contains("far_field_turbulence")));
+        config.boundaries = BoundarySettings::default();
+        let errors = config.validate().err().unwrap_or_default();
+        assert!(!errors.iter().any(|e| e.contains("boundary override")));
+        let mut incompressible = low;
+        incompressible.speed_m_s = 20.0;
+        let errors = incompressible.validate().err().unwrap_or_default();
+        assert!(!errors.iter().any(|e| e.contains("boundary override")));
+    }
+
+    #[test]
     fn residual_parser_groups_pressure_corrections_by_outer_time() {
         let rows = parse_residuals(
             "Time = 41\nSolving for Ux, Initial residual = 2e-4, Final residual = 2e-6\nSolving for p, Initial residual = 9e-4, Final residual = 3e-6\nSolving for p, Initial residual = 1e-5, Final residual = 4e-7\nSolving for Uy, Initial residual = 3e-4, Final residual = 2e-6\nTime = 42\nSolving for Ux, Initial residual = 2e-6, Final residual = 2e-8\n",
@@ -543,6 +610,20 @@ mod tests {
         assert_eq!(rows.len(), 5);
         assert!(rows[..4].iter().all(|row| row.iteration == 41));
         assert_eq!(rows[4].iteration, 42);
+    }
+
+    #[test]
+    fn residual_parser_keeps_nan_residuals_non_finite() {
+        let rows = parse_residuals(
+            "Time = 3
+Solving for p, Initial residual = nan, Final residual = nan, No Iterations 1
+Solving for Ux, Initial residual = 2e-4, Final residual = 2e-6, No Iterations 2
+",
+        );
+        assert_eq!(rows.len(), 2);
+        assert!(rows[0].initial.is_nan() && rows[0].final_residual.is_nan());
+        assert_eq!(rows[1].initial, 2e-4);
+        assert_eq!(rows[1].final_residual, 2e-6);
     }
 
     #[test]

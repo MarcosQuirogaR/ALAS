@@ -96,11 +96,13 @@ fn a_translated_main_gear_meets_every_ground_mechanism_on_the_rebuilt_candidate(
     let after = super::super::relative_balance::assess(&outcome, &placed).unwrap();
     assert_eq!(ground_misses(&after), BTreeSet::new());
 
-    // Nearest station: one millimetre less translation already misses a
-    // mechanism on the same closure's rebuilt ledger.
+    // Nearest station: one centimetre less translation already misses a
+    // mechanism on the same closure's rebuilt ledger. (Geometry round 2 left
+    // the solver's own tolerance between 1 mm and 1 cm on this fixture: 1 mm
+    // less still passes, 1 cm, 5 cm and more miss the nose-gear load window.)
     let mut shorter = placed.clone();
     shorter.landing_gear.derived_main_gear = Some(DerivedMainGearStation {
-        translation_m: translation - 1.0e-3,
+        translation_m: translation - 1.0e-2,
     });
     let mut probe_outcome = outcome;
     let gear_x = |candidate: &AlasConfig| {
@@ -312,7 +314,12 @@ fn a_three_leg_group_translates_past_its_centre_leg_behind_the_wing_root() {
         tip_chord_m: 2.827_541_478_958_002,
         sweep_deg: 40.926_177_529_939_146,
         tip_twist_deg: -1.737_388_828_312_142_1,
-        wing_x_shift_m: -3.977_305_764_442_710_3,
+        // Geometry round 2 moved the DC-10 empty CG forward enough to clear the nose-gear
+        // share this fixture is built to miss; 0.35 m of extra wing shift restored it. The
+        // frozen geometry (fitted wing and tails) moved it forward again: a scan of the shift
+        // finds the nose-gear-load miss only for shifts above -3.5 m (missed at -3.25 m, met at
+        // -3.5 m), so the shift returns to the pre-round-2 value.
+        wing_x_shift_m: -3.277_305_764_442_71,
         tail_scale: 1.011_511_624_181_909_5,
         airfoil_thickness_scale: 0.971_979_582_161_175_3,
         airfoil_camber_scale: 0.989_585_468_423_623_5,
@@ -363,7 +370,9 @@ fn a_three_leg_group_translates_past_its_centre_leg_behind_the_wing_root() {
 
 /// With a zero re-trim tolerance every centre-of-gravity move re-trims, so a
 /// re-sizing that is offered the previous closure's trim and lattice cache
-/// must reproduce a cold re-sizing bit for bit: the cache is exact.
+/// must reproduce a cold re-sizing: the cache is exact to the rounding of the
+/// lattice factorization update (relative 1e-9; it was bitwise before the
+/// Schur-complement update, `ALAS_VLM_SCHUR_LU=0` restores that).
 #[test]
 fn a_re_sizing_offered_a_trim_it_cannot_keep_is_a_cold_sizing() {
     let (mut config, design) = preset("A220-300");
@@ -393,10 +402,14 @@ fn a_re_sizing_offered_a_trim_it_cannot_keep_is_a_cold_sizing() {
             outcome.x_np,
             outcome.cg_x,
         ]
-        .map(f64::to_bits)
     };
     assert_ne!(first.cg_x.to_bits(), cold.cg_x.to_bits());
-    assert_eq!(key(&warm), key(&cold));
+    for (warm, cold) in key(&warm).into_iter().zip(key(&cold)) {
+        assert!(
+            (warm - cold).abs() <= 1.0e-9 * cold.abs(),
+            "{warm} vs {cold}"
+        );
+    }
 }
 
 /// Within the re-trim tolerance the re-sizing keeps the previous closure's

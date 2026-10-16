@@ -67,8 +67,13 @@ pub(crate) fn evaluate(
     destination: &Airport,
     route_distance_m: f64,
 ) -> Result<(Option<MissionResult>, SelectedLoadCase), String> {
+    let dispatch_profile =
+        alas_math::stage_profile::scope(alas_math::stage_profile::Stage::PipelineRouteDispatch);
     let (request, mut load_case) =
         dispatch::select_route_load_case(config, report, origin, destination, route_distance_m)?;
+    drop(dispatch_profile);
+    let _flight_profile =
+        alas_math::stage_profile::scope(alas_math::stage_profile::Stage::PipelineTelemetryFlight);
     // The one native flight, at the selected mass: telemetry beside the
     // route the segment model priced; its failure never stops the stage.
     let native = (|| {
@@ -108,7 +113,7 @@ fn build_analyses(config: &AlasConfig, report: &AnalysisReport) -> Result<Missio
 /// vehicle fixture sizes its turbofan from cruise-required thrust and uses the
 /// unfolded compatibility area; allowing those values to leak into the
 /// product path would reintroduce throttle commands above one.
-#[allow(dead_code)] // Called from the cfg(test) SUAVE boundary module, not product builds.
+#[cfg(test)]
 fn build_analyses_reference_compatibility(
     config: &AlasConfig,
     report: &AnalysisReport,

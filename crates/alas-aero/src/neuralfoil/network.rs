@@ -163,8 +163,8 @@ pub fn evaluate_sweep(
         inputs.push(mirror_input(&input));
         inputs.push(input);
     }
-    // Direct at odd, mirrored at even positions: pushed mirrored-first so
-    // the swap above keeps `input` usable without a copy.
+    // Direct at odd, mirrored at even positions: each pair is pushed
+    // mirrored-first.
     // The batch output is owned, so each pair is corrected in place rather
     // than copied out first.
     let mut outputs = network.evaluate_batch(&inputs);

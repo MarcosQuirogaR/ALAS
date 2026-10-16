@@ -420,3 +420,218 @@ fn a_reference_brief_does_not_bind_a_named_engine() {
         GeometryConfig::default().engine.radius_scale_m
     );
 }
+
+/// The 70-seat, 800 nmi regional turboprop brief of the clean-sheet
+/// acceptance case: no preset, a catalogue turboprop, a 2.865 m body.
+fn turboprop_brief() -> serde_json::Value {
+    json!({
+        "requirements": {
+            "mtow_kg": 23_000.0, "num_passengers": 70,
+            "cruise_mach": 0.44, "cruise_altitude_m": 5_180.0
+        },
+        "geometry": {"fuselage": {"diameter_m": 2.865}, "engine": {"engine_name": "PW127M"}},
+        "optimizer": {"objective": {"design_range_nmi": 800.0}}
+    })
+}
+
+#[test]
+fn the_turboprop_class_is_the_median_of_the_published_regional_records() {
+    use turboprop_class::{turboprop_class, BREAK_ROOT_CHORD_RATIO};
+    let class = turboprop_class();
+    // Jane's 2008-2009: aspect ratios 11.08, 12.0, 13.39, 12.8.
+    assert!(relative(class.aspect_ratio, 0.5 * (12.0 + 12.8)) < 5e-3);
+    // Wing loadings 341.3, 368.9, 331.7, 443.7 kg/m^2.
+    assert!(relative(class.wing_loading_kg_m2, 0.5 * (341.3 + 368.9)) < 1e-12);
+    assert_eq!(class.minimum_wing_loading_kg_m2, 331.7);
+    // Fuel over MTOW 0.2419, 0.2222, 0.2492: the middle one.
+    assert!(relative(class.fuel_fraction, 4_500.0 / 18_600.0) < 1e-12);
+    assert!(relative(class.tip_root_chord_ratio, 0.5 * (1.41 + 1.59) / 2.57) < 1e-12);
+    assert!((0.29..0.34).contains(&class.engine_semispan_fraction));
+    assert_eq!(BREAK_ROOT_CHORD_RATIO, 1.0);
+    // Every record lies above Raymer's pooled twin-turboprop class.
+    assert!(class.aspect_ratio > 9.2 && class.wing_loading_kg_m2 > 195.0);
+}
+
+#[test]
+fn a_turboprop_brief_starts_from_the_turboprop_class_not_the_jet_defaults() {
+    let config = load(&turboprop_brief());
+    assert!(config.derives_clean_sheet_start());
+    let class = turboprop_class_of();
+    // Wing: class loading and aspect ratio, straight, constant-chord centre.
+    let wing = config.class_wing().unwrap();
+    assert!(relative(wing.area_m2, 23_000.0 / class.wing_loading_kg_m2) < 1e-12);
+    assert!(relative(wing.span_m.powi(2) / wing.area_m2, class.aspect_ratio) < 1e-12);
+    assert_eq!(wing.sweep_deg, 0.0);
+    let start = config.clean_sheet_design().unwrap();
+    assert!(relative(start.break_chord_m, start.root_chord_m) < 1e-12);
+    assert!(
+        relative(
+            start.tip_chord_m / start.root_chord_m,
+            class.tip_root_chord_ratio
+        ) < 1e-12
+    );
+    let built = WingPlanformSummary::of(&config.geometry.wing, &start).unwrap();
+    assert!(relative(built.area_m2, wing.area_m2) < 1e-9);
+    // Section, incidence, engine station out of the fuselage by the class.
+    let g = &config.geometry;
+    assert_eq!(g.wing.root_airfoil, "naca23018");
+    assert_eq!(g.wing.tip_airfoil, "naca23012");
+    assert_eq!(g.wing.airfoil_class, crate::AirfoilClass::Conventional);
+    assert_eq!(g.wing.root_twist_deg, 2.0);
+    let y = g.engine.spanwise_positions_m[0];
+    assert!(relative(y, class.engine_semispan_fraction * 0.5 * wing.span_m) < 1e-12);
+    let clearance = y - 0.5 * g.fuselage.diameter_m - 0.5 * 3.93;
+    assert!(clearance > 0.5, "propeller to fuselage {clearance} m");
+    // Requirements, high lift, FLOPS block, structure, route.
+    assert_eq!(config.requirements.min_wing_loading_kg_m2, 331.7);
+    assert_eq!(config.performance.cl_max_to, 2.07);
+    assert_eq!(config.performance.cl_max_land, 2.71);
+    let t = &config.mass_model.flops_transport;
+    assert_eq!(t.flight_attendant_count, Some(2));
+    assert_eq!(t.fuel_tank_count, Some(2));
+    assert!(!t.apu_installed);
+    assert_eq!(t.maximum_mach, Some(1.25 * 0.44));
+    assert_eq!(t.design_range_nmi, Some(800.0));
+    assert!(
+        relative(
+            t.maximum_fuel_capacity_kg.unwrap(),
+            class.fuel_fraction * 23_000.0
+        ) < 1e-12
+    );
+    assert_eq!(
+        t.cabin_equipment_method,
+        crate::CabinEquipmentMethod::RegionalTurbopropV1
+    );
+    assert_eq!(
+        config
+            .mass_model
+            .flops_structure
+            .maximum_operating_altitude_m,
+        Some(7_620.0)
+    );
+    let from = crate::airports::get(&config.departure_airport).unwrap();
+    let to = crate::airports::get(&config.arrival_airport).unwrap();
+    let nmi = turboprop_class::great_circle_m(
+        (from.latitude_deg, from.longitude_deg),
+        (to.latitude_deg, to.longitude_deg),
+    ) / 1_852.0;
+    // The longest route the planner can return (stretch 1.2) fits the range.
+    assert!(
+        nmi * config.mission.max_airway_stretch <= 800.0 && nmi > 600.0,
+        "{} to {} is {nmi} nmi",
+        from.icao,
+        to.icao
+    );
+    assert!(from.elevation_m <= 1_000.0 && to.elevation_m <= 1_000.0);
+}
+
+fn turboprop_class_of() -> &'static turboprop_class::TurbopropClass {
+    turboprop_class::turboprop_class()
+}
+
+#[test]
+fn keys_the_turboprop_brief_names_win_over_the_class() {
+    let mut value = turboprop_brief();
+    value["performance"] = json!({"cl_max_to": 2.4});
+    value["departure_airport"] = json!("Riga (EVRA)");
+    value["requirements"]["min_wing_loading_kg_m2"] = json!(300.0);
+    value["mass_model"] = json!({"flops_transport": {"maximum_fuel_capacity_kg": 6_000.0,
+                                                     "apu_installed": true}});
+    value["geometry"]["wing"] = json!({"root_airfoil": "naca2410"});
+    let config = load(&value);
+    assert_eq!(config.performance.cl_max_to, 2.4);
+    // The unnamed sibling keeps the class value.
+    assert_eq!(config.performance.cl_max_land, 2.71);
+    assert_eq!(config.departure_airport, "Riga (EVRA)");
+    assert_eq!(config.requirements.min_wing_loading_kg_m2, 300.0);
+    let t = &config.mass_model.flops_transport;
+    assert_eq!(t.maximum_fuel_capacity_kg, Some(6_000.0));
+    assert!(t.apu_installed);
+    assert_eq!(config.geometry.wing.root_airfoil, "naca2410");
+    assert_eq!(config.geometry.wing.tip_airfoil, "naca23012");
+}
+
+#[test]
+fn the_ultimate_load_factor_follows_the_part_25_minimum_below_50000_lb() {
+    // 25.337(b): 2.1 + 24000 / (W + 10000), W in lb, within [2.5, 3.8].
+    let factor = |mtow_kg: f64| turboprop_class::ultimate_load_factor(mtow_kg).unwrap();
+    assert!(
+        relative(
+            factor(20_000.0),
+            1.5 * (2.1 + 24_000.0 / (44_092.4 + 10_000.0))
+        ) < 1e-5
+    );
+    assert!(factor(20_000.0) > 3.75);
+    // Above 50,000 lb the rule is the shipped 3.75 (n = 2.5), bit for bit.
+    assert_eq!(factor(23_000.0), 3.75);
+    assert_eq!(factor(70_000.0), 3.75);
+    // Tiny aircraft are capped at n = 3.8.
+    assert_eq!(factor(500.0), 1.5 * 3.8);
+    assert!(turboprop_class::ultimate_load_factor(f64::NAN).is_none());
+    let mut value = turboprop_brief();
+    value["requirements"]["mtow_kg"] = json!(20_000.0);
+    assert!(load(&value).requirements.ultimate_load_factor > 3.75);
+    value["requirements"]["ultimate_load_factor"] = json!(4.2);
+    assert_eq!(load(&value).requirements.ultimate_load_factor, 4.2);
+    assert_eq!(
+        load(&turboprop_brief()).requirements.ultimate_load_factor,
+        3.75
+    );
+}
+
+#[test]
+fn a_four_engine_turboprop_brief_is_not_a_regional_twin() {
+    let mut value = turboprop_brief();
+    value["geometry"]["engine"]["spanwise_positions_m"] = json!([-9.0, -4.5, 4.5, 9.0]);
+    let config = load(&value);
+    assert!(!config.is_turboprop_brief());
+    assert_eq!(config.performance, crate::PerformanceConfig::default());
+    assert_eq!(config.requirements.min_wing_loading_kg_m2, 485.0);
+    assert_eq!(config.departure_airport, "London Heathrow (EGLL)");
+}
+
+#[test]
+fn a_jet_brief_and_a_turboprop_registered_preset_are_untouched_by_the_class() {
+    let jet = load(&narrowbody_brief());
+    assert_eq!(jet.performance, crate::PerformanceConfig::default());
+    assert_eq!(jet.requirements.min_wing_loading_kg_m2, 485.0);
+    assert_eq!(
+        jet.mass_model.flops_transport.maximum_fuel_capacity_kg,
+        Some(200_000.0)
+    );
+    assert_eq!(jet.departure_airport, "London Heathrow (EGLL)");
+    let atr = load(&json!({"preset": "ATR72-600"}));
+    assert_eq!(atr.requirements.min_wing_loading_kg_m2, 330.0);
+    assert!(!atr.derives_clean_sheet_start());
+    assert_eq!(atr.departure_airport, "Madrid Barajas (LEMD)");
+}
+
+#[test]
+fn the_route_default_needs_a_positive_range_and_the_longest_route_fits_it() {
+    assert!(turboprop_class::pair_for_design_range(0.0, 1.2).is_none());
+    assert!(turboprop_class::pair_for_design_range(f64::NAN, 1.2).is_none());
+    let nmi = |a: &str, b: &str| {
+        let (a, b) = (
+            crate::airports::get(a).unwrap(),
+            crate::airports::get(b).unwrap(),
+        );
+        turboprop_class::great_circle_m(
+            (a.latitude_deg, a.longitude_deg),
+            (b.latitude_deg, b.longitude_deg),
+        ) / 1_852.0
+    };
+    for (range, stretch) in [(300.0, 1.2), (800.0, 1.2), (800.0, 1.0), (800.0, 0.0)] {
+        let (a, b) = turboprop_class::pair_for_design_range(range, stretch).unwrap();
+        assert_ne!(a, b);
+        let longest = nmi(a, b) * stretch.max(1.0);
+        assert!(longest <= range, "{a} {b}: {longest} nmi against {range}");
+        assert!(
+            longest > 0.7 * range,
+            "{a} {b}: {longest} nmi against {range}"
+        );
+    }
+    // A larger permitted detour never lengthens the pair.
+    let tight = turboprop_class::pair_for_design_range(800.0, 1.2).unwrap();
+    let loose = turboprop_class::pair_for_design_range(800.0, 1.0).unwrap();
+    assert!(nmi(tight.0, tight.1) <= nmi(loose.0, loose.1));
+}

@@ -18,7 +18,7 @@ pub fn figure_design_evolution(
         .design_vectors
         .iter()
         .zip(&history.valid)
-        .filter_map(|(dv, &ok)| ok.then_some(dv))
+        .filter_map(|(dv, &ok)| dv.as_ref().filter(|_| ok))
         .collect();
     if valid_dvs.is_empty() {
         return None;

@@ -153,7 +153,7 @@ impl AirfoilCfdState {
         }
         let text = serde_json::to_string_pretty(&self.config)
             .map_err(|error| format!("cannot encode CFD study settings: {error}"))?;
-        std::fs::write(&self.saved_study_path, text).map_err(|error| {
+        crate::fs_atomic::write_atomic(&self.saved_study_path, text).map_err(|error| {
             format!(
                 "cannot write CFD study settings {}: {error}",
                 self.saved_study_path.display()
@@ -161,7 +161,7 @@ impl AirfoilCfdState {
         })?;
         let sweep_text = serde_json::to_string_pretty(&self.sweep_settings)
             .map_err(|error| format!("cannot encode CFD sweep settings: {error}"))?;
-        std::fs::write(&self.saved_sweep_path, sweep_text).map_err(|error| {
+        crate::fs_atomic::write_atomic(&self.saved_sweep_path, sweep_text).map_err(|error| {
             format!(
                 "cannot write CFD sweep settings {}: {error}",
                 self.saved_sweep_path.display()
@@ -204,7 +204,7 @@ impl AirfoilCfdState {
         };
         let text = serde_json::to_string_pretty(&preferences)
             .map_err(|error| format!("cannot encode CFD environment settings: {error}"))?;
-        std::fs::write(&path, text)
+        crate::fs_atomic::write_atomic(&path, text)
             .map_err(|error| format!("cannot write {}: {error}", path.display()))?;
         Ok(path)
     }

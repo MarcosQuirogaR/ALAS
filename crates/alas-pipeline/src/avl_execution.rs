@@ -95,3 +95,33 @@ pub fn run_avl_takeoff_comparison_cancellable(
         cancel,
     )
 }
+
+/// Compare AVL with ALAS VLM at cruise altitude and the highest Mach, not
+/// above the configured cruise Mach, whose wing-normal Mach is inside AVL's
+/// linear Prandtl-Glauert validity domain.
+///
+/// The result's `comparison_reference.phase` states whether the Mach was
+/// capped. Transonic cruise accuracy is not judged here (AVL has no
+/// transonic physics); it is validated against MSES and published data.
+pub fn run_avl_linear_cruise_comparison_cancellable(
+    report: &AnalysisReport,
+    config: &AlasConfig,
+    output_dir: &Path,
+    executable: Option<&Path>,
+    timeout_seconds: f64,
+    cancel: Option<&AtomicBool>,
+) -> AvlAnalysisResult {
+    let reference = match super::reference::linear_cruise_comparison_reference(report, config) {
+        Ok(reference) => reference,
+        Err(error) => return rejected_reference_result(output_dir, executable, error),
+    };
+    run_avl_analysis_with_reference(
+        report,
+        config,
+        output_dir,
+        executable,
+        timeout_seconds,
+        reference,
+        cancel,
+    )
+}

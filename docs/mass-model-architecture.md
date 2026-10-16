@@ -63,8 +63,8 @@ certified ratio when it loads. Its default follows the declared
 already read; no mass threshold is introduced
 (`alas_config::landing_mass_ratio`). Long haul takes 0.7574, the 777-9
 ratio (Boeing D6-86073 Rev G, Table 2-1: 266,258 / 351,534 kg). Short and
-medium haul takes 0.858, the mean of the registry's short/medium-haul jet
-transports: A320-200 0.846 and A220-300 0.869. The ATR 72-600 (0.972)
+medium haul takes 0.8598, the mean of the registry's three short/medium-haul
+jet transports: A320-200 0.846, A220-300 0.869 and E195-E2 0.864. The ATR 72-600 (0.972)
 shares the haul class but is excluded. It is a regional turboprop,
 certified for short sectors with its landing mass near its takeoff mass,
 and it has its own mass method; including it would give 0.896. The
@@ -99,8 +99,9 @@ configuration closed at the report's takeoff mass
   are sized for the closed aircraft, not for the MTOW limit it stays under.
   The MTOW requirement bounds the closure; it is not a structural design
   weight.
-- The `mtow_band` and `payload_adjusted` modes design the structure at the
-  closure in every design mode (table below).
+- The `payload_adjusted` mode designs the structure at the closure in every
+  design mode (table below). The `mtow_band` mode designs it at the chosen
+  band mass `m`, exactly as `fixed_requirement` designs it at the requirement.
 
 The structural design mass of each `MtowSizing` mode is resolved once, by
 `AlasConfig::mtow_plan()` (`MtowPlan::structural_basis`), and applied by
@@ -115,13 +116,17 @@ for in every mode:
 | `fixed_requirement` | route, one pass | declared cap | declared cap | design-mode basis (above) |
 | `sized_by_mission` | route, ceiling = cap | closure | design-mode basis: declared `DG` (fixed aircraft) or the closure (clean sheet) | design-mode basis; clean sheet uses the fraction of the cap |
 | `unconstrained` | route, no ceiling | closure | design-mode basis | design-mode basis |
-| `mtow_band` | design mission, clamp `T (1 + p)` | closure | the closure, in every design mode | `max(scaled, ZFW + reserves)`: scaled is `(MLW / MTOW) x closure` from the preset reference weights for a registered aircraft in `BaselineSandbox`/`ReferenceAdaptation`, otherwise `mlw_fraction_mtow x closure`; ZFW + reserves is the sizing closure's zero-fuel mass plus contingency, alternate, final reserve, additional and extra fuel (its own destination landing mass) |
-| `payload_adjusted` | design range (explicit, else the preset's charted range; the route only when neither exists), no ceiling | closure | the closure, in every design mode | as `mtow_band` |
+| `mtow_band` | route, one pass, at the chosen mass `m` in `[T (1 - p), T (1 + p)]` | `m` (cap) | `m`, as `fixed_requirement` with `m` in place of the requirement | as `fixed_requirement` at `m` |
+| `payload_adjusted` | design range (explicit, else the preset's charted range; the route only when neither exists), no ceiling | closure | the closure, in every design mode | `max(scaled, ZFW + reserves)`: scaled is `(MLW / MTOW) x closure` from the preset reference weights for a registered aircraft in `BaselineSandbox`/`ReferenceAdaptation`, otherwise `mlw_fraction_mtow x closure`; ZFW + reserves is the sizing closure's zero-fuel mass plus contingency, alternate, final reserve, additional and extra fuel (its own destination landing mass) |
 
 An explicit `flops_structure.design_gross_mass_kg` keeps the structure at
-that declared weight in every mode (a validation warning in the two design
-modes). `T` is `optimizer.objective.mtow_target_kg` (zero: the declared
-MTOW) and `p` is `mtow_band_fraction` (default 0.05). The design mission is
+that declared weight in every mode (a validation warning in the two modes that otherwise follow the
+chosen or closed mass). `T` is `optimizer.objective.mtow_target_kg` (zero: the declared
+MTOW) and `p` is `mtow_band_fraction` (default 0.10). The band mass `m` is the
+17th element of the flat design vector (`DesignVector::mtow_kg`), seeded at `T`;
+`AlasConfig::at_band_mass` writes it into `requirements.mtow_kg`, after which the
+candidate is a `fixed_requirement` problem at `m` (one shared path, no duplicated
+sizing). The rest of this paragraph describes `payload_adjusted`. The design mission is
 `AlasConfig::design_mission()`: range `optimizer.objective.design_range_nmi`
 when positive, else the preset's charted design range
 (`reference.design_point`, below), else the declared FLOPS
@@ -322,14 +327,15 @@ terms, never part of OEW.
 | Wing (bending, shear and controls, miscellaneous) | eqs. 10-45 | `flops_transport::structure` | `wing` | `DG`, `ULF`, planform, `SFLAP` |
 | Horizontal and vertical tails | eqs. 46, 50 | structure | `h_stab`, `v_stab` | `DG`, tail areas |
 | Fuselage | eq. 56 | structure | `fuselage` | length, width, depth |
-| Paint | eq. 68 | structure | `fuselage` | wetted area, `WPAINT` (0 by default) |
+| Paint | eq. 68 | structure | `fuselage` | wetted area, `WPAINT` (0.037 lbm/ft^2 = 0.1807 kg/m^2 declared for every registered aircraft by `preset_flops/structure.rs::declared_paint_area_density_kg_m2`; the lower of the two NASA deck values 0.037 and 0.07) |
 | Nose and main gear | eqs. 63-67 | structure | `gear` (`nose_gear`, `main_gear` rows at 15/85) | `WLDG`, oleo lengths |
 | Nacelles | eq. 69 | structure group, charged once to propulsion | `propulsion` | thrust, nacelle geometry |
 | Engine term `WENGP`/`WENG` | eqs. 75-80 | propulsion | `propulsion` | declared `WENGB` (the certified dry engine mass of the type-certificate data sheet, where its stated scope is the basic engine with accessories: A320 CFM56-5B4/3 2,454.8 kg, A220 PW1521G-3 2,177 kg, A380 Trent 970-84 6,246 kg) or the `THRSO/5.5` correlation where no such scope is stated (A340: the CFM56-5C dry weight contains its adapter/reverser; B787: the GEnx data sheet lists the fan reversers under the engine type design without a split; DC-10: no retained CF6-50C value). Certified A320/A220/A380 aircraft-side exhaust/EBU scope is recorded as `OutsideUnmodelled`; no Eq. 78 mass is invented without a separable source. Starter overlap is explicit per preset and remains conservative when unresolved. See `preset_flops/structure.rs` |
 | Inlet, nozzle | eqs. 77-78 | propulsion | `propulsion` | declared baselines only; otherwise inside `WENG` |
 | Thrust reversers, engine controls, starters, misc. | eqs. 86, 87, 89 | propulsion | `propulsion` | thrust, `VMAX`, nacelle diameter |
 | Fuel system | eq. 92 | propulsion | `propulsion` | `FMXTOT`, engines, `VMAX` |
-| Pylons, mounts, EBU, fluids | none | **unresolved installation scope** | not represented | source gap; not invented |
+| Wing pylons | LTH box-beam pylon method (`PylonMassMethod::LthBoxBeamV1`, `0.2648 x SLST^0.6517` kg per pylon, SLST in N) | structure | `propulsion` | every registered aircraft except the ATR 72-600 and A400M (`None`; nacelles faired into the wing) |
+| Mounts, EBU, fluids | none | **unresolved installation scope** | not represented | source gap; not invented |
 | Surface controls, APU, instruments, hydraulics, electrical, avionics, air conditioning, anti-ice | eqs. 97, 101-113 | `flops_transport::equations` | `systems` (nine rows) | geometry, `DG`, crew, passengers, `VMAX`, range |
 | Furnishings | eq. 110 | systems group | `furnishings` (once) | crew, class counts, compartment |
 | Empty-mass margin | eq. 139 | `flops_methods` | `systems-empty_mass_margin_and_residual` | fraction of structure + propulsion + systems |
@@ -338,7 +344,7 @@ terms, never part of OEW.
 | Unusable fuel | eq. 121 | operating items, placed per tank | tank rows | `FMXTOT`, tanks, engines, `SW` (a correlation, 165 kg on the A320; EASA lists 65.7 kg) |
 | Engine oil | eq. 122 | operating items | `operating-engine_oil` | engines, thrust |
 | Passenger service (catering, water, supplies) | eq. 123 | operating items | `operating-passenger_service` | class counts, range, `VMAX` |
-| Cargo containers | eq. 126 | operating items | `operating-cargo_containers` | `WCARGO` (0 declared on every preset) |
+| Cargo containers | eq. 126 | operating items | `operating-cargo_containers` | `WCARGO` (0 declared on every preset); reported separately (`cargo_containers_kg`, `total_with_cargo_containers_kg`) and **excluded** from `FlopsOperatingItemsBreakdown::total_kg`, so the container tare is outside ALAS OEW |
 | **Operating empty mass** | eq. 141 | `OEW_KEYS` sum | structure + propulsion + systems + furnishings (incl. operating items) | |
 | Passengers and checked bags | | payload layout | `payload` rows | seated count, 84 + 16 kg per seat (100 kg combined) |
 | Belly / revenue cargo | | payload layout | `payload` rows | `belly_cargo_kg`, capped by `max_structural_payload_kg` |
@@ -360,7 +366,7 @@ every FLOPS term and are recorded as unresolved scope, not as an all-in pod.
 | Quantity | Source in the product | Note |
 |---|---|---|
 | `DG` | `MassSizingBasis` (above) | declared MTOW for a fixed aircraft, closure mass for a clean sheet, or a declared override |
-| `WLDG` | preset `reference.mlw_kg` in fixed modes; `mlw_fraction_mtow` (0.92) x `DG` otherwise; declared override wins | on the baseline tree the report path used 0.92 x MTOW for every preset because presets load in `CleanSheet`; the A320 gear was 272 kg heavier than at its certified 66,000 kg |
+| `WLDG` | preset `reference.mlw_kg` in fixed modes; `mlw_fraction_mtow` x `DG` otherwise (default 0.7574 long haul, 0.8598 short/medium haul, `landing_mass_ratio.rs`; 0.92 was the historical uniform default); declared override wins | on the baseline tree the report path used 0.92 x MTOW for every preset because presets load in `CleanSheet`; the A320 gear was 272 kg heavier than at its certified 66,000 kg |
 | Ultimate load factor | `requirements.ultimate_load_factor` = 3.75 | Screening value (`1.5 x 2.5`); verify certification basis, amendment, category and load case; no aircraft-specific design load case is retained |
 | Dive speed | `requirements.dive_speed_m_s` | Screening/Torenbeek strength input and V-n value; speed type, altitude/Mach envelope and certification basis must be recorded |
 | Fuel density | preset `reference.fuel_density_kg_l` (source table) | A320: 0.800 kg/L (EASA table); the Airbus common convention 0.785 kg/L is a different bookkeeping |
@@ -411,6 +417,29 @@ keeps the database default box (aluminium skin and webs, `CFRP UD` caps at
 the reference 900 MPa tension value, which the frozen fixtures pin) and sits
 at 0.71; an all-aluminium or all-`CFRP QI` box gives 1.13 or 1.12, but no
 source states AVE's wing material.
+
+The product sizing law takes the per-station maximum over more than the
+pull-up (`alas_struct::sizing::envelope`): the manoeuvre set, the
+quasi-static CS 25.341(a) discrete gust at V_C and V_D (`alas_struct::gust`:
+the CS-25 Amendment 27 reference velocities and flight-profile alleviation
+with the Pratt gust load factor, Torenbeek 2013 Eq. 11.7-11.10) and the torque
+of the aerodynamic load about the box axis, carried by the webs as a
+Bredt-Batho shear flow added to the vertical shear of the same case
+(`alas_struct::torsion`). The web gauge is a spanwise quantity: every station
+gets the thinnest gauge, at or above the 2 mm manufacturing floor, that carries
+its combined strength and clear-panel shear buckling at the installed rib pitch
+(simply supported edges, Niu 1988 Fig. 5.4.6 curve 4), with the caps rebuilt at
+each trial gauge; the mesh writes one web property per panel. For metallic
+covers whose preset declares one, the lower-cover fatigue limit is a 1 g
+tensile stress (Torenbeek 2013 section 11.7.1: 75 MPa short-haul, 110 MPa
+long-haul; `StructuresConfig::lower_cover_fatigue_stress_1g_pa`) met by area
+added to the lower flange only, with the neutral-axis shift and inertia gain of
+the asymmetric section, so the compression cover keeps its strength and
+buckling sizing. At gross mass the gust never governs a jet transport. What the
+cases leave out (the dynamic gust analysis, section moment, aileron, flap and
+engine-offset torque, stiffness credit of the fatigue area in the response
+section) is declared in `alas_struct::scope`. The frozen reference law and the
+finite-element decks keep the manoeuvre set.
 
 ## Fixed-aircraft mission checks
 
@@ -476,6 +505,13 @@ fit in the route.
     - the wingbox centroid (37 % MAC) lies forward of Raymer's 40 % MAC;
     - the TCDS E.003 bare-engine CG can only move the engine aft of the
       nacelle mid-length point.
+  - Tractor turboprops are the exception (2026-10-14): the nacelle runs back
+    over the wing as exhaust and gear-bay fairing, so a mid-length station
+    moved the ATR 72-600 propulsion group 1.5 m aft of the engine arm implied
+    by the ATR Aircraft Recovery Manual (p.129 worked example, 10.0 m +-0.3).
+    Turboprop nacelles take Jenkinson's class rule, 40 % of the nacelle length
+    from the nose (Civil Jet Aircraft Design, ch. 7, "Position of mass
+    components"); turbofans keep mid-length.
   - The residual comes from the A320's wing position at 0.41 of the
     fuselage length, where the generic fuselage, systems and cabin rules
     land at 36-44 % MAC. On the A220-300 (wing at 0.43 L) the same rules
@@ -488,8 +524,10 @@ fit in the route.
 
 ## Explicit boundaries
 
-* ATR72-600 is outside the pinned transport FLOPS domain (no propeller or
-  shaft-power equation) and stays an explicit unsupported row.
+* FLOPS itself has no propeller or shaft-power equation, so the ATR72-600 is
+  outside the pinned transport FLOPS equations; the product path prices it
+  through the shaft-power turboprop branch documented in
+  `docs/flops-robustness.md` (the registry holds twelve presets).
 * AVE is notional; the Boeing 777-9 is its benchmark, not its truth.
 * The A320-200 fixed-aircraft mission does not close on the generic default
   climb schedule (250 m/s true-airspeed step climbs, M0.78-0.85 at 5-9 km):

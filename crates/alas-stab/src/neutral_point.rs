@@ -40,6 +40,8 @@ pub use fuselage::FuselageTerms;
 pub use nacelles::NacelleTerm;
 pub use surfaces::{combine, goethert_stretch, per_surface_contributions, SurfaceContribution};
 
+pub(crate) use pipeline::beta_for_mach;
+pub(crate) use pipeline::compressible::compressible_np_from_stretched_probes;
 pub(crate) use pipeline::product_neutral_point;
 use pipeline::{clean_np_at_condition, clean_np_at_conditions_sharing_probe};
 

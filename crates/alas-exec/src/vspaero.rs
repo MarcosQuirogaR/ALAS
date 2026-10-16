@@ -19,6 +19,8 @@ use crate::process::{
 };
 use crate::supervise::SupervisedSpawn;
 
+mod cache;
+
 /// Wake model declared by the native `.vspaero` setup.
 ///
 /// This is setup provenance, not a convergence result. A frozen wake is a
@@ -281,6 +283,13 @@ pub fn run_vspaero(
         }
     }
 
+    // Opt-in result cache (`ALAS_TOOL_CACHE_DIR`); see `cache.rs`.
+    let cache = cache::begin(executable, case_path, thread_count);
+    if cache.as_ref().and_then(|cache| cache.restore()).is_some() {
+        result.status = VspaeroProcessStatus::Completed;
+        result.error = None;
+        return result;
+    }
     let stdout = match File::create(&stdout_path) {
         Ok(file) => file,
         Err(error) => {
@@ -373,6 +382,9 @@ pub fn run_vspaero(
         return result;
     }
 
+    if let Some(cache) = &cache {
+        cache.store(&[]);
+    }
     result.status = VspaeroProcessStatus::Completed;
     result.error = None;
     result

@@ -20,6 +20,9 @@ use alas_opt::{CandidateAssessment, ConstraintResidual, SearchDiagnostics};
 use alas_pipeline::{AnalysisReport, PipelineResult};
 use serde_json::{json, Value};
 
+#[path = "validation.rs"]
+pub(super) mod validation;
+
 /// Distinct designs satisfying every hard constraint at the full in-loop fidelity.
 /// Screening with a separate model never enters this history.
 pub(super) fn full_fidelity_valid(history: &alas_opt::OptimizationHistory) -> usize {
@@ -40,7 +43,9 @@ pub(super) fn full_fidelity_valid(history: &alas_opt::OptimizationHistory) -> us
                     .get(*index)
                     .is_some_and(|value| value.is_finite())
         })
-        .map(|(_, (design, _))| {
+        // A row with no design (a candidate that never parsed) is not a design.
+        .filter_map(|(_, (design, _))| design.as_ref())
+        .map(|design| {
             design
                 .to_array()
                 .into_iter()
@@ -203,6 +208,27 @@ fn assessment_delta(baseline: &Value, winner: &Value) -> Value {
     })
 }
 
+/// What the native baseline pipeline alone says, for a row whose search
+/// delivered no design (so there is no baseline-versus-optimized comparison).
+/// `fuel_kg` is the MTOW - MZFW closure of the baseline report, kg.
+pub(super) fn baseline_only_json(baseline: &Result<PipelineResult, String>) -> Value {
+    match baseline {
+        Ok(result) => json!({
+            "native_mission": mission_json(result),
+            "fuel_kg": result
+                .optimized_report
+                .as_ref()
+                .and_then(|report| report.component_masses.get("Fuel").copied()),
+            "cruise_l_over_d": result
+                .optimized_report
+                .as_ref()
+                .map(|report| report.design_point.l_over_d),
+            "geometry_and_performance": side_json(result),
+        }),
+        Err(error) => json!({"unavailable": error}),
+    }
+}
+
 fn mission_json(result: &PipelineResult) -> Value {
     let summary = result
         .mission_result
@@ -237,12 +263,15 @@ fn side_json(result: &PipelineResult) -> Option<Value> {
         mass.filter(|m| m.is_finite() && s_ref.is_finite() && s_ref > 0.0)
             .map(|m| m / s_ref)
     };
-    let field = mlw_kg.and_then(|mlw| {
-        alas_pipeline::field_reference::report_isa_sea_level_field_reference(
-            config, report, s_ref, mtow_kg, mlw,
-        )
-        .ok()
-    });
+    let field_reference = mlw_kg.map_or_else(
+        || Err("no design landing mass and no preset MLW".to_owned()),
+        |mlw| {
+            alas_pipeline::field_reference::report_isa_sea_level_field_reference(
+                config, report, s_ref, mtow_kg, mlw,
+            )
+        },
+    );
+    let field = field_reference.as_ref().ok();
     let code = icao_code_for_span(span_m);
     let cg = &result.feasibility.cg_envelope;
     Some(json!({
@@ -274,6 +303,15 @@ fn side_json(result: &PipelineResult) -> Option<Value> {
             "aft_limit_pct_mac": cg.aft_limit_pct_mac,
             "static_margin": report.static_margin,
         },
+        "validation": validation::validation_json(
+            config,
+            report,
+            &result.feasibility,
+            &validation::FieldBasis {
+                takeoff_mass_kg: mtow_kg,
+                reference: &field_reference,
+            },
+        ),
     }))
 }
 

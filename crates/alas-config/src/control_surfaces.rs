@@ -5,12 +5,16 @@
 
 //! Where the control surfaces sit on the wing and tail.
 //!
-//! These are a drawing input and nothing more. The aerodynamic model treats
+//! These are a drawing input, with one exception. The aerodynamic model treats
 //! the wing and tail as plain lifting surfaces with no deflectable
 //! sub-geometry, so changing a flap's span here changes what the
 //! control-surface diagram shows and changes no computed number anywhere.
 //! That is worth stating plainly, because a settings page full of flap
 //! geometry invites the assumption that the flaps are being modelled.
+//!
+//! The exception is the rudder: its chord fraction, span run and maximum
+//! deflection set the rudder area and authority of the one-engine-inoperative
+//! yaw balance (minimum control speed, trim drag, crosswind check).
 //!
 //! Each surface is given as a chord fraction of the local chord and a span
 //! run between two fractions of the semi-span. The defaults are typical
@@ -161,6 +165,21 @@ pub struct ControlSurfacesConfig {
         help = "Tip-ward end of the rudder run, as a fraction of v-stab span."
     )]
     pub rudder_span_end_frac: f64,
+
+    /// Largest rudder deflection each way.
+    #[serde(default = "default_rudder_max_deflection_deg")]
+    #[config(
+        label = "Rudder maximum deflection",
+        unit = "deg",
+        help = "Largest rudder deflection each way. With the rudder chord and span it sets the rudder authority of the one-engine-inoperative yaw balance (minimum control speed, trim drag, crosswind). Transports use 25 to 30 degrees for a single-hinge rudder and up to 35 degrees for a double-hinge one (Torenbeek, Synthesis of Subsonic Airplane Design, Sec. 9.6.1; Roskam, Airplane Design Part VII, Sec. 2.3)."
+    )]
+    pub rudder_max_deflection_deg: f64,
+}
+
+/// Default of [`ControlSurfacesConfig::rudder_max_deflection_deg`]: 30 degrees,
+/// the upper end of Torenbeek Sec. 9.6.1 for a single-hinge rudder.
+const fn default_rudder_max_deflection_deg() -> f64 {
+    30.0
 }
 
 impl Default for ControlSurfacesConfig {
@@ -184,6 +203,7 @@ impl Default for ControlSurfacesConfig {
             rudder_chord_fraction: 0.35,
             rudder_span_start_frac: 0.10,
             rudder_span_end_frac: 0.90,
+            rudder_max_deflection_deg: default_rudder_max_deflection_deg(),
         }
     }
 }
@@ -236,6 +256,20 @@ mod tests {
             assert!((0.0..=1.0).contains(&start), "{name} starts off the span");
             assert!((0.0..=1.0).contains(&end), "{name} ends off the span");
         }
+    }
+
+    #[test]
+    fn the_rudder_deflection_limit_defaults_to_the_transport_upper_range() {
+        let config = ControlSurfacesConfig::default();
+        assert!((config.rudder_max_deflection_deg - 30.0).abs() < 1e-12);
+        // A legacy file without the field loads with the default.
+        let mut value = serde_json::to_value(&config).unwrap();
+        value
+            .as_object_mut()
+            .unwrap()
+            .remove("rudder_max_deflection_deg");
+        let loaded: ControlSurfacesConfig = serde_json::from_value(value).unwrap();
+        assert!((loaded.rudder_max_deflection_deg - 30.0).abs() < 1e-12);
     }
 
     #[test]

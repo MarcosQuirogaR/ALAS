@@ -13,7 +13,7 @@ use alas_config::{AlasConfig, MtowSizing};
 use alas_exec::RunEnvironment;
 use alas_pipeline::{PipelineOptions, PipelineResult};
 
-use super::{panic_message, run_with_timeout, RunOutcome};
+use super::{run_with_timeout, RunOutcome};
 
 fn invalid(message: String) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidInput, message)
@@ -85,11 +85,7 @@ pub(super) fn run_baseline_pipeline(
 ) -> Result<PipelineResult, String> {
     let (config, options) = baseline_request(config, seed, result_dir);
     match run_with_timeout(config, options, environment, timeout) {
-        RunOutcome::Finished(result, _, _) => match *result {
-            Ok(Ok(run)) => Ok(run),
-            Ok(Err(error)) => Err(error),
-            Err(panic) => Err(format!("pipeline panicked: {}", panic_message(&panic))),
-        },
+        RunOutcome::Finished(result, _, _) => *result,
         RunOutcome::Cancelled { detail, .. } => {
             Err(format!("cancelled by the external guard: {detail}"))
         }

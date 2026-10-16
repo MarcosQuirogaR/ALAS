@@ -409,6 +409,20 @@ fn thinning_keeps_one_point_per_cell_and_class() {
 }
 
 #[test]
+fn thinning_never_exceeds_the_cap_even_on_the_coarsest_grid() {
+    // 200 distinct classes-by-cells at the coarsest 16-unit grid: spread over
+    // x so every point lands in its own cell.
+    let points: Vec<(TraceClass, [f64; 2])> = (0..200)
+        .map(|index| (TraceClass::Rejected, [f64::from(index) * 20.0, 0.0]))
+        .collect();
+    let kept = thin(&points, 25);
+    assert_eq!(kept.len(), 25);
+    assert_eq!(kept[0].1, points[0].1);
+    assert!(kept.windows(2).all(|pair| pair[0].1[0] < pair[1].1[0]));
+    assert!(thin(&points, 0).is_empty());
+}
+
+#[test]
 fn a_mixed_or_unnamed_objective_falls_back_to_the_ranking_cost() {
     let mut trace = synthetic_trace(200);
     let scene = figure_evaluation_trace(&trace, None, Some("light"));

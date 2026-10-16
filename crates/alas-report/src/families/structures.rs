@@ -34,7 +34,6 @@ pub use sizing::figure_structures_sizing;
 
 use crate::scene::{Axes2D, Color, Scene, Stroke};
 use alas_geom::wing_structure::WingStructureGeometry;
-use alas_pipeline::structural::StructuralAnalysisResult;
 
 pub(super) use crate::families::common::linspace;
 
@@ -51,10 +50,6 @@ pub(super) const SPAR_COLORS: [&str; 6] = [
     "#9467bd", // tab:purple
     "#8c564b", // tab:brown
 ];
-
-/// `tab:gray`, matplotlib's Tableau palette -- the fallback color for a load
-/// case name none of `figure_structures_loads`'s three known cases matches.
-pub(super) const TAB_GRAY: &str = "#7f7f7f";
 
 /// The four semi-wing mass components, in the order upstream's
 /// `mass_breakdown_kg` dict lists them (`structural_sizing.py:246-251`) and
@@ -251,24 +246,7 @@ pub(super) fn chord_bounds(le: &[f64], te: &[f64]) -> (f64, f64) {
     (lo - span * 0.08, hi + span * 0.08)
 }
 
-/// `_structures_unavailable_message`: `None` when the analysis is ok and a
-/// figure should render its real content, `Some(message)` when it should
-/// degrade to [`status_message_scene`] instead.
-pub(super) fn structures_unavailable_message(
-    result: Option<&StructuralAnalysisResult>,
-) -> Option<String> {
-    match result {
-        None => Some(
-            "Structural analysis was not run for this design (Advanced Settings -> Structural Analysis)."
-                .to_owned(),
-        ),
-        Some(r) if r.status != "ok" => Some(format!(
-            "Structural analysis failed: {}",
-            r.error.as_deref().unwrap_or("unknown error")
-        )),
-        Some(_) => None,
-    }
-}
+pub(super) use crate::families::common::structural_unavailable_message as structures_unavailable_message;
 
 /// `figure_status_message`, scoped to the `ok=False` branch this family's
 /// two `structural_result`-driven figures actually reach. The shared
@@ -284,6 +262,7 @@ mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used)]
 
     use super::*;
+    use alas_pipeline::structural::StructuralAnalysisResult;
 
     #[test]
     fn format_thousands_groups_from_the_right_and_keeps_the_sign() {
@@ -332,6 +311,12 @@ mod tests {
         assert!(structures_unavailable_message(Some(&failed))
             .unwrap()
             .contains("bad material"));
+
+        // The `Default` status is "not_run": a skipped analysis, not a failure.
+        let skipped = StructuralAnalysisResult::default();
+        assert_eq!(skipped.status, "not_run");
+        let message = structures_unavailable_message(Some(&skipped)).unwrap();
+        assert!(message.contains("not run") && !message.contains("failed"));
 
         failed.status = "ok".to_owned();
         assert!(structures_unavailable_message(Some(&failed)).is_none());

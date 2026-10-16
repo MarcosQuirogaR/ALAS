@@ -124,6 +124,15 @@ pub struct StructuresConfig {
     )]
     pub max_linear_curvature_relative_error: f64,
 
+    /// Fatigue limit of the lower box cover as a 1 g level-flight tensile stress.
+    #[serde(default, skip_serializing_if = "is_zero_stress")]
+    #[config(
+        label = "Lower-cover fatigue stress limit (1 g)",
+        unit = "Pa",
+        help = "Largest tensile stress the lower wing cover may carry in 1 g level flight, set by the design service life. Torenbeek, Advanced Aircraft Design (2013), section 11.7.1: 75 MPa for riveted skin-stringer 2024-T3 panels of short-range airliners (more than 50 000 flights), 110 MPa for integrally machined long-range panels (about 25 000 flights). The sizing raises the section until the 1 g tensile stress is within it. 0 = no fatigue limit, which is also the value for composite covers, whose damage-tolerance strain limit already applies."
+    )]
+    pub lower_cover_fatigue_stress_1g_pa: f64,
+
     /// Skin thickness.
     #[config(
         label = "Skin gauge",
@@ -404,6 +413,7 @@ impl Default for StructuresConfig {
             rib_material: "Al 7075-T6".to_owned(),
             additional_safety_factor: 1.0,
             max_linear_curvature_relative_error: default_linear_curvature_error(),
+            lower_cover_fatigue_stress_1g_pa: 0.0,
             t_skin_min_m: 0.006,
             t_web_min_m: 0.002,
             t_rib_m: 0.004,
@@ -444,6 +454,10 @@ impl Default for StructuresConfig {
             run_patran_export: true,
         }
     }
+}
+
+fn is_zero_stress(value: &f64) -> bool {
+    *value == 0.0
 }
 
 fn default_linear_curvature_error() -> f64 {

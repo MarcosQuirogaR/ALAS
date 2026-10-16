@@ -30,7 +30,16 @@ pub fn section<T: for<'de> Deserialize<'de>>(key: &str) -> Vec<T> {
 /// the same `setattr`-after-default the generator does. An unhandled key is a
 /// fixture the test cannot reproduce, so it panics.
 pub fn perf_config_for(overrides: &Map<String, Value>) -> PerformanceConfig {
-    let mut pc = PerformanceConfig::default();
+    // The fixture replays the frozen translated schedule: its approach factor
+    // 1.30, its take-off flap increment 0.025 and its V2 = max(factor * VS,
+    // VR). The product defaults moved (lane A1: CS 25.107(b) V2MIN, CS 25.125
+    // VREF 1.23 VSR0, handbook flap drag), so the replay sets them explicitly.
+    let mut pc = PerformanceConfig {
+        legacy_field_correlations: true,
+        vapp_vstall_land_factor: 1.30,
+        oei_climb_delta_cd: 0.025,
+        ..PerformanceConfig::default()
+    };
     for (key, value) in overrides {
         let f = || value.as_f64().unwrap();
         match key.as_str() {

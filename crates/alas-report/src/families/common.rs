@@ -33,6 +33,66 @@ pub(crate) fn padded_range(values: impl Iterator<Item = f64>, pad_frac: f64) -> 
 /// the figures sample exactly as the geometry does.
 pub(crate) use alas_geom::aircraft::spacing::linspace;
 
+/// Greedily assign a row index to each (already x-sorted) label so any two
+/// labels sharing a row are at least `min_sep` apart in x:
+/// `_assign_label_rows`.
+///
+/// Each label goes on the first existing row whose last-placed x is far
+/// enough away, or opens a new row if none is, so the row count grows on
+/// demand and no two labels collide however many land close together.
+pub(crate) fn assign_label_rows(xs: &[f64], min_sep: f64) -> Vec<usize> {
+    let mut last_x_per_row: Vec<f64> = Vec::new();
+    let mut rows = Vec::with_capacity(xs.len());
+    for &x in xs {
+        let mut placed = false;
+        for (r, last_x) in last_x_per_row.iter_mut().enumerate() {
+            if x - *last_x >= min_sep {
+                *last_x = x;
+                rows.push(r);
+                placed = true;
+                break;
+            }
+        }
+        if !placed {
+            last_x_per_row.push(x);
+            rows.push(last_x_per_row.len() - 1);
+        }
+    }
+    rows
+}
+
+/// The load-case-to-color map the structures figures share (`colors =
+/// {"pull-up": "tab:red", "push-down": "tab:blue", "level": "tab:green"}`),
+/// falling back to matplotlib's `tab:gray` (`#7f7f7f`) for anything else.
+pub(crate) fn load_case_color(name: &str) -> &'static str {
+    match name {
+        "pull-up" => "tab:red",
+        "push-down" => "tab:blue",
+        "level" => "tab:green",
+        _ => "#7f7f7f",
+    }
+}
+
+/// `_structures_unavailable_message`: `None` when the structural analysis is
+/// ok and a figure should render its real content, `Some(message)` when it
+/// should degrade to a status scene instead. A `"not_run"` status (the
+/// `Default` of the result) is a skipped analysis, not a failure, and gets the
+/// same message as an absent result.
+pub(crate) fn structural_unavailable_message(
+    result: Option<&alas_pipeline::structural::StructuralAnalysisResult>,
+) -> Option<String> {
+    const NOT_RUN: &str = "Structural analysis was not run for this design (Advanced Settings -> Structural Analysis).";
+    match result {
+        None => Some(NOT_RUN.to_owned()),
+        Some(r) if r.status == "not_run" => Some(NOT_RUN.to_owned()),
+        Some(r) if r.status != "ok" => Some(format!(
+            "Structural analysis failed: {}",
+            r.error.as_deref().unwrap_or("unknown error")
+        )),
+        Some(_) => None,
+    }
+}
+
 /// Two axis ranges, one per pixel extent (`u_px`, `v_px`), that share a
 /// single data-units-per-pixel scale and are centred on each data interval:
 /// the self-contained substitute for `ax.set_aspect("equal")` that

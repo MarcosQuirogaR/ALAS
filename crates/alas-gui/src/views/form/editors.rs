@@ -366,17 +366,24 @@ pub(super) fn edit_str(
                     *slot = Value::String(text.clone());
                 }
                 ui.menu_button(MENU_GLYPH, |ui| {
-                    egui::ScrollArea::vertical()
-                        .max_height(240.0)
-                        .show(ui, |ui| {
-                            for opt in opts.iter().take(400) {
+                    // Virtualized: the library holds well over a thousand names, so
+                    // only the visible rows are laid out and none are dropped.
+                    let row_height = ui.text_style_height(&egui::TextStyle::Button)
+                        + ui.spacing().item_spacing.y;
+                    egui::ScrollArea::vertical().max_height(240.0).show_rows(
+                        ui,
+                        row_height,
+                        opts.len(),
+                        |ui, rows| {
+                            for opt in &opts[rows] {
                                 if ui.selectable_label(current == *opt, opt).clicked() {
                                     *slot = Value::String(opt.clone());
                                     changed = true;
                                     ui.close_menu();
                                 }
                             }
-                        });
+                        },
+                    );
                 })
                 .response
                 .on_hover_text(crate::views::tr("Choose from the library"));
@@ -434,7 +441,10 @@ pub(super) fn edit_tuple_list(ui: &mut Ui, field: &Field, slot: &mut Value) -> b
             if let Some(cols) = leaf.columns {
                 ui.horizontal_wrapped(|ui| {
                     for c in cols {
-                        ui.add_sized([70.0, 16.0], egui::Label::new(RichText::new(*c).weak()));
+                        ui.add_sized(
+                            [70.0, 16.0],
+                            egui::Label::new(RichText::new(crate::views::tr(c)).weak()),
+                        );
                     }
                 });
             }

@@ -296,7 +296,7 @@ pub fn show_viewport(state: &mut AppState, ui: &mut Ui) {
     ui.ctx()
         .data_mut(|d| d.insert_temp(viewport_rect_id(), rect));
     let fit = CanvasFit::new(&framing, rect);
-    let handles = state.sandbox_handles();
+    let handles = state.sandbox_handles_shared();
     let press_origin = ui.input(|i| i.pointer.press_origin());
     let gesture_on_control = pointer_over_overlay(&overlays, press_origin);
     let pointer = response
@@ -352,7 +352,7 @@ pub fn show_viewport(state: &mut AppState, ui: &mut Ui) {
 
     let painter = ui.painter_at(rect);
     let accent = ui.visuals().hyperlink_color;
-    for handle in &handles {
+    for handle in handles.iter() {
         let active = state
             .sandbox
             .drag

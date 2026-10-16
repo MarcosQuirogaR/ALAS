@@ -176,8 +176,10 @@ fn declared_exit_items(
 ///
 /// The source sequence fixes the number and order of exit pairs, while the
 /// model's monument/seat pass supplies the available stations.  Choosing the
-/// lower integer at an exact midpoint keeps a source pair away from the aft
-/// endpoint when the candidate count is even; the registered A220/A320
+/// lower integer (`floor`) at every non-integer ideal station, not only at an
+/// exact midpoint, keeps a source pair away from the aft
+/// endpoint when the candidate count is even (a bay already taken advances
+/// to the next free one); the registered A220/A320
 /// layouts then satisfy CS-25's 18.3 m adjacent-exit spacing check without
 /// inventing a longitudinal station.  The final spacing assertion belongs in
 /// the source-specific acceptance test because this helper has no fuselage

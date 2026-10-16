@@ -286,6 +286,7 @@ pub fn run_solver_optimizations(
                 nominal,
                 bounds.as_deref(),
                 avl_output,
+                acceptance_route,
                 cancel,
             )
         } else {

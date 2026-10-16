@@ -3,7 +3,8 @@
 The hybrid parasite buildup uses gross projected wing area for coefficient
 normalization and exposed wing area for skin friction. With
 `drag_model.exclude_buried_main_wing_area = true` (the product default), the
-main-wing center section inside the body is subtracted before applying the
+center section inside the body of the main wing (and of a fuselage-mounted
+horizontal tail, see below) is subtracted before applying the
 configured wing wetted-area factor. Setting it to `false` retains the gross
 wing-area convention; `AeroAnalysis::new_reference_compatibility` also retains
 the frozen convention independently of this flag.
@@ -19,8 +20,16 @@ aircraft reference area is unchanged.
 This is a local extruded-body approximation, not a mesh intersection: it does
 not resolve fairings, thickness, changing body contour over the chord, twist
 in the buried-area metric, or dihedral crossing the body surface. It is limited
-to symmetric main wings and centered fuselages. Tail wetted-area conventions
-are unchanged. OpenVSP's [Comp Geom](https://www.nasa.gov/reference/openvsp-comp-geom/)
+to symmetric lifting surfaces and centered fuselages. Despite the flag name
+(`exclude_buried_main_wing_area`), the correction is applied to every
+symmetric surface in `plane.wings` whose root lies inside the body, which
+includes a fuselage-mounted horizontal tail; a fin, a T-tail and a detached
+surface subtract nothing (`wetted.rs`, `parasite.rs`; the unit test
+`bodies_take_their_wetted_area_from_the_loft_and_tails_their_exposed_planform`
+pins the tail case). The wing wetted-area factor
+(`geometry.wing_wetted_area_factor`) is read only by the frozen
+reference-compatibility path; the product path uses Raymer's
+thickness-ratio-dependent factor. OpenVSP's [Comp Geom](https://www.nasa.gov/reference/openvsp-comp-geom/)
 offers an intersected-surface calculation for higher-fidelity checks.
 
 Reproduce the numerical change with
@@ -467,9 +476,10 @@ d = x_P - x_cg and kappa = th''/g the balance is `kappa d^2 + d - r = 0`,
 r = A - kappa (k_y^2 + h_cg^2), A the non-weight moments over W. The forward
 limit is the larger root, evaluated as `d = 2 r / (1 + sqrt(1 + 4 kappa r))`.
 k_y is the mass ledger's takeoff pitch radius of gyration (Raymer's
-jet-transport 0.38 L/2 without a ledger); th'' is 7 deg/s^2 for every class
-(Torenbeek/Roskam 6-8 deg/s^2 midpoint; Sadraey's Table 9.6 class values could
-not be confirmed from an accessible source). Both are overridable with the
+jet-transport 0.38 L/2 without a ledger); th'' is 5 deg/s^2 for every class
+(the midpoint of Sadraey's transport range of 4-6 deg/s^2, sec. 12.3; the
+earlier 7 deg/s^2 had no retrieved source; Sadraey's Table 9.6 class values
+could not be confirmed from an accessible source). Both are overridable with the
 optional `landing_gear.rotation_pitch_acceleration_deg_s2` and
 `landing_gear.pitch_radius_of_gyration_frac_mac`.
 
@@ -492,6 +502,8 @@ omitted; its moment `D (h_D - h_cg)` is bounded by about 1 %MAC.
 These are implementation and plausibility checks: the derived CL_h of the
 registered presets is now -0.85 to -0.97 (the thin-airfoil upper bound gave
 -1.22 to -1.42), the section cap does not bind, and the rotation boundaries
-lie forward of the A220 certified (18.4) and A320 ACAP (17) limits (9.2 and
--3.0 %MAC) but aft of the A340 ACAP 20.3 (28.3 %MAC), a known residual. These
+lie forward of the A220 flight-envelope and A320 ACAP (17) limits (A320 1.3,
+A220 -13.5 %MAC, with the 4.3 deg trimmable-stabiliser setting; 9.2 and -3.0 at
+the built -2 deg incidence) but aft of the A340 ACAP 20.3 (22.0 %MAC; 28.3 at
+the built incidence), a known residual (`published_forward_cg_limits.rs`). These
 are checks, not calibration targets, and not a validation of the boundary.

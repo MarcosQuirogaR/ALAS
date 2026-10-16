@@ -149,6 +149,18 @@ pub(in super::super) fn empty(theme: Option<&str>, message: &str) -> Scene {
     crate::status_figure::figure_status_message(message, "", false, theme)
 }
 
+/// What a freight position is called: the air-cargo pallet of a declared
+/// freight hold (the A400M's 463L master pallet, not an airliner ULD), a
+/// "ULD" for every container deck.
+fn cargo_position_name(config: &AlasConfig) -> String {
+    let cargo = &config.cabin.cargo;
+    if cargo.freight_hold.is_some() {
+        format!("{} pallet", cargo.main_deck_uld)
+    } else {
+        "ULD".to_owned()
+    }
+}
+
 /// Draw a plan view of every placed payload item over the actual fuselage.
 pub fn figure_cabin_payload(
     layout: &PayloadLayout,
@@ -410,8 +422,9 @@ pub fn figure_cabin_payload(
                 layout.total_mass / 1000.0
             ),
             LayoutSummary::Cargo(summary) => format!(
-                "{} ULD, {:.1} t",
+                "{} {}, {:.1} t",
                 summary.n_ulds,
+                cargo_position_name(config),
                 layout.total_mass / 1000.0
             ),
         },

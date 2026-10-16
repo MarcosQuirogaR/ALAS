@@ -32,6 +32,9 @@ mod search;
 mod search_methods;
 pub mod transport_planform;
 
+/// Opt-in per-stage evaluation timers (`ALAS_EVAL_PROFILE=1`).
+pub use alas_math::stage_profile;
+
 pub use cancellation::{
     watch_for, CancelEvent, CancelEventKind, CancelPhase, CancelScope, CancelSnapshot, CancelWatch,
     StopReason,

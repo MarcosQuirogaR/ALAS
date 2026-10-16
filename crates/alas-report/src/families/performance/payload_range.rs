@@ -251,12 +251,16 @@ pub fn payload_range_data(
     // limit. Under Hard MTOW that limit is the declared MTOW, which one
     // volume-limited load case does not lower; a mission-closed aircraft's
     // limit is its sized takeoff mass.
-    let mtow_kg =
-        if config.optimizer.objective.mtow_sizing == alas_config::MtowSizing::FixedRequirement {
-            report.aircraft_mtow_limit_kg(config.requirements.mtow_kg)
-        } else {
-            report.analysis_takeoff_mass_kg(config.requirements.mtow_kg)
-        };
+    let mtow_kg = if config
+        .optimizer
+        .objective
+        .mtow_sizing
+        .sizes_at_declared_mass()
+    {
+        report.aircraft_mtow_limit_kg(config.requirements.mtow_kg)
+    } else {
+        report.analysis_takeoff_mass_kg(config.requirements.mtow_kg)
+    };
 
     // A payload-range chart is an aircraft-capability curve, not a second
     // drawing of the currently selected cabin load. The old implementation

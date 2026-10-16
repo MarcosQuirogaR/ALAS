@@ -9,8 +9,9 @@ use super::*;
 ///
 /// Each record is `[len][body][len]` with 32-bit little-endian length words.
 /// Reading stops cleanly at the first length word that cannot begin a record
-/// (non-positive, or overrunning the file): that is how the trailing
-/// end-of-file marker and any pad are reached. A record whose two length words
+/// (non-positive): that is how the trailing
+/// end-of-file marker and any pad are reached. A positive length that overruns
+/// the file is a truncated file and is reported. A record whose two length words
 /// disagree is corruption, and is reported.
 pub(super) fn split_records(bytes: &[u8]) -> Result<Vec<&[u8]>, Op2Error> {
     let mut records = Vec::new();
@@ -23,7 +24,7 @@ pub(super) fn split_records(bytes: &[u8]) -> Result<Vec<&[u8]>, Op2Error> {
         let len = len as usize;
         let end = match p.checked_add(8).and_then(|v| v.checked_add(len)) {
             Some(end) if end <= bytes.len() => end,
-            _ => break,
+            _ => return Err(Op2Error::TruncatedRecord { offset: p }),
         };
         let trailing = read_i32(bytes, p + 4 + len)?;
         if trailing != len as i32 {

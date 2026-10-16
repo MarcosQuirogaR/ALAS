@@ -33,6 +33,12 @@ impl FullAnalysis {
             cruise_altitude_m: req.cruise_altitude_m,
             ..NpConditionsInput::default()
         };
-        neutral_point_conditions(plane, fine_analysis, &np_input).ok()
+        match neutral_point_conditions(plane, fine_analysis, &np_input) {
+            Ok(conditions) => Some(conditions),
+            Err(error) => {
+                tracing::warn!(%error, "neutral-point conditions unavailable: VLM probe failed");
+                None
+            }
+        }
     }
 }

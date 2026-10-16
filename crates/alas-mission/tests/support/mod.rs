@@ -188,6 +188,7 @@ impl Spec {
             // Every recorded parity fixture predates calibrated-airspeed
             // support and is a literal true airspeed.
             air_speed_reference: alas_config::mission::SpeedReference::TrueAirspeed,
+            speed_caps: alas_config::mission::SpeedCaps::default(),
             true_course_rad: self.true_course_rad,
             temperature_deviation_k: self.temperature_deviation_k,
             number_control_points: self.number_control_points,

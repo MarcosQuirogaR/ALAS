@@ -12,7 +12,6 @@
 //! ALAS drag buildup. When AVL is absent, the original four-panel layout is
 //! retained.
 
-use alas_aero::mses::MsesPolarResult;
 use alas_mission::solve::MissionResult;
 use alas_pipeline::full_analysis::AnalysisReport;
 use alas_pipeline::{AvlAnalysisResult, VspaeroAnalysisResult};
@@ -98,7 +97,6 @@ fn operating_point_stroke() -> Stroke {
 pub fn figure_model_comparison(
     report: &AnalysisReport,
     mission: Option<&MissionResult>,
-    _mses: Option<&MsesPolarResult>,
     vspaero: Option<&VspaeroAnalysisResult>,
     avl: Option<&AvlAnalysisResult>,
     theme: Option<&str>,
@@ -156,6 +154,13 @@ pub fn figure_model_comparison(
         })
         .collect();
 
+    // VSPAERO is solved at the reporting (compressibility-corrected) angles, so
+    // the ALAS lattice curve is drawn on that axis beside it.
+    let vlm_alpha_deg = if vspaero_points.is_empty() {
+        &p.geometric_alpha_deg
+    } else {
+        &p.alpha_deg
+    };
     let x_drag = padded_range(
         p.cd.iter()
             .copied()
@@ -178,7 +183,7 @@ pub fn figure_model_comparison(
         0.08,
     );
     let x_alpha = padded_range(
-        p.geometric_alpha_deg
+        vlm_alpha_deg
             .iter()
             .copied()
             .chain(mission_points.iter().map(|v| v.2))
@@ -251,7 +256,7 @@ pub fn figure_model_comparison(
     );
     axes[1].add_line_series(
         &mut scene,
-        &p.geometric_alpha_deg
+        &vlm_alpha_deg
             .iter()
             .copied()
             .zip(p.cl.iter().copied())
@@ -260,7 +265,7 @@ pub fn figure_model_comparison(
     );
     axes[2].add_line_series(
         &mut scene,
-        &p.geometric_alpha_deg
+        &vlm_alpha_deg
             .iter()
             .copied()
             .zip(p.cm.iter().copied())
@@ -269,7 +274,7 @@ pub fn figure_model_comparison(
     );
     axes[3].add_line_series(
         &mut scene,
-        &p.geometric_alpha_deg
+        &vlm_alpha_deg
             .iter()
             .copied()
             .zip(p.l_over_d.iter().copied())

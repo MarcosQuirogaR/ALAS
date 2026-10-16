@@ -30,7 +30,7 @@ pub(super) const MID_CAP: i64 = 3;
 pub(super) const MID_RIB: i64 = 4;
 
 /// Property identifiers. Webs take one property per spar from
-/// [`PID_WEB_BASE`], and caps one per spar *segment* from [`PID_CAP_BASE`],
+/// [`PID_WEB_BASE`] per spar panel, and caps one per spar *segment* from [`PID_CAP_BASE`],
 /// since a cap tapers along the span and each element carries its own section.
 pub(super) const PID_SKIN: i64 = 1;
 pub(super) const PID_MAIN_RIB: i64 = 4;

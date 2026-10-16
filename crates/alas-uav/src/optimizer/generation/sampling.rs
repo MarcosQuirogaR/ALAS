@@ -2,6 +2,11 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 use super::*;
+use crate::airframe::analysis::{estimate_trim_setup, AirframeInputs};
+use crate::airframe::geometry::{AirframeGeometry, Panel, Planform, TailRole, TailSurfaceGeom};
+use crate::airframe::materials::SparMaterials;
+use crate::airframe::spar::SparGeometry;
+use crate::spec::topology::TailKind;
 
 #[derive(Clone, Copy)]
 pub(in super::super) struct CandidateSample {
@@ -72,6 +77,7 @@ pub(in super::super) fn generate(
         empennage,
         landing_gear,
     };
+    let airframe_inputs = airframe_inputs(problem, &geometry);
     let density = evidence.material_mass_kg
         / (evidence.material_dimensions.length_m
             * evidence.material_dimensions.width_m
@@ -221,6 +227,7 @@ pub(in super::super) fn generate(
             wing_root_bending_moment_nm: Some(root_moment_nm),
             allowable_wing_root_bending_moment_nm: Some(root_capacity_nm),
         }],
+        airframe_inputs,
     };
     let mut findings = Vec::new();
     check_control_equipment(problem, &selection, &mut findings);
@@ -350,6 +357,79 @@ fn propulsor_installations(
         })
         .collect();
     (motor, esc, propeller, additional_propulsors)
+}
+
+/// Airframe-analysis inputs of a generated design: the wing as one rectangular
+/// panel per half (the generator has no taper), the tails from the empennage
+/// areas and spans with their quarter-chord at `tail_arm_m` aft of the wing,
+/// and the spar from the rule-of-thumb cap fractions.  Spar laminates are the
+/// literature default until `alas-uav-db` carries ply data (see
+/// `airframe::materials`).
+fn airframe_inputs(
+    problem: &OptimizationProblem<'_>,
+    geometry: &GeneratedGeometry,
+) -> AirframeInputs {
+    let model = problem.model;
+    let wing = geometry.wing;
+    let tail = geometry.empennage;
+    let wing_ac_x = wing.leading_edge_x_m + 0.25 * wing.mean_chord_m;
+    let tail_chord = tail.horizontal_area_m2 / tail.horizontal_span_m;
+    let tail_root_x = wing_ac_x + tail.tail_arm_m - 0.25 * tail_chord;
+    let fin_chord = tail.vertical_area_m2 / tail.vertical_span_m;
+    let fin_root_x = wing_ac_x + tail.tail_arm_m - 0.25 * fin_chord;
+    let planform = |panel_span_m: f64, chord_m: f64, x_m: f64, vertical: bool| Planform {
+        panels: vec![Panel {
+            span_m: panel_span_m,
+            chord_root_m: chord_m,
+            chord_tip_m: chord_m,
+            root_le_m: [x_m, 0.0, 0.0],
+            sweep_le_rad: 0.0,
+            dihedral_rad: 0.0,
+        }],
+        mirror: !vertical,
+        vertical,
+    };
+    let depth_m = model.spar_cap_separation_fraction * wing.mean_chord_m;
+    let cap_width_m = model.spar_cap_width_fraction * wing.mean_chord_m;
+    AirframeInputs {
+        geometry: AirframeGeometry {
+            wing: planform(
+                0.5 * wing.span_m,
+                wing.mean_chord_m,
+                wing.leading_edge_x_m,
+                false,
+            ),
+            horizontal: Some(TailSurfaceGeom {
+                role: TailRole::Horizontal,
+                planform: planform(0.5 * tail.horizontal_span_m, tail_chord, tail_root_x, false),
+                v_dihedral_rad: 0.0,
+                incidence_rad: 0.0,
+                count: 1,
+            }),
+            vertical: Some(TailSurfaceGeom {
+                role: TailRole::Vertical,
+                planform: planform(tail.vertical_span_m, fin_chord, fin_root_x, true),
+                v_dihedral_rad: 0.0,
+                incidence_rad: 0.0,
+                count: 1,
+            }),
+            tail_kind: TailKind::Conventional,
+        },
+        cruise_speed_m_s: problem.objectives.cruise_speed_m_s,
+        air_density_kg_m3: model.air_density_kg_m3,
+        limit_load_factor: model.limit_load_factor,
+        safety_factor: model.structural_safety_factor,
+        trim_setup: estimate_trim_setup(),
+        spar_geometry: SparGeometry {
+            semispan_m: 0.5 * wing.span_m,
+            root_depth_m: depth_m,
+            tip_depth_m: depth_m,
+            root_cap_width_m: cap_width_m,
+            tip_cap_width_m: cap_width_m,
+        },
+        spar_materials: SparMaterials::LiteratureDefault,
+        spar_stations: 200,
+    }
 }
 
 fn propulsor_lateral_position(index: u16, count: u16, wing_span_m: f64) -> f64 {

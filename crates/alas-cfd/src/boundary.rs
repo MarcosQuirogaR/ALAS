@@ -5,7 +5,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::config::FarFieldCondition;
+use super::config::{FarFieldCondition, FlowRegime};
 
 impl super::CfdStudyConfig {
     /// Whether the prescribed freestream is supersonic normal to the vertical
@@ -79,6 +79,58 @@ pub struct BoundarySettings {
     /// Static pressure reference in Pa. The incompressible `p` field stores
     /// kinematic pressure, so the dictionary value is `p_ref / rho`.
     pub pressure_reference_pa: f64,
+}
+
+impl BoundarySettings {
+    pub(crate) fn validate(&self, regime: FlowRegime) -> Result<(), Vec<String>> {
+        let mut errors = Vec::new();
+        if self.inlet_patch != "inlet"
+            || self.outlet_patch != "outlet"
+            || self.airfoil_patch != "airfoil"
+        {
+            errors.push(
+                "The initial versioned template requires inlet, outlet and airfoil patch names."
+                    .to_owned(),
+            );
+        }
+        if !self.pressure_reference_pa.is_finite() {
+            errors.push("Pressure reference must be finite.".to_owned());
+        }
+        if regime.is_compressible() {
+            errors.extend(self.compressible_override_errors());
+        }
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
+    }
+
+    /// Errors for far-field overrides, which the compressible case writers
+    /// ignore (they always emit the default treatment).
+    fn compressible_override_errors(&self) -> Vec<String> {
+        let defaults = Self::default();
+        [
+            ("far_field", self.far_field != defaults.far_field),
+            (
+                "far_field_turbulence",
+                self.far_field_turbulence != defaults.far_field_turbulence,
+            ),
+            (
+                "far_field_velocity",
+                self.far_field_velocity != defaults.far_field_velocity,
+            ),
+        ]
+        .into_iter()
+        .filter(|(_, overridden)| *overridden)
+        .map(|(name, _)| {
+            format!(
+                "The compressible solver (Mach >= {}) ignores the {name} boundary override; leave it at its default or lower the Mach number.",
+                crate::conventions::INCOMPRESSIBLE_LIMIT_MACH
+            )
+        })
+        .collect()
+    }
 }
 
 impl Default for BoundarySettings {

@@ -9,9 +9,15 @@
 //! with the FLOPS transport wing (NASA/TM-2017-219627 Vol. I, eqs. 33-45) on
 //! the same planform and design gross mass, and on the A320-200 with the
 //! published class statement that a narrowbody transport wing group is
-//! 9-11 % of maximum takeoff mass (B737-200 9.2 %, B727-200 10.4 %,
-//! DC-9-30 10.5 %; J. Roskam, *Airplane Design Part V: Component Weight
-//! Estimation*, DARcorporation). Masses are kg.
+//! 9-11.5 % of maximum takeoff mass. Wing Group / GW as printed in J. Roskam,
+//! *Airplane Design Part V: Component Weight Estimation*, DARcorporation,
+//! Appendix A (page images read directly): B737-200 0.092 and B727-100 0.111
+//! (Table A7.2b, book p.153), DC-9-30 0.106 and MD-80 0.111 (Table A7.1b,
+//! book p.151). The band's edges are therefore set by 1960s-80s aluminium
+//! narrowbodies; the A320-200 itself is 8,801 kg of 73,500 kg = 11.97 % in
+//! E. Obert, *Aerodynamic Design of Transport Aircraft*, 2009, Fig. 42.25
+//! (book p.581, wing row only; pylons, fuel system and flight controls are
+//! separate rows). Masses are kg.
 //!
 //! The composite presets (A220-300, B787-9) size their box with the
 //! longitudinal `CFRP 60/30/10` caps with a 0.004 design strain and QI panels

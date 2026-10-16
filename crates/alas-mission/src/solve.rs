@@ -947,6 +947,7 @@ mod tests {
             },
             air_speed_m_s: 230.0,
             air_speed_reference: Default::default(),
+            speed_caps: alas_config::mission::SpeedCaps::default(),
             true_course_rad: 0.0,
             temperature_deviation_k: 0.0,
             number_control_points: 4,

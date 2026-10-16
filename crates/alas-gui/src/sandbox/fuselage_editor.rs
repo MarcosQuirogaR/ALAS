@@ -6,10 +6,12 @@
 //!
 //! Every point maps to one configuration field, so a drag is one field edit
 //! with the same validity domain and undo transaction as a typed value. The
-//! profile follows the builder's station laws: the nose radius grows as
-//! `sqrt(1 - (1 - xi)^2)` and the tailcone radius shrinks as `1 - xi^1.5`.
+//! profile is drawn from the builder's own station functions
+//! (`FuselageConfig::nose_station` and `aft_body_station`), so it follows the
+//! shaped nose and belly upsweep exactly as the built body does.
 
-use egui::{pos2, vec2, Color32, Rect, Sense, Stroke, Ui};
+use alas_config::FuselageConfig;
+use egui::{pos2, vec2, Rect, Sense, Stroke, Ui};
 use serde_json::Value;
 
 use crate::state::AppState;
@@ -27,6 +29,7 @@ struct Profile {
     cabin_z: f64,
     tailcone_length: f64,
     tail_z: f64,
+    fuselage: FuselageConfig,
 }
 
 fn profile(state: &AppState) -> Option<Profile> {
@@ -41,6 +44,7 @@ fn profile(state: &AppState) -> Option<Profile> {
         cabin_z: f.cabin_z_m,
         tailcone_length: f.tailcone_length_m,
         tail_z: f.tail_z_m,
+        fuselage: f.clone(),
     })
 }
 
@@ -94,14 +98,6 @@ fn drag_point(
     }
 }
 
-fn nose_radius(xi: f64) -> f64 {
-    (1.0 - (1.0 - xi).powi(2)).max(0.0).sqrt()
-}
-
-fn tail_radius(xi: f64) -> f64 {
-    1.0 - xi.powf(1.5)
-}
-
 /// Render the side profile and the cross-section.
 pub fn show_fuselage_editor(state: &mut AppState, ui: &mut Ui) {
     let Some(p) = profile(state) else {
@@ -128,21 +124,19 @@ pub fn show_fuselage_editor(state: &mut AppState, ui: &mut Ui) {
     let mut bottom = Vec::new();
     for k in 0..=10 {
         let xi = k as f64 / 10.0;
-        let x = xi * p.cabin_start_x;
-        let z = p.cabin_z + (p.nose_z - p.cabin_z) * (1.0 - xi).powi(2);
-        let r = radius * nose_radius(xi);
-        top.push(to_screen(x, z + r));
-        bottom.push(to_screen(x, z - r));
+        let station = p.fuselage.nose_station(xi);
+        let r = station.height_m * 0.5;
+        top.push(to_screen(station.x_m, station.z_m + r));
+        bottom.push(to_screen(station.x_m, station.z_m - r));
     }
     top.push(to_screen(cabin_end, p.cabin_z + radius));
     bottom.push(to_screen(cabin_end, p.cabin_z - radius));
     for k in 1..=10 {
         let xi = k as f64 / 10.0;
-        let x = cabin_end + xi * (p.length - cabin_end);
-        let z = p.cabin_z + (p.tail_z - p.cabin_z) * xi.powf(1.5);
-        let r = radius * tail_radius(xi);
-        top.push(to_screen(x, z + r));
-        bottom.push(to_screen(x, z - r));
+        let station = p.fuselage.aft_body_station(xi, p.length);
+        let r = station.height_m * 0.5;
+        top.push(to_screen(station.x_m, station.z_m + r));
+        bottom.push(to_screen(station.x_m, station.z_m - r));
     }
     let stroke = Stroke::new(1.5_f32, ui.visuals().hyperlink_color);
     painter.add(egui::Shape::line(top, stroke));
@@ -243,5 +237,4 @@ pub fn show_fuselage_editor(state: &mut AppState, ui: &mut Ui) {
         move |pos| f64::from((center.y - pos.y).abs() / scale) * 2.0,
         "Height",
     );
-    let _ = Color32::TRANSPARENT;
 }

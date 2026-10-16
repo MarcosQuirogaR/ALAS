@@ -20,26 +20,10 @@ use crate::inertia::{
 use crate::ledger::{
     InertiaTensor, LedgerError, MassGroup, MassItem, MassLedger, MassMethod, MassRole,
 };
-use crate::stations::ComponentStations;
+use crate::stations::{ComponentStations, NOSE_GEAR_MASS_FRACTION};
 
 use super::flops_items::push_flops_systems_and_operating_items;
 use super::{LedgerMethods, PayloadItemSummary};
-
-/// Fraction of [`MassBreakdown::gear`] carried by the nose gear at static
-/// weight, the rest going to the main gear: Raymer, *Aircraft Design: A
-/// Conceptual Approach*, 6th ed., ch. 11, typical nose/main static load
-/// split (roughly 8-15% nose for a tricycle transport). This is a mass
-/// split assumption, not a measured load: [`crate::stations`]'s gear
-/// stations already carry the geometric x/z placement this module reuses.
-///
-/// Documented fallback only: a pure FLOPS buildup carries its own
-/// `main_gear_kg`/`nose_gear_kg` split (FLOPS equations 63/64, which give the
-/// A320 preset 11.2% nose rather than 15%), passed to [`push_gear`] as
-/// `flops_gear_split_kg` and used instead whenever it is `Some`. This fraction
-/// remains the split for every path that has no FLOPS structural evaluation
-/// to read it from (the Torenbeek-comparison buildup and any other lumped
-/// [`MassBreakdown::gear`] source).
-const NOSE_GEAR_MASS_FRACTION: f64 = 0.15;
 
 /// Build the complete, unvalidated ledger for one mass statement.
 ///

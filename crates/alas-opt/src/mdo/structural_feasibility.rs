@@ -126,7 +126,11 @@ pub fn assess_candidate(
         &config.geometry.engine,
         &config.mass_model,
         &requirements,
-    );
+    )
+    .with_torque_sources(alas_struct::torque_sources::TorqueSources::from_config(
+        config,
+        &requirements,
+    ));
     let point_masses = &wing_mounted.point_masses_kg;
     if !geometry.semi_span.is_finite()
         || geometry.semi_span <= 0.0

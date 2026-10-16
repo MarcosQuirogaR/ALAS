@@ -215,8 +215,26 @@ pub(super) fn first_start_marker_gate(marker_path: &Path) -> bool {
         return false;
     }
     if let Some(parent) = marker_path.parent() {
-        let _ = std::fs::create_dir_all(parent);
+        if let Err(error) = std::fs::create_dir_all(parent) {
+            report_marker_failure(marker_path, &error);
+        }
     }
-    let _ = std::fs::write(marker_path, b"1");
+    if let Err(error) = std::fs::write(marker_path, b"1") {
+        report_marker_failure(marker_path, &error);
+    }
     true
+}
+
+/// A marker that cannot be written makes the first-start flow repeat on the
+/// next launch; say so on stderr instead of dropping the error (the gate runs
+/// while the state is constructed, before there is a run log to write to).
+#[allow(
+    clippy::print_stderr,
+    reason = "runs before any log sink exists; stderr is the only channel for this notice"
+)]
+fn report_marker_failure(marker_path: &Path, error: &std::io::Error) {
+    eprintln!(
+        "alas: cannot record first-start marker {}: {error}",
+        marker_path.display()
+    );
 }

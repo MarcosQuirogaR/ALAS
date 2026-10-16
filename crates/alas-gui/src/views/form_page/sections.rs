@@ -27,6 +27,22 @@ pub(super) struct PageSection {
     default_open: bool,
 }
 
+/// A scope note shown under a section header, keyed by the section title.
+///
+/// The aileron inputs set the control-surface geometry that the movable-area
+/// mass, the wing inventory and the control-surface figure read; the
+/// CS 25.349(a) aileron rolling load cases are outside the product structural
+/// set (`alas_struct::scope::AILERON_CASES_NOT_IN_PRODUCT_SET`), so they do
+/// not size the wing box.
+fn section_note(title: &str) -> Option<&'static str> {
+    match title {
+        "Roll and lift dump" => Some(AILERON_SCOPE_NOTE),
+        _ => None,
+    }
+}
+
+const AILERON_SCOPE_NOTE: &str = "Aileron inputs set control-surface geometry, movable-area mass and diagnostics only; the CS 25.349(a) aileron rolling load cases are not in the product wing-box sizing.";
+
 /// Render an explicitly grouped form while leaving the schema authoritative.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn render_sectioned_form(
@@ -65,6 +81,9 @@ pub(super) fn render_sectioned_form(
                 .id_salt(format!("{group}::{}", section.title))
                 .default_open(section.default_open)
                 .show(ui, |ui| {
+                    if let Some(note) = section_note(section.title) {
+                        ui.label(RichText::new(tr(note)).small().weak());
+                    }
                     if flatten_turboprop {
                         // This node already has a dedicated Advanced Settings
                         // card. Edit its children at the existing JSON path,
@@ -80,9 +99,12 @@ pub(super) fn render_sectioned_form(
                         if !values.is_object() {
                             *values = Value::Object(serde_json::Map::new());
                         }
-                        let child_values = values
-                            .as_object_mut()
-                            .expect("mass model object")
+                        // The guard above made `values` an object, so this
+                        // else branch is unreachable; skip the card if not.
+                        let Some(values_map) = values.as_object_mut() else {
+                            return;
+                        };
+                        let child_values = values_map
                             .entry("flops_turboprop")
                             .or_insert_with(|| Value::Object(serde_json::Map::new()));
                         edits.extend(dynamic_form_with_open_root_nodes(

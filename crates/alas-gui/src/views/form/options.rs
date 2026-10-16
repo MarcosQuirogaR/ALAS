@@ -9,22 +9,20 @@
 //! a missing source from degrading silently into a free-text editor.
 
 use alas_config::{Entry, Field, Number, OptionSource, ZeroMeaning};
+use std::cell::RefCell;
+use std::rc::Rc;
+
 use serde_json::Value;
 
 /// Resolve the option sources the schema names at the GUI boundary.
-pub(super) fn resolved_options(field: &Field, values: &Value) -> Option<Vec<String>> {
+pub(super) fn resolved_options(field: &Field, values: &Value) -> Option<Rc<[String]>> {
     let source = match &field.entry {
         Entry::Leaf(leaf) => leaf.options,
         Entry::Node(_) => None,
     };
 
     let mut options = match source {
-        Some(OptionSource::Airfoil) => {
-            alas_geom::airfoil_library::AirfoilLibrary::get_available_airfoils()
-                .into_iter()
-                .map(str::to_owned)
-                .collect()
-        }
+        Some(OptionSource::Airfoil) => return Some(airfoil_options()),
         Some(OptionSource::Engine) => alas_config::engines::available()
             .iter()
             .map(|name| (*name).to_owned())
@@ -76,7 +74,35 @@ pub(super) fn resolved_options(field: &Field, values: &Value) -> Option<Vec<Stri
         };
         options = presets.iter().copied().map(str::to_owned).collect();
     }
-    Some(options)
+    Some(Rc::from(options))
+}
+
+thread_local! {
+    /// Sorted airfoil menu, rebuilt only when the runtime airfoil registry
+    /// changes (a custom import bumps `airfoil_io::generation`).
+    static AIRFOIL_OPTIONS: RefCell<Option<(u64, Rc<[String]>)>> = const { RefCell::new(None) };
+}
+
+/// The airfoil names offered by every airfoil field, shared across fields and
+/// frames. The library list is built and sorted from the whole Selig corpus,
+/// so it is cached against the registry generation instead of per call.
+fn airfoil_options() -> Rc<[String]> {
+    let generation = alas_geom::airfoil_io::generation();
+    AIRFOIL_OPTIONS.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        if let Some((cached_generation, options)) = cache.as_ref() {
+            if *cached_generation == generation {
+                return Rc::clone(options);
+            }
+        }
+        let options: Rc<[String]> =
+            alas_geom::airfoil_library::AirfoilLibrary::get_available_airfoils()
+                .into_iter()
+                .map(str::to_owned)
+                .collect();
+        *cache = Some((generation, Rc::clone(&options)));
+        options
+    })
 }
 
 /// Resolve a readonly-unless condition against the current form level and
@@ -148,6 +174,17 @@ fn cabin_preset_display_name(value: &str) -> Option<&'static str> {
     }
 }
 
+/// Labels for `cruise_altitude_policy`, keyed by field name because
+/// `declared` and `design` have no underscore for the generic rewrite.
+fn cruise_policy_display_name(field: &Field, value: &str) -> Option<&'static str> {
+    match (field.name, value) {
+        ("cruise_altitude_policy", "declared") => Some("Declared cruise level"),
+        ("cruise_altitude_policy", "design") => Some("Design cruise altitude"),
+        ("cruise_altitude_policy", "optimum_step") => Some("Optimum step climb"),
+        _ => None,
+    }
+}
+
 /// Present fixed option values as sentence-cased UI text without changing the
 /// serialized configuration value. This keeps values such as `passenger` and
 /// `auto` readable while preserving their lower-case data contracts.
@@ -158,7 +195,8 @@ pub(super) fn display_option(field: &Field, value: &str) -> String {
         );
     }
     let humanized = humanize_identifier(value);
-    let source = cabin_preset_display_name(value)
+    let source = cruise_policy_display_name(field, value)
+        .or_else(|| cabin_preset_display_name(value))
         .or(humanized.as_deref())
         .unwrap_or(value);
     let localized = alas_i18n::t(Some(source), None).into_owned();

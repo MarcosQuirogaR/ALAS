@@ -10,6 +10,10 @@
 //! under Advanced Settings > Propulsion, structural solver cases on Analyses)
 //! and which fields stay loadable but hidden.
 
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::rc::Rc;
+
 use alas_config::{Entry, Field, Node};
 use egui::{RichText, Ui};
 use serde_json::Value;
@@ -101,6 +105,43 @@ pub(crate) const STRUCTURES_CASES: &[(&str, &str)] = &[
         "Random-vibration RMS from SOL 111",
     ),
 ];
+
+/// (page id, group) -> (schema slice address, length, pruned tree).
+type VisibleFieldsCache = HashMap<(&'static str, String), (usize, usize, Rc<Vec<Field>>)>;
+
+thread_local! {
+    /// Pruned field trees by (page id, group), tagged with the identity of the
+    /// schema slice they were built from.
+    static VISIBLE_FIELDS: RefCell<VisibleFieldsCache> = RefCell::new(HashMap::new());
+}
+
+/// [`visible_fields`] for `group` of `state.schema`, built once per page and
+/// shared afterwards. The schema tree is immutable for the life of the state, so
+/// re-cloning and re-pruning it every frame was pure overhead. The cache entry
+/// also records the schema slice's address and length, so a different schema
+/// (a new state) rebuilds instead of reusing a stale tree.
+pub(super) fn cached_visible_fields(
+    state: &AppState,
+    page: &Page,
+    group: &str,
+) -> Option<Rc<Vec<Field>>> {
+    let Some(Entry::Node(node)) = state.schema.field(group).map(|field| &field.entry) else {
+        return None;
+    };
+    let identity = (node.fields.as_ptr() as usize, node.fields.len());
+    VISIBLE_FIELDS.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        let key = (page.id, group.to_owned());
+        if let Some((ptr, len, fields)) = cache.get(&key) {
+            if (*ptr, *len) == identity {
+                return Some(Rc::clone(fields));
+            }
+        }
+        let fields = Rc::new(visible_fields(page, group, &node.fields));
+        cache.insert(key, (identity.0, identity.1, Rc::clone(&fields)));
+        Some(fields)
+    })
+}
 
 /// The fields a page shows for its group.
 pub(super) fn visible_fields(page: &Page, group: &str, fields: &[Field]) -> Vec<Field> {
@@ -313,7 +354,7 @@ pub(super) fn render_propulsion_editor(
         render_engine_selector(state, ui);
     }
     let model = state
-        .typed_config()
+        .typed_config_arc()
         .ok_or_else(|| "configuration cannot be decoded".to_owned())
         .and_then(|config| super::engine_editor_model(&config.geometry.engine));
     let model = match model {

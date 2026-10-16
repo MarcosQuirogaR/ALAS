@@ -145,12 +145,15 @@ fn build_cargo_layout_with_mass_semantics(
     let mut items = Vec::new();
     let mut n_main = 0i64;
     let mut n_lower = 0i64;
+    let freight_deck = manager.freight_deck();
     for slot in &manager.slots {
         if slot.payload <= MIN_LOADED_KG {
             continue;
         }
         let deck = if slot.deck == MAIN {
-            g.passenger_decks.iter().find(|deck| deck.name == MAIN)
+            freight_deck
+                .as_ref()
+                .or_else(|| g.passenger_decks.iter().find(|deck| deck.name == MAIN))
         } else {
             Some(&g.lower_deck)
         };

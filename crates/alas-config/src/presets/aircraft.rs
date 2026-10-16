@@ -319,6 +319,7 @@ impl AircraftPreset {
             }
             _ => {}
         }
+        super::cabin_sources::seed_freight_hold(self.name, &mut cabin);
         if self.name == "A320-200" {
             // Airbus A320 ACAP Figure 2-4-1: 28/29 in pitch for the 180-seat
             // single-class arrangement; the 28 in lower bound is used.
@@ -343,12 +344,11 @@ impl AircraftPreset {
 
     /// Representative route and speed schedule loaded by interactive clients.
     pub fn operational_mission_defaults(&self) -> OperationalMissionDefaults {
-        let (departure_airport, arrival_airport, cruise_altitude_m, cruise_mach, provenance) = match self.name {
+        let (departure_airport, arrival_airport, cruise_altitude_m, provenance) = match self.name {
             "A220-300" => (
                 "Riga (EVRA)",
                 "Stockholm Arlanda (ESSA)",
                 25_000.0 * 0.3048,
-                0.74,
                 "airBaltic 30-year route history: Stockholm is one of its most popular Riga routes; airBaltic operates an all-A220-300 fleet (accessed 2026-08-29)",
             ),
             "ATR72-600" => (
@@ -359,67 +359,54 @@ impl AircraftPreset {
                 // factsheet's max-cruise fuel flow; FL200's thinner air
                 // lowers the required power. Internal ATR study, 2026-09-07.
                 20_000.0 * 0.3048,
-                // Internal-consistency correction: `requirements.cruise_mach`
-                // (design/sizing) is 0.44; the operational default used an
-                // unexplained 0.40. 0.44 removes that mismatch (close to the
-                // factsheet's 275 KTAS, but not itself validation evidence).
-                0.44,
                 "Representative European regional-sector default; operational example only, not an ATR design-mission claim",
             ),
             "A320-200" => (
                 "Madrid Barajas (LEMD)",
                 "Palma de Mallorca (LEPA)",
                 28_000.0 * 0.3048,
-                0.74,
                 "Aena 2025 traffic reporting identifies Madrid among Palma's principal connections; representative A320-family short-haul pairing (accessed 2026-08-29)",
             ),
             "A340-300" => (
                 "Frankfurt (EDDF)",
                 "Boston Logan (KBOS)",
                 39_000.0 * 0.3048,
-                0.82,
                 "Lufthansa 2026 timetable publishes ten weekly Frankfurt-Boston flights and 5,889 km route distance; representative remaining A340-300 operation (accessed 2026-08-29)",
             ),
             "A380-800" => (
                 "Dubai (OMDB)",
                 "London Heathrow (EGLL)",
                 39_000.0 * 0.3048,
-                0.83,
                 "Emirates identifies Dubai-London Heathrow as a high-frequency A380 market (accessed 2026-08-29)",
             ),
             "B787-9" => (
                 "Tokyo Haneda (RJTT)",
                 "Sydney (YSSY)",
                 41_000.0 * 0.3048,
-                0.85,
                 "ANA lists Sydney among the principal Haneda routes for its Boeing 787-9 (accessed 2026-08-29)",
             ),
             "C919" => (
                 "Frankfurt (EDDF)",
                 "Madrid Barajas (LEMD)",
                 37_000.0 * 0.3048,
-                0.78,
                 "PLACEHOLDER sector of about 1,000 nmi typical of a 158-seat narrowbody: the C919 flies only Chinese domestic routes (China Eastern Shanghai Hongqiao-Chengdu from 2023-05-28, press reports) and the airport table holds no Chinese airport, so no real C919 route can be named; not a COMAC design-mission claim",
             ),
             "E195-E2" => (
                 "Madrid Barajas (LEMD)",
                 "Palma de Mallorca (LEPA)",
                 35_000.0 * 0.3048,
-                0.78,
                 "Representative European short-haul pairing for a 132-seat single-class E195-E2 (Embraer lists Binter Canarias and Azul among its operators; accessed 2026-10-04); operational example only, not an Embraer design-mission claim",
             ),
             "A400M" => (
                 "Frankfurt (EDDF)",
                 "Madrid Barajas (LEMD)",
                 11_278.0,
-                0.72,
                 "Representative European airlift sector; operational example only, not an A400M design-mission claim (the design point is the 20 t / 6300 km brochure entry)",
             ),
             "DC-10" => (
                 "Osaka Kansai (RJBB)",
                 "Honolulu (PHNL)",
                 37_000.0 * 0.3048,
-                0.82,
                 "Northwest Airlines 1996-10-27 timetable explicitly assigns DC-10 equipment to Osaka-Honolulu; historical because scheduled passenger DC-10 service has ended",
             ),
             // ESTIMATE: representative historical long-haul 747-400 route
@@ -428,7 +415,6 @@ impl AircraftPreset {
                 "London Heathrow (EGLL)",
                 "Johannesburg OR Tambo (FAOR)",
                 35_000.0 * 0.3048,
-                0.85,
                 "Declared representative 747-400 long-haul route (estimate, not verified against a timetable); the design mission is the ACAP section 3.2.1 payload/range corner, not this route",
             ),
             // AVE is a synthetic reference aircraft and has no real demand history.
@@ -436,18 +422,26 @@ impl AircraftPreset {
                 "London Heathrow (EGLL)",
                 "Dubai (OMDB)",
                 39_000.0 * 0.3048,
-                0.84,
                 "Synthetic AVE reference route; no real-world subtype demand claim",
             ),
         };
 
         let mut profile = crate::MissionProfileConfig::default();
-        let atmosphere = alas_atmo::Atmosphere::new(cruise_altitude_m);
-        let cruise_tas_m_s = cruise_mach * atmosphere.speed_of_sound();
+        // Exact US1976 (the mission models' own atmosphere), not the
+        // differentiable spline: the declared Mach and TAS must name one
+        // speed of sound (audit MIS-03).
+        // One source of truth for the cruise Mach: the requirement. The
+        // operational schedule used to carry its own Mach per aircraft
+        // (A320 0.74 against a 0.78 requirement, A380 0.83 against 0.85), read
+        // by the mission as a different Mach at the design level.
+        let cruise_mach = self.requirements.cruise_mach;
+        let cruise_tas_m_s = cruise_mach
+            * alas_atmo::us1976_compute_values(cruise_altitude_m, 0.0).speed_of_sound_m_s;
         profile.cruise_1_air_speed_m_s = cruise_tas_m_s;
         profile.cruise_2_air_speed_m_s = cruise_tas_m_s;
         profile.cruise_3_air_speed_m_s = cruise_tas_m_s;
 
+        super::speed_schedules::apply_registered_ladder(self, &mut profile, cruise_altitude_m);
         if self.name == "A320-200" {
             apply_a320_200_speed_schedule(
                 &mut profile,

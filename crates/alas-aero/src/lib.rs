@@ -92,6 +92,7 @@ pub mod mses;
 pub mod neuralfoil;
 pub mod operating_point;
 pub mod singularities;
+pub mod strips;
 mod vector3;
 pub mod vorlax;
 pub mod vspaero;

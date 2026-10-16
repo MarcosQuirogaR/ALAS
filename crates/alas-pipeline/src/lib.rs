@@ -50,12 +50,18 @@ pub mod payload_layout_export;
 pub mod pipeline;
 pub mod plot;
 pub mod quick_analysis;
+pub mod reference_mission;
+pub mod report_config;
 pub mod run_manifest;
 pub mod runs;
 pub mod solver_mode;
 pub mod structural;
+pub mod tool_profile;
 pub mod vspaero;
+mod vspaero_domain;
+mod vspaero_geometry;
 pub mod vspaero_refinement;
+mod vspaero_wake;
 
 pub use alas_exec::RunEnvironment;
 pub use alas_opt::{
@@ -93,13 +99,13 @@ pub use export::{
 };
 pub use feasibility::{
     assess_physical_feasibility, assess_physical_feasibility_with_load_case, design_mass_config,
-    design_vn_diagram, design_vn_mass_kg, format_feasibility, CarriedFuelBasis,
+    design_vn_diagram, design_vn_mass_kg, format_feasibility, thrust_checks, CarriedFuelBasis,
     CgEnvelopeAssessment, CruiseEquilibriumAssessment, DeliveryBlocker, DeliveryClassification,
     DeliveryVerdict, DesignProvenance, DispatchAssessment, DispatchOutcome, FeasibilityReport,
     FindingCode, FindingSeverity, FuelCapacityAssessment, FuelCapacityEvidence,
     FuelLoadingAssessment, LedgerItemSummary, MassBalanceAssessment, MassStateSummary,
-    MissionFuelAssessment, MissionFuelStatus, PhysicalFinding, PlanningCgStatus, RunCompletion,
-    TankSummary,
+    MissionFuelAssessment, MissionFuelStatus, PhysicalFinding, PlannedLevels, PlanningCgStatus,
+    RunCompletion, TankSummary, ThrustChecks,
 };
 pub use flowunsteady::{
     run_flowunsteady_analysis, FlowUnsteadyAnalysisResult, FlowUnsteadyAnalysisStatus,

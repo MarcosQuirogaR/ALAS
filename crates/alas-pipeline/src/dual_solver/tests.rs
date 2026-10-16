@@ -474,3 +474,28 @@ fn an_avl_candidate_is_drawn_with_the_tail_the_assessment_sizes() {
         "the moved wing must resize the tail for this check to mean anything"
     );
 }
+
+#[test]
+fn the_avl_branch_enters_the_shared_reporting_fidelity_ladder() {
+    // The AVL branch calls the same ladder as the VLM branch, so a raised
+    // cancellation flag stops it before reporting verification with the
+    // GUI-recognised prefix instead of reporting the in-loop score as done.
+    let cancel = AtomicBool::new(true);
+    let config = AlasConfig::default();
+    let nominal = DesignVector::default();
+    let mut optimization = delivered_fixture(true, None);
+    let outcome = run_reporting_ladder(
+        ReportingLadder {
+            solver: SolverKind::Avl,
+            config: &config,
+            effective_config: &config,
+            nominal: &nominal,
+            acceptance_route: None,
+            cancel: Some(&cancel),
+        },
+        &mut optimization,
+    );
+    let error = outcome.err().expect("a cancelled ladder is an error");
+    assert!(error.starts_with("Cancelled safely"), "{error}");
+    assert!(optimization.delivered_acceptance.is_none());
+}

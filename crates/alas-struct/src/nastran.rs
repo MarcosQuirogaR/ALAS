@@ -38,6 +38,7 @@ pub use decks::{
     build_sol101_bulk, build_sol103_bulk, build_sol111_random_bulk, build_sol111_sine_bulk,
     build_sol111_sine_bulk_msc, elliptic_forces_by_y,
 };
+pub(crate) use decks::{FORCE_SID_BASE, GRAVITY_SID_BASE};
 pub use format::free_field;
 pub use results::{
     read_force_psd_rms, read_harmonic_response, read_modes, read_static, read_vibration,

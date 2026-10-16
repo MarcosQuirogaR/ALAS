@@ -1,0 +1,218 @@
+{
+  "id": "xc-2025-clubs",
+  "version": 1,
+  "family": "xtra_challenge",
+  "name": "XtraChallenge 2025, Clubs category, liquid payload",
+  "status": "provisional",
+  "citation": "XtraChallenge 2025 Reglamento Tecnico, Categoria Clubes v1.20 (17.03.2025), s6 requirements, s7.6 circuit, s8 scoring (eq. 1-10); local copy refs/competitions/XC_XC_25_TRC_V1.20.pdf. Provisional for 2026: the 2026 rules were not located, so this edition's formulas are the nearest primary text; the 2026 missions (secondary source only) differ. The Academic 2025 document was not found.",
+  "gates": [
+    {
+      "id": "mtow",
+      "description": "Take-off mass <= 25 kg",
+      "margin_expr": "(25 kg - mtow) / (25 kg)",
+      "hard": true,
+      "citation": "XtraChallenge 2025 Reglamento Tecnico, Categoria Clubes v1.20 (17.03.2025) s6.9"
+    },
+    {
+      "id": "budget",
+      "description": "Manufacturing cost <= 400 EUR",
+      "margin_expr": "(400 EUR - cost) / (400 EUR)",
+      "hard": true,
+      "citation": "XtraChallenge 2025 Reglamento Tecnico, Categoria Clubes v1.20 (17.03.2025) s6.2"
+    },
+    {
+      "id": "motors",
+      "description": "A single motor",
+      "margin_expr": "0 - abs(motor_count - 1)",
+      "hard": true,
+      "citation": "XtraChallenge 2025 Reglamento Tecnico, Categoria Clubes v1.20 (17.03.2025) s6.6"
+    },
+    {
+      "id": "cells",
+      "description": "3S LiPo",
+      "margin_expr": "(3 - cell_count) / 3",
+      "hard": true,
+      "citation": "XtraChallenge 2025 Reglamento Tecnico, Categoria Clubes v1.20 (17.03.2025) s6.6"
+    },
+    {
+      "id": "pack_voltage",
+      "description": "Pack voltage <= 12.6 V",
+      "margin_expr": "(12.6 V - pack_voltage_max) / (12.6 V)",
+      "hard": true,
+      "citation": "XtraChallenge 2025 Reglamento Tecnico, Categoria Clubes v1.20 (17.03.2025) s6.6"
+    },
+    {
+      "id": "announcement",
+      "description": "Declared take-off 20, 40 or 60 m",
+      "margin_expr": "if(announced_takeoff == 20 m || announced_takeoff == 40 m || announced_takeoff == 60 m, 0, -1)",
+      "hard": true,
+      "citation": "XtraChallenge 2025 Reglamento Tecnico, Categoria Clubes v1.20 (17.03.2025) s8.5 eq. 6"
+    },
+    {
+      "id": "takeoff_within_announcement",
+      "description": "Predicted take-off distance within the declaration (else B_despegue = 0)",
+      "margin_expr": "(announced_takeoff - takeoff_distance) / announced_takeoff",
+      "hard": false,
+      "citation": "XtraChallenge 2025 Reglamento Tecnico, Categoria Clubes v1.20 (17.03.2025) s8.5"
+    }
+  ],
+  "parameters": [
+    {
+      "name": "flight_valid",
+      "unit_si": "1",
+      "default": 1,
+      "min": 0,
+      "max": 1,
+      "doc": "1 when the flight is legal; 0 for a rule breach the simulator cannot see (lost part, flight-zone breach, failed static test)"
+    },
+    {
+      "name": "pilot_external",
+      "unit_si": "1",
+      "default": 0,
+      "min": 0,
+      "max": 1,
+      "doc": "1 when an external pilot flies the round (S_pilot = 0.75, eq. 7)"
+    },
+    {
+      "name": "flight_clock_throttle_up",
+      "unit_si": "1",
+      "default": 0,
+      "min": 0,
+      "max": 1,
+      "doc": "Climb timed from lift-off (s7.5 Ascenso)"
+    }
+  ],
+  "segments": [
+    {
+      "name": "loading",
+      "kind": {
+        "kind": "loading",
+        "seconds": 30.0
+      }
+    },
+    {
+      "name": "takeoff",
+      "kind": {
+        "kind": "takeoff",
+        "runway_m": 60.0,
+        "surface": "grass"
+      }
+    },
+    {
+      "name": "climb",
+      "kind": {
+        "kind": "climb",
+        "end": {
+          "until": "time",
+          "seconds": 60.0
+        }
+      }
+    },
+    {
+      "name": "glide",
+      "kind": {
+        "kind": "glide",
+        "end": {
+          "until": "altitude",
+          "meters": 10.0
+        }
+      }
+    },
+    {
+      "name": "circuit",
+      "kind": {
+        "kind": "laps",
+        "lap_length_m": 200.0,
+        "turn_gate": true,
+        "count": 5
+      }
+    },
+    {
+      "name": "landing",
+      "kind": {
+        "kind": "landing",
+        "zone_m": null
+      }
+    }
+  ],
+  "score": {
+    "terms": [
+      {
+        "name": "p_weight",
+        "expr": "200 * rel(payload_volume, c_max)",
+        "additive_bonus": false
+      },
+      {
+        "name": "p_time",
+        "expr": "200 * rel(t_min, time_1km)",
+        "additive_bonus": false
+      },
+      {
+        "name": "p_glide",
+        "expr": "150 * rel(glide_time, te_max)",
+        "additive_bonus": false
+      },
+      {
+        "name": "a60",
+        "expr": "altitude_at_60s / (1 m)",
+        "additive_bonus": false
+      },
+      {
+        "name": "p_alt",
+        "expr": "6.5455e-6 * a60^4 - 0.001822 * a60^3 + 0.1436 * a60^2 - 1.3011 * a60",
+        "additive_bonus": false
+      },
+      {
+        "name": "ct_team",
+        "expr": "payload_volume / sqrt(loading_time)",
+        "additive_bonus": false
+      },
+      {
+        "name": "b_load",
+        "expr": "100 * rel(ct_team, ct_max)",
+        "additive_bonus": true
+      },
+      {
+        "name": "b_to",
+        "expr": "if(takeoff_distance > announced_takeoff, 0, step(announced_takeoff, 20 m, 1.25, 40 m, 1.125, 60 m, 1, 0))",
+        "additive_bonus": false
+      },
+      {
+        "name": "s_pilot",
+        "expr": "if(pilot_external > 0, 0.75, 1)",
+        "additive_bonus": false
+      }
+    ],
+    "round_expr": "(((p_weight + p_time + p_glide + p_alt) * flight_valid + b_load) * b_to) * s_pilot",
+    "aggregation": {
+      "kind": "mean_except_worst"
+    },
+    "reference_field": [
+      {
+        "name": "c_max",
+        "default": 0.004,
+        "unit_si": "m^3",
+        "note": "ASSUMPTION: most water carried by any team in the round (4 L); no published figure"
+      },
+      {
+        "name": "t_min",
+        "default": 40,
+        "unit_si": "s",
+        "note": "ASSUMPTION: fastest 1 km time of the round; no published figure"
+      },
+      {
+        "name": "te_max",
+        "default": 120,
+        "unit_si": "s",
+        "note": "ASSUMPTION: longest glide of the round; no published figure"
+      },
+      {
+        "name": "ct_max",
+        "default": 0.0006,
+        "unit_si": "m^3/s^0.5",
+        "note": "ASSUMPTION: best C/sqrt(t_load) of the round, e.g. 4 L in 44 s; no published figure"
+      }
+    ]
+  },
+  "variants": []
+}

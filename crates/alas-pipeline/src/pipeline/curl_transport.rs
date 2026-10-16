@@ -13,6 +13,9 @@ pub(super) struct SystemCurlTransport;
 
 impl SimbriefTransport for SystemCurlTransport {
     fn fetch(&self, url: &str, timeout_s: f64) -> Result<String, String> {
+        if !timeout_s.is_finite() {
+            return Err(format!("SimBrief timeout must be finite, got {timeout_s}"));
+        }
         let executable = if cfg!(windows) { "curl.exe" } else { "curl" };
         let timeout = timeout_s.clamp(1.0, 120.0).to_string();
         let connect_timeout = timeout_s.clamp(1.0, 10.0).to_string();

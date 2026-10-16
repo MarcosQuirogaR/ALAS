@@ -50,8 +50,9 @@ pub const BAROMETRIC_GRAVITY: f64 = 9.81;
 const CELSIUS_TO_KELVIN: f64 = 273.15;
 
 /// Sea-level pressure, in pascals: the base condition the layer table's
-/// chained barometric-formula evaluation starts from.
-const SEA_LEVEL_PRESSURE_PA: f64 = 101_325.0;
+/// chained barometric-formula evaluation starts from (the crate's single
+/// declaration, in [`crate::airspeed`]).
+use crate::airspeed::SEA_LEVEL_PRESSURE_PA;
 
 /// The ISA table's eight layers, exactly as
 /// `native aerodynamic model/atmosphere/isa_data/isa_table.csv` lists them: base

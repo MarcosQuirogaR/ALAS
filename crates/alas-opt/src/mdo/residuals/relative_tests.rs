@@ -112,8 +112,10 @@ fn every_preset_nominal_passes_both_relative_constraints() {
 fn a_candidate_below_both_nominal_and_requirement_fails() {
     // The fixture needs a registered aircraft short of both requirements;
     // the A320's usable takeoff range now exceeds 30 %MAC (the derived
-    // rotation authority), the A380-800's does not.
-    let config = reference_config("A380-800");
+    // rotation authority), and the A380-800's tail-scrape clearance (11.23 deg after the
+    // geometry phase 1 aft loft) now exceeds the required 10 deg. The AVE is short of both:
+    // 6.94 deg of scrape clearance and a usable range under 30 %MAC.
+    let config = reference_config("AVE");
     let outcome = nominal_outcome(&config);
     let assessment = assess(&outcome, &config).unwrap_or_else(|error| panic!("{error}"));
     let own = nominal_balance(&config).unwrap_or_else(|| panic!("no nominal"));
@@ -269,5 +271,62 @@ fn an_unresolvable_nominal_is_a_hard_violation() {
         assert_eq!(flag.role, role);
         assert!(flag.normalized_violation > 0.0);
         assert!(residuals.iter().all(|r| !r.id.ends_with("_vs_nominal")));
+    }
+}
+
+/// Lever A12: the nominals are the registered aircraft's, so candidates with
+/// different geometry-scaled CLmax share the one nominal resolved under the
+/// declared CLmax, and the relative residuals are unchanged by the scaling.
+#[test]
+fn candidates_with_scaled_clmax_share_the_registered_nominal() {
+    use alas_perf::performance::clmax::ClmaxSet;
+    let config = reference_config("A320-200");
+    let declared = super::super::sizing::clmax_geometry::declared_set(&config);
+    let mut outcome = nominal_outcome(&config);
+    outcome.declared_clmax = Some(declared);
+    let mut rows = Vec::new();
+    for scale in [0.9, 1.05, 1.1, 1.2] {
+        let set = ClmaxSet {
+            clean: declared.clean * scale,
+            takeoff: declared.takeoff * scale,
+            landing: declared.landing * scale,
+        };
+        outcome.clmax = Some(set);
+        let scaled = outcome.config_with_clmax(&config);
+        assert_ne!(config_key(&scaled), config_key(&config), "scale {scale}");
+        let balance = balance_residuals(&outcome, &scaled, ResidualRole::Constraint);
+        rows.push(find(&balance, "usable_cg_range_vs_nominal").limit);
+    }
+    assert!(rows
+        .windows(2)
+        .all(|pair| pair[0].to_bits() == pair[1].to_bits()));
+    assert_eq!(NOMINAL.resolutions(&config), 1);
+}
+
+/// The A400M design mission needs more fuel than its tanks hold in the
+/// mission-closed modes; the registered aircraft is loaded tank-limited, so
+/// its balance reference still resolves (an unavailable reference makes every
+/// candidate violate `relative_balance_nominal_unavailable`).
+#[test]
+fn a_registered_aircraft_whose_mission_overflows_its_tanks_still_has_a_nominal() {
+    {
+        let mode = "payload_adjusted";
+        let config = AlasConfig::from_value(&serde_json::json!({
+            "preset": "A400M",
+            "optimizer": {
+                "design_space": {"mode": "reference_adaptation"},
+                "objective": {"mtow_sizing": mode}
+            }
+        }))
+        .unwrap();
+        let nominal =
+            nominal_balance(&config).unwrap_or_else(|| panic!("A400M {mode}: no nominal"));
+        assert!(nominal.usable_cg_range_pct_mac.is_finite() && nominal.tail_scrape_deg > 0.0);
+        // The candidate path keeps the mission load: the overflow is an error
+        // there (the capacity residuals reject it), not silently clamped.
+        let design = alas_config::presets::get("A400M").unwrap().design_vector;
+        let outcome = super::super::sizing::run_candidate(&config, &design.to_array()).unwrap();
+        let error = assess(&outcome, &config).expect_err("mission fuel exceeds the tanks");
+        assert!(error.contains("exceeds usable capacity"), "{error}");
     }
 }

@@ -11,24 +11,21 @@ mod regional_cabin;
 use self::lth_cabin::{lth_furnishings_kg, lth_operating_items_kg};
 use super::propulsion::{scaled_engine_count, scaled_nacelle_diameter_m};
 
+use super::units::kg;
 use super::{
     FlopsOperatingItemsBreakdown, FlopsSystemsBreakdown, FlopsTransportBreakdown,
     FlopsTransportInputError, FlopsTransportInputs, PropulsionSizing,
 };
 
-fn pounds_to_kg(value: f64) -> f64 {
-    value * POUND_MASS
-}
-
 pub(super) fn surface_controls_kg(maximum_mach: f64, area_m2: f64, gross_kg: f64) -> f64 {
     let area_ft2 = area_m2 / FOOT.powi(2);
     let gross_lb = gross_kg / POUND_MASS;
-    pounds_to_kg(1.1 * maximum_mach.powf(0.52) * area_ft2.powf(0.6) * gross_lb.powf(0.32))
+    kg(1.1 * maximum_mach.powf(0.52) * area_ft2.powf(0.6) * gross_lb.powf(0.32))
 }
 
 pub(super) fn apu_kg(fuselage_planform_area_m2: f64, passengers: usize) -> f64 {
     let area_ft2 = fuselage_planform_area_m2 / FOOT.powi(2);
-    pounds_to_kg(54.0 * area_ft2.powf(0.3) + 5.4 * (passengers as f64).powf(0.9))
+    kg(54.0 * area_ft2.powf(0.3) + 5.4 * (passengers as f64).powf(0.9))
 }
 
 /// Equation 102. `wing_engines` and `fuselage_engines` are the
@@ -43,11 +40,10 @@ pub(super) fn instruments_kg(
     fuselage_engines: f64,
 ) -> f64 {
     let area_ft2 = fuselage_planform_area_m2 / FOOT.powi(2);
-    pounds_to_kg(
-        0.48 * area_ft2.powf(0.57)
-            * maximum_mach.sqrt()
-            * (10.0 + 2.5 * flight_crew as f64 + wing_engines + 1.5 * fuselage_engines),
-    )
+    kg(0.48
+        * area_ft2.powf(0.57)
+        * maximum_mach.sqrt()
+        * (10.0 + 2.5 * flight_crew as f64 + wing_engines + 1.5 * fuselage_engines))
 }
 
 /// Equation 104 (eq. 103 is the fighter form), with the scaled counts `FNEW` and `FNEF`.
@@ -63,13 +59,12 @@ pub(super) fn hydraulics_kg(
     let fuselage_area_ft2 = fuselage_planform_area_m2 / FOOT.powi(2);
     let wing_area_ft2 = wing_area_m2 / FOOT.powi(2);
     let pressure_psi = hydraulic_pressure_pa / PSI;
-    pounds_to_kg(
-        0.57 * (fuselage_area_ft2 + 0.27 * wing_area_ft2)
-            * (1.0 + 0.03 * wing_engines + 0.05 * fuselage_engines)
-            * (3000.0 / pressure_psi).powf(0.35)
-            * (1.0 + 0.04 * variable_sweep_penalty)
-            * maximum_mach.powf(0.33),
-    )
+    kg(0.57
+        * (fuselage_area_ft2 + 0.27 * wing_area_ft2)
+        * (1.0 + 0.03 * wing_engines + 0.05 * fuselage_engines)
+        * (3000.0 / pressure_psi).powf(0.35)
+        * (1.0 + 0.04 * variable_sweep_penalty)
+        * maximum_mach.powf(0.33))
 }
 
 /// Equation 106, with the scaled total engine count `FNENG`.
@@ -81,13 +76,12 @@ pub(super) fn electrical_kg(
     flight_crew: usize,
     passengers: usize,
 ) -> f64 {
-    pounds_to_kg(
-        92.0 * (fuselage_length_m / FOOT).powf(0.4)
-            * (fuselage_width_m / FOOT).powf(0.14)
-            * (fuselage_count as f64).powf(0.27)
-            * engine_count.powf(0.69)
-            * (1.0 + 0.044 * flight_crew as f64 + 0.0015 * passengers as f64),
-    )
+    kg(92.0
+        * (fuselage_length_m / FOOT).powf(0.4)
+        * (fuselage_width_m / FOOT).powf(0.14)
+        * (fuselage_count as f64).powf(0.27)
+        * engine_count.powf(0.69)
+        * (1.0 + 0.044 * flight_crew as f64 + 0.0015 * passengers as f64))
 }
 
 pub(super) fn avionics_kg(
@@ -96,9 +90,7 @@ pub(super) fn avionics_kg(
     fuselage_planform_area_m2: f64,
 ) -> f64 {
     let area_ft2 = fuselage_planform_area_m2 / FOOT.powi(2);
-    pounds_to_kg(
-        15.8 * design_range_nmi.powf(0.1) * (flight_crew as f64).powf(0.7) * area_ft2.powf(0.43),
-    )
+    kg(15.8 * design_range_nmi.powf(0.1) * (flight_crew as f64).powf(0.7) * area_ft2.powf(0.43))
 }
 
 // FLOPS Eq. 110 uses each cabin class and both fuselage dimensions explicitly;
@@ -114,16 +106,14 @@ pub(super) fn furnishings_kg(
     fuselage_depth_m: f64,
     fuselage_count: usize,
 ) -> f64 {
-    pounds_to_kg(
-        127.0 * flight_crew as f64
-            + 112.0 * first as f64
-            + 78.0 * business as f64
-            + 44.0 * tourist as f64
-            + 2.6
-                * (passenger_compartment_length_m / FOOT)
-                * ((fuselage_width_m + fuselage_depth_m) / FOOT)
-                * fuselage_count as f64,
-    )
+    kg(127.0 * flight_crew as f64
+        + 112.0 * first as f64
+        + 78.0 * business as f64
+        + 44.0 * tourist as f64
+        + 2.6
+            * (passenger_compartment_length_m / FOOT)
+            * ((fuselage_width_m + fuselage_depth_m) / FOOT)
+            * fuselage_count as f64)
 }
 
 pub(super) fn air_conditioning_kg(
@@ -136,7 +126,7 @@ pub(super) fn air_conditioning_kg(
     let area_ft2 = fuselage_planform_area_m2 / FOOT.powi(2);
     let depth_ft = fuselage_depth_m / FOOT;
     let avionics_lb = avionics_kg_value / POUND_MASS;
-    pounds_to_kg(
+    kg(
         (3.2 * (area_ft2 * depth_ft).powf(0.6) + 9.0 * (passengers as f64).powf(0.83))
             * maximum_mach
             + 0.075 * avionics_lb,
@@ -152,19 +142,17 @@ pub(super) fn anti_ice_kg(
     engine_count: f64,
     fuselage_width_m: f64,
 ) -> f64 {
-    pounds_to_kg(
-        (span_m / FOOT) / sweep_deg.to_radians().cos()
-            + 3.8 * (nacelle_diameter_m / FOOT) * engine_count
-            + 1.5 * (fuselage_width_m / FOOT),
-    )
+    kg((span_m / FOOT) / sweep_deg.to_radians().cos()
+        + 3.8 * (nacelle_diameter_m / FOOT) * engine_count
+        + 1.5 * (fuselage_width_m / FOOT))
 }
 
 pub(super) fn cabin_crew_and_baggage_kg(attendants: usize, galley_crew: usize) -> f64 {
-    pounds_to_kg(155.0 * attendants as f64 + 200.0 * galley_crew as f64)
+    kg(155.0 * attendants as f64 + 200.0 * galley_crew as f64)
 }
 
 pub(super) fn flight_crew_and_baggage_kg(flight_crew: usize) -> f64 {
-    pounds_to_kg(225.0 * flight_crew as f64)
+    kg(225.0 * flight_crew as f64)
 }
 
 /// Equation 121. `engine_count` is the scaled count `FNENG` and `thrust_n`
@@ -176,16 +164,14 @@ pub(super) fn unusable_fuel_kg(
     tank_count: usize,
     maximum_fuel_capacity_kg: f64,
 ) -> f64 {
-    pounds_to_kg(
-        11.5 * engine_count * (thrust_n / POUND_FORCE).powf(0.2)
-            + 0.07 * (wing_area_m2 / FOOT.powi(2))
-            + 1.6 * tank_count as f64 * (maximum_fuel_capacity_kg / POUND_MASS).powf(0.28),
-    )
+    kg(11.5 * engine_count * (thrust_n / POUND_FORCE).powf(0.2)
+        + 0.07 * (wing_area_m2 / FOOT.powi(2))
+        + 1.6 * tank_count as f64 * (maximum_fuel_capacity_kg / POUND_MASS).powf(0.28))
 }
 
 /// Equation 123 (eq. 122 is the fighter form), with scaled `FNENG` and thrust `FTHRST`.
 pub(super) fn engine_oil_kg(engine_count: f64, thrust_n: f64) -> f64 {
-    pounds_to_kg(0.082 * engine_count * (thrust_n / POUND_FORCE).powf(0.65))
+    kg(0.082 * engine_count * (thrust_n / POUND_FORCE).powf(0.65))
 }
 
 pub(super) fn passenger_service_kg(
@@ -195,7 +181,7 @@ pub(super) fn passenger_service_kg(
     design_range_nmi: f64,
     maximum_mach: f64,
 ) -> f64 {
-    pounds_to_kg(
+    kg(
         (5.164 * first as f64 + 3.846 * business as f64 + 2.529 * tourist as f64)
             * (design_range_nmi / maximum_mach).powf(0.225),
     )
@@ -210,7 +196,7 @@ pub(super) fn passenger_service_kg(
 /// reaches this function with nothing in the containers.
 pub(super) fn cargo_containers_kg(containerized_mass_kg: f64) -> f64 {
     let containers = ((containerized_mass_kg / POUND_MASS) / 950.0).ceil();
-    pounds_to_kg(175.0 * containers)
+    kg(175.0 * containers)
 }
 
 fn validate_positive(value: f64, field: &'static str) -> Result<(), FlopsTransportInputError> {

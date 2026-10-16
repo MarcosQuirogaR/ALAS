@@ -129,9 +129,10 @@ Structural Analysis results.
 
 [FLOWUnsteady](https://github.com/byu-cpc/FLOWUnsteady) (typically run in
 Julia) is an optional path for unsteady lifting-surface or rotor analysis.
-ALAS doesn't bundle Julia or FLOWUnsteady itself; instead, set the
-`ALAS_FLOWUNSTEADY_EXE` environment variable to your own adapter script or
-wrapper, which ALAS calls as
+ALAS doesn't bundle Julia or FLOWUnsteady itself; instead, point ALAS at your
+own adapter script or wrapper, either with the FLOWUnsteady path on the
+Tools page (a persisted tool preference) or with the
+`ALAS_FLOWUNSTEADY_EXE` environment variable. ALAS calls it as
 `<adapter> --alas-request <request-file> --alas-result <result-file>`.
 
 ## Reading Statuses and Evidence

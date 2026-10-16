@@ -120,6 +120,11 @@ pub const E195_E2_PLANNING_CABIN: SourcedPlanningCabin = SourcedPlanningCabin {
 };
 
 /// The E195-E2 at the 62,500 kg weight variant, with PW1923G engines.
+/// The Embraer E-Jets E2 APM 5824 Rev 25 (Table 2.2, PDF p17) lists the
+/// standard model at 61,500 kg MTOW; its payload-range charts are drawn for
+/// that weight, so model-versus-chart range differences include a 1,000 kg
+/// variant offset. The SB 190E2-00-0058 weight is kept (EASA TCDS IM.A.071
+/// Issue 28) until evidence supports changing the modelled variant (F16).
 pub fn e195_e2() -> AircraftPreset {
     AircraftPreset {
         name: "E195-E2",
@@ -240,9 +245,14 @@ pub fn e195_e2() -> AircraftPreset {
         // found, so the outer panel shares the E190-E2 sweep and kink.
         design_vector: DesignVector {
             span_m: 35.124,
-            root_chord_m: 6.003,
-            break_chord_m: 2.869,
-            tip_chord_m: 0.854,
+            // Step B: the drawn chords (centreline 7.046 m, kink 3.722 m, APM 5824 Rev 21 Fig 2.2 top silhouette, measure/E195-E2, B) were TRIED and REVERTED. Built S_ref 103.0 -> 125.2 m^2
+            // (+21.6 %), MAC 3.680 -> 4.454 m, and the top overlay flipped from 10.7 m^2 undersized to 10.9 m^2 oversized along the outboard TE (total error 11.6 -> 12.8 m^2): the drawn kink chord is
+            // inconsistent with the drawn 18.5 deg outboard TE sweep (it implies ~13.5 deg). TODO: once geo/reference-wing-2026-10-11 is merged (reference_wing 103 m^2 / MAC 3.665 m) re-test the drawn
+            // inboard TE (a kinked inboard trailing edge, not a single kink chord), and set the V2 nacelle_profile.
+            // geo/close 2026-10-12 (owner: TE meets the fuselage at 90 deg): centreline chord 6.003 -> 6.923 m so the inboard TE is a straight, unswept line to the kink (A320 convention); SOB chord ratio below
+            root_chord_m: 6.7090, // geo/close pass 2: drawn inboard TE x 21.09 m (top sheet, y 2-5.7 m) minus root LE 14.3812 m; pass 1 was 6.9231
+            break_chord_m: 3.5790, // geo/close 2026-10-12: kink at the drawn TE corner (y 5.67 m, TE x 21.09 m) on the drawn outboard TE line (21.54 + 0.3375 (y - 7)); was 2.890372 // geometry round 2 (wing lane): the sourced straight-edge tip chord is kept; this kink chord closes the published reference area behind the swept-back tip
+            tip_chord_m: 1.0, // geo/close 2026-10-12: the drawn outboard TE reaches x 25.07 m at the semispan (top sheet); was 0.854 // chord the straight edges reach at the tip (the extreme tip chord is the rake chord below)
             sweep_deg: 28.9,
             tip_twist_deg: -1.5,
             wing_x_shift_m: 0.0,
@@ -256,31 +266,102 @@ pub fn e195_e2() -> AircraftPreset {
         airfoil_class_source: "Design-era declaration: the E2 wing (certified 2018) is of the supercritical-section generation; manufacturer section data are not public. Drawn with NASA SC2-0714 root and SC(2)-0410 tip sections (Harris, NASA TP-2969, 1990).",
         geometry: GeometryConfig {
             wing: WingConfig {
-                // Root-chord leading edge 11.55 m aft of the nose on the
-                // E190-E2 plan view (APM Figure 2.1: 28.9 deg leading edge
-                // through 12.38 m at the side of the body) plus the 2.332 m
-                // forward plug: 13.882 m. The model leading edge of the MAC
-                // then sits 17.36 m aft of the nose (quarter MAC 18.27 m).
-                // ESTIMATE: derived from the E190-E2 drawing and the datum
-                // difference; the E195-E2 drawing was not found.
-                root_datum_x_m: 13.882,
+                // Reference wing = the manufacturer's published values (geometry freeze 2026-10-12, owner decision); the drawn planform stays the geometry.
+                // S 103 m2: Embraer E2 APM section 1 reference area and EASA.IM.A.071 TCDS III.4 wing area; MAC 3.665 m: the same TCDS.
+                // LEMAC is not given there. Derived (not published): 17.958 m aft of the nose tip, which keeps the quarter-MAC point of the drawn MAC
+                // (LE 17.881 m, MAC 3.975 m): 17.881 + 0.25 (3.975 - 3.665).
+                reference_wing: crate::ReferenceWingConfig::published(103.0, Some(3.665), Some(17.958)),
+                // Root-chord leading edge 14.37 m aft of the nose: the straight
+                // 28.9-30 deg leading edge of the E195-E2 vector plan view (APM
+                // 5824 Rev 21 Fig 2.2, overlay study) run in to the centreline.
+                // It replaces the E190-E2-plus-plug estimate (13.882 m: APM
+                // Fig 2.1 11.55 m plus the 2.332 m plug), which put the wing
+                // 0.5 m forward of the E195-E2 drawing at every station. The
+                // model leading edge of the MAC moves from 17.36 m to 17.85 m.
+                root_datum_x_m: 14.3812, // geometry round 2 (wing lane): was 14.37; keeps the published quarter-MAC station with the swept-back tip, the closed kink chord and the re-converted sweep
                 // Low wing. ESTIMATE of the root and kink heights from the
                 // A320 convention for a 3.35 m body; the tip lower surface
                 // stands 3.81 m above the ground (E190-E2 APM Table 2.2,
                 // (G), 56,600 kg) against a body axis read at 3.75 m.
-                root_z_m: -1.2,
-                break_z_m: -0.65,
-                tip_z_m: 0.35,
+                root_z_m: -0.7034, // geometry round 2 (wing lane); was -1.2
+                break_z_m: -0.1620, // geo/close 2026-10-12: C2 dihedral line height at the new kink 0.3228; was -0.0221 at 0.416 // geometry round 2 (wing lane); was -0.65
+                tip_z_m: 0.6950, // geometry round 2 (wing lane); was 0.35
                 root_twist_deg: 3.0,
                 break_twist_deg: 1.0,
-                break_span_fraction: 0.416,
-                kink_span_fraction: Some(0.416),
+                break_span_fraction: 0.3228, // geo/close 2026-10-12: drawn TE corner; was 0.416
+                kink_span_fraction: Some(0.3228), // was 0.416
                 // Half the 3.02 m body width over the 17.562 m semi-span.
                 side_of_body_span_fraction: Some(0.086),
+                // geo/close 2026-10-12: SOB chord 6.089 m (TE x = kink TE 21.30 m) over the 6.923 m centreline chord; was None
+                side_of_body_chord_ratio: Some(0.8757), // pass 2 (SOB chord 5.875 m over 6.709 m)
                 outboard_sweep_decrement_deg: 1.5,
                 root_airfoil: "SC2-0714".to_owned(),
                 tip_airfoil: "sc20410".to_owned(),
                 airfoil_class: crate::AirfoilClass::Supercritical,
+                                // Thickness profile (geometry round 2): the NASA Common Research Model t/c 0.154 at the
+                // centreline, 0.138 at the side of body, 0.105 at the yehudi break and 0.095 at the tip
+                // (Vassberg, DeHaan, Rivers and Wahls, AIAA 2008-6919, Table 2) is the public transport-wing
+                // distribution; the multipliers below act on the root-kink-tip section blend above.
+                thickness_stations: vec![
+                    crate::WingThicknessStation {
+                        span_fraction: 0.0000,
+                        thickness_scale: 1.1037, // t/c 0.1395 -> 0.1540
+                    },
+                    crate::WingThicknessStation {
+                        span_fraction: 0.0860,
+                        thickness_scale: 0.9890, // t/c 0.1395 -> 0.1380
+                    },
+                    crate::WingThicknessStation {
+                        span_fraction: 0.3228, // geo/close 2026-10-12: follows the kink; was 0.4160
+                        thickness_scale: 0.7525, // t/c 0.1395 -> 0.1050
+                    },
+                    crate::WingThicknessStation {
+                        span_fraction: 1.0000,
+                        thickness_scale: 0.9539, // t/c 0.0996 -> 0.0950
+                    },
+                ],
+                // Swept-back tip (geometry round 2): the leading and trailing edges follow the straight lines to the
+                // design tip chord; outboard of the rake start the leading edge sweeps further aft so that the chord at the
+                // extreme tip is 0.58 m (silhouette of the drawing 0.15 m inboard of the tip), the trailing edge staying one line.
+                // The design tip chord closes the published reference area including the rake.
+                tip_rake_tip_chord_m: Some(0.58),
+                tip_rake_start_span_fraction: Some(0.9220),
+                // Spanwise dihedral (geometry round 2): leading-edge heights at interior stations fitted to the upper edge of the
+                // manufacturer front view (symmetrised drawing aligned on the fuselage crown, same measurement on the model).
+                dihedral_stations: vec![
+                    crate::WingDihedralStation {
+                        span_fraction: 0.0860, // geo/close 2026-10-12: was 0.1000 / z -0.5712; moved onto the side-of-body station (stations may not lie within 0.03 of it), z on the same root-to-station line
+                        z_m: -0.5897, // Step B: REVERTED proposal +0.03 m (measure/E195-E2 dihedral 5.36 vs 4.4 deg): the before/after front overlay got worse (agreement 52.7 -> 48.8 %, inboard wing oversized), so unchanged
+                        flight_rise_m: None,
+                    },
+                    crate::WingDihedralStation {
+                        span_fraction: 0.2000,
+                        z_m: -0.4082,
+                        flight_rise_m: None,
+                    },
+                    crate::WingDihedralStation {
+                        span_fraction: 0.2900, // geo/close 2026-10-12: was 0.3000 / z -0.1931; moved 0.03 clear of the new kink (0.3228), z on the same C2 line
+                        z_m: -0.2068,
+                        flight_rise_m: None,
+                    },
+                    crate::WingDihedralStation {
+                        span_fraction: 0.5000,
+                        z_m: 0.0807,
+                        flight_rise_m: None,
+                    },
+                    crate::WingDihedralStation {
+                        span_fraction: 0.6500,
+                        z_m: 0.2387,
+                        flight_rise_m: None,
+                    },
+                    crate::WingDihedralStation {
+                        span_fraction: 0.8000,
+                        z_m: 0.4078,
+                        flight_rise_m: None,
+                    },
+                ],
+                // Step B (loft-wing-2026-10-11): C2 cubic spline through the dihedral, twist and thickness stations; was Linear (default).
+                wing_profile_interpolation: crate::WingProfileInterpolation::C2Spline,
                 ..WingConfig::default()
             },
             // The E190-E2 tail carried to the E195-E2 unchanged (ESTIMATE:
@@ -294,18 +375,20 @@ pub fn e195_e2() -> AircraftPreset {
             // 6.56 m forward of the tail tip, read off the side view.
             empennage: EmpennageConfig {
                 tail_airfoil: "naca0012".to_owned(),
-                hstab_offset_from_tail_m: 5.30,
-                hstab_z_m: 1.15,
-                hstab_root_chord_m: 3.65,
-                hstab_tip_chord_m: 1.07,
+                // geo/tailfit 2026-10-11: tailplane straight-edge fit to the drawing, centreline values; was off 5.30, chords 3.65/1.07, tip (3.38, 4.92, 0.640)
+                hstab_offset_from_tail_m: 5.36,
+                hstab_z_m: 0.730, // geometry round 2 (wing lane): upper surface at the root matched to the front view; was 1.15
+                hstab_root_chord_m: 3.36,
+                hstab_tip_chord_m: 1.3,
                 hstab_root_twist_deg: -2.0,
                 hstab_tip_twist_deg: -2.0,
-                hstab_tip_le_m: (3.38, 4.92, 0.5),
-                vstab_offset_from_tail_m: 6.56,
+                hstab_tip_le_m: (3.37, 4.92, 0.640), // tailplane dihedral matched to the front view; was z 0.5
+                // geo/tailfit 2026-10-11: fin straight-edge fit to the drawing at the root line (rms 0.011/0.005 m); was off 6.56, chords 4.76/1.36, tip (4.50, 0.0, 5.27)
+                vstab_offset_from_tail_m: 6.51,
                 vstab_z_m: 1.70,
-                vstab_root_chord_m: 4.76,
+                vstab_root_chord_m: 4.64,
                 vstab_tip_chord_m: 1.36,
-                vstab_tip_le_m: (4.50, 0.0, 5.27),
+                vstab_tip_le_m: (4.54, 0.0, 5.27),
                 ..EmpennageConfig::default()
             },
             fuselage: FuselageConfig {
@@ -314,27 +397,55 @@ pub fn e195_e2() -> AircraftPreset {
                 // E-Jet envelope (ESTIMATE, the APM side view reads 3.4 m).
                 diameter_m: 3.02,
                 height_m: Some(3.35),
-                nose_z_m: -0.3,
+                nose_z_m: -0.77,
                 cabin_start_x_m: 3.4,
                 cabin_z_m: 0.1,
                 // ESTIMATE: 19 % of the length, the A220 and A320 ratio.
                 tailcone_length_m: 7.9,
                 tail_z_m: 1.4,
+                // FUSELAGE-G2 shaped nose and aft body. Outline traced from the manufacturer drawing
+                // (side: same; top: Embraer E-Jets E2 APM Rev 21 Fig 2.2 (195-E2)),
+                // calibrated to the drawn length; the nose law (windshield, radome, keel and plan
+                // exponents) is a least-squares fit to the traced upper, lower and plan lines (RMS 0.014 m),
+                // the aft law (belly ramp, crown drop, plan taper, closing section) to the traced aft lines
+                // (RMS 0.089 m). Cabin start, tailcone length and every payload and mass station are unchanged:
+                // only the outer loft moves. Section exponent 2.0 (ellipse): no drawing measures it.
+                nose_length_m: Some(5.36),
+                nose_windshield_angle_deg: Some(32.5),
+                nose_crown_end_fraction: Some(0.99),
+                nose_radome_length_fraction: Some(0.1),
+                nose_keel_exponent: Some(2.65),
+                nose_plan_exponent: Some(1.93),
+                nose_section_exponent: Some(2.0),
+                belly_upsweep_length_m: Some(11.88),
+                aft_belly_exponent: Some(1.3),
+                tail_end_z_m: Some(0.98),
+                tail_end_width_m: Some(0.35),
+                tail_end_height_m: Some(0.52),
+                aft_plan_length_m: Some(8.93),
+                aft_plan_exponent: Some(1.0),
+                aft_crown_length_m: Some(10.37),
+                aft_crown_exponent: Some(1.7),
                 ..FuselageConfig::default()
             },
             engine: EngineConfig {
+                // Final merge: engines.json carries a V2 nacelle set (nacelle_shape_v2) that agrees with the measured length, diameter and inlet; was Legacy.
+                nacelle_model: crate::NacelleModel::V2,
                 // Nacelle centreline +-4.84 m (E190-E2 APM Figure 2.1 plan
                 // view: nacelle outline 3.62-6.07 m from the centreline).
                 spanwise_positions_m: vec![4.84, -4.84],
+                // Step B: kept (published clearance beats the drawn centreline, which sits 0.63 m higher); the E195-E2 own Table 2.7 prints (F) 0.37 m at MRW 61,700 kg, so the pin holds.
                 // Nacelle low point 0.38 m above the ground (E190-E2 APM
                 // Table 2.2, (F)) with the 1.08 m catalogue radius, against a
                 // body axis read at 3.75 m and the local wing leading edge.
-                z_m: -1.45,
+                // geo/close 2026-10-12: nacelle raised 0.55 m to the drawn height (APM Figure 2.1 side view overlay: drawn bottom 0.55 m above the model). The Table 2.7 clearance (F) 0.37 m is a
+                // minimum at MRW 61,700 kg (compressed struts/tyres), not the static drawn height; drawing wins. was -2.040
+                z_m: -1.490, // geometry round 2 (wing lane): was -1.45; the wing leading edge at the engine moved +0.590 m, this keeps the nacelle height
                 // Puts the nacelle front 12.88 m aft of the nose: the 13.882 m
                 // root datum plus the 2.668 m the 28.9 deg leading edge runs
                 // aft by the engine station, less this offset (the E190-E2
                 // inlet lip at 10.55 m plus the 2.332 m forward plug).
-                inlet_x_offset_m: 3.668,
+                inlet_x_offset_m: 3.6792, // geometry round 2 (wing lane): was 3.668; the wing datum and sweep moved by +0.0112 m at the engine, this keeps the inlet station
                 ..EngineConfig::default()
             },
             ..GeometryConfig::default()

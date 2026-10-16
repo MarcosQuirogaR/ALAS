@@ -118,32 +118,67 @@ fn nacelle_bodies(plane: &Airplane) -> Vec<&Fuselage> {
         .collect()
 }
 
+/// Radius, as a fraction of the maximum, below which the tail of a nacelle
+/// outline is an exhaust plug cone rather than nacelle structure.
+const PLUG_RADIUS_FRACTION: f64 = 0.25;
+
+/// Equivalent diameter `sqrt(width * height)` and length of one outline
+/// `(station, width, height)`: the maximum diameter (the width itself for
+/// the circular catalogue nacelles) and the distance from the first station
+/// to the last one still at least [`PLUG_RADIUS_FRACTION`] of it. FLOPS
+/// equation 69 prices a nacelle from its structure; the plug cone behind the
+/// core nozzle is not part of it. An outline that ends above that fraction
+/// (the generic catalogue pods) is measured to its end.
+fn outline_dimensions(stations: &[(f64, f64, f64)]) -> (f64, f64) {
+    let diameter = |&(_, w, h): &(f64, f64, f64)| (w * h).sqrt();
+    let maximum = stations.iter().map(diameter).fold(0.0, f64::max);
+    let first = stations.iter().map(|s| s.0).fold(f64::INFINITY, f64::min);
+    let last = stations
+        .iter()
+        .filter(|s| diameter(s) >= PLUG_RADIUS_FRACTION * maximum)
+        .map(|s| s.0)
+        .fold(f64::NEG_INFINITY, f64::max);
+    (maximum, last - first)
+}
+
 /// Average nacelle diameter and length, m, from the built bodies or from
 /// the configured profile when none were built.
+///
+/// A centreline pod that carries its own installation outline
+/// (`engine.centre_engine`) is mostly aft-fuselage and fin-root fairing: its
+/// engine nacelle is the catalogue one, so that is what it contributes here;
+/// its wetted area still counts in the drag and paint estimates.
 pub(super) fn nacelle_dimensions(plane: &Airplane, geometry: &GeometryConfig) -> (f64, f64) {
+    let engine = &geometry.engine;
+    let catalogue = || {
+        let radius = engine.radius_scale_m;
+        let stations: Vec<_> = engine
+            .nacelle_profile
+            .iter()
+            .map(|&(x, f)| (x, 2.0 * radius * f, 2.0 * radius * f))
+            .collect();
+        (2.0 * radius, outline_dimensions(&stations).1)
+    };
     let bodies = nacelle_bodies(plane);
     if bodies.is_empty() {
-        let profile = &geometry.engine.nacelle_profile;
-        let length = match (profile.first(), profile.last()) {
-            (Some(first), Some(last)) => (last.0 - first.0).abs(),
-            _ => 0.0,
-        };
-        return (2.0 * geometry.engine.radius_scale_m, length);
+        return catalogue();
     }
     let count = bodies.len() as f64;
-    let diameter = bodies
-        .iter()
-        .map(|body| body.xsecs.iter().map(|x| x.width).fold(0.0, f64::max))
-        .sum::<f64>()
-        / count;
-    let length = bodies
-        .iter()
-        .map(|body| {
-            let xs = body.xsecs.iter().map(|x| x.xyz_c[0]);
-            xs.clone().fold(f64::NEG_INFINITY, f64::max) - xs.fold(f64::INFINITY, f64::min)
-        })
-        .sum::<f64>()
-        / count;
+    let (mut diameter, mut length) = (0.0, 0.0);
+    for body in &bodies {
+        let (d, l) = if body.name == "Nacelle Center" && engine.centre_engine.is_some() {
+            catalogue()
+        } else {
+            let stations: Vec<_> = body
+                .xsecs
+                .iter()
+                .map(|x| (x.xyz_c[0], x.width, x.height))
+                .collect();
+            outline_dimensions(&stations)
+        };
+        diameter += d / count;
+        length += l / count;
+    }
     (diameter, length)
 }
 

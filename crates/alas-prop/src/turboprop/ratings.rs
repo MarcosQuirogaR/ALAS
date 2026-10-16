@@ -7,8 +7,10 @@
 //!
 //! * **Available power** is flat-rated at sea level to the EASA TCDS IM.E.041
 //!   temperatures and lapses as `(rho / rho_corner)^n` above the corner.
-//! * **PSFC** is flat in power setting and scales with ambient temperature as
-//!   `sqrt(T / T_ref)` (Majeed 2009, SRS-TSD-002 Rev. 1).
+//! * **PSFC** scales with ambient temperature as `sqrt(T / T_ref)` (Majeed
+//!   2009, SRS-TSD-002 Rev. 1), is flat over the sourced 46-100 % power band
+//!   and rises below it through a flagged class multiplier
+//!   ([`Pw127m568fModel::part_power_psfc_multiplier`]).
 
 use super::*;
 
@@ -104,17 +106,42 @@ impl Pw127m568fModel {
     /// the power 0.41-0.64, and 0.5 is the class-level value, the same as
     /// Eshelby's turbofan `theta^0.5`.
     ///
-    /// **Flat in power setting.** Majeed's cycle model gives ESFC flat to
-    /// 0.3 % from 46 % to 60 % of take-off power at 25,000 ft (Tab. 4.1), and
-    /// the flight data are at 62 % and 100 %. Below about 46 % no citable
-    /// penalty coefficient was found (Saravanamuttoo Fig. 9.11 and a PW127
-    /// deck were not retrieved), so the model **assumes** the same PSFC there.
-    /// A real turboprop's PSFC rises as power falls, so descent, idle and
-    /// hold fuel are a lower bound.
+    /// This is the PSFC on the flat part-power band (46-100 % of take-off
+    /// power); [`Self::psfc_at_power_kg_kwh`] adds the part-power rise below
+    /// it. Majeed's cycle model gives ESFC flat to 0.3 % from 46 % to 60 % of
+    /// take-off power at 25,000 ft (Tab. 4.1), and the flight data are at
+    /// 62 % and 100 %.
     #[must_use]
     pub fn psfc_kg_kwh(self, ambient_temperature_k: f64) -> f64 {
         self.psfc_reference_kg_kwh
             * (ambient_temperature_k / self.psfc_reference_temperature_k).sqrt()
+    }
+
+    /// Part-power multiplier on the flat-band PSFC at `power_fraction`, the
+    /// shaft power over the take-off power available at the same ambient
+    /// density: 1 at and above [`Self::part_power_knee_fraction`], then
+    /// `(knee / phi)^b` with `b` = [`Self::part_power_psfc_exponent`]. The
+    /// fraction is floored at 0.02 so a vanishing power cannot diverge.
+    ///
+    /// **Flagged class assumption** (see the exponent's documentation): the
+    /// rise below the knee is shaped on Raymer's cruise/loiter `C_bhp` ratio
+    /// of 1.2, not on a PW100 deck. It is monotone non-increasing in power and
+    /// continuous at the knee.
+    #[must_use]
+    pub fn part_power_psfc_multiplier(self, power_fraction: f64) -> f64 {
+        if !power_fraction.is_finite() || power_fraction >= self.part_power_knee_fraction {
+            return 1.0;
+        }
+        (self.part_power_knee_fraction / power_fraction.max(0.02))
+            .powf(self.part_power_psfc_exponent)
+    }
+
+    /// PSFC at an ambient temperature and a power fraction of the available
+    /// take-off power, kg/(kW h): [`Self::psfc_kg_kwh`] times
+    /// [`Self::part_power_psfc_multiplier`].
+    #[must_use]
+    pub fn psfc_at_power_kg_kwh(self, ambient_temperature_k: f64, power_fraction: f64) -> f64 {
+        self.psfc_kg_kwh(ambient_temperature_k) * self.part_power_psfc_multiplier(power_fraction)
     }
 
     /// The shaft power this rating actually delivers at an ambient density, W.

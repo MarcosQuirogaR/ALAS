@@ -108,9 +108,7 @@ fn build() -> Vec<PerformancePreset> {
                 cl_max_land_source: "Mattingly et al., Aircraft Engine Design, 2nd ed., Table 2.1 p.36 (credits Torenbeek 1976): double-slotted flaps without slats, CLmax/cos(quarter-chord sweep)=2.3-2.7 in landing; retained CLmax_land=2.20 engineering selection at nominal 20 deg sweep (normalized value 2.34); conceptual class default, not an aircraft coefficient; https://doczz.net/doc/8595015/2-constraint-analysis".to_owned(),
                 thrust_lapse: 0.20,
                 oei_gradient: 0.024,
-                k_land: 0.58,
                 oei_climb_cl: 1.0,
-                oei_climb_delta_cd: 0.020,
                 bfl_factor: 1.15,
                 ..PerformanceConfig::default()
             },
@@ -150,9 +148,7 @@ fn build() -> Vec<PerformancePreset> {
                 cl_max_land_source: "Mattingly et al., Aircraft Engine Design, 2nd ed., Table 2.1 p.36 (credits Torenbeek 1976): triple-slotted flaps and slats, CLmax/cos(quarter-chord sweep)=3.2-3.5 in landing; retained CLmax_land=2.95 engineering selection at nominal 30 deg sweep (normalized value 3.41); conceptual class default, not an aircraft coefficient; https://doczz.net/doc/8595015/2-constraint-analysis".to_owned(),
                 thrust_lapse: 0.26,
                 oei_gradient: 0.027,
-                k_land: 0.63,
                 oei_climb_cl: 1.35,
-                oei_climb_delta_cd: 0.030,
                 bfl_factor: 1.18,
                 ..PerformanceConfig::default()
             },

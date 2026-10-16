@@ -5,15 +5,15 @@
 use crate::chart_kit::draw_title;
 use crate::scene::{Axes2D, Color, Fill, Scene, SceneElement, Stroke, TextAlign, TextBaseline};
 use crate::theme::{get_palette, Palette};
-use alas_config::AlasConfig;
+use alas_config::{AlasConfig, TurbofanEngineSpec};
 use alas_prop::cycle::states::{compute_turbofan_cycle_states, CycleStation};
 
 const CORE: &str = "#e67e22";
 const BYPASS: &str = "#3498db";
 
-pub(super) fn preview(config: &AlasConfig, theme: Option<&str>) -> Scene {
+pub(super) fn preview(config: &AlasConfig, eng: &TurbofanEngineSpec, theme: Option<&str>) -> Scene {
     let states =
-        compute_turbofan_cycle_states(&super::design_point(config), &config.propulsion_cycle);
+        compute_turbofan_cycle_states(&super::design_point(config, eng), &config.propulsion_cycle);
     match states
         .freestream_static
         .as_ref()
@@ -388,8 +388,9 @@ mod tests {
     #[test]
     fn process_curves_preserve_stations_and_polytropic_entropy() {
         let config = AlasConfig::default();
+        let eng = super::super::turbofan_spec(&config).expect("turbofan binding");
         let states = compute_turbofan_cycle_states(
-            &super::super::design_point(&config),
+            &super::super::design_point(&config, eng),
             &config.propulsion_cycle,
         );
         for pair in states.core.windows(2) {
@@ -405,8 +406,9 @@ mod tests {
     #[test]
     fn ideal_closure_preserves_exit_and_returns_to_reference() {
         let config = AlasConfig::default();
+        let eng = super::super::turbofan_spec(&config).expect("turbofan binding");
         let states = compute_turbofan_cycle_states(
-            &super::super::design_point(&config),
+            &super::super::design_point(&config, eng),
             &config.propulsion_cycle,
         );
         let reference = states

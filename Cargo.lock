@@ -60,6 +60,7 @@ dependencies = [
  "alas-mission",
  "alas-opt",
  "alas-payload",
+ "alas-perf",
  "alas-pipeline",
  "alas-report",
  "alas-screen",
@@ -133,6 +134,7 @@ dependencies = [
  "alas-atmo",
  "alas-config-derive",
  "alas-i18n",
+ "alas-math",
  "alas-testkit",
  "serde",
  "serde_json",
@@ -172,6 +174,7 @@ dependencies = [
  "alas-testkit",
  "serde",
  "thiserror 2.0.19",
+ "tracing",
 ]
 
 [[package]]
@@ -194,7 +197,6 @@ dependencies = [
  "alas-route",
  "alas-screen",
  "alas-struct",
- "alas-testkit",
  "alas-uav",
  "alas-viz",
  "eframe",
@@ -264,12 +266,14 @@ dependencies = [
  "alas-config",
  "alas-geom",
  "alas-mass",
+ "alas-math",
  "alas-mission",
  "alas-payload",
  "alas-perf",
  "alas-prop",
  "alas-stab",
  "alas-struct",
+ "alas-testkit",
  "alas-units",
  "rayon",
  "serde",
@@ -365,6 +369,7 @@ dependencies = [
  "alas-struct",
  "alas-testkit",
  "base64",
+ "rayon",
  "serde",
  "serde_json",
  "thiserror 2.0.19",
@@ -414,6 +419,8 @@ dependencies = [
 name = "alas-struct"
 version = "1.3.2"
 dependencies = [
+ "alas-aero",
+ "alas-atmo",
  "alas-config",
  "alas-exec",
  "alas-geom",
@@ -438,6 +445,17 @@ dependencies = [
  "alas-aero",
  "alas-atmo",
  "alas-geom",
+ "alas-uav-db",
+ "miniz_oxide",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.19",
+]
+
+[[package]]
+name = "alas-uav-db"
+version = "1.3.2"
+dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.19",
@@ -448,7 +466,6 @@ name = "alas-units"
 version = "1.3.2"
 dependencies = [
  "alas-testkit",
- "serde_json",
 ]
 
 [[package]]

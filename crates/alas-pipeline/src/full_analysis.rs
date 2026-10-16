@@ -11,7 +11,7 @@
 //! typed model-derived CG and ground-reaction constraints, and solves the
 //! trimmed cruise point.
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::f64::consts::PI;
 
 use alas_aero::analysis::{AeroAnalysis, PolarSweep, TrimPoint};
@@ -152,16 +152,16 @@ pub struct AnalysisReport {
     /// Neutral point longitudinal position, in meters.
     pub x_neutral_point: f64,
     /// Scalar geometry summary metrics.
-    pub geometry_summary: HashMap<String, f64>,
+    pub geometry_summary: BTreeMap<String, f64>,
     /// Breakdown of masses by component name, in kg.
-    pub component_masses: HashMap<String, f64>,
+    pub component_masses: BTreeMap<String, f64>,
     /// The verified pure-FLOPS groups that produced `component_masses`, when
     /// this report used the production architecture. Keeping the grouped
     /// evaluation on the report lets the item-level ledger consume the same
     /// result instead of re-running or relabelling a lumped approximation.
     pub flops_mass_buildup: Option<Box<FlopsMassBuildup>>,
     /// Centroid positions by component name, in meters `[x, y, z]`.
-    pub mass_coordinates: HashMap<String, [f64; 3]>,
+    pub mass_coordinates: BTreeMap<String, [f64; 3]>,
     /// Global mass-weighted center of gravity `[x, y, z]`, in meters.
     pub physical_cg: [f64; 3],
     /// Detailed cabin and cargo payload layout, if successfully constructed.
@@ -279,9 +279,9 @@ use polar_point::design_point_nearest;
 pub mod cabin_sync;
 
 mod design_point;
-mod payload_limit;
+use alas_opt::mdo::payload_limit;
 mod payload_pass;
-mod route_payload_cap;
+use alas_opt::mdo::route_payload_cap;
 mod run;
 mod takeoff_loading;
 #[cfg(test)]

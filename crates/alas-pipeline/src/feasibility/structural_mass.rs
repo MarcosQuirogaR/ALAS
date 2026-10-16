@@ -4,7 +4,7 @@
 //! Structural-mass limits: the payload cap and a registered aircraft's
 //! published maximum zero-fuel mass.
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 use alas_config::{presets, AlasConfig, DesignVector, MassArchitecture};
 use alas_mass::breakdown::{OEW_KEYS, PAYLOAD};
@@ -79,7 +79,7 @@ impl OperatingEmptyMassReconciliation {
 /// Returns `None` when either figure is unavailable or non-finite: a missing
 /// datum stays missing rather than defaulting to the other one.
 pub(super) fn modeled_operating_empty_mass(
-    component_masses: &HashMap<String, f64>,
+    component_masses: &BTreeMap<String, f64>,
     zero_fuel_mass_kg: f64,
     payload_kg: Option<f64>,
     architecture: MassArchitecture,
@@ -163,7 +163,7 @@ pub(super) fn append_structural_mass_findings(
     let Ok(preset) = presets::get(&config.preset) else {
         return;
     };
-    if *design != preset.design_vector {
+    if !design.same_geometry(&preset.design_vector) {
         return;
     }
     let Some(mzfw_kg) = preset.reference.mzfw_kg else {
@@ -270,7 +270,7 @@ mod tests {
     /// (`preset-validation-harness/baseline/preset_acceptance_matrix.json`,
     /// `ATR72-600.model_audit.mass_balance.component_masses_kg`). They sum to
     /// the 15,257 kg the matrix table prints in its OEW column.
-    fn atr72_600_baseline_components() -> HashMap<String, f64> {
+    fn atr72_600_baseline_components() -> BTreeMap<String, f64> {
         [
             (WING, 2_220.105_546_708_234_7),
             (H_STAB, 264.888_687_638_446_87),
@@ -289,7 +289,7 @@ mod tests {
     /// The reconciliation under the production architecture, which is what
     /// the acceptance baseline ran.
     fn reconcile(
-        component_masses: &HashMap<String, f64>,
+        component_masses: &BTreeMap<String, f64>,
         zero_fuel_mass_kg: f64,
         payload_kg: Option<f64>,
     ) -> Option<OperatingEmptyMassReconciliation> {

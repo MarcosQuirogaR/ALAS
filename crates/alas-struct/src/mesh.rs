@@ -38,6 +38,7 @@ mod cards;
 mod elements;
 mod fuel;
 mod health;
+mod load_introduction;
 mod mass;
 mod nodes;
 mod product_caps;
@@ -50,6 +51,7 @@ pub use cards::{
     Cbar, Conm2, Deck, Grid, Mat1, Param, ParamValue, Pbarl, Pshell, Rbe3, Shell, Spc1,
 };
 pub use fuel::{add_distributed_fuel_mass, FuelMassError};
+pub use load_introduction::{assessed_peak, LOAD_INTRODUCTION_LAYERS, MIN_ASSESSED_SHARE};
 
 /// The shell warping coefficient above which a panel is reported as badly
 /// non-planar: `WARPING_THRESHOLD`.
@@ -186,6 +188,10 @@ pub enum MeshError {
         /// How many non-finite reals the deck carries in total.
         count: usize,
     },
+    /// The front spar line has no nodes, so the root, kink and tip node ids
+    /// the loads and results index on do not exist.
+    #[error("the front spar line is empty: no wing root, kink or tip node to report")]
+    EmptySparLine,
 }
 
 /// Whether the rib at position `pos` in the main skin-rib list gets

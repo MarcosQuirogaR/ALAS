@@ -38,6 +38,23 @@ fn display_name(spec: &alas_config::DesignVariableSpec) -> String {
         .join(" ")
 }
 
+/// The variables of the comma-separated fixed list under their display names,
+/// so the raw identifiers of the text field have a readable, translated
+/// reading beside them. An unknown identifier is kept as typed.
+fn fixed_variables_caption(list: &str) -> String {
+    list.split(',')
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(|name| {
+            DESIGN_VARIABLE_SPECS
+                .iter()
+                .find(|spec| spec.name == name)
+                .map_or_else(|| name.to_owned(), |spec| tr(&display_name(spec)))
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 /// Render the Design Space page.
 pub fn show_design_space_view(state: &mut AppState, ui: &mut Ui) {
     ui.heading(tr("Design Space")).on_hover_text(tr(
@@ -63,7 +80,7 @@ pub fn show_design_space_view(state: &mut AppState, ui: &mut Ui) {
             });
             ui.add_space(8.0);
             // Read after the mode card, whose edits change the envelope.
-            let config = state.typed_config().unwrap_or_default();
+            let config = state.typed_config_arc().unwrap_or_default();
             let nominal = state.current_design().unwrap_or_default();
             let envelopes = config.design_envelope(&nominal);
             show_design_constraints(state, ui);
@@ -165,6 +182,22 @@ fn show_design_mode_settings(state: &mut AppState, ui: &mut Ui, mode: DesignMode
         .entry("design_space".to_owned())
         .or_insert_with(|| serde_json::json!({}));
     let edits = dynamic_form(ui, &fields, values, &error_fields, lang, false);
+    if mode == DesignMode::ReferenceAdaptation {
+        let list = values
+            .get("reference_fixed_variables")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default();
+        if !list.trim().is_empty() {
+            ui.label(
+                RichText::new(crate::views::tr_fields(
+                    "Fixed variables: {names}",
+                    &[("names", fixed_variables_caption(list))],
+                ))
+                .small()
+                .weak(),
+            );
+        }
+    }
     if !edits.is_empty() {
         // Changing a window or the clean-sheet cabin-sizing policy changes the
         // declared envelope. Rebuild run bounds from that same source.
@@ -361,6 +394,14 @@ mod tests {
         assert_eq!(sweep.unit, "deg");
         assert_eq!(display_name(tail), "Tail Scale");
         assert_eq!(tail.unit, "-");
+    }
+
+    #[test]
+    fn the_fixed_variable_list_has_a_readable_caption() {
+        assert_eq!(
+            super::fixed_variables_caption("fuselage_length_m, tail_scale, nonsense"),
+            "Fuselage Length, Tail Scale, nonsense"
+        );
     }
 
     #[test]

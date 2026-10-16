@@ -3,16 +3,16 @@
 
 //! Recording evaluated design candidates and tracking convergence diagnostics.
 
-use std::collections::HashMap;
-
 use alas_config::design_variables::DesignVector;
 use serde::{Deserialize, Serialize};
 
 /// Records the trajectory of evaluated designs during an optimization run.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct OptimizationHistory {
-    /// Evaluated design vectors in evaluation order.
-    pub design_vectors: Vec<DesignVector>,
+    /// Evaluated design vectors in evaluation order. `None` marks a row whose
+    /// candidate never parsed into a design (wrong-length vector), serialized
+    /// as `null`; plain objects from older files still deserialize as `Some`.
+    pub design_vectors: Vec<Option<DesignVector>>,
     /// Whether each candidate passed the active optimizer validity policy.
     ///
     /// In unconstrained product searches, a completed finite-aero evaluation
@@ -70,7 +70,7 @@ impl OptimizationHistory {
     #[allow(clippy::too_many_arguments)] // one positional field per history vector it appends to
     pub fn record(
         &mut self,
-        dv: DesignVector,
+        dv: impl Into<Option<DesignVector>>,
         valid: bool,
         cost: f64,
         ld: f64,
@@ -80,7 +80,7 @@ impl OptimizationHistory {
         trim_ih: f64,
         reason: impl Into<String>,
     ) {
-        self.design_vectors.push(dv);
+        self.design_vectors.push(dv.into());
         self.valid.push(valid);
         self.cost.push(cost);
         self.l_over_d.push(ld);
@@ -120,7 +120,7 @@ impl OptimizationHistory {
     #[allow(clippy::too_many_arguments)] // mirrors `record`'s own arity plus the five mission-sized fields
     pub fn record_mission_sized(
         &mut self,
-        dv: DesignVector,
+        dv: impl Into<Option<DesignVector>>,
         valid: bool,
         cost: f64,
         ld: f64,
@@ -186,24 +186,6 @@ impl OptimizationHistory {
     pub fn n_valid(&self) -> usize {
         self.valid.iter().filter(|&&v| v).count()
     }
-
-    /// Counts occurrences of each individual rejection reason.
-    ///
-    /// Compound reasons separated by `+` are split into individual category counts.
-    pub fn reject_reason_counts(&self) -> HashMap<String, usize> {
-        let mut counts: HashMap<String, usize> = HashMap::new();
-        for compound in &self.reject_reason {
-            if compound.is_empty() {
-                continue;
-            }
-            for reason in compound.split('+') {
-                if !reason.is_empty() {
-                    *counts.entry(reason.to_owned()).or_insert(0) += 1;
-                }
-            }
-        }
-        counts
-    }
 }
 
 #[cfg(test)]
@@ -252,6 +234,32 @@ mod tests {
         assert!(history.block_fuel_kg[0].is_nan());
         assert_eq!(history.hard_violation[0], 0.0);
         assert_eq!(history.soft_violation[0], 0.0);
+    }
+
+    #[test]
+    fn a_row_without_a_design_serializes_as_null_and_old_files_still_read() {
+        let mut history = OptimizationHistory::new();
+        history.record(None, false, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, "geometry_build");
+        history.record(
+            DesignVector::default(),
+            true,
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            "",
+        );
+        let json = serde_json::to_value(&history).expect("history serializes");
+        assert!(json["design_vectors"][0].is_null());
+        assert!(json["design_vectors"][1].is_object());
+        // A file written before the field became optional holds plain objects.
+        // (The NaN mission-sized sentinels also serialize as null, so only the
+        // design column is read back here.)
+        let back: Vec<Option<DesignVector>> =
+            serde_json::from_value(json["design_vectors"].clone()).expect("designs read");
+        assert_eq!(back, vec![None, Some(DesignVector::default())]);
     }
 
     #[test]

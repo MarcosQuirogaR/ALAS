@@ -13,77 +13,120 @@ pub(crate) struct MassTerm {
     pub(crate) x_m: f64,
 }
 
+/// Penetration depth, in metres, below which two axis-aligned envelopes count
+/// as touching rather than overlapping. It absorbs float round-off from
+/// sequentially packed layouts with zero gap (about 1e-16 m) and is far below
+/// any physical clearance.
+const OVERLAP_TOLERANCE_M: f64 = 1.0e-9;
+
+/// Axis-aligned envelope of an installed component, in body axes.
+struct Envelope {
+    id: String,
+    center: [f64; 3],
+    half: [f64; 3],
+}
+
 pub(crate) fn check_packaging(design: &UavDesign, findings: &mut Vec<Finding>) {
-    check_envelope(
+    let bay = design.airframe.equipment_bay;
+    let mut envelopes: Vec<Envelope> = Vec::new();
+    envelopes.extend(check_envelope(
         &design.battery.id,
         design.battery.spec.dimensions,
         design.battery.placement,
-        design.airframe.equipment_bay,
+        bay,
         findings,
-    );
+    ));
     for (motor, esc, _) in design.propulsors() {
-        check_envelope(
+        envelopes.extend(check_envelope(
             &motor.id,
             motor.spec.dimensions,
             motor.placement,
-            design.airframe.equipment_bay,
+            bay,
             findings,
-        );
-        check_envelope(
+        ));
+        envelopes.extend(check_envelope(
             &esc.id,
             esc.spec.dimensions,
             esc.placement,
-            design.airframe.equipment_bay,
+            bay,
             findings,
-        );
+        ));
     }
     for servo in &design.servos {
-        check_envelope(
+        envelopes.extend(check_envelope(
             &servo.id,
             servo.spec.dimensions,
             servo.placement,
-            design.airframe.equipment_bay,
+            bay,
             findings,
-        );
+        ));
     }
     for item in &design.other_items {
-        check_envelope(
+        envelopes.extend(check_envelope(
             &item.id,
             item.dimensions,
             item.placement,
-            design.airframe.equipment_bay,
+            bay,
             findings,
-        );
+        ));
+    }
+    check_pairwise_overlap(&envelopes, findings);
+}
+
+/// Report every pair of in-bay components whose envelopes interpenetrate on
+/// all three axes by more than [`OVERLAP_TOLERANCE_M`]. Touching faces pass.
+fn check_pairwise_overlap(envelopes: &[Envelope], findings: &mut Vec<Finding>) {
+    for (index, first) in envelopes.iter().enumerate() {
+        for second in &envelopes[index + 1..] {
+            let overlaps = (0..3).all(|axis| {
+                let reach = first.half[axis] + second.half[axis];
+                let separation = (first.center[axis] - second.center[axis]).abs();
+                reach - separation > OVERLAP_TOLERANCE_M
+            });
+            if overlaps {
+                findings.push(failure(
+                    FindingKind::PackagingViolation,
+                    format!("{} and {}", first.id, second.id),
+                    "axis-aligned component envelopes overlap inside the equipment bay".to_owned(),
+                    None,
+                    None,
+                    None,
+                ));
+            }
+        }
     }
 }
 
+/// Check one component against the bay. Returns its envelope when it is an
+/// in-bay component with a finite placement and positive dimensions, so the
+/// caller can test it against the other components.
 fn check_envelope(
     id: &str,
     dimensions: Option<Dimensions>,
     placement: Placement,
     bay: EquipmentBay,
     findings: &mut Vec<Finding>,
-) {
+) -> Option<Envelope> {
     if !placement.inside_equipment_bay {
-        return;
+        return None;
     }
     if !placement.center_x_m.is_finite()
         || !placement.center_y_m.is_finite()
         || !placement.center_z_m.is_finite()
     {
         findings.push(invalid(id, placement.center_x_m));
-        return;
+        return None;
     }
     let Some(dimensions) = dimensions else {
         missing(id, "dimensions required for packaging", findings);
-        return;
+        return None;
     };
     if !positive(dimensions.length_m)
         || !positive(dimensions.width_m)
         || !positive(dimensions.height_m)
     {
         findings.push(invalid(&format!("{id} dimensions"), dimensions.length_m));
-        return;
+        return None;
     }
     let half_x = dimensions.length_m / 2.0;
     let half_y = dimensions.width_m / 2.0;
@@ -104,6 +147,15 @@ fn check_envelope(
             None,
         ));
     }
+    Some(Envelope {
+        id: id.to_owned(),
+        center: [
+            placement.center_x_m,
+            placement.center_y_m,
+            placement.center_z_m,
+        ],
+        half: [half_x, half_y, half_z],
+    })
 }
 
 pub(crate) fn collect_mass_terms(

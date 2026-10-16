@@ -51,6 +51,27 @@ impl AircraftBuilder {
     }
 }
 
+/// Subdivisions of each station interval when a lofted body's top is queried
+/// from the exact crown instead of the station polyline.
+const LOFT_TOP_SUBDIVISIONS: usize = 4;
+
+/// The exact crown of a lofted body at its stations and at
+/// [`LOFT_TOP_SUBDIVISIONS`] points inside every interval.
+fn lofted_top(loft: &crate::loft::Loft, body: &Fuselage) -> Vec<[f64; 2]> {
+    let mut top = Vec::new();
+    for pair in body.xsecs.windows(2) {
+        let (x0, x1) = (pair[0].xyz_c[0], pair[1].xyz_c[0]);
+        for i in 0..LOFT_TOP_SUBDIVISIONS {
+            let x = x0 + (x1 - x0) * i as f64 / LOFT_TOP_SUBDIVISIONS as f64;
+            top.push([x, loft.crown_z(x)]);
+        }
+    }
+    if let Some(last) = body.xsecs.last() {
+        top.push([last.xyz_c[0], loft.crown_z(last.xyz_c[0])]);
+    }
+    top
+}
+
 /// The tops of the bodies on the plane of symmetry a fin can stand on.
 pub(super) struct FinSeat {
     /// One `(x, z_top)` polyline per body, nose to tail.
@@ -63,6 +84,9 @@ impl FinSeat {
         let tops = bodies
             .into_iter()
             .map(|body| {
+                if let Some(loft) = &body.loft {
+                    return lofted_top(loft, body);
+                }
                 body.xsecs
                     .iter()
                     .map(|xsec| [xsec.xyz_c[0], xsec.xyz_c[2] + xsec.height / 2.0])

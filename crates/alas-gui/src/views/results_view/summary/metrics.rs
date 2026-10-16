@@ -17,7 +17,7 @@ pub(super) fn static_margin_rows(
     baseline: Option<f64>,
     optimized: Option<f64>,
 ) -> Vec<(&'static str, String)> {
-    let margin = |value: f64| format!("{:.1} % MAC", value * 100.0);
+    let margin = |value: f64| super::super::format_pct_mac(value * 100.0);
     vec![
         (
             "Static margin (baseline)",
@@ -163,17 +163,22 @@ pub(super) fn fuel_margin_rows(
     }
 }
 
-/// The MTOW band edges, shown only for the band mode and only when the
-/// report is a sized closure: an unsized report has no closed mass to compare
-/// with the band.
+/// The MTOW band edges and the mass the search chose in them, shown only for
+/// the band mode. `chosen_kg` is the takeoff-mass limit the report was
+/// evaluated at (`requirements.mtow_kg` of the delivered configuration).
 pub(super) fn mtow_band_row(
     plan: &alas_config::MtowPlan,
-    sized: bool,
+    chosen_kg: f64,
 ) -> Option<(&'static str, String)> {
-    match (plan.mode, plan.lower_bound_kg, plan.upper_bound_kg) {
-        (alas_config::MtowSizing::MtowBand, Some(lower_kg), Some(upper_kg)) if sized => Some((
+    match (plan.mode, plan.band_edges_kg) {
+        (alas_config::MtowSizing::MtowBand, Some((lower_kg, upper_kg))) => Some((
             "MTOW band (lower to upper edge)",
-            format!("{:.1} to {:.1} t", lower_kg / 1_000.0, upper_kg / 1_000.0),
+            format!(
+                "{:.1} to {:.1} t, chosen {:.1} t",
+                lower_kg / 1_000.0,
+                upper_kg / 1_000.0,
+                chosen_kg / 1_000.0
+            ),
         )),
         _ => None,
     }
@@ -191,9 +196,10 @@ pub(super) fn mass_metrics(result: &alas_pipeline::PipelineResult) -> Vec<(&'sta
             metrics.extend(takeoff_mass_rows(oew_kg, tow_kg, mtow_kg));
         }
     }
-    let sized =
-        selected_analysis(result).is_some_and(|report| report.sized_takeoff_mass_kg().is_some());
-    metrics.extend(mtow_band_row(&result.config.mtow_plan(), sized));
+    metrics.extend(mtow_band_row(
+        &result.config.mtow_plan(),
+        result.config.requirements.mtow_kg,
+    ));
     metrics.push((
         "Takeoff mass margin",
         takeoff_mass_margin(fuel.mtow_shortfall_kg),
@@ -303,7 +309,7 @@ pub(super) fn selected_analysis(result: &alas_pipeline::PipelineResult) -> Optio
 }
 
 pub(super) fn mass_triplet_kg(
-    component_masses: &std::collections::HashMap<String, f64>,
+    component_masses: &std::collections::BTreeMap<String, f64>,
     tow_kg: f64,
     mtow_kg: f64,
 ) -> Option<(f64, f64, f64)> {
@@ -346,6 +352,29 @@ pub(super) fn tonnes(value_t: f64) -> String {
 }
 
 /// One labelled row per value; no slash-joined composites.
+/// Name the freight positions of a declared freight hold (the A400M's 463L
+/// master pallets) as pallets instead of airliner ULDs. The counts are the
+/// same quantities; only the container name differs, and a hold has no lower
+/// deck to count.
+pub(super) fn freight_hold_labels(
+    metrics: Vec<(&'static str, String)>,
+) -> Vec<(&'static str, String)> {
+    metrics
+        .into_iter()
+        .filter(|(label, _)| *label != "Lower deck ULDs")
+        .map(|(label, value)| {
+            let label = match label {
+                "ULD tare" => "Pallet tare",
+                "ULDs loaded" => "463L pallets loaded",
+                "ULD positions" => "463L pallet positions",
+                "Main deck ULDs" => "Main deck 463L pallets",
+                other => other,
+            };
+            (label, value)
+        })
+        .collect()
+}
+
 pub(super) fn payload_summary_metrics(layout: &PayloadLayout) -> Vec<(&'static str, String)> {
     match &layout.summary {
         LayoutSummary::Passenger(summary) => {
@@ -388,7 +417,7 @@ pub(super) fn payload_summary_metrics(layout: &PayloadLayout) -> Vec<(&'static s
                     "Wheelchair stowages",
                     summary.wheelchair_stowages.to_string(),
                 ),
-                ("Payload CG", format!("{:.1}% MAC", summary.cg_pct_mac)),
+                ("Payload CG", format_cg_pct_mac(summary.cg_pct_mac)),
             ]
         }
         LayoutSummary::Cargo(summary) => vec![
@@ -406,10 +435,7 @@ pub(super) fn payload_summary_metrics(layout: &PayloadLayout) -> Vec<(&'static s
             ("Cargo volume", format!("{:.1} m\u{b3}", summary.volume_m3)),
             ("Main deck ULDs", summary.n_main_deck.to_string()),
             ("Lower deck ULDs", summary.n_lower_deck.to_string()),
-            (
-                "Payload CG",
-                format!("{:.1}% MAC", summary.achieved_cg_pct_mac),
-            ),
+            ("Payload CG", format_cg_pct_mac(summary.achieved_cg_pct_mac)),
             ("Loading strategy", tr(&summary.strategy)),
         ],
     }

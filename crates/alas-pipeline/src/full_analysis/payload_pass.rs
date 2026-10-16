@@ -25,12 +25,7 @@ use alas_mass::breakdown::{MassBreakdown, MassCoordinates, PayloadLayoutSummary}
 
 use super::*;
 
-/// Layouts the product pass may build before it keeps the last one: the
-/// seed-cabin layout, the layout on the synchronized cabin's empty mass, and
-/// two more for a cabin whose seated count moves once more with the empty
-/// mass. A seated count is an integer, so a non-oscillating cabin settles in
-/// a few layouts; the bound only stops a pathological two-cycle.
-const MAX_PAYLOAD_LAYOUTS: usize = 4;
+use alas_opt::mdo::cabin_sync::MAX_PAYLOAD_LAYOUTS;
 
 /// The payload layout and the mass buildup priced on it.
 pub(super) struct PayloadPass {

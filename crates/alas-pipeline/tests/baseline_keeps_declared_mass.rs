@@ -115,7 +115,12 @@ fn baseline_pipeline_run_keeps_the_declared_mtow() {
             );
             // The sizing mode is an optimizer setting: the baseline reports
             // are identical, digit for digit, under every mode.
-            let reports = (result.baseline_analysis, result.optimized_report);
+            let mut reports = (result.baseline_analysis, result.optimized_report);
+            // The band mode records the takeoff mass it evaluated at (the target
+            // here) on the design vector; that label is the only difference.
+            for report in [&mut reports.0, &mut reports.1].into_iter().flatten() {
+                report.design.mtow_kg = None;
+            }
             match &reference {
                 Some(first) => assert!(first == &reports, "{what}: report differs by mode"),
                 None => reference = Some(reports),

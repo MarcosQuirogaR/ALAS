@@ -21,6 +21,10 @@ pub enum MainWingStationKind {
     Kink,
     /// Wingtip.
     Tip,
+    /// Start of a swept-back tip rake, between the kink and the tip. It is
+    /// not part of [`TransportPlanform::stations`]; see
+    /// [`TransportPlanform::tip_rake`].
+    TipRake,
 }
 
 /// One planform station, measured on the right semispan.
@@ -84,6 +88,14 @@ pub struct TransportPlanform {
     pub kink: MainWingStation,
     /// Wingtip station.
     pub tip: MainWingStation,
+    /// Optional start of a swept-back tip rake: the leading edge follows the
+    /// straight design sweep to here and sweeps further aft outboard of it,
+    /// while the trailing edge stays one straight line from the kink to the
+    /// tip. Present only when the wing declares a rake; kept out of
+    /// [`Self::stations`], which lists the defining stations, and included by
+    /// [`Self::reference_area_m2`], [`Self::panels`] and
+    /// [`Self::leading_edge_x_at`].
+    pub tip_rake: Option<MainWingStation>,
     /// Inboard leading-edge sweep set by the design vector.
     pub inboard_le_sweep_deg: f64,
     /// Outboard leading-edge sweep. Product transport planforms keep this
@@ -169,13 +181,24 @@ impl TransportPlanform {
         stations
     }
 
+    /// Defining stations plus the optional tip-rake station, centreline to tip.
+    pub fn stations_with_rake(&self) -> Vec<MainWingStation> {
+        let mut stations = self.stations();
+        if let Some(rake) = self.tip_rake {
+            let tip = stations.pop();
+            stations.push(rake);
+            stations.extend(tip);
+        }
+        stations
+    }
+
     /// Projected (XY) reference area of both semispans, m^2: the straight
     /// trapezoidal panels between the stations, `2 sum (c_i + c_o)/2 (y_o -
     /// y_i)`. The geometry builder lofts these panels with chord linear in
     /// span, so this is the main wing's `s_ref` before any non-planar tip
     /// device.
     pub fn reference_area_m2(&self) -> f64 {
-        self.stations()
+        self.stations_with_rake()
             .windows(2)
             .map(|pair| (pair[0].chord_m + pair[1].chord_m) * (pair[1].y_m - pair[0].y_m))
             .sum()
@@ -183,7 +206,7 @@ impl TransportPlanform {
 
     /// Return every straight panel, including the optional side-of-body panel.
     pub fn panels(&self) -> Vec<MainWingPanel> {
-        let stations = self.stations();
+        let stations = self.stations_with_rake();
         stations
             .windows(2)
             .map(|pair| MainWingPanel::from_stations(pair[0], pair[1]))
@@ -209,7 +232,7 @@ impl TransportPlanform {
             });
         }
         let y = spanwise_position_m.abs();
-        let stations = self.stations();
+        let stations = self.stations_with_rake();
         let tip_y_m = self.tip.y_m;
         if y > tip_y_m {
             return Err(TransportPlanformError::SpanwisePositionOutsidePlanform {

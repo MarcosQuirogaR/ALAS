@@ -477,7 +477,7 @@ mod tests {
         let mut objective = Resizing(OptimizationHistory::new());
         let result = search(config, &bounds, &mut objective, ScreeningModel::Same);
         let history = &result.history;
-        assert!(!history.design_vectors.contains(&result.best_design));
+        assert!(!history.design_vectors.contains(&Some(result.best_design)));
         let diagnostics = diagnostics_of(&result);
         let comparison = diagnostics.baseline.as_ref().expect("baseline evaluated");
         assert_eq!(
@@ -494,11 +494,15 @@ mod tests {
         // The ladder offers the winner once, not again as its own row.
         let row = diagnostics.winner_history_row.expect("winner row");
         assert_eq!(
-            history.design_vectors[row].span_m,
+            history.design_vectors[row]
+                .expect("winner row has a design")
+                .span_m,
             result.best_design.span_m
         );
         let ladder = result.ranked_hard_feasible_candidates(4);
-        assert!(!ladder[1..].contains(&history.design_vectors[row]));
+        assert!(
+            !ladder[1..].contains(&history.design_vectors[row].expect("winner row has a design"))
+        );
     }
 
     #[test]
@@ -659,6 +663,7 @@ mod tests {
         let mut config = AlasConfig::default();
         config.optimizer.solver.seed = Some(11);
         config.optimizer.solver.screening.max_evaluations = 2_000;
+        config.optimizer.solver.stop_on_evaluations_only = false;
         config.optimizer.solver.screening.time_limit_s = 0.1;
         config.optimizer.solver.refinement.max_evaluations = 2_000;
         config.optimizer.solver.refinement.time_limit_s = 0.4;
@@ -702,6 +707,48 @@ mod tests {
             };
             assert_eq!(counts(replayed_stages), counts(stages), "{workers} workers");
         }
+    }
+
+    #[test]
+    fn the_default_settings_reproduce_the_same_search_at_one_and_many_workers() {
+        // Audit SIZ-06/SIZ-07 (decision D6): with no seed or stop rule
+        // configured, the search is seeded with `DEFAULT_SEED` and stops on
+        // its evaluation budgets, so every run and every worker count give
+        // one result. Only the budgets are shrunk, for a tiny problem.
+        let mut config = AlasConfig::default();
+        let solver = &mut config.optimizer.solver;
+        assert_eq!(solver.seed, Some(alas_config::DEFAULT_SEED));
+        assert!(solver.stop_on_evaluations_only);
+        solver.screening.max_evaluations = 24;
+        solver.refinement.max_evaluations = 48;
+        // A tiny time limit that would end the run early if it were read.
+        solver.screening.time_limit_s = 1.0e-3;
+        solver.refinement.time_limit_s = 1.0e-3;
+        let first = timed_run(&config, 1, 1.0);
+        let counts = |result: &OptimizationResult| -> Vec<(usize, String)> {
+            diagnostics_of(result)
+                .stages
+                .iter()
+                .map(|stage| (stage.evaluations, stage.termination.to_string()))
+                .collect()
+        };
+        for stage in &diagnostics_of(&first).stages {
+            assert!(!stage.time_limited, "{}", stage.stage);
+            assert_ne!(stage.termination, "time_budget", "{}", stage.stage);
+        }
+        assert_eq!(
+            diagnostics_of(&first).seed,
+            Some(alas_config::DEFAULT_SEED as u64)
+        );
+        for workers in [1, 4] {
+            let again = timed_run(&config, workers, 1.0);
+            assert_eq!(bits(&again), bits(&first), "{workers} workers");
+            assert_eq!(counts(&again), counts(&first), "{workers} workers");
+        }
+        // A different seed is a different search (the seed is read).
+        let mut other = config.clone();
+        other.optimizer.solver.seed = Some(alas_config::DEFAULT_SEED + 1);
+        assert_ne!(bits(&timed_run(&other, 1, 1.0)), bits(&first));
     }
 
     /// A run with a 2 ms screening model and an 8 ms refinement model.
@@ -777,6 +824,7 @@ mod tests {
         let solver = &mut config.optimizer.solver;
         solver.seed = Some(11);
         solver.workers = 1;
+        solver.stop_on_evaluations_only = false;
         solver.screening.max_evaluations = 64;
         solver.refinement.max_evaluations = 1_200;
         solver.refinement.time_limit_s = 0.1;
@@ -820,6 +868,10 @@ mod tests {
         // One lane: the plan follows the refinement's 125 analyses per
         // second, not the screening's 500.
         let mut config = AlasConfig::default();
+        // The wall-clock search: its 20 000-evaluation ceilings are far
+        // above what the short limits afford, so the plan, not the ceiling,
+        // sets the budget.
+        config.optimizer.solver = alas_config::SolverSettings::interactive();
         config.optimizer.solver.seed = Some(3);
         config.optimizer.solver.screening.time_limit_s = 0.2;
         config.optimizer.solver.refinement.time_limit_s = 4.0;
@@ -838,7 +890,10 @@ mod tests {
             "{planned} vs {screening_rate}"
         );
         // The piloted seeds lead the refinement history, the baseline first.
-        assert_eq!(result.history.design_vectors[0], DesignVector::default());
+        assert_eq!(
+            result.history.design_vectors[0],
+            Some(DesignVector::default())
+        );
         // The replay count and the planned budget reproduce the run, pilot
         // included, at any worker count.
         let replay = replay_of(&config, stages);
@@ -849,7 +904,7 @@ mod tests {
     }
 
     /// Every analysed and requested design, its exact cost and the winner.
-    fn bits(result: &OptimizationResult) -> (Vec<DesignVector>, Vec<u64>, DesignVector) {
+    fn bits(result: &OptimizationResult) -> (Vec<Option<DesignVector>>, Vec<u64>, DesignVector) {
         let costs = result
             .history
             .cost
@@ -995,6 +1050,7 @@ mod tests {
         let mut config = AlasConfig::default();
         config.optimizer.solver.seed = Some(13);
         config.optimizer.solver.screening.time_limit_s = 0.1;
+        config.optimizer.solver.stop_on_evaluations_only = false;
         config.optimizer.solver.refinement.time_limit_s = 0.3;
         config.optimizer.solver.convergence_stagnation_generations = 1_000_000;
         let limited = infeasible_run(&config, 1);

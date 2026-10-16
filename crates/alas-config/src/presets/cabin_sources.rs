@@ -204,3 +204,14 @@ pub fn atr72_600_baggage_holds() -> Vec<crate::HoldCompartmentConfig> {
         })
         .collect()
 }
+
+/// Seed the declared freight hold of a military transport or freighter into
+/// its cabin configuration: the payload is then loaded on 463L pallets along
+/// the hold floor and ramp, and there is no underfloor hold. Every passenger
+/// aircraft keeps the airliner cargo configuration.
+pub(super) fn seed_freight_hold(name: &str, cabin: &mut crate::CabinConfig) {
+    if name == "A400M" {
+        cabin.cargo.freight_hold = Some(super::military::A400M_FREIGHT_HOLD);
+        cabin.cargo.main_deck_uld = "463L".to_owned();
+    }
+}

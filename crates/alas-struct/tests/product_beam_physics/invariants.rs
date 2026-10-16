@@ -64,8 +64,14 @@ pub(super) fn assert_material_volumes(
             cap_volume += 0.5
                 * (spar.a_cap[station] + spar.a_cap[station + 1])
                 * (upper_length + lower_length);
-            web_volume +=
-                0.5 * (spar.h[station] + spar.h[station + 1]) * spar.t_web * middle_length;
+            // The lower-cover fatigue area is carried by the lower flange only.
+            cap_volume += 0.5
+                * (spar.lower_extra_area[station] + spar.lower_extra_area[station + 1])
+                * lower_length;
+            web_volume += 0.5
+                * (spar.h[station] * spar.t_web[station]
+                    + spar.h[station + 1] * spar.t_web[station + 1])
+                * middle_length;
         }
     }
     assert_roundoff_equal(
@@ -243,7 +249,8 @@ fn tip_point_load_recovers_closed_form_deflection_and_exact_refinement_error() {
             spar.w_cap = vec![width; count];
             spar.t_cap = vec![thickness; count];
             spar.a_cap = vec![cap_area; count];
-            spar.t_web = web_thickness;
+            spar.t_web = vec![web_thickness; count];
+            spar.lower_extra_area = vec![0.0; count];
             spar.frac_moment = vec![0.5; count];
             spar.margin_of_safety = vec![0.0; count];
         }
