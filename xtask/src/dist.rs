@@ -602,7 +602,6 @@ fn source_path_allowed(path: &str) -> bool {
         || SOURCE_EMBEDDED_ASSET_FILES
             .iter()
             .any(|candidate| *candidate == normalized)
-        || normalized == "assets/textures/earth_blue_marble.png"
         || SOURCE_GOLDEN_FIXTURE_FILES
             .iter()
             .any(|candidate| *candidate == normalized)
@@ -721,7 +720,7 @@ fn write_source_manifest(source_root: &Path, snapshot: &SourceSnapshot) -> Resul
         "  \"allowed_embedded_asset_files\": {},\n",
         json_string_array(&SOURCE_EMBEDDED_ASSET_FILES)
     ));
-    json.push_str("  \"allowed_asset_files\": [\"assets/textures/earth_blue_marble.png\"],\n");
+    json.push_str("  \"allowed_asset_files\": [],\n");
     json.push_str(&format!(
         "  \"allowed_data_directory_prefixes\": {},\n",
         json_string_array(&SOURCE_DATA_DIRECTORY_PREFIXES)

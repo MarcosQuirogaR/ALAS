@@ -286,7 +286,10 @@ fn render_image(svg: &mut String, data: &Value) -> Result<(), String> {
     let y = field_number(data, "y")?;
     let width = field_number(data, "width")?;
     let height = field_number(data, "height")?;
-    let href = image_href(source);
+    let Some(href) = image_href(source) else {
+        // No Earth texture configured (ALAS_EARTH_TEXTURE): keep the plain background.
+        return Ok(());
+    };
 
     let source_rect = match data.get("source_rect") {
         None | Some(Value::Null) => None,
@@ -322,12 +325,12 @@ fn render_image(svg: &mut String, data: &Value) -> Result<(), String> {
     Ok(())
 }
 
-fn image_href(source: &str) -> String {
+fn image_href(source: &str) -> Option<String> {
     if source == "embedded://nasa-blue-marble" {
-        let bytes = include_bytes!("../../../assets/textures/earth_blue_marble.png");
-        return format!("data:image/png;base64,{}", encode_base64(bytes));
+        let bytes = crate::earth_texture::earth_texture_png()?;
+        return Some(format!("data:image/png;base64,{}", encode_base64(bytes)));
     }
-    escape_xml(source)
+    Some(escape_xml(source))
 }
 
 fn encode_base64(bytes: &[u8]) -> String {

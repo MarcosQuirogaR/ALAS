@@ -455,7 +455,7 @@ fn registered_hard_mtow_nominals_separate_model_defects_from_physical_findings()
             // tip_back clear. The OEW state alone keeps a 4.6 % nose share
             // against 6 % (OEW CG 46.3 % MAC, no published A400M CG): that
             // estimate-driven finding stays pinned. Probe: gear_probe
-            // before/after, .agent/reports/fix-cg-atr-a400m-2026-10-14.md.
+            // before/after, internal report fix-cg-atr-a400m-2026-10-14.
             "A400M" => &["min_nose_gear_load"],
             _ => panic!("{name}: establish the registered hard-MTOW findings"),
         };

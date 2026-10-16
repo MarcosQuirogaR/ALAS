@@ -329,7 +329,7 @@
     "title": "Boeing 747-400 ACAP D6-58326-1 Rev F (Dec 2024)",
     "page": "2.2.1 General dimensions",
     "sha256": "9dd5baf00f3b9e5fdaa0bdf25425e1e65c9c6ee440d5b5c547956f95ccacef08",
-    "path": "C:\\Proyectos\\ALAS\\.agent\\b747-src\\747-400.pdf"
+    "path": "<fit-workdir>/747-400.pdf"
    },
    "view": "top",
    "px_per_m": 32.20029127082565,
@@ -347,7 +347,7 @@
     "title": "Boeing 747-400 ACAP D6-58326-1 Rev F (Dec 2024)",
     "page": "2.2.1 General dimensions",
     "sha256": "9dd5baf00f3b9e5fdaa0bdf25425e1e65c9c6ee440d5b5c547956f95ccacef08",
-    "path": "C:\\Proyectos\\ALAS\\.agent\\b747-src\\747-400.pdf"
+    "path": "<fit-workdir>/747-400.pdf"
    },
    "view": "side",
    "px_per_m": 32.12112636196406,
@@ -365,7 +365,7 @@
     "title": "Boeing 747-400 ACAP D6-58326-1 Rev F (Dec 2024)",
     "page": "2.2.1 General dimensions",
     "sha256": "9dd5baf00f3b9e5fdaa0bdf25425e1e65c9c6ee440d5b5c547956f95ccacef08",
-    "path": "C:\\Proyectos\\ALAS\\.agent\\b747-src\\747-400.pdf"
+    "path": "<fit-workdir>/747-400.pdf"
    },
    "view": "side",
    "px_per_m": 32.12112636196406,
@@ -383,7 +383,7 @@
     "title": "Boeing 747-400 ACAP D6-58326-1 Rev F (Dec 2024)",
     "page": "2.2.1 General dimensions",
     "sha256": "9dd5baf00f3b9e5fdaa0bdf25425e1e65c9c6ee440d5b5c547956f95ccacef08",
-    "path": "C:\\Proyectos\\ALAS\\.agent\\b747-src\\747-400.pdf"
+    "path": "<fit-workdir>/747-400.pdf"
    },
    "view": "front",
    "px_per_m": 32.12112636196406,
@@ -401,7 +401,7 @@
     "title": "Boeing 747-400 ACAP D6-58326-1 Rev F (Dec 2024)",
     "page": "2.2.1 General dimensions",
     "sha256": "9dd5baf00f3b9e5fdaa0bdf25425e1e65c9c6ee440d5b5c547956f95ccacef08",
-    "path": "C:\\Proyectos\\ALAS\\.agent\\b747-src\\747-400.pdf"
+    "path": "<fit-workdir>/747-400.pdf"
    },
    "view": "side",
    "px_per_m": 32.12112636196406,
@@ -419,7 +419,7 @@
     "title": "Boeing 747-400 ACAP D6-58326-1 Rev F (Dec 2024)",
     "page": "2.2.1 General dimensions",
     "sha256": "9dd5baf00f3b9e5fdaa0bdf25425e1e65c9c6ee440d5b5c547956f95ccacef08",
-    "path": "C:\\Proyectos\\ALAS\\.agent\\b747-src\\747-400.pdf"
+    "path": "<fit-workdir>/747-400.pdf"
    },
    "view": "side",
    "px_per_m": 32.12112636196406,
@@ -437,7 +437,7 @@
     "title": "Boeing 747-400 ACAP D6-58326-1 Rev F (Dec 2024)",
     "page": "2.2.1 General dimensions",
     "sha256": "9dd5baf00f3b9e5fdaa0bdf25425e1e65c9c6ee440d5b5c547956f95ccacef08",
-    "path": "C:\\Proyectos\\ALAS\\.agent\\b747-src\\747-400.pdf"
+    "path": "<fit-workdir>/747-400.pdf"
    },
    "view": "side",
    "px_per_m": 32.12112636196406,
@@ -455,7 +455,7 @@
     "title": "Boeing 747-400 ACAP D6-58326-1 Rev F (Dec 2024)",
     "page": "2.5.1 Cabin Cross-Sections (printed p. 2-28, PDF p. 45)",
     "sha256": "9dd5baf00f3b9e5fdaa0bdf25425e1e65c9c6ee440d5b5c547956f95ccacef08",
-    "path": "C:\\Proyectos\\ALAS-thesis\\library\\boeing_2024_747400acap.pdf"
+    "path": "<fit-workdir>/boeing_2024_747400acap.pdf"
    },
    "view": "section",
    "px_per_m": 239.3846153846154,

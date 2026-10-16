@@ -380,7 +380,7 @@
   "not configured": "sin configurar",
   "invalid directory: {path}": "directorio no válido: {path}",
   "Navigation data and imported route files are kept in locations you choose. They are saved per user and never copied beside the application executable.": "Los datos de navegación y los archivos de ruta importados se guardan en las ubicaciones que elijas. Se guardan por usuario y nunca se copian junto al ejecutable de la aplicación.",
-  "The NASA Blue Marble route texture is bundled inside ALAS as a compressed PNG; it has no user path to configure.": "La textura de ruta NASA Blue Marble está incluida en ALAS como PNG comprimido; no tiene una ruta configurable por el usuario.",
+  "The Earth texture is optional: set ALAS_EARTH_TEXTURE to a local equirectangular PNG, for example a copy of the NASA Blue Marble. Without it, route figures use a plain globe.": "La textura terrestre es opcional: defina ALAS_EARTH_TEXTURE con un PNG equirectangular local, por ejemplo una copia de NASA Blue Marble. Sin ella, las figuras de ruta usan un globo simple.",
   "Choose the directory or executable with the native file picker. The selected location is saved in this user's preferences.": "Elige el directorio o ejecutable con el selector nativo de archivos. La ubicación seleccionada se guarda en las preferencias de este usuario.",
   "Show this exact location in the system file explorer.": "Muestra esta ubicación exacta en el explorador de archivos del sistema.",
   "Cannot open folder: {path} is not an existing directory.": "No se puede abrir la carpeta: {path} no es un directorio existente.",

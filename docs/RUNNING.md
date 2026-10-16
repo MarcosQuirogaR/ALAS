@@ -182,7 +182,7 @@ changes results.
   The shipped `release` profile is unchanged.
 * **`cargo xtask dev-env`** prints the settings above for the shell to
   evaluate, so a fresh shell or worktree needs one line:
-  `cargo xtask dev-env --target-dir <ALAS-checkout>/.agent/target-<lane> | Invoke-Expression`
+  `cargo xtask dev-env --target-dir <target-root>/<lane> | Invoke-Expression`
   (PowerShell; `--shell sh` prints `export` lines instead). It sets
   `CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER=rust-lld` on Windows, optionally
   `CARGO_TARGET_DIR` (use one target directory per lane, reused across that
@@ -252,6 +252,14 @@ a project-completion tracker any more, since orchestration layers such as
 `alas-pipeline` and `alas-gui` were written natively rather than translated.
 
 ---
+
+### Optional Earth texture
+
+Globe and map figures use the plain vector globe and flat map by default. ALAS
+does not ship an Earth raster. To add a texture, set `ALAS_EARTH_TEXTURE` to the
+path of a local equirectangular PNG (2:1, for example a copy of the NASA Blue
+Marble, which is public domain). It is read once per process; if it is unset or
+unreadable, figures render without the texture and a warning is printed.
 
 ## Running the application
 
