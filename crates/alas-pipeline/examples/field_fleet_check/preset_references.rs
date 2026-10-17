@@ -9,9 +9,7 @@ use alas_geom::builder::AircraftBuilder;
 use alas_opt::mdo::propulsion::turboprop_unit_model;
 use alas_perf::performance::compute_v_speeds_at_masses;
 use alas_pipeline::field_performance::report_field_polar;
-use alas_pipeline::field_reference::{
-    isa_sea_level_field_reference, report_isa_sea_level_field_reference,
-};
+use alas_pipeline::field_reference::report_isa_sea_level_field_reference;
 use alas_pipeline::full_analysis::FullAnalysis;
 use alas_prop::turboprop::{Pw127mRating, TurbopropCommand, TurbopropCondition, TurbopropMode};
 use serde_json::{json, Value};
@@ -56,38 +54,26 @@ fn evaluate_preset(name: &str, contract: &Value) -> Result<Value, String> {
             "comparison": "Effective model input reconstruction, not independent speed validation",
         })
     });
-    let (field_result, trace) = if matches!(
+    // Both propulsion types need the built airframe: the CS 25.113 jet field
+    // length uses the candidate drag and the failed-engine trim drag too.
+    let report = FullAnalysis::new(config.clone())
+        .run(&preset.design_vector, true)
+        .map_err(|error| error.to_string())?;
+    let trace = if matches!(
         config.geometry.engine.active_model(),
         Ok(ActiveEngineModel::Turboprop(_))
     ) {
-        let report = FullAnalysis::new(config.clone())
-            .run(&preset.design_vector, true)
-            .map_err(|error| error.to_string())?;
-        let trace = propeller_trace(&config, &report, wing_area, takeoff_mass, landing_mass)?;
-        (
-            report_isa_sea_level_field_reference(
-                &config,
-                &report,
-                wing_area,
-                takeoff_mass,
-                landing_mass,
-            ),
-            trace,
-        )
+        propeller_trace(&config, &report, wing_area, takeoff_mass, landing_mass)?
     } else {
-        // Jet field lengths and Vref are independent of the OEI drag diagnostic.
-        (
-            isa_sea_level_field_reference(
-                &config,
-                wing_area,
-                0.02,
-                0.04,
-                takeoff_mass,
-                landing_mass,
-            ),
-            Value::Null,
-        )
+        Value::Null
     };
+    let field_result = report_isa_sea_level_field_reference(
+        &config,
+        &report,
+        wing_area,
+        takeoff_mass,
+        landing_mass,
+    );
     let field = match field_result {
         Ok(field) => field,
         Err(error) => {

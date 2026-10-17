@@ -58,9 +58,17 @@ pub(super) fn add_transition_rbe3(
     // order two equally distant candidates are offered in.
     let mut skin: Vec<(i64, [f64; 3])> = Vec::new();
     let mut seen: HashSet<i64> = HashSet::new();
-    for &((rib, _, _), nid) in nodes.placements() {
+    for &((rib, point, _), nid) in nodes.placements() {
         if !skin_ribs.contains(&rib) || seen.contains(&nid) {
             continue;
+        }
+        // Boxed deck: only skin inside the spar window exists to tie to.
+        if translations_only {
+            if let Some((front, rear)) = super::boxed::spar_window(&stations[rib]) {
+                if point < front || point > rear {
+                    continue;
+                }
+            }
         }
         let Some(xyz) = deck.grid_xyz(nid) else {
             continue;
@@ -102,7 +110,8 @@ pub(super) fn add_transition_rbe3(
         }
 
         for surface in [Surface::Ext, Surface::Int] {
-            for j in 1..=end.max(0) as usize {
+            let first = super::boxed::boxed_front_start(station, translations_only);
+            for j in first..=end.max(0) as usize {
                 let Some(dependent) = nodes.get((rib, j, surface)) else {
                     continue;
                 };

@@ -85,6 +85,11 @@ pub enum FieldPropulsion<'a> {
 /// 14 CFR 25.113(a), 1.15 applies to the all-engine distance, compared against
 /// the engine-out distance; it is not a universal balanced-field multiplier.
 /// The propeller result applies that factor once to its all-engine distance.
+///
+/// The `Jet` branch is that correlation: it supplies the speed schedule, the
+/// landing distance and the replay. The production jet take-off field length
+/// is the CS 25.113 integration of [`super::takeoff_field`], which the
+/// pipeline (`alas_pipeline::field_performance`) lays over this result.
 /// `ldr_m` remains actual distance from the 50 ft screen under 25.125(a),
 /// before the separate operational landing-field factor.
 pub fn compute_field_performance_for_propulsion(

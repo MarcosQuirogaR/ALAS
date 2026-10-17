@@ -23,6 +23,15 @@ use std::collections::BTreeMap;
 /// corners are priced on the configuration's segment mission model, so the
 /// report's masses and the tank volume its wing yields must belong to an
 /// aircraft that model can fly with reserves.
+/// The default jet config for the field figures. The fixture report has no
+/// fin, so the asymmetric trim drag of the CS 25.113 field length is an
+/// explicit assumption here (missing evidence is a status message otherwise).
+fn jet_field_config() -> AlasConfig {
+    let mut config = AlasConfig::default();
+    config.performance.oei_asymmetric_trim_cd = Some(0.001);
+    config
+}
+
 fn sample_report(payload_kg: f64) -> AnalysisReport {
     let airfoil = Airfoil::from_name("naca0012").expect("fixture airfoil");
     let wing = Wing::new(
@@ -101,7 +110,7 @@ fn sample_report(payload_kg: f64) -> AnalysisReport {
 
 #[test]
 fn performance_figures_render_from_the_report_and_configuration() {
-    let config = AlasConfig::default();
+    let config = jet_field_config();
     let report = sample_report(20_000.0);
 
     let payload = render_svg(&performance::figure_payload_range(&report, &config, None));
@@ -133,7 +142,7 @@ fn performance_figures_render_from_the_report_and_configuration() {
     assert!(departure.contains("London Heathrow"));
     assert!(arrival.contains("Dubai"));
     for svg in [departure, arrival] {
-        for label in ["TODR", "BFL proxy", "ASD proxy", "LFL", "V1", "VR", "V2"] {
+        for label in ["TODR", "BFL", "ASD", "LFL", "V1", "VR", "V2"] {
             assert!(svg.contains(label), "missing {label}");
         }
     }
@@ -141,7 +150,7 @@ fn performance_figures_render_from_the_report_and_configuration() {
 
 #[test]
 fn field_performance_uses_the_effective_dispatched_airport() {
-    let config = AlasConfig::default();
+    let config = jet_field_config();
     let report = sample_report(20_000.0);
     let dispatched_departure = alas_config::airports::get("OMDB").expect("Dubai airport");
 
@@ -222,7 +231,7 @@ fn payload_range_status_names_the_missing_physical_input() {
 
 #[test]
 fn performance_renderers_keep_the_contract_details_visible() {
-    let config = AlasConfig::default();
+    let config = jet_field_config();
     let report = sample_report(20_000.0);
 
     let matching = performance::figure_matching_chart(&report, &config, Some("dark"));

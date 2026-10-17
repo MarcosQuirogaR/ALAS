@@ -77,6 +77,9 @@ pub struct ControllingMargin {
 pub struct WingboxSizing {
     /// Spanwise stations, m.
     pub y_stations: Vec<f64>,
+    /// Cosine of the box-axis sweep at each station (see [`super::swept`]); empty means an
+    /// unswept beam, as in the frozen reference law.
+    pub axis_cos: Vec<f64>,
     /// Normalized spanwise stations, `y / semi_span`.
     pub eta_stations: Vec<f64>,
     /// Local chord at each station, m.
@@ -103,6 +106,11 @@ pub struct WingboxSizing {
 }
 
 impl WingboxSizing {
+    /// Cosine of the box-axis sweep at `station`, 1 where none is recorded.
+    pub fn axis_cos_at(&self, station: usize) -> f64 {
+        self.axis_cos.get(station).copied().unwrap_or(1.0)
+    }
+
     /// Installed spanwise pitch between adjacent ribs, including the root and
     /// tip ribs. This is distinct from [`Self::rib_spacing_m`], which is the
     /// maximum pitch permitted by the panel-buckling calculation and may be

@@ -56,6 +56,10 @@ pub struct CaseSet {
     pub fatigue: bool,
     /// The CS 25.349(a) aileron rolling cases ([`crate::torque_sources`]).
     pub aileron: bool,
+    /// Resolve the bending moment about the section normal to the swept
+    /// elastic axis, `M_x / cos(L_ea)` (Torenbeek 2013, Eq. 11.11). The frozen
+    /// reference law does not.
+    pub swept: bool,
 }
 
 impl CaseSet {
@@ -73,6 +77,7 @@ impl CaseSet {
         torque: true,
         fatigue: true,
         aileron: false,
+        swept: true,
     };
     /// [`CaseSet::ALL`] plus the rigid-wing aileron rolling cases, available
     /// and tested but not used by the product.
@@ -87,6 +92,12 @@ impl CaseSet {
         torque: false,
         fatigue: false,
         aileron: false,
+        swept: true,
+    };
+    /// The frozen reference law's set: manoeuvre cases, unswept beam.
+    pub const FROZEN_REFERENCE: Self = Self {
+        swept: false,
+        ..Self::MANOEUVRE_ONLY
     };
 }
 
@@ -252,6 +263,7 @@ pub(super) fn case_loads(
         .zip(&chord)
         .map(|(&e, &c)| wsg.x_le(e) + 0.25 * c)
         .collect();
+    let axis_cos = super::swept::axis_cos(wsg, y);
     let base = strength_cases(wsg, cfg, req, set);
     torque_cases::variants(wsg, cfg, req, y, relief, base, set)
         .into_iter()
@@ -314,6 +326,15 @@ pub(super) fn case_loads(
                         + torsion::bredt_shear_flow_n_per_m(torque[j], area[j]) * depth_sum[j]
                 })
                 .collect();
+            let moment: Vec<f64> = if set.swept {
+                moment
+                    .iter()
+                    .zip(&axis_cos)
+                    .map(|(m, c)| m / c.max(1.0e-3))
+                    .collect()
+            } else {
+                moment
+            };
             CaseLoads {
                 case,
                 q_net,
@@ -507,6 +528,7 @@ mod tests {
             torque,
             fatigue,
             aileron: false,
+            swept: true,
         }
     }
 

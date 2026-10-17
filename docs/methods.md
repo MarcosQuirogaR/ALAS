@@ -387,14 +387,42 @@ approved LOPA.
 # Propulsion-specific field performance
 
 `performance.legacy_field_correlations = false` selects the corrected field
-method. Jet takeoff retains Raymer's FAR-25 TOP correlation (5th edition,
-section 5.4, Fig. 5.4): 37.7 TOP in ft with wing loading in psf. It already
-estimates field length; its BFL proxy receives no additional 1.15 multiplier.
-[CS/FAR 25.113](https://www.govinfo.gov/content/pkg/CFR-2025-title14-vol1/pdf/CFR-2025-title14-vol1-sec25-113.pdf)
-applies 1.15 to an all-engine takeoff-distance candidate, compared with the
-engine-out distance. It does not multiply a balanced field length by 1.15.
-The historical low-level APIs and the explicit replay selection preserve the
-translated correlation, speed schedule and BFL multiplier for parity.
+method. Jet takeoff field length is the CS 25.113(a) take-off distance by
+integration (`alas_perf::performance::takeoff_field`, one definition for the
+optimiser constraint, the airport findings, the ISA sea-level field reference
+and the report inputs): `TOFL = max(1.15 x all-engine distance to 35 ft, BFL)`,
+the balanced field being the equality of the one-engine continued take-off
+(failure at VEF) and the CS 25.109(a) accelerate-stop distance at the decision
+speed V1. Ground roll integrates the engine-deck take-off thrust (Jenkinson
+chart) at every speed with Raymer Eqs. 17.100-17.101 and rolling friction 0.02
+(Torenbeek p. 168); rotation takes 3 s (Raymer p. 673); the airborne distance
+is the larger of the energy distance (Torenbeek Eq. 5-85) and the Raymer
+transition arc (Eqs. 17.105-17.112, n = 1.2) with gear down and no ground
+effect; the failed engine adds its windmilling and asymmetric-trim drag; the
+stop uses 0.37 g mean deceleration without reverse thrust (Torenbeek p. 169)
+plus 2 s at V1 (CS 25.109(a)(1)(iv)); VR is searched between the schedule
+minimum and V2 for the shortest field (Raymer p. 676). The optimiser
+constraint `takeoff_field` compares this length with the take-off distance
+available, in metres. Dry level hard runway, still air, no clearway, stopway or
+lift dump: a conceptual estimate, not a certified field length. The field
+length follows V2 and so the configured `CLmax_TO`; a class-default `CLmax_TO`
+shifts it with the square of the V2 error. Raymer's TOP correlation (5th
+edition, section 5.4, Fig. 5.4: 37.7 TOP in ft, psf) and the translated BFL
+multiplier remain only for the explicit replay selection and the low-level
+historical APIs, and drive the matching chart.
+
+The registered jets (A320-200, A340-300, A380-800, B787-9, B747-400, DC-10,
+A220-300, E195-E2, C919) take `CLmax_TO` from their declared high-lift system
+instead of the class default: Raymer 5th ed. Eq. 12.21 and Table 12.2 (printed
+p. 415), also Jenkinson Ch. 8, `CLmax_TO = CLmax_clean + 0.70 dCL_flap(landing)
++ dCL_LE` with `dCL = 0.9 dcl_max (S_flapped/S_ref) cos(hinge sweep)`, c'/c 1.275
+(Fowler) and 1.075 (slat), and the 60-80 % take-off share at its midpoint. Flap
+and slat runs are the declared control-surface spans measured on each preset's
+planform (`alas-config::presets::high_lift_system`; device type and document
+page per preset are recorded there). A conceptual estimate, not a measured
+CLmax: against the Vref-recovered landing coefficients the same method misses
+by 12 % on average (up to +34 % on the 747-400), and its take-off values sit
+above Jenkinson's statistical 1.7-2.2.
 
 Propeller distances use Torenbeek, *Synthesis of Subsonic Airplane Design*
 (1982), sections 5.4.5-5.4.6, pp. 167-170, equations 5-73/74, 5-89 and

@@ -15,11 +15,11 @@
 
 use alas_config::{DesignRequirements, StructuresConfig};
 
+use super::forces::distribute_elliptic;
 use super::format::{free_field, python_str};
 use super::{monitor_set, MonitorNodes};
 use crate::loads::{self, LoadCase};
 use crate::mesh::{Deck, MeshNodeIndex};
-use crate::sizing::gradient_unit;
 
 /// The static deck's constraint set, shared by all four solutions: the mesh
 /// writes exactly one `SPC1`, and it is set 1.
@@ -32,54 +32,6 @@ const SPC_SET: i64 = 1;
 pub(crate) const GRAVITY_SID_BASE: i64 = 100;
 pub(crate) const FORCE_SID_BASE: i64 = 200;
 
-/// Distribute `total_force_n` over `nid_y` with the same half-ellipse
-/// [`crate::loads::elliptic_distributed_load`] uses, discretized onto the
-/// mesh's own front-spar node line: `_elliptic_forces_by_y`.
-///
-/// The node line is not evenly spaced, so each node's share is weighted by the
-/// span it stands for as well as by the ellipse. A distribution that summed to
-/// nothing (every node at the tip, where the ellipse is zero) falls back to
-/// an equal split rather than dividing by it.
-pub fn elliptic_forces_by_y(
-    nid_y: &[(i64, f64)],
-    total_force_n: f64,
-    semi_span: f64,
-) -> Vec<(i64, f64)> {
-    let spans: Vec<f64> = nid_y.iter().map(|&(_, y)| y).collect();
-    let ellipse: Vec<f64> = spans
-        .iter()
-        .map(|&y| {
-            (1.0 - (y / semi_span.max(1e-9)).powi(2))
-                .clamp(0.0, 1.0)
-                .sqrt()
-        })
-        .collect();
-    let widths: Vec<f64> = if spans.len() > 1 {
-        gradient_unit(&spans)
-            .iter()
-            .map(|value| value.abs())
-            .collect()
-    } else {
-        vec![1.0]
-    };
-
-    let mut weights: Vec<f64> = ellipse
-        .iter()
-        .zip(&widths)
-        .map(|(&q, &width)| q * width)
-        .collect();
-    let mut total: f64 = weights.iter().sum();
-    if total < 1e-15 {
-        weights = vec![1.0; ellipse.len()];
-        total = weights.iter().sum();
-    }
-    nid_y
-        .iter()
-        .zip(&weights)
-        .map(|(&(nid, _), &weight)| (nid, weight / total * total_force_n))
-        .collect()
-}
-
 /// SOL 101, linear static: one subcase per design load case, each combining the
 /// structure's own inertial relief with the aerodynamic lift that balances it:
 /// `build_sol101_bulk`.
@@ -89,6 +41,30 @@ pub fn build_sol101_bulk(
     req: &DesignRequirements,
     cfg: &StructuresConfig,
     mesh_include: &str,
+) -> String {
+    build_sol101(deck, node_index, req, cfg, mesh_include, false)
+}
+
+/// [`build_sol101_bulk`] with the lift distributed by the trapezoid rule
+/// ([`elliptic_forces_by_y_trapezoid`]). The product solve uses this; the
+/// reference form stays for the frozen parity fixture.
+pub fn build_sol101_bulk_product(
+    deck: &Deck,
+    node_index: &MeshNodeIndex,
+    req: &DesignRequirements,
+    cfg: &StructuresConfig,
+    mesh_include: &str,
+) -> String {
+    build_sol101(deck, node_index, req, cfg, mesh_include, true)
+}
+
+fn build_sol101(
+    deck: &Deck,
+    node_index: &MeshNodeIndex,
+    req: &DesignRequirements,
+    cfg: &StructuresConfig,
+    mesh_include: &str,
+    trapezoid: bool,
 ) -> String {
     let front_upper: &[i64] = node_index
         .spar_upper_nids
@@ -142,6 +118,7 @@ pub fn build_sol101_bulk(
             req,
             &nid_y,
             semi_span,
+            trapezoid,
         ));
     }
 
@@ -155,6 +132,7 @@ pub fn build_sol101_bulk(
 /// signed total force; the structure's inertial reaction always opposes the
 /// load factor's sign, because a positive `n` means the airframe is
 /// accelerating upward and the equivalent body force points down.
+#[allow(clippy::too_many_arguments)] // The reference's own arguments plus the weighting rule.
 fn load_case_cards(
     case: &LoadCase,
     sid: i64,
@@ -163,6 +141,7 @@ fn load_case_cards(
     req: &DesignRequirements,
     nid_y: &[(i64, f64)],
     semi_span: f64,
+    trapezoid: bool,
 ) -> Vec<String> {
     let gravity_magnitude = case.load_factor.abs() * req.gravity_m_s2;
     let lift_sign = case.lift_sign();
@@ -177,7 +156,7 @@ fn load_case_cards(
             free_field(gravity_sign)
         ),
     ];
-    for (nid, force) in elliptic_forces_by_y(nid_y, case.total_force_n.abs(), semi_span) {
+    for (nid, force) in distribute_elliptic(nid_y, case.total_force_n.abs(), semi_span, trapezoid) {
         out.push(format!(
             "FORCE,{force_sid},{nid},0,{},0.,0.,1.",
             free_field(force.abs() * lift_sign)

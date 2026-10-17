@@ -11,8 +11,10 @@
 //! ([`landing::ws_landing_limit`]). [`constraints::build_matching_chart`]
 //! assembles all four across a set of aerodromes. Production field estimates
 //! use [`field::compute_field_performance_for_propulsion`]: the jet takeoff
-//! parameter correlation or Torenbeek's propeller ground-motion, balanced-field
-//! and landing energy methods. The translated speed and distance APIs remain
+//! parameter correlation (speeds, landing, replay) or Torenbeek's propeller
+//! ground-motion, balanced-field and landing energy methods; the jet take-off
+//! field length itself is the CS 25.113 integration
+//! [`takeoff_field::takeoff_field`]. The translated speed and distance APIs remain
 //! available for legacy replay. [`envelope::build_vn_diagram`] rounds out the
 //! surface with the flight envelope.
 //!
@@ -33,6 +35,7 @@ pub mod landing;
 pub mod second_segment;
 pub mod segments;
 pub mod speeds;
+pub mod takeoff_field;
 pub mod yaw_balance;
 
 pub use constraints::{
@@ -69,6 +72,7 @@ pub use speeds::{
     compute_field_performance, compute_field_performance_at_masses, compute_v_speeds,
     compute_v_speeds_at_masses, FieldPerformance, VSpeeds,
 };
+pub use takeoff_field::{takeoff_field, TakeoffField, TakeoffFieldInputs};
 
 use alas_atmo::Atmosphere;
 

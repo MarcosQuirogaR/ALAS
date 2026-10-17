@@ -7,7 +7,6 @@
 
 use std::sync::atomic::Ordering;
 use std::sync::mpsc::{channel, Receiver, Sender};
-use std::thread;
 use std::time::Instant;
 
 use alas_pipeline::DesignPipeline;
@@ -165,7 +164,7 @@ impl AppState {
             Path::new(self.tool_preferences.avl_exe.as_deref().unwrap_or("")),
         );
 
-        thread::spawn(move || {
+        let spawned = crate::worker_stack::spawn_analysis_thread("alas-run", move || {
             let pipeline = DesignPipeline::new(config);
             if cancel.load(Ordering::Relaxed) {
                 let _ = tx.send(WorkerMessage::Finished(Box::new(Err(format!(
@@ -210,6 +209,8 @@ impl AppState {
             );
             let _ = tx.send(WorkerMessage::Finished(Box::new(result)));
         });
+        // A failed spawn drops `tx`; the receiver sees the closed channel.
+        drop(spawned);
     }
 
     /// Drain any pending progress and update the UI when a run finishes.

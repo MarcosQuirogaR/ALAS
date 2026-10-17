@@ -66,6 +66,14 @@ pub fn published_landing_change(path: &str) -> Option<(Value, Value)> {
         "preset_then_field" => "B787-9",
         name => name,
     };
+    // Take-off CLmax from the declared high-lift system (fix lane CLmax-TO,
+    // 2026-10-16; Raymer 5th ed. Eq. 12.21 / Table 12.2): replaces the frozen
+    // 2.10 class default for every jet with a declared system.
+    if key == "cl_max_to" {
+        let preset = alas_config::presets::get(name).ok()?;
+        let parts = alas_config::presets::preset_breakdown(preset)?;
+        return Some((json!(2.10), json!(parts.takeoff())));
+    }
     let source = alas_config::presets::published_landing_reference(name)?;
     match key {
         "cl_max_land" => {

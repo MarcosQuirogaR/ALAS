@@ -59,3 +59,44 @@ fn preset_exports_close_symmetric_roots_without_flattening_vertical_fins() {
         assert!(vertical_fins >= 1, "{} vertical fin", preset.name);
     }
 }
+
+#[test]
+fn only_a_tailplane_passing_through_a_fin_is_exported_as_two_halves() {
+    let mut split = Vec::new();
+    for preset in alas_config::presets::registry() {
+        let config = AlasConfig::from_value(&serde_json::json!({"preset": preset.name}))
+            .expect("registered preset");
+        let airplane = AircraftBuilder::new(Some(config.geometry))
+            .build(Some(&preset.design_vector), true)
+            .expect("preset geometry");
+        let exported = exported_wings(&airplane);
+        if exported.len() == airplane.wings.len() {
+            continue;
+        }
+        split.push(preset.name);
+        // The halves are a mirror pair in planform and sit either side of
+        // the fin plane, outboard of the clearance.
+        let right = exported
+            .iter()
+            .find(|wing| wing.pose == WingPose::RightHalf)
+            .expect("right half");
+        let left = exported
+            .iter()
+            .find(|wing| wing.pose == WingPose::LeftHalf)
+            .expect("left half");
+        assert!(right.wing.xsecs[0].xyz_le[1] > 0.0);
+        assert!(left.wing.xsecs[0].xyz_le[1] < 0.0);
+        for (r, l) in right.wing.xsecs.iter().zip(&left.wing.xsecs) {
+            assert!((r.xyz_le[1] + l.xyz_le[1]).abs() < 1.0e-12);
+            assert!((r.chord - l.chord).abs() < 1.0e-12);
+            assert!((r.xyz_le[0] - l.xyz_le[0]).abs() < 1.0e-12);
+        }
+        let script = render_script(&airplane, None, "root.vsp3", "cad.vsp3", "root.png");
+        assert!(script.contains(&format!(
+            "SetParmVal( wing_{}, \"X_Rel_Rotation\", \"XForm\", 180.000000000000 );",
+            left.index
+        )));
+    }
+    split.sort_unstable();
+    assert_eq!(split, ["A400M", "ATR72-600"]);
+}

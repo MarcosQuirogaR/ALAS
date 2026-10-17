@@ -157,6 +157,10 @@ pub struct FieldPerformance {
     pub ldr_m: f64,
     /// Landing mass used for the landing speeds and distance, kg.
     pub landing_mass_kg: f64,
+    /// The CS 25.113 integration behind `todr_m`, `bfl_m` and `asd_m` when
+    /// it ran (jets outside the translated replay); `None` for the
+    /// correlations.
+    pub takeoff_field: Option<super::takeoff_field::TakeoffField>,
 }
 
 impl FieldPerformance {
@@ -277,6 +281,7 @@ pub fn compute_field_performance_at_masses(
         asd_m,
         ldr_m,
         landing_mass_kg,
+        takeoff_field: None,
     }
 }
 

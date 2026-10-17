@@ -60,6 +60,7 @@ pub(crate) mod section;
 mod solve;
 mod stiffness;
 mod stiffness_distribution;
+pub(crate) mod swept;
 mod torque_cases;
 mod types;
 mod web;
@@ -430,6 +431,7 @@ mod tests {
     fn installed_rib_spacing_uses_the_selected_count_not_the_allowable_limit() {
         let mut sizing = WingboxSizing {
             y_stations: vec![0.0, 35.875],
+            axis_cos: Vec::new(),
             num_ribs: 25,
             rib_spacing_m: 0.96738451494986,
             ..test_sizing()
@@ -445,6 +447,7 @@ mod tests {
     fn installed_rib_spacing_uses_the_station_span_when_the_grid_has_a_datum_offset() {
         let sizing = WingboxSizing {
             y_stations: vec![4.0, 14.0],
+            axis_cos: Vec::new(),
             num_ribs: 6,
             rib_spacing_m: 2.0,
             ..test_sizing()
@@ -815,6 +818,7 @@ mod tests {
     fn test_sizing() -> WingboxSizing {
         WingboxSizing {
             y_stations: vec![0.0, 35.875],
+            axis_cos: Vec::new(),
             eta_stations: vec![0.0, 1.0],
             chord: vec![1.0, 1.0],
             spar_fracs: vec![0.25, 0.75],

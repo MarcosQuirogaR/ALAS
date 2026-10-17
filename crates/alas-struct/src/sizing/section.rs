@@ -28,6 +28,29 @@ pub(crate) fn cap_ei(spar: &SparSizing, station: usize, cap: &MaterialSpec) -> f
     cap.e_pa * cap_inertia(spar.h[station], spar.w_cap[station], spar.t_cap[station])
 }
 
+/// Stiffness of the lower-cover fatigue area, N m^2. It is real flange material
+/// on the lower cap (the deck puts it on the lower bar); the response section
+/// previously left it out as "conservative for deflection". Credited in the
+/// response stiffness only ([`station_ei_spanwise`]): [`station_ei`] stays the
+/// symmetric section the fatigue sizing starts from (it adds this area itself,
+/// with its neutral-axis shift). Centroid at the lower spar surface; the small
+/// neutral-axis shift is not modelled here.
+pub(crate) fn lower_extra_ei(sizing: &WingboxSizing, station: usize, cap: &MaterialSpec) -> f64 {
+    sizing
+        .spars
+        .iter()
+        .map(|spar| {
+            let extra = spar.lower_extra_area.get(station).copied().unwrap_or(0.0);
+            let h = spar.h[station];
+            if h > 0.0 && extra > 0.0 {
+                cap.e_pa * extra * 0.25 * h * h
+            } else {
+                0.0
+            }
+        })
+        .sum()
+}
+
 /// Two straight cover panels: integrate 2*t*(h(x)/2)^2 across each bay.
 /// The polynomial integral is exact for linearly varying panel depth.
 pub(crate) fn non_cap_ei(
@@ -36,6 +59,18 @@ pub(crate) fn non_cap_ei(
     skin: &MaterialSpec,
     web: &MaterialSpec,
 ) -> f64 {
+    let (covers, webs) = cover_and_web_ei(sizing, station, skin, web);
+    covers * sizing.axis_cos_at(station) + webs
+}
+
+/// Cover and web contributions to the streamwise-cut stiffness, separately,
+/// because a normal-to-axis cut sees the covers `cos L` as wide.
+pub(crate) fn cover_and_web_ei(
+    sizing: &WingboxSizing,
+    station: usize,
+    skin: &MaterialSpec,
+    web: &MaterialSpec,
+) -> (f64, f64) {
     // Consecutive active spars bound each cover bay. This runs in the inner
     // loop of every cap and web search, so it pairs them in place rather than
     // collecting them; the terms and their summation order are unchanged.
@@ -49,12 +84,17 @@ pub(crate) fn non_cap_ei(
             skin.e_pa * sizing.t_skin * width * (a * a + a * b + b * b) / 6.0
         })
         .sum();
-    covers
-        + active()
+    (
+        covers,
+        active()
             .map(|spar| web.e_pa * spar.t_web[station] * spar.h[station].powi(3) / 12.0)
-            .sum::<f64>()
+            .sum::<f64>(),
+    )
 }
 
+/// Stiffness of the section normal to the box axis, `EI_n`, N m^2: caps and
+/// webs as cut, covers `cos L` as wide (see [`super::swept`]). Equal to the
+/// streamwise-cut stiffness when no sweep is recorded.
 pub(crate) fn station_ei(
     sizing: &WingboxSizing,
     station: usize,
@@ -68,6 +108,19 @@ pub(crate) fn station_ei(
             .iter()
             .map(|spar| cap_ei(spar, station, cap))
             .sum::<f64>()
+}
+
+/// Effective bending stiffness in the spanwise frame, `EI_n cos^3 L`: the
+/// curvature `w_yy` under the streamwise moment `M_x` is `M_x / EI_eff`.
+pub(crate) fn station_ei_spanwise(
+    sizing: &WingboxSizing,
+    station: usize,
+    skin: &MaterialSpec,
+    web: &MaterialSpec,
+    cap: &MaterialSpec,
+) -> f64 {
+    (station_ei(sizing, station, skin, web, cap) + lower_extra_ei(sizing, station, cap))
+        * sizing.axis_cos_at(station).powi(3)
 }
 
 /// Per-spar cap stress and the maximum utilization of that cap, its web,
@@ -175,6 +228,7 @@ mod tests {
         };
         WingboxSizing {
             y_stations: vec![0.0, 10.0],
+            axis_cos: Vec::new(),
             eta_stations: vec![0.0, 1.0],
             chord: vec![4.0; 2],
             spar_fracs: vec![0.25, 0.75],

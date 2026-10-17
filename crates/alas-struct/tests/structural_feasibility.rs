@@ -20,6 +20,7 @@ fn beam(level_tip_m: f64, semispan_m: f64) -> (WingboxSizing, StructuralAnalysis
     let q = level_tip_m * 8.0 * ei / semispan_m.powi(4);
     let sizing = WingboxSizing {
         y_stations: y.clone(),
+        axis_cos: Vec::new(),
         eta_stations: y.iter().map(|v| v / semispan_m).collect(),
         chord: vec![2.0; count],
         spar_fracs: vec![0.25],

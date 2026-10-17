@@ -203,7 +203,15 @@ fn build_with_caps(
     let mut eid: i64 = 1;
     for pair in regions.skin_ribs.windows(2) {
         for surface in [Surface::Ext, Surface::Int] {
-            elements::zipper_skin_strip(&mut deck, &mut eid, &stations, &nodes, pair, surface);
+            elements::zipper_skin_strip(
+                &mut deck,
+                &mut eid,
+                &stations,
+                &nodes,
+                pair,
+                surface,
+                product_caps,
+            );
         }
     }
     for (spar, (upper, lower)) in spar_upper.iter().zip(&spar_lower).enumerate() {
@@ -243,8 +251,18 @@ fn build_with_caps(
             );
         }
     }
-    elements::add_rib_panels(&mut deck, &mut eid, &stations, &nodes, &regions);
-    elements::add_trailing_edge(&mut deck, &mut eid, &stations, &nodes, &regions, cfg, wsg);
+    elements::add_rib_panels(
+        &mut deck,
+        &mut eid,
+        &stations,
+        &nodes,
+        &regions,
+        product_caps,
+    );
+    if !product_caps {
+        // The boxed product deck has no structure aft of the rear spar.
+        elements::add_trailing_edge(&mut deck, &mut eid, &stations, &nodes, &regions, cfg, wsg);
+    }
     if product_caps {
         super::product_caps::add_spar_caps(
             &mut deck,
@@ -258,7 +276,7 @@ fn build_with_caps(
         elements::add_spar_caps(&mut deck, &mut eid, &spar_upper, &spar_lower, sizing, wsg);
     }
 
-    let root_nodes = elements::root_constraint_nodes(&stations, &nodes);
+    let root_nodes = elements::root_constraint_nodes(&stations, &nodes, product_caps);
     deck.constraints.push(Spc1 {
         sid: 1,
         components: "123456",
@@ -298,6 +316,9 @@ fn build_with_caps(
         product_caps,
     );
 
+    if product_caps {
+        deck.retain_referenced_grids();
+    }
     let mut report = health::check_mesh_health(&deck, &stations, &regions, &spar_upper, wsg)?;
     warnings.append(&mut report.warnings);
     report.warnings = warnings;

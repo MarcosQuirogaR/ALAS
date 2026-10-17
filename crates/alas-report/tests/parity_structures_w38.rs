@@ -59,6 +59,7 @@ fn sample_structural_result() -> StructuralAnalysisResult {
     };
     let sizing = WingboxSizing {
         y_stations: y.clone(),
+        axis_cos: Vec::new(),
         eta_stations: vec![0.0, 0.5, 1.0],
         chord: vec![6.0, 4.0, 2.0],
         spar_fracs: vec![0.2],
