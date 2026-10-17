@@ -35,6 +35,8 @@
 //! airplane. And upstream's `repo_root` argument, retained there only for
 //! signature compatibility, is dropped.
 
+mod classify;
+pub use classify::*;
 mod deck;
 mod driver;
 mod exec;

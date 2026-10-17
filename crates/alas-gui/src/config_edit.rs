@@ -11,7 +11,8 @@ use std::collections::BTreeMap;
 
 use alas_config::{
     fidelity_presets, performance_presets, presets, solver_presets, validate, AlasConfig,
-    DesignMode, EngineConfig, FuelPolicyConfig, FuelTankLayoutConfig, DESIGN_VARIABLE_SPECS,
+    DesignMode, EngineConfig, FuelPolicyConfig, FuelTankLayoutConfig, SolverSettings,
+    DESIGN_VARIABLE_SPECS,
 };
 use alas_exec::ToolPreferences;
 use serde_json::Value;
@@ -25,6 +26,15 @@ use crate::views::{tr, tr_fields};
 mod config_edit_custom;
 #[path = "config_edit_design_space.rs"]
 mod config_edit_design_space;
+
+/// The desktop application keeps wall-clock-limited, clock-seeded searches
+/// (audit SIZ-06, decision D6); the library default is the reproducible
+/// evaluation-budget search used by presets, the command line and the
+/// validation runs. A user who wants a reproducible GUI run sets a seed and
+/// switches on "Stop on evaluation budgets only".
+pub(crate) fn apply_interactive_solver(config: &mut AlasConfig) {
+    config.optimizer.solver = SolverSettings::interactive();
+}
 
 /// Serialize a configuration for the generic form editor, which edits this
 /// JSON directly and needs every schema field present to find it back.
@@ -101,6 +111,7 @@ impl AppState {
                 return;
             }
         };
+        apply_interactive_solver(&mut config);
         if let Some(previous) = previous {
             preserve_machine_locations(&mut config, &previous);
             if previous.optimizer.design_space.mode == DesignMode::BaselineSandbox {
@@ -284,16 +295,16 @@ impl AppState {
         self.on_config_modified();
     }
 
-    /// Revalidate and rebuild the live preview after an edit.
-    ///
-    /// A registered preset's protected geometry is restored first, and a
-    /// sandbox edit is routed to the sandbox's own revision bookkeeping.
+    /// Revalidate and rebuild the live preview after an edit: protected preset
+    /// geometry is restored and automatic cruise speeds follow an edited Mach
+    /// first; a sandbox edit goes to the sandbox's revision bookkeeping.
     pub fn on_config_modified(&mut self) {
         if self.sandbox.active() {
             self.on_sandbox_model_changed();
             return;
         }
         self.enforce_preset_geometry();
+        self.sync_cruise_speeds_to_requirement_mach();
         if let Some(config) = self.typed_config() {
             self.validation_findings = validate(&config);
         }
@@ -326,6 +337,16 @@ impl AppState {
                 } else {
                     default_fields.remove(*name);
                 }
+            }
+        }
+        if group == "optimizer" {
+            let mut interactive = AlasConfig::default();
+            apply_interactive_solver(&mut interactive);
+            if let (Some(fields), Ok(solver)) = (
+                default_group.as_object_mut(),
+                serde_json::to_value(&interactive.optimizer.solver),
+            ) {
+                fields.insert("solver".to_owned(), solver);
             }
         }
         root.insert(group.to_owned(), default_group);

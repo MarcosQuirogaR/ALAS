@@ -29,6 +29,7 @@ use super::geometry::{
     configured_surface_area, fixed_non_box_structure, flops_wing_inputs, surface_centroid,
     validate_secondary_breakdown,
 };
+use super::non_optimum;
 use super::support::{design_requirements, reconcile_against_reference, StructuralInventory};
 use super::{declared_integral_wing_fuel_kg_m, design_gross_mass_kg, WingReconciliationError};
 
@@ -134,6 +135,34 @@ pub fn sized_primary_wing(
     reference_cache::candidate_sizing(prepare_primary_wing(config, dv, plane, requirements)?)
 }
 
+/// The structural-box geometry of a built wing: the spar layout on its root
+/// and tip airfoils. Shared by the sizing and the ground-deflection model so
+/// both read one box.
+pub(super) fn primary_structure_geometry(
+    config: &AlasConfig,
+    dv: &DesignVector,
+    wing: &Wing,
+) -> Result<alas_geom::wing_structure::WingStructureGeometry, WingReconciliationError> {
+    let (spar_fractions, spar_full_span) = config.structures.resolved_spars();
+    let root = wing
+        .xsecs
+        .first()
+        .ok_or(WingReconciliationError::StructuralSizing)?;
+    let tip = wing
+        .xsecs
+        .last()
+        .ok_or(WingReconciliationError::StructuralSizing)?;
+    alas_geom::wing_structure::WingStructureGeometry::new(
+        dv,
+        &config.geometry.wing,
+        &root.airfoil,
+        &tip.airfoil,
+        &spar_fractions,
+        Some(&spar_full_span),
+    )
+    .map_err(|_| WingReconciliationError::StructuralSizing)
+}
+
 fn prepare_primary_wing<'a>(
     config: &'a AlasConfig,
     dv: &DesignVector,
@@ -152,24 +181,11 @@ fn prepare_primary_wing<'a>(
     if !wing.symmetric || wing.xsecs.len() < 2 || config.structures.spanwise_stations < 2 {
         return Err(WingReconciliationError::StructuralSizing);
     }
-    let (spar_fractions, spar_full_span) = config.structures.resolved_spars();
+    let geometry = primary_structure_geometry(config, dv, wing)?;
     let root = wing
         .xsecs
         .first()
         .ok_or(WingReconciliationError::StructuralSizing)?;
-    let tip = wing
-        .xsecs
-        .last()
-        .ok_or(WingReconciliationError::StructuralSizing)?;
-    let geometry = alas_geom::wing_structure::WingStructureGeometry::new(
-        dv,
-        &config.geometry.wing,
-        &root.airfoil,
-        &tip.airfoil,
-        &spar_fractions,
-        Some(&spar_full_span),
-    )
-    .map_err(|_| WingReconciliationError::StructuralSizing)?;
     let skin = alas_config::materials::get(&config.structures.skin_material)
         .map_err(|_| WingReconciliationError::StructuralSizing)?;
     let web = alas_config::materials::get(&config.structures.spar_web_material)
@@ -220,6 +236,13 @@ fn prepare_primary_wing<'a>(
         declared_fuel: uses_declared_fuel,
         fuel,
         wing_mounted,
+        torque: alas_struct::torque_sources::TorqueSources::from_config(config, requirements),
+        main_gear_wing_fraction: non_optimum::main_gear_wing_fraction(
+            config,
+            plane,
+            wing,
+            requirements,
+        ),
         root_x_m: root.xyz_le[0],
     })
 }
@@ -412,5 +435,23 @@ pub fn clean_sheet_secondary(
         surfaces,
         fixed_structure: fixed_non_box_structure(config, wing),
     };
-    build_wing_inventory(&inputs).map_err(|_| WingReconciliationError::StructuralSizing)
+    let inventory =
+        build_wing_inventory(&inputs).map_err(|_| WingReconciliationError::StructuralSizing)?;
+    // Box-side non-optimum items (Torenbeek 2013, section 11.5), driven by the
+    // sized box's own quantities; absent for a box that did not come from the
+    // sizer. The secondary base of the miscellaneous item is the movable
+    // surfaces only: the fixed item already carries the FLOPS miscellaneous
+    // term of its own planform.
+    let movable_secondary_kg: f64 = inventory
+        .items
+        .iter()
+        .filter(|item| item.name != "fixed_non_box_structure")
+        .map(|item| item.mass_kg)
+        .sum();
+    Ok(
+        match non_optimum::inputs(config, wing, &sized_box, movable_secondary_kg) {
+            Some(drivers) => inventory.with_non_optimum(non_optimum::entries(&drivers, &sized_box)),
+            None => inventory,
+        },
+    )
 }

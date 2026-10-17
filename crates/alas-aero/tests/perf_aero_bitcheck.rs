@@ -28,10 +28,22 @@ use alas_aero::operating_point::OperatingPoint;
 use alas_aero::vlm::{self, VlmSystem};
 use alas_aero::vorlax::{self, VlmCondition, VlmGeometry, VlmSettings, VlmWing};
 use alas_atmo::Atmosphere;
+use alas_config::physics::DragModelConfig;
 use alas_geom::aircraft::airfoil::Airfoil;
 use alas_geom::aircraft::airplane::Airplane;
 use alas_geom::aircraft::fuselage::{Fuselage, FuselageXSec};
 use alas_geom::aircraft::wing::{Wing, WingXSec};
+
+/// The drag model this bit-identity baseline was captured with: viscous
+/// margin 1.10 and no lift-dependent term. The product defaults moved with the
+/// kappa calibration; the baseline guards the code path, not the defaults.
+fn frozen_drag_model() -> DragModelConfig {
+    DragModelConfig {
+        viscous_margin: 1.10,
+        lift_dependent_viscous_fraction: 0.0,
+        ..DragModelConfig::default()
+    }
+}
 
 fn naca(name: &str) -> Airfoil {
     Airfoil::from_name(name).expect("valid 4-digit NACA name")
@@ -331,7 +343,8 @@ fn probe_airplane() -> Airplane {
 #[test]
 fn drag_components_sweep_is_bit_identical() {
     let plane = probe_airplane();
-    let analysis = AeroAnalysis::new(&plane, 30.0, None, None, None);
+    let frozen = frozen_drag_model();
+    let analysis = AeroAnalysis::new(&plane, 30.0, None, Some(frozen.clone()), None);
     let mut out = String::new();
     for &mach in &[0.3, 0.6, 0.78, 0.82, 0.87, 0.6] {
         for &cl in &[0.2, 0.45, 0.7, 1.1] {
@@ -357,7 +370,8 @@ fn drag_components_sweep_is_bit_identical() {
     }
     // The reference-compatibility path takes the frozen single-thickness
     // convention through the same cache and must stay identical too.
-    let reference = AeroAnalysis::new_reference_compatibility(&plane, 30.0, None, None, None);
+    let reference =
+        AeroAnalysis::new_reference_compatibility(&plane, 30.0, None, Some(frozen), None);
     for &mach in &[0.3, 0.82] {
         let components = reference.drag_components(mach, 10_000.0, 0.5, 0.012, None);
         push_bits(

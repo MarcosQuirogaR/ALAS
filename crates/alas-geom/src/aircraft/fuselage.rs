@@ -26,7 +26,10 @@
 //! `FuselageXSec.xsec_perimeter` is translated as a private helper of
 //! [`Fuselage::area_wetted`], the one thing that reads it upstream too.
 
+use std::sync::Arc;
+
 use super::vector3::add3;
+use crate::loft::Loft;
 
 /// The default `shape` a `FuselageXSec` is constructed with when nothing
 /// overrides it: `FuselageXSec.__init__`'s `shape: float = 2.0`, a
@@ -141,6 +144,10 @@ impl FuselageXSec {
 /// A fuselage (or other slender body: pod, fuel tank, nacelle): a name and an
 /// ordered list of cross-sections: `Fuselage`, scoped to the fields and
 /// methods this program uses (see the module doc).
+///
+/// A body built from a [`Loft`] also carries it: `xsecs` is then the dense
+/// legacy view of the loft ([`Loft::sample_xsecs`]) that consumers which read
+/// stations keep using, and `loft` serves the exact queries.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Fuselage {
     /// The fuselage's name, e.g. `"Fuselage"` or `"Nacelle R"`: later
@@ -150,23 +157,39 @@ pub struct Fuselage {
     /// Cross-sections from nose to tail. Lofted linearly between adjacent
     /// pairs.
     pub xsecs: Vec<FuselageXSec>,
+    /// The lofted surface the stations were sampled from, if any.
+    pub loft: Option<Arc<Loft>>,
 }
 
 impl Fuselage {
-    /// A new fuselage named `name`, holding `xsecs`.
+    /// A new fuselage named `name`, holding `xsecs` and no loft.
     pub fn new(name: impl Into<String>, xsecs: Vec<FuselageXSec>) -> Self {
         Self {
             name: name.into(),
             xsecs,
+            loft: None,
         }
     }
 
     /// A copy of this fuselage translated by `xyz`: `Fuselage.translate`.
+    /// The loft, if any, is translated with it.
     pub fn translate(&self, xyz: [f64; 3]) -> Self {
         Self {
             name: self.name.clone(),
             xsecs: self.xsecs.iter().map(|xsec| xsec.translate(xyz)).collect(),
+            loft: self
+                .loft
+                .as_ref()
+                .map(|loft| Arc::new(loft.translated(xyz))),
         }
+    }
+
+    /// The wetted area of the lofted surface when there is one (exact skin
+    /// integral, excluding base faces), else [`Self::area_wetted`].
+    pub fn area_wetted_lofted(&self) -> f64 {
+        self.loft
+            .as_ref()
+            .map_or_else(|| self.area_wetted(), |loft| loft.wetted_area())
     }
 
     /// The fuselage's wetted area: each adjacent pair of stations'

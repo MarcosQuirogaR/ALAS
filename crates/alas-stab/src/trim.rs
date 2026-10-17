@@ -56,6 +56,9 @@ use std::f64::consts::PI;
 mod tail_volume;
 pub use tail_volume::{tail_volume_coefficients, tail_volume_coefficients_reference_compatibility};
 
+mod compressible;
+pub use compressible::CompressibleTrim;
+
 mod with_system;
 pub use with_system::{
     neutral_point_reference_compatibility_with_system, neutral_point_with_system,

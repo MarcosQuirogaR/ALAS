@@ -50,14 +50,27 @@ use alas_geom::aircraft::airplane::Airplane;
 
 use crate::modes::{self, MassProperties, StabilityAero};
 
-/// The radius-of-gyration fraction of span for roll inertia: `rx = 0.25 b`.
-const RX_SPAN_FRACTION: f64 = 0.25;
-/// The radius-of-gyration fraction of fuselage length for pitch inertia:
-/// `ry = 0.38 L`.
-const RY_LENGTH_FRACTION: f64 = 0.38;
-/// The radius-of-gyration fraction of fuselage length for yaw inertia:
-/// `rz = 0.40 L`.
-const RZ_LENGTH_FRACTION: f64 = 0.40;
+/// Nondimensional radii of gyration of the product fallback: Raymer, *Aircraft
+/// Design: A Conceptual Approach*, 6th ed., Table 16.1 (p. 623), row "Jet
+/// transport, 2 wing-mounted engines": `(Rx, Ry, Rz) = (0.25, 0.38, 0.46)`.
+///
+/// Raymer's definition (Eq. 16.52-16.54, same page) is
+/// `Ixx = (b/2)^2 M Rx^2`, `Iyy = (L/2)^2 M Ry^2` and
+/// `Izz = ((b + L)/4)^2 M Rz^2`, i.e. each radius is the table value times
+/// HALF the span, HALF the fuselage length and half their mean. Applying the
+/// table value to the full dimension (STAB-10) doubled `rx` and `ry`: for the
+/// B747 Etkin and Reid give `ry/L = 0.176` against the 0.19 of this
+/// definition and the 0.38 of the full-length reading.
+const RX_BAR: f64 = 0.25;
+const RY_BAR: f64 = 0.38;
+const RZ_BAR: f64 = 0.46;
+
+/// Legacy fractions of the frozen reference-compatibility path
+/// (`rx = 0.25 b`, `ry = 0.38 L`, `rz = 0.40 L`); kept bit-identical for the
+/// parity fixture and never used by product analyses.
+const LEGACY_RX_SPAN_FRACTION: f64 = 0.25;
+const LEGACY_RY_LENGTH_FRACTION: f64 = 0.38;
+const LEGACY_RZ_LENGTH_FRACTION: f64 = 0.40;
 
 /// The `chordwise_resolution` the `VortexLatticeMethod` constructor defaults
 /// to and which `compute_dynamic_modes` leaves unset; it sets only
@@ -68,10 +81,11 @@ const CHORDWISE_RESOLUTION: usize = 10;
 /// A radius-of-gyration estimate of `(Ixx, Iyy, Izz)` in kg.m^2:
 /// `estimate_inertia`.
 ///
-/// `rx = 0.25 span`, `ry = 0.38 fuselage_length`, `rz = 0.40 fuselage_length`;
-/// each inertia is `mass * r^2`. A well-established conceptual-design
-/// approximation for transport aircraft, used before a real structural mass
-/// distribution exists, not a substitute for a mass-properties model.
+/// `rx = 0.25 (b/2)`, `ry = 0.38 (L/2)`, `rz = 0.46 ((b + L)/4)` (Raymer
+/// Table 16.1, jet transport with 2 wing-mounted engines; see [`RX_BAR`]);
+/// each inertia is `mass * r^2`, SI (kg, m, kg m^2). A conceptual-design
+/// approximation used before a real structural mass distribution exists, not
+/// a substitute for a mass-properties model.
 ///
 /// `Iyy` and `Izz` are NaN when the airplane has no fuselage stations to
 /// measure a length from.
@@ -79,7 +93,7 @@ pub fn estimate_inertia(plane: &Airplane, mass_kg: f64) -> (f64, f64, f64) {
     // Dynamic roll inertia is an aircraft-level reference quantity.  Use the
     // same lateral/Y span that normalizes the aerodynamic derivatives rather
     // than the wing's legacy unfolded YZ path.
-    estimate_inertia_with_span(plane, mass_kg, plane.b_ref)
+    estimate_inertia_with_span(plane, mass_kg, plane.b_ref, false)
 }
 
 /// Frozen translation/parity inertia estimate using the historical unfolded
@@ -91,10 +105,15 @@ pub fn estimate_inertia_reference_compatibility(plane: &Airplane, mass_kg: f64) 
         .first()
         .map(|wing| wing.unfolded_span())
         .unwrap_or(plane.b_ref);
-    estimate_inertia_with_span(plane, mass_kg, span)
+    estimate_inertia_with_span(plane, mass_kg, span, true)
 }
 
-fn estimate_inertia_with_span(plane: &Airplane, mass_kg: f64, span: f64) -> (f64, f64, f64) {
+fn estimate_inertia_with_span(
+    plane: &Airplane,
+    mass_kg: f64,
+    span: f64,
+    legacy: bool,
+) -> (f64, f64, f64) {
     // The pitch and yaw radii scale with the primary fuselage's length. An
     // airplane without one (or with a fuselage that has no stations) has no
     // length to scale, so `Iyy`/`Izz` come back NaN, visibly unusable, rather
@@ -104,9 +123,19 @@ fn estimate_inertia_with_span(plane: &Airplane, mass_kg: f64, span: f64) -> (f64
         .first()
         .and_then(|fus| Some(fus.xsecs.last()?.xyz_c[0] - fus.xsecs.first()?.xyz_c[0]))
         .unwrap_or(f64::NAN);
-    let rx = RX_SPAN_FRACTION * span;
-    let ry = RY_LENGTH_FRACTION * fus_len;
-    let rz = RZ_LENGTH_FRACTION * fus_len;
+    let (rx, ry, rz) = if legacy {
+        (
+            LEGACY_RX_SPAN_FRACTION * span,
+            LEGACY_RY_LENGTH_FRACTION * fus_len,
+            LEGACY_RZ_LENGTH_FRACTION * fus_len,
+        )
+    } else {
+        (
+            RX_BAR * 0.5 * span,
+            RY_BAR * 0.5 * fus_len,
+            RZ_BAR * 0.25 * (span + fus_len),
+        )
+    };
     (
         mass_kg * (rx * rx),
         mass_kg * (ry * ry),
@@ -290,7 +319,7 @@ mod tests {
         let mut plane = probe(20.0, 10.0);
         plane.fuselages.clear();
         let (ixx, iyy, izz) = estimate_inertia(&plane, 1000.0);
-        assert!((ixx - 1000.0 * 2.5 * 2.5).abs() < 1e-9, "ixx={ixx}");
+        assert!((ixx - 1000.0 * 1.25 * 1.25).abs() < 1e-9, "ixx={ixx}");
         assert!(iyy.is_nan() && izz.is_nan(), "iyy={iyy} izz={izz}");
     }
 
@@ -298,10 +327,25 @@ mod tests {
     fn estimate_inertia_applies_the_radius_of_gyration_fractions() {
         let plane = probe(20.0, 10.0);
         let (ixx, iyy, izz) = estimate_inertia(&plane, 1000.0);
-        // rx = 0.25*10 = 2.5, ry = 0.38*20 = 7.6, rz = 0.40*20 = 8.0.
-        assert!((ixx - 1000.0 * 2.5 * 2.5).abs() < 1e-9, "ixx={ixx}");
-        assert!((iyy - 1000.0 * 7.6 * 7.6).abs() < 1e-6, "iyy={iyy}");
-        assert!((izz - 1000.0 * 8.0 * 8.0).abs() < 1e-9, "izz={izz}");
+        // Raymer Table 16.1: rx = 0.25*(10/2) = 1.25, ry = 0.38*(20/2) = 3.8,
+        // rz = 0.46*((10 + 20)/4) = 3.45.
+        assert!((ixx - 1000.0 * 1.25 * 1.25).abs() < 1e-9, "ixx={ixx}");
+        assert!((iyy - 1000.0 * 3.8 * 3.8).abs() < 1e-6, "iyy={iyy}");
+        assert!((izz - 1000.0 * 3.45 * 3.45).abs() < 1e-6, "izz={izz}");
+    }
+
+    #[test]
+    fn the_product_pitch_radius_matches_the_etkin_b747_ratio_and_the_frozen_path_keeps_its_own() {
+        // Etkin and Reid B747 (636,636 lb, L = 231.8 ft): ry/L = 0.176. The
+        // Raymer half-length definition gives 0.19, the old full-length
+        // reading 0.38 (2.15x too large, STAB-10).
+        let plane = probe(231.8, 195.7);
+        let (_, iyy, _) = estimate_inertia(&plane, 1.0);
+        let ratio = iyy.sqrt() / 231.8;
+        assert!((ratio - 0.19).abs() < 1e-12, "ry/L={ratio}");
+        assert!((ratio / 0.176 - 1.0).abs() < 0.10, "within 10 % of Etkin");
+        let (_, iyy_legacy, _) = estimate_inertia_reference_compatibility(&plane, 1.0);
+        assert!((iyy_legacy.sqrt() / 231.8 - 0.38).abs() < 1e-12);
     }
 
     #[test]

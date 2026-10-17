@@ -219,10 +219,19 @@ jobs:
           set -euo pipefail
           mkdir -p package-artifact
           cp package-metadata/toolchain.txt package-artifact/
-          cp dist/*.zip package-artifact/ 2>/dev/null || true
-          cp dist/*.zip.sha256 package-artifact/ 2>/dev/null || true
-          cp dist/*.tar.gz package-artifact/ 2>/dev/null || true
-          cp dist/*.tar.gz.sha256 package-artifact/ 2>/dev/null || true
+          shopt -s nullglob
+          archives=(dist/*.zip dist/*.tar.gz)
+          if [ "${#archives[@]}" -eq 0 ]; then
+            echo "no package archive found in dist/" >&2
+            exit 1
+          fi
+          for archive in "${archives[@]}"; do
+            if [ ! -f "${archive}.sha256" ]; then
+              echo "missing checksum ${archive}.sha256" >&2
+              exit 1
+            fi
+            cp "$archive" "${archive}.sha256" package-artifact/
+          done
           cp "${{ steps.package_dir.outputs.path }}/RELEASE-MANIFEST.json" package-artifact/
           cp "${{ steps.package_dir.outputs.path }}/SOURCE-MANIFEST.json" package-artifact/
           ls -la package-artifact

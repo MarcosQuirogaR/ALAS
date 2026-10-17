@@ -1,0 +1,281 @@
+{
+  "id": "acc-2024",
+  "version": 1,
+  "family": "acc",
+  "name": "Air Cargo Challenge 2024 (Aachen), pool balls",
+  "status": "official",
+  "citation": "ACC 2024 Participation Handbook v1.3 (22.04.2024), s3.3 requirements, s3.6 mission procedure, s3.7.3-3.7.11 scoring; local copy refs/competitions/ACC2024_rules_aeroud.pdf (AeroUD mirror); transcription checked against the PDF pages 25-27 on 2026-10-12",
+  "gates": [
+    {
+      "id": "mtow",
+      "description": "Take-off mass <= 25 kg",
+      "margin_expr": "(25 kg - mtow) / (25 kg)",
+      "hard": true,
+      "citation": "ACC 2024 Participation Handbook v1.3 (22.04.2024) s3.3.10"
+    },
+    {
+      "id": "box_sum",
+      "description": "Transport box inner L+W+H <= 1400 mm",
+      "margin_expr": "(1.4 m - transport_box_sum) / (1.4 m)",
+      "hard": true,
+      "citation": "ACC 2024 Participation Handbook v1.3 (22.04.2024) s3.3.2"
+    },
+    {
+      "id": "box_mass",
+      "description": "Box + aircraft + tools <= 23 kg",
+      "margin_expr": "(23 kg - transport_box_mass) / (23 kg)",
+      "hard": true,
+      "citation": "ACC 2024 Participation Handbook v1.3 (22.04.2024) s3.3.2"
+    },
+    {
+      "id": "motor",
+      "description": "Exactly one T-Motor AT2826 900 KV motor",
+      "margin_expr": "0 - abs(motor_count - 1)",
+      "hard": true,
+      "citation": "ACC 2024 Participation Handbook v1.3 (22.04.2024) s3.3.5 Motor"
+    },
+    {
+      "id": "cells",
+      "description": "At most 3 cells in series",
+      "margin_expr": "(3 - cell_count) / 3",
+      "hard": true,
+      "citation": "ACC 2024 Participation Handbook v1.3 (22.04.2024) s3.3.5 Main Battery"
+    },
+    {
+      "id": "pack_voltage",
+      "description": "Pack voltage <= 12.6 V",
+      "margin_expr": "(12.6 V - pack_voltage_max) / (12.6 V)",
+      "hard": true,
+      "citation": "ACC 2024 Participation Handbook v1.3 (22.04.2024) s3.3.5 Main Battery"
+    },
+    {
+      "id": "pack_energy",
+      "description": "Energy per pack <= 100 Wh",
+      "margin_expr": "(100 Wh - pack_energy_max) / (100 Wh)",
+      "hard": true,
+      "citation": "ACC 2024 Participation Handbook v1.3 (22.04.2024) s3.3.5 Main Battery"
+    },
+    {
+      "id": "pack_rating",
+      "description": "Continuous discharge rating >= 40 A",
+      "margin_expr": "(battery_continuous_rating - 40 A) / (40 A)",
+      "hard": true,
+      "citation": "ACC 2024 Participation Handbook v1.3 (22.04.2024) s3.3.5 Main Battery"
+    },
+    {
+      "id": "bay",
+      "description": "Cargo bay holds at least two balls",
+      "margin_expr": "(bay_can_capacity - 2) / 2",
+      "hard": true,
+      "citation": "ACC 2024 Participation Handbook v1.3 (22.04.2024) s3.3.9"
+    },
+    {
+      "id": "announcement",
+      "description": "Announced take-off distance is 40 m or 60 m",
+      "margin_expr": "if(announced_takeoff == 40 m || announced_takeoff == 60 m, 0, -1)",
+      "hard": true,
+      "citation": "ACC 2024 Participation Handbook v1.3 (22.04.2024) s3.7.8"
+    },
+    {
+      "id": "zero_voltage",
+      "description": "Recorded voltage never above 12.75 V (else zero flight)",
+      "margin_expr": "(12.75 V - peak_voltage) / (12.75 V)",
+      "hard": true,
+      "citation": "ACC 2024 Participation Handbook v1.3 (22.04.2024) s3.7.9"
+    },
+    {
+      "id": "takeoff_within_announcement",
+      "description": "Predicted take-off distance within the announcement (else flight invalid)",
+      "margin_expr": "(announced_takeoff - takeoff_distance) / announced_takeoff",
+      "hard": false,
+      "citation": "ACC 2024 Participation Handbook v1.3 (22.04.2024) s3.7.8"
+    }
+  ],
+  "parameters": [
+    {
+      "name": "current_limit",
+      "unit_si": "A",
+      "default": 30,
+      "min": 1,
+      "max": 200,
+      "doc": "Current limit (s3.7.7)"
+    },
+    {
+      "name": "block_window",
+      "unit_si": "s",
+      "default": 0.5,
+      "min": 0.1,
+      "max": 5,
+      "doc": "Averaging block of the 10 Hz current log (s3.7.7)"
+    },
+    {
+      "name": "flight_valid",
+      "unit_si": "1",
+      "default": 1,
+      "min": 0,
+      "max": 1,
+      "doc": "1 when the flight is legal; 0 for a rule breach the simulator cannot see (lost part, flight-zone breach, failed static test)"
+    },
+    {
+      "name": "landing_damaged",
+      "unit_si": "1",
+      "default": 0,
+      "min": 0,
+      "max": 1,
+      "doc": "1 when the aircraft is not safe to fly again after landing: round multiplied by 0.5 (s3.7.9)"
+    },
+    {
+      "name": "flight_clock_throttle_up",
+      "unit_si": "1",
+      "default": 1,
+      "min": 0,
+      "max": 1,
+      "doc": "Flight time starts at throttle-up; 30 s climb then 90 s efficiency then 90 s distance (s3.6.8)"
+    }
+  ],
+  "segments": [
+    {
+      "name": "loading",
+      "kind": {
+        "kind": "loading",
+        "seconds": 60.0
+      }
+    },
+    {
+      "name": "takeoff",
+      "kind": {
+        "kind": "takeoff",
+        "runway_m": 60.0,
+        "surface": "grass"
+      }
+    },
+    {
+      "name": "climb",
+      "kind": {
+        "kind": "climb",
+        "end": {
+          "until": "time",
+          "seconds": 30.0
+        }
+      }
+    },
+    {
+      "name": "efficiency",
+      "kind": {
+        "kind": "cruise",
+        "end": {
+          "until": "time",
+          "seconds": 90.0
+        },
+        "altitude_window_m": [
+          10.0,
+          100.0
+        ]
+      }
+    },
+    {
+      "name": "distance",
+      "kind": {
+        "kind": "cruise",
+        "end": {
+          "until": "time",
+          "seconds": 90.0
+        },
+        "altitude_window_m": [
+          10.0,
+          100.0
+        ]
+      }
+    },
+    {
+      "name": "landing",
+      "kind": {
+        "kind": "landing",
+        "zone_m": null
+      }
+    }
+  ],
+  "score": {
+    "terms": [
+      {
+        "name": "b_to",
+        "expr": "if(takeoff_distance > announced_takeoff, 0, step(announced_takeoff, 40 m, 1.05, 60 m, 1, 0))",
+        "additive_bonus": false
+      },
+      {
+        "name": "s_payload",
+        "expr": "1000 * rel(payload_count, n_best)",
+        "additive_bonus": false
+      },
+      {
+        "name": "e_team",
+        "expr": "distance_eff^2 / (2 Wh/km * distance_eff + energy_eff)",
+        "additive_bonus": false
+      },
+      {
+        "name": "s_eff",
+        "expr": "1000 * rel(e_team, e_max)",
+        "additive_bonus": false
+      },
+      {
+        "name": "s_distance",
+        "expr": "1000 * rel(distance_90s, d_max)",
+        "additive_bonus": false
+      },
+      {
+        "name": "i_over",
+        "expr": "integral_above(block_mean(battery_current, block_window), current_limit)",
+        "additive_bonus": false
+      },
+      {
+        "name": "p_current",
+        "expr": "0.5 * (i_over / (1 A*s))",
+        "additive_bonus": false
+      },
+      {
+        "name": "b_loading",
+        "expr": "if(loading_time < 120 s, 60 * (1 - loading_time / (120 s)), 0)",
+        "additive_bonus": true
+      },
+      {
+        "name": "p_flight",
+        "expr": "if(landing_damaged > 0, 0.5, 1)",
+        "additive_bonus": false
+      },
+      {
+        "name": "flight_ok",
+        "expr": "if(peak_voltage <= 12.75 V && takeoff_distance <= announced_takeoff, 1, 0) * flight_valid",
+        "additive_bonus": false
+      }
+    ],
+    "round_expr": "flight_ok * ((s_payload + s_eff + s_distance) / 3 + b_loading - p_current) * b_to * p_flight",
+    "aggregation": {
+      "kind": "rank_weighted",
+      "weights": [
+        0.25,
+        0.5
+      ]
+    },
+    "reference_field": [
+      {
+        "name": "n_best",
+        "default": 20,
+        "unit_si": "1",
+        "note": "ASSUMPTION: most balls carried by any team in the round; no published figure, set to the field best"
+      },
+      {
+        "name": "e_max",
+        "default": 92.6,
+        "unit_si": "m^2/J",
+        "note": "ASSUMPTION: best efficiency figure of the round, e.g. d_eff 2 km, 8 Wh: (2 km)^2/(2 Wh/km*2 km + 8 Wh) = 0.333 km^2/Wh = 92.6 m^2/J"
+      },
+      {
+        "name": "d_max",
+        "default": 3000,
+        "unit_si": "m",
+        "note": "ASSUMPTION: longest 90 s distance of the round; no published figure, set to the field best"
+      }
+    ]
+  },
+  "variants": []
+}

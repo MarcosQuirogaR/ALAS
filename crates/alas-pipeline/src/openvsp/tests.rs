@@ -228,7 +228,7 @@ fn native_wing_roundtrip_preserves_section_chords_and_tip_position() {
         std::env::temp_dir().join(format!("alas-wing-roundtrip-{}", std::process::id()));
     fs::create_dir_all(&directory).unwrap();
     let mut script = String::from("void main() {\n    ClearVSPModel();\n");
-    emit_wing(&mut script, 0, wing);
+    emit_wing_in_pose(&mut script, 0, wing, WingPose::Standard);
     script.push_str("    Update();\n    WriteVSPFile(\"wing.vsp3\", SET_ALL);\n    bool valid = true;\n    for ( int phase = 0; phase < 2; phase++ ) {\n        if ( phase == 1 ) { ClearVSPModel(); ReadVSPFile(\"wing.vsp3\"); }\n");
     let _ = writeln!(
         script,

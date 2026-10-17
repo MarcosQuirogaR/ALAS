@@ -243,8 +243,20 @@ pub fn reference_mesh() -> AnalysisConfig {
     analysis_config(1, 1)
 }
 
+/// The frozen Python drag-model defaults: viscous margin 1.10 and no
+/// lift-dependent viscous term. The product defaults moved to the fitted
+/// margin with the lift-dependent fraction on (`DEFAULT_VISCOUS_MARGIN`);
+/// the generator's `_aero` still runs the frozen convention.
+pub fn frozen_drag_model() -> DragModelConfig {
+    DragModelConfig {
+        viscous_margin: 1.10,
+        lift_dependent_viscous_fraction: 0.0,
+        ..DragModelConfig::default()
+    }
+}
+
 /// An analysis of `plane` at the fixture's sweep, every configuration group
-/// at its default: the generator's `_aero`.
+/// at its frozen default: the generator's `_aero`.
 pub fn aero<'a>(
     plane: &'a Airplane,
     fixture: &Fixture,
@@ -254,7 +266,7 @@ pub fn aero<'a>(
         plane,
         fixture.sweep_deg,
         Some(GeometryConfig::default()),
-        Some(DragModelConfig::default()),
+        Some(frozen_drag_model()),
         Some(analysis),
     )
 }

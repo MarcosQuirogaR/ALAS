@@ -104,29 +104,6 @@ pub struct SimbriefFetchOutcome {
     pub status: SimbriefFetchStatus,
 }
 
-/// Fetch and parse a SimBrief route through an injected transport.
-///
-/// Transport failures and schema failures return `None`, preserving the route
-/// planner's fall-through contract.
-pub fn fetch_route<T: SimbriefTransport>(
-    transport: &T,
-    identifier: &str,
-    origin: &Airport,
-    dest: &Airport,
-    timeout_s: f64,
-    allow_mismatch: bool,
-) -> Option<Route> {
-    fetch_route_with_status(
-        transport,
-        identifier,
-        origin,
-        dest,
-        timeout_s,
-        allow_mismatch,
-    )
-    .route
-}
-
 /// Fetch and parse a SimBrief route without discarding the tier's outcome.
 pub fn fetch_route_with_status<T: SimbriefTransport>(
     transport: &T,
@@ -300,7 +277,12 @@ fn airport_from_ofp(node: &Value, fallback: &Airport) -> Airport {
         .get("icao_code")
         .and_then(as_text)
         .map(|code| code.trim().to_uppercase())
-        .filter(|code| !code.is_empty())
+        // The code becomes part of a navdata file name, so accept only a
+        // plain ASCII alphanumeric identifier (ICAO codes are 4 characters;
+        // 2..=8 leaves room for local codes) and otherwise use the fallback.
+        .filter(|code| {
+            (2..=8).contains(&code.len()) && code.bytes().all(|b| b.is_ascii_alphanumeric())
+        })
         .unwrap_or_else(|| fallback.icao.clone());
     let name = node
         .get("name")
@@ -409,6 +391,17 @@ mod tests {
             "destination": {"icao_code": dest, "pos_lat": "51.15", "pos_long": "-0.19"},
             "navlog": {"fix": fixes},
         })
+    }
+
+    #[test]
+    fn a_plan_icao_code_that_is_not_a_plain_identifier_falls_back_to_the_configured_airport() {
+        let fallback = airport("LEMD", 40.47, -3.56);
+        for bad in ["../x", "LE MD", "A", "TOOLONGCODE", ""] {
+            let node = json!({"icao_code": bad, "pos_lat": "1.0", "pos_long": "2.0"});
+            assert_eq!(airport_from_ofp(&node, &fallback).icao, "LEMD", "{bad:?}");
+        }
+        let node = json!({"icao_code": " egll ", "pos_lat": "1.0", "pos_long": "2.0"});
+        assert_eq!(airport_from_ofp(&node, &fallback).icao, "EGLL");
     }
 
     #[test]
@@ -566,7 +559,7 @@ mod tests {
         )
         .to_string();
         let transport = FixtureTransport { response: document };
-        let route = fetch_route(
+        let route = fetch_route_with_status(
             &transport,
             "pilot",
             &airport("LEMD", 40.47, -3.56),
@@ -574,6 +567,7 @@ mod tests {
             3.0,
             false,
         )
+        .route
         .expect("fixture transport produces a route");
         assert_eq!(route.source, RouteSource::SimbriefApi);
         assert_eq!(route.waypoints[1].ident, "BRAVO");

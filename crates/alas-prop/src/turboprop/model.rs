@@ -110,94 +110,20 @@ impl Pw127m568fModel {
             condition.true_airspeed_m_s / (revolutions_s * self.propeller_diameter_m);
 
         let disk_area_m2 = PI * self.propeller_diameter_m.powi(2) / 4.0;
-        let ideal_static_thrust_n =
-            (2.0 * condition.density_kg_m3 * disk_area_m2 * propeller_power_w.powi(2)).cbrt();
-        let static_thrust_n = self.static_figure_of_merit.powf(2.0 / 3.0) * ideal_static_thrust_n;
-        // Public 568F data do not define the transition from static actuator-disk
-        // behavior to the generic J-based surrogate. Blend them over 0..5 m/s
-        // with smoothstep (zero slope at both ends), avoiding a regime switch or
-        // force jump while keeping the exact finite actuator-disk limit at V=0.
-        let transition_end_m_s = 5.0;
-        let transition_fraction = condition.true_airspeed_m_s / transition_end_m_s;
-        let transition_weight = if transition_fraction >= 1.0 {
-            1.0
-        } else {
-            transition_fraction.powi(2) * (3.0 - 2.0 * transition_fraction)
-        };
-        let governor_solution = self.solve_governor(
-            condition.density_kg_m3,
-            revolutions_s,
-            advance_ratio,
-            propeller_power_w,
-            command.mode == TurbopropMode::FlightIdle,
+        // Thrust is the one-dimensional actuator-disk bound evaluated on the
+        // share of shaft power that survives blade profile/tip losses and
+        // tip-Mach compressibility (see `propeller_loss`). The earlier
+        // generic CT/CP polynomial is no longer a thrust source: it was not
+        // energy-consistent (J CT/CP > 1 over part of its map) and was only
+        // ever kept honest by this bound. At V = 0 the bound with the static
+        // figure of merit is exactly `FM^(2/3) (2 rho A P^2)^(1/3)`.
+        let helical_tip_mach = self.helical_tip_mach(
+            condition.true_airspeed_m_s,
+            command.propeller_speed_rpm,
+            ambient_temperature_k,
         );
-        let (governed_angle_deg, governed_thrust_n) = match governor_solution {
-            Ok(solution) => solution,
-            Err(TurbopropError::GovernorNoSolution { .. })
-            | Err(TurbopropError::NonPhysicalResult("negative forward thrust")) => {
-                // Outside the generic CP surface, retain the nearest pitch-bound
-                // indication but do not discard available engine power. Applying
-                // the static figure of merit to shaft power in ideal momentum
-                // theory is the minimum-hypothesis extension: at V=0 it exactly
-                // recovers T = FM^(2/3) T_ideal, while remaining power-bounded at
-                // every forward speed.
-                let power_scale = condition.density_kg_m3
-                    * revolutions_s.powi(3)
-                    * self.propeller_diameter_m.powi(5);
-                let lower_angle_deg = self.surrogate.minimum_blade_angle_deg;
-                let upper_angle_deg = self.surrogate.maximum_blade_angle_deg;
-                let lower_power_w = self
-                    .surrogate
-                    .coefficients(advance_ratio, lower_angle_deg)
-                    .1
-                    * power_scale;
-                let upper_power_w = self
-                    .surrogate
-                    .coefficients(advance_ratio, upper_angle_deg)
-                    .1
-                    * power_scale;
-                let nearest_angle_deg = if (lower_power_w - propeller_power_w).abs()
-                    <= (upper_power_w - propeller_power_w).abs()
-                {
-                    lower_angle_deg
-                } else {
-                    upper_angle_deg
-                };
-                let extrapolated_thrust_n = if command.mode == TurbopropMode::FlightIdle {
-                    // No public 568F windmilling/idle map supports converting
-                    // residual idle shaft power into positive cruise-like thrust.
-                    // Zero is the conservative minimum-hypothesis fallback.
-                    0.0
-                } else {
-                    actuator_disk_thrust_bound_n(
-                        self.blade_efficiency(advance_ratio) * propeller_power_w,
-                        condition.density_kg_m3,
-                        disk_area_m2,
-                        condition.true_airspeed_m_s,
-                    )
-                };
-                (nearest_angle_deg, extrapolated_thrust_n)
-            }
-            Err(error) => return Err(error),
-        };
-        let blade_angle_deg = self.surrogate.minimum_blade_angle_deg
-            + transition_weight * (governed_angle_deg - self.surrogate.minimum_blade_angle_deg);
-        let blended_thrust_n =
-            static_thrust_n + transition_weight * (governed_thrust_n - static_thrust_n);
-        // The generic CT/CP surface is not an energy-consistent propeller map,
-        // so positive thrust is bounded by one-dimensional actuator-disk
-        // momentum theory. The power that reaches the disc is not the whole
-        // shaft power: a real blade spends part of it on profile drag, tip
-        // loss and non-uniform inflow, and bounding with the *whole* shaft
-        // power is a propeller with none of those (eta_p = 0.98 at cruise),
-        // which no propeller of this class reaches.
-        //
-        // The static branch's treatment (a figure of merit as an
-        // effective-power loss factor) is therefore applied at every
-        // airspeed, with the blade efficiency blended from the static figure
-        // of merit to the declared forward-flight value. At `V = 0` the two
-        // coincide exactly, so the static thrust is the static branch's.
-        let blade_efficiency = self.blade_efficiency(advance_ratio);
+        let blade_efficiency = self.blade_efficiency(advance_ratio)
+            * self.tip_mach_efficiency_factor(helical_tip_mach);
         let ideal_thrust_bound_n = actuator_disk_thrust_bound_n(
             blade_efficiency * propeller_power_w,
             condition.density_kg_m3,
@@ -211,18 +137,20 @@ impl Pw127m568fModel {
         } else {
             f64::INFINITY
         };
-        let energy_bounded_thrust_n = blended_thrust_n
-            .min(ideal_thrust_bound_n)
-            .min(efficiency_capped_thrust_n);
+        let blade_angle_deg = self.indicative_blade_angle_deg(
+            condition.density_kg_m3,
+            revolutions_s,
+            advance_ratio,
+            propeller_power_w,
+            command.mode == TurbopropMode::FlightIdle,
+        );
         let propeller_thrust_n = if command.mode == TurbopropMode::FlightIdle {
-            // The generic powered CT polynomial is not a windmilling map and
-            // predicts several kilonewtons of drag at some descent points. With
-            // neither OEM idle pitch nor drag data, zero propeller force is the
-            // bounded neutral hypothesis. Nacelle/airframe drag remains outside
-            // this isolated propulsion kernel.
+            // No OEM idle pitch or windmilling drag data: zero propeller
+            // force is the bounded neutral hypothesis. Nacelle/airframe drag
+            // remains outside this isolated propulsion kernel.
             0.0
         } else {
-            energy_bounded_thrust_n
+            ideal_thrust_bound_n.min(efficiency_capped_thrust_n)
         };
 
         let useful_power_w = propeller_thrust_n * condition.true_airspeed_m_s;
@@ -236,9 +164,15 @@ impl Pw127m568fModel {
                 "propulsive efficiency is outside [0, 1]",
             ));
         }
-        // Class PSFC on free-turbine shaft power: flat in power, sqrt(theta)
-        // in ambient temperature (see `psfc_kg_kwh`).
-        let psfc_kg_kwh = self.psfc_kg_kwh(ambient_temperature_k);
+        // Class PSFC on free-turbine shaft power: sqrt(theta) in ambient
+        // temperature and a part-power multiplier below the sourced flat band
+        // (see `psfc_at_power_kg_kwh`).
+        let psfc_kg_kwh = self.psfc_at_power_kg_kwh(
+            ambient_temperature_k,
+            engine_power_w
+                / self
+                    .available_shaft_power_w(Pw127mRating::NormalTakeoff, condition.density_kg_m3),
+        );
         let fuel_flow_kg_s = engine_power_w * psfc_kg_kwh / JOULES_PER_KWH;
         let output = TurbopropOutput {
             engine_shaft_power_w: engine_power_w,
@@ -371,6 +305,10 @@ impl Pw127m568fModel {
                 "minimum_power_lapse_fraction",
                 self.minimum_power_lapse_fraction,
             ),
+            ("part_power_knee_fraction", self.part_power_knee_fraction),
+            ("part_power_psfc_exponent", self.part_power_psfc_exponent),
+            ("tip_mach_critical", self.tip_mach_critical),
+            ("tip_mach_loss_coefficient", self.tip_mach_loss_coefficient),
         ] {
             if !value.is_finite() {
                 return Err(TurbopropError::NonFinite(name));
@@ -444,6 +382,25 @@ impl Pw127m568fModel {
                 self.minimum_power_lapse_fraction,
                 f64::MIN_POSITIVE,
                 1.0,
+            ),
+            (
+                "part_power_knee_fraction",
+                self.part_power_knee_fraction,
+                f64::MIN_POSITIVE,
+                1.0,
+            ),
+            (
+                "part_power_psfc_exponent",
+                self.part_power_psfc_exponent,
+                0.0,
+                3.0,
+            ),
+            ("tip_mach_critical", self.tip_mach_critical, 0.3, 2.0),
+            (
+                "tip_mach_loss_coefficient",
+                self.tip_mach_loss_coefficient,
+                0.0,
+                50.0,
             ),
         ] {
             if value < minimum || value > maximum {

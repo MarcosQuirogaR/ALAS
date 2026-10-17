@@ -129,36 +129,37 @@ fn the_unconstrained_closure_crosses_a_declared_mass_it_only_seeds_from() {
 }
 
 #[test]
-fn the_band_closes_on_the_design_mission_and_rejects_a_band_below_it() {
-    // A band wide enough to hold the design-mission fixed point closes on it.
-    let mut wide = clean_sheet(MtowSizing::MtowBand);
-    wide.optimizer.objective.mtow_band_fraction = 0.5;
-    let plan = wide.mtow_plan();
-    assert!(plan.design_mission.is_some());
-    let assessment = assess(&wide);
-    let sized = &assessment.sized;
-    assert_mission_closed(&wide, sized);
-    let (lower_kg, upper_kg) = (plan.lower_bound_kg.unwrap(), plan.upper_bound_kg.unwrap());
-    assert!(lower_kg < sized.takeoff_mass_kg && sized.takeoff_mass_kg < upper_kg);
-    assert_eq!(violated(&assessment, "mtow_band_lower"), Some(false));
-    assert_eq!(violated(&assessment, "mtow_band_upper"), Some(false));
-    // A band whose upper edge lies below that fixed point holds the closure
-    // at the edge and rejects the candidate.
-    let closed_kg = sized.takeoff_mass_kg;
-    let mut narrow = wide.clone();
-    narrow.optimizer.objective.mtow_target_kg = 0.8 * closed_kg;
-    narrow.optimizer.objective.mtow_band_fraction = 0.05;
-    let edge_kg = narrow.mtow_plan().upper_bound_kg.unwrap();
-    assert!(edge_kg < closed_kg);
-    let held = assess(&narrow);
-    let tolerance_kg = narrow.optimizer.objective.sizing_tolerance_kg;
-    assert!(held.sized.takeoff_mass_kg <= edge_kg + tolerance_kg);
-    assert!(!held.sized.sizing_closed);
+fn the_band_is_a_free_mass_under_the_same_ceiling_the_fixed_requirement_applies() {
+    let band = clean_sheet(MtowSizing::MtowBand);
+    let target_kg = band.mtow_band_target_kg();
+    let (lower_kg, upper_kg) = band.mtow_band_limits_kg();
     assert!(
-        !held.hard_feasible,
-        "a band below the mission must reject: {:?}",
-        held.violated_hard_ids()
+        (lower_kg - 0.9 * target_kg).abs() < 1e-6,
+        "p = 10 % by default"
     );
+    for chosen_kg in [lower_kg, target_kg, upper_kg] {
+        let design = DesignVector {
+            mtow_kg: Some(chosen_kg),
+            ..Default::default()
+        };
+        let in_band = assess_product_candidate(&band, &design).unwrap();
+        let mut fixed = clean_sheet(MtowSizing::FixedRequirement);
+        fixed.requirements.mtow_kg = chosen_kg;
+        let at_fixed = assess(&fixed);
+        assert_eq!(
+            in_band.sized.takeoff_mass_kg,
+            at_fixed.sized.takeoff_mass_kg
+        );
+        assert_eq!(in_band.sized.design_gross_mass_kg, chosen_kg);
+        assert_eq!(in_band.hard_feasible, at_fixed.hard_feasible, "{chosen_kg}");
+        assert_eq!(
+            violated(&in_band, "mtow_ceiling"),
+            violated(&at_fixed, "mtow_ceiling")
+        );
+        // A takeoff-mass closure is not a band constraint any more.
+        assert_eq!(violated(&in_band, "mtow_band_lower"), None);
+        assert_eq!(violated(&in_band, "mtow_band_upper"), None);
+    }
 }
 
 #[test]

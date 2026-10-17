@@ -171,7 +171,8 @@ pub fn c919() -> AircraftPreset {
         // trailing edge fixes the kink chord at the root chord less 3.2625 m,
         // and a 7.150 m centreline chord (kink chord rounded up to 3.895 m so the edge never runs forward) then gives half area 64.58 m^2.
         design_vector: DesignVector {
-            span_m: 33.6,
+            // Step B: 35.80 m is the span over the winglets (ACAP 02-02 Fig 1, printed, A); the planar wing is 33.6 m (device reach 1.10 m per side, below). Was span_m 33.6.
+            span_m: 35.8,
             root_chord_m: 7.150,
             break_chord_m: 3.895,
             tip_chord_m: 1.75,
@@ -188,14 +189,21 @@ pub fn c919() -> AircraftPreset {
         airfoil_class_source: "ESTIMATE: the C919 wing (first flight 2017) is a supercritical design; COMAC section data are not public. Drawn with NASA SC(2)-0610 root and SC(2)-0410 tip sections (Harris, NASA TP-2969, 1990), as for the A320 preset.",
         geometry: GeometryConfig {
             wing: WingConfig {
-                // ESTIMATE: the A320-200 root-leading-edge station (11.891 m
-                // of 37.57 m) as a length fraction, 12.31 m for 38.9 m.
-                root_datum_x_m: 12.31,
+                // Reference wing = the manufacturer's published values (geometry freeze 2026-10-12, owner decision); the drawn planform stays the geometry.
+                // S 129.15 m2: secondary source only (Wikipedia specification table, see the sources list); no published MAC or LEMAC
+                // (COMAC publishes none): both follow the drawn reference trapezoid.
+                reference_wing: crate::ReferenceWingConfig::published(129.15, None, None),
+                // Root-chord leading edge 12.60 m aft of the nose: the straight
+                // leading edge of the C919 ACAP plan view (C919-SVV19-50009-00,
+                // 02-02 Fig 1, vector, overlay study) run in to the centreline.
+                // It replaces the A320 length-fraction estimate (12.31 m), which
+                // put the wing 0.3 m forward of the drawing at every station.
+                root_datum_x_m: 12.60,
                 // ESTIMATE: A320-200 dihedral heights (low wing, 3.95 m body)
                 // carried over.
-                root_z_m: -1.2,
-                break_z_m: -0.62,
-                tip_z_m: 0.33,
+                root_z_m: -1.0739, // geometry round 2 (wing lane); was -1.2
+                break_z_m: -0.3997, // geometry round 2 (wing lane); was -0.62
+                tip_z_m: 0.6992, // geometry round 2 (wing lane); was 0.33
                 root_twist_deg: 3.0,
                 break_twist_deg: 1.0,
                 break_span_fraction: 0.379_3,
@@ -210,6 +218,76 @@ pub fn c919() -> AircraftPreset {
                 root_airfoil: "sc20610".to_owned(),
                 tip_airfoil: "sc20410".to_owned(),
                 airfoil_class: crate::AirfoilClass::Supercritical,
+                                // Thickness profile (geometry round 2): the NASA Common Research Model t/c 0.154 at the
+                // centreline, 0.138 at the side of body, 0.105 at the yehudi break and 0.095 at the tip
+                // (Vassberg, DeHaan, Rivers and Wahls, AIAA 2008-6919, Table 2) is the public transport-wing
+                // distribution; the multipliers below act on the root-kink-tip section blend above.
+                thickness_stations: vec![
+                    crate::WingThicknessStation {
+                        span_fraction: 0.0000,
+                        thickness_scale: 1.5444, // t/c 0.0997 -> 0.1540
+                    },
+                    crate::WingThicknessStation {
+                        span_fraction: 0.1179,
+                        thickness_scale: 1.3840, // t/c 0.0997 -> 0.1380
+                    },
+                    crate::WingThicknessStation {
+                        span_fraction: 0.3793,
+                        thickness_scale: 1.0530, // t/c 0.0997 -> 0.1050
+                    },
+                    crate::WingThicknessStation {
+                        span_fraction: 1.0000,
+                        thickness_scale: 0.9539, // t/c 0.0996 -> 0.0950
+                    },
+                ],
+                // Spanwise dihedral (geometry round 2): leading-edge heights at interior stations fitted to the upper edge of the
+                // manufacturer front view (symmetrised drawing aligned on the fuselage crown, same measurement on the model).
+                dihedral_stations: vec![
+                    crate::WingDihedralStation {
+                        span_fraction: 0.2000,
+                        z_m: -0.7572,
+                        flight_rise_m: None,
+                    },
+                    crate::WingDihedralStation {
+                        span_fraction: 0.3000,
+                        z_m: -0.5497,
+                        flight_rise_m: None,
+                    },
+                    crate::WingDihedralStation {
+                        span_fraction: 0.5000,
+                        z_m: -0.2003,
+                        flight_rise_m: None,
+                    },
+                    crate::WingDihedralStation {
+                        span_fraction: 0.6500,
+                        z_m: 0.0930,
+                        flight_rise_m: None,
+                    },
+                    crate::WingDihedralStation {
+                        span_fraction: 0.8000,
+                        z_m: 0.3672,
+                        flight_rise_m: None,
+                    },
+                ],
+                // Step B (loft-wing-2026-10-11): C2 cubic spline through the dihedral, twist and thickness stations; was Linear (default).
+                wing_profile_interpolation: crate::WingProfileInterpolation::C2Spline,
+                // Step B: C919 tip device (ACAP 02-02 Fig 1, measure/C919): outer tip reaches 17.75 m semi-span against the 16.65 m planar tip (reach 1.10 m, B) and the tip top stands
+                // 2.19 m above the root upper surface, 0.93 m above the tip upper surface (C, one view, low confidence). A raked, strongly canted tip (47 deg from vertical, blend 0.3 m);
+                // tip chord 0.5 m and LE sweep 55 deg are templates (C, line art does not resolve them). Reach with these numbers 1.115 m -> wing 33.57 m.
+                wingtip_device: Some(crate::WingtipDevice {
+                    kind: crate::WingtipDeviceKind::Winglet,
+                    height_m: 0.93,
+                    down_height_m: 0.0,
+                    cant_deg: 47.0,
+                    root_chord_m: None,
+                    tip_chord_m: 0.5,
+                    le_sweep_deg: 55.0,
+                    toe_out_deg: 0.0,
+                    blend_radius_m: 0.3,
+                    airfoil: None,
+                    span_includes_device: true,
+                    include_in_vlm: true,
+                }),
                 ..WingConfig::default()
             },
             // ESTIMATE: the A320-200 empennage (31.0 m^2 tailplane, 21.5 m^2
@@ -219,45 +297,92 @@ pub fn c919() -> AircraftPreset {
             // carried fin.
             empennage: EmpennageConfig {
                 tail_airfoil: "naca0012".to_owned(),
-                hstab_offset_from_tail_m: 5.5,
-                hstab_z_m: 0.8,
-                hstab_root_chord_m: 3.740,
-                hstab_tip_chord_m: 1.24,
+                // Apex moved 0.69 m forward, tip leading edge held at the ACAP
+                // drawing (36.7 m): LE sweep 32.5 deg drawn vs 27.8 deg carried.
+                // geo/tailfit 2026-10-11: tailplane straight-edge fit to the drawing, centreline values; was off 6.19, chords 3.97/1.43, tip (4.04, 6.35, 0.612)
+                hstab_offset_from_tail_m: 6.09,
+                hstab_z_m: 0.800, // geometry round 2 (wing lane): upper surface at the root matched to the front view; was 0.8
+                // Step B (C919 ACAP C919-SVV19-50009-00 02-02 Fig 1 top view, measure/C919, B; |delta| 0.13-0.2 m > 0.05 m reading error): drawn tailplane
+                // 6.35 m semi-span, centreline chord 3.97 m, tip chord 1.43 m = 34.3 m^2 (was the carried A320 values 6.225 m / 3.740 m / 1.24 m = 31.0 m^2).
+                hstab_root_chord_m: 3.8,
+                hstab_tip_chord_m: 1.18,
                 hstab_root_twist_deg: -2.0,
                 hstab_tip_twist_deg: -2.0,
-                hstab_tip_le_m: (3.31, 6.225, 0.5),
-                vstab_offset_from_tail_m: 6.5,
+                // Step B: root LE kept (offset 6.19 m); tip LE x 4.04 m = drawn 32.46 deg LE sweep (ACAP top view) over the 6.35 m semi-span, was 3.94 m at 6.225 m (32.33 deg);
+                // tip z scaled with the semi-span to hold the 5.5 deg dihedral (0.600 -> 0.612, front view dihedral 4.79 vs 4.59 deg is within uncertainty).
+                hstab_tip_le_m: (4.07, 6.35, 0.612),
+                // Fin position fitted to the C919 ACAP side view (digitised): crown
+                // leading edge 31.2 m, tip trailing edge 38.3 m on the 38.9 m
+                // body; the A320 offset it was carried with put them 1.0-1.25 m
+                // too far aft. The chords and height stay the carried ones
+                // (drawing: 5.7 m root, 2.1 m tip chord, 5.9 m height).
+                // Step B: crown LE at 31.16 m (ACAP side view LE extrapolated to the crown, measure/C919, C) = 38.9 - 7.74; was 7.65 (LE 31.25 m). The measurement table
+                // lists 7.55 for -0.1 m, which has the wrong sign: the model LE was 0.10 m AFT of the drawing, so the offset grows.
+                // geo/tailfit 2026-10-11: fin straight-edge fit to the drawing at the root line (rms 0.010/0.005 m); was off 7.74, chords 5.74/2.05, tip (5.05, 0.0, 5.93)
+                vstab_offset_from_tail_m: 7.72,
                 vstab_z_m: 2.17,
-                vstab_root_chord_m: 5.444,
-                vstab_tip_chord_m: 1.884,
-                vstab_tip_le_m: (5.060, 0.0, 5.87),
+                // Step B (ACAP side view chords 5.60/4.79/3.89/3.01/2.24 m at 5/25/50/75/95 % height, measure/C919, B): crown chord 5.74 m (mean of the extrapolated 5.80 m and
+                // the traced crown LE/TE 5.68 m; was the carried A320 5.444 m), tip chord 2.05 m (was 1.884), height 5.93 m (drawn 5.93-5.96, was 5.87), tip LE offset 5.05 m =
+                // 5.93 m x tan(40.44 deg) of the drawn LE sweep (was 5.060 m at 5.87 m, 40.8 deg). Fin area 23.1 m^2 vs drawn 23.2 (was 21.5).
+                vstab_root_chord_m: 5.54,
+                vstab_tip_chord_m: 1.96,
+                vstab_tip_le_m: (5.06, 0.0, 5.93),
                 ..EmpennageConfig::default()
             },
             fuselage: FuselageConfig {
                 // Wikipedia specification table: 3.96 m wide, 4.166 m high.
                 diameter_m: 3.96,
                 height_m: Some(4.166),
-                nose_z_m: -0.3,
+                nose_z_m: -0.68,
                 cabin_start_x_m: 3.5,
                 cabin_z_m: 0.1,
                 // ESTIMATE: the A320-200 tailcone (7.5 m of 37.57 m) scaled to
                 // the 38.9 m length.
                 tailcone_length_m: 7.77,
                 tail_z_m: 1.0,
+                // FUSELAGE-G2 shaped nose and aft body. Outline traced from the manufacturer drawing
+                // (side: same; top: COMAC C919 ACAP C919-SVV19-50009-00 Issue 003),
+                // calibrated to the drawn length; the nose law (windshield, radome, keel and plan
+                // exponents) is a least-squares fit to the traced upper, lower and plan lines (RMS 0.092 m),
+                // the aft law (belly ramp, crown drop, plan taper, closing section) to the traced aft lines
+                // (RMS 0.049 m). Cabin start, tailcone length and every payload and mass station are unchanged:
+                // only the outer loft moves. Section exponent 2.0 (ellipse): no drawing measures it.
+                nose_length_m: Some(4.44),
+                nose_windshield_angle_deg: Some(36.3),
+                nose_crown_end_fraction: Some(1.0),
+                nose_radome_length_fraction: Some(0.1),
+                nose_keel_exponent: Some(3.38),
+                nose_plan_exponent: Some(1.64),
+                nose_section_exponent: Some(2.0),
+                belly_upsweep_length_m: Some(13.69),
+                aft_belly_exponent: Some(1.58),
+                tail_end_z_m: Some(1.21),
+                tail_end_width_m: Some(0.5),
+                tail_end_height_m: Some(0.48),
+                aft_plan_length_m: Some(10.94),
+                aft_plan_exponent: Some(1.18),
+                aft_crown_length_m: Some(11.27),
+                aft_crown_exponent: Some(2.2),
                 ..FuselageConfig::default()
             },
             engine: EngineConfig {
+                // Final merge: engines.json carries a V2 nacelle set (nacelle_shape_v2) that agrees with the measured length, diameter and inlet; was Legacy.
+                nacelle_model: crate::NacelleModel::V2,
                 // ESTIMATE: the A320-200 engine station (5.755 m of a 17.05 m
                 // semi-span, 0.3376) scaled to the 16.8 m semi-span, 5.67 m,
                 // with 0.1 m added for the larger 78 in fan nacelle.
-                spanwise_positions_m: vec![5.77, -5.77],
+                // geo/close 2026-10-12: drawn engine 0.30 m further outboard (top view best shift dy +0.35 m); was 5.77 (ESTIMATE)
+                spanwise_positions_m: vec![6.07, -6.07],
                 // ESTIMATE: the A320 axis 1.50 m below the local leading edge
                 // lowered by the 0.15 m radius increase (1.15 m LEAP nacelle
                 // against 1.0 m) so the nacelle keeps its ground clearance.
-                z_m: -1.65,
+                // geo/close 2026-10-12: raised 0.35 m to the drawn height (side sheet best shift dz +0.35 m; the previous value was an ESTIMATE holding A320-like clearance); was -1.857
+                z_m: -1.507, // geometry round 2 (wing lane): was -1.65; the wing leading edge at the engine moved +0.207 m, this keeps the nacelle height
                 // ESTIMATE: the A320 offset 3.646 m plus 0.3 m for the
                 // longer LEAP nacelle ahead of the wing leading edge.
-                inlet_x_offset_m: 3.95,
+                // Step B (C919 ACAP 02-02 Fig 1 top view, printed 12.08 m nose-to-inlet, measure/C919, B; model front was 11.603 m, 0.48 m forward, confirmed by the
+                // before overlay): offset 3.95 -> 3.473 m puts the inlet at 12.08 m. Not tied to the LEAP-1C V2 shape (no radius change: drawn 2.72 m diameter is schematic).
+                inlet_x_offset_m: 3.473,
                 ..EngineConfig::default()
             },
             ..GeometryConfig::default()

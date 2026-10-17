@@ -380,6 +380,11 @@ mod tests {
 
     #[test]
     fn route_detail_uses_a_clipped_equirectangular_texture() {
+        // The Earth texture is optional (ALAS_EARTH_TEXTURE); without it the
+        // figure draws the plain map and there is no texture to assert on.
+        if alas_pipeline::earth_texture::earth_texture_png().is_none() {
+            return;
+        }
         let route = Route::new(
             vec![
                 Waypoint::named(51.47, -0.45, "EGLL"),
@@ -415,7 +420,9 @@ mod tests {
         assert!((0.0..=1.0).contains(&top));
         assert!(width > 0.0 && height > 0.0);
         let svg = render_svg(&scene);
-        assert!(svg.matches("data:image/png;base64,").count() >= 2);
+        // The texture is defined once and every image reference points at it.
+        assert_eq!(svg.matches("data:image/png;base64,").count(), 1);
+        assert!(svg.matches("href=\"#alas-blue-marble").count() >= 2);
         assert!(svg.contains("viewBox="));
     }
 

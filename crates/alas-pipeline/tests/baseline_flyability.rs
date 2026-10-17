@@ -64,7 +64,12 @@ fn reserve_margin_kg(
         50,
         tolerance_kg,
     )
-    .unwrap();
+    .unwrap_or_else(|error| {
+        panic!(
+            "dispatch at ZFW {zero_fuel_mass_kg:.0} kg over {:.0} nmi: {error:?}",
+            range_m / NMI
+        )
+    });
     assert!(
         matches!(
             solution.status,
@@ -72,7 +77,8 @@ fn reserve_margin_kg(
                 | DispatchStatus::MtowLimited { .. }
                 | DispatchStatus::TankLimited { .. }
         ),
-        "{:?}",
+        "ZFW {zero_fuel_mass_kg:.0} kg over {:.0} nmi at MTOW {mtow_kg:.0} kg, tank {capacity_kg:.0} kg: {:?}",
+        range_m / NMI,
         solution.status
     );
     ceiling_kg - zero_fuel_mass_kg - solution.plan.takeoff_fuel_kg()

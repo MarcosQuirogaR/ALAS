@@ -713,14 +713,14 @@ mod product_tests {
         let mix = pax.length_share_mix();
         let seats =
             |cap| simulate_passenger_counts_for_seat_mix_with_source_cap(&g, pax, &mix, cap, None);
-        // The floor holds 663 seats; a ceiling below that must be filled to
-        // the seat rather than left a whole business row short of it, and a
-        // ceiling above the floor must not change the uncapped answer.
-        assert_eq!(seats(None).total(), 663);
+        // The floor holds 662 seats (663 before the geometry phase 1 fuselage loft, -0.15 %); a
+        // ceiling below that must be filled to the seat rather than left a whole business row
+        // short of it, and a ceiling above the floor must not change the uncapped answer.
+        assert_eq!(seats(None).total(), 662);
         assert_eq!(seats(Some(868)), seats(None));
         assert_eq!(seats(Some(555)).total(), 555);
         assert_eq!(seats(Some(600)).total(), 600);
-        assert_eq!(seats(Some(555)).business, 85);
+        assert_eq!(seats(Some(555)).business, 84); // 85 before the geometry phase 1 loft
     }
 
     #[test]

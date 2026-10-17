@@ -80,11 +80,14 @@ fn every_preset_uses_a_finite_structural_wing_point_inside_its_wingbox() {
             let aerodynamic_center_x = reference_wing.aerodynamic_center(0.0)[0];
             let mean_aerodynamic_chord = reference_wing.mean_aerodynamic_chord();
             assert!(
-                (aerodynamic_center_x - 16.469_108_083_231_486).abs() < 1e-12,
+                // Geometry phase 1: the compatibility build follows the preset wing (root 7.071 m,
+                // break 3.7 m chords), so this AC moved from 16.4879 to 16.3464 m.
+                (aerodynamic_center_x - 16.346_367_581_246_128).abs() < 1e-12,
                 "A220 frozen-reference aerodynamic-center x drifted: {aerodynamic_center_x:.15}"
             );
             assert!(
-                (mean_aerodynamic_chord - 3.720_242_534_584_891_3).abs() < 1e-12,
+                // Same cause: the drawn A220 wing carries the Yehudi root, MAC 3.7375 -> 4.1911 m.
+                (mean_aerodynamic_chord - 4.191_079_091_355_154).abs() < 1e-12,
                 "A220 frozen-reference MAC drifted: {mean_aerodynamic_chord:.15}"
             );
             assert!(

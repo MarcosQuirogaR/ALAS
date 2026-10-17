@@ -9,7 +9,7 @@
 
 use alas_aero::analysis::PolarSweep;
 use alas_aero::avl::{AvlModel, AvlPolar, AvlPolarPoint, AvlReference};
-use alas_aero::mses::{MsesPolarResult, MsesPressureResult, MsesStatus};
+use alas_aero::mses::{MsesPressureResult, MsesStatus};
 use alas_aero::vspaero::{VspaeroModel, VspaeroPolar, VspaeroPolarPoint, VspaeroReference};
 use alas_config::design_variables::DesignVector;
 use alas_geom::asb::airfoil::Airfoil;
@@ -23,7 +23,7 @@ use alas_pipeline::{
 };
 use alas_report::families::{aerodynamics, optimization};
 use alas_report::svg::render_svg;
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 fn report() -> AnalysisReport {
@@ -66,11 +66,11 @@ fn report() -> AnalysisReport {
         static_margin: 0.1,
         x_neutral_point: 4.0,
         trimmed_design_point: None,
-        component_masses: HashMap::new(),
+        component_masses: BTreeMap::new(),
         flops_mass_buildup: None,
-        mass_coordinates: HashMap::new(),
+        mass_coordinates: BTreeMap::new(),
         physical_cg: [0.0, 0.0, 0.0],
-        geometry_summary: HashMap::new(),
+        geometry_summary: BTreeMap::new(),
         payload_layout: None,
         cg_envelope_ok: Some(true),
         neutral_point_conditions: None,
@@ -126,6 +126,7 @@ fn avl_result(
         }),
         comparison,
         error: None,
+        linear_cruise: None,
     }
 }
 
@@ -178,10 +179,10 @@ fn model_comparison_overlays_only_compatible_avl_lift_and_moment() {
             AvlComparableQuantity::PitchingMomentCoefficient,
         ]),
         error: None,
+        linear_cruise: None,
     };
     let svg = render_svg(&aerodynamics::figure_model_comparison(
         &report,
-        None,
         None,
         None,
         Some(&avl),
@@ -211,7 +212,6 @@ fn model_comparison_keeps_the_legacy_layout_when_avl_is_absent() {
         None,
         None,
         None,
-        None,
         Some("dark"),
     ));
 
@@ -223,8 +223,7 @@ fn model_comparison_keeps_the_legacy_layout_when_avl_is_absent() {
 
 #[test]
 fn model_comparison_uses_one_bottom_legend_and_unmarked_model_curves() {
-    let scene =
-        aerodynamics::figure_model_comparison(&report(), None, None, None, None, Some("dark"));
+    let scene = aerodynamics::figure_model_comparison(&report(), None, None, None, Some("dark"));
     let legend_positions = scene
         .elements
         .iter()
@@ -267,7 +266,6 @@ fn model_comparison_reports_avl_status_without_overlaying_non_comparable_data() 
         &report,
         None,
         None,
-        None,
         Some(&avl),
         Some("dark"),
     ));
@@ -294,11 +292,11 @@ fn model_comparison_names_the_exported_avl_deck_when_the_solver_is_not_configure
         comparison_reference: None,
         comparison: AvlComparisonStatus::NotEvaluated,
         error: Some("native AVL executable is not configured; geometry deck exported".to_owned()),
+        linear_cruise: None,
     };
 
     let svg = render_svg(&aerodynamics::figure_model_comparison(
         &report,
-        None,
         None,
         None,
         Some(&avl),
@@ -370,7 +368,6 @@ fn report_fed_figures_preserve_python_titles_axes_markers_and_legends() {
         None,
         None,
         None,
-        None,
         Some("dark"),
     ));
     text_contract(
@@ -405,22 +402,10 @@ fn report_fed_figures_preserve_python_titles_axes_markers_and_legends() {
 }
 
 #[test]
-fn model_comparison_keeps_section_coefficients_out_of_aircraft_axes() {
-    let section = MsesPolarResult {
-        status: MsesStatus::Ok,
-        airfoil_name: "root_demo".to_owned(),
-        mach: 0.72,
-        reynolds: 12_000_000.0,
-        alpha_deg: vec![0.0, 4.0],
-        cl: vec![7.0, 9.0],
-        cd: vec![3.0, 4.0],
-        cm: vec![2.0, 2.5],
-        ..MsesPolarResult::default()
-    };
+fn model_comparison_draws_no_section_coefficients_on_aircraft_axes() {
     let svg = render_svg(&aerodynamics::figure_model_comparison(
         &report(),
         None,
-        Some(&section),
         None,
         None,
         Some("dark"),
@@ -446,7 +431,6 @@ fn model_comparison_plots_the_geometry_resolving_non_vlm_lift_model() {
     report.airplane.s_ref = 15.0;
     let svg = render_svg(&aerodynamics::figure_model_comparison(
         &report,
-        None,
         None,
         None,
         None,
@@ -481,7 +465,6 @@ fn classical_prandtl_curve_uses_geometry_when_the_report_grid_never_reaches_zero
 
     let svg = render_svg(&aerodynamics::figure_model_comparison(
         &report,
-        None,
         None,
         None,
         None,
@@ -541,10 +524,10 @@ fn model_comparison_overlays_only_compatible_vspaero_lift_and_moment() {
             VspaeroComparableQuantity::PitchingMomentCoefficient,
         ]),
         error: None,
+        outside_validity_alpha_deg: Vec::new(),
     };
     let svg = render_svg(&aerodynamics::figure_model_comparison(
         &report,
-        None,
         None,
         Some(&vspaero),
         None,

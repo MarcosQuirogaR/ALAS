@@ -10,7 +10,23 @@ impl Default for ObjectiveWeights {
         Self {
             transport_planform_constraints_enabled: true,
             transport_shape_priors_enabled: false,
-            geometric_body_alpha_min_deg: 2.0,
+            // Body-attitude window (D8, re-derived from sources, deg, geometric
+            // angle of the fuselage reference line to the flight path at
+            // mid-cruise, nose-up positive; compressible trim). Lower bound 0:
+            // the fuselage must not fly nose-down in cruise. Sadraey (2013),
+            // Aircraft Design, sec. 5.5 (p. 196): "the fuselage angle of
+            // attack must be zero in cruise" for minimum fuselage drag;
+            // Jenkinson et al. (1999), Civil Jet Aircraft Design, "Wing/body
+            // setting": the fuselage is at its minimum drag attitude at the
+            // mid-cruise condition, "approximately level"; Raymer (6th ed.)
+            // Ch. 4 "Wing incidence" (p. 88) and Ch. 23.2 (p. 837): "a few
+            // degrees nose-up" / "a small angle of attack". The former 2.0 minimum was not sourced: it was written
+            // on the incompressible attitude, which the Goethert trim (AERL-02)
+            // shows overstated alpha by 1 to 1.5 deg. The 4.0 maximum is an
+            // unsourced engineering limit (no primary source gives a number
+            // above "a few degrees"); it is unchanged because compressibility
+            // only lowers the attitude.
+            geometric_body_alpha_min_deg: 0.0,
             geometric_body_alpha_max_deg: 4.0,
             geometric_body_alpha_penalty_scale: 200.0,
             min_root_wingbox_depth_m: 1.20,

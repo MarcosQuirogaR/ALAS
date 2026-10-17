@@ -130,7 +130,9 @@ fn figure_page(section_title: &str, figure: &PdfFigure) -> String {
 }
 
 fn append_scene(out: &mut String, scene: &Scene) {
-    if let Some(background) = scene.background {
+    // A scene composited over pre-drawn content keeps `background` for contrast
+    // decisions but must not paint it (the SVG renderer honours the same flag).
+    if let (true, Some(background)) = (scene.paint_background, scene.background) {
         append_fill(out, background);
         out.push_str(&format!(
             "0 0 {} {} re f\n",
@@ -442,7 +444,8 @@ fn append_stroke(out: &mut String, color: Color, width: f64, dash: Option<&[f64]
 
 #[cfg(test)]
 mod tests {
-    use super::{append_scene_text, SceneTextStyle};
+    use super::{append_scene, append_scene_text, SceneTextStyle};
+    use crate::scene::Scene;
     use crate::scene::{Color, TextAlign, TextBaseline};
 
     fn style(baseline: TextBaseline, angle_deg: f64) -> SceneTextStyle {
@@ -478,5 +481,18 @@ mod tests {
         );
         // Reading upward: glyph tops face -x, so the baseline sits 4.8 px toward +x.
         assert!(rotated.contains("0.000 -1.000 -1.000 -0.000 104.800 50.000 Tm"));
+    }
+
+    #[test]
+    fn hidden_background_paint_is_not_filled_in_pdf() {
+        let mut scene = Scene::new(100.0, 50.0, Some(Color::rgb(30, 30, 30)));
+        let mut painted = String::new();
+        append_scene(&mut painted, &scene);
+        assert!(painted.contains("0 0 100.000 50.000 re f"));
+
+        scene.hide_background_paint();
+        let mut hidden = String::new();
+        append_scene(&mut hidden, &scene);
+        assert!(!hidden.contains("re f"), "{hidden}");
     }
 }

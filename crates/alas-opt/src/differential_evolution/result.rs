@@ -352,6 +352,8 @@ impl OptimizationResult {
             .design_vectors
             .iter()
             .enumerate()
+            // A row with no design (an unparsed candidate) cannot be verified.
+            .filter_map(|(index, design)| design.as_ref().map(|design| (index, design)))
             .filter(|(index, _)| {
                 Some(*index) != winner_row
                     && self.history.valid.get(*index).copied().unwrap_or(false)

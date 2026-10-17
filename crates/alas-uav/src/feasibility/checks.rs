@@ -4,7 +4,7 @@
 use super::*;
 
 /// Conventional standard acceleration of gravity, in metres per second squared.
-pub const STANDARD_GRAVITY_M_S2: f64 = 9.806_65;
+pub const STANDARD_GRAVITY_M_S2: f64 = alas_atmo::STANDARD_GRAVITY;
 
 /// Evaluate all coupled constraints for a selected fixed-wing UAV.
 pub fn evaluate(design: &UavDesign) -> UavReport {
@@ -60,6 +60,29 @@ pub fn evaluate(design: &UavDesign) -> UavReport {
     check_energy(design, mission_energy_available_wh, &mut findings);
     let flight_conditions = check_flight(design, takeoff_mass_kg, &mut findings);
     check_structure(design, &mut findings);
+    let airframe = match (takeoff_mass_kg, center_of_gravity_x_m) {
+        (Some(mass), Some(cg)) => {
+            match crate::airframe::analysis::analyse_design(&design.airframe_inputs, mass, cg) {
+                Ok(analysis) => Some(analysis),
+                Err(error) => {
+                    findings.push(Finding {
+                        severity: Severity::Unverified,
+                        kind: FindingKind::InvalidInput,
+                        subject: "airframe analysis".to_owned(),
+                        message: error.to_string(),
+                        required: None,
+                        available: None,
+                        units: None,
+                    });
+                    None
+                }
+            }
+        }
+        _ => {
+            missing("airframe analysis", "takeoff mass and CG", &mut findings);
+            None
+        }
+    };
 
     UavReport {
         takeoff_mass_kg,
@@ -68,6 +91,7 @@ pub fn evaluate(design: &UavDesign) -> UavReport {
         mission_energy_available_wh,
         flight_conditions,
         findings,
+        airframe,
     }
 }
 

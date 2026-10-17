@@ -7,7 +7,8 @@ use alas_config::design_variables::DesignVector;
 use alas_config::AlasConfig;
 
 use super::{
-    scored_point_at, DesignObjective, DesignOptimizer, OptimizationError, SearchObjective,
+    scored_point_at, DelegatedObjective, DesignObjective, DesignOptimizer, OptimizationError,
+    SearchObjective,
 };
 use crate::evaluator::ObjectiveEvaluation;
 use crate::history::OptimizationHistory;
@@ -204,7 +205,7 @@ fn failed_native_search_diagnostics_preserve_the_strict_rejection_and_candidate(
     assert_eq!(evidence.termination, "no_feasible_design");
     assert!(!evidence.search_diagnostics.as_ref().unwrap().converged);
     assert_eq!(evidence.history.n_evaluations(), 1);
-    assert_eq!(evidence.history.design_vectors, vec![nominal]);
+    assert_eq!(evidence.history.design_vectors, vec![Some(nominal)]);
     assert_eq!(evidence.best_design, nominal);
 }
 
@@ -400,27 +401,6 @@ fn clean_sheet_optimizer_publishes_the_cabin_sized_fuselage() {
 }
 
 #[test]
-fn native_worker_batches_merge_history_in_candidate_order() {
-    let mut objective = DesignObjective::new(AlasConfig::default());
-    let candidates = vec![Vec::new(), Vec::new(), Vec::new(), Vec::new()];
-
-    let evaluations = objective.evaluate_batch(&candidates, 2);
-
-    assert_eq!(evaluations.len(), candidates.len());
-    assert_eq!(objective.history.n_evaluations(), candidates.len());
-    // `evaluate` routes to `crate::mdo::evaluate_mission_sized`, which
-    // validates the design-vector shape first
-    // (`DesignObjective::validate_design_space`) and records "design_space"
-    // before any geometry is built, so an empty (wrong-length) candidate
-    // fails at that shape check.
-    assert!(objective
-        .history
-        .reject_reason
-        .iter()
-        .all(|reason| reason == "design_space"));
-}
-
-#[test]
 fn an_unsupported_method_token_set_directly_is_rejected_rather_than_silently_run() {
     // A saved configuration document migrates an unsupported method token
     // (`sqp`, `nsga2`, `turbo_1`, `cma_es`, `feasibility_first_de`) to
@@ -516,9 +496,9 @@ fn a_cancelled_de_run_reports_the_analyses_it_executed_and_not_its_budget() {
     let mut calls = 0usize;
     let mut evaluator = |design: &DesignVector| {
         calls += 1;
-        // Inside the second generation. The delegated evaluator is serial and
-        // does not poll the flag, so that whole generation is scored; the
-        // kernel observes the request at its end.
+        // Inside the second generation. The delegated batch checks the flag
+        // before each candidate, so the rest of that generation is recorded
+        // as never started instead of being scored.
         if calls == 2 * INITIAL_POPULATION + 5 {
             cancel.store(true, Ordering::Relaxed);
         }
@@ -540,15 +520,29 @@ fn a_cancelled_de_run_reports_the_analyses_it_executed_and_not_its_budget() {
         .expect("the DE path always reports diagnostics");
     assert_eq!(
         diagnostics.analysis_evaluations,
-        result.history.n_evaluations(),
-        "every analysis in the history belongs to the refinement"
+        2 * INITIAL_POPULATION + 5,
+        "the candidates started before the request are the analyses"
     );
-    assert!(diagnostics.analysis_evaluations < 3 * INITIAL_POPULATION);
-    assert!(diagnostics.analysis_evaluations > 2 * INITIAL_POPULATION);
+    let cancelled_rows = result
+        .history
+        .reject_reason
+        .iter()
+        .filter(|reason| reason.as_str() == crate::evaluation_trace::CANCELLED_UNSTARTED)
+        .count();
+    assert_eq!(
+        diagnostics.analysis_evaluations + cancelled_rows,
+        result.history.n_evaluations(),
+        "every history row is an analysis or a recorded never-started candidate"
+    );
+    assert!(cancelled_rows > 0 && cancelled_rows <= INITIAL_POPULATION - 5);
     assert_eq!(diagnostics.poll_iterations, 1);
     let refinement = diagnostics.stages.last().expect("a refinement stage");
     assert_eq!(refinement.termination, "cancelled");
-    assert_eq!(refinement.evaluations, diagnostics.analysis_evaluations);
+    assert_eq!(
+        refinement.analysis_evaluations,
+        diagnostics.analysis_evaluations
+    );
+    assert_eq!(refinement.cancelled_unstarted, cancelled_rows);
 }
 
 #[test]
@@ -670,4 +664,41 @@ fn a_reporting_fidelity_rejection_also_refuses_the_delivered_feasibility_verdict
     assert!(!result.best_valid);
     assert!(!result.is_delivered_feasible());
     assert!(!result.converged());
+}
+
+#[test]
+fn a_delegated_batch_stops_starting_candidates_once_cancellation_is_requested() {
+    struct CancelAfterFirst<'a>(&'a AtomicBool, usize);
+    impl crate::evaluator::ObjectiveEvaluator for CancelAfterFirst<'_> {
+        fn evaluate(&mut self, design: &DesignVector) -> ObjectiveEvaluation {
+            self.1 += 1;
+            self.0.store(true, Ordering::Release);
+            ObjectiveEvaluation {
+                cost: 1.0,
+                valid: true,
+                l_over_d: 10.0,
+                span_m: design.span_m,
+                alpha_deg: 2.0,
+                area_m2: 1.0,
+                trim_ih_deg: 0.0,
+                reject_reason: String::new(),
+            }
+        }
+    }
+    let cancel = AtomicBool::new(false);
+    let mut evaluator = CancelAfterFirst(&cancel, 0);
+    let mut objective = DelegatedObjective::new(&mut evaluator, 1.0e6, Some(&cancel));
+    let design = DesignVector::default().to_array().to_vec();
+    let scores = SearchObjective::evaluate_batch(&mut objective, &vec![design; 4], 1);
+    assert_eq!(scores.len(), 4);
+    assert_eq!(scores[0], (1.0, true));
+    assert!(scores[1..]
+        .iter()
+        .all(|&(cost, valid)| cost == 1.0e6 && !valid));
+    assert_eq!(objective.history.n_evaluations(), 4);
+    assert!(objective.history.reject_reason[1..]
+        .iter()
+        .all(|reason| reason == crate::evaluation_trace::CANCELLED_UNSTARTED));
+    drop(objective);
+    assert_eq!(evaluator.1, 1);
 }

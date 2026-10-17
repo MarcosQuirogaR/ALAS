@@ -16,7 +16,8 @@ use alas_pipeline::structural::StructuralAnalysisResult;
 use alas_struct::analytical::LoadCaseResult;
 use alas_struct::nastran::ResultStatus;
 
-use super::{status_message_scene, structures_unavailable_message, TAB_GRAY};
+use super::{status_message_scene, structures_unavailable_message};
+use crate::families::common::load_case_color;
 
 const MSC_NASTRAN_COLOR: &str = "tab:red";
 const NASTRAN95_COLOR: &str = "tab:orange";
@@ -331,18 +332,6 @@ fn compact_error(error: &str) -> String {
         compact.push_str("...");
     }
     compact
-}
-
-/// The load-case-to-color map `figure_structures_loads` uses (`colors =
-/// {"pull-up": "tab:red", "push-down": "tab:blue", "level": "tab:green"}`),
-/// falling back to `tab:gray` for anything else.
-fn load_case_color(name: &str) -> &'static str {
-    match name {
-        "pull-up" => "tab:red",
-        "push-down" => "tab:blue",
-        "level" => "tab:green",
-        _ => TAB_GRAY,
-    }
 }
 
 /// A diamond marker (a 4-point polygon rotated 45 degrees), approximating

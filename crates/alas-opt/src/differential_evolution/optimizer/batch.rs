@@ -85,11 +85,12 @@ pub(crate) fn pre_gate_violation(
 /// its limit as the residual table does. The reason is the first that fails
 /// in that order.
 ///
-/// The area is the planform's own trapezoid sum
-/// ([`alas_config::TransportPlanform::reference_area_m2`]). The built wing's
-/// `s_ref` reproduces it to summation round-off and adds the projection of
-/// any non-planar tip device, so it is never smaller; the gate rejects only
-/// an excess beyond [`AREA_ROUNDOFF`], so every design it rejects is over
+/// The area is the reference area the builder will give `s_ref`
+/// ([`alas_config::WingConfig::reference_area_m2`], which follows
+/// `ReferenceWingMode`: the published area, the reference trapezoid or the
+/// drawn planform). The built wing's `s_ref` reproduces it to summation
+/// round-off and adds the projection of any non-planar tip device, so it is
+/// never smaller; the gate rejects only an excess beyond [`AREA_ROUNDOFF`], so every design it rejects is over
 /// the limit in the residual table too, and the borderline ones and those a
 /// tip device carries over are left to it.
 fn hard_geometry_violation(config: &AlasConfig, design: &DesignVector) -> Option<(Reason, f64)> {
@@ -101,7 +102,7 @@ fn hard_geometry_violation(config: &AlasConfig, design: &DesignVector) -> Option
     let limit_m2 = config.requirements.max_wing_area_m2;
     let excess_area = match config.geometry.wing.transport_planform(design) {
         Ok(planform) if limit_m2.is_finite() && limit_m2 > 0.0 => {
-            let excess = (planform.reference_area_m2() - limit_m2) / limit_m2;
+            let excess = (config.geometry.wing.reference_area_m2(&planform) - limit_m2) / limit_m2;
             if excess > AREA_ROUNDOFF {
                 excess
             } else {
@@ -468,10 +469,11 @@ mod tests {
     #[test]
     fn the_wing_area_pre_gate_agrees_with_the_built_reference_area() {
         // Every registered aircraft over its own box: the built wing's
-        // `s_ref` is the planform's trapezoid area to round-off far below
-        // the gate's margin, plus any non-planar tip device's projection
-        // (the AVE's), never less, so the gate rejects only designs the
-        // residual table rejects.
+        // `s_ref` is the reference area of the wing's `ReferenceWingMode`
+        // (published, trapezoid or drawn) to round-off far below the gate's
+        // margin, plus any non-planar tip device's projection (the AVE's),
+        // never less, so the gate rejects only designs the residual table
+        // rejects.
         let mut gated = 0;
         for preset in alas_config::presets::available() {
             let config = AlasConfig::from_value(&serde_json::json!({ "preset": preset })).unwrap();
@@ -489,7 +491,7 @@ mod tests {
                 let Ok(plane) = builder.build(Some(&design), false) else {
                     continue;
                 };
-                let area_m2 = planform.reference_area_m2();
+                let area_m2 = config.geometry.wing.reference_area_m2(&planform);
                 assert!(
                     plane.s_ref >= area_m2 * (1.0 - 1.0e-12),
                     "{preset}: planform {area_m2} m2 against built {} m2",

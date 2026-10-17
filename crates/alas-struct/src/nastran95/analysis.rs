@@ -15,17 +15,24 @@ use std::path::Path;
 
 use alas_config::{DesignRequirements, StructuresConfig};
 
-use super::deck::build_modes_deck_for_nodes;
+use super::deck::build_static_deck_product_in;
+use super::units::UnitScale;
 use super::{
-    build_static_deck_product, displacement_of, read_displacement_tables, read_eigenvalues,
-    read_eigenvector_tables, run_nastran95, Dialect, Nastran95Solver, RunOutcome,
+    displacement_of, read_displacement_tables, read_eigenvalues, read_eigenvector_tables,
+    run_nastran95, Dialect, Nastran95Solver, RunOutcome,
 };
 use crate::loads;
 use crate::mesh::{Deck, MeshNodeIndex};
 use crate::nastran::{ModesResult, NastranResults, ResultStatus, StaticResult, VibrationResult};
 
 const SOL101: &str = "sol101";
-const SOL103: &str = "sol103";
+
+/// The unit system of the product decks written here: decimetre - 10 kg -
+/// newton. See [`super::units`] for why metres cannot be used (NASTRAN-95's
+/// absolute `CQUAD4` degeneracy threshold) and why millimetres are not used
+/// either (its results move with the length unit). Print-file displacements
+/// and stresses are converted back to SI by the readers below.
+pub(super) const PRODUCT_UNITS: UnitScale = UnitScale::DECIMETRE;
 
 /// Run the local NASTRAN-95 implementation for the enabled static and modal
 /// solutions.
@@ -45,16 +52,38 @@ pub fn run_nastran95_analysis(
     solver: &Nastran95Solver,
 ) -> NastranResults {
     let mut results = NastranResults::default();
+    // Name any panel the solver's absolute CQUAD4 test would reject before it
+    // is started; the solver itself only reports an opaque fatal 2224.
+    let flagged = super::quad_guard::degenerate_quads(deck, PRODUCT_UNITS);
+    if let Some(message) = super::quad_guard::degeneracy_message(&flagged, PRODUCT_UNITS) {
+        return guard_rejection(config, message);
+    }
     if config.run_sol_static {
-        let text =
-            build_static_deck_product(deck, node_index, requirements, config, Dialect::Nastran95);
+        let text = build_static_deck_product_in(
+            deck,
+            node_index,
+            requirements,
+            config,
+            Dialect::Nastran95,
+            PRODUCT_UNITS,
+        );
         results.static_solve = match solve_and_retain(solver, work_dir, SOL101, &text, config) {
             Ok(print) => {
-                let mut result = read_static_print(&print, node_index, requirements, config);
+                let mut result =
+                    read_static_print(&print, node_index, requirements, config, PRODUCT_UNITS);
                 let cases = loads::load_cases(requirements, config.additional_safety_factor);
-                let response = super::read_static_spanwise_print(&print, deck, node_index, &cases);
+                let mut response =
+                    super::read_static_spanwise_print(&print, deck, node_index, &cases);
+                for case in &mut response.cases {
+                    for translation in &mut case.translations_m {
+                        for component in translation {
+                            *component /= PRODUCT_UNITS.length;
+                        }
+                    }
+                }
                 crate::nastran::static_spanwise::attach(&mut result, response);
-                let stress = super::read_static_shell_stress_print(&print, deck, &cases);
+                let mut stress = super::read_static_shell_stress_print(&print, deck, &cases);
+                shell_stress_to_si(&mut stress, PRODUCT_UNITS);
                 if let Some(error) = &stress.error {
                     result.status = ResultStatus::Error;
                     result.error = Some(format!(
@@ -65,6 +94,10 @@ pub fn run_nastran95_analysis(
                             .map_or(String::new(), |e| format!("{e}; "))
                     ));
                 } else {
+                    let excluded = deck.load_introduction_elements(
+                        &node_index.engine_nids,
+                        crate::mesh::LOAD_INTRODUCTION_LAYERS,
+                    );
                     for case in &stress.cases {
                         let peak = case
                             .samples
@@ -72,6 +105,14 @@ pub fn run_nastran95_analysis(
                             .map(|s| s.von_mises_pa)
                             .fold(0.0_f64, f64::max);
                         result.root_von_mises_max_pa.push(case.name, peak);
+                        // Unavailable (not 0 Pa) when nothing is assessed.
+                        if let Some(assessed) = crate::mesh::assessed_peak(
+                            case.samples
+                                .iter()
+                                .map(|s| (excluded.contains(&s.element_id), s.von_mises_pa)),
+                        ) {
+                            result.assessed_von_mises_max_pa.push(case.name, assessed);
+                        }
                     }
                 }
                 result.shell_stress = Some(stress);
@@ -86,20 +127,8 @@ pub fn run_nastran95_analysis(
     }
 
     if config.run_sol_modes {
-        let output_nodes = node_index
-            .spar_upper_nids
-            .first()
-            .map(Vec::as_slice)
-            .unwrap_or_default();
-        let text = build_modes_deck_for_nodes(deck, config, Dialect::Nastran95, output_nodes);
-        results.modes = match solve_and_retain(solver, work_dir, SOL103, &text, config) {
-            Ok(print) => read_modes_print(&print, deck, node_index, config.n_modes),
-            Err(detail) => ModesResult {
-                status: ResultStatus::Error,
-                error: Some(detail),
-                ..ModesResult::default()
-            },
-        };
+        results.modes =
+            super::modal_search::solve_modes(solver, work_dir, deck, node_index, config);
     }
 
     if config.run_sol_vibration_sine || config.run_sol_vibration_random {
@@ -118,8 +147,29 @@ pub fn run_nastran95_analysis(
     results
 }
 
+/// The results of a run the element guard stopped: every requested solution
+/// is an `Error` carrying the guard's diagnostic, never a fabricated value.
+fn guard_rejection(config: &StructuresConfig, message: String) -> NastranResults {
+    let mut results = NastranResults::default();
+    if config.run_sol_static {
+        results.static_solve = StaticResult {
+            status: ResultStatus::Error,
+            error: Some(message.clone()),
+            ..StaticResult::default()
+        };
+    }
+    if config.run_sol_modes {
+        results.modes = ModesResult {
+            status: ResultStatus::Error,
+            error: Some(message),
+            ..ModesResult::default()
+        };
+    }
+    results
+}
+
 /// Run one local solution and retain the input/output pair beside it.
-fn solve_and_retain(
+pub(super) fn solve_and_retain(
     solver: &Nastran95Solver,
     work_dir: &Path,
     solution: &str,
@@ -153,6 +203,7 @@ fn read_static_print(
     node_index: &MeshNodeIndex,
     requirements: &DesignRequirements,
     config: &StructuresConfig,
+    units: UnitScale,
 ) -> StaticResult {
     let tables = read_displacement_tables(print);
     let cases = loads::load_cases(requirements, config.additional_safety_factor);
@@ -162,18 +213,33 @@ fn read_static_print(
     };
     for (index, case) in cases.iter().enumerate() {
         if let Some(row) = displacement_of(&tables, index, node_index.tip_nid) {
-            result.tip_deflection_m.push(case.name, row[2]);
+            result
+                .tip_deflection_m
+                .push(case.name, row[2] / units.length);
         }
     }
     result
 }
 
 /// Read local SOL 103 eigenvalues and front-spar mode shapes.
+#[cfg(test)]
 fn read_modes_print(
     print: &str,
     deck: &Deck,
     node_index: &MeshNodeIndex,
     requested_modes: i64,
+) -> ModesResult {
+    read_modes_print_limited(print, deck, node_index, requested_modes, usize::MAX)
+}
+
+/// As [`read_modes_print`], keeping at most `confirmed` leading roots: the
+/// prefix the Sturm counts confirm to be gap-free.
+pub(super) fn read_modes_print_limited(
+    print: &str,
+    deck: &Deck,
+    node_index: &MeshNodeIndex,
+    requested_modes: i64,
+    confirmed: usize,
 ) -> ModesResult {
     let all_modes = read_eigenvalues(print);
     // NASTRAN-95 substitutes zero for rigid-body frequencies (the BULK manual
@@ -191,7 +257,7 @@ fn read_modes_print(
                 && mode.cyclic_hz > 0.0
         })
         .map(|(index, _)| index)
-        .take(requested_modes.max(1) as usize)
+        .take((requested_modes.max(1) as usize).min(confirmed))
         .collect();
     let frequencies_hz = kept
         .iter()
@@ -221,7 +287,17 @@ fn read_modes_print(
     ordered.sort_by(|left, right| left.0.total_cmp(&right.0));
     let mode_shape_y_m = ordered.iter().map(|&(y, _)| y).collect::<Vec<_>>();
     let displacement_tables = read_displacement_tables(print);
-    let eigenvector_tables = read_eigenvector_tables(print);
+    let eigenvector_tables = match read_eigenvector_tables(print) {
+        Ok(tables) => tables,
+        Err(error) => {
+            return ModesResult {
+                status: ResultStatus::Error,
+                error: Some(error.to_string()),
+                frequencies_hz,
+                ..ModesResult::default()
+            };
+        }
+    };
     let mut mode_shapes = Vec::new();
     for &mode_index in &kept {
         // Keep one shape slot for every retained frequency, even when the
@@ -257,6 +333,19 @@ fn read_modes_print(
         mode_shapes,
         mode_shape_y_m: Some(mode_shape_y_m),
         ..ModesResult::default()
+    }
+}
+
+/// Convert printed shell stresses (deck units) to SI in place.
+fn shell_stress_to_si(response: &mut crate::nastran::StaticShellStressResponse, units: UnitScale) {
+    for case in &mut response.cases {
+        for sample in &mut case.samples {
+            sample.fiber_distance_m /= units.length;
+            sample.normal_x_pa /= units.stress();
+            sample.normal_y_pa /= units.stress();
+            sample.shear_xy_pa /= units.stress();
+            sample.von_mises_pa /= units.stress();
+        }
     }
 }
 
@@ -363,6 +452,69 @@ mod tests {
     }
 
     #[test]
+    fn a_degenerate_panel_stops_the_run_with_a_named_element_before_any_solver_starts() {
+        // A 0.5 mm high trailing-edge panel at deck-scale x10 is fine; the same
+        // geometry 100000x smaller is below the solver's absolute CQUAD4 test.
+        let mut deck = Deck::new();
+        for (nid, xyz) in [
+            (1, [0.0, 0.0, 0.0]),
+            (2, [1.0e-5, 0.0, 0.0]),
+            (3, [1.0e-5, 0.0, 1.0e-6]),
+            (4, [0.0, 0.0, 1.0e-6]),
+        ] {
+            deck.add_grid(nid, xyz);
+        }
+        deck.quads.push(crate::mesh::Shell {
+            eid: 4242,
+            pid: 1,
+            nodes: vec![1, 2, 3, 4],
+        });
+        let index = MeshNodeIndex {
+            root_nid: 1,
+            tip_nid: 2,
+            kink_nid: 1,
+            spar_upper_nids: vec![vec![1, 2]],
+            spar_lower_nids: vec![],
+            engine_nids: vec![],
+        };
+        // The solver path is never reached, so a placeholder installation is
+        // enough; its executable does not exist.
+        let solver = Nastran95Solver {
+            exe: "nonexistent/nastran.exe".into(),
+            rf_source: "nonexistent/rf".into(),
+            runtime: None,
+            runtime_source: super::super::run::Nastran95RuntimeSource::Unspecified,
+            rf_stage: None,
+            open_core_words: None,
+            max_open_core_words: 1,
+        };
+        let config = StructuresConfig {
+            run_sol_static: true,
+            run_sol_modes: true,
+            ..StructuresConfig::default()
+        };
+        let results = run_nastran95_analysis(
+            &deck,
+            &index,
+            &config,
+            &DesignRequirements::default(),
+            Path::new("unused"),
+            &solver,
+        );
+        for (status, error) in [
+            (results.static_solve.status, &results.static_solve.error),
+            (results.modes.status, &results.modes.error),
+        ] {
+            assert_eq!(status, ResultStatus::Error);
+            let message = error.as_deref().unwrap_or_default();
+            assert!(
+                message.contains("4242") && message.contains("element guard"),
+                "{message}"
+            );
+        }
+    }
+
+    #[test]
     fn local_static_prints_report_tip_deflection_without_fabricating_stress() {
         let index = MeshNodeIndex {
             root_nid: 1,
@@ -383,7 +535,7 @@ mod tests {
              2      G      0.0  0.0  1.25 0.0  0.0  0.0
 ";
         let print = format!("{one_case}{one_case}{one_case}");
-        let result = read_static_print(&print, &index, &requirements, &config);
+        let result = read_static_print(&print, &index, &requirements, &config, UnitScale::SI);
         assert_eq!(result.status, ResultStatus::Ok);
         assert_eq!(result.root_von_mises_max_pa.len(), 0);
         assert_eq!(result.tip_deflection_m.labels().len(), 3);

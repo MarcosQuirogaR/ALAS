@@ -20,7 +20,7 @@ mod tests {
     use alas_config::AlasConfig;
     use alas_geom::aircraft::airplane::Airplane;
     use alas_pipeline::full_analysis::{AnalysisReport, DesignPoint, PolarFit, PolarFitStatus};
-    use std::collections::HashMap;
+    use std::collections::BTreeMap;
 
     #[test]
     fn summary_formatting_produces_non_empty_string() {
@@ -63,11 +63,11 @@ mod tests {
             static_margin: 0.12,
             x_neutral_point: 16.2,
             trimmed_design_point: None,
-            component_masses: HashMap::new(),
+            component_masses: BTreeMap::new(),
             flops_mass_buildup: None,
-            mass_coordinates: HashMap::new(),
+            mass_coordinates: BTreeMap::new(),
             physical_cg: [15.0, 0.0, 0.0],
-            geometry_summary: HashMap::new(),
+            geometry_summary: BTreeMap::new(),
             payload_layout: None,
             cg_envelope_ok: Some(true),
             neutral_point_conditions: None,

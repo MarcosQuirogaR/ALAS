@@ -172,7 +172,10 @@ fn mass_residuals(outcome: &SizingOutcome, config: &AlasConfig) -> Vec<Constrain
     // (`alas_mass::tanks::resolve_product_layout`) at one fuel density, and
     // the candidate's is the capacity its dispatch is bounded by.
     let capacity_kg = sized.usable_capacity_kg;
-    if let (Some(nominal_kg), true) = (nominal_tank_capacity_kg(config), capacity_kg.is_finite()) {
+    if let (Some(nominal_kg), true) = (
+        nominal_tank_capacity_kg(&outcome.registered_config(config)),
+        capacity_kg.is_finite(),
+    ) {
         let required_kg =
             if outcome.plan.design_mission.is_some() && sized.design_mission_fuel_kg.is_finite() {
                 sized.design_mission_fuel_kg
@@ -401,7 +404,8 @@ fn balance_residuals(
     };
     // Hard, preset-anchored companions of the two diagnostic residuals below.
     // They compare design loadings, as the reporting guard does.
-    let mut residuals = relative_balance::residuals(&assessment, config, role);
+    let mut residuals =
+        relative_balance::residuals(&assessment, &outcome.registered_config(config), role);
     // The absolute constraints hold in every state the reporting verdict
     // gates: the design loading and the dispatched route's takeoff and
     // landing.
@@ -465,10 +469,8 @@ fn balance_residuals(
 }
 
 /// The per-constraint assessment with the largest normalized exceedance
-/// across every loading state, matching
-/// `ModelCgEnvelopeAssessment::worst_hard_exceedance`'s own convention but
-/// keeping the assessment (actual, limit) that produced it rather than only
-/// the number.
+/// across every loading state, keeping the
+/// assessment (actual, limit) that produced it rather than only the number.
 fn worst_by_constraint(
     loading_states: &[ModelCgLoadingAssessment],
     constraint: ModelCgConstraint,

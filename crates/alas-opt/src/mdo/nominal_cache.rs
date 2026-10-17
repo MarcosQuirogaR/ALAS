@@ -77,6 +77,7 @@ impl<T: Copy> NominalCache<T> {
     ) -> Option<T> {
         let config = without_placement(config);
         let config = config.as_ref();
+        alas_math::stage_profile::count(alas_math::stage_profile::Counter::NominalLookups, 1);
         let key = config_key(config);
         let cell = Arc::clone(
             self.cells
@@ -87,6 +88,10 @@ impl<T: Copy> NominalCache<T> {
                 .or_default(),
         );
         *cell.get_or_init(|| {
+            alas_math::stage_profile::count(
+                alas_math::stage_profile::Counter::NominalResolutions,
+                1,
+            );
             #[cfg(test)]
             {
                 *self

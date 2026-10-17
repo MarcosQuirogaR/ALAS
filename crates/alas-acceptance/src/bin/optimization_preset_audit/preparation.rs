@@ -58,7 +58,7 @@ pub(super) fn apply_execution_scope(config: &mut AlasConfig, native_only: bool) 
     }
 }
 
-/// Centralized decoration includes every early failure, panic and cancelled row.
+/// Centralized decoration includes every early failure and cancelled row.
 pub(super) fn record_scope(row: &mut serde_json::Value, native_only: bool) {
     let scope = execution_scope(native_only);
     row["execution_scope"] = scope.into();

@@ -140,8 +140,13 @@ fn apply_cabin_preset_with_semantics(
         // A freighter preset is a payload, so the deck configuration it is a
         // payload *of* has to be settled first.
         config.cabin.cargo.use_main_deck = true;
-        config.cabin.cargo.main_deck_uld = "PMC".to_owned();
-        config.cabin.cargo.lower_deck_uld = "LD3".to_owned();
+        if config.cabin.cargo.freight_hold.is_none() {
+            // A declared freight hold keeps its own pallet; the airliner
+            // 96 x 125 in pallet and underfloor LD3 are the generic freighter
+            // defaults.
+            config.cabin.cargo.main_deck_uld = "PMC".to_owned();
+            config.cabin.cargo.lower_deck_uld = "LD3".to_owned();
+        }
         config.cabin.cargo.loading_strategy = "target_cg".to_owned();
 
         let manager = CargoLoadManager::new(&cg_geom, config.cabin.cargo.clone());

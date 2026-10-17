@@ -42,6 +42,30 @@ impl CandidateDrag {
         }
     }
 
+    /// Drag at the actual US1976 atmosphere of an airport (take-off or
+    /// landing) condition before the configuration increment: as
+    /// [`Self::cd_at_atmosphere`] without the lift-dependent viscous term,
+    /// which belongs to the clean polar only (Torenbeek 2013, p. 96). At
+    /// `cl = 0` the two are equal.
+    pub fn cd_airport_base_at_atmosphere(
+        &self,
+        cl: f64,
+        mach: f64,
+        altitude_m: f64,
+        isa_deviation_c: f64,
+    ) -> f64 {
+        match self {
+            Self::Table(table) => {
+                let atmosphere = alas_atmo::us1976_compute_values(altitude_m, isa_deviation_c);
+                let reynolds_per_m =
+                    atmosphere.density_kg_m3 * mach * atmosphere.speed_of_sound_m_s
+                        / atmosphere.dynamic_viscosity_pa_s;
+                table.cd_without_lift_viscous_at_reynolds_per_m(cl, mach, reynolds_per_m)
+            }
+            Self::External(polar) => polar.cd(cl, mach, altitude_m),
+        }
+    }
+
     /// Clean trimmed drag at the actual US1976 atmosphere, including an ISA
     /// temperature deviation (K or deg C). Native parasite drag uses
     /// `rho V / mu` per metre with each component's own Reynolds length.
@@ -59,9 +83,7 @@ impl CandidateDrag {
                 let reynolds_per_m =
                     atmosphere.density_kg_m3 * mach * atmosphere.speed_of_sound_m_s
                         / atmosphere.dynamic_viscosity_pa_s;
-                table.cd0_at_reynolds_per_m(mach, reynolds_per_m)
-                    + table.induced_cd(cl)
-                    + table.wave_cd(cl, mach)
+                table.cd_at_reynolds_per_m(cl, mach, reynolds_per_m)
             }
             Self::External(polar) => polar.cd(cl, mach, altitude_m),
         }
@@ -127,6 +149,28 @@ pub struct CandidateFuelArtifacts {
     pub frozen_plan: Option<FrozenMissionPlan>,
     /// The empennage scales the geometry was built with.
     pub tail_sizing: TailSizing,
+    /// The geometry-scaled maximum lift coefficients the closure flew with,
+    /// None when the candidate keeps the configuration's declared values
+    /// (the registered geometry, or the model switched off). Every consumer
+    /// that re-flies or reports the candidate reads its coefficients through
+    /// [Self::config_with_clmax] so the report and the sizing agree (AERL-01).
+    pub clmax: Option<alas_perf::performance::clmax::ClmaxSet>,
+}
+
+impl CandidateFuelArtifacts {
+    /// config with the coefficients this candidate was sized with, or the
+    /// borrowed original when it kept the declared ones.
+    pub fn config_with_clmax<'a>(
+        &self,
+        config: &'a alas_config::AlasConfig,
+    ) -> std::borrow::Cow<'a, alas_config::AlasConfig> {
+        match &self.clmax {
+            Some(set) => {
+                std::borrow::Cow::Owned(crate::mdo::sizing::clmax_geometry::with_clmax(config, set))
+            }
+            None => std::borrow::Cow::Borrowed(config),
+        }
+    }
 }
 
 /// Work one candidate's sizing closure spent, for cost reports and budgets.

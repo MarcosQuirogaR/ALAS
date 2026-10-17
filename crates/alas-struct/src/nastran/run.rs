@@ -52,6 +52,7 @@ use alas_exec::SupervisedSpawn;
 
 use super::text;
 
+mod cache;
 #[path = "run_diagnostics.rs"]
 mod diagnostics;
 
@@ -239,7 +240,19 @@ fn run_with_memory(
     let mut command = Command::new(&program);
     command.args(&arguments).current_dir(&work_dir);
     let described = format!("{program} {}", arguments.join(" "));
-    supervise(
+    // Opt-in result cache (`ALAS_TOOL_CACHE_DIR`); see `cache.rs`.
+    let cache = cache::begin(
+        exe_path,
+        solver_path,
+        bdf_path,
+        &work_dir,
+        &arguments,
+        &plain_path(&absolute_directory(bdf_path)),
+    );
+    if cache.as_ref().and_then(|cache| cache.restore()).is_some() {
+        return NastranRunOutcome::succeeded();
+    }
+    let outcome = supervise(
         command,
         &Solve {
             command_line: described,
@@ -248,7 +261,11 @@ fn run_with_memory(
             work_dir,
             timeout_seconds,
         },
-    )
+    );
+    if let (Some(cache), true) = (&cache, outcome.ok) {
+        cache.store(&[]);
+    }
+    outcome
 }
 
 fn absolute_directory(bdf_path: &Path) -> PathBuf {

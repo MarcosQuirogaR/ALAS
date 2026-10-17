@@ -14,7 +14,6 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender, TryRecvError};
 use std::sync::Arc;
-use std::thread;
 use std::time::Instant;
 
 use alas_config::{AlasConfig, DesignVector};
@@ -117,7 +116,7 @@ impl QuickEstimates {
             design,
             revision,
         };
-        thread::spawn(move || {
+        let spawned = crate::worker_stack::spawn_analysis_thread("alas-quick", move || {
             let event_sender = sender.clone();
             let mut sink = move |event: QuickEvent| {
                 let _ = event_sender.send(WorkerMessage::Event(event));
@@ -125,6 +124,7 @@ impl QuickEstimates {
             let summary = run_quick_analysis(&request, &mut sink, &cancel);
             let _ = sender.send(WorkerMessage::Finished(summary));
         });
+        drop(spawned);
     }
 
     /// Reset the panel for a new job on `revision` and open its channel.
@@ -249,6 +249,7 @@ impl QuickEstimates {
 mod tests {
     use super::*;
     use alas_pipeline::quick_analysis::QuickValue;
+    use std::thread;
     use std::time::Duration;
 
     fn wait_until_idle(estimates: &mut QuickEstimates) {

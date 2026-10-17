@@ -7,12 +7,15 @@
 
 //! Evidence and import-contract tests for the embedded UAV catalogue.
 
+#[path = "support/prop_tables.rs"]
+mod prop_tables;
 use alas_uav::catalog::ComponentKind;
 use alas_uav::{
     apc_performance_catalog, full_catalog, has_reviewed_quote, is_analysis_ready,
     multi_source_catalog, optimization_catalog, reviewed_catalog, reviewed_quote, seed_catalog,
     Catalog, Currency,
 };
+use prop_tables::use_synthetic_tables;
 
 const REVIEW_MANIFEST: &str = include_str!("../data/rc_innovations_review_manifest.json");
 const MULTI_SOURCE_MANIFEST: &str = include_str!("../data/multi_source_manifest.json");
@@ -385,8 +388,10 @@ fn the_multi_source_catalogue_keeps_manufacturer_evidence_and_unknowns_explicit(
 
 #[test]
 fn the_full_catalogue_merges_sources_without_duplicate_ids() {
+    use_synthetic_tables();
     let catalog = full_catalog().expect("full catalogue");
-    assert_eq!(catalog.records.len(), 606);
+    // 185 embedded records plus 2 derived from the SYNTHETIC propeller tables.
+    assert_eq!(catalog.records.len(), 187);
     assert!(catalog.get("gens-ace-b-45c-1800-5s1p").is_some());
     assert!(catalog.get("tmotor-at1050-kv90").is_some());
     assert!(catalog.get("mateksys-f405-wing-v2").is_some());
@@ -442,15 +447,18 @@ fn the_full_catalogue_merges_sources_without_duplicate_ids() {
 
 #[test]
 fn the_apc_performance_catalogue_adds_every_nonduplicated_source_table() {
-    let catalog = apc_performance_catalog().expect("generated APC performance catalogue");
-    assert_eq!(catalog.records.len(), 421);
+    use_synthetic_tables();
+    let catalog = apc_performance_catalog().expect("derived APC performance catalogue");
+    // Six SYNTHETIC tables; 8x6E, 9x6E, 10x5E and 12x6E already have reviewed records.
+    assert_eq!(catalog.records.len(), 2);
+    assert!(catalog.get("apc-7x4e").is_some());
     let propeller = catalog
-        .get("apc-13x4-5ep-f2b")
+        .get("apc-9x4-5ep-f2b")
         .expect("F2B variant must retain its distinct source-table identity");
     let ComponentKind::Propeller(spec) = &propeller.kind else {
         panic!("APC performance record selected a different component family");
     };
-    assert_eq!(spec.diameter_m, Some(13.0 * 0.0254));
+    assert_eq!(spec.diameter_m, Some(9.0 * 0.0254));
     assert_eq!(spec.pitch_m, Some(4.5 * 0.0254));
     assert_eq!(spec.mass_kg, None);
 }
@@ -559,6 +567,7 @@ fn is_utc_date(value: &str) -> bool {
 
 #[test]
 fn the_powertrain_manifest_names_only_complete_priced_selectable_records() {
+    use_synthetic_tables();
     let manifest: serde_json::Value =
         serde_json::from_str(MULTI_SOURCE_MANIFEST).expect("multi-source manifest");
     let catalog = full_catalog().expect("full catalogue");

@@ -142,8 +142,8 @@ pub(crate) fn show_mission_profile_inputs(state: &mut AppState, ui: &mut Ui) {
     reconcile_route_profile(state);
     let route_distance = route_distance_m(&state.config_values);
     let profile = state
-        .typed_config()
-        .map(|config| config.mission.profile)
+        .typed_config_arc()
+        .map(|config| config.mission.profile.clone())
         .unwrap_or_default();
     let cruise_count = active_cruise_count(&profile);
 
@@ -163,7 +163,7 @@ pub(crate) fn show_mission_profile_inputs(state: &mut AppState, ui: &mut Ui) {
             show_cruise_legs_card(ui, state, cruise_count);
         }
         ui.add_space(8.0);
-        if let Some(config) = state.typed_config() {
+        if let Some(config) = state.typed_config_arc() {
             crate::views::mission_profile_preview::show_interactive_mission_profile_preview(
                 state, ui, &config,
             );
@@ -236,14 +236,14 @@ pub(crate) fn show_mission_profile_window(state: &mut AppState, ctx: &Context) {
     let phase_title = PHASES
         .iter()
         .find(|phase| phase.id == phase_id)
-        .map(|phase| tr(phase.title))
-        .unwrap_or_else(|| tr("Mission profile"));
+        .map_or_else(|| tr("Mission profile"), |phase| tr(phase.title));
+    let title = tr_fields("Mission profile: {phase}", &[("phase", phase_title)]);
     let response = show_native_viewport(
         ctx,
         "mission_profile_phase",
-        format!("Mission profile: {phase_title}"),
+        title.clone(),
         ViewportBuilder::default()
-            .with_title(format!("Mission profile: {phase_title}"))
+            .with_title(title)
             .with_inner_size(vec2(560.0, 430.0))
             .with_min_inner_size(vec2(420.0, 300.0))
             .with_resizable(true),
@@ -595,7 +595,7 @@ fn active_cruise_count(profile: &MissionProfileConfig) -> usize {
 }
 
 fn profile_issues(state: &AppState, distance_m: Option<f64>) -> Vec<String> {
-    let Some(config) = state.typed_config() else {
+    let Some(config) = state.typed_config_arc() else {
         return vec![tr("Mission configuration is invalid.")];
     };
     let profile = &config.mission.profile;

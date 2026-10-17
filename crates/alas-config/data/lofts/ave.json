@@ -1,0 +1,349 @@
+{
+ "schema": 1,
+ "preset": "AVE",
+ "body": "fuselage",
+ "reference_length_m": 76.72,
+ "degree": 5,
+ "frame": "x aft of nose tip, y right, z up, metres; z datum identical to the preset fuselage frame (cabin_z_m etc.)",
+ "curves": {
+  "A": {
+   "knots": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.10248305526590198,
+    0.12056830031282587,
+    0.12056830031282587,
+    0.12056830031282587,
+    0.7566475495307612,
+    0.7566475495307612,
+    0.7566475495307612,
+    0.8053180396246089,
+    0.8904913972888425,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0
+   ],
+   "coeffs": [
+    -4.2891487208947956e-16,
+    0.9434999999999997,
+    5.205911392603996,
+    4.284693705762416,
+    9.61,
+    9.609999999999996,
+    9.609999999999996,
+    9.61,
+    9.610000000000003,
+    9.610000000000003,
+    4.0561709507682435,
+    3.8106516672935102,
+    0.0340258007517803,
+    0.005972850013038915,
+    0.006762516485398633
+   ]
+  },
+  "E": {
+   "knots": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.10691475495307613,
+    0.1257820646506778,
+    0.1257820646506778,
+    0.1257820646506778,
+    0.3819082377476538,
+    0.3819082377476538,
+    0.3819082377476538,
+    0.5055265901981231,
+    0.7218587069864442,
+    0.8120437956204379,
+    0.8980709071949948,
+    0.9019812304483837,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0
+   ],
+   "coeffs": [
+    -2.364085636204839e-16,
+    0.9843,
+    6.892996453044927,
+    6.365816509468758,
+    9.61,
+    9.609999999999998,
+    9.610000000000003,
+    9.61,
+    9.609999999999998,
+    9.610000000000003,
+    9.627596646525241,
+    9.294307042753498,
+    10.211554619269078,
+    5.003175046542315,
+    1.7322377878214985,
+    2.5433906890273756,
+    0.929565414144109,
+    0.00698566550524371
+   ]
+  },
+  "zc": {
+   "knots": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.10691475495307613,
+    0.1257820646506778,
+    0.1257820646506778,
+    0.1257820646506778,
+    0.3819082377476538,
+    0.3819082377476538,
+    0.3819082377476538,
+    0.5055265901981231,
+    0.7218587069864442,
+    0.8120437956204379,
+    0.8980709071949948,
+    0.9019812304483837,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0
+   ],
+   "coeffs": [
+    -0.4123337833468078,
+    -0.37116434689361527,
+    0.4414886977499549,
+    -0.3255973542877748,
+    0.20000000000000084,
+    0.20000000000000248,
+    0.20000000000000148,
+    0.1999999999999999,
+    0.20000000000000376,
+    0.19999999999999912,
+    0.3170808161137375,
+    -0.018549480846256516,
+    0.11593431817020952,
+    0.9315503284413459,
+    1.5717473114486102,
+    1.4150426451404476,
+    1.7324346113217373,
+    2.5708889125781007
+   ]
+  },
+  "n": {
+   "knots": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0
+   ],
+   "coeffs": [
+    2.0,
+    2.0,
+    2.0,
+    2.0,
+    2.0,
+    2.0
+   ]
+  },
+  "k": {
+   "knots": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0
+   ],
+   "coeffs": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ]
+  }
+ },
+ "front": {
+  "kind": "point",
+  "tip_radius_m": 0.3
+ },
+ "rear": {
+  "kind": "base"
+ },
+ "cabin": {
+  "x_start_m": 6.0,
+  "x_end_m": 62.72
+ },
+ "fairness": {
+  "inflections": {
+   "crown": 1,
+   "keel": 2,
+   "plan": 2
+  },
+  "tv_ratio_max": 1.5
+ },
+ "fit": {
+  "rms_m": 0.054794388990098024,
+  "max_m": 0.14850260224558304,
+  "lambda": 1.0,
+  "tool_version": "loft_fit 0.1 + fairfit 1 (quality pass 2026-10-11)"
+ },
+ "provenance": [
+  {
+   "group": "A",
+   "kind": "measured",
+   "drawing": {
+    "id": "boeing_2025_777xacap",
+    "title": "Boeing 777-9 ACAP D6-86073 Rev G (stand-in for AVE, NOT the same aircraft)",
+    "page": "Fig 2-1",
+    "sha256": "e6023a97ce31fe526114bedba7f0f30db732533a561d9c0992fbaf5b8cbea2a2",
+    "path": "<fit-workdir>/777X_Rev_G.pdf"
+   },
+   "view": "top",
+   "px_per_m": 48.55914058572732,
+   "n_samples": 1615,
+   "rms_m": 0.03644467003879087,
+   "max_m": 0.1373942951310038,
+   "confidence": "B",
+   "note": "plan half-width from the calibrated top silhouette (both halves averaged, centreline offset 0.021 m removed); wing/hstab/fairing intervals excluded (exclusions/AVE.json); plateau value = preset D/2, line-width correction -0.001 m/side | quality pass 2026-10-11: refit under the Rust sampled fairness metric (inflections where radius < 50 local half-sizes) with the accuracy gates kept"
+  },
+  {
+   "group": "E",
+   "kind": "measured",
+   "drawing": {
+    "id": "boeing_2025_777xacap",
+    "title": "Boeing 777-9 ACAP D6-86073 Rev G (stand-in for AVE, NOT the same aircraft)",
+    "page": "Fig 2-1",
+    "sha256": "e6023a97ce31fe526114bedba7f0f30db732533a561d9c0992fbaf5b8cbea2a2",
+    "path": "<fit-workdir>/777X_Rev_G.pdf"
+   },
+   "view": "side",
+   "px_per_m": 48.36439463052261,
+   "n_samples": 3233,
+   "rms_m": 0.06195963618836796,
+   "max_m": 0.14850260224558304,
+   "confidence": "B",
+   "note": "half-height from crown and keel of the side silhouette; fin/engine/gear/fairing intervals excluded; plateau = preset height_m/2 (H measured 6.224 m) | quality pass 2026-10-11: refit under the Rust sampled fairness metric (inflections where radius < 50 local half-sizes) with the accuracy gates kept | Wave 2: height capped at 6.212 m (preset 6.2 m) and S(x) non-increasing aft of 16 m; the drawn keel 0.09 m below the cylinder at x 36-48 m is a possible residual pitch of the drawing and is not followed (drawn-sample residual there at the 14.85 cm hinge)."
+  },
+  {
+   "group": "zc",
+   "kind": "measured",
+   "drawing": {
+    "id": "boeing_2025_777xacap",
+    "title": "Boeing 777-9 ACAP D6-86073 Rev G (stand-in for AVE, NOT the same aircraft)",
+    "page": "Fig 2-1",
+    "sha256": "e6023a97ce31fe526114bedba7f0f30db732533a561d9c0992fbaf5b8cbea2a2",
+    "path": "<fit-workdir>/777X_Rev_G.pdf"
+   },
+   "view": "side",
+   "px_per_m": 48.36439463052261,
+   "n_samples": 3233,
+   "rms_m": 0.06195963618836796,
+   "max_m": 0.14850260224558304,
+   "confidence": "B",
+   "note": "centreline height; z datum: crown of the drawing = cabin_z + H/2 of the preset; nose tip z from the drawing -0.412 m (preset nose_z_m 0.25) | quality pass 2026-10-11: refit under the Rust sampled fairness metric (inflections where radius < 50 local half-sizes) with the accuracy gates kept"
+  },
+  {
+   "group": "n",
+   "kind": "template",
+   "drawing": {
+    "id": "boeing_2025_777xacap",
+    "title": "Boeing 777-9 ACAP D6-86073 Rev G (stand-in for AVE, NOT the same aircraft)",
+    "page": "Fig 2-1",
+    "sha256": "e6023a97ce31fe526114bedba7f0f30db732533a561d9c0992fbaf5b8cbea2a2",
+    "path": "<fit-workdir>/777X_Rev_G.pdf"
+   },
+   "view": "front",
+   "px_per_m": 48.36439463052261,
+   "n_samples": 0,
+   "rms_m": 0.0,
+   "max_m": 0.0,
+   "confidence": "B",
+   "note": "n = 2 (ellipse): no dimensioned cabin cross-section is available in the masks; unmeasured"
+  },
+  {
+   "group": "k",
+   "kind": "template",
+   "drawing": {
+    "id": "boeing_2025_777xacap",
+    "title": "Boeing 777-9 ACAP D6-86073 Rev G (stand-in for AVE, NOT the same aircraft)",
+    "page": "Fig 2-1",
+    "sha256": "e6023a97ce31fe526114bedba7f0f30db732533a561d9c0992fbaf5b8cbea2a2",
+    "path": "<fit-workdir>/777X_Rev_G.pdf"
+   },
+   "view": "side",
+   "px_per_m": 48.36439463052261,
+   "n_samples": 0,
+   "rms_m": 0.0,
+   "max_m": 0.0,
+   "confidence": "B",
+   "note": "k = 0 (shoulder at centreline): unmeasured"
+  },
+  {
+   "group": "closure",
+   "kind": "measured",
+   "drawing": {
+    "id": "boeing_2025_777xacap",
+    "title": "Boeing 777-9 ACAP D6-86073 Rev G (stand-in for AVE, NOT the same aircraft)",
+    "page": "Fig 2-1",
+    "sha256": "e6023a97ce31fe526114bedba7f0f30db732533a561d9c0992fbaf5b8cbea2a2",
+    "path": "<fit-workdir>/777X_Rev_G.pdf"
+   },
+   "view": "side",
+   "px_per_m": 48.36439463052261,
+   "n_samples": 0,
+   "rms_m": 0.0,
+   "max_m": 0.0,
+   "confidence": "B",
+   "note": "front: point nose, tip radius 0.30 m (scan 0.10-0.30 m, minimum-knot/minimum-RMS choice, resolution-limited); rear: finite base A=-0.000 m2 (a=0.000 m), E=-0.395 m2 (e=0.000 m)"
+  },
+  {
+   "group": "cabin",
+   "kind": "dimension",
+   "drawing": {
+    "id": "boeing_2025_777xacap",
+    "title": "Boeing 777-9 ACAP D6-86073 Rev G (stand-in for AVE, NOT the same aircraft)",
+    "page": "Fig 2-1",
+    "sha256": "e6023a97ce31fe526114bedba7f0f30db732533a561d9c0992fbaf5b8cbea2a2",
+    "path": "<fit-workdir>/777X_Rev_G.pdf"
+   },
+   "view": "side",
+   "px_per_m": 48.36439463052261,
+   "n_samples": 0,
+   "rms_m": 0.0,
+   "max_m": 0.0,
+   "confidence": "B",
+   "note": "cabin_start_x_m / tailcone_length_m of the preset (payload semantics, unchanged); the flat plateau of the loft is fitted from the drawing and is NOT the payload cabin interval"
+  }
+ ]
+}

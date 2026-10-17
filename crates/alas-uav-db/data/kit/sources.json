@@ -1,0 +1,39 @@
+{
+ "schema_version": 2,
+ "sources": [
+  {
+   "id": "hobbywing-skywalker-sl-motors",
+   "url": "https://www.hobbywing.com/en/products/skywalker2814",
+   "kind": "manufacturer",
+   "licence": "none stated; page disclaimer (information provided as is) read 2026-10-12, site terms not separately read",
+   "redistribution": "facts_with_citation",
+   "tos_checked_at": "2026-10-12",
+   "robots_checked_at": "2026-10-12",
+   "content_hash": "sha256:97c0f8c128f9fc214f23ad6228952fb9ab8942f909d48f6717d81dcb522e8687",
+   "citation": "Hobbywing, 'SkyWalker 2814 2820 2826 - RC Airplane Motors 540-1400KV', product page, standard components specification table, retrieved 2026-10-12"
+  },
+  {
+   "id": "tmotor-at8025-page",
+   "url": "https://store.tmotor.com/product/at8025-fixed-wing-motor.html",
+   "kind": "manufacturer",
+   "licence": "none stated; terms of service not read (review before public release)",
+   "redistribution": "facts_with_citation",
+   "tos_checked_at": null,
+   "robots_checked_at": "2026-10-12",
+   "content_hash": "sha256:f875de69897605a264388cb4177585e7921361f5202c07d4eb33cfb4bc240e93",
+   "citation": "T-MOTOR, 'AT8025 70CC VTOL UAV Fixed Wing Aircraft Long Shaft Motor KV160/KV190', product page, Specification table, retrieved 2026-10-12"
+  },
+  {
+   "id": "radiomaster-er6g-page",
+   "url": "https://radiomasterrc.com/products/er6g-er6gv-2-4ghz-elrs-pwm-receiver",
+   "kind": "manufacturer",
+   "licence": "none stated; terms of service not read (review before public release)",
+   "redistribution": "facts_with_citation",
+   "tos_checked_at": null,
+   "robots_checked_at": "2026-10-12",
+   "content_hash": "sha256:8012e02884d5454c038b421a67b2ac4426d0294653ba0f9863054f14e56cbcec",
+   "citation": "RadioMaster, 'ER6G & ER6GV 2.4GHz ELRS PWM Receiver', product page, Specification (ER6G) and (ER6GV), retrieved 2026-10-12"
+  }
+ ],
+ "components": []
+}

@@ -9,7 +9,7 @@
 // Test code: a failed unwrap on a fixture it builds is the assertion failing.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 use alas_aero::analysis::PolarSweep;
 use alas_config::design_variables::DesignVector;
@@ -91,7 +91,7 @@ pub fn probe_airplane(with_hstab: bool, with_vstab: bool) -> Airplane {
 /// physically consistent) polar, mass and CG: enough for every stability
 /// figure to have real numbers to plot.
 pub fn probe_report(airplane: Airplane) -> AnalysisReport {
-    let mut component_masses = HashMap::new();
+    let mut component_masses = BTreeMap::new();
     component_masses.insert("Wing".to_owned(), 8000.0);
     component_masses.insert("Fuselage".to_owned(), 12000.0);
 
@@ -126,10 +126,10 @@ pub fn probe_report(airplane: Airplane) -> AnalysisReport {
         },
         static_margin: 0.10,
         x_neutral_point: x_ref + 1.0,
-        geometry_summary: HashMap::new(),
+        geometry_summary: BTreeMap::new(),
         component_masses,
         flops_mass_buildup: None,
-        mass_coordinates: HashMap::new(),
+        mass_coordinates: BTreeMap::new(),
         payload_layout: None,
         // Dynamic-mode figures are explicitly gated on a solved trim point.
         // The probe is intentionally lightweight, so use a finite hand-built

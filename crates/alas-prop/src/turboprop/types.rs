@@ -231,6 +231,30 @@ pub struct Pw127m568fModel {
     pub power_lapse_density_exponent: f64,
     /// Lower bound on the available rated-power fraction at very low density.
     pub minimum_power_lapse_fraction: f64,
+    /// Fraction of the available take-off power at and above which the PSFC
+    /// is flat (the part-power multiplier is 1): 0.46, the lower end of the
+    /// 46-100 % band over which Majeed (2009) Tab. 4.1 gives ESFC flat to
+    /// 0.3 %. Below it the PSFC rises, see
+    /// [`Pw127m568fModel::part_power_psfc_multiplier`].
+    pub part_power_knee_fraction: f64,
+    /// Exponent `b` of the part-power PSFC rise below the knee,
+    /// `PSFC / PSFC_flat = (knee / phi)^b`. **A flagged class assumption.**
+    /// No PW100 part-power deck was retrieved. The only citable class datum
+    /// is Raymer (6th ed.) Table 3.4: turboprop `C_bhp` 0.5 lb/bhp/h at
+    /// cruise and 0.6 at loiter, a ratio of 1.2 at a reduced loiter power;
+    /// taking that loiter power as 35 % of take-off power (an assumption)
+    /// gives `b = ln 1.2 / ln (0.46 / 0.35) = 0.667`.
+    pub part_power_psfc_exponent: f64,
+    /// Helical tip Mach number above which the propeller loses efficiency to
+    /// compressibility: 0.89 (Raymer, Aircraft Design: A Conceptual
+    /// Approach, propeller chapter: the Mach loss begins at a helical tip
+    /// Mach near 0.89). **Flagged: the value is as recalled from the audit
+    /// brief, not re-read from the page.**
+    pub tip_mach_critical: f64,
+    /// Coefficient `c` of the quadratic tip-Mach efficiency loss
+    /// `1 - c (M_h - M_crit)^2`. **A flagged class assumption** with no
+    /// retrieved source; it is inert below [`Self::tip_mach_critical`].
+    pub tip_mach_loss_coefficient: f64,
     /// Generic propeller coefficient surface and pitch bounds.
     pub surrogate: PropellerSurrogate,
 }
@@ -271,6 +295,10 @@ impl Default for Pw127m568fModel {
             power_lapse_reference_density_kg_m3: 1.225,
             power_lapse_density_exponent: 0.728,
             minimum_power_lapse_fraction: 0.15,
+            part_power_knee_fraction: 0.46,
+            part_power_psfc_exponent: 0.667,
+            tip_mach_critical: 0.89,
+            tip_mach_loss_coefficient: 4.0,
             surrogate: PropellerSurrogate::generic_six_blade(),
         }
     }

@@ -21,6 +21,22 @@ pub(super) fn full_analysis_completed(result: &PipelineResult) -> bool {
                 .is_some_and(|s| s.status == "ok" && s.sizing.is_some() && s.analysis.is_some()))
 }
 
+/// Whole-process evaluation stage split (`ALAS_EVAL_PROFILE=1`): exclusive
+/// seconds per stage and event counters from `alas_opt::stage_profile`, over
+/// every evaluation the run made (search, verification and replays).
+pub(super) fn eval_profile_json() -> Value {
+    let report = alas_opt::stage_profile::report();
+    json!({
+        "note": "exclusive wall seconds on a shared host; use the fractions",
+        "total_s": report.total_s(),
+        "stages": report.stages.iter().map(|(key, seconds, calls, inclusive_s)| json!({
+            "stage": key, "seconds": seconds, "calls": calls, "inclusive_seconds": inclusive_s,
+        })).collect::<Vec<_>>(),
+        "counters": report.counters.iter().map(|(key, count)| (key.to_string(), json!(count)))
+            .collect::<serde_json::Map<_, _>>(),
+    })
+}
+
 /// Whether the route's trip was flown on the fuel carried, on the unified
 /// segment mission model.
 fn route_flown(result: &PipelineResult) -> bool {

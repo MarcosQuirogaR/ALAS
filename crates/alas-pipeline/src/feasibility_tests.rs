@@ -68,6 +68,7 @@ fn cruise_equilibrium_reports_scalar_and_inertial_force_residuals() {
         },
         air_speed_m_s: 250.0,
         air_speed_reference: alas_config::mission::SpeedReference::TrueAirspeed,
+        speed_caps: alas_config::mission::SpeedCaps::default(),
         true_course_rad: 0.0,
         temperature_deviation_k: 0.0,
         number_control_points: 2,
@@ -346,11 +347,14 @@ fn a_propeller_aircraft_gets_its_cruise_thrust_margin_from_the_propeller_model()
         .run(&preset.design_vector, true)
         .expect("ATR full analysis");
     let feasibility = assess_physical_feasibility(&config, &preset.design_vector, &report, None);
-    for finding in feasibility
-        .findings
-        .iter()
-        .filter(|finding| finding.code == FindingCode::ThrustMarginViolation)
-    {
+    // The engine-out and landing climb checks (CS 25.121, 25.119) share the
+    // finding code with the cruise margin; this test is about the cruise one.
+    for finding in feasibility.findings.iter().filter(|finding| {
+        finding.code == FindingCode::ThrustMarginViolation
+            && !finding.message.contains("CS 25.1")
+            && !finding.message.contains("engine-out second-segment")
+            && !finding.message.contains("residual climb")
+    }) {
         assert!(
             finding.message.contains("maximum-cruise thrust"),
             "{}",
@@ -366,4 +370,50 @@ fn a_propeller_aircraft_gets_its_cruise_thrust_margin_from_the_propeller_model()
     let jet = AlasConfig::from_value(&serde_json::json!({ "preset": "A320-200" }))
         .expect("A320-200 config");
     assert!(static_thrust::propeller_cruise_thrust_n(&jet).is_none());
+}
+
+/// The take-off band (owner decision 2026-10-14): the AVE's second segment
+/// needs 0.2528 against 0.2655 installed, so it passes. Raising the failed
+/// engine's windmilling drag coefficient by configuration (the derived value
+/// is 0.0039) lifts the requirement: 0.0200 gives 0.2824 (6.0 % short, inside
+/// the 8.2 % take-off band: a Warning finding), 0.0320 gives 0.3045 (12.8 %
+/// short, beyond it: the hard ThrustMarginViolation error).
+#[test]
+fn a_second_segment_shortfall_inside_the_take_off_band_is_a_warning_beyond_it_an_error() {
+    let preset = presets::get("AVE").expect("registered AVE preset");
+    let findings_for = |windmilling_cd: Option<f64>| {
+        let mut config =
+            AlasConfig::from_value(&serde_json::json!({ "preset": "AVE" })).expect("AVE config");
+        config.performance.oei_windmilling_cd = windmilling_cd;
+        let report = crate::full_analysis::FullAnalysis::new(config.clone())
+            .run(&preset.design_vector, true)
+            .expect("AVE full analysis");
+        assess_physical_feasibility(&config, &preset.design_vector, &report, None)
+            .findings
+            .into_iter()
+            .filter(|finding| {
+                finding.code != FindingCode::ImprovedClimbV2
+                    && (finding.message.contains("second segment")
+                        || finding.message.contains("second-segment"))
+            })
+            .collect::<Vec<_>>()
+    };
+    assert!(findings_for(None).is_empty());
+    let inside = findings_for(Some(0.020));
+    assert_eq!(inside.len(), 1, "{inside:?}");
+    assert_eq!(inside[0].code, FindingCode::ThrustWithinChartScatter);
+    assert_eq!(inside[0].severity, FindingSeverity::Warning);
+    assert!(inside[0].message.contains("Bartel-Young"), "{inside:?}");
+    let (available, required) = (
+        inside[0].actual.expect("available"),
+        inside[0].limit.expect("required"),
+    );
+    assert!(
+        (0.918..1.0).contains(&(available / required)),
+        "{available} {required}"
+    );
+    let beyond = findings_for(Some(0.032));
+    assert_eq!(beyond.len(), 1, "{beyond:?}");
+    assert_eq!(beyond[0].code, FindingCode::ThrustMarginViolation);
+    assert_eq!(beyond[0].severity, FindingSeverity::Error);
 }

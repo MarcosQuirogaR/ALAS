@@ -37,7 +37,7 @@ pub(super) fn prepare(directory: &Path) -> Option<String> {
 #[derive(Default, Deserialize)]
 #[serde(default)]
 struct CountHistory {
-    design_vectors: Vec<DesignVector>,
+    design_vectors: Vec<Option<DesignVector>>,
     valid: Vec<bool>,
     cost: Vec<Option<f64>>,
     objective_value: Vec<Option<f64>>,

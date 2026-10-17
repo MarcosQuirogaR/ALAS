@@ -103,7 +103,7 @@ pub fn root_ei(
     let webs: f64 = sizing
         .spars
         .iter()
-        .map(|s| web.e_pa * s.t_web * s.h[0].powi(3) / 12.0)
+        .map(|s| web.e_pa * s.t_web[0] * s.h[0].powi(3) / 12.0)
         .sum();
     let covers: f64 = sizing
         .spars

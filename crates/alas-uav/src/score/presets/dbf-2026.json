@@ -1,0 +1,240 @@
+{
+  "id": "dbf-2026",
+  "version": 1,
+  "family": "aiaa_dbf",
+  "name": "AIAA Design/Build/Fly 2025-26, Banner Towing Bush Plane",
+  "status": "official",
+  "citation": "AIAA DBF 2025-26 Rules (2026-DBF-Rules.pdf), s3.1 requirements, s3.3.3 missions (printed p.19-20), s3.3.4 ground mission (p.21), s6.3 total score; local copy refs/competitions/AIAA_DBF2026_rules.pdf. The lap length of the course is not transcribed (ASSUMPTION in the segment template).",
+  "gates": [
+    {
+      "id": "span",
+      "description": "Wingspan <= 5 ft",
+      "margin_expr": "(5 ft - span) / (5 ft)",
+      "hard": true,
+      "citation": "AIAA DBF 2025-26 Rules (2026-DBF-Rules.pdf) s3.1"
+    },
+    {
+      "id": "mtow",
+      "description": "Take-off gross weight < 55 lb",
+      "margin_expr": "(55 lb - mtow) / (55 lb)",
+      "hard": true,
+      "citation": "AIAA DBF 2025-26 Rules (2026-DBF-Rules.pdf) s3.1 and tech inspection"
+    },
+    {
+      "id": "pack_energy",
+      "description": "Energy per pack <= 100 Wh",
+      "margin_expr": "(100 Wh - pack_energy_max) / (100 Wh)",
+      "hard": true,
+      "citation": "AIAA DBF 2025-26 Rules (2026-DBF-Rules.pdf) s3.1 battery rules"
+    },
+    {
+      "id": "fuse",
+      "description": "Arming fuse <= 100 A",
+      "margin_expr": "(100 A - fuse_rating) / (100 A)",
+      "hard": true,
+      "citation": "AIAA DBF 2025-26 Rules (2026-DBF-Rules.pdf) s3.1 arming fuse"
+    }
+  ],
+  "parameters": [
+    {
+      "name": "report_score",
+      "unit_si": "1",
+      "default": 100,
+      "min": 0,
+      "max": 1000,
+      "doc": "Total Report Score = 0.15 Proposal + 0.85 Design Report (s6.3); user input, the tool optimises mission terms"
+    },
+    {
+      "name": "participation",
+      "unit_si": "1",
+      "default": 0,
+      "min": 0,
+      "max": 10,
+      "doc": "Participation Score (s6.3)"
+    },
+    {
+      "name": "m1_success",
+      "unit_si": "1",
+      "default": 1,
+      "min": 0,
+      "max": 1,
+      "doc": "M1 = 1.0 for a successful mission (s3.3.3.1)"
+    },
+    {
+      "name": "m2_flown",
+      "unit_si": "1",
+      "default": 1,
+      "min": 0,
+      "max": 1,
+      "doc": "Charter mission attempted"
+    },
+    {
+      "name": "m3_flown",
+      "unit_si": "1",
+      "default": 1,
+      "min": 0,
+      "max": 1,
+      "doc": "Banner mission attempted"
+    },
+    {
+      "name": "pax_count",
+      "unit_si": "1",
+      "default": 0,
+      "min": 0,
+      "max": 100,
+      "doc": "Passengers carried in M2"
+    },
+    {
+      "name": "cargo_count",
+      "unit_si": "1",
+      "default": 0,
+      "min": 0,
+      "max": 100,
+      "doc": "Cargo items carried in M2"
+    },
+    {
+      "name": "banner_length",
+      "unit_si": "m",
+      "default": 1.0,
+      "min": 0,
+      "max": 20,
+      "doc": "Banner length in M3"
+    },
+    {
+      "name": "ground_mission_time",
+      "unit_si": "s",
+      "default": 90,
+      "min": 1,
+      "max": 3600,
+      "doc": "Ground mission time (s3.3.4)"
+    },
+    {
+      "name": "flight_window_s",
+      "unit_si": "s",
+      "default": 300,
+      "min": 1,
+      "max": 3600,
+      "doc": "Flight window of each mission (s3.3.3)"
+    }
+  ],
+  "segments": [
+    {
+      "name": "takeoff",
+      "kind": {
+        "kind": "takeoff",
+        "runway_m": 60.0,
+        "surface": "hard"
+      }
+    },
+    {
+      "name": "climb",
+      "kind": {
+        "kind": "climb",
+        "end": {
+          "until": "altitude",
+          "meters": 20.0
+        }
+      }
+    },
+    {
+      "name": "charter",
+      "kind": {
+        "kind": "laps",
+        "lap_length_m": 700.0,
+        "turn_gate": true,
+        "count": 99
+      }
+    },
+    {
+      "name": "landing",
+      "kind": {
+        "kind": "landing",
+        "zone_m": null
+      }
+    }
+  ],
+  "score": {
+    "terms": [
+      {
+        "name": "ws_ft",
+        "expr": "round(100 * (round(span / (1 in)) / 12)) / 100",
+        "additive_bonus": false
+      },
+      {
+        "name": "rac",
+        "expr": "max(0.9, 0.05 * ws_ft + 0.75)",
+        "additive_bonus": false
+      },
+      {
+        "name": "ef",
+        "expr": "battery_energy / (100 Wh)",
+        "additive_bonus": false
+      },
+      {
+        "name": "income",
+        "expr": "pax_count * (6 + 2 * laps_m2) + cargo_count * (10 + 8 * laps_m2)",
+        "additive_bonus": false
+      },
+      {
+        "name": "cost_m2",
+        "expr": "laps_m2 * (10 + 0.5 * pax_count + 2 * cargo_count) * ef",
+        "additive_bonus": false
+      },
+      {
+        "name": "net_income",
+        "expr": "income - cost_m2",
+        "additive_bonus": false
+      },
+      {
+        "name": "m1",
+        "expr": "m1_success",
+        "additive_bonus": false
+      },
+      {
+        "name": "m2",
+        "expr": "if(m2_flown > 0, 1 + rel(net_income, net_income_best), 0)",
+        "additive_bonus": false
+      },
+      {
+        "name": "banner_metric",
+        "expr": "laps_m3 * banner_length / rac",
+        "additive_bonus": false
+      },
+      {
+        "name": "m3",
+        "expr": "if(m3_flown > 0, 2 + rel(banner_metric, banner_metric_best), 0)",
+        "additive_bonus": false
+      },
+      {
+        "name": "gm",
+        "expr": "rel(ground_time_min, ground_mission_time)",
+        "additive_bonus": false
+      }
+    ],
+    "round_expr": "report_score * (m1 + m2 + m3 + gm) + participation",
+    "aggregation": {
+      "kind": "single"
+    },
+    "reference_field": [
+      {
+        "name": "net_income_best",
+        "default": 150,
+        "unit_si": "1",
+        "note": "ASSUMPTION: highest net income of all teams; no published figure for 2025-26 flown yet"
+      },
+      {
+        "name": "banner_metric_best",
+        "default": 20,
+        "unit_si": "m",
+        "note": "ASSUMPTION: highest laps x banner_length / RAC of all teams"
+      },
+      {
+        "name": "ground_time_min",
+        "default": 40,
+        "unit_si": "s",
+        "note": "ASSUMPTION: lowest ground mission time of all teams"
+      }
+    ]
+  },
+  "variants": []
+}

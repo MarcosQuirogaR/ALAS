@@ -33,6 +33,13 @@ use serde::{Deserialize, Serialize};
 
 use crate::ConfigNode;
 
+mod defaults;
+
+use defaults::{
+    default_seed, default_stop_on_evaluations_only, is_default_stop_on_evaluations_only,
+};
+pub use defaults::{DEFAULT_REPRODUCIBLE_EVALUATIONS, DEFAULT_SEED};
+
 /// Settings for the differential-evolution solver.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ConfigNode)]
 #[serde(deny_unknown_fields)]
@@ -129,7 +136,10 @@ pub struct SolverSettings {
     )]
     pub convergence_stagnation_generations: i64,
 
-    /// The random seed, or unset for a different search each run.
+    /// The random seed, or unset for a different search each run. The
+    /// default is the fixed [`DEFAULT_SEED`], so an unconfigured run is
+    /// reproducible; a file that names `null` keeps the clock seed.
+    #[serde(default = "default_seed")]
     #[config(
         label = "Random seed",
         help = "Set an integer for a reproducible run (same seed -> same result); leave blank for a different search each run."
@@ -151,30 +161,15 @@ pub struct SolverSettings {
 
     /// Ignore the stage time limits and stop every stage on its evaluation
     /// budget, so a seeded run is bit-identical at any worker count.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    #[serde(
+        default = "default_stop_on_evaluations_only",
+        skip_serializing_if = "is_default_stop_on_evaluations_only"
+    )]
     #[config(
         label = "Stop on evaluation budgets only",
         help = "Off: each stage also stops at its time limit. Time-limited: the stopping point depends on machine speed and worker count; replay with the recorded evaluation counts for a bit-identical result at any worker count. On: the time limits are ignored and each stage runs to its evaluation budget, so a seeded run is bit-identical at any worker count however long it takes."
     )]
     pub stop_on_evaluations_only: bool,
-}
-
-impl Default for SolverSettings {
-    fn default() -> Self {
-        Self {
-            method: default_optimizer_method(),
-            finite_difference_step: default_finite_difference_step(),
-            constraint_tolerance: default_constraint_tolerance(),
-            screening: default_screening_budget(),
-            refinement: default_refinement_budget(),
-            parameter_adaptation: false,
-            tolerance: 0.02,
-            convergence_stagnation_generations: default_convergence_stagnation_generations(),
-            seed: None,
-            workers: 0,
-            stop_on_evaluations_only: false,
-        }
-    }
 }
 
 /// The largest wall-clock limit either search stage accepts, s.
@@ -343,7 +338,7 @@ const DEFAULT_EVALUATION_CEILING: i64 = 20_000;
 
 /// Screening default: the 30 s limit is the interactive budget and ends the
 /// stage under the [`DEFAULT_EVALUATION_CEILING`].
-fn default_screening_budget() -> StageBudget {
+pub(super) fn default_screening_budget() -> StageBudget {
     StageBudget {
         max_evaluations: DEFAULT_EVALUATION_CEILING,
         time_limit_s: 30.0,
@@ -357,7 +352,7 @@ fn default_screening_budget() -> StageBudget {
 /// Refinement default: the 120 s limit ends the stage, whose population
 /// schedule is planned on what that limit affords at the measured screening
 /// throughput, at most the [`DEFAULT_EVALUATION_CEILING`].
-fn default_refinement_budget() -> StageBudget {
+pub(super) fn default_refinement_budget() -> StageBudget {
     StageBudget {
         max_evaluations: DEFAULT_EVALUATION_CEILING,
         time_limit_s: 120.0,
@@ -449,11 +444,11 @@ impl SolverSettings {
     }
 }
 
-fn default_optimizer_method() -> String {
+pub(super) fn default_optimizer_method() -> String {
     PRODUCT_DE_METHOD.to_owned()
 }
 
-fn default_finite_difference_step() -> f64 {
+pub(super) fn default_finite_difference_step() -> f64 {
     0.002
 }
 
@@ -464,7 +459,7 @@ fn is_default_finite_difference_step(value: &f64) -> bool {
     *value == default_finite_difference_step()
 }
 
-fn default_constraint_tolerance() -> f64 {
+pub(super) fn default_constraint_tolerance() -> f64 {
     1.0e-4
 }
 
@@ -472,7 +467,7 @@ fn is_default_constraint_tolerance(value: &f64) -> bool {
     *value == default_constraint_tolerance()
 }
 
-fn default_convergence_stagnation_generations() -> i64 {
+pub(super) fn default_convergence_stagnation_generations() -> i64 {
     5
 }
 
@@ -536,11 +531,57 @@ mod tests {
 
     #[test]
     fn an_unset_seed_reaches_the_form_as_blank_rather_than_as_a_number() {
-        // The default is a different search each run, and a seed box showing
-        // 0 would claim the run was reproducible when it was not.
-        let leaf = leaf("seed", &SolverSettings::default());
+        // A blank seed means a different search each run, and a seed box
+        // showing 0 would claim the run was reproducible when it was not.
+        let settings = SolverSettings {
+            seed: None,
+            ..Default::default()
+        };
+        let leaf = leaf("seed", &settings);
         assert_eq!(leaf.kind, Kind::Optional);
         assert_eq!(leaf.value, serde_json::Value::Null);
+    }
+
+    #[test]
+    fn the_defaults_are_reproducible_and_the_interactive_search_is_time_limited() {
+        // Audit SIZ-06/SIZ-07, decision D6.
+        let reproducible = SolverSettings::default();
+        assert_eq!(reproducible.seed, Some(DEFAULT_SEED));
+        assert!(reproducible.stop_on_evaluations_only);
+        assert_eq!(reproducible.validate_budgets(), Ok(()));
+        assert_eq!(
+            reproducible.screening.max_evaluations,
+            DEFAULT_REPRODUCIBLE_EVALUATIONS
+        );
+        assert_eq!(
+            reproducible.refinement.max_evaluations,
+            DEFAULT_REPRODUCIBLE_EVALUATIONS
+        );
+        let interactive = SolverSettings::interactive();
+        assert_eq!(interactive.seed, None);
+        assert!(!interactive.stop_on_evaluations_only);
+        assert_eq!(interactive.screening.max_evaluations, 20_000);
+        assert_eq!(interactive.validate_budgets(), Ok(()));
+    }
+
+    #[test]
+    fn a_saved_solver_without_the_keys_is_reproducible_and_explicit_values_survive() {
+        let bare: SolverSettings = serde_json::from_value(serde_json::json!({
+            "tolerance": 0.02, "workers": 0,
+            "screening": {"max_evaluations": 5, "time_limit_s": 1.0},
+            "refinement": {"max_evaluations": 5, "time_limit_s": 1.0}
+        }))
+        .unwrap();
+        assert_eq!(bare.seed, Some(DEFAULT_SEED));
+        assert!(bare.stop_on_evaluations_only);
+        let interactive = SolverSettings::interactive();
+        let round_trip: SolverSettings =
+            serde_json::from_value(serde_json::to_value(&interactive).unwrap()).unwrap();
+        assert_eq!(round_trip, interactive);
+        let default_round_trip: SolverSettings =
+            serde_json::from_value(serde_json::to_value(SolverSettings::default()).unwrap())
+                .unwrap();
+        assert_eq!(default_round_trip, SolverSettings::default());
     }
 
     #[test]

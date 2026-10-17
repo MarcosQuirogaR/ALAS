@@ -45,7 +45,9 @@ use super::results::{
     ResultStatus, StaticResult, VibrationResult,
 };
 use super::run::{run_nastran_with_memory, NastranRunOutcome};
-use super::{build_sol101_bulk, build_sol103_bulk, build_sol111_sine_bulk_msc, monitor_set};
+use super::{
+    build_sol101_bulk_product, build_sol103_bulk, build_sol111_sine_bulk_msc, monitor_set,
+};
 
 /// The mesh every solution includes, written once at the top of the work tree.
 const MESH_FILE: &str = "wing_mesh.bdf";
@@ -144,7 +146,7 @@ pub fn run_nastran_analysis(
     if config.run_sol_static {
         decks.push((
             Solution::Sol101,
-            build_sol101_bulk(deck, node_index, requirements, config, MESH_INCLUDE),
+            build_sol101_bulk_product(deck, node_index, requirements, config, MESH_INCLUDE),
         ));
     }
     if config.run_sol_modes {

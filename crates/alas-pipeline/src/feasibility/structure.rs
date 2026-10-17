@@ -355,13 +355,35 @@ pub(crate) fn append_downstream(
         // A mixed-material root maximum has no element/material attribution.
         // Exceeding even the strongest declared allowable is a necessary veto;
         // passing it does not establish material-specific FE strength margins.
+        //
+        // The compared stress is the element-centroid von Mises outside the
+        // load-introduction and constraint zones when the solver adapter
+        // supplies it. The global corner maximum (`root_von_mises_max_pa`)
+        // sits on RBE3 spiders, the engine mass and the clamped root, where
+        // it is an artefact of the idealisation (A320 pull-up: 835 MPa corner,
+        // 152 MPa at that element's centroid); it is then only a warning.
         match strongest_declared_allowable(config) {
             Some(allowable) => {
-                for (case, stress) in response.root_von_mises_max_pa.iter() {
+                let assessed = has_all_cases(&response.assessed_von_mises_max_pa);
+                let (basis, values) = if assessed {
+                    ("assessed centroid", &response.assessed_von_mises_max_pa)
+                } else {
+                    ("peak corner", &response.root_von_mises_max_pa)
+                };
+                for (case, stress) in values.iter() {
                     if stress > allowable {
                         findings.push(error(FindingCode::StructuralStrengthViolation,
-                            format!("{solver} {case} root stress exceeds every declared material allowable; element-level stress and mesh review required"),
+                            format!("{solver} {case} {basis} stress exceeds every declared material allowable; element-level stress and mesh review required"),
                             Some(stress), Some(allowable), "Pa"));
+                    }
+                }
+                if assessed {
+                    for (case, stress) in response.root_von_mises_max_pa.iter() {
+                        if stress > allowable {
+                            findings.push(warning(FindingCode::StructuralStrengthViolation,
+                                format!("{solver} {case} peak corner stress exceeds every declared material allowable inside load-introduction or constraint zones (RBE3 spiders, engine mass, root clamp), which are not assessed; local detail review required"),
+                                Some(stress), Some(allowable), "Pa"));
+                        }
                     }
                 }
             }
@@ -391,6 +413,18 @@ pub(crate) fn append_downstream(
             }
         }
     }
+}
+
+/// Whether `values` carries exactly one entry for each design load case.
+fn has_all_cases(values: &alas_struct::nastran::LabelledValues) -> bool {
+    values.len() == 3
+        && ["pull-up", "push-down", "level"].iter().all(|expected| {
+            values
+                .iter()
+                .filter(|(case, stress)| case == expected && stress.is_finite())
+                .count()
+                == 1
+        })
 }
 
 fn strongest_declared_allowable(config: &AlasConfig) -> Option<f64> {

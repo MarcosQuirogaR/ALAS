@@ -78,7 +78,7 @@ cargo run --release --bin alas -- --seed 42 --output isolated-dir --plots
 
 ## Command line options
 
-All flags supported by v1.3.2:
+All flags supported by v1.4.0:
 
 | Flag | Argument | Description |
 |---|---|---|

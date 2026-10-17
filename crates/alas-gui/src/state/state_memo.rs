@@ -91,10 +91,17 @@ impl AppState {
     /// every mutation site remembering to bump it, cannot silently
     /// desynchronize from the data it describes.
     pub fn typed_config(&self) -> Option<AlasConfig> {
+        self.typed_config_arc().map(|config| (*config).clone())
+    }
+
+    /// Shared handle to the memoized typed configuration (see
+    /// [`Self::typed_config`]); a cache hit is a refcount bump rather than a deep
+    /// clone. Per-frame read-only callers should prefer this over `typed_config`.
+    pub fn typed_config_arc(&self) -> Option<Arc<AlasConfig>> {
         let fingerprint = config_fingerprint(&self.config_values);
         if let Some((cached_fingerprint, cached)) = self.typed_config_memo.borrow().as_ref() {
             if *cached_fingerprint == fingerprint {
-                return Some((**cached).clone());
+                return Some(Arc::clone(cached));
             }
         }
         let config: AlasConfig = if self
@@ -106,7 +113,8 @@ impl AppState {
         } else {
             serde_json::from_value(self.config_values.clone()).ok()?
         };
-        *self.typed_config_memo.borrow_mut() = Some((fingerprint, Arc::new(config.clone())));
+        let config = Arc::new(config);
+        *self.typed_config_memo.borrow_mut() = Some((fingerprint, Arc::clone(&config)));
         Some(config)
     }
 

@@ -8,15 +8,28 @@ use alas_config::PerformanceConfig;
 
 use super::{density_ratio, G, M_TO_FT, PA_TO_PSF, RHO_SL};
 
+/// CS 25.107(b): `V2MIN` is not less than `1.10 VMC`.
+pub use alas_config::V2_MIN_OVER_VMC;
+
 /// Reference speeds [m/s] for one aircraft + aerodrome combination:
 /// `VSpeeds`.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct VSpeeds {
-    /// Stall speed in take-off configuration (1 g).
+    /// Reference stall speed `VSR` in the take-off configuration, m/s:
+    /// `sqrt(2 W / (rho S CLmax_TO))` with the configured `CLmax_TO` read as
+    /// the lift coefficient at the CS 25.103 reference stall speed on a 1-g
+    /// basis (load factor normal to the flight path of one). A `CLmax` taken
+    /// from a wind-tunnel or handbook maximum (a minimum-speed basis) needs
+    /// the CS 25.103 `VSR` definition applied before use: Torenbeek Sec. 5.4.4
+    /// p. 166 puts the apparent difference near 13 percent of `CLmax`.
     pub v_stall_to_ms: f64,
-    /// Stall speed in landing configuration (1 g).
+    /// Reference stall speed `VSR0` in the landing configuration, m/s, on the
+    /// same 1-g basis as [`Self::v_stall_to_ms`].
     pub v_stall_land_ms: f64,
-    /// Minimum control speed (FAR 25.149).
+    /// Minimum control speed (CS 25.149): `vmc_vstall_factor` times `VSR`. The
+    /// caller puts the `VMC / VSR` computed from the yaw balance in that field
+    /// (`alas_opt::mdo::performance_with_vmc`); left at its default it is the
+    /// 1.13 VSR ceiling, an estimate rather than a computed value.
     pub v_mc_ms: f64,
     /// Conceptual decision-speed proxy (floored at airborne `VMC`).
     ///
@@ -85,10 +98,29 @@ pub fn compute_v_speeds_at_masses(
     let v_stall_to = (2.0 * ws_pa / (rho * cl_max_to)).sqrt();
     let v_stall_land = (2.0 * landing_ws_pa / (rho * cl_max_land)).sqrt();
 
+    // `v_stall_to` is the take-off reference stall speed VSR on a 1-g basis
+    // (CS 25.103); VMC is `vmc_vstall_factor` (computed by the caller or the declared ceiling).
     let v_mc = pc.vmc_vstall_factor * v_stall_to;
     let v_r = (pc.vr_vmc_factor * v_mc).max(pc.vr_vstall_factor * v_stall_to);
     let v1 = (pc.v1_vr_factor * v_r).max(v_mc);
-    let v2 = (pc.v2_vstall_factor * v_stall_to).max(v_r);
+    // CS 25.107(b): V2MIN is not below 1.13 VSR (1.08 VSR for the listed
+    // exceptions) and not below 1.10 VMC; (c): V2 is not below V2MIN or VR.
+    // The "VR + speed gained before 35 ft" term needs the rotation march
+    // (FLD-09) and is not modelled, so that increment is zero here.
+    // The translated legacy replay (`legacy_field_correlations`) keeps the
+    // original `V2 = max(factor * VS, VR)` the golden fixtures were
+    // generated with.
+    let v2_min = if pc.legacy_field_correlations {
+        0.0
+    } else {
+        (pc.v2_min_vsr_factor * v_stall_to).max(V2_MIN_OVER_VMC * v_mc)
+    };
+    // An improved-climb V2 (improved_climb_v2_over_vsr, resolved from the
+    // second-segment gradient) only ever raises the safety speed.
+    let v2 = (pc.v2_vstall_factor * v_stall_to)
+        .max(v2_min)
+        .max(v_r)
+        .max(pc.improved_climb_v2_over_vsr.unwrap_or(0.0) * v_stall_to);
     let v_app = pc.vapp_vstall_land_factor * v_stall_land;
     let v_td = pc.vtd_vstall_land_factor * v_stall_land;
 
@@ -125,6 +157,10 @@ pub struct FieldPerformance {
     pub ldr_m: f64,
     /// Landing mass used for the landing speeds and distance, kg.
     pub landing_mass_kg: f64,
+    /// The CS 25.113 integration behind `todr_m`, `bfl_m` and `asd_m` when
+    /// it ran (jets outside the translated replay); `None` for the
+    /// correlations.
+    pub takeoff_field: Option<super::takeoff_field::TakeoffField>,
 }
 
 impl FieldPerformance {
@@ -228,7 +264,10 @@ pub fn compute_field_performance_at_masses(
         perf_config,
     );
 
-    let toda_req_ft = 37.7 * ws_psf / (sigma * cl_max_to * tw_sl.max(1e-6));
+    // The correlation reads the lift-off speed through CLmax_TO; flying an improved-
+    // climb V2 raises it, which is the same as a lower effective CLmax_TO.
+    let toda_req_ft =
+        37.7 * ws_psf / (sigma * perf_config.takeoff_field_cl_max(cl_max_to) * tw_sl.max(1e-6));
     let todr_m = toda_req_ft / M_TO_FT;
     let bfl_m = todr_m * bfl_factor;
     let asd_m = bfl_m;
@@ -242,6 +281,7 @@ pub fn compute_field_performance_at_masses(
         asd_m,
         ldr_m,
         landing_mass_kg,
+        takeoff_field: None,
     }
 }
 
@@ -356,5 +396,129 @@ mod tests {
         assert!(arrival.v_stall_land_ms < full.v_stall_land_ms);
         assert!(arrival.v_app_ms < full.v_app_ms);
         assert!(arrival.v_td_ms < full.v_td_ms);
+    }
+
+    fn speeds_with(pc: &PerformanceConfig) -> VSpeeds {
+        compute_v_speeds(79_000.0, 122.0, &sea_level(), 1.8, 2.6, pc)
+    }
+
+    #[test]
+    fn v2_is_never_below_the_cs25_107_minimum_for_any_factor_combination() {
+        // CS 25.107(b)-(c): V2 >= V2MIN = max(1.13 VSR, 1.10 VMC) and
+        // V2 >= VR; (e)(1)(ii): VR >= 1.05 VMC; V1 <= VR <= V2.
+        for vmc in [1.0, 1.09, 1.13, 1.2] {
+            for v2 in [1.05, 1.13, 1.2, 1.3] {
+                for vr_vstall in [1.0, 1.1, 1.15] {
+                    for v1 in [0.9, 0.95, 1.0] {
+                        let pc = PerformanceConfig {
+                            vmc_vstall_factor: vmc,
+                            v2_vstall_factor: v2,
+                            vr_vstall_factor: vr_vstall,
+                            v1_vr_factor: v1,
+                            ..PerformanceConfig::default()
+                        };
+                        let vs = speeds_with(&pc);
+                        let eps = 1e-12 * vs.v2_ms;
+                        assert!(vs.v2_ms + eps >= 1.13 * vs.v_stall_to_ms);
+                        assert!(vs.v2_ms + eps >= 1.10 * vs.v_mc_ms);
+                        assert!(vs.v_r_ms + eps >= 1.05 * vs.v_mc_ms);
+                        assert!(vs.v1_ms + eps >= vs.v_mc_ms);
+                        assert!(vs.v1_ms <= vs.v_r_ms + eps && vs.v_r_ms <= vs.v2_ms + eps);
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn the_schedule_agrees_with_the_configuration_speed_ratios() {
+        // `PerformanceConfig::takeoff_speed_ratios` is the single statement of
+        // the CS 25.107 rule other crates use; this schedule must equal it.
+        for legacy in [false, true] {
+            for vmc in [1.0, 1.09, 1.13, 1.2] {
+                for v2 in [1.05, 1.2, 1.3] {
+                    let pc = PerformanceConfig {
+                        legacy_field_correlations: legacy,
+                        vmc_vstall_factor: vmc,
+                        v2_vstall_factor: v2,
+                        ..PerformanceConfig::default()
+                    };
+                    let vs = speeds_with(&pc);
+                    let ratios = pc.takeoff_speed_ratios();
+                    assert!((vs.v_mc_ms / vs.v_stall_to_ms - ratios.vmc).abs() < 1e-12);
+                    assert!((vs.v_r_ms / vs.v_stall_to_ms - ratios.vr).abs() < 1e-12);
+                    assert!((vs.v1_ms / vs.v_stall_to_ms - ratios.v1).abs() < 1e-12);
+                    assert!((vs.v2_ms / vs.v_stall_to_ms - ratios.v2).abs() < 1e-12);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn the_legacy_replay_keeps_the_translated_v2_rule() {
+        // Golden replay: V2 = max(1.20 VS, VR), no V2MIN term.
+        let pc = PerformanceConfig {
+            legacy_field_correlations: true,
+            ..PerformanceConfig::default()
+        };
+        let vs = speeds_with(&pc);
+        assert!((vs.v2_ms / vs.v_stall_to_ms - 1.20).abs() < 1e-12);
+    }
+
+    #[test]
+    fn the_default_vmc_estimate_gives_v2_of_1_243_vsr() {
+        // VMC estimate 1.13 VSR (the CS 25.149(c) ceiling): 1.10 * 1.13 =
+        // 1.243 exceeds both the selected 1.20 and the 1.13 minimum, and VR
+        // = 1.05 * 1.13 = 1.1865 VSR.
+        let vs = speeds_with(&PerformanceConfig::default());
+        assert!((vs.v2_ms / vs.v_stall_to_ms - 1.243).abs() < 1e-12);
+        assert!((vs.v_r_ms / vs.v_stall_to_ms - 1.1865).abs() < 1e-12);
+    }
+
+    #[test]
+    fn a_selected_factor_above_the_minimum_is_kept() {
+        let pc = PerformanceConfig {
+            v2_vstall_factor: 1.30,
+            ..PerformanceConfig::default()
+        };
+        let vs = speeds_with(&pc);
+        assert!((vs.v2_ms / vs.v_stall_to_ms - 1.30).abs() < 1e-12);
+    }
+
+    #[test]
+    fn the_four_engine_turboprop_exception_lowers_only_the_stall_floor() {
+        // 1.08 VSR (CS 25.107(b)(2)): with a low VMC estimate the selected
+        // factor governs; the 1.10 VMC floor still applies.
+        let pc = PerformanceConfig {
+            v2_min_vsr_factor: 1.08,
+            v2_vstall_factor: 1.08,
+            vmc_vstall_factor: 1.0,
+            vr_vstall_factor: 1.0,
+            ..PerformanceConfig::default()
+        };
+        let vs = speeds_with(&pc);
+        assert!((vs.v2_ms / vs.v_stall_to_ms - 1.10).abs() < 1e-12);
+    }
+
+    #[test]
+    fn hand_case_with_a_60_ms_stall_speed() {
+        // Choose the wing loading so VS = 60 m/s exactly: W/S = 0.5 rho VS^2 CL.
+        let sigma_rho = 1.225 * density_ratio(0.0, 0.0);
+        let cl_max = 1.8;
+        let ws = 0.5 * sigma_rho * 60.0 * 60.0 * cl_max;
+        let area = 100.0;
+        let mass = ws * area / G;
+        let vs = compute_v_speeds(
+            mass,
+            area,
+            &sea_level(),
+            cl_max,
+            2.6,
+            &PerformanceConfig::default(),
+        );
+        assert!((vs.v_stall_to_ms - 60.0).abs() < 1e-9);
+        assert!((vs.v2_ms - 74.58).abs() < 1e-9);
+        assert!((vs.v_r_ms - 71.19).abs() < 1e-9);
+        assert!((vs.v_mc_ms - 67.8).abs() < 1e-9);
     }
 }

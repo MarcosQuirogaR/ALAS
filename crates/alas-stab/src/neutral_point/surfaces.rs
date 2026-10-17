@@ -86,11 +86,31 @@ pub fn per_surface_contributions(
         .collect()
 }
 
+/// The fractional loss of the tail's in-presence lift slope caused by a
+/// downwash-gradient increment `delta` (STAB-04, flaps down).
+///
+/// The tail slope per unit aircraft angle of attack is proportional to
+/// `1 - d_eps/d_alpha` (downwash `eps`, both nondimensional, `delta` and
+/// `eps` as `d eps / d alpha`). The vortex lattice already carries the clean
+/// gradient `eps_vlm` (`deps_dalpha_vlm`), so raising it to `eps_vlm + delta`
+/// scales the in-presence slope by
+/// `(1 - eps_vlm - delta) / (1 - eps_vlm) = 1 - delta / (1 - eps_vlm)`, not by
+/// `1 - delta`. Returns `delta / (1 - eps_vlm)`, clamped to `[0, 1]` (a tail
+/// cannot lose more than all of its slope); the VLM gradient is itself
+/// clamped to `[0, 0.9]` upstream. At `eps_vlm = 0.35`, `delta = 0.10` the
+/// factor is 0.846 instead of 0.90 (Torenbeek 1982/2013 and DATCOM 4.4
+/// downwash definition; algebra, not a fitted constant).
+pub(super) fn tail_slope_loss(delta: f64, eps_vlm: f64) -> f64 {
+    let denominator = (1.0 - eps_vlm).max(0.1);
+    (delta / denominator).clamp(0.0, 1.0)
+}
+
 /// `x_np = sum_i eta_i dL_i x_i / sum_i eta_i dL_i`: [`per_surface_contributions`]
 /// combined with a per-surface tail efficiency. `eta_i = 1.0` for every wing
 /// but `tail_wing_index`, which gets `eta_tail * (1.0 - tail_deps_extra)`
-/// (`tail_deps_extra` folds in the high-lift downwash-increment estimate,
-/// F5's flapped-condition term; `0.0` for the clean case). `None` when the
+/// (`tail_deps_extra` is the fractional tail-slope loss of a high-lift
+/// downwash increment, see [`tail_slope_loss`]; `0.0` for the clean case).
+/// `None` when the
 /// combined denominator is degenerate (no usable lift slope anywhere).
 pub fn combine(
     contributions: &[SurfaceContribution],
@@ -242,5 +262,36 @@ mod tests {
         // A larger downwash increment de-weights the tail's aft AC, so the
         // combined NP moves forward.
         assert!(flapped < clean, "flapped={flapped} clean={clean}");
+    }
+
+    #[test]
+    fn the_flap_downwash_factor_is_one_minus_delta_over_one_minus_eps() {
+        // STAB-04 closed form: eps 0.35, delta 0.10 -> 1 - 0.10/0.65 = 0.846.
+        let loss = tail_slope_loss(0.10, 0.35);
+        assert!((1.0 - loss - 0.846_153_846).abs() < 1e-8, "loss={loss}");
+        // No increment, no loss; zero downwash recovers the old (1 - delta).
+        assert_eq!(tail_slope_loss(0.0, 0.35), 0.0);
+        assert!((tail_slope_loss(0.10, 0.0) - 0.10).abs() < 1e-15);
+        // A gradient increment can remove at most the whole slope.
+        assert_eq!(tail_slope_loss(5.0, 0.35), 1.0);
+        // The NP shift of the derived example: wing AC 0.25c, tail 4.5c aft
+        // with the tail carrying 0.35 of the unweighted slope; the corrected
+        // factor moves the NP forward by more than the old one.
+        let contributions = vec![
+            SurfaceContribution {
+                wing_index: 0,
+                d_lift: 1.0,
+                x_ac: 0.0,
+            },
+            SurfaceContribution {
+                wing_index: 1,
+                d_lift: 0.35,
+                x_ac: 4.5,
+            },
+        ];
+        let old = combine(&contributions, Some(1), 0.9, 0.10).expect("finite");
+        let new =
+            combine(&contributions, Some(1), 0.9, tail_slope_loss(0.10, 0.35)).expect("finite");
+        assert!(new < old, "new={new} old={old}");
     }
 }

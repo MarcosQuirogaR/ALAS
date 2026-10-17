@@ -190,7 +190,13 @@ pub fn check_cg_envelope(
     } else {
         0.0
     };
-    let x_mac_le = x_wing_ac_val - 0.25 * mac;
+    // The reference wing's MAC leading edge when the geometry sets one,
+    // otherwise the reconstruction from the drawn wing's quarter-chord point.
+    let x_mac_le = plane
+        .wings
+        .first()
+        .and_then(|wing| wing.reference)
+        .map_or(x_wing_ac_val - 0.25 * mac, |reference| reference.mac_le_x_m);
 
     let to_pct = |x_val: f64| -> f64 { ((x_val - x_mac_le) / mac.max(0.001)) * 100.0 };
 

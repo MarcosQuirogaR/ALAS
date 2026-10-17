@@ -94,6 +94,96 @@ pub(super) fn run_vlm_optimizer(request: VlmOptimizerRequest<'_>) -> SolverOptim
         );
     }
 
+    let LadderOutcome {
+        delivered,
+        reporting_nominal,
+    } = match run_reporting_ladder(
+        ReportingLadder {
+            solver: SolverKind::Vlm,
+            config: &config,
+            effective_config: &effective_config,
+            nominal: &nominal,
+            acceptance_route,
+            cancel,
+        },
+        &mut optimization,
+    ) {
+        Ok(outcome) => outcome,
+        Err(error) => return SolverOptimizationResult::failed(SolverKind::Vlm, output_dir, error),
+    };
+    let status = SolverOptimizationStatus::for_delivered(&optimization);
+    // Publish the vector the delivered report describes. The replay resolves
+    // the search vector into the assessed aircraft, with a reference
+    // adaptation's solved tail scale, and the report, mission and feasibility
+    // are built on that aircraft; the vector it was handed is the search's.
+    let delivered_design = delivered.report.design;
+    let baseline_verification = reporting_nominal
+        .as_ref()
+        .and_then(|nominal| nominal.verified_analysis(&config, acceptance_route));
+    let report = delivered.report.clone();
+    let verification =
+        crate::acceptance::VerifiedAnalysis::new(config, acceptance_route.cloned(), delivered);
+    SolverOptimizationResult {
+        solver: SolverKind::Vlm,
+        status,
+        design: Some(delivered_design),
+        optimization: Some(optimization),
+        report: Some(report),
+        verification: Some(verification),
+        baseline_verification,
+        avl_result: None,
+        output_dir,
+        error: None,
+    }
+}
+
+/// One job of the reporting-fidelity ladder: the registered aircraft the
+/// relative balance guard compares against, or one ranked finalist.
+enum LadderJob {
+    Nominal(Option<Result<crate::acceptance::ReportingNominal, String>>),
+    Finalist(Result<FinalistVerification, String>),
+}
+
+/// Inputs of the reporting-fidelity ladder shared by the VLM and AVL branches.
+pub(super) struct ReportingLadder<'a> {
+    pub(super) solver: SolverKind,
+    /// The configuration the published analysis uses.
+    pub(super) config: &'a AlasConfig,
+    /// The seeded configuration the search ran with.
+    pub(super) effective_config: &'a AlasConfig,
+    pub(super) nominal: &'a DesignVector,
+    pub(super) acceptance_route: Option<&'a AcceptanceRoute>,
+    pub(super) cancel: Option<&'a AtomicBool>,
+}
+
+/// What the ladder delivers: the verified (or best-rejected) reporting
+/// analysis and the registered aircraft it was compared against.
+pub(super) struct LadderOutcome {
+    pub(super) delivered: FinalistVerification,
+    pub(super) reporting_nominal: Option<crate::acceptance::ReportingNominal>,
+}
+
+/// Re-evaluate the search finalist (and, if rejected, the next hard-feasible
+/// candidates) at reporting fidelity and record the result on `optimization`
+/// as its delivered acceptance. Shared by every optimization branch so no
+/// branch can report `Completed` on in-loop validity alone.
+pub(super) fn run_reporting_ladder(
+    ladder: ReportingLadder<'_>,
+    optimization: &mut OptimizationResult,
+) -> Result<LadderOutcome, String> {
+    let ReportingLadder {
+        solver,
+        config,
+        effective_config,
+        nominal,
+        acceptance_route,
+        cancel,
+    } = ladder;
+    let nominal = *nominal;
+    let label = match solver {
+        SolverKind::Vlm => "VLM",
+        SolverKind::Avl => "AVL",
+    };
     // The ladder below marks its own phase per candidate; entering it here
     // as well would put two identical records at the same timestamp.
     let scope = alas_opt::CancelScope::attach(cancel);
@@ -113,7 +203,7 @@ pub(super) fn run_vlm_optimizer(request: VlmOptimizerRequest<'_>) -> SolverOptim
         == alas_config::DesignMode::ReferenceAdaptation)
         .then(|| alas_config::presets::get(&config.preset).ok())
         .flatten()
-        .map(|preset| preset.design_vector);
+        .map(|preset| config.band_design(preset.design_vector));
     let baseline_is_nominal = registered_design == Some(nominal);
     let separate_nominal = usize::from(
         config.optimizer.design_space.mode == alas_config::DesignMode::ReferenceAdaptation
@@ -137,7 +227,8 @@ pub(super) fn run_vlm_optimizer(request: VlmOptimizerRequest<'_>) -> SolverOptim
     let mut finalist_rejected_by = Vec::new();
     let mut rejection_messages: Vec<String> = Vec::new();
     let mut accepted: Option<(usize, FinalistVerification)> = None;
-    let jobs = match verification::evaluate_ordered(
+    let mass_nominals = crate::acceptance::MassNominals::default();
+    let jobs = verification::evaluate_ordered(
         candidates.len() + 1,
         2.min(candidates.len() + 1),
         effective_config.optimizer.solver.resolved_workers(),
@@ -147,13 +238,13 @@ pub(super) fn run_vlm_optimizer(request: VlmOptimizerRequest<'_>) -> SolverOptim
         |job| {
             if job == 0 {
                 LadderJob::Nominal(crate::acceptance::ReportingNominal::evaluate(
-                    &config,
+                    config,
                     acceptance_route,
                     cancel,
                 ))
             } else {
                 LadderJob::Finalist(crate::acceptance::verify_finalist_cancellable(
-                    &config,
+                    config,
                     &candidates[job - 1],
                     acceptance_route,
                     None,
@@ -171,7 +262,14 @@ pub(super) fn run_vlm_optimizer(request: VlmOptimizerRequest<'_>) -> SolverOptim
                 LadderJob::Nominal(_) => false,
                 LadderJob::Finalist(Ok(verification)) => {
                     let mut held = verification.clone();
-                    crate::acceptance::hold_to_nominal(&mut held, &config, nominal);
+                    crate::acceptance::hold_to_nominal_at_mass(
+                        &mut held,
+                        config,
+                        nominal,
+                        acceptance_route,
+                        cancel,
+                        &mass_nominals,
+                    );
                     held.accepted()
                 }
                 LadderJob::Finalist(Err(error)) => {
@@ -179,10 +277,7 @@ pub(super) fn run_vlm_optimizer(request: VlmOptimizerRequest<'_>) -> SolverOptim
                 }
             })
         },
-    ) {
-        Ok(jobs) => jobs,
-        Err(error) => return SolverOptimizationResult::failed(SolverKind::Vlm, output_dir, error),
-    };
+    )?;
     let mut reporting_nominal = None;
     let mut verifications = Vec::with_capacity(jobs.len());
     for (job, result) in jobs {
@@ -193,14 +288,21 @@ pub(super) fn run_vlm_optimizer(request: VlmOptimizerRequest<'_>) -> SolverOptim
                 reporting_nominal = Some(evaluated);
             }
             LadderJob::Nominal(Some(Err(error))) => {
-                return SolverOptimizationResult::failed(SolverKind::Vlm, output_dir, error);
+                return Err(error);
             }
             LadderJob::Finalist(result) => verifications.push((job - 1, result)),
         }
     }
     for (_, result) in &mut verifications {
         if let Ok(verification) = result {
-            crate::acceptance::hold_to_nominal(verification, &config, reporting_nominal.as_ref());
+            crate::acceptance::hold_to_nominal_at_mass(
+                verification,
+                config,
+                reporting_nominal.as_ref(),
+                acceptance_route,
+                cancel,
+                &mass_nominals,
+            );
         }
     }
     analyses += verifications.len();
@@ -212,17 +314,13 @@ pub(super) fn run_vlm_optimizer(request: VlmOptimizerRequest<'_>) -> SolverOptim
         let verification = match result {
             Ok(verification) => verification,
             Err(error) if error.starts_with("Cancelled safely") => {
-                return SolverOptimizationResult::failed(SolverKind::Vlm, output_dir, error);
+                return Err(error);
             }
             Err(error) if rank == 0 => {
                 // The search returned a design its own replay rejects. That
                 // is an integration error in the search, not a reporting
                 // disagreement, and it stays a branch failure.
-                return SolverOptimizationResult::failed(
-                    SolverKind::Vlm,
-                    output_dir,
-                    format!("VLM finalist replay failed: {error}"),
-                );
+                return Err(format!("{label} finalist replay failed: {error}"));
             }
             Err(error) => {
                 tracing::warn!(%error, rank, "fallback candidate could not be re-evaluated");
@@ -257,11 +355,9 @@ pub(super) fn run_vlm_optimizer(request: VlmOptimizerRequest<'_>) -> SolverOptim
         (Some((rank, verification)), _) => (verification, rank == 0),
         (None, Some(verification)) => (verification, true),
         (None, None) => {
-            return SolverOptimizationResult::failed(
-                SolverKind::Vlm,
-                output_dir,
-                "VLM finalist could not be re-evaluated at reporting fidelity",
-            )
+            return Err(format!(
+                "{label} finalist could not be re-evaluated at reporting fidelity"
+            ))
         }
     };
     let verified = delivered.accepted();
@@ -285,7 +381,7 @@ pub(super) fn run_vlm_optimizer(request: VlmOptimizerRequest<'_>) -> SolverOptim
         .then(|| {
             analyses += usize::from(!baseline_is_nominal);
             crate::acceptance::compare_with_baseline(
-                &config,
+                config,
                 &nominal,
                 &delivered,
                 acceptance_route,
@@ -306,35 +402,8 @@ pub(super) fn run_vlm_optimizer(request: VlmOptimizerRequest<'_>) -> SolverOptim
         baseline,
     });
 
-    let status = SolverOptimizationStatus::for_delivered(&optimization);
-    // Publish the vector the delivered report describes. The replay resolves
-    // the search vector into the assessed aircraft, with a reference
-    // adaptation's solved tail scale, and the report, mission and feasibility
-    // are built on that aircraft; the vector it was handed is the search's.
-    let delivered_design = delivered.report.design;
-    let baseline_verification = reporting_nominal
-        .as_ref()
-        .and_then(|nominal| nominal.verified_analysis(&config, acceptance_route));
-    let report = delivered.report.clone();
-    let verification =
-        crate::acceptance::VerifiedAnalysis::new(config, acceptance_route.cloned(), delivered);
-    SolverOptimizationResult {
-        solver: SolverKind::Vlm,
-        status,
-        design: Some(delivered_design),
-        optimization: Some(optimization),
-        report: Some(report),
-        verification: Some(verification),
-        baseline_verification,
-        avl_result: None,
-        output_dir,
-        error: None,
-    }
-}
-
-/// One job of the reporting-fidelity ladder: the registered aircraft the
-/// relative balance guard compares against, or one ranked finalist.
-enum LadderJob {
-    Nominal(Option<Result<crate::acceptance::ReportingNominal, String>>),
-    Finalist(Result<FinalistVerification, String>),
+    Ok(LadderOutcome {
+        delivered,
+        reporting_nominal,
+    })
 }

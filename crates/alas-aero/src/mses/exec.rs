@@ -207,7 +207,25 @@ pub fn run_tool_with_env_and_cancel(
             seconds: timeout_seconds,
         });
     }
+    // `ALAS_TOOL_TIMEOUT_SCALE` (default 1, exact) stretches every external-tool deadline.
+    let scaled =
+        alas_exec::tool_runtime::RuntimeSettings::current().scaled_timeout_s(timeout_seconds);
+    let timeout = Duration::try_from_secs_f64(scaled).unwrap_or(timeout);
     let command = exe.display().to_string();
+    // Opt-in result cache (`ALAS_TOOL_CACHE_DIR`). MSES is deterministic and
+    // reads only the files in `cwd`, its keystrokes and `MSES_OSMAP`, so the
+    // key is exactly those plus the executable. Only exit-0 runs are stored.
+    let cache = mses_cache(exe, args, cwd, stdin_input, environment);
+    if let Some(stdout) = cache
+        .as_ref()
+        .and_then(|cache| cache.restore())
+        .and_then(|bytes| String::from_utf8(bytes).ok())
+    {
+        return Ok(ToolRun {
+            status: success_status(),
+            stdout,
+        });
+    }
     let mut command_builder = Command::new(exe);
     let mut child = command_builder
         .args(args)
@@ -224,31 +242,28 @@ pub fn run_tool_with_env_and_cancel(
             source,
         })?;
 
-    // Feed all keystrokes, then close stdin so the tool stops waiting on it.
-    // The scripts are tiny, so writing them before reading any output cannot
-    // deadlock: the tool consumes them immediately and only then produces the
-    // output the reader threads below drain.
+    // Feed all keystrokes on a thread, then close stdin so the tool stops
+    // waiting on it. Writing inline would block forever on a tool that stops
+    // reading with a full pipe, outside the deadline below; the thread lets
+    // the deadline kill the tree, which breaks the pipe and ends the writer.
     let stdin_pipe = child.stdin.take().ok_or_else(|| RunError::Io {
         command: command.clone(),
         source: std::io::Error::other("stdin pipe was not captured"),
     })?;
-    {
+    let stdin_bytes = stdin_input.as_bytes().to_vec();
+    let stdin_writer = thread::spawn(move || {
         let mut stdin_pipe = stdin_pipe;
         // A tool that exits before reading its keystrokes closes the pipe
         // first; on Linux the write then fails with EPIPE, a race Windows
         // rarely shows. Its exit status and transcript decide the run, so a
         // broken pipe here is not itself a failure.
         stdin_pipe
-            .write_all(stdin_input.as_bytes())
+            .write_all(&stdin_bytes)
             .or_else(|error| match error.kind() {
                 std::io::ErrorKind::BrokenPipe => Ok(()),
                 _ => Err(error),
             })
-            .map_err(|source| RunError::Io {
-                command: command.clone(),
-                source,
-            })?;
-    }
+    });
 
     let mut stdout_pipe = child.stdout.take().ok_or_else(|| RunError::Io {
         command: command.clone(),
@@ -258,15 +273,17 @@ pub fn run_tool_with_env_and_cancel(
         command: command.clone(),
         source: std::io::Error::other("stderr pipe was not captured"),
     })?;
+    // Raw bytes decoded lossily: a non-UTF-8 byte must not discard the whole
+    // transcript (read_to_string would drop everything read so far).
     let stdout_reader = thread::spawn(move || {
-        let mut buffer = String::new();
-        let _ = stdout_pipe.read_to_string(&mut buffer);
-        buffer
+        let mut buffer = Vec::new();
+        let _ = stdout_pipe.read_to_end(&mut buffer);
+        String::from_utf8_lossy(&buffer).into_owned()
     });
     let stderr_reader = thread::spawn(move || {
-        let mut buffer = String::new();
-        let _ = stderr_pipe.read_to_string(&mut buffer);
-        buffer
+        let mut buffer = Vec::new();
+        let _ = stderr_pipe.read_to_end(&mut buffer);
+        String::from_utf8_lossy(&buffer).into_owned()
     });
 
     let deadline = Instant::now() + timeout;
@@ -301,6 +318,15 @@ pub fn run_tool_with_env_and_cancel(
         }
     };
 
+    stdin_writer
+        .join()
+        .map_err(|_| RunError::Reader {
+            command: command.clone(),
+        })?
+        .map_err(|source| RunError::Io {
+            command: command.clone(),
+            source,
+        })?;
     let raw_stdout = stdout_reader.join().map_err(|_| RunError::Reader {
         command: command.clone(),
     })?;
@@ -310,10 +336,64 @@ pub fn run_tool_with_env_and_cancel(
         command: command.clone(),
     })?;
 
-    Ok(ToolRun {
-        status,
-        stdout: normalize_newlines(raw_stdout),
-    })
+    let stdout = normalize_newlines(raw_stdout);
+    if status.success() {
+        if let Some(cache) = &cache {
+            cache.store(stdout.as_bytes());
+        }
+    }
+    Ok(ToolRun { status, stdout })
+}
+
+/// Cache handle for one MSES-suite launch, `None` when the cache is off.
+fn mses_cache(
+    exe: &Path,
+    args: &[&str],
+    cwd: &Path,
+    stdin_input: &str,
+    environment: &[(&str, &OsStr)],
+) -> Option<alas_exec::tool_cache::DirCache> {
+    let mut environment_text = Vec::new();
+    for (name, value) in environment {
+        environment_text.extend_from_slice(name.as_bytes());
+        environment_text.push(b'=');
+        // An osmap hook names a file whose content, not path, is the input.
+        let path = Path::new(value);
+        match std::fs::read(path) {
+            Ok(content) if path.is_file() => environment_text.extend_from_slice(&content),
+            _ => environment_text.extend_from_slice(value.to_string_lossy().as_bytes()),
+        }
+        environment_text.push(0);
+    }
+    let arguments = args.join("\u{1f}");
+    let program = exe
+        .file_stem()
+        .map(|stem| stem.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    alas_exec::tool_cache::DirCache::begin(
+        "mses",
+        exe,
+        cwd,
+        &[],
+        &[
+            program.as_bytes(),
+            arguments.as_bytes(),
+            stdin_input.as_bytes(),
+            &environment_text,
+        ],
+    )
+}
+
+/// A successful exit status, for replaying a cached run.
+fn success_status() -> ExitStatus {
+    #[cfg(windows)]
+    {
+        std::os::windows::process::ExitStatusExt::from_raw(0)
+    }
+    #[cfg(not(windows))]
+    {
+        std::os::unix::process::ExitStatusExt::from_raw(0)
+    }
 }
 
 /// Translate `\r\n` and lone `\r` to `\n`, reproducing what upstream's
@@ -372,6 +452,39 @@ mod tests {
         let cwd = std::env::temp_dir();
         let error = run_tool(Path::new(program), &args, &cwd, "", 0.3).unwrap_err();
         assert!(matches!(error, RunError::Timeout { .. }));
+    }
+
+    /// With the opt-in cache on, an identical launch replays the first run's
+    /// stdout and output files instead of running the tool again. The command
+    /// prints a clock reading and writes it to a file, so a re-run would differ.
+    #[test]
+    fn an_identical_launch_is_replayed_from_the_opt_in_cache() {
+        use alas_exec::tool_runtime::RuntimeSettings;
+        let scratch = WorkDir::new("alas_mses_cache_test_").expect("scratch dir");
+        let cache_root = scratch.path().join("cache");
+        let work = scratch.path().join("work");
+        std::fs::create_dir_all(&work).expect("work dir");
+        RuntimeSettings::set_override(Some(RuntimeSettings {
+            cache_dir: Some(cache_root),
+            ..RuntimeSettings::default()
+        }));
+        #[cfg(windows)]
+        let script = "echo %RANDOM%%RANDOM%%TIME% > stamp.txt & type stamp.txt";
+        #[cfg(not(windows))]
+        let script = "date +%s%N > stamp.txt; cat stamp.txt";
+        let (program, mut args) = shell();
+        args.push(script);
+        let first = run_tool(Path::new(program), &args, &work, "", 20.0).expect("first run");
+        let first_stamp = std::fs::read_to_string(work.join("stamp.txt")).expect("stamp");
+        std::fs::remove_file(work.join("stamp.txt")).expect("remove stamp");
+        // The first run left its output in `work`; clear it so the replayed
+        // directory looks like the one the first run started from.
+        let second = run_tool(Path::new(program), &args, &work, "", 20.0).expect("second run");
+        let second_stamp = std::fs::read_to_string(work.join("stamp.txt")).expect("replayed");
+        RuntimeSettings::set_override(None);
+        assert!(first.status.success() && second.status.success());
+        assert_eq!(first.stdout, second.stdout);
+        assert_eq!(first_stamp, second_stamp);
     }
 
     #[test]

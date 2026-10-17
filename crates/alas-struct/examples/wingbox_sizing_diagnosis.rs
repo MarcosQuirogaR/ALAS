@@ -148,6 +148,7 @@ fn main() {
         let relief = WingInertiaRelief {
             running_mass_kg_m: relieved.clone(),
             point_masses_kg: Vec::new(),
+            ..Default::default()
         };
         let fuel_semi_kg = trapezoid(&fuel, y);
         let structure_semi_kg = trapezoid(&structure, y);

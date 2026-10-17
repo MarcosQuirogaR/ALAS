@@ -1,0 +1,190 @@
+{
+ "schema_version": 2,
+ "sources": [],
+ "components": [
+  {
+   "id": "radiomaster-er6g",
+   "mpn": "ER6G",
+   "manufacturer": "RadioMaster",
+   "status": "active",
+   "schema_version": 2,
+   "valid_from": "2026-10-12",
+   "valid_to": null,
+   "created_at": "2026-10-12",
+   "updated_at": "2026-10-12",
+   "category": "receiver",
+   "spec": {
+    "role": {
+     "value": "receiver",
+     "unit_si": "1",
+     "source_id": "radiomaster-er6g-page",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "ER 2.4GHz ELRS PWM Receiver",
+     "confidence": 0.7
+    },
+    "mass_kg": {
+     "value": 0.005,
+     "unit_si": "kg",
+     "source_id": "radiomaster-er6g-page",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "5.0 grams",
+     "confidence": 0.7
+    },
+    "v_in_min_v": {
+     "value": 3.5,
+     "unit_si": "V",
+     "source_id": "radiomaster-er6g-page",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "Power supply: DC 3.5 - 8.4V",
+     "confidence": 0.7
+    },
+    "v_in_max_v": {
+     "value": 8.4,
+     "unit_si": "V",
+     "source_id": "radiomaster-er6g-page",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "Power supply: DC 3.5 - 8.4V",
+     "confidence": 0.7
+    },
+    "channels": {
+     "value": 6,
+     "unit_si": "1",
+     "source_id": "radiomaster-er6g-page",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "Output channel: 6CH PWM",
+     "confidence": 0.7
+    },
+    "protocols": {
+     "value": [
+      "ExpressLRS"
+     ],
+     "unit_si": "1",
+     "source_id": "radiomaster-er6g-page",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "Wireless protocol: ExpressLRS",
+     "confidence": 0.7
+    },
+    "telemetry": {
+     "value": true,
+     "unit_si": "1",
+     "source_id": "radiomaster-er6g-page",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "Telemetry power: maximum 50mw; battery voltage detection 3.0 - 26V",
+     "confidence": 0.7
+    },
+    "dims_m": {
+     "value": [
+      0.042,
+      0.013,
+      0.008
+     ],
+     "unit_si": "m",
+     "source_id": "radiomaster-er6g-page",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "42*13*8mm",
+     "confidence": 0.7
+    }
+   }
+  },
+  {
+   "id": "radiomaster-er6gv",
+   "mpn": "ER6GV",
+   "manufacturer": "RadioMaster",
+   "status": "active",
+   "schema_version": 2,
+   "valid_from": "2026-10-12",
+   "valid_to": null,
+   "created_at": "2026-10-12",
+   "updated_at": "2026-10-12",
+   "category": "receiver",
+   "spec": {
+    "role": {
+     "value": "receiver",
+     "unit_si": "1",
+     "source_id": "radiomaster-er6g-page",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "ER 2.4GHz ELRS PWM Receiver",
+     "confidence": 0.7
+    },
+    "mass_kg": {
+     "value": 0.005,
+     "unit_si": "kg",
+     "source_id": "radiomaster-er6g-page",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "5.0 grams",
+     "confidence": 0.7
+    },
+    "v_in_min_v": {
+     "value": 3.5,
+     "unit_si": "V",
+     "source_id": "radiomaster-er6g-page",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "Power supply: DC 3.5 - 8.4V",
+     "confidence": 0.7
+    },
+    "v_in_max_v": {
+     "value": 8.4,
+     "unit_si": "V",
+     "source_id": "radiomaster-er6g-page",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "Power supply: DC 3.5 - 8.4V",
+     "confidence": 0.7
+    },
+    "channels": {
+     "value": 6,
+     "unit_si": "1",
+     "source_id": "radiomaster-er6g-page",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "Output channel: 6CH PWM",
+     "confidence": 0.7
+    },
+    "protocols": {
+     "value": [
+      "ExpressLRS"
+     ],
+     "unit_si": "1",
+     "source_id": "radiomaster-er6g-page",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "Wireless protocol: ExpressLRS",
+     "confidence": 0.7
+    },
+    "telemetry": {
+     "value": true,
+     "unit_si": "1",
+     "source_id": "radiomaster-er6g-page",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "Telemetry power: maximum 50mw; battery voltage detection 3.0 - 26V",
+     "confidence": 0.7
+    },
+    "dims_m": {
+     "value": [
+      0.042,
+      0.013,
+      0.008
+     ],
+     "unit_si": "m",
+     "source_id": "radiomaster-er6g-page",
+     "retrieved_at": "2026-10-12",
+     "method": "datasheet",
+     "raw": "42*13*8mm",
+     "confidence": 0.7
+    }
+   }
+  }
+ ]
+}

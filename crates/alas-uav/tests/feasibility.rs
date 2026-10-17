@@ -7,6 +7,10 @@
 
 //! Coupled fixed-wing UAV feasibility-contract tests.
 
+use alas_uav::airframe::analysis::{estimate_trim_setup, AirframeInputs};
+use alas_uav::airframe::geometry::{AirframeGeometry, Panel, Planform, TailRole, TailSurfaceGeom};
+use alas_uav::airframe::materials::SparMaterials;
+use alas_uav::airframe::spar::SparGeometry;
 use alas_uav::catalog::{
     BatterySpec, Dimensions, EscSpec, MotorSpec, PropellerSpec, ServoOperatingPoint, ServoSpec,
 };
@@ -16,6 +20,7 @@ use alas_uav::feasibility::{
     InstalledServo, MissionEnergyDemand, Placement, PropulsionElectricalDemand, StructuralCase,
     UavDesign,
 };
+use alas_uav::spec::topology::TailKind;
 
 #[test]
 fn a_complete_design_passes_every_coupled_constraint() {
@@ -146,6 +151,38 @@ fn cell_count_cg_and_packaging_incompatibilities_are_not_hidden() {
 }
 
 #[test]
+fn overlapping_in_bay_components_are_a_packaging_violation() {
+    let mut design = complete_design();
+    assert!(!evaluate(&design)
+        .findings
+        .iter()
+        .any(|finding| { finding.kind == FindingKind::PackagingViolation }));
+    // The ESC coincides with the battery: inside the bay, but sharing volume.
+    design.esc.placement = design.battery.placement;
+    let report = evaluate(&design);
+    assert!(report.findings.iter().any(|finding| {
+        finding.kind == FindingKind::PackagingViolation
+            && finding.subject == "battery and esc"
+            && finding.message.contains("overlap")
+    }));
+    assert!(!report.verified_feasible());
+}
+
+#[test]
+fn touching_in_bay_components_do_not_overlap() {
+    let mut design = complete_design();
+    // Battery spans x in [0.39, 0.51] (0.12 m long); butt a 0.04 m ESC on its
+    // forward face, same y and z.
+    design.esc.placement = design.battery.placement;
+    design.esc.placement.center_x_m = 0.45 - 0.06 - 0.02;
+    let report = evaluate(&design);
+    assert!(!report
+        .findings
+        .iter()
+        .any(|finding| finding.kind == FindingKind::PackagingViolation));
+}
+
+#[test]
 fn an_empty_or_internally_inconsistent_analysis_cannot_pass_as_verified() {
     let mut design = complete_design();
     design.flight_conditions.clear();
@@ -171,6 +208,14 @@ fn complete_design() -> UavDesign {
     let internal = |x| Placement {
         center_x_m: x,
         center_y_m: 0.0,
+        center_z_m: 0.0,
+        inside_equipment_bay: true,
+    };
+    // Same x as `internal`, offset in y so in-bay envelopes do not overlap
+    // the battery (x and y are the only axes the CG checks read).
+    let internal_offset_y = |x, y| Placement {
+        center_x_m: x,
+        center_y_m: y,
         center_z_m: 0.0,
         inside_equipment_bay: true,
     };
@@ -254,7 +299,7 @@ fn complete_design() -> UavDesign {
                 mass_kg: Some(0.08),
                 dimensions: Some(small),
             },
-            placement: internal(0.4),
+            placement: internal_offset_y(0.4, 0.1),
         },
         propeller: InstalledPropeller {
             id: "propeller".to_owned(),
@@ -277,7 +322,7 @@ fn complete_design() -> UavDesign {
             id: "autopilot".to_owned(),
             mass_kg: Some(0.1),
             dimensions: Some(small),
-            placement: internal(0.5),
+            placement: internal_offset_y(0.5, -0.1),
         }],
         propulsion_demand: PropulsionElectricalDemand {
             battery_current_a: 40.0,
@@ -307,6 +352,63 @@ fn complete_design() -> UavDesign {
             wing_root_bending_moment_nm: Some(80.0),
             allowable_wing_root_bending_moment_nm: Some(100.0),
         }],
+        airframe_inputs: fixture_airframe_inputs(),
+    }
+}
+
+/// Airframe-analysis inputs of the fixture: a 0.8 m^2 rectangular wing, a
+/// tail 0.9 m aft of the wing quarter chord, literature-default spar.
+fn fixture_airframe_inputs() -> AirframeInputs {
+    let panel = |span_m: f64, chord_m: f64, x_m: f64, vertical: bool| Planform {
+        panels: vec![Panel {
+            span_m,
+            chord_root_m: chord_m,
+            chord_tip_m: chord_m,
+            root_le_m: [x_m, 0.0, 0.0],
+            sweep_le_rad: 0.0,
+            dihedral_rad: 0.0,
+        }],
+        mirror: !vertical,
+        vertical,
+    };
+    let span = (0.8_f64 * 8.0).sqrt();
+    let chord = 0.8 / span;
+    let wing_ac = 0.3 + 0.25 * chord;
+    let tail_chord = 0.16 / 0.8;
+    let fin_chord = 0.05 / 0.3;
+    AirframeInputs {
+        geometry: AirframeGeometry {
+            wing: panel(0.5 * span, chord, 0.3, false),
+            horizontal: Some(TailSurfaceGeom {
+                role: TailRole::Horizontal,
+                planform: panel(0.4, tail_chord, wing_ac + 0.9 - 0.25 * tail_chord, false),
+                v_dihedral_rad: 0.0,
+                incidence_rad: 0.0,
+                count: 1,
+            }),
+            vertical: Some(TailSurfaceGeom {
+                role: TailRole::Vertical,
+                planform: panel(0.3, fin_chord, wing_ac + 0.9 - 0.25 * fin_chord, true),
+                v_dihedral_rad: 0.0,
+                incidence_rad: 0.0,
+                count: 1,
+            }),
+            tail_kind: TailKind::Conventional,
+        },
+        cruise_speed_m_s: 20.0,
+        air_density_kg_m3: 1.225,
+        limit_load_factor: 3.5,
+        safety_factor: 1.5,
+        trim_setup: estimate_trim_setup(),
+        spar_geometry: SparGeometry {
+            semispan_m: 0.5 * span,
+            root_depth_m: 0.06,
+            tip_depth_m: 0.06,
+            root_cap_width_m: 0.02,
+            tip_cap_width_m: 0.02,
+        },
+        spar_materials: SparMaterials::LiteratureDefault,
+        spar_stations: 200,
     }
 }
 

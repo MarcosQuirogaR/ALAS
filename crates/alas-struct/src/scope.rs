@@ -64,42 +64,104 @@ pub struct NotAvailable {
 
 /// Representation of the gust and continuous-turbulence design cases.
 ///
-/// [`crate::loads::load_cases`] is the V-n manoeuvre set only: symmetric
-/// pull-up and push-down at the ultimate load factor, and 1 g level. The
-/// certification gust cases are a separate envelope, and on a real transport
-/// they routinely size the outer wing where the manoeuvre case does not.
+/// The sizing evaluates the quasi-static discrete vertical gust of CS 25.341(a)
+/// at `V_C` and `V_D` ([`crate::gust`]) beside the V-n manoeuvre set of
+/// [`crate::loads::load_cases`]. The dynamic analysis the rule requires, and the
+/// continuous-turbulence case, are not evaluated, so the gap is declared in
+/// both variants.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GustEnvelope {
-    /// No gust case is evaluated. The box is a manoeuvre-sized box, and must
-    /// not be published as sized to the certification load envelope.
+    /// No gust case is evaluated (the planform or speeds did not define one).
+    /// The box is a manoeuvre-sized box, and must not be published as sized to
+    /// the certification load envelope.
     NotModelled(NotAvailable),
+    /// The rigid-aeroplane quasi-static discrete gust is evaluated. It is a
+    /// screening load, not the dynamic gust analysis of CS 25.341(a)(1).
+    QuasiStatic(NotAvailable),
 }
 
 impl GustEnvelope {
-    /// The declaration every solve in this crate currently carries.
+    /// The declaration of a solve that evaluated no gust case.
     pub const fn not_modelled() -> Self {
         Self::NotModelled(NotAvailable {
             quantity: "discrete gust and continuous turbulence load cases, \
                        CS-25.341 / 14 CFR 25.341",
-            reason: "the load model evaluates the V-n manoeuvre set only. A gust case needs \
-                     the reference gust velocity at the design altitude, the gust gradient \
-                     search, the aircraft mass ratio and the lift-curve slope at the case \
-                     speed, none of which this crate is given, and none of which may be \
-                     assumed into existence.",
-            resolved_by: "a gust load model fed by the certified speed schedule and the \
-                          aerodynamic lift-curve slope, evaluated alongside \
-                          crate::loads::load_cases",
+            reason: "the planform, speeds or mass did not define a discrete gust (an input of \
+                     the quasi-static gust model was not finite and positive), so the box is \
+                     sized to the manoeuvre set only.",
+            resolved_by: "valid design speeds, gross mass and planform for crate::gust",
             direction: OmissionDirection::Lighter,
+        })
+    }
+
+    /// The declaration of a solve that evaluated the quasi-static gust.
+    pub const fn quasi_static() -> Self {
+        Self::QuasiStatic(NotAvailable {
+            quantity: "dynamic discrete-gust response (gradient search, unsteady \
+                       aerodynamics, flexibility, pitching) and continuous turbulence, \
+                       CS-25.341(a)(1), (b)",
+            reason: "the gust load is the rigid-aeroplane quasi-static Pratt load factor at the \
+                     tuned gradient of 12.5 mean chords, at V_C and V_D, with the flight \
+                     profile alleviation factor taken at its upper bound (R1 = R2 = 1). \
+                     Structural flexibility and the dynamic response can raise or lower the \
+                     load by amounts this model does not estimate.",
+            resolved_by: "a dynamic gust analysis of the flexible aeroplane over the gradient \
+                          range of 9-107 m, and a continuous-turbulence analysis",
+            direction: OmissionDirection::Unknown,
         })
     }
 
     /// The gap this envelope declares, if any.
     pub const fn not_available(self) -> Option<NotAvailable> {
         match self {
-            Self::NotModelled(gap) => Some(gap),
+            Self::NotModelled(gap) | Self::QuasiStatic(gap) => Some(gap),
         }
     }
 }
+
+/// The torque sources the web sizing still does not include.
+pub const TORQUE_CASES_NOT_MODELLED: NotAvailable = NotAvailable {
+    quantity: "spoiler and roll-spoiler hinge moments (the spoiler share of the CS 25.349 rolling \
+               cases), flap Fowler extension and slat loads, 25.345(a) flap gust and \
+               slipstream, and propeller thrust and torque, N m",
+    reason: "the torque the webs carry is the lift offset from the elastic axis plus the \
+             section pitching moment (NeuralFoil, incompressible and attached: no shock-induced \
+             aft loading at V_D), the single-slotted flap lift at V_F with n = 2.0 (strip theory, \
+             c'/c = 1), the aileron cases, the engine inertia offsets at the pylon stations and \
+             the take-off thrust couple (crate::torque_sources). Spoilers, slats, the flap gust \
+             and turboprop propeller loads are not modelled; thrust is not combined with the \
+             manoeuvre cases.",
+    resolved_by: "spoiler and slat load data, a flap gust response and propeller loads",
+    direction: OmissionDirection::Lighter,
+};
+
+/// The CS 25.349(a) aileron rolling cases are implemented but not in the product set.
+pub const AILERON_CASES_NOT_IN_PRODUCT_SET: NotAvailable = NotAvailable {
+    quantity: "CS 25.349(a) aileron rolling cases at V_A, V_C and V_D (the stop at V_A, the V_A \
+               roll rate at V_C, a third of it at V_D), N m",
+    reason: "implemented (CaseSet::WITH_AILERON) with rigid strip theory: the 25 deg stop, \
+             steady roll with strip-theory damping, zero roll rate at V_A. A rolling case needs \
+             the aeroelastic aileron effectiveness of the wing (CS 25.349(a) requires the \
+             torsional flexibility to be considered) and the roll-rate and control-law limits of \
+             the aircraft (AMC 25.349(a)). A rigid strip at full deflection over-predicts: roll \
+             rates of 20 to 50 deg/s, about 1.3 times the FLOPS wing for the A340 and A380, and \
+             the AVE box above its own complete-wing mass. The product therefore leaves them \
+             out, which can leave an outboard box lighter than the certification envelope needs.",
+    resolved_by: "the wing torsional stiffness (aileron effectiveness) and the aircraft's \
+                  aileron deflection and roll-rate schedule",
+    direction: OmissionDirection::Lighter,
+};
+
+/// The fatigue limit is applied to a symmetric section.
+pub const FATIGUE_AREA_STIFFNESS_NOT_CREDITED: NotAvailable = NotAvailable {
+    quantity: "stiffness of the lower-cover fatigue area in the response section, N m^2",
+    reason: "the area added to the lower flange for the fatigue limit is sized with its own
+             neutral-axis shift and inertia gain, but the analytical response section (deflection,
+             modes) uses the symmetric section without it, so deflection is over-stated and the
+             strength margins of the symmetric section are conservative for it.",
+    resolved_by: "an asymmetric analytical section with independent upper and lower flange areas",
+    direction: OmissionDirection::Heavier,
+};
 
 /// The spanwise datum the box is sized and integrated from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

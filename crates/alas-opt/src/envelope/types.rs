@@ -352,19 +352,6 @@ impl ModelCgEnvelopeAssessment {
             .iter()
             .any(|state| !state.ground_reactions_admissible)
     }
-
-    /// Largest normalized hard-constraint exceedance across all load states.
-    ///
-    /// Excludes diagnostic constraints, as [`Self::hard_constraints_pass`]
-    /// does.
-    pub fn worst_hard_exceedance(&self) -> f64 {
-        self.loading_states
-            .iter()
-            .flat_map(|state| &state.constraints)
-            .filter(|constraint| constraint.violated && !constraint.constraint.is_diagnostic())
-            .map(|constraint| constraint.normalized_exceedance)
-            .fold(0.0, f64::max)
-    }
 }
 
 /// Why the model-derived assessment could not be formed.

@@ -7,37 +7,7 @@
 //! side-view marker stack ([`super::side_view`]) and the stability-metrics
 //! ruler ([`super::metrics`]).
 
-/// Assigns each of `xs` (already x-sorted by the caller) a row index so that
-/// any two labels sharing a row are at least `min_sep` apart in x:
-/// `_assign_label_rows`.
-///
-/// Greedy: each label goes on the first existing row whose last-placed x is
-/// far enough away, or opens a new row if none is. Replaces a fixed
-/// row-count cycle (e.g. `i % 3`): with a bounded number of rows, a label
-/// cluster tighter in x than the cycle length wraps back onto an
-/// already-occupied row and its annotation collides with its neighbour's.
-/// Growing the row count on demand guarantees no collision regardless of how
-/// many markers land close together.
-pub fn assign_label_rows(xs: &[f64], min_sep: f64) -> Vec<usize> {
-    let mut last_x_per_row: Vec<f64> = Vec::new();
-    let mut rows = Vec::with_capacity(xs.len());
-    for &x in xs {
-        let mut placed = false;
-        for (r, last_x) in last_x_per_row.iter_mut().enumerate() {
-            if x - *last_x >= min_sep {
-                *last_x = x;
-                rows.push(r);
-                placed = true;
-                break;
-            }
-        }
-        if !placed {
-            last_x_per_row.push(x);
-            rows.push(last_x_per_row.len() - 1);
-        }
-    }
-    rows
-}
+pub(super) use crate::families::common::assign_label_rows;
 
 #[cfg(test)]
 mod tests {

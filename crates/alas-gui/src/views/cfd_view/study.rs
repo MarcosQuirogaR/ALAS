@@ -204,6 +204,10 @@ fn operating_point_group(ui: &mut Ui, config: &mut CfdStudyConfig) {
         });
 }
 
+/// Why the far-field controls are inactive for compressible cases.
+const COMPRESSIBLE_FAR_FIELD_NOTE: &str =
+    "Far-field treatment is fixed for compressible cases (Mach 0.3 and above).";
+
 fn boundary_group(ui: &mut Ui, config: &mut CfdStudyConfig) {
     Grid::new("airfoil_cfd_boundary_state_grid")
         .num_columns(2)
@@ -221,22 +225,36 @@ fn boundary_group(ui: &mut Ui, config: &mut CfdStudyConfig) {
             row_label(ui, "Turbulence model", "The steady k-omega SST model is used in both paths; rhoSimpleFoam adds perfect-gas density and energy equations when Mach requires compressibility.");
             ui.label(RichText::new(&config.turbulence_model).monospace());
             ui.end_row();
+            // alas-cfd rejects non-default far-field treatments for compressible
+            // regimes (Mach >= COMPRESSIBLE_SOLVER_THRESHOLD_MACH), so the
+            // controls are greyed out there; same predicate as the solver choice.
+            let compressible = config.flow_regime().is_compressible();
             row_label(ui, "Far-field condition", "Boundary condition applied to the reusable far-field patch.");
-            ComboBox::from_id_salt("airfoil_cfd_far_field")
-                .width(FIELD_WIDTH)
-                .selected_text(match config.boundaries.far_field {
-                    FarFieldCondition::FixedValue => tr("Fixed velocity"),
-                    FarFieldCondition::Freestream => tr("Freestream mixed"),
-                })
-                .show_ui(ui, |ui| {
+            ui.vertical(|ui| {
+                ui.add_enabled_ui(!compressible, |ui| {
+                    ComboBox::from_id_salt("airfoil_cfd_far_field")
+                        .width(FIELD_WIDTH)
+                        .selected_text(match config.boundaries.far_field {
+                            FarFieldCondition::FixedValue => tr("Fixed velocity"),
+                            FarFieldCondition::Freestream => tr("Freestream mixed"),
+                        })
+                        .show_ui(ui, |ui| {
                     ui.selectable_value(&mut config.boundaries.far_field, FarFieldCondition::FixedValue, tr("Fixed velocity"));
                     ui.selectable_value(&mut config.boundaries.far_field, FarFieldCondition::Freestream, tr("Freestream mixed"));
-                });
+                        });
+                })
+                .response
+                .on_disabled_hover_text(tr(COMPRESSIBLE_FAR_FIELD_NOTE));
+                if compressible {
+                    ui.label(RichText::new(tr(COMPRESSIBLE_FAR_FIELD_NOTE)).small().weak());
+                }
+            });
             ui.end_row();
             // Both sub-conditions are documented as applying only while the
             // far field is `FixedValue`; disabling them there is what keeps the
             // form honest about when the choice has any effect.
-            let sub_conditions_apply = config.boundaries.far_field == FarFieldCondition::FixedValue;
+            let sub_conditions_apply =
+                !compressible && config.boundaries.far_field == FarFieldCondition::FixedValue;
             row_label(ui, "Far-field turbulence", "Treatment of k and omega on the outer patch while the far field is Fixed velocity. inletOutlet imposes the freestream state on inflow and convects the interior value out on outflow; fixedValue clamps every outer face, including outflow.");
             ui.add_enabled_ui(sub_conditions_apply, |ui| {
                 ComboBox::from_id_salt("airfoil_cfd_far_field_turbulence")
@@ -254,7 +272,9 @@ fn boundary_group(ui: &mut Ui, config: &mut CfdStudyConfig) {
                             );
                         }
                     });
-            });
+            })
+            .response
+            .on_disabled_hover_text(tr(COMPRESSIBLE_FAR_FIELD_NOTE));
             ui.end_row();
             row_label(ui, "Far-field velocity", "Treatment of U on the outer patch while the far field is Fixed velocity. freestream is inletOutlet for velocity: the freestream vector on inflow, zero gradient on outflow. The pressure treatment is untouched either way.");
             ui.add_enabled_ui(sub_conditions_apply, |ui| {
@@ -273,7 +293,9 @@ fn boundary_group(ui: &mut Ui, config: &mut CfdStudyConfig) {
                             );
                         }
                     });
-            });
+            })
+            .response
+            .on_disabled_hover_text(tr(COMPRESSIBLE_FAR_FIELD_NOTE));
             ui.end_row();
             row_label(ui, "Pressure reference [Pa]", "Positive values set the absolute static pressure for rhoSimpleFoam. Zero retains the incompressible gauge convention and derives a positive perfect-gas pressure from rho R T when the compressible path is selected.");
             field(ui, DragValue::new(&mut config.boundaries.pressure_reference_pa).speed(1.0).range(0.0..=1.0e6));

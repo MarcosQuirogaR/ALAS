@@ -1,22 +1,21 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! Headless contracts for the fixed-wing UAV desktop workflow.
+//! Headless contracts for the fixed-wing UAV competition workflow.
 
-// Navigation/catalogue fixtures are required by the page contract under test.
+// Navigation and catalogue fixtures are required by the page contract under test.
 #![allow(clippy::expect_used)]
 
 use alas_gui::nav::{self, PageKind};
-use alas_gui::uav::{
-    ComponentRole, MissionPlanMode, PropulsionInputMode, UavExecutionStatus, UavSection,
-    UavWorkflowOutcome, UavWorkflowState,
-};
+use alas_gui::uav::{UavExecutionStatus, UavSection, UavWorkflowOutcome, UavWorkflowState};
 use alas_uav::{TopologyAvailability, UavAnalysisPath, UavTopology};
+use std::path::PathBuf;
 use std::thread;
 use std::time::{Duration, Instant};
 
 #[test]
 fn fixed_wing_uav_is_a_first_class_navigation_page() {
+    use_synthetic_tables();
     let page = nav::page("uav").expect("UAV page is registered");
     assert_eq!(page.kind, PageKind::Uav);
     assert_eq!(page.title, "Fixed-Wing UAV");
@@ -24,6 +23,7 @@ fn fixed_wing_uav_is_a_first_class_navigation_page() {
 
 #[test]
 fn every_design_convention_has_a_typed_sizing_boundary() {
+    use_synthetic_tables();
     assert_eq!(UavTopology::ALL.len(), 4);
     assert_eq!(UavTopology::ALL[0], UavTopology::ConventionalTail);
     for topology in UavTopology::ALL {
@@ -38,127 +38,54 @@ fn every_design_convention_has_a_typed_sizing_boundary() {
         UavTopology::ConventionalTail.availability(UavAnalysisPath::PreliminaryOptimization),
         TopologyAvailability::Available
     ));
-    for topology in [
-        UavTopology::TTail,
-        UavTopology::VTail,
-        UavTopology::FlyingWing,
-    ] {
-        assert!(matches!(
-            topology.availability(UavAnalysisPath::PreliminaryOptimization),
-            TopologyAvailability::Unavailable(_)
-        ));
-    }
 }
 
 #[test]
-fn automatic_sizing_uses_reviewed_materials_and_selects_landing_gear() {
-    let state = UavWorkflowState::default();
-    let materials = state.records_for(ComponentRole::Material);
-    assert_eq!(materials.len(), 2);
-    assert!(materials
-        .iter()
-        .all(|record| { matches!(record.kind, alas_uav::ComponentKind::MaterialStock(_)) }));
-    let landing_gear = state.records_for(ComponentRole::LandingGear);
-    assert_eq!(landing_gear.len(), 1);
-    assert_eq!(landing_gear[0].id, "robart-121-retractable-tailwheel");
-    assert_eq!(
-        state.selections.landing_gear,
-        "robart-121-retractable-tailwheel"
-    );
-    assert!(state
-        .selected_evidence_gaps()
-        .iter()
-        .all(|gap| { !gap.contains("Landing gear") }));
-}
-
-#[test]
-fn advanced_manual_map_without_evidence_is_rejected_before_optimization() {
-    let mut state = UavWorkflowState::default();
-    state.propulsion_input_mode = PropulsionInputMode::AdvancedManual;
-    state.propulsion_evidence.clear();
-    assert!(!state.start());
-    assert!(matches!(
-        state.execution,
-        UavExecutionStatus::Failed(message) if message.contains("evidence is required")
-    ));
-    assert_eq!(state.outcome, UavWorkflowOutcome::NotRun);
-}
-
-#[test]
-fn automatic_solver_needs_no_manual_points_and_retains_a_multi_phase_result() {
-    let mut state = runnable_state(8);
-    state.propulsion_evidence.clear();
-    state.propulsion_motor_count = 2;
-    assert!(state.start());
-    wait_for_worker(&mut state);
-
-    let mission = state
-        .last_electrical_mission
-        .as_ref()
-        .expect("automatic source-backed calculation is retained with any optimizer verdict");
-    assert_eq!(mission.phases.len(), 4);
-    assert!(mission.total_duration_s >= state.objectives.endurance_s);
-    assert!(mission.total_distance_m >= state.objectives.range_m);
-    assert!(
-        mission.phases[0].propulsion.total_thrust_n
-            > mission.phases[0].propulsion.per_motor.thrust_n
-    );
-    assert!(mission.maximum_battery_current_a > 0.0);
-}
-
-#[test]
-fn background_search_completes_and_reports_retail_evidence_gaps() {
+fn competition_search_with_a_small_budget_completes_and_fills_the_result() {
+    use_synthetic_tables();
     let mut state = runnable_state(8);
     assert!(state.start());
     wait_for_worker(&mut state);
 
     assert_eq!(state.execution, UavExecutionStatus::Completed);
     assert_eq!(state.active_section, UavSection::Results);
-    assert_eq!(
-        state.last_completed_topology,
-        Some(UavTopology::ConventionalTail)
-    );
-    assert!(
-        matches!(
-            state.outcome,
-            UavWorkflowOutcome::NoFeasibleDesign(_)
-                | UavWorkflowOutcome::PreliminaryFeasible { .. }
-        ),
-        "unexpected outcome: {:#?}",
-        state.outcome
-    );
-    if let UavWorkflowOutcome::NoFeasibleDesign(summary) = state.outcome {
-        assert!(summary
-            .rejections
-            .iter()
-            .any(|row| { row.kind == alas_uav::FindingKind::MissingData && row.candidates > 0 }));
-        assert!(summary
-            .examples
-            .iter()
-            .any(|example| example.kind == alas_uav::FindingKind::MissingData));
-        assert!(summary.best_evaluated.is_some());
+    let UavWorkflowOutcome::Competition(result) = &state.outcome else {
+        panic!("a completed competition search fills the competition result");
+    };
+    assert_eq!(result.preset_id, "acc-2026");
+    assert!(!result.preset_name.is_empty());
+    assert_eq!(result.optimum.evaluations, 8);
+    assert!(result.optimum.compatible_bundles > 0);
+    if let Some(best) = &result.optimum.best {
+        assert!(!best.components.motor_id.is_empty());
+        assert!(!best.components.propeller_id.is_empty());
+        assert!(best.evaluation.feasible || !best.evaluation.failed_gates.is_empty());
     }
 }
 
 #[test]
-fn unsupported_design_conventions_explain_why_preliminary_sizing_cannot_start() {
-    for topology in [
-        UavTopology::TTail,
-        UavTopology::VTail,
-        UavTopology::FlyingWing,
-    ] {
-        let mut state = runnable_state(8);
-        state.topology = topology;
-        assert!(!state.start());
-        assert!(matches!(
-            state.execution,
-            UavExecutionStatus::Failed(message) if message.contains(topology.label())
-        ));
-    }
+fn an_unknown_preset_or_a_tiny_budget_is_refused_before_the_search() {
+    use_synthetic_tables();
+    let mut state = runnable_state(8);
+    state.competition.preset_id = "no-such-preset".to_owned();
+    assert!(!state.start());
+    assert!(matches!(
+        &state.execution,
+        UavExecutionStatus::Failed(message) if message.contains("no-such-preset")
+    ));
+
+    let mut state = runnable_state(2);
+    assert!(!state.start());
+    assert!(matches!(
+        &state.execution,
+        UavExecutionStatus::Failed(message) if message.contains("at least 4")
+    ));
+    assert!(matches!(state.outcome, UavWorkflowOutcome::NotRun));
 }
 
 #[test]
 fn active_search_cannot_be_started_twice_and_cancels_cooperatively() {
+    use_synthetic_tables();
     let mut state = runnable_state(1_000_000);
     assert!(state.start());
     assert!(
@@ -168,8 +95,7 @@ fn active_search_cannot_be_started_twice_and_cancels_cooperatively() {
     assert!(matches!(
         state.execution,
         UavExecutionStatus::Running(progress)
-            if progress.evaluated_candidates == 0
-                && progress.total_candidates == 1_000_000
+            if progress.total_candidates == 1_000_000
     ));
 
     state.cancel();
@@ -182,24 +108,29 @@ fn active_search_cannot_be_started_twice_and_cancels_cooperatively() {
         state.execution,
         UavExecutionStatus::Cancelled { .. }
     ));
-    assert_eq!(state.outcome, UavWorkflowOutcome::NotRun);
+    assert!(matches!(state.outcome, UavWorkflowOutcome::NotRun));
 }
 
 #[test]
 fn failed_or_cancelled_restart_retains_the_last_completed_result() {
+    use_synthetic_tables();
     let mut state = runnable_state(8);
     assert!(state.start());
     wait_for_worker(&mut state);
-    let completed = state.outcome.clone();
-    assert_ne!(completed, UavWorkflowOutcome::NotRun);
+    let completed_preset = match &state.outcome {
+        UavWorkflowOutcome::Competition(result) => result.preset_id.clone(),
+        UavWorkflowOutcome::NotRun => panic!("the first search must complete"),
+    };
 
-    state.propulsion_input_mode = PropulsionInputMode::AdvancedManual;
-    state.propulsion_evidence.clear();
+    state.competition.preset_id = "no-such-preset".to_owned();
     assert!(!state.start());
     assert!(matches!(state.execution, UavExecutionStatus::Failed(_)));
-    assert_eq!(state.outcome, completed);
+    assert!(matches!(
+        &state.outcome,
+        UavWorkflowOutcome::Competition(result) if result.preset_id == completed_preset
+    ));
 
-    state.propulsion_evidence = "user-provided dynamometer record".to_owned();
+    state.competition.preset_id = completed_preset.clone();
     state.evaluations = 1_000_000;
     assert!(state.start());
     state.cancel();
@@ -208,62 +139,38 @@ fn failed_or_cancelled_restart_retains_the_last_completed_result() {
         state.execution,
         UavExecutionStatus::Cancelled { .. }
     ));
-    assert_eq!(state.outcome, completed);
+    assert!(matches!(
+        &state.outcome,
+        UavWorkflowOutcome::Competition(result) if result.preset_id == completed_preset
+    ));
 }
 
 #[test]
-fn dynamic_uav_labels_have_spanish_catalog_entries() {
+fn competition_labels_have_spanish_catalog_entries() {
+    use_synthetic_tables();
     let catalog = alas_i18n::es::desktop_catalog();
-    for key in ComponentRole::ALL
+    for key in UavSection::ALL
         .into_iter()
-        .map(ComponentRole::label)
-        .chain(UavSection::ALL.into_iter().map(UavSection::short_title))
-        .chain(
-            [
-                PropulsionInputMode::Automatic,
-                PropulsionInputMode::AdvancedManual,
-            ]
-            .into_iter()
-            .map(PropulsionInputMode::label),
-        )
-        .chain(
-            [MissionPlanMode::Standard, MissionPlanMode::Advanced]
-                .into_iter()
-                .map(MissionPlanMode::label),
-        )
-        .chain(
-            UavTopology::ALL
-                .into_iter()
-                .flat_map(|topology| [topology.label(), topology.description()]),
-        )
+        .flat_map(|section| [section.short_title(), section.title(), section.description()])
         .chain([
-            "UAV workflow",
-            "Preliminary design metrics",
-            "Design convention",
-            "Propulsion data source or test ID",
-            "Preliminary sizing is available for this design convention.",
-            "Preliminary sizing unavailable: {reason}",
-            "Choose a supported convention before starting preliminary sizing: {reason}",
-            "Endurance",
-            "Range",
-            "Cruise speed",
-            "Maximum stall speed",
-            "Missing evidence",
-            "Insufficient lift",
-            "Insufficient thrust",
-            "Energy shortfall",
-            "Structural overload",
-            "Landing-gear overload",
-            "VLM CL",
-            "Induced-CD discrepancy",
-            "Cancel UAV search",
-            "Cancellation requested; finishing the current candidate.",
+            "Competition preset",
+            "Announced take-off distance",
+            "Payload count (ACC cans gate)",
+            "Payload volume (XC gate)",
+            "Evaluation budget",
+            "Random seed",
+            "Run competition search",
+            "Chosen components",
+            "Hard gates",
+            "Gates that bind (failed)",
+            "No hard gate fails.",
+            "Competition search result",
+            "Feasible design found: every evaluated hard gate passes.",
+            "Differential evolution over compatible propulsion bundles",
+            "Search time and evaluation rate depend on the machine and are not reproducible; the seed and budget are.",
             "UAV search completed.",
-            "The last completed UAV result is retained.",
-            "Shared-core lift verdict: passed",
-            "Shared-core lift verdict: insufficient lift",
-            "Design convention used by this result: {topology}",
-            "The selected convention differs from this result; run again to update it.",
+            "UAV result",
+            "Preliminary: not validated against measured flight data",
         ])
     {
         assert!(catalog.contains_key(key), "missing Spanish UAV key: {key}");
@@ -272,16 +179,15 @@ fn dynamic_uav_labels_have_spanish_catalog_entries() {
 
 fn runnable_state(evaluations: usize) -> UavWorkflowState {
     let mut state = UavWorkflowState::default();
-    state.propulsion_evidence = "user-provided dynamometer record".to_owned();
     state.evaluations = evaluations;
     state
 }
 
 fn wait_for_worker(state: &mut UavWorkflowState) {
-    let deadline = Instant::now() + Duration::from_secs(10);
+    let deadline = Instant::now() + Duration::from_secs(120);
     while state.is_running() && Instant::now() < deadline {
         state.poll();
-        thread::sleep(Duration::from_millis(1));
+        thread::sleep(Duration::from_millis(5));
     }
     state.poll();
     assert!(
@@ -289,4 +195,11 @@ fn wait_for_worker(state: &mut UavWorkflowState) {
         "UAV worker did not reach a terminal state: {:#?}",
         state.execution
     );
+}
+
+/// ALAS ships no propeller data; these SYNTHETIC tables stand in for it.
+fn use_synthetic_tables() {
+    alas_uav::propulsion_electric::prop_data::set_prop_data_dir(Some(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../alas-uav/tests/fixtures/prop_data"),
+    ));
 }

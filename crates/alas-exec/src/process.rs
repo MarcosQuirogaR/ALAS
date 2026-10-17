@@ -40,10 +40,12 @@
 //! which is why [`NewProcessGroup::new_process_group`] and
 //! [`kill_process_tree`] are one pair of things rather than two.
 
+use std::collections::HashMap;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus};
-use std::thread::{self, JoinHandle};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
+use std::thread::{self, JoinHandle, ThreadId};
 use std::time::{Duration, Instant};
 
 /// How often [`wait_with_timeout`] polls a supervised child: short against
@@ -91,6 +93,8 @@ pub fn timeout_from_seconds(tool: &str, seconds: f64) -> Result<Duration, Invali
             seconds,
         });
     }
+    // `ALAS_TOOL_TIMEOUT_SCALE` (default 1, exact) stretches every external-tool deadline.
+    let seconds = crate::tool_runtime::RuntimeSettings::current().scaled_timeout_s(seconds);
     Ok(Duration::try_from_secs_f64(seconds).unwrap_or(Duration::MAX))
 }
 
@@ -300,23 +304,69 @@ pub fn wait_with_timeout(child: &mut Child, timeout: Duration) -> DeadlineWait {
 /// stream concurrently keeps the pipes empty. `None` (a stream that was not
 /// piped) yields no bytes.
 pub fn drain<R: Read + Send + 'static>(stream: Option<R>) -> JoinHandle<Vec<u8>> {
-    thread::spawn(move || {
-        let mut buffer = Vec::new();
+    let shared = Arc::new(Mutex::new(Vec::new()));
+    let thread_shared = Arc::clone(&shared);
+    let handle = thread::spawn(move || {
         if let Some(mut stream) = stream {
+            let mut chunk = [0_u8; 8192];
             // A read error truncates a diagnostic tail; the exit status and
             // the produced artifacts remain the success criteria.
-            let _ = stream.read_to_end(&mut buffer);
+            while let Ok(count) = stream.read(&mut chunk) {
+                if count == 0 {
+                    break;
+                }
+                lock_ignoring_poison(&thread_shared).extend_from_slice(&chunk[..count]);
+            }
         }
-        buffer
-    })
+        std::mem::take(&mut *lock_ignoring_poison(&thread_shared))
+    });
+    // Remember the live buffer so `drained_text` can return the captured
+    // prefix if the reader never reaches end-of-stream. Keyed by thread id.
+    lock_ignoring_poison(live_buffers()).insert(handle.thread().id(), shared);
+    handle
+}
+
+/// How long [`drained_text`] waits for a reader to finish after its process
+/// has exited or been killed. A reader normally finishes within milliseconds;
+/// one that does not is held open by a descendant that inherited the pipe.
+const DRAIN_GRACE: Duration = Duration::from_secs(2);
+
+type LiveBuffers = Mutex<HashMap<ThreadId, Arc<Mutex<Vec<u8>>>>>;
+
+fn live_buffers() -> &'static LiveBuffers {
+    static BUFFERS: OnceLock<LiveBuffers> = OnceLock::new();
+    BUFFERS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn lock_ignoring_poison<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
 /// The text a [`drain`] thread collected, decoded lossily.
 ///
-/// A reader thread that panicked yields empty text: the stream is a
-/// diagnostic, not a result.
+/// The wait is bounded: if the reader has not reached end-of-stream within a
+/// short grace period (a surviving descendant still holds the pipe), the
+/// bytes captured so far are returned with a note, and the reader thread is
+/// left detached rather than blocking the caller forever. A reader thread
+/// that panicked yields empty text: the stream is a diagnostic, not a result.
 pub fn drained_text(handle: JoinHandle<Vec<u8>>) -> String {
-    String::from_utf8_lossy(&handle.join().unwrap_or_default()).into_owned()
+    let id = handle.thread().id();
+    let live = lock_ignoring_poison(live_buffers()).remove(&id);
+    let deadline = Instant::now() + DRAIN_GRACE;
+    while !handle.is_finished() && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(5));
+    }
+    if handle.is_finished() {
+        return String::from_utf8_lossy(&handle.join().unwrap_or_default()).into_owned();
+    }
+    let prefix = live
+        .map(|buffer| lock_ignoring_poison(&buffer).clone())
+        .unwrap_or_default();
+    let mut text = String::from_utf8_lossy(&prefix).into_owned();
+    text.push_str(
+        "\n[output reader still open after the process ended; later output not captured]\n",
+    );
+    text
 }
 
 // A test spawns a process it built here directly, so a failed expect is the
@@ -325,6 +375,37 @@ pub fn drained_text(handle: JoinHandle<Vec<u8>>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A stream that yields a prefix and then never reaches end-of-stream,
+    /// like a pipe still held open by a surviving descendant.
+    struct StuckStream(bool);
+
+    impl Read for StuckStream {
+        fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+            if self.0 {
+                thread::sleep(Duration::from_secs(30));
+                return Ok(0);
+            }
+            self.0 = true;
+            buffer[..3].copy_from_slice(b"abc");
+            Ok(3)
+        }
+    }
+
+    #[test]
+    fn drained_text_is_bounded_and_keeps_the_prefix_when_the_stream_never_closes() {
+        let started = Instant::now();
+        let text = drained_text(drain(Some(StuckStream(false))));
+        assert!(started.elapsed() < Duration::from_secs(10));
+        assert!(text.starts_with("abc"), "{text}");
+        assert!(text.contains("later output not captured"), "{text}");
+    }
+
+    #[test]
+    fn drained_text_returns_everything_from_a_stream_that_closes() {
+        let text = drained_text(drain(Some(&b"hello"[..])));
+        assert_eq!(text, "hello");
+    }
 
     #[test]
     fn a_timeout_that_is_not_finite_and_positive_is_refused_naming_the_tool() {

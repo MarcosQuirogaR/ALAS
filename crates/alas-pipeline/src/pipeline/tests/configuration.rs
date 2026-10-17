@@ -84,7 +84,11 @@ fn a_pipeline_seed_reaches_the_optimizer_configuration() {
     let effective = crate::dual_solver::seeded_config(&config, Some(42))
         .unwrap_or_else(|error| panic!("seed is representable: {error}"));
     assert_eq!(effective.optimizer.solver.seed, Some(42));
-    assert_eq!(config.optimizer.solver.seed, None);
+    // Decision D6: the unconfigured default is the fixed reproducible seed.
+    assert_eq!(
+        config.optimizer.solver.seed,
+        Some(alas_config::DEFAULT_SEED)
+    );
 }
 
 #[test]
@@ -191,14 +195,17 @@ fn fixed_design_review_exposes_its_binding_constraint_without_promoting_a_finali
     config.landing_gear.required_rotation_angle_deg = 0.0;
     // The Korn relation receives the quarter-chord sweep, so
     // the default design's cruise wave drag is high, and at M 0.84 it needs
-    // static T/W 0.2676 against the default rating's 0.2655. That thrust
-    // finding is real but not what this test is about, so the engine gets a
-    // 10 % margin and the review keeps isolating the binding design residual.
+    // static T/W 0.375 against the default rating's 0.2655 (maximum-cruise
+    // thrust 0.152 of static at FL390 from the Jenkinson charts; 0.268 with
+    // the earlier maximum-climb anchor at the take-off weight). That thrust
+    // finding is real but not what this test is about, so the engine is
+    // uprated by 50 % and the review keeps isolating the binding design
+    // residual.
     let thrust_kn = config.geometry.engine.thrust_kn();
     config
         .geometry
         .engine
-        .set_thrust_kn(1.10 * thrust_kn)
+        .set_thrust_kn(1.50 * thrust_kn)
         .expect("the default engine accepts a rated thrust");
     let design = DesignVector::default();
     let bounds = design

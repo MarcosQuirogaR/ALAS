@@ -5,13 +5,24 @@
 
 use super::{EvaluateBatch, Outcome, ScoredPoint, Termination, Tier};
 
+/// The winner rule shared by every search stage: the first feasible cost is
+/// the first valid point seen, and the winner is the strict
+/// [`ScoredPoint::feasibility_key`] minimum (the earlier point wins ties).
+pub(crate) fn track_winner(
+    first_feasible_cost: &mut Option<f64>,
+    winner: &mut ScoredPoint,
+    point: &ScoredPoint,
+) {
+    if first_feasible_cost.is_none() && point.valid() {
+        *first_feasible_cost = Some(point.cost);
+    }
+    if point.feasibility_key() < winner.feasibility_key() {
+        *winner = point.clone();
+    }
+}
+
 pub(super) fn record(outcome: &mut Outcome, point: &ScoredPoint) {
-    if outcome.first_feasible_cost.is_none() && point.valid() {
-        outcome.first_feasible_cost = Some(point.cost);
-    }
-    if point.feasibility_key() < outcome.winner.feasibility_key() {
-        outcome.winner = point.clone();
-    }
+    track_winner(&mut outcome.first_feasible_cost, &mut outcome.winner, point);
 }
 
 /// Count `scores` against the budget or, rejected by the pre-gate, against

@@ -12,7 +12,7 @@ mod cg_envelope;
 pub mod load_trim;
 mod mass_distribution;
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 use alas_aero::analysis::PolarSweep;
 use alas_config::{design_variables::DesignVector, AlasConfig};
@@ -167,12 +167,12 @@ pub fn quick_preview_report(
         .as_pairs()
         .into_iter()
         .map(|(name, value)| (name.to_owned(), value))
-        .collect::<HashMap<_, _>>();
+        .collect::<BTreeMap<_, _>>();
     let mass_coordinates = coordinates
         .as_pairs()
         .into_iter()
         .map(|(name, value)| (name.to_owned(), value))
-        .collect::<HashMap<_, _>>();
+        .collect::<BTreeMap<_, _>>();
     Ok(AnalysisReport {
         design,
         airplane,
@@ -205,7 +205,7 @@ pub fn quick_preview_report(
         },
         static_margin: f64::NAN,
         x_neutral_point: f64::NAN,
-        geometry_summary: HashMap::new(),
+        geometry_summary: BTreeMap::new(),
         component_masses,
         flops_mass_buildup: None,
         mass_coordinates,

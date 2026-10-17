@@ -117,39 +117,77 @@ pub fn ave() -> AircraftPreset {
                 root_airfoil: "SC2-0714".to_owned(),
                 tip_airfoil: "sc20410".to_owned(),
                 airfoil_class: crate::AirfoilClass::Supercritical,
+                wing_profile_interpolation: crate::WingProfileInterpolation::C2Spline, // step B w2 (loft-wing report); was Linear
                 ..WingConfig::default()
             },
             empennage: EmpennageConfig {
                 tail_airfoil: "naca0012".to_owned(),
-                hstab_offset_from_tail_m: 10.7,
+                // Step B w2 (measure/AVE, 777-9 ACAP Fig 2-1 tail, B): drawn centreline leading-edge apex 64.87 m, 1.13 m aft
+                // of the model, and leading-edge sweep 39.2 deg against 34.3 deg; the semispan (11.0 m), chords and
+                // dihedral (grade C: tip rounding of the low-resolution mask) stay. Was offset 10.7 m, tip x 7.5 m.
+                // geo/tailfit 2026-10-11: tailplane straight-edge fit to the drawing, centreline values; was off 11.85, chords 8.0/2.2, tip (8.96, 11.0, 1.0)
+                hstab_offset_from_tail_m: 11.76,
                 hstab_z_m: 1.2,
-                hstab_root_chord_m: 8.0,
-                hstab_tip_chord_m: 2.2,
+                hstab_root_chord_m: 6.98,
+                hstab_tip_chord_m: 1.66,
                 hstab_root_twist_deg: -2.0,
                 hstab_tip_twist_deg: -2.0,
-                hstab_tip_le_m: (7.5, 11.0, 1.0),
-                vstab_offset_from_tail_m: 12.2,
-                vstab_z_m: 2.0,
-                vstab_root_chord_m: 9.5,
-                vstab_tip_chord_m: 3.2,
-                vstab_tip_le_m: (9.0, 0.0, 9.8),
+                hstab_tip_le_m: (9.94, 12.19, 1.0), // tan(39.2 deg) x 11.0 m; was (7.5, 11.0, 1.0)
+                // Step B w2 (measure/AVE, DECISIONS: use the explicit fin datum): root line at the crown (3.3 m) with the
+                // drawn crown leading edge 62.59 m (76.72 - 14.13); was root z 2.0 m and offset 12.2 m, which put the crown
+                // leading edge at 65.68 m. Root chord 9.5 m stays (drawn crown chord 9.35 m, C). Fin top at 14.40 m: the
+                // ACAP overall height 19.53 m above the model's ground plane (-5.13 m); 11.1 m above the crown, the
+                // side-view reading (front view 10.1 m, C). Sweep 44.3 deg as drawn (dx 10.81 m). Was tip (9.0, 0.0, 9.8).
+                // geo/tailfit 2026-10-11: fin straight-edge fit to the drawing at the root line (rms 0.008/0.011 m); was off 14.13, chords 9.5/3.2, tip (10.81, 0.0, 11.1)
+                vstab_offset_from_tail_m: 13.63,
+                vstab_z_m: 3.3,
+                vstab_root_chord_m: 8.96,
+                vstab_tip_chord_m: 2.65,
+                vstab_tip_le_m: (10.3, 0.0, 10.51),
                 ..EmpennageConfig::default()
             },
             fuselage: FuselageConfig {
                 diameter_m: 6.2,
-                nose_z_m: -0.5,
+                nose_z_m: 0.25,
                 cabin_start_x_m: 6.0,
                 cabin_z_m: 0.2,
                 tailcone_length_m: 14.0,
                 tail_z_m: 1.8,
+                // FUSELAGE-G2 shaped nose and aft body. Outline traced from the manufacturer drawing
+                // (side: same; top: Boeing 777-9 D6-86073 Rev G),
+                // calibrated to the drawn length; the nose law (windshield, radome, keel and plan
+                // exponents) is a least-squares fit to the traced upper, lower and plan lines (RMS 0.087 m),
+                // the aft law (belly ramp, crown drop, plan taper, closing section) to the traced aft lines
+                // (RMS 0.109 m). Cabin start, tailcone length and every payload and mass station are unchanged:
+                // only the outer loft moves. Section exponent 2.0 (ellipse): no drawing measures it.
+                nose_length_m: Some(10.62),
+                nose_windshield_angle_deg: Some(20.0),
+                nose_crown_end_fraction: Some(1.0),
+                nose_radome_length_fraction: Some(0.1),
+                nose_keel_exponent: Some(3.01),
+                nose_plan_exponent: Some(1.39),
+                nose_section_exponent: Some(2.0),
+                belly_upsweep_length_m: Some(20.59),
+                aft_belly_exponent: Some(1.24),
+                tail_end_z_m: Some(1.98),
+                tail_end_width_m: Some(0.1),
+                tail_end_height_m: Some(0.96),
+                aft_plan_length_m: Some(17.66),
+                aft_plan_exponent: Some(1.02),
+                aft_crown_length_m: Some(11.64),
+                aft_crown_exponent: Some(1.0),
                 ..FuselageConfig::default()
             },
             engine: EngineConfig {
-                spanwise_positions_m: vec![9.8, -9.8],
-                // Measured down from the local wing surface, and calibrated to
-                // leave about 0.35 m of clearance under the lower surface.
-                z_m: -3.13,
-                inlet_x_offset_m: 4.2,
+                // Step B w2, owner decision: the engines follow the 777-9 drawing (ACAP Fig 2-1: centreline 10.64 m, mask
+                // 10.81 m, mean 10.7 m; inlet 25.96 m from the nose; nacelle height as drawn, 1.62 m above the old
+                // position). The 0.35 m clearance target is no longer a design rule. Was y 9.8 m, z -3.13 m, offset 4.2 m.
+                spanwise_positions_m: vec![10.7, -10.7],
+                // Measured down from the local wing surface: +1.479 m puts the nacelle centre at z -2.205 m (was -3.825 m at
+                // y 9.8 m), 1.62 m higher as drawn, allowing for the wing heights at the new station and the C2 profile.
+                // geo/close 2026-10-12: AVE side sheet best rigid shift dz -0.25 m (applied); dx +0.15 m side but 0.00 m top: offset kept. was z -1.651
+                z_m: -1.901,
+                inlet_x_offset_m: 6.9,
                 ..EngineConfig::default()
             },
             ..GeometryConfig::default()

@@ -1,51 +1,43 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! Fixed-wing UAV catalogue, sizing, layout, and shared-core verification page.
-//!
-//! The page is a guided workflow rather than one uninterrupted form. Inputs
-//! stay editable in their own section, while evidence boundaries and the
-//! status of the selected design convention remain visible before a run.
+//! Fixed-wing UAV competition page: the preliminary banner, the workflow
+//! tabs, the inputs of each section and the result of the last search.
 
-use alas_uav::optimizer::{GeneratedGeometry, OptimizedUav, RejectedUav};
-use alas_uav::{optimization_catalog, optimized_aircraft_bom, Severity, UavDesign};
-use egui::{Color32, RichText, ScrollArea, Sense, Stroke, Ui, Vec2};
+use alas_uav::optimizer::GeneratedGeometry;
+use alas_uav::UavDesign;
+use egui::{Color32, ScrollArea, Sense, Stroke, Ui, Vec2};
 
 use crate::state::AppState;
-use crate::theme::success_color;
 use crate::uav::{UavSection, UavWorkflowOutcome, UavWorkflowState};
 
-use super::{tr, tr_fields};
+use super::tr;
 
 mod airframe;
-mod finding;
+mod airframe_results;
+mod competition_results;
 mod presentation;
+#[cfg(debug_assertions)]
+mod preview;
 mod results;
 mod sections;
 mod uav_fields;
 mod workflow;
 
-use airframe::{airframe_inputs, shared_core_inputs};
-use finding::finding_label;
+use airframe::airframe_inputs;
+use competition_results::competition_result;
 use presentation::card;
-use results::{aircraft_bom, electrical_mission};
-use sections::{component_inputs, mission_inputs, propulsion_inputs};
-use uav_fields::{result_measure, result_value};
-use workflow::{
-    action_bar, execution_status, outcome_is_verified, release_blocker, section_intro,
-    topology_selector, workflow_header, UAV_RELEASE_BLOCKED,
-};
+use sections::mission_inputs;
+use workflow::{action_bar, execution_status, preliminary_banner, section_intro, workflow_header};
 
 /// Render the complete fixed-wing UAV workflow.
 pub fn show_uav_view(state: &mut AppState, ui: &mut Ui) {
-    if UAV_RELEASE_BLOCKED {
-        release_blocker(ui);
-        return;
-    }
     ScrollArea::vertical()
         .id_salt("uav_workflow_scroll")
         .auto_shrink([false, false])
         .show(ui, |ui| {
+            preliminary_banner(ui);
+            ui.add_space(8.0);
             workflow_header(&mut state.uav, ui);
             ui.add_space(8.0);
 
@@ -57,21 +49,8 @@ pub fn show_uav_view(state: &mut AppState, ui: &mut Ui) {
                 UavSection::Mission => {
                     ui.add_enabled_ui(!running, |ui| mission_inputs(&mut state.uav, ui));
                 }
-                UavSection::Hardware => {
-                    ui.add_enabled_ui(!running, |ui| component_inputs(&mut state.uav, ui));
-                }
-                UavSection::Propulsion => {
-                    ui.add_enabled_ui(!running, |ui| propulsion_inputs(&mut state.uav, ui));
-                }
                 UavSection::Airframe => {
-                    ui.add_enabled_ui(!running, |ui| {
-                        topology_selector(&mut state.uav, ui);
-                        ui.add_space(6.0);
-                        airframe_inputs(&mut state.uav, ui);
-                    });
-                }
-                UavSection::Verification => {
-                    ui.add_enabled_ui(!running, |ui| shared_core_inputs(&mut state.uav, ui));
+                    ui.add_enabled_ui(!running, |ui| airframe_inputs(&mut state.uav, ui));
                 }
                 UavSection::Results => outcome(&state.uav, ui),
             }
@@ -79,333 +58,28 @@ pub fn show_uav_view(state: &mut AppState, ui: &mut Ui) {
             action_bar(&mut state.uav, ui);
             ui.add_space(8.0);
             execution_status(&state.uav, ui);
+            // Developer builds only; a release build compiles none of it.
+            #[cfg(debug_assertions)]
+            {
+                ui.add_space(8.0);
+                preview::dev_preview(ui);
+            }
         });
 }
 
 fn outcome(state: &UavWorkflowState, ui: &mut Ui) {
-    if let Some(topology) = state.last_completed_topology {
-        card(ui, "Design convention", None, |ui| {
-            ui.label(tr(topology.label()));
-            if topology != state.topology {
-                ui.colored_label(
-                    ui.visuals().warn_fg_color,
-                    tr("Convention changed; run again"),
-                )
-                .on_hover_text(tr(
-                    "The selected convention differs from this result; run again to update it.",
-                ));
-            }
-        });
-        ui.add_space(8.0);
-    }
-    if let Some(mission) = &state.last_electrical_mission {
-        electrical_mission(mission, ui);
-        ui.add_space(8.0);
-    }
     match &state.outcome {
         UavWorkflowOutcome::NotRun => {
             card(ui, "UAV result", None, |ui| {
                 ui.weak(tr("No UAV search has been run."));
             });
         }
-        UavWorkflowOutcome::NoFeasibleDesign(summary) => {
-            card(ui, "UAV result", None, |ui| {
-                ui.colored_label(
-                    ui.visuals().warn_fg_color,
-                    tr_fields(
-                        "No verified design after {count} candidates.",
-                        &[("count", summary.evaluated_candidates.to_string())],
-                    ),
-                );
-                ui.add_space(4.0);
-                for rejection in &summary.rejections {
-                    ui.label(format!(
-                        "{}: {}",
-                        tr(finding_label(rejection.kind)),
-                        rejection.candidates
-                    ));
-                }
-                if !summary.examples.is_empty() {
-                    ui.add_space(6.0);
-                    ui.label(RichText::new(tr("Representative causes")).strong());
-                    for example in &summary.examples {
-                        ui.colored_label(
-                            ui.visuals().warn_fg_color,
-                            format!(
-                                "{} ({}): {}",
-                                tr(finding_label(example.kind)),
-                                example.subject,
-                                example.message
-                            ),
-                        );
-                    }
-                }
-                ui.add_space(4.0);
-                ui.weak(tr("Missing data leaves constraints unverified"))
-                    .on_hover_text(tr("A missing-data rejection is an unverified constraint, not proof that the hardware is physically impossible."));
-            });
-            if let Some(rejected) = &summary.best_evaluated {
-                ui.add_space(8.0);
-                card(
-                    ui,
-                    "Best evaluated review artifact",
-                    Some(
-                        "This geometry was generated and evaluated but did not pass verification. It is shown for diagnosis only, not as a design recommendation.",
-                    ),
-                    |ui| {
-                        if !rejected.report.findings.is_empty() {
-                            ui.label(RichText::new(tr("Blocking findings")).strong());
-                            for finding in &rejected.report.findings {
-                                let color = if finding.severity == Severity::Failure {
-                                    ui.visuals().error_fg_color
-                                } else {
-                                    ui.visuals().warn_fg_color
-                                };
-                                ui.colored_label(color, &finding.message);
-                            }
-                        }
-                    },
-                );
-                ui.add_space(8.0);
-                rejected_metrics(rejected, ui);
-                ui.add_space(8.0);
-                layout_plot_rejected(rejected, ui);
-            } else {
-                ui.add_space(8.0);
-                card(ui, "Generated planform and installed layout", None, |ui| {
-                    ui.weak(tr("No complete geometry generated"))
-                        .on_hover_text(tr("No airframe figure is shown because every candidate stopped before a physically complete geometry could be generated; the electrical mission above remains the valid result artifact."));
-                });
-            }
-        }
-        UavWorkflowOutcome::PreliminaryFeasible {
-            optimized,
-            shared_core,
-        } => {
-            let production_verified = outcome_is_verified(&state.outcome);
-            card(ui, "UAV result", None, |ui| {
-                ui.colored_label(
-                    if production_verified {
-                        success_color(ui.visuals())
-                    } else {
-                        ui.visuals().warn_fg_color
-                    },
-                    if production_verified {
-                        tr("Preliminary optimizer and production-core verification passed")
-                    } else {
-                        tr("Preliminary geometry generated; production-core verification did not pass")
-                    },
-                );
-            });
-            ui.add_space(8.0);
-            metrics(optimized, ui);
-            ui.add_space(8.0);
-            layout_plot(optimized, ui);
-            ui.add_space(8.0);
-            component_provenance(optimized, ui);
-            ui.add_space(8.0);
-            aircraft_bom(optimized, ui);
-            ui.add_space(8.0);
-            physical_findings(optimized, ui);
-            ui.add_space(8.0);
-            shared_core_comparison(shared_core, ui);
-        }
+        UavWorkflowOutcome::Competition(result) => competition_result(result, ui),
     }
 }
 
-fn component_provenance(optimized: &OptimizedUav, ui: &mut Ui) {
-    card(ui, "Selected components and provenance", None, |ui| {
-        let bom = optimized_aircraft_bom(&optimized.components);
-        for line in &bom.lines {
-            if let Some(record) = optimization_catalog()
-                .ok()
-                .and_then(|catalog| catalog.get(&line.selection.component_id))
-            {
-                ui.horizontal_wrapped(|ui| {
-                    ui.label(format!(
-                        "{} x{}: {}",
-                        tr(line.category.label()),
-                        line.selection.quantity,
-                        record.model
-                    ));
-                    ui.hyperlink_to(tr("Open evidence"), &record.provenance.source_url);
-                });
-            } else {
-                ui.label(format!(
-                    "{} x{}: {}",
-                    tr(line.category.label()),
-                    line.selection.quantity,
-                    line.selection.component_id
-                ));
-            }
-        }
-    });
-}
-
-fn physical_findings(optimized: &OptimizedUav, ui: &mut Ui) {
-    card(ui, "Physical findings", None, |ui| {
-        if optimized.report.findings.is_empty() {
-            ui.label(tr("All requested preliminary constraints passed."));
-            return;
-        }
-        for finding in &optimized.report.findings {
-            let color = if finding.severity == Severity::Failure {
-                ui.visuals().error_fg_color
-            } else {
-                ui.visuals().warn_fg_color
-            };
-            ui.colored_label(color, &finding.message);
-        }
-    });
-}
-
-fn shared_core_comparison(
-    shared_core: &Result<Box<alas_uav::SharedCoreVerification>, alas_uav::SharedCoreFailure>,
-    ui: &mut Ui,
-) {
-    card(ui, "Shared-core comparison", None, |ui| match shared_core {
-        Ok(verification) => {
-            let assessment = &verification.assessment;
-            match verification.lift_verdict {
-                alas_uav::SharedCoreLiftVerdict::Passed => {
-                    ui.colored_label(
-                        success_color(ui.visuals()),
-                        tr("Shared-core lift verdict: passed"),
-                    );
-                }
-                alas_uav::SharedCoreLiftVerdict::InsufficientLift => {
-                    ui.colored_label(
-                        ui.visuals().error_fg_color,
-                        tr("Shared-core lift verdict: insufficient lift"),
-                    );
-                }
-            }
-            egui::Grid::new("uav_shared_result")
-                .num_columns(2)
-                .spacing([20.0, 8.0])
-                .show(ui, |ui| {
-                    result_value(
-                        ui,
-                        "Required one-g CL",
-                        assessment.required_lift_coefficient,
-                    );
-                    result_value(ui, "VLM CL", assessment.vlm.cl_lift);
-                    result_value(ui, "VLM induced CD", assessment.vlm.cd_drag);
-                    result_value(
-                        ui,
-                        "Preliminary induced CD at VLM CL",
-                        assessment.preliminary_induced_drag_coefficient,
-                    );
-                    result_value(
-                        ui,
-                        "Induced-CD discrepancy",
-                        assessment.induced_drag_coefficient_delta,
-                    );
-                    result_measure(ui, "Lift margin", assessment.lift_margin_n, "N");
-                    result_value(
-                        ui,
-                        "Preliminary parasite CD0 (not in VLM)",
-                        assessment.preliminary_zero_lift_drag_coefficient,
-                    );
-                });
-        }
-        Err(error) => {
-            ui.colored_label(ui.visuals().error_fg_color, error.to_string());
-        }
-    });
-}
-
-fn metrics(optimized: &OptimizedUav, ui: &mut Ui) {
-    let geometry = optimized.geometry;
-    card(ui, "Preliminary design metrics", None, |ui| {
-        egui::Grid::new("uav_metrics_grid")
-            .num_columns(2)
-            .spacing([20.0, 8.0])
-            .show(ui, |ui| {
-                result_measure(ui, "Takeoff mass", optimized.metrics.takeoff_mass_kg, "kg");
-                result_measure(
-                    ui,
-                    "Mission energy",
-                    optimized.metrics.mission_energy_wh,
-                    "Wh",
-                );
-                result_value(
-                    ui,
-                    "Propulsive efficiency",
-                    optimized.metrics.propulsive_efficiency,
-                );
-                result_measure(ui, "Wing area", geometry.wing.area_m2, "m2");
-                result_measure(ui, "Wing span", geometry.wing.span_m, "m");
-                result_measure(ui, "Fuselage length", geometry.fuselage.length_m, "m");
-                result_measure(
-                    ui,
-                    "Horizontal-tail area",
-                    geometry.empennage.horizontal_area_m2,
-                    "m2",
-                );
-                result_measure(
-                    ui,
-                    "Vertical-tail area",
-                    geometry.empennage.vertical_area_m2,
-                    "m2",
-                );
-                result_measure(ui, "Landing-gear track", geometry.landing_gear.track_m, "m");
-                result_measure(
-                    ui,
-                    "Landing-gear wheelbase",
-                    geometry.landing_gear.wheelbase_m,
-                    "m",
-                );
-                result_measure(
-                    ui,
-                    "Minimum gear-leg length",
-                    geometry.landing_gear.minimum_leg_length_m,
-                    "m",
-                );
-            });
-    });
-}
-
-fn layout_plot(optimized: &OptimizedUav, ui: &mut Ui) {
-    layout_plot_geometry(optimized.geometry, &optimized.design, ui);
-}
-
-fn layout_plot_rejected(rejected: &RejectedUav, ui: &mut Ui) {
-    layout_plot_geometry(rejected.geometry, &rejected.design, ui);
-}
-
-fn rejected_metrics(rejected: &RejectedUav, ui: &mut Ui) {
-    let Some(metrics) = rejected.metrics else {
-        card(ui, "Preliminary design metrics", None, |ui| {
-            ui.weak(tr("Objective metrics unavailable"))
-                .on_hover_text(tr(
-                    "Objective metrics were unavailable for this rejected candidate.",
-                ));
-        });
-        return;
-    };
-    card(ui, "Preliminary design metrics", None, |ui| {
-        egui::Grid::new("uav_rejected_metrics_grid")
-            .num_columns(2)
-            .spacing([20.0, 8.0])
-            .show(ui, |ui| {
-                result_measure(ui, "Takeoff mass", metrics.takeoff_mass_kg, "kg");
-                result_measure(ui, "Mission energy", metrics.mission_energy_wh, "Wh");
-                result_value(ui, "Propulsive efficiency", metrics.propulsive_efficiency);
-                result_value(ui, "Objective score", metrics.score);
-                result_measure(ui, "Wing area", rejected.geometry.wing.area_m2, "m2");
-                result_measure(ui, "Wing span", rejected.geometry.wing.span_m, "m");
-                result_measure(
-                    ui,
-                    "Fuselage length",
-                    rejected.geometry.fuselage.length_m,
-                    "m",
-                );
-            });
-    });
-}
-
-fn layout_plot_geometry(geometry: GeneratedGeometry, design: &UavDesign, ui: &mut Ui) {
+/// Planform and installed-layout figure of one generated airframe.
+pub(super) fn layout_plot_geometry(geometry: GeneratedGeometry, design: &UavDesign, ui: &mut Ui) {
     card(ui, "Generated planform and installed layout", None, |ui| {
         let available_width = ui.available_width().max(320.0);
         let desired = Vec2::new(available_width, 300.0);

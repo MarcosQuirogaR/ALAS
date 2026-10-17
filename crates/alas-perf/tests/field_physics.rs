@@ -50,6 +50,7 @@ fn propeller(
             zero_lift_drag_coefficient: 0.04,
             induced_drag_factor: 0.04,
             failed_engine_drag_coefficient: 0.0,
+            ground_roll_gear_drag_coefficient: 0.0,
         },
     )
 }
@@ -130,6 +131,12 @@ fn jets_use_top_once_and_the_legacy_path_remains_selectable() -> Result<(), Stri
     let config = PerformanceConfig::default();
     let field = airport(0.0);
     let input = inputs(&config, &field);
+    // The translated replay keeps the original V2 = max(factor * VS, VR); the
+    // production schedule adds the CS 25.107(b) V2MIN terms.
+    let legacy_config = PerformanceConfig {
+        legacy_field_correlations: true,
+        ..config.clone()
+    };
     let translated = compute_field_performance_at_masses(
         input.takeoff_mass_kg,
         input.landing_mass_kg,
@@ -140,17 +147,13 @@ fn jets_use_top_once_and_the_legacy_path_remains_selectable() -> Result<(), Stri
         input.sea_level_static_tw,
         input.landing_distance_factor,
         config.bfl_factor,
-        &config,
+        &legacy_config,
     );
     let corrected = compute_field_performance_for_propulsion(input, FieldPropulsion::Jet)?;
     assert_eq!(corrected.todr_m, translated.todr_m);
     assert_eq!(corrected.bfl_m, corrected.todr_m);
     assert_eq!(translated.bfl_m, corrected.bfl_m * config.bfl_factor);
     assert_eq!(corrected.ldr_m, translated.ldr_m);
-    let legacy_config = PerformanceConfig {
-        legacy_field_correlations: true,
-        ..config.clone()
-    };
     let legacy = compute_field_performance_for_propulsion(
         FieldInputs {
             config: &legacy_config,
@@ -207,6 +210,7 @@ fn failed_engine_drag_and_weaker_brakes_cannot_improve_balanced_field() -> Resul
             zero_lift_drag_coefficient: 0.04,
             induced_drag_factor: 0.04,
             failed_engine_drag_coefficient: 0.02,
+            ground_roll_gear_drag_coefficient: 0.0,
         },
     )?;
     let weak_config = PerformanceConfig {
@@ -259,6 +263,7 @@ fn greater_engine_out_reserve_thrust_cannot_lengthen_balanced_field() -> Result<
             zero_lift_drag_coefficient: 0.04,
             induced_drag_factor: 0.04,
             failed_engine_drag_coefficient: 0.0,
+            ground_roll_gear_drag_coefficient: 0.0,
         },
     )?;
     assert!(reserve.bfl_m < same_rating.bfl_m);
@@ -282,6 +287,7 @@ fn landing_remains_available_outside_the_balanced_field_domain() -> Result<(), S
             zero_lift_drag_coefficient: 0.04,
             induced_drag_factor: 0.04,
             failed_engine_drag_coefficient: 0.0,
+            ground_roll_gear_drag_coefficient: 0.0,
         },
     );
     assert!(single_engine.is_err());

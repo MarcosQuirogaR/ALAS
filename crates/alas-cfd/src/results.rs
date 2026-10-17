@@ -441,7 +441,7 @@ pub fn write_result_artifacts(results: &CfdResults) -> Result<(), String> {
         .map_err(|error| format!("cannot write CFD results: {error}"))?;
     let simulation = results.provenance.config.effective_simulation();
     let report = format!(
-        "# ALAS OpenFOAM result\n\nOutcome: **{}**\n\nStatus: {}\n\nAirfoil: `{}`\nCoordinate hash: `{}`\nTemplate: `{}`\nBackend: `{}`\nOpenFOAM version: `{}`\nReproducibility hashes: `{}`\nSpeed: `{:.8} m/s`\nReynolds: `{:.8e}`\nChord: `{:.8} m`\nAngle of attack: `{:.6} deg`\nTemperature: `{:.8} K`\nDiagnostic Mach: `{:.8}`\nFlow regime: `{}`\nOpenFOAM solver: `{}`\nCompressible equations: `{}`\nStatic pressure used: `{:.8} Pa`\nAutomatic maximum iterations: `{}`\nAutomatic startup iterations: `{}`\nAutomatic pressure relaxation: `{:.3}`\nAutomatic momentum relaxation: `{:.3}`\nAutomatic turbulence relaxation: `{:.3}`\n\nMesh passed: `{}`\nCells: `{}`\nMax non-orthogonality: `{}`
+        "# ALAS OpenFOAM result\n\nOutcome: **{}**\n\nStatus: {}\n\nAirfoil: `{}`\nCoordinate hash: `{}`\nTemplate: `{}`\nBackend: `{}`\nOpenFOAM version: `{}`\nTracked file hashes (count): `{}`\nSpeed: `{:.8} m/s`\nReynolds: `{:.8e}`\nChord: `{:.8} m`\nAngle of attack: `{:.6} deg`\nTemperature: `{:.8} K`\nDiagnostic Mach: `{:.8}`\nFlow regime: `{}`\nOpenFOAM solver: `{}`\nCompressible equations: `{}`\nStatic pressure used: `{:.8} Pa`\nAutomatic maximum iterations: `{}`\nAutomatic startup iterations: `{}`\nAutomatic pressure relaxation: `{:.3}`\nAutomatic momentum relaxation: `{:.3}`\nAutomatic turbulence relaxation: `{:.3}`\n\nMesh passed: `{}`\nCells: `{}`\nMax non-orthogonality: `{}`
 Severely non-orthogonal faces (> 70 deg, checkMesh warning): `{}`
 Mesh qualification (declared limits): `{}`
 {}

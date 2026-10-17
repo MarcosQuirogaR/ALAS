@@ -12,7 +12,6 @@
 //! material; modulus-weighted EI and sigma = E*kappa*z enforce one strain.
 
 use super::{SparSizing, WingboxSizing};
-use crate::allowables::bending_allowable_pa;
 use alas_config::materials::MaterialSpec;
 
 /// Cap pair inertia about the section mid-plane, m^4. The caps' centroids
@@ -29,6 +28,29 @@ pub(crate) fn cap_ei(spar: &SparSizing, station: usize, cap: &MaterialSpec) -> f
     cap.e_pa * cap_inertia(spar.h[station], spar.w_cap[station], spar.t_cap[station])
 }
 
+/// Stiffness of the lower-cover fatigue area, N m^2. It is real flange material
+/// on the lower cap (the deck puts it on the lower bar); the response section
+/// previously left it out as "conservative for deflection". Credited in the
+/// response stiffness only ([`station_ei_spanwise`]): [`station_ei`] stays the
+/// symmetric section the fatigue sizing starts from (it adds this area itself,
+/// with its neutral-axis shift). Centroid at the lower spar surface; the small
+/// neutral-axis shift is not modelled here.
+pub(crate) fn lower_extra_ei(sizing: &WingboxSizing, station: usize, cap: &MaterialSpec) -> f64 {
+    sizing
+        .spars
+        .iter()
+        .map(|spar| {
+            let extra = spar.lower_extra_area.get(station).copied().unwrap_or(0.0);
+            let h = spar.h[station];
+            if h > 0.0 && extra > 0.0 {
+                cap.e_pa * extra * 0.25 * h * h
+            } else {
+                0.0
+            }
+        })
+        .sum()
+}
+
 /// Two straight cover panels: integrate 2*t*(h(x)/2)^2 across each bay.
 /// The polynomial integral is exact for linearly varying panel depth.
 pub(crate) fn non_cap_ei(
@@ -37,6 +59,18 @@ pub(crate) fn non_cap_ei(
     skin: &MaterialSpec,
     web: &MaterialSpec,
 ) -> f64 {
+    let (covers, webs) = cover_and_web_ei(sizing, station, skin, web);
+    covers * sizing.axis_cos_at(station) + webs
+}
+
+/// Cover and web contributions to the streamwise-cut stiffness, separately,
+/// because a normal-to-axis cut sees the covers `cos L` as wide.
+pub(crate) fn cover_and_web_ei(
+    sizing: &WingboxSizing,
+    station: usize,
+    skin: &MaterialSpec,
+    web: &MaterialSpec,
+) -> (f64, f64) {
     // Consecutive active spars bound each cover bay. This runs in the inner
     // loop of every cap and web search, so it pairs them in place rather than
     // collecting them; the terms and their summation order are unchanged.
@@ -50,12 +84,17 @@ pub(crate) fn non_cap_ei(
             skin.e_pa * sizing.t_skin * width * (a * a + a * b + b * b) / 6.0
         })
         .sum();
-    covers
-        + active()
-            .map(|spar| web.e_pa * spar.t_web * spar.h[station].powi(3) / 12.0)
-            .sum::<f64>()
+    (
+        covers,
+        active()
+            .map(|spar| web.e_pa * spar.t_web[station] * spar.h[station].powi(3) / 12.0)
+            .sum::<f64>(),
+    )
 }
 
+/// Stiffness of the section normal to the box axis, `EI_n`, N m^2: caps and
+/// webs as cut, covers `cos L` as wide (see [`super::swept`]). Equal to the
+/// streamwise-cut stiffness when no sweep is recorded.
 pub(crate) fn station_ei(
     sizing: &WingboxSizing,
     station: usize,
@@ -69,6 +108,19 @@ pub(crate) fn station_ei(
             .iter()
             .map(|spar| cap_ei(spar, station, cap))
             .sum::<f64>()
+}
+
+/// Effective bending stiffness in the spanwise frame, `EI_n cos^3 L`: the
+/// curvature `w_yy` under the streamwise moment `M_x` is `M_x / EI_eff`.
+pub(crate) fn station_ei_spanwise(
+    sizing: &WingboxSizing,
+    station: usize,
+    skin: &MaterialSpec,
+    web: &MaterialSpec,
+    cap: &MaterialSpec,
+) -> f64 {
+    (station_ei(sizing, station, skin, web, cap) + lower_extra_ei(sizing, station, cap))
+        * sizing.axis_cos_at(station).powi(3)
 }
 
 /// Per-spar cap stress and the maximum utilization of that cap, its web,
@@ -98,11 +150,16 @@ pub(crate) fn stress_utilization(
         .iter()
         .map(|spar| 0.5 * spar.h[station])
         .fold(0.0_f64, f64::max);
-    let utilization = (cap_stress / bending_allowable_pa(cap))
+    // The covers and the spar flanges are one stiffened skin-stringer panel:
+    // its compressive allowable is the lesser of the material allowable and
+    // the structural-index curve of the installed smeared thickness.
+    let panel = super::panel::CoverPanel::new(sizing, station);
+    let flange = super::panel::flange_area_m2(sizing, station);
+    let utilization = (cap_stress / panel.allowable_pa(cap, flange))
         .max(super::web::utilization(
             sizing, station, spar_index, curvature, shear, web,
         ))
-        .max(skin.e_pa * curvature * cover_distance / bending_allowable_pa(skin));
+        .max(skin.e_pa * curvature * cover_distance / panel.allowable_pa(skin, flange));
     (cap_stress, utilization)
 }
 
@@ -141,7 +198,7 @@ pub(crate) fn update_moment_fractions(
             .enumerate()
             .map(|(index, spar)| {
                 cap_ei(spar, station, cap)
-                    + web.e_pa * spar.t_web * spar.h[station].powi(3) / 12.0
+                    + web.e_pa * spar.t_web[station] * spar.h[station].powi(3) / 12.0
                     + cover_ei[index]
             })
             .collect();
@@ -164,12 +221,14 @@ mod tests {
             w_cap: vec![0.2; 2],
             t_cap: vec![0.01; 2],
             a_cap: vec![0.002; 2],
-            t_web: 0.003,
+            t_web: vec![0.003; 2],
+            lower_extra_area: vec![0.0; 2],
             frac_moment: vec![0.5; 2],
             margin_of_safety: vec![0.0; 2],
         };
         WingboxSizing {
             y_stations: vec![0.0, 10.0],
+            axis_cos: Vec::new(),
             eta_stations: vec![0.0, 1.0],
             chord: vec![4.0; 2],
             spar_fracs: vec![0.25, 0.75],
@@ -206,6 +265,23 @@ mod tests {
             2.0 * cap_inertia(1.0, 0.2, 0.01) + 2.0 * 0.003 / 12.0 + 2.0 * 2.0 * 0.005 * 0.25;
         let actual = station_ei(&sizing, 0, material, material, material);
         assert!((actual / (material.e_pa * expected_inertia) - 1.0).abs() < 1.0e-14);
+    }
+
+    #[test]
+    fn a_longer_rib_bay_lowers_the_cover_allowable_and_raises_its_utilization() {
+        let material = materials::get("Al 7075-T6").expect("registered material");
+        let mut short = rectangular_box();
+        short.num_ribs = 11; // 1 m bays over the 10 m station span
+        let mut long = rectangular_box();
+        long.num_ribs = 3; // 5 m bays
+        let moment = station_ei(&short, 0, material, material, material) * 0.002;
+        let (_, ratio_short) =
+            stress_utilization(&short, 0, 0, moment, 0.0, material, material, material);
+        let (_, ratio_long) =
+            stress_utilization(&long, 0, 0, moment, 0.0, material, material, material);
+        assert!(ratio_long > ratio_short, "{ratio_long} vs {ratio_short}");
+        // Two spars with 0.2 m x 10 mm flanges: 0.004 m^2 per cover.
+        assert!((super::super::panel::flange_area_m2(&short, 0) - 0.004).abs() < 1.0e-15);
     }
 
     #[test]

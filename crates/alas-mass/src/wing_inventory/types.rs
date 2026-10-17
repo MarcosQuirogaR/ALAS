@@ -7,6 +7,9 @@ use crate::wingbox_feedback::{SecondaryWingMass, SizedWingboxMass, WingExtent};
 /// Number of enumerated non-box items.
 pub const ITEM_COUNT: usize = 5;
 
+/// Number of box-side non-optimum items ([`alas_struct::non_optimum`]).
+pub const NON_OPTIMUM_ITEM_COUNT: usize = alas_struct::non_optimum::ITEM_COUNT;
+
 /// Maximum number of findings retained in a [`WingInventoryStatus`]: one per
 /// required item plus the two plausibility gates, which is every finding this
 /// module can raise at once.
@@ -258,14 +261,25 @@ pub struct WingInventoryDiagnostics {
     pub total_to_torenbeek_group_ratio: f64,
     /// Reconciled total wing over the FLOPS wing group.
     pub total_to_flops_group_ratio: f64,
+    /// Sum of the box-side non-optimum items, kg (0 without them).
+    pub non_optimum_total_kg: f64,
+    /// Sized box plus non-optimum items over Torenbeek basic structure.
+    pub box_plus_non_optimum_to_torenbeek_basic_ratio: f64,
+    /// The FLOPS miscellaneous term `W3` share that falls inside the box
+    /// (`W3` times the chord fraction between the spars), kg: the FLOPS
+    /// counterpart of the non-optimum items, not added to the wing.
+    pub flops_miscellaneous_inside_box_kg: f64,
 }
 
 /// The enumerated non-box inventory and its diagnostics.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct WingNonBoxInventory {
-    /// The enumerated items.
+    /// The enumerated non-box items.
     pub items: [WingInventoryEntry; ITEM_COUNT],
-    /// Sum of the item masses, kg.
+    /// The box-side non-optimum items, when the sized box carried the
+    /// quantities they are driven by (see [`Self::with_non_optimum`]).
+    pub non_optimum: Option<[WingInventoryEntry; NON_OPTIMUM_ITEM_COUNT]>,
+    /// Sum of the item masses (non-box plus non-optimum), kg.
     pub total_kg: f64,
     /// Sum of the item first moments `[Mx, My, Mz]`, kg m.
     pub first_moment_kg_m: [f64; 3],
@@ -282,9 +296,67 @@ pub struct WingNonBoxInventory {
 }
 
 impl WingNonBoxInventory {
-    /// Sum of the item masses, kg.
+    /// Sum of the item masses (non-box plus non-optimum), kg.
     pub fn total_kg(&self) -> f64 {
         self.total_kg
+    }
+
+    /// Sum of the non-box item masses only, kg.
+    pub fn non_box_total_kg(&self) -> f64 {
+        self.items.iter().map(|item| item.mass_kg).sum()
+    }
+
+    /// Add the box-side non-optimum items to the inventory.
+    ///
+    /// They change the totals, the first moment, the centroid, the complete
+    /// wing mass and the two group ratios. They do not change the status:
+    /// the plausibility gates compare the *non-box* share against its sourced
+    /// band and were evaluated on the ideal box plus the non-box items, which
+    /// is what that band describes. Applying it twice replaces the first set.
+    pub fn with_non_optimum(mut self, items: [WingInventoryEntry; NON_OPTIMUM_ITEM_COUNT]) -> Self {
+        let previous = self.non_optimum_mass_kg();
+        let previous_moment = self.non_optimum_moment_kg_m();
+        let added: f64 = items.iter().map(|item| item.mass_kg).sum();
+        let mut added_moment = [0.0; 3];
+        for item in &items {
+            let moment = item.first_moment_kg_m();
+            for axis in 0..3 {
+                added_moment[axis] += moment[axis];
+            }
+        }
+        self.total_kg += added - previous;
+        for axis in 0..3 {
+            self.first_moment_kg_m[axis] += added_moment[axis] - previous_moment[axis];
+        }
+        if self.total_kg > 0.0 && self.first_moment_kg_m.iter().all(|m| m.is_finite()) {
+            self.centroid_m =
+                std::array::from_fn(|axis| self.first_moment_kg_m[axis] / self.total_kg);
+        }
+        self.complete_wing_mass_kg = self.sized_box_mass_kg + self.total_kg;
+        let d = &mut self.diagnostics;
+        d.non_optimum_total_kg = added;
+        d.box_plus_non_optimum_to_torenbeek_basic_ratio =
+            (self.sized_box_mass_kg + added) / d.torenbeek_basic_structure_kg;
+        d.total_to_torenbeek_group_ratio = self.complete_wing_mass_kg / d.torenbeek_group_total_kg;
+        d.total_to_flops_group_ratio = self.complete_wing_mass_kg / d.flops_group_total_kg;
+        self.non_optimum = Some(items);
+        self
+    }
+
+    fn non_optimum_mass_kg(&self) -> f64 {
+        self.non_optimum
+            .map_or(0.0, |items| items.iter().map(|item| item.mass_kg).sum())
+    }
+
+    fn non_optimum_moment_kg_m(&self) -> [f64; 3] {
+        let mut moment = [0.0; 3];
+        for item in self.non_optimum.iter().flatten() {
+            let m = item.first_moment_kg_m();
+            for axis in 0..3 {
+                moment[axis] += m[axis];
+            }
+        }
+        moment
     }
 
     /// Sum of the item first moments `[Mx, My, Mz]`, kg m.

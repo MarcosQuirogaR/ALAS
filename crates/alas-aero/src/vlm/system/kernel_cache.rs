@@ -15,6 +15,7 @@
 use rayon::prelude::*;
 
 use super::super::{TRAILING_VORTEX_DIRECTION, VORTEX_CORE_RADIUS};
+use super::fast_rows::{evaluate_row, RowScratch};
 use super::inter_surface_core;
 use super::{Panel, PARALLEL_PANEL_THRESHOLD};
 use crate::operating_point::OperatingPoint;
@@ -62,29 +63,52 @@ pub(super) fn build_kernel_cache(
         return None;
     }
     let mut kernel = vec![[0.0_f64; 3]; n * n];
-    let fill_row = |(row, (&point, field_panel)): (&mut [[f64; 3]], (&[f64; 3], &Panel))| {
-        for (entry, source_panel) in row.iter_mut().zip(panels) {
-            *entry = calculate_induced_velocity_horseshoe_cored(
-                point,
-                source_panel.left_vortex_vertex,
-                source_panel.right_vortex_vertex,
-                TRAILING_VORTEX_DIRECTION,
-                4.0 * std::f64::consts::PI,
-                VORTEX_CORE_RADIUS,
-                inter_surface_core(field_panel.wing_index, source_panel),
-            );
-        }
-    };
+    let fast = crate::vlm::speed::fast_kernel();
+    let columns = super::fast_kernel::all_columns(panels, fast);
+    let fill_row =
+        |scratch: &mut RowScratch,
+         (row, (&point, field_panel)): (&mut [[f64; 3]], (&[f64; 3], &Panel))| {
+            if let Some(columns) = &columns {
+                evaluate_row(
+                    point,
+                    field_panel.wing_index,
+                    columns,
+                    (4.0 * std::f64::consts::PI, 1.0),
+                    scratch,
+                );
+                for (j, entry) in row.iter_mut().enumerate() {
+                    *entry = [
+                        scratch.velocity[0][j],
+                        scratch.velocity[1][j],
+                        scratch.velocity[2][j],
+                    ];
+                }
+                return;
+            }
+            for (entry, source_panel) in row.iter_mut().zip(panels) {
+                *entry = super::fast_kernel::horseshoe(
+                    fast,
+                    point,
+                    source_panel.left_vortex_vertex,
+                    source_panel.right_vortex_vertex,
+                    (4.0 * std::f64::consts::PI, 1.0),
+                    inter_surface_core(field_panel.wing_index, source_panel),
+                );
+            }
+        };
     if n < PARALLEL_PANEL_THRESHOLD {
+        let mut scratch = RowScratch::default();
         kernel
             .chunks_mut(n)
             .zip(vortex_centers.iter().zip(panels))
-            .for_each(fill_row);
+            .for_each(|item| fill_row(&mut scratch, item));
     } else {
         kernel
             .par_chunks_mut(n)
             .zip(vortex_centers.par_iter().zip(panels.par_iter()))
-            .for_each(fill_row);
+            .for_each_init(RowScratch::default, |scratch, item| {
+                fill_row(scratch, item);
+            });
     }
     Some(kernel)
 }
@@ -114,53 +138,53 @@ pub(super) fn velocity_at_points(
 ) -> Vec<[f64; 3]> {
     let rotation_velocities = op_point.rotation_velocity_geometry_axes_about(points, reference);
     let n = panels.len();
-    // One exact division per source, rather than the same division at every
-    // field point. The cached and direct kernels retain their operation order.
-    let constants: Vec<_> = if kernel.is_some() {
-        vortex_strengths
+    let far_field = |i: usize| add3(steady_freestream_velocity, rotation_velocities[i]);
+    if let Some(kernel) = kernel {
+        // One exact division per source, rather than the same division at
+        // every field point. The cached and direct kernels retain their
+        // operation order.
+        let constants: Vec<f64> = vortex_strengths
             .iter()
             .map(|gamma| gamma / (4.0 * std::f64::consts::PI))
-            .collect()
-    } else {
-        Vec::new()
-    };
+            .collect();
+        // Four field points advance together so their independent running
+        // sums overlap the add latency; each point still adds its panels in
+        // ascending order, so every sum is the one-point-at-a-time sum.
+        let mut induced = vec![[0.0_f64; 3]; points.len()];
+        if n < PARALLEL_PANEL_THRESHOLD {
+            kernel
+                .chunks(n * KERNEL_ROW_BLOCK)
+                .zip(induced.chunks_mut(KERNEL_ROW_BLOCK))
+                .for_each(|(rows, out)| kernel_rows(rows, n, &constants, out));
+        } else {
+            kernel
+                .par_chunks(n * KERNEL_ROW_BLOCK)
+                .zip(induced.par_chunks_mut(KERNEL_ROW_BLOCK))
+                .for_each(|(rows, out)| kernel_rows(rows, n, &constants, out));
+        }
+        return induced
+            .iter()
+            .enumerate()
+            .map(|(i, &sum)| add3(sum, far_field(i)))
+            .collect();
+    }
     let at_point = |point_index: usize, point: [f64; 3], rotation_velocity: [f64; 3]| {
-        let induced = match kernel {
-            Some(kernel) => {
-                let row = &kernel[point_index * n..point_index * n + n];
-                row.iter()
-                    .zip(&constants)
-                    .fold([0.0, 0.0, 0.0], |acc, (&bracket, &constant)| {
-                        // The exact same `constant * bracket_component`
-                        // upstream's kernel computes inline; only the
-                        // bracket itself (independent of gamma) was
-                        // precomputed, in `build_kernel_cache`.
-                        let contribution = [
-                            constant * bracket[0],
-                            constant * bracket[1],
-                            constant * bracket[2],
-                        ];
-                        add3(acc, contribution)
-                    })
-            }
-            None => {
-                panels
-                    .iter()
-                    .zip(vortex_strengths)
-                    .fold([0.0, 0.0, 0.0], |acc, (panel, &gamma)| {
-                        let contribution = calculate_induced_velocity_horseshoe_cored(
-                            point,
-                            panel.left_vortex_vertex,
-                            panel.right_vortex_vertex,
-                            TRAILING_VORTEX_DIRECTION,
-                            gamma,
-                            VORTEX_CORE_RADIUS,
-                            inter_surface_core(panels[point_index].wing_index, panel),
-                        );
-                        add3(acc, contribution)
-                    })
-            }
-        };
+        let induced =
+            panels
+                .iter()
+                .zip(vortex_strengths)
+                .fold([0.0, 0.0, 0.0], |acc, (panel, &gamma)| {
+                    let contribution = calculate_induced_velocity_horseshoe_cored(
+                        point,
+                        panel.left_vortex_vertex,
+                        panel.right_vortex_vertex,
+                        TRAILING_VORTEX_DIRECTION,
+                        gamma,
+                        VORTEX_CORE_RADIUS,
+                        inter_surface_core(panels[point_index].wing_index, panel),
+                    );
+                    add3(acc, contribution)
+                });
         add3(induced, add3(steady_freestream_velocity, rotation_velocity))
     };
     if panels.len() < PARALLEL_PANEL_THRESHOLD {
@@ -177,5 +201,51 @@ pub(super) fn velocity_at_points(
             .enumerate()
             .map(|(i, (&point, &rotation_velocity))| at_point(i, point, rotation_velocity))
             .collect()
+    }
+}
+
+/// Field points advanced together by [`kernel_rows`].
+const KERNEL_ROW_BLOCK: usize = 4;
+
+/// `out[r] = sum_j constants[j] * rows[r * n + j]` for up to
+/// [`KERNEL_ROW_BLOCK`] kernel rows, each row summed in ascending `j` as
+/// `acc = acc + [c * b0, c * b1, c * b2]` from `[0, 0, 0]`: exactly the sum
+/// of one row alone, whose `constant * bracket_component` is the product
+/// upstream's kernel computes inline.
+fn kernel_rows(rows: &[[f64; 3]], n: usize, constants: &[f64], out: &mut [[f64; 3]]) {
+    if out.len() == KERNEL_ROW_BLOCK {
+        let (r0, rest) = rows.split_at(n);
+        let (r1, rest) = rest.split_at(n);
+        let (r2, r3) = rest.split_at(n);
+        let mut acc = [[0.0_f64; 3]; KERNEL_ROW_BLOCK];
+        for (j, &constant) in constants.iter().enumerate() {
+            for (sum, bracket) in acc.iter_mut().zip([r0[j], r1[j], r2[j], r3[j]]) {
+                *sum = add3(
+                    *sum,
+                    [
+                        constant * bracket[0],
+                        constant * bracket[1],
+                        constant * bracket[2],
+                    ],
+                );
+            }
+        }
+        out.copy_from_slice(&acc);
+    } else {
+        for (row, sum) in rows.chunks(n).zip(out.iter_mut()) {
+            *sum = row
+                .iter()
+                .zip(constants)
+                .fold([0.0, 0.0, 0.0], |acc, (&bracket, &constant)| {
+                    add3(
+                        acc,
+                        [
+                            constant * bracket[0],
+                            constant * bracket[1],
+                            constant * bracket[2],
+                        ],
+                    )
+                });
+        }
     }
 }

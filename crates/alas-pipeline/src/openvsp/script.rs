@@ -22,8 +22,8 @@ pub(super) fn render_script(
     for (index, fuselage) in airplane.fuselages.iter().enumerate() {
         emit_fuselage(&mut script, index, fuselage);
     }
-    for (index, wing) in airplane.wings.iter().enumerate() {
-        emit_wing(&mut script, index, wing);
+    for exported in exported_wings(airplane) {
+        emit_wing_in_pose(&mut script, exported.index, &exported.wing, exported.pose);
     }
     if let Some(gear) = landing_gear {
         emit_landing_gear(&mut script, airplane, gear);

@@ -168,7 +168,8 @@ pub(super) fn draw_muted_points(
 
 /// `points` thinned to one per class and square grid cell, the grid
 /// coarsening until at most `cap` remain; the first point of each cell, in
-/// request order, is kept.
+/// request order, is kept. If the coarsest grid still leaves more than `cap`,
+/// an evenly strided subset of `cap` points (in request order) is returned.
 pub(super) fn thin(points: &[(TraceClass, [f64; 2])], cap: usize) -> Vec<(TraceClass, [f64; 2])> {
     let mut kept = Vec::new();
     for cell in [1.0, 1.5, 2.0, 3.0, 4.0, 6.0, 8.0, 12.0, 16.0] {
@@ -181,10 +182,14 @@ pub(super) fn thin(points: &[(TraceClass, [f64; 2])], cap: usize) -> Vec<(TraceC
             })
             .collect();
         if kept.len() <= cap {
-            break;
+            return kept;
         }
     }
-    kept
+    // Even the coarsest grid can leave more than `cap` occupied cells; take an
+    // evenly strided subset so the documented cap holds without favouring the
+    // earliest requests.
+    let total = kept.len();
+    (0..cap).map(|i| kept[i * total / cap]).collect()
 }
 
 /// Ticks for records with no finite value: rejected and valid in the upper

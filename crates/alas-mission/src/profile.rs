@@ -24,7 +24,6 @@
 #[path = "profile/step_climb.rs"]
 mod step_climb;
 
-use alas_atmo::Atmosphere;
 use alas_config::airports::Airport;
 use alas_config::mission::MissionProfileConfig;
 use alas_config::AlasConfig;
@@ -108,7 +107,7 @@ pub fn propose_profile_for_route(
         ));
     }
     let cruise_true_airspeed_m_s =
-        cruise_mach * Atmosphere::isa(cruise_altitude_m).speed_of_sound();
+        cruise_mach * alas_atmo::us1976_compute_values(cruise_altitude_m, 0.0).speed_of_sound_m_s;
     if !cruise_true_airspeed_m_s.is_finite() || cruise_true_airspeed_m_s <= 0.0 {
         return Err("mission proposal produced a non-finite cruise true airspeed".to_owned());
     }

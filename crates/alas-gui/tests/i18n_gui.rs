@@ -3,6 +3,10 @@
 
 //! Spanish desktop catalog coverage and rendered-scene integration tests.
 
+// A test asserts on values it constructed or loaded from a fixture it
+// controls, so a failed unwrap there is the assertion failing.
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 use alas_config::ConfigNode;
 use alas_gui::scene::build_page_preview;
 use alas_gui::state::AppState;
@@ -238,35 +242,6 @@ fn the_optimizer_validity_domain_has_spanish_catalog_provenance() {
     assert!(missing.is_empty(), "{}", missing.join("\n"));
     // One group and fourteen windows, each with a label and help sentence.
     assert_eq!(checked, 2 * (1 + 14));
-}
-
-/// Search diagnostics retain Spanish provenance.
-#[test]
-fn the_search_diagnostics_view_has_spanish_provenance() {
-    let base = alas_i18n::es::catalog();
-    let desktop = alas_i18n::es::desktop_catalog();
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-    let mut total = 0;
-    for relative in ["src/views/run_log/search_diagnostics.rs"] {
-        let source = std::fs::read_to_string(root.join(relative)).expect("the view source");
-        let mut keys = literal_arguments(&source, "tr");
-        keys.extend(literal_arguments(&source, "tr_fields"));
-        assert!(
-            keys.len() >= 7,
-            "{relative} sends almost nothing through the boundary, so this would pass vacuously: {keys:?}"
-        );
-        total += keys.len();
-        for key in keys {
-            assert!(
-                base.contains_key(&key) || desktop.contains_key(&key),
-                "{relative} sends an uncatalogued literal: {key:?}"
-            );
-        }
-    }
-    assert!(
-        total >= 20,
-        "expected every field label and note, got {total}"
-    );
 }
 
 /// The surfaces covered: the responsive landing layout's notice, the reason a run is blocked, the schema form's

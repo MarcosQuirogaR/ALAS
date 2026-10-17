@@ -72,9 +72,12 @@ pub(super) fn allocate(
             .iter()
             .map(|spar| cap_ei(spar.h[j], spar.w_cap[j], spar.t_cap[j], cap.e_pa))
             .sum();
-        non_cap_ei[j] = (response.ei_nm2[j] - current_cap_ei).max(0.0);
+        // `ei_nm2` is the spanwise-frame stiffness `EI_n cos^3 L`; caps enter it
+        // with the same factor (their normal-cut inertia is the streamwise one).
+        let c3 = floor.axis_cos_at(j).powi(3);
+        non_cap_ei[j] = (response.ei_nm2[j] - c3 * current_cap_ei).max(0.0);
         floor_ei[j] = non_cap_ei[j]
-            + floor
+            + c3 * floor
                 .spars
                 .iter()
                 .map(|spar| cap_ei(spar.h[j], spar.w_cap[j], spar.t_cap[j], cap.e_pa))
@@ -88,7 +91,8 @@ pub(super) fn allocate(
                 .map(|(i, spar)| spar.a_cap[j] * cap_pair_stretch[i][j])
                 .sum::<f64>();
         if area > 0.0 {
-            beta[j] = cap.e_pa
+            beta[j] = c3
+                * cap.e_pa
                 * floor
                     .spars
                     .iter()
@@ -137,7 +141,7 @@ pub(super) fn allocate(
                     .enumerate()
                     .map(|(i, spar)| {
                         let (width, thickness) = dimensions(i, j, growth);
-                        cap_ei(spar.h[j], width, thickness, cap.e_pa)
+                        floor.axis_cos_at(j).powi(3) * cap_ei(spar.h[j], width, thickness, cap.e_pa)
                     })
                     .sum::<f64>();
             let curvature = moment[j] / ei;

@@ -5,7 +5,7 @@
 
 use super::{ALTITUDE_TOLERANCE_M, DISTANCE_TOLERANCE_M, PROFILE_SCALE_ITERATIONS};
 use alas_atmo::us1976_try_compute_values;
-use alas_config::mission::{resolve_true_airspeed_m_s, SpeedReference};
+use alas_config::mission::{SpeedCaps, SpeedReference};
 use alas_mission::segments::{SegmentKind, SegmentSpec};
 use alas_mission::{MissionRequest, Numerics};
 
@@ -347,13 +347,14 @@ pub(super) fn profile_horizontal_distance(
 ) -> f64 {
     let rate_m_s = vertical_rate_m_s.abs();
     let altitude_change_m = (altitude_end_m - altitude_start_m).abs();
+    let capped = spec.speed_caps != SpeedCaps::default();
     match spec.air_speed_reference {
-        SpeedReference::TrueAirspeed => {
+        SpeedReference::TrueAirspeed if !capped => {
             let horizontal_speed_m_s =
                 (spec.air_speed_m_s * spec.air_speed_m_s - rate_m_s * rate_m_s).sqrt();
             altitude_change_m / rate_m_s * horizontal_speed_m_s
         }
-        SpeedReference::CalibratedAirspeed => {
+        SpeedReference::TrueAirspeed | SpeedReference::CalibratedAirspeed => {
             let mut numerics = Numerics {
                 number_control_points: i64::try_from(spec.number_control_points)
                     .unwrap_or(i64::MAX),
@@ -374,8 +375,8 @@ pub(super) fn profile_horizontal_distance(
                 else {
                     return f64::NAN;
                 };
-                let Ok(true_air_speed_m_s) = resolve_true_airspeed_m_s(
-                    SpeedReference::CalibratedAirspeed,
+                let Ok(true_air_speed_m_s) = spec.speed_caps.true_airspeed_m_s(
+                    spec.air_speed_reference,
                     spec.air_speed_m_s,
                     atmosphere.pressure_pa,
                     atmosphere.temperature_k,

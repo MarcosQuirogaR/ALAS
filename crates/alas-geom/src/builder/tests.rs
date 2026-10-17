@@ -47,6 +47,36 @@ fn a_centerline_engine_is_named_and_placed_on_the_tailcone() {
 }
 
 #[test]
+fn a_configured_centre_engine_pod_is_placed_sized_and_pitched_as_stated() {
+    let mut geometry = GeometryConfig::default();
+    geometry.engine.spanwise_positions_m = vec![0.0];
+    geometry.engine.centre_engine = Some(alas_config::CentreEngineInstallation {
+        axis_z_m: 4.85,
+        axis_pitch_deg: 4.0,
+        width_m: 2.85,
+        height_m: 3.0,
+        profile: vec![(0.0, 0.93), (0.8, 1.0), (11.9, 1.0), (14.15, 0.25)],
+    });
+    let builder = AircraftBuilder::new(Some(geometry));
+    let dv = DesignVector::default();
+    let pod = &builder
+        .build_engines(&dv, WingShape::Flight)
+        .expect("the configured pod builds")[0];
+    assert_eq!(pod.name, "Nacelle Center");
+    // The nozzle exit ends at the fuselage tail.
+    let last = pod.xsecs.last().unwrap();
+    assert!((last.xyz_c[0] - dv.fuselage_length_m).abs() < 1e-9);
+    // Axis height at the inlet face, then falling by tan(pitch) per metre.
+    assert!((pod.xsecs[0].xyz_c[2] - 4.85).abs() < 1e-12);
+    let drop = 4.0_f64.to_radians().tan() * 14.15;
+    assert!((last.xyz_c[2] - (4.85 - drop)).abs() < 1e-9);
+    // Non-circular section: 2.85 m wide, 3.0 m high at the maximum.
+    let widest = pod.xsecs.iter().map(|x| x.width).fold(0.0, f64::max);
+    let tallest = pod.xsecs.iter().map(|x| x.height).fold(0.0, f64::max);
+    assert!((widest - 2.85).abs() < 1e-12 && (tallest - 3.0).abs() < 1e-12);
+}
+
+#[test]
 fn wing_mounted_engines_are_named_by_which_side_they_are_on() {
     let builder = AircraftBuilder::new(Some(GeometryConfig::default()));
     let dv = DesignVector::default();

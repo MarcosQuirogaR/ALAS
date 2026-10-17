@@ -6,15 +6,25 @@
 /// Configuration card shown in the detached External Tools manager.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ExternalToolConfig {
+    /// Overview of every external tool.
     All,
+    /// MSES airfoil analysis.
     Mses,
+    /// MSC NASTRAN solver.
     MscNastran,
+    /// MSC Patran pre/post-processor.
     MscPatran,
+    /// MSC NASTRAN 95 legacy runtime.
     Nastran95,
+    /// OpenVSP geometry tool.
     OpenVsp,
+    /// OpenFOAM CFD toolchain.
     OpenFoam,
+    /// Gmsh mesher.
     Gmsh,
+    /// ParaView post-processor.
     ParaView,
+    /// FlowUnsteady solver.
     FlowUnsteady,
 }
 

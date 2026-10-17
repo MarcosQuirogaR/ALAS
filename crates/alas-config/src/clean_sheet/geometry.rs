@@ -101,12 +101,39 @@ pub(crate) fn seed_preset_less_defaults(
     {
         instance.optimizer.objective.aerodrome_reference_code = AerodromeReferenceCode::Auto;
     }
+    if let Ok(named) = overlay::<AlasConfig>(instance, data) {
+        if named.is_turboprop_brief() {
+            super::turboprop_class::seed(instance, &named, data);
+        }
+    }
     let Ok(mut brief) = overlay::<AlasConfig>(instance, data) else {
         return Ok(());
     };
     brief.apply_clean_sheet_commit(data, true);
     instance.optimizer.objective.derived_aerodrome_code =
         brief.optimizer.objective.derived_aerodrome_code;
+    // The cabin-equipment method follows the one size rule the product has
+    // (`CabinEquipmentMethod::for_civil_transport_size`), as a registered
+    // preset's does, instead of the 350-seat notional default's. A shaft-power
+    // aircraft below 40 t takes the regional turboprop relation; any brief of
+    // 70 seats or 40 t and more keeps the LTH relations it had. An explicit
+    // file key is laid over this by the caller's overlay.
+    let turboprop = brief.geometry.engine.propulsion_technology
+        == crate::engines::PropulsionTechnology::Turboprop;
+    instance.mass_model.flops_transport.cabin_equipment_method =
+        crate::CabinEquipmentMethod::for_civil_transport_size(
+            Some(brief.requirements.mtow_kg),
+            Some(brief.requirements.num_passengers),
+            turboprop,
+        );
+    // A turboprop cannot fly the widebody schedule `MissionProfileConfig`
+    // defaults to; the explicit `mission.profile` keys of the file are laid
+    // over this one by the caller's overlay.
+    if turboprop {
+        if let Some(profile) = super::turboprop_mission::profile(&brief) {
+            instance.mission.profile = profile;
+        }
+    }
     instance.geometry = brief.geometry;
     Ok(())
 }
@@ -144,6 +171,29 @@ pub(super) fn estimated_fuselage_length_m(config: &AlasConfig) -> Option<f64> {
     (length_m.is_finite() && length_m > 0.0).then_some(length_m)
 }
 
+/// Relative section disagreement above which the builder rejects a body loft
+/// (`alas_geom` `EXTENT_ERR`, 2 %).
+const LOFT_EXTENT_TOLERANCE: f64 = 0.02;
+
+/// The base body loft is fitted to the shipped reference's section; the
+/// builder refuses it when the declared diameter or height disagrees by more
+/// than 2 % (`BuildError::LoftExtent`), which made every derived clean sheet
+/// of another diameter unbuildable. A brief that changes the section is a
+/// parametric body (the loft would not build for it anyway).
+pub(super) fn drop_mismatched_loft(f: &mut crate::FuselageConfig) {
+    if f.loft.is_none() {
+        return;
+    }
+    let reference = &AlasConfig::default().geometry.fuselage;
+    let differs =
+        |value: f64, reference: f64| (value - reference).abs() > LOFT_EXTENT_TOLERANCE * reference;
+    if differs(f.diameter_m, reference.diameter_m)
+        || differs(f.effective_height_m(), reference.effective_height_m())
+    {
+        f.loft = None;
+    }
+}
+
 /// `brief`'s geometry with every brief-dependent field the file leaves
 /// unset re-derived; `None` when the brief cannot be sized.
 pub(super) fn derive(brief: &AlasConfig, data: &Value) -> Option<GeometryConfig> {
@@ -161,6 +211,7 @@ pub(super) fn derive(brief: &AlasConfig, data: &Value) -> Option<GeometryConfig>
         }
     };
     let f = &mut g.fuselage;
+    drop_mismatched_loft(f);
     put(
         "/geometry/fuselage/cabin_start_x_m",
         &mut f.cabin_start_x_m,
@@ -232,6 +283,9 @@ pub(super) fn derive(brief: &AlasConfig, data: &Value) -> Option<GeometryConfig>
         );
     }
 
+    if config.is_turboprop_brief() {
+        super::turboprop_class::shape_geometry(&mut config.geometry, data, class.span_m);
+    }
     let start = config.chords_for_area(class)?;
     let length_m = estimated_fuselage_length_m(&config)?;
     let wing = WingPlanformSummary::of(&config.geometry.wing, &start)?;

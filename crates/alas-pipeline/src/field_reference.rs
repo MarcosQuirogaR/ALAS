@@ -18,9 +18,10 @@
 use alas_config::airports::Airport;
 use alas_config::{ActiveEngineModel, AlasConfig, TurbopropEngineSpec};
 use alas_opt::mdo::propulsion::turboprop_unit_model;
+use alas_opt::mdo::{second_segment_evidence, EngineOutModel, YawAirframe};
 use alas_perf::performance::{
-    assess_oei_climb, compute_v_speeds_at_masses, far25_oei_gradient, oei_cl_at_v2, OeiClimbStatus,
-    OeiV2Condition,
+    assess_oei_climb, compute_v_speeds_at_masses, decompose_gradient, far25_oei_gradient,
+    oei_cl_at_v2, GradientInputs, OeiClimbStatus,
 };
 use alas_prop::turboprop::Pw127mRating;
 
@@ -47,8 +48,10 @@ pub const VREF_OVER_VS1G: f64 = 1.23;
 /// takes the FAR 25 field length as 1.667 times the distance).
 pub const DRY_LANDING_DISTANCE_SHARE: f64 = 0.6;
 
-/// Second-segment climb evidence the model supports. The app has no
-/// available-gradient model: only a *required* T/W is evaluated.
+/// Second-segment climb evidence the model supports: the required T/W and,
+/// when the evidence is complete, the gradient the installed thrust delivers
+/// (the same balance written for the available side,
+/// `alas_perf::performance::decompose_gradient`).
 #[derive(Debug, Clone, PartialEq)]
 pub struct OeiSecondSegmentReference {
     /// Required minimum gross gradient, 14 CFR 25.121(b), when the engine
@@ -63,6 +66,23 @@ pub struct OeiSecondSegmentReference {
     pub status: OeiClimbStatus,
     /// What the numbers are, in words.
     pub basis: &'static str,
+    /// V2 / VSR the second segment is assessed at.
+    pub v2_over_vsr: f64,
+    /// Whether V2 was raised above the CS 25.107 schedule to meet the
+    /// gradient (improved climb); the jet field length is then charged by
+    /// improved_climb_field_factor.
+    pub improved_climb: bool,
+    /// Factor on the jet take-off field length for the improved-climb V2.
+    pub improved_climb_field_factor: f64,
+    /// Gross gradient (rise over distance, dimensionless; 0.024 is 2.4 %) the
+    /// installed all-engine static thrust delivers with one engine out at V2:
+    /// `(N-1)/N r T/W_installed - CD/CL`, with `r` the operating-engine
+    /// thrust at V2 over the rated static thrust and `CD` the drag of the
+    /// assessed point (clean, take-off flap increment, failed engine, trim).
+    /// `None` unless `status` is `SlsEquivalent` (the same evidence gate as
+    /// the required T/W). For a propeller the installed T/W is the
+    /// ground-roll mean thrust basis of `static_thrust_basis`.
+    pub available_gradient: Option<f64>,
 }
 
 /// Field performance and reference speeds on an ISA sea-level runway.
@@ -102,22 +122,29 @@ pub struct IsaSeaLevelFieldReference {
     pub landing_field_length_m: f64,
     /// Definition of `landing_field_length_m`.
     pub landing_field_length_basis: &'static str,
+    /// The CS 25.113 integration behind the jet take-off distances (all-engine
+    /// distance, balanced `V1`, `VEF`, selected `VR`); `None` for the
+    /// propeller method and the replay correlations.
+    pub takeoff_field: Option<alas_perf::performance::TakeoffField>,
+    /// Take-off safety speed `V2` at the take-off mass, m/s (CAS equals TAS
+    /// at ISA sea level to within the compressibility correction the speed
+    /// model applies).
+    pub v2_m_s: f64,
+    /// Take-off-configuration reference stall speed `VSR` at the take-off
+    /// mass, m/s, from which `V2 / VSR` is formed.
+    pub v_stall_takeoff_m_s: f64,
     /// Unfactored landing distance from 50 ft, m. Propellers use Torenbeek's
     /// air-phase energy and touchdown braking balance. Jets retain the
     /// correlation `K (W/S)/(sigma CL_max,land)` at the landing mass.
     ///
-    /// `K` (`performance.k_land`, 0.58-0.63 m/Pa in the presets, 0.60 by
-    /// default) is an actual-distance coefficient, not a field-length one.
-    /// Raymer eq. 5.11 gives the unfactored distance
-    /// `S = 80 (W/S)/(sigma CL_max) + S_a` [ft, psf] with `S_a` = 1000 ft for
-    /// an airliner, and the FAR 25 field length as 1.667 times that.
-    /// 80 ft/psf is 0.51 m/Pa; with `S_a` folded in at a transport wing
-    /// loading near 5 kPa and `CL_max` near 2.8 the effective proportional
-    /// coefficient is about 0.68 m/Pa. The FAR field-length form
-    /// `S_FL = 0.3 V_A^2` [ft, kt] with `V_A = 1.3 V_S` (Loftin, NASA RP-1060,
-    /// 1980) is 0.95 m/Pa, and 0.6 of it is 0.57 m/Pa. K = 0.60 m/Pa sits with
-    /// the unfactored distances, so it is exported here and the field length
-    /// above is this divided by 0.6.
+    /// `K` (`performance.k_land`, one value, 0.505 m/Pa) is an actual-distance
+    /// coefficient, not a field-length one: it is calibrated as the mean of
+    /// 0.6 LFL / (0.5 rho0 (Vref/1.23)^2) over eight certified jets (see
+    /// `PerformanceConfig::default`). Loftin (NASA RP-1060, Fig. 3.4) gives
+    /// 0.572 and Raymer eq. 5.11 (80 ft/psf = 0.51 m/Pa plus an air-distance
+    /// term) is of the same order. The field length above is this divided by
+    /// the 0.6 dry share (`JET_DRY_LANDING_SHARE`), the same share the
+    /// optimizer residual, matching chart and delivery gate apply to the LDA.
     pub landing_distance_m: f64,
     /// 1 g landing-configuration stall speed at the landing mass, m/s.
     pub vs1g_landing_m_s: f64,
@@ -204,7 +231,7 @@ pub fn candidate_field_polar(
     let artifacts = report.fuel.artifacts(config, &report.design)?;
     let cd = artifacts
         .drag
-        .cd_at_atmosphere(cl, mach, altitude_m, isa_deviation_c);
+        .cd_airport_base_at_atmosphere(cl, mach, altitude_m, isa_deviation_c);
     if !cd.is_finite() || cd <= 0.0 {
         return Err("shared candidate field drag is not finite and positive".to_owned());
     }
@@ -223,6 +250,16 @@ pub fn report_isa_sea_level_field_reference(
     takeoff_mass_kg: f64,
     landing_mass_kg: f64,
 ) -> Result<IsaSeaLevelFieldReference, String> {
+    // The V speeds of the reference use the computed minimum control speed,
+    // like the feasibility gate and the report figures, not the declared one.
+    let resolved = crate::report_config::config_for_report(
+        config,
+        report,
+        takeoff_mass_kg,
+        landing_mass_kg,
+        wing_area_m2,
+    );
+    let config = &*resolved;
     let airport = Airport::custom("ISA sea level", 0.0, 10_000.0, 10_000.0, 0.0, 0.0, 0.0);
     let perf = &config.performance;
     let speeds = compute_v_speeds_at_masses(
@@ -239,11 +276,7 @@ pub fn report_isa_sea_level_field_reference(
     let atmosphere = alas_atmo::us1976_compute_values(0.0, 0.0);
     let mach = speeds.v2_ms / atmosphere.speed_of_sound_m_s;
     let (cd0, k) = candidate_field_polar(config, report, cl, mach, 0.0, 0.0)?;
-    let field_polar = if matches!(
-        config.geometry.engine.active_model(),
-        Ok(ActiveEngineModel::Turboprop(_))
-    ) && !perf.legacy_field_correlations
-    {
+    let field_polar = if !perf.legacy_field_correlations {
         Some(crate::field_performance::report_field_polar(
             config, report, mach, &airport,
         )?)
@@ -252,6 +285,10 @@ pub fn report_isa_sea_level_field_reference(
     };
     reference_with_field_polar(
         config,
+        Some(YawAirframe {
+            plane: &report.airplane,
+            cg_x_m: report.physical_cg[0],
+        }),
         wing_area_m2,
         cd0,
         k,
@@ -275,6 +312,7 @@ pub fn isa_sea_level_field_reference(
 ) -> Result<IsaSeaLevelFieldReference, String> {
     reference_with_field_polar(
         config,
+        None,
         wing_area_m2,
         cd0,
         k,
@@ -288,6 +326,7 @@ pub fn isa_sea_level_field_reference(
 #[allow(clippy::too_many_arguments)]
 fn reference_with_field_polar(
     config: &AlasConfig,
+    airframe: Option<YawAirframe<'_>>,
     wing_area_m2: f64,
     cd0: f64,
     k: f64,
@@ -315,8 +354,9 @@ fn reference_with_field_polar(
     let (static_thrust_n, static_thrust_basis) = sea_level_static_thrust_n(config, speeds.v_r_ms)?;
     let static_tw = static_thrust_n / (takeoff_mass_kg * config.requirements.gravity_m_s2);
     let (field_cd0, field_k) = field_polar.unwrap_or((cd0, k));
-    let field = crate::field_performance::calculate(
+    let field = crate::field_performance::calculate_with_airframe(
         config,
+        airframe,
         &airport,
         wing_area_m2,
         takeoff_mass_kg,
@@ -332,14 +372,17 @@ fn reference_with_field_polar(
 
     let n_engines = config.geometry.engine.spanwise_positions_m.len() as i64;
     let required_gradient = far25_oei_gradient(n_engines);
-    let oei_condition = OeiV2Condition {
-        departure_elevation_m: 0.0,
-        departure_isa_deviation_c: 0.0,
-        v2_over_vstall: speeds.v2_ms / speeds.v_stall_to_ms,
-        condition_to_sls_thrust_ratio: perf.oei_condition_to_sls_thrust_ratio,
-        asymmetric_trim_cd: perf.oei_asymmetric_trim_cd,
-        windmilling_cd: perf.oei_windmilling_cd,
-    };
+    // The same evidence builder as the optimizer residual, the feasibility
+    // finding and the matching chart; the reference departs from ISA sea
+    // level.
+    let static_per_engine_n = static_thrust_n / n_engines.max(1) as f64;
+    let model = EngineOutModel::new(config, airframe, wing_area_m2, Some(static_per_engine_n)).ok();
+    let reference_cd0 = field_polar.map_or(cd0, |(field_cd0, _)| field_cd0);
+    let oei_condition =
+        second_segment_evidence(model.as_ref(), perf, &airport, &speeds, &|_, _, _| {
+            reference_cd0
+        })
+        .condition;
     let cl_v2 = oei_cl_at_v2(perf.cl_max_to, oei_condition.v2_over_vstall)
         .ok_or_else(|| "field V2 lift coefficient is invalid".to_owned())?;
     let assessment = assess_oei_climb(
@@ -352,6 +395,23 @@ fn reference_with_field_polar(
         perf.cl_max_to,
         Some(oei_condition),
     );
+    // The available side of the same balance, on the same evidence and gate.
+    let available_gradient = (assessment.status == OeiClimbStatus::SlsEquivalent)
+        .then(|| {
+            decompose_gradient(&GradientInputs {
+                n_engines,
+                installed_tw_sls: static_tw,
+                thrust_ratio: oei_condition.condition_to_sls_thrust_ratio?,
+                cl: cl_v2,
+                cd0_clean: cd0,
+                induced_factor: k,
+                flap_delta_cd: perf.oei_climb_delta_cd,
+                windmilling_cd: oei_condition.windmilling_cd?,
+                trim_cd: oei_condition.asymmetric_trim_cd?,
+            })
+        })
+        .flatten()
+        .map(|decomposition| decomposition.gradient);
     Ok(IsaSeaLevelFieldReference {
         takeoff_mass_kg,
         landing_mass_kg,
@@ -359,16 +419,15 @@ fn reference_with_field_polar(
         static_thrust_basis,
         static_tw,
         takeoff_field_length_m: field.todr_m,
-        takeoff_field_length_basis: if propeller {
+        takeoff_field_length_basis: if perf.legacy_field_correlations {
+            "translated replay: Raymer take-off-parameter correlation 37.7 (W/S)/(sigma CLmax_TO T/W) [ft, psf] (Aircraft Design, Sec. 5.4, Fig. 5.4)"
+        } else if propeller {
             "Torenbeek ch.5/App.K propeller field estimate with speed-dependent installed thrust; \
              max of 115% AEO distance and eq.5-89 balanced-field approximation. Dry, level, still \
-             air; normal AEO rating and installed automatic takeoff reserve on the remaining engines; unconfigured failed-engine \
-             and asymmetric drag assumed zero. Conceptual, not certificated."
+             air; normal AEO rating and installed automatic takeoff reserve on the remaining engines; failed-engine drag (feathered \
+             propeller) and asymmetric trim drag from the shared engine-out evidence builder. Conceptual, not certificated."
         } else {
-            "FAR 25 take-off field length: Raymer take-off-parameter \
-             correlation 37.7 (W/S)/(sigma CLmax_TO T/W) [ft, psf] at MTOW, ISA sea level \
-             (Aircraft Design, Sec. 5.4, Fig. 5.4), which is already a balanced-field-type \
-             length; no bfl_factor applied"
+            "CS 25.113(a) take-off field length by integration: max(1.15 x all-engine distance to 35 ft, balanced field length), dry level hard runway, still air, ISA sea level. Ground roll with the deck take-off thrust at every speed (Raymer Eqs. 17.100-17.101, mu 0.02 Torenbeek p. 168), 3 s rotation (Raymer p. 673), airborne distance the larger of the energy (Torenbeek Eq. 5-85) and transition-arc (Raymer Eqs. 17.105-17.112) distances; one-engine continued take-off with the failure at VEF and the failed-engine windmilling plus trim drag; VR searched between the schedule minimum and V2 for the shortest field. Conceptual, not certificated"
         },
         model_balanced_field_length_m: field.bfl_m,
         model_balanced_field_length_basis: if perf.legacy_field_correlations {
@@ -377,11 +436,11 @@ fn reference_with_field_polar(
             "Torenbeek eq.5-89 conceptual balance with integrated ground-roll equivalent acceleration, \
              V2 thrust lapse and configured stop deceleration; no certified V1/ASDA claim"
         } else {
-            "Raymer FAR 25 TOP field correlation; 25.113(a)(2) does not require another 1.15 \
-             on an already factored field length; accelerate-stop is not independently resolved"
+            "balanced field: CS 25.109(a)(1) accelerate-stop (all engines to VEF, one engine to V1, braking at 0.37 g mean (Torenbeek Eq. 5-87, 15 jet transports, no reverse thrust), plus 2 s at V1) equal to the CS 25.113(a)(1) continued take-off distance at the balanced V1"
         },
         landing_field_length_m: field.ldr_m
             / crate::field_performance::dry_landing_distance_share(config),
+        takeoff_field: field.takeoff_field,
         landing_field_length_basis: if propeller {
             "Torenbeek eqs.5-93/5-94 air energy plus braking, no reverse credit, at MLW; \
              divided by configured dry planning share (CAT.POL.A.230(a)(2): 0.70 default, \
@@ -392,6 +451,8 @@ fn reference_with_field_polar(
              by 0.6 (14 CFR 121.195(b); Raymer eq. 5.11, x1.667)"
         },
         landing_distance_m: field.ldr_m,
+        v2_m_s: speeds.v2_ms,
+        v_stall_takeoff_m_s: speeds.v_stall_to_ms,
         vs1g_landing_m_s: speeds.v_stall_land_ms,
         vref_m_s: VREF_OVER_VS1G * speeds.v_stall_land_ms,
         oei: OeiSecondSegmentReference {
@@ -399,8 +460,17 @@ fn reference_with_field_polar(
             required_inflight_tw: assessment.required_inflight_tw,
             required_sls_tw: assessment.required_sls_tw,
             status: assessment.status,
-            basis: "required T/W to hold the 14 CFR 25.121(b) gross gradient; the model has no \
-                 available-gradient calculation, so no available gradient is exported",
+            v2_over_vsr: speeds.v2_ms / speeds.v_stall_to_ms,
+            improved_climb: perf.improved_climb_v2_over_vsr.is_some(),
+            improved_climb_field_factor: perf.improved_climb_field_factor(),
+            available_gradient,
+            basis: "required T/W to hold the CS 25.121(b) gross gradient at V2 = max(selected \
+                 factor, 1.13 VSR, 1.10 VMC) with VMC computed from the engine-out yaw balance of \
+                 the built fin and rudder when the report supports it (the declared ratio, the \
+                 CS 25.149(c) ceiling, is the fallback); thrust ratio from the \
+                 engine deck at V2, failed-engine drag (Roskam VI 4.67) and asymmetric trim drag \
+                 (Torenbeek G-84..89, an upper bound); the available gradient is the same \
+                 balance at the installed static T/W (alas_perf decompose_gradient)",
         },
     })
 }
@@ -458,7 +528,9 @@ mod tests {
 
     #[test]
     fn a320_reference_is_finite_and_ordered() {
-        let config = AlasConfig::from_value(&json!({ "preset": "A320-200" })).expect("preset");
+        let mut config = AlasConfig::from_value(&json!({ "preset": "A320-200" })).expect("preset");
+        // No fin is built on this path: state the asymmetric trim drag.
+        config.performance.oei_asymmetric_trim_cd = Some(0.001);
         let mtow = config.requirements.mtow_kg;
         let reference =
             isa_sea_level_field_reference(&config, 122.6, 0.02, 0.04, mtow, 0.92 * mtow)
@@ -473,13 +545,14 @@ mod tests {
         ] {
             assert!(value.is_finite() && value > 0.0, "{reference:?}");
         }
-        // The jet TOP correlation already estimates field length; 25.113 does
-        // not add another all-engine margin to that field-length estimate.
-        assert!(
-            (reference.model_balanced_field_length_m / reference.takeoff_field_length_m - 1.0)
-                .abs()
-                < 1e-12
-        );
+        // CS 25.113(a): the field length is the greater of the balanced field
+        // and 1.15 times the all-engine distance; both legs are reported.
+        let solved = reference.takeoff_field.expect("integrated jet field");
+        assert_eq!(reference.takeoff_field_length_m, solved.tofl_m);
+        assert_eq!(reference.model_balanced_field_length_m, solved.balanced_m);
+        assert!((solved.tofl_m - solved.balanced_m.max(1.15 * solved.all_engine_m)).abs() < 1e-9);
+        assert!(solved.balanced_m <= reference.takeoff_field_length_m + 1e-9);
+        assert!(solved.v1_m_s <= solved.vr_m_s && solved.vr_m_s <= reference.v2_m_s + 1e-9);
         // The factored landing field length is the actual distance over 0.6.
         assert!(
             (reference.landing_field_length_m / reference.landing_distance_m - 1.0 / 0.6).abs()

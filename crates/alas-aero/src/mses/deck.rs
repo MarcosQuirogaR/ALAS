@@ -88,7 +88,12 @@ pub fn mset_keystrokes(mset_n: i64, mset_e: f64, mset_alpha: f64) -> String {
 /// without a valid mesh. Keep the boundary values explicit and stable, as in
 /// the reference MSES wrapper.
 pub fn mset_blade(airfoil_name: &str, coordinates: &[(f64, f64)]) -> String {
-    let name = airfoil_name.chars().take(32).collect::<String>();
+    // Control characters (a newline would corrupt the header layout) are dropped.
+    let name = airfoil_name
+        .chars()
+        .filter(|c| !c.is_control())
+        .take(32)
+        .collect::<String>();
     let mut text = format!("{name:<32}\n  -2.0    3.0    -2.5    3.5\n");
     for &(x, y) in coordinates {
         text.push_str(&format!("{x:14.6} {y:14.6}\n"));

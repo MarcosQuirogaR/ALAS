@@ -16,7 +16,12 @@ use super::ComponentStations;
 
 /// Share of the landing-gear mass on the nose gear; the same split the
 /// ledger builder uses, after the typical nose-gear static-load share
-/// (Raymer, *Aircraft Design*, ch. 11).
+/// (Raymer, *Aircraft Design*, ch. 11). A mass split assumption, not a
+/// measured load. A pure FLOPS buildup instead carries its own
+/// `main_gear_kg`/`nose_gear_kg` split (FLOPS equations 63/64, 11.2% nose for
+/// the A320 preset); this fraction remains the split for every path with no
+/// FLOPS structural evaluation (the Torenbeek-comparison buildup and any other
+/// lumped gear source).
 pub const NOSE_GEAR_MASS_FRACTION: f64 = 0.15;
 
 /// Vertical offset of the no-nacelle propulsion point below the wing

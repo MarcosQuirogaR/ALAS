@@ -106,7 +106,8 @@ pub fn plan_fuel(
         });
     }
 
-    let holding_altitude_m = policy.holding_altitude_ft * FOOT;
+    // AMC1 CAT.OP.MPA.181: 1,500 ft above the aerodrome elevation.
+    let holding_altitude_m = model.destination_elevation_m() + policy.holding_altitude_ft * FOOT;
     let alternate_distance_m = policy.alternate_distance_nmi * NAUTICAL_MILE;
 
     let idle_fuel_flow_kg_s = model.taxi_fuel_flow_kg_s()?;
@@ -829,5 +830,70 @@ mod tests {
             plan_fuel(&policy, &model, TOW_KG, -1.0),
             Err(FuelModelError::InvalidDistance { .. })
         ));
+    }
+
+    /// A model that records the altitude every holding quantity is priced at
+    /// and reports a destination elevation.
+    struct RecordingModel {
+        inner: ToyModel,
+        elevation_m: f64,
+        altitudes_m: std::cell::RefCell<Vec<f64>>,
+    }
+
+    impl FuelBurnModel for RecordingModel {
+        fn trip(&self, mass_kg: f64, range_m: f64) -> Result<LegEstimate, FuelModelError> {
+            self.inner.trip(mass_kg, range_m)
+        }
+
+        fn diversion(&self, mass_kg: f64, distance_m: f64) -> Result<LegEstimate, FuelModelError> {
+            self.inner.diversion(mass_kg, distance_m)
+        }
+
+        fn holding_fuel_flow_kg_s(
+            &self,
+            mass_kg: f64,
+            altitude_m: f64,
+        ) -> Result<f64, FuelModelError> {
+            self.altitudes_m.borrow_mut().push(altitude_m);
+            self.inner.holding_fuel_flow_kg_s(mass_kg, altitude_m)
+        }
+
+        fn cruise_fuel_flow_kg_s(&self, mass_kg: f64) -> Result<f64, FuelModelError> {
+            self.inner.cruise_fuel_flow_kg_s(mass_kg)
+        }
+
+        fn taxi_fuel_flow_kg_s(&self) -> Result<f64, FuelModelError> {
+            self.inner.taxi_fuel_flow_kg_s()
+        }
+
+        fn destination_elevation_m(&self) -> f64 {
+            self.elevation_m
+        }
+    }
+
+    #[test]
+    fn the_hold_is_priced_1500_ft_above_the_aerodrome_not_above_sea_level() {
+        // AMC1 CAT.OP.MPA.181: 1,500 ft = 457.2 m above aerodrome elevation.
+        let policy = FuelPolicyConfig::default();
+        assert_eq!(policy.holding_altitude_ft, 1_500.0);
+        for elevation_m in [0.0, 610.0, 2_000.0] {
+            let model = RecordingModel {
+                inner: toy_model(),
+                elevation_m,
+                altitudes_m: std::cell::RefCell::new(Vec::new()),
+            };
+            plan_fuel(&policy, &model, TOW_KG, RANGE_M).unwrap();
+            let altitudes = model.altitudes_m.borrow();
+            assert!(!altitudes.is_empty());
+            for altitude_m in altitudes.iter() {
+                assert!(
+                    (altitude_m - (elevation_m + 457.2)).abs() < 1.0e-9,
+                    "{altitude_m}"
+                );
+            }
+        }
+        // A model that declares no elevation keeps the sea-level datum.
+        let model = toy_model();
+        assert_eq!(model.destination_elevation_m(), 0.0);
     }
 }

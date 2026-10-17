@@ -10,7 +10,7 @@
 //! ratio (dual-axis).
 
 use super::support::axis_labels;
-use super::{design_point, linspace, turbofan_spec};
+use super::{design_point, linspace};
 use crate::chart_kit::{draw_legend, draw_title, LegendMarker};
 use crate::colormap::Colormap;
 use crate::scene::{Axes2D, Color, Fill, Scene, SceneElement, Stroke, TextAlign, TextBaseline};

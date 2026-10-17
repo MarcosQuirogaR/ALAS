@@ -61,6 +61,7 @@ mod cabin_sources;
 mod cg_envelope;
 mod evidence;
 mod gear_load;
+mod high_lift_system;
 mod landing_reference;
 mod military;
 mod mission_evidence;
@@ -94,6 +95,10 @@ pub use evidence::{
     PayloadRangeDesignPoint, PublishedMissionLoadCase, PublishedRange, PublishedReserveContract,
 };
 pub use gear_load::{AftCgNoseLoadPoint, PublishedAftCgNoseLoad};
+pub use high_lift_system::{
+    declared_system, declared_systems, preset_breakdown, DeclaredHighLift, HighLiftBreakdown,
+    HighLiftGeometry, TrailingEdgeDevice,
+};
 pub use landing_reference::{
     published_landing_reference, published_landing_references, PublishedLandingReference,
 };

@@ -19,7 +19,10 @@ use alas_exec::avl::{run_avl_with_options_cancellable, AvlProcessStatus, AvlRunO
 use crate::full_analysis::AnalysisReport;
 
 mod reference;
-use reference::{rejected_reference_result, takeoff_comparison_reference};
+use reference::{
+    reference_condition_mismatch, rejected_reference_result, takeoff_comparison_reference,
+    PG_NORMAL_MACH_LIMIT,
+};
 
 /// Product-level state of a requested native AVL analysis.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -100,8 +103,10 @@ pub struct AvlComparisonReference {
     /// ALAS VLM polar whose coefficient rows correspond to the schedule below;
     /// its public `alpha_deg` axis is the reporting/display axis.
     pub vlm_polar: PolarSweep,
-    /// Geometric alpha values actually sent to AVL. `vlm_polar.alpha_deg`
-    /// remains the display/reporting axis after its PG relabeling.
+    /// Alpha values actually sent to AVL, one per `vlm_polar` row: the VLM's
+    /// geometric angles for the take-off comparison, its compressibility-
+    /// corrected reporting axis for the cruise comparison (see
+    /// `reference::linear_cruise_comparison_reference`).
     pub geometric_alpha_deg: Vec<f64>,
 }
 
@@ -130,6 +135,11 @@ pub struct AvlAnalysisResult {
     pub comparison: AvlComparisonStatus,
     /// Actionable failure or incompatibility detail.
     pub error: Option<String>,
+    /// The comparison at the highest Mach inside AVL's linear-valid domain
+    /// (cruise altitude), published beside the take-off comparison this
+    /// result describes. `None` on the cruise result itself and on runs that
+    /// did not request it.
+    pub linear_cruise: Option<Box<AvlAnalysisResult>>,
 }
 
 impl AvlAnalysisResult {
@@ -144,8 +154,8 @@ impl AvlAnalysisResult {
 #[path = "avl_execution.rs"]
 mod execution;
 pub use execution::{
-    run_avl_analysis, run_avl_analysis_cancellable, run_avl_takeoff_comparison,
-    run_avl_takeoff_comparison_cancellable,
+    run_avl_analysis, run_avl_analysis_cancellable, run_avl_linear_cruise_comparison_cancellable,
+    run_avl_takeoff_comparison, run_avl_takeoff_comparison_cancellable,
 };
 
 fn run_avl_analysis_with_reference(
@@ -171,6 +181,7 @@ fn run_avl_analysis_with_reference(
         comparison_reference: Some(reference.clone()),
         comparison: AvlComparisonStatus::NotEvaluated,
         error: None,
+        linear_cruise: None,
     };
     let parent = geometry_path.parent().unwrap_or(output_dir);
     if let Err(error) = fs::create_dir_all(parent) {
@@ -178,7 +189,17 @@ fn run_avl_analysis_with_reference(
         result.error = Some(format!("cannot create {}: {error}", parent.display()));
         return result;
     }
-    let chordwise_vortices = positive_usize(config.analysis.fine_chordwise_resolution).max(8);
+    // The 8-chord floor is the matrix profile's mesh: the dense AIC solve is
+    // O(N^3) in vortices (4544 at 16 chords, ~115 s; 2272 at 8, ~17 s) and the
+    // A320 cruise CL and Cm move by 0.19 % and 0.02 % between the two.
+    let chordwise_vortices = if alas_exec::tool_runtime::RuntimeSettings::current()
+        .fidelity
+        .is_reduced()
+    {
+        8
+    } else {
+        positive_usize(config.analysis.fine_chordwise_resolution).max(8)
+    };
     let spanwise_vortices = positive_usize(config.analysis.fine_spanwise_resolution)
         .saturating_mul(10)
         .max(20);
@@ -277,7 +298,18 @@ fn run_avl_analysis_with_reference(
             return result;
         }
     };
-    let comparison = classify_avl_comparison(&polar, report, &reference);
+    let comparison = match (
+        classify_avl_comparison(&polar, report, &reference),
+        reference_condition_mismatch(&reference, report, config),
+    ) {
+        (AvlComparisonStatus::Compatible(_), Some(mismatch)) => {
+            AvlComparisonStatus::Rejected(mismatch)
+        }
+        (AvlComparisonStatus::Rejected(reason), Some(mismatch)) => {
+            AvlComparisonStatus::Rejected(format!("{reason}; {mismatch}"))
+        }
+        (status, _) => status,
+    };
     result.polar = Some(polar);
     match &comparison {
         AvlComparisonStatus::Compatible(_) => {
@@ -394,7 +426,7 @@ fn wing_normal_mach(mach: f64, sweep_deg: f64) -> f64 {
 }
 
 fn pg_domain_supported(wing_normal_mach: f64) -> bool {
-    wing_normal_mach.is_finite() && wing_normal_mach < 0.7
+    wing_normal_mach.is_finite() && wing_normal_mach < PG_NORMAL_MACH_LIMIT
 }
 
 fn close(left: f64, right: f64) -> bool {

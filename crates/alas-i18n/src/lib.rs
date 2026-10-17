@@ -48,9 +48,9 @@
 //! A catalog is one language's string table: English source text mapped to
 //! its translation. [`register_catalog`] is the only way one is installed,
 //! and the one caller in this crate is [`es::install`], which registers the
-//! Spanish catalog (ported from `alas/translations/es.py`) and then extends
-//! it with the desktop catalog. Nothing calls `install` automatically, so a
-//! build that never calls it has no catalog at all. For an uninstalled
+//! Spanish catalog (ported from `alas/translations/es.py`) merged with the
+//! desktop catalog as one table, in a single registration. Nothing calls
+//! `install` automatically, so a build that never calls it has no catalog at all. For an uninstalled
 //! language, or for any entry a catalog does not cover, [`t`]
 //! returns the original English text. A missing or partial catalog is
 //! therefore always the safe case, never an error: a headless build that
@@ -157,24 +157,6 @@ where
     // than propagating that panic into an unrelated caller.
     if let Ok(mut catalogs) = registry().write() {
         catalogs.insert(lang.to_string(), table);
-    }
-}
-
-/// Add entries to an installed language catalog without discarding its
-/// source-parity base table.
-///
-/// Desktop-only strings live in a separate reference catalog from the Python
-/// application strings. Keeping extension explicit lets each source retain
-/// its own provenance and parity checks while presenting one lookup table.
-pub fn extend_catalog<I>(lang: &str, entries: I)
-where
-    I: IntoIterator<Item = (String, String)>,
-{
-    if let Ok(mut catalogs) = registry().write() {
-        catalogs
-            .entry(lang.to_string())
-            .or_default()
-            .extend(entries);
     }
 }
 

@@ -22,7 +22,8 @@ pub struct CrawlPolicy {
     pub allowed_hosts: Vec<String>,
     /// HTTP user-agent sent on every request.
     pub user_agent: String,
-    /// Minimum delay between successive requests.
+    /// Minimum delay between successive requests; the 5 s default follows the
+    /// 5-10 s politeness rule for third-party retail hosts.
     pub min_request_interval_ms: u64,
     /// Category pages used to supplement a sitemap that omits products.
     pub seed_category_urls: Vec<String>,
@@ -47,7 +48,7 @@ impl Default for CrawlPolicy {
             sitemap_url: "https://rc-innovations.es/sitemap.xml".to_owned(),
             allowed_hosts: vec!["rc-innovations.es".to_owned()],
             user_agent: DEFAULT_USER_AGENT.to_owned(),
-            min_request_interval_ms: 1_500,
+            min_request_interval_ms: 5_000,
             seed_category_urls: vec![
                 "https://rc-innovations.es/shop/category/baterias-lipo-167".to_owned(),
                 "https://rc-innovations.es/shop/category/motores-t-motor-211".to_owned(),

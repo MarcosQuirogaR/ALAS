@@ -159,7 +159,10 @@ pub(crate) fn select_route_load_case(
     route_distance_m: f64,
 ) -> Result<(MissionRequest, SelectedLoadCase), String> {
     let request = build_mission_request(config, origin, destination, route_distance_m);
+    let loading_profile =
+        alas_math::stage_profile::scope(alas_math::stage_profile::Stage::PipelineFuelLoading);
     let fuel_loading = plan_fuel_loading(config, &report.design, report);
+    drop(loading_profile);
     let load_case = select_load_case(config, report, &fuel_loading, &request)?;
     Ok((request, load_case))
 }
@@ -211,10 +214,13 @@ fn price_route(
     request: &MissionRequest,
 ) -> Result<Result<(f64, Box<PolicyClosureCase>), String>, String> {
     let zero_fuel_mass_kg = fuel_loading.zero_fuel_mass_kg;
+    let model_profile =
+        alas_math::stage_profile::scope(alas_math::stage_profile::Stage::PipelineMissionModel);
     let model = match report_mission_model(config, report) {
         Ok(model) => model,
         Err(error) => return Ok(Err(error)),
     };
+    drop(model_profile);
     let sized = report.fuel.sized_fuel();
     let limits = DispatchLimits {
         mtow_kg: aircraft_mtow_kg(config, report),
@@ -243,6 +249,8 @@ fn price_route(
     });
     // An under-resolved trip (or a cancelled run) leaves the policy unpriced
     // rather than flown unfrozen.
+    let _dispatch_profile =
+        alas_math::stage_profile::scope(alas_math::stage_profile::Stage::PipelinePlannedDispatch);
     let solution = match solve_planned_dispatch(
         &model,
         zero_fuel_mass_kg,

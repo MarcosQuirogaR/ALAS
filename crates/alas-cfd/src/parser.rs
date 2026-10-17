@@ -268,10 +268,30 @@ pub fn apply_force_decomposition(
     if !denominator.is_finite() || denominator <= 0.0 {
         return;
     }
+    // Sorted finite times allow a bounded scan; anything else keeps the
+    // original linear search, so the matched component is identical.
+    let sorted = decomposition
+        .iter()
+        .all(|component| component.time.is_finite())
+        && decomposition
+            .windows(2)
+            .all(|pair| pair[0].time <= pair[1].time);
     for sample in samples {
-        let Some(component) = decomposition.iter().rev().find(|component| {
+        let matches = |component: &&ForceDecompositionSample| {
             (component.time - sample.time).abs() <= 1.0e-7 * sample.time.abs().max(1.0)
-        }) else {
+        };
+        let found = if sorted && sample.time.is_finite() {
+            let tolerance = 2.0e-7 * sample.time.abs().max(1.0);
+            let upper = decomposition.partition_point(|c| c.time <= sample.time + tolerance);
+            decomposition[..upper]
+                .iter()
+                .rev()
+                .take_while(|c| c.time >= sample.time - tolerance)
+                .find(matches)
+        } else {
+            decomposition.iter().rev().find(matches)
+        };
+        let Some(component) = found else {
             continue;
         };
         sample.cd_pressure = Some(dot3(component.pressure_force_n, drag_dir) / denominator);
@@ -320,7 +340,17 @@ pub fn parse_mass_balance(log: &str) -> Vec<MassBalanceSample> {
 
 fn number_after(text: &str, marker: &str) -> Option<f64> {
     let (_, rest) = text.split_once(marker)?;
-    rest.split_whitespace().find_map(|token| {
+    first_number(rest)
+}
+
+/// The number in the first whitespace token, so a literal `nan`/`inf` parses
+/// as non-finite (and reaches the finite guards) instead of being skipped in
+/// favour of a later unrelated numeric token. Punctuation and unit suffixes
+/// around a plain number are tolerated.
+fn first_number(text: &str) -> Option<f64> {
+    let token = text.split_whitespace().next()?;
+    let bare = token.trim_matches(|ch: char| matches!(ch, ',' | ';' | ':' | '(' | ')'));
+    bare.parse::<f64>().ok().or_else(|| {
         token
             .trim_matches(|ch: char| {
                 !(ch.is_ascii_digit() || matches!(ch, '+' | '-' | '.' | 'e' | 'E'))
@@ -334,12 +364,5 @@ fn number_after(text: &str, marker: &str) -> Option<f64> {
 /// `ExecutionTime = ...` lines, which contain the same `Time =` substring.
 fn outer_time_after(line: &str) -> Option<f64> {
     let tail = line.trim_start().strip_prefix("Time =")?;
-    tail.split_whitespace().find_map(|token| {
-        token
-            .trim_matches(|ch: char| {
-                !(ch.is_ascii_digit() || matches!(ch, '+' | '-' | '.' | 'e' | 'E'))
-            })
-            .parse::<f64>()
-            .ok()
-    })
+    first_number(tail)
 }

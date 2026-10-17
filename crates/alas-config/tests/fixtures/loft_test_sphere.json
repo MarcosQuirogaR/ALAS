@@ -1,0 +1,23 @@
+{
+  "schema": 1,
+  "preset": "test_sphere",
+  "body": "fuselage",
+  "reference_length_m": 2.0,
+  "degree": 3,
+  "frame": "x aft of nose tip, y right, z up, metres; unit sphere centred at x = 1, z = 1 (hand-made test fixture, not a preset)",
+  "curves": {
+    "A":  {"knots": [0, 0, 0, 0, 1, 1, 1, 1], "coeffs": [0.0, 1.3333333333333333, 1.3333333333333333, 0.0]},
+    "E":  {"knots": [0, 0, 0, 0, 1, 1, 1, 1], "coeffs": [0.0, 1.3333333333333333, 1.3333333333333333, 0.0]},
+    "zc": {"knots": [0, 0, 0, 0, 1, 1, 1, 1], "coeffs": [1.0, 1.0, 1.0, 1.0]},
+    "n":  {"knots": [0, 0, 0, 0, 1, 1, 1, 1], "coeffs": [2.0, 2.0, 2.0, 2.0]},
+    "k":  {"knots": [0, 0, 0, 0, 1, 1, 1, 1], "coeffs": [0.0, 0.0, 0.0, 0.0]}
+  },
+  "front": {"kind": "point", "tip_radius_m": 1.0},
+  "rear": {"kind": "point", "tip_radius_m": 1.0},
+  "cabin": {"x_start_m": 0.8, "x_end_m": 1.2},
+  "fairness": {"inflections": {"crown": 0, "keel": 0, "plan": 0}, "tv_ratio_max": 1.5},
+  "fit": {"rms_m": 0.0, "max_m": 0.0, "lambda": 0.0, "tool_version": "hand-made"},
+  "provenance": [
+    {"group": "A", "kind": "template", "confidence": "C", "note": "analytic sphere"}
+  ]
+}

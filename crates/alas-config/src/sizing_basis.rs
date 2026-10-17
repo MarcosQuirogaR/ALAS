@@ -201,7 +201,12 @@ impl AlasConfig {
     /// configuration; the rewritten one carries the overrides and reads as a
     /// declared structure.
     pub fn at_sized_closure_mass(&self, closure_mass_kg: f64) -> Self {
-        if self.optimizer.objective.mtow_sizing == crate::MtowSizing::FixedRequirement {
+        if self
+            .optimizer
+            .objective
+            .mtow_sizing
+            .sizes_at_declared_mass()
+        {
             // A volume-limited takeoff load does not resize the aircraft's
             // structure or landing gear below its declared design weights.
             let (gross_kg, landing_kg) = match self.mass_sizing_basis() {
@@ -234,13 +239,22 @@ impl AlasConfig {
     }
 
     /// Whether the reserve floor of
-    /// [`Self::design_landing_mass_with_reserve_floor`] applies: only the two
-    /// design modes, only when they design the structure at the closure, and
-    /// never over an explicit `design_landing_mass_kg`.
+    /// [`Self::design_landing_mass_with_reserve_floor`] applies: the two
+    /// design modes when they design the structure at the closure, and the
+    /// legacy `SizedByMission` / `Unconstrained` sizing of a coupled design
+    /// (audit SIZ-03: the gear, the dispatch limit and the `landing_mass`
+    /// residual then read one landing mass), never over an explicit
+    /// `design_landing_mass_kg`.
     fn landing_reserve_floor_applies(&self) -> bool {
         let plan = self.mtow_plan();
-        plan.requires_mission_sized_evaluation()
-            && plan.structural_basis == crate::optimizer::StructuralBasis::ClosureMass
+        let designs_at_closure = plan.requires_mission_sized_evaluation()
+            && plan.structural_basis == crate::optimizer::StructuralBasis::ClosureMass;
+        let coupled_legacy_sizing = self.mass_sizing_basis() == MassSizingBasis::Coupled
+            && matches!(
+                plan.mode,
+                crate::MtowSizing::SizedByMission | crate::MtowSizing::Unconstrained
+            );
+        (designs_at_closure || coupled_legacy_sizing)
             && self
                 .mass_model
                 .flops_structure
@@ -414,7 +428,7 @@ mod tests {
         }
         // At the declared MTOW the ratio reproduces the declared MLW exactly.
         let mut band = a320(DesignMode::ReferenceAdaptation);
-        band.optimizer.objective.mtow_sizing = MtowSizing::MtowBand;
+        band.optimizer.objective.mtow_sizing = MtowSizing::PayloadAdjusted;
         assert_eq!(band.design_landing_mass_at_closure(78_000.0), 66_000.0);
     }
 
@@ -464,7 +478,14 @@ mod tests {
                     config.design_landing_mass_with_reserve_floor(70_000.0, Some(65_000.0));
                 let sized =
                     config.at_sized_closure_mass_with_landing_floor(70_000.0, Some(65_000.0));
-                if sizing.requires_mission_sized_evaluation() {
+                // The legacy sizing modes of a coupled design read the same
+                // floored landing mass (audit SIZ-03).
+                let coupled_legacy = design_mode == DesignMode::CleanSheet
+                    && matches!(
+                        sizing,
+                        MtowSizing::SizedByMission | MtowSizing::Unconstrained
+                    );
+                if sizing.requires_mission_sized_evaluation() || coupled_legacy {
                     assert_eq!(floored, 65_000.0, "{design_mode:?} {sizing:?}");
                     assert_eq!(
                         sized.mass_model.flops_structure.design_landing_mass_kg,
@@ -482,13 +503,64 @@ mod tests {
             }
         }
         let mut band = a320(DesignMode::ReferenceAdaptation);
-        band.optimizer.objective.mtow_sizing = MtowSizing::MtowBand;
+        band.optimizer.objective.mtow_sizing = MtowSizing::PayloadAdjusted;
         assert!((band.design_landing_mass_at_closure(70_000.0) - ratio_kg).abs() < 1e-6);
         // An explicit landing mass is never raised.
         band.mass_model.flops_structure.design_landing_mass_kg = Some(50_000.0);
         assert_eq!(
             band.design_landing_mass_with_reserve_floor(70_000.0, Some(65_000.0)),
             50_000.0
+        );
+    }
+
+    #[test]
+    fn a_coupled_legacy_sizing_designs_the_gear_at_the_landing_mass_it_is_checked_against() {
+        // Audit SIZ-03: the gear (`at_sized_closure_mass_with_landing_floor`),
+        // the dispatch limit and the `landing_mass` residual (both
+        // `design_landing_mass_with_reserve_floor`) read one landing mass, and
+        // it is the closure fraction raised to the mission's own landing mass.
+        use crate::MtowSizing;
+        for sizing in [MtowSizing::SizedByMission, MtowSizing::Unconstrained] {
+            let mut config = a320(DesignMode::CleanSheet);
+            config.optimizer.objective.mtow_sizing = sizing;
+            let fraction = config.mass_model.mlw_fraction_mtow;
+            let closure_kg = 70_000.0;
+            // Below the closure fraction: the fraction of the closure.
+            let low_floor_kg = 0.5 * fraction * closure_kg;
+            let limit_kg =
+                config.design_landing_mass_with_reserve_floor(closure_kg, Some(low_floor_kg));
+            assert!(
+                (limit_kg - fraction * closure_kg).abs() < 1e-9,
+                "{sizing:?}"
+            );
+            let gear =
+                config.at_sized_closure_mass_with_landing_floor(closure_kg, Some(low_floor_kg));
+            assert_eq!(gear.mass_model.flops_structure.design_landing_mass_kg, None);
+            // Above it (a short sector): the floor, in the gear and the limit.
+            let floor_kg = 0.5 * (fraction + 1.0) * closure_kg;
+            let limit_kg =
+                config.design_landing_mass_with_reserve_floor(closure_kg, Some(floor_kg));
+            assert_eq!(limit_kg, floor_kg, "{sizing:?}");
+            let gear = config.at_sized_closure_mass_with_landing_floor(closure_kg, Some(floor_kg));
+            assert_eq!(
+                gear.mass_model.flops_structure.design_landing_mass_kg,
+                Some(floor_kg),
+                "{sizing:?}"
+            );
+            // The landing limit no longer follows the declared MTOW.
+            let mut declared = config.clone();
+            declared.requirements.mtow_kg *= 1.5;
+            assert_eq!(
+                declared.design_landing_mass_with_reserve_floor(closure_kg, Some(floor_kg)),
+                floor_kg
+            );
+        }
+        // A fixed requirement keeps the fraction of the closure (no floor).
+        let mut fixed = a320(DesignMode::CleanSheet);
+        fixed.optimizer.objective.mtow_sizing = MtowSizing::FixedRequirement;
+        assert_eq!(
+            fixed.design_landing_mass_with_reserve_floor(70_000.0, Some(69_000.0)),
+            fixed.design_landing_mass_at_closure(70_000.0)
         );
     }
 

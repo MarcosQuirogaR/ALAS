@@ -681,13 +681,19 @@ pub fn handles(
         2.0,
     ));
 
-    if let Some(&y_pos) = g.engine.spanwise_positions_m.iter().find(|y| **y > 0.0) {
+    if let Some((engine_index, &y_pos)) = g
+        .engine
+        .spanwise_positions_m
+        .iter()
+        .enumerate()
+        .find(|(_, y)| **y > 0.0)
+    {
         if let Ok(planform) = g.wing.transport_planform(design) {
             let x0 = g.wing.root_datum_x_m + design.wing_x_shift_m;
             let le = planform.leading_edge_x_at(y_pos).unwrap_or(0.0);
             let x_inlet = x0 + le - g.engine.inlet_x_offset_m;
             let z_wing = interpolated_wing_z(config, &planform, y_pos);
-            let z = z_wing + g.engine.z_m;
+            let z = z_wing + g.engine.z_for_engine_m(engine_index);
             let length = g.engine.nacelle_length_m();
             let prop = Discipline::Propulsion;
             out.push(handle(
@@ -826,7 +832,7 @@ fn is_generated_fuselage_section_handle(kind: HandleKind) -> bool {
 
 fn custom_section_scalar(values: &Value, handle: &Handle) -> Option<f64> {
     let index = handle.section_index?;
-    let component = handle.component?;
+    handle.component?;
     let pointer = match handle.kind {
         HandleKind::CustomWingSectionSpan
         | HandleKind::CustomWingSectionLeadingEdge
@@ -856,7 +862,6 @@ fn custom_section_scalar(values: &Value, handle: &Handle) -> Option<f64> {
         HandleKind::CustomFuselageSectionZ => "z_m",
         _ => return None,
     };
-    let _ = component;
     values
         .pointer(pointer)?
         .as_array()?
@@ -1128,16 +1133,11 @@ fn value_with_scalar(handle: &Handle, current: &Value, scalar: f64) -> Value {
 impl AppState {
     /// The handles for the current aircraft and focus.
     pub fn sandbox_handles(&self) -> Vec<Handle> {
-        let (Some(config), Some(design)) = (self.typed_config(), self.current_design()) else {
-            return Vec::new();
-        };
-        handles(&config, &design, self.sandbox.focus())
+        self.sandbox_handles_shared().to_vec()
     }
 
     fn sandbox_field(&self, id: &str) -> Option<SandboxField> {
-        fields::inventory(&self.schema)
-            .into_iter()
-            .find(|f| f.id == id)
+        self.sandbox.fields.iter().find(|f| f.id == id).cloned()
     }
 
     /// Start dragging `handle`. `points_per_canvas_unit` is the widget scale

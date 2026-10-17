@@ -3,7 +3,7 @@
 
 //! Focused contracts for the CPACS renderer's optional analysis branches.
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 use alas_aero::analysis::PolarSweep;
 use alas_config::design_variables::DesignVector;
@@ -157,6 +157,7 @@ fn a_complete_mission_is_exported_as_a_cpacs_trajectory_summary() {
         },
         air_speed_m_s: 250.0,
         air_speed_reference: alas_config::mission::SpeedReference::TrueAirspeed,
+        speed_caps: alas_config::mission::SpeedCaps::default(),
         true_course_rad: 0.0,
         temperature_deviation_k: 0.0,
         number_control_points: 2,
@@ -255,11 +256,11 @@ fn test_report(config: &AlasConfig) -> AnalysisReport {
     let component_masses = component_names
         .into_iter()
         .map(|name| (name.to_owned(), 1.0))
-        .collect::<HashMap<_, _>>();
+        .collect::<BTreeMap<_, _>>();
     let mass_coordinates = component_names
         .into_iter()
         .map(|name| (name.to_owned(), [1.0, 0.0, 0.0]))
-        .collect::<HashMap<_, _>>();
+        .collect::<BTreeMap<_, _>>();
 
     AnalysisReport {
         design: DesignVector::default(),
@@ -291,7 +292,7 @@ fn test_report(config: &AlasConfig) -> AnalysisReport {
         },
         static_margin: 0.1,
         x_neutral_point: 30.0,
-        geometry_summary: HashMap::new(),
+        geometry_summary: BTreeMap::new(),
         component_masses,
         flops_mass_buildup: None,
         mass_coordinates,

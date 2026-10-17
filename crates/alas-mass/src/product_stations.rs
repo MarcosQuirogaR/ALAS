@@ -128,7 +128,7 @@ pub fn tank_reference(config: &AlasConfig, design: &DesignVector) -> (f64, Optio
     let density = crate::tanks::inventory_density_kg_m3(config);
     let published_l = presets::get(&config.preset)
         .ok()
-        .filter(|preset| *design == preset.design_vector)
+        .filter(|preset| design.same_geometry(&preset.design_vector))
         .and_then(|preset| preset.reference.usable_fuel_volume_l);
     (density, published_l)
 }

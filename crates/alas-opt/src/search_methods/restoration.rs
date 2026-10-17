@@ -162,12 +162,7 @@ fn evaluate_wave(
         .filter(|point| point.tier == super::Tier::PreGateFailed)
         .count();
     for point in &samples {
-        if point.valid() && result.first_feasible_cost.is_none() {
-            result.first_feasible_cost = Some(point.cost);
-        }
-        if point.feasibility_key() < result.winner.feasibility_key() {
-            result.winner = point.clone();
-        }
+        super::lshade_de::track_winner(&mut result.first_feasible_cost, &mut result.winner, point);
     }
     result.cancelled |= scope.requested();
     samples

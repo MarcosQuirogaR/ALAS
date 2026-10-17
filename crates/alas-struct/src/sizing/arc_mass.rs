@@ -48,7 +48,7 @@ pub(super) fn spar_stretches(
     wsg: &WingStructureGeometry,
     sizing: &WingboxSizing,
     spar_index: usize,
-) -> (Vec<f64>, Vec<f64>) {
+) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
     let spar = &sizing.spars[spar_index];
     let count = sizing.y_stations.len();
     let mut x = Vec::with_capacity(count);
@@ -68,11 +68,15 @@ pub(super) fn spar_stretches(
     let upper_stretch = stretch(&sizing.y_stations, &x, &upper);
     let lower_stretch = stretch(&sizing.y_stations, &x, &lower);
     let cap_pair = upper_stretch
-        .into_iter()
-        .zip(lower_stretch)
+        .iter()
+        .zip(&lower_stretch)
         .map(|(a, b)| a + b)
         .collect();
-    (cap_pair, stretch(&sizing.y_stations, &x, &middle))
+    (
+        cap_pair,
+        stretch(&sizing.y_stations, &x, &middle),
+        lower_stretch,
+    )
 }
 
 /// Update semi-wing cap/web mass and return the complete, mass-conserving
@@ -87,7 +91,11 @@ pub(super) fn update(
     if count < 2
         || sizing.chord.len() != count
         || sizing.spars.iter().any(|spar| {
-            spar.a_cap.len() != count || spar.h.len() != count || spar.t_cap.len() != count
+            spar.a_cap.len() != count
+                || spar.h.len() != count
+                || spar.t_cap.len() != count
+                || spar.t_web.len() != count
+                || spar.lower_extra_area.len() != count
         })
         || sizing
             .y_stations
@@ -100,10 +108,12 @@ pub(super) fn update(
     let mut caps = vec![0.0; count];
     let mut webs = vec![0.0; count];
     for (i, spar) in sizing.spars.iter().enumerate() {
-        let (cap_pair_stretch, web_stretch) = spar_stretches(wsg, sizing, i);
+        let (cap_pair_stretch, web_stretch, lower_stretch) = spar_stretches(wsg, sizing, i);
         for j in 0..count {
-            caps[j] += cap.rho_kg_m3 * spar.a_cap[j] * cap_pair_stretch[j];
-            webs[j] += web.rho_kg_m3 * spar.t_web * spar.h[j] * web_stretch[j];
+            caps[j] += cap.rho_kg_m3
+                * (spar.a_cap[j] * cap_pair_stretch[j]
+                    + spar.lower_extra_area[j] * lower_stretch[j]);
+            webs[j] += web.rho_kg_m3 * spar.t_web[j] * spar.h[j] * web_stretch[j];
         }
     }
     sizing.mass_breakdown_kg.spar_caps = integrate(&caps, &sizing.y_stations);

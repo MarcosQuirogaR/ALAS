@@ -301,6 +301,14 @@ pub trait FuelBurnModel {
 
     /// Fuel flow at ground idle with every engine running, kg/s.
     fn taxi_fuel_flow_kg_s(&self) -> Result<f64, FuelModelError>;
+
+    /// Elevation of the destination aerodrome above mean sea level, m: the
+    /// datum of the holding altitude, which EASA AMC1 CAT.OP.MPA.181 sets at
+    /// 1,500 ft *above aerodrome elevation*. A model that knows no aerodrome
+    /// elevation returns zero (a sea-level aerodrome).
+    fn destination_elevation_m(&self) -> f64 {
+        0.0
+    }
 }
 
 #[cfg(test)]

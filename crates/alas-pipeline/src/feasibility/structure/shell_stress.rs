@@ -5,7 +5,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::{error, FindingCode, PhysicalFinding};
+use super::{error, warning, FindingCode, PhysicalFinding};
 use alas_struct::nastran::{StaticCaseIdentity, StaticResult, StaticShellStressCase};
 
 pub(super) fn append(
@@ -51,12 +51,43 @@ pub(super) fn append(
                 None, None, "",
             )),
         }
+        // Elements in load-introduction or constraint zones are not assessed
+        // (Saint-Venant; see alas_struct::mesh::load_introduction), but their
+        // peak is surfaced so a reviewer sees what was set aside.
+        if let Some((actual, allowable)) = scan(inputs, case, Zone::LoadIntroduction) {
+            if actual > allowable {
+                findings.push(warning(
+                    FindingCode::StructuralStrengthViolation,
+                    format!("{solver} {} shell stress exceeds its allowable only inside load-introduction or constraint zones (RBE3 spiders, engine mass, root clamp), which are not assessed; local detail review required", case.name),
+                    Some(actual), Some(allowable), "Pa",
+                ));
+            }
+        }
     }
+}
+
+/// Which shells a scan covers.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Zone {
+    /// Shells outside every load-introduction or constraint zone.
+    Assessed,
+    /// Shells inside a zone.
+    LoadIntroduction,
 }
 
 fn governing_utilization(
     inputs: &crate::structural::EvaluationInputs,
     case: &StaticShellStressCase,
+) -> Option<(f64, f64)> {
+    scan(inputs, case, Zone::Assessed)
+}
+
+/// Validate every sample of `case`, then return the largest
+/// `(stress, allowable)` ratio among the shells of `zone`.
+fn scan(
+    inputs: &crate::structural::EvaluationInputs,
+    case: &StaticShellStressCase,
+    zone: Zone,
 ) -> Option<(f64, f64)> {
     let expected: BTreeMap<_, _> = inputs
         .shell_identities()
@@ -95,7 +126,10 @@ fn governing_utilization(
         // proxy as the product MAT1 deck, not an orthotropic laminate failure
         // criterion. Shell checks do not supply the absent CBAR cap stresses.
         let actual = vm.max(sample.von_mises_pa);
-        if actual / allowable > governing.0 / governing.1 {
+        let in_zone = inputs.in_load_introduction(sample.element_id);
+        if in_zone == (zone == Zone::LoadIntroduction)
+            && actual / allowable > governing.0 / governing.1
+        {
             governing = (actual, allowable);
         }
         if !fibers

@@ -10,6 +10,7 @@
 
 pub mod drag;
 pub mod fields;
+mod handle_cache;
 pub mod persist;
 pub mod policy;
 pub mod quick;

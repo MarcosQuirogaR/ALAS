@@ -95,7 +95,10 @@ pub(super) fn build(name: &str) -> io::Result<Model> {
                 ),
             }
         });
-    let mounted = wing_mounted_relief(&config.geometry.engine, &config.mass_model, &req);
+    let mounted = wing_mounted_relief(&config.geometry.engine, &config.mass_model, &req)
+        .with_torque_sources(alas_struct::torque_sources::TorqueSources::from_config(
+            &config, &req,
+        ));
     let skin = materials::get(&cfg.skin_material).map_err(io::Error::other)?;
     let web = materials::get(&cfg.spar_web_material).map_err(io::Error::other)?;
     let cap = materials::get(&cfg.spar_cap_material).map_err(io::Error::other)?;
@@ -190,11 +193,11 @@ fn section(
     for spar in &active {
         let x = spar.chord_fraction * sizing.chord[station];
         let cap_area = 2.0 * spar.a_cap[station];
-        let web_area = web.e_pa / cap.e_pa * spar.t_web * spar.h[station];
+        let web_area = web.e_pa / cap.e_pa * spar.t_web[station] * spar.h[station];
         area += cap_area + web_area;
         first += (cap_area + web_area) * x;
         second += cap_area * (x * x + spar.w_cap[station].powi(2) / 12.0)
-            + web_area * (x * x + spar.t_web.powi(2) / 12.0);
+            + web_area * (x * x + spar.t_web[station].powi(2) / 12.0);
     }
     let mut enclosed = 0.0;
     let mut torsion_compliance = 0.0;
@@ -213,7 +216,7 @@ fn section(
             / skin.g_pa();
     }
     for spar in active.first().into_iter().chain(active.last()) {
-        torsion_compliance += spar.h[station] / spar.t_web * cap.g_pa() / web.g_pa();
+        torsion_compliance += spar.h[station] / spar.t_web[station] * cap.g_pa() / web.g_pa();
     }
     Section {
         area,

@@ -19,7 +19,7 @@ mod perf_support;
 use alas_config::airports::Airport;
 use alas_perf::performance::{
     build_matching_chart, density_ratio, tw_cruise_constraint, tw_oei_climb_constraint,
-    tw_takeoff_constraint, ws_landing_limit,
+    tw_takeoff_constraint, ws_landing_limit, JET_DRY_LANDING_SHARE,
 };
 use alas_testkit::{Comparison, Tier};
 use perf_support::{compare_arrays, section, AirportInput};
@@ -201,7 +201,9 @@ fn build_matching_chart_matches_the_fixture() {
             case.oei_gradient,
             case.k_land,
             case.oei_climb_cl,
-            case.oei_climb_delta_cd,
+            // The fixture's fallback case was generated with the frozen
+            // default 0.025; the live default is checked separately below.
+            case.oei_climb_delta_cd.or(Some(0.025)),
             case.tw_design,
             case.n_ws_points,
             case.ws_min_pa,
@@ -261,9 +263,35 @@ fn build_matching_chart_matches_the_fixture() {
             c.scalar(
                 &format!("{name}: ws_land_limits[{apt_name}]"),
                 *limit,
-                *want,
+                // The frozen Python chart compared the actual-distance limit
+                // with the full LDA. The product chart applies the 0.6 dry
+                // field-length share (14 CFR 121.195(b)) once, so the
+                // expected limit scales by JET_DRY_LANDING_SHARE. An omitted
+                // k_land falls back to the product default 0.505 m/Pa instead
+                // of the frozen 0.60.
+                *want * JET_DRY_LANDING_SHARE * case.k_land.unwrap_or(0.60)
+                    / case.k_land.unwrap_or(0.505),
             );
         }
     }
     c.finish();
+}
+
+#[test]
+fn an_omitted_oei_flap_increment_falls_back_to_the_live_configuration_default() {
+    // The generated fixture pins the frozen 0.025; the product default is the
+    // handbook take-off flap increment of `PerformanceConfig::default()`.
+    let airports = [Airport::custom(
+        "Fixture", 0.0, 3500.0, 3500.0, 0.0, 0.0, 0.0,
+    )];
+    let chart = |delta: Option<f64>| {
+        build_matching_chart(
+            0.02, 0.045, 0.78, 11_000.0, 79_000.0, 122.0, 2, &airports, None, None, None, None,
+            None, None, delta, None, 10, None, None,
+        )
+        .tw_oei_climb
+    };
+    let live = alas_config::PerformanceConfig::default().oei_climb_delta_cd;
+    assert_eq!(chart(None), chart(Some(live)));
+    assert!(chart(None) < chart(Some(0.025)));
 }

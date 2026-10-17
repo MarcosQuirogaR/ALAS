@@ -7,6 +7,8 @@
 // contract, while the public renderer itself returns typed errors.
 #![allow(clippy::expect_used)]
 
+#[path = "support/prop_tables.rs"]
+mod prop_tables;
 use alas_uav::propulsion_electric::{
     enrich_cpacs35_with_uav_electrical, render_uav_cpacs35_toolspecific,
     simulate_catalogue_mission, solve_catalogue_powertrain, CataloguePowertrainSelection,
@@ -14,9 +16,11 @@ use alas_uav::propulsion_electric::{
     UAV_ELECTRICAL_NAMESPACE,
 };
 use alas_uav::{estimate_procurement_cost, full_catalog, ProcurementSelection};
+use prop_tables::use_synthetic_tables;
 
 #[test]
 fn selected_electrical_data_renders_as_a_namespace_bound_cpacs_extension() {
+    use_synthetic_tables();
     let data = electrical_data();
     let xml = render_uav_cpacs35_toolspecific(&data).expect("reviewed data renders");
 
@@ -35,6 +39,7 @@ fn selected_electrical_data_renders_as_a_namespace_bound_cpacs_extension() {
 
 #[test]
 fn extension_is_inserted_without_taking_ownership_of_the_cpacs_document() {
+    use_synthetic_tables();
     let document = "<?xml version=\"1.0\"?><cpacs><header/></cpacs>";
     let enriched =
         enrich_cpacs35_with_uav_electrical(document, "alas_uav_cpacs35.xsd", &electrical_data())
@@ -64,6 +69,7 @@ fn extension_is_inserted_without_taking_ownership_of_the_cpacs_document() {
 
 #[test]
 fn renderer_escapes_catalogue_text_and_rejects_an_empty_propulsor_count() {
+    use_synthetic_tables();
     let mut data = electrical_data();
     data.selection.battery_id = "pack&<unsafe>".to_owned();
     let escaped = render_uav_cpacs35_toolspecific(&data).expect("text is escaped");

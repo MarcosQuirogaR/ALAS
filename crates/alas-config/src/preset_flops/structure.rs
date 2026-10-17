@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
+use super::composite::declared_composite_utilization;
 use crate::{
     FlopsNozzleScope, FlopsStarterScope, FlopsStructureConfig, FlopsTurbopropConfig,
     PropellerConstruction, PylonMassMethod,
@@ -67,19 +68,6 @@ fn certified_maximum_operating_altitude_m(name: &str) -> Option<f64> {
         "ATR72-600" => Some(25_000.0 * METERS_PER_FOOT),
         _ => None,
     }
-}
-
-/// Select the FLOPS `FCOMP` endpoint for a registered aircraft.
-///
-/// NASA/TM-2017-219627 Appendix D defines `FCOMP` as a technology coefficient
-/// in the wing mass fits, not as the aircraft's percentage of composite
-/// material. The retained primary evidence provides no aircraft-specific map
-/// from composite architecture or material percentage to that coefficient, so
-/// every preset keeps the published metallic-equation endpoint. This is an
-/// explicit evidence-limited baseline and does not claim that any aircraft is
-/// all-metal; a source-backed coefficient can replace it when one exists.
-fn declared_composite_utilization(_name: &str) -> f64 {
-    0.0
 }
 
 /// Exterior paint, FLOPS `WPAINT`, kg per square metre of wetted area.
@@ -341,26 +329,23 @@ mod tests {
     }
 
     #[test]
-    fn registered_composite_selection_keeps_the_explicit_unknown_baseline() {
-        for name in [
-            "AVE",
-            "A220-300",
-            "A320-200",
-            "A340-300",
-            "A380-800",
-            "ATR72-600",
-            "B787-9",
-            "DC-10",
+    fn registered_composite_selection_follows_the_construction_table() {
+        for (name, fcomp) in [
+            ("AVE", 0.125 / 0.30),
+            ("A220-300", 0.125 / 0.30),
+            ("B787-9", 0.125 / 0.30),
+            ("A380-800", 0.25 * 0.125 / 0.30),
+            ("A320-200", 0.0),
+            ("A340-300", 0.0),
+            ("ATR72-600", 0.0),
+            ("DC-10", 0.0),
         ] {
             let structure = declared_structure(name);
-            assert_eq!(
-                structure.composite_utilization, 0.0,
-                "{name} must retain the source-limited FLOPS baseline"
+            assert!(
+                (structure.composite_utilization - fcomp).abs() < 1e-12,
+                "{name}"
             );
-            assert_eq!(
-                structure.composite_utilization_interpretation(),
-                "declared FLOPS metallic-equation baseline; not an aircraft material percentage"
-            );
+            assert!(structure.validate().is_ok(), "{name}");
         }
     }
 }

@@ -288,7 +288,7 @@ fn custom_cabin_passenger_target_eligible(config: &AlasConfig) -> bool {
 /// that count is recomputed from geometry regardless of what is shown here.
 fn show_custom_cabin_passenger_target(state: &mut AppState, ui: &mut Ui) {
     let eligible = state
-        .typed_config()
+        .typed_config_arc()
         .is_some_and(|config| custom_cabin_passenger_target_eligible(&config));
     if !eligible {
         return;
@@ -338,7 +338,7 @@ fn show_custom_cabin_passenger_target(state: &mut AppState, ui: &mut Ui) {
 /// capacity or the payload a candidate carries.
 fn show_cargo_capacity_objective(state: &mut AppState, ui: &mut Ui) {
     let eligible = state
-        .typed_config()
+        .typed_config_arc()
         .is_some_and(|config| config.requirements.aircraft_type == "cargo");
     if !eligible {
         return;

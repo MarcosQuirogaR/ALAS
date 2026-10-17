@@ -351,6 +351,7 @@ fn test_result_fixture() -> CfdResults {
             name: config.airfoil_name.clone(),
             coordinates: Vec::new(),
             coordinate_hash: String::new(),
+            correction: None,
         });
     CfdResults {
         outcome: CfdOutcome::Unconverged,

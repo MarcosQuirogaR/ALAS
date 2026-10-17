@@ -1,32 +1,17 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! Reviewed dimensionless propeller data and bounded interpolation.
+//! Dimensionless propeller data and bounded interpolation.
 //!
-//! The legacy project carries the 436 official APC `PER3` performance files.
-//! Repeating their fixed-width text in the executable would obscure the data
-//! with headers and duplicate columns, so the fixture generator stores their
-//! exact displayed decimal samples in a compact binary bundle.  The bundle is
-//! deliberately decoded here rather than fitted or extrapolated: a requested
-//! speed must still be bracketed by source samples.
-
-use std::sync::OnceLock;
+//! Tables come from the user's local propeller data directory (see
+//! [`super::prop_data`]); nothing is embedded in the executable.  They are
+//! used as published: a requested speed and RPM must be bracketed by source
+//! samples, and nothing is fitted or extrapolated.
 
 use serde::Deserialize;
 
+use super::prop_data::{loaded_prop_tables, unavailable_reason};
 use super::ElectricPropulsionError;
-
-const APC_12X6E_FIXTURE: &str = include_str!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../../golden/prop_elec/apc_12x6e_fixture.json"
-));
-const APC_TABLE_BUNDLE: &[u8] = include_bytes!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../../golden/prop_elec/apc_performance_tables.bin"
-));
-const APC_TABLE_MAGIC: &[u8; 8] = b"ALASAPC1";
-const MPH_TO_M_S: f64 = 0.447_04;
-const INCH_TO_M: f64 = 0.0254;
 
 /// One Ct/Cp sample at one RPM and true airspeed.
 #[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
@@ -40,10 +25,10 @@ pub struct PropellerSample {
 }
 
 /// Propeller samples at one shaft speed.
-#[derive(Debug, Clone, PartialEq, Deserialize)]
-struct RpmCurve {
-    rpm: f64,
-    points: Vec<PropellerSample>,
+#[derive(Debug, Clone, PartialEq)]
+pub(super) struct RpmCurve {
+    pub(super) rpm: f64,
+    pub(super) points: Vec<PropellerSample>,
 }
 
 /// A source-bounded propeller Ct/Cp table.
@@ -53,34 +38,40 @@ pub struct PropellerPerformanceMap {
     model: String,
     source_file: String,
     diameter_m: f64,
+    pitch_m: f64,
     curves: Vec<RpmCurve>,
-}
-
-#[derive(Debug, Deserialize)]
-struct Fixture {
-    schema_version: u32,
-    source: FixtureSource,
-    curves: Vec<RpmCurve>,
-}
-
-#[derive(Debug, Deserialize)]
-struct FixtureSource {
-    propeller_id: String,
-    diameter_m: f64,
 }
 
 impl PropellerPerformanceMap {
+    pub(super) fn from_parts(
+        propeller_id: String,
+        model: String,
+        source_file: String,
+        diameter_m: f64,
+        pitch_m: f64,
+        curves: Vec<RpmCurve>,
+    ) -> Self {
+        Self {
+            propeller_id,
+            model,
+            source_file,
+            diameter_m,
+            pitch_m,
+            curves,
+        }
+    }
+
     /// Stable catalogue identifier for this table.
     pub fn propeller_id(&self) -> &str {
         &self.propeller_id
     }
 
-    /// Printed APC model designation associated with the source table.
+    /// Printed model designation associated with the source table.
     pub fn model(&self) -> &str {
         &self.model
     }
 
-    /// Original APC performance filename retained by the generated bundle.
+    /// Original performance filename of the imported table.
     pub fn source_file(&self) -> &str {
         &self.source_file
     }
@@ -88,6 +79,11 @@ impl PropellerPerformanceMap {
     /// Propeller diameter used by the dimensionless source table.
     pub fn diameter_m(&self) -> f64 {
         self.diameter_m
+    }
+
+    /// Propeller pitch in metres, from the table title.
+    pub fn pitch_m(&self) -> f64 {
+        self.pitch_m
     }
 
     /// Inclusive RPM bounds that have data at a requested flight speed.
@@ -136,132 +132,67 @@ impl PropellerPerformanceMap {
     }
 }
 
-/// Load every supplied APC performance table, including non-electric variants.
+/// Every table found in the user's propeller data directory.
 ///
 /// A table being available means that thrust and torque can be evaluated only
 /// within its documented speed/RPM envelope.  It does not assert that a
-/// particular motor, installation, or airframe is verified.
+/// particular motor, installation, or airframe is verified.  Fails with
+/// [`ElectricPropulsionError::PropellerDataUnavailable`] when no table is
+/// installed.
 pub fn apc_performance_maps() -> Result<&'static [PropellerPerformanceMap], ElectricPropulsionError>
 {
-    static TABLES: OnceLock<Result<Vec<PropellerPerformanceMap>, ElectricPropulsionError>> =
-        OnceLock::new();
-    TABLES
-        .get_or_init(parse_apc_table_bundle)
-        .as_ref()
-        .map(Vec::as_slice)
-        .map_err(Clone::clone)
+    let loaded = loaded_prop_tables();
+    if loaded.tables.is_empty() {
+        return Err(unavailable("any propeller", loaded));
+    }
+    Ok(loaded.tables.as_slice())
 }
 
-/// Resolve one APC source table by its stable catalogue identifier.
+/// Resolve one table by its stable catalogue identifier.
+///
+/// The manufacturer catalogue spells electric models with an `E` suffix while
+/// a table title may omit it (or the reverse), so the exact key is tried
+/// first, then the key without and with a trailing `e`.
 pub fn apc_performance_map(
     propeller_id: &str,
 ) -> Result<&'static PropellerPerformanceMap, ElectricPropulsionError> {
-    if propeller_id == "apc-12x6e" {
-        return apc_12x6e_performance_map();
+    let loaded = loaded_prop_tables();
+    if loaded.tables.is_empty() {
+        return Err(unavailable(propeller_id, loaded));
     }
-    // The manufacturer catalogue uses an `E` suffix while the generated APC
-    // tables retain the normalized PER3 identifier without that suffix.
-    let table_id = match propeller_id.strip_suffix('e') {
-        Some(id) if id.starts_with("apc-") => id,
-        _ => propeller_id,
-    };
-    apc_performance_maps()?
-        .iter()
-        .find(|table| table.propeller_id == table_id)
-        .ok_or_else(|| ElectricPropulsionError::UnsupportedPropeller {
-            id: propeller_id.to_owned(),
-        })
+    let appended = format!("{propeller_id}e");
+    let candidates = [
+        Some(propeller_id),
+        propeller_id.strip_suffix('e'),
+        Some(&appended),
+    ];
+    let tables: &'static [PropellerPerformanceMap] = loaded.tables.as_slice();
+    let found = candidates
+        .into_iter()
+        .flatten()
+        .find_map(|key| tables.iter().find(|table| table.propeller_id == key));
+    found.ok_or_else(|| ElectricPropulsionError::UnsupportedPropeller {
+        id: propeller_id.to_owned(),
+    })
 }
 
-/// Load the normalized user-supplied APC 12x6E performance table.
+/// The table for the 12x6E propeller (`apc-12x6e`), when installed.
 pub fn apc_12x6e_performance_map(
 ) -> Result<&'static PropellerPerformanceMap, ElectricPropulsionError> {
-    static TABLE: OnceLock<Result<PropellerPerformanceMap, ElectricPropulsionError>> =
-        OnceLock::new();
-    TABLE
-        .get_or_init(parse_apc_12x6e)
-        .as_ref()
-        .map_err(Clone::clone)
+    apc_performance_map("apc-12x6e")
 }
 
-fn parse_apc_12x6e() -> Result<PropellerPerformanceMap, ElectricPropulsionError> {
-    let fixture: Fixture = serde_json::from_str(APC_12X6E_FIXTURE).map_err(|error| {
-        ElectricPropulsionError::InvalidInput(format!(
-            "embedded APC 12x6E fixture is invalid JSON: {error}"
-        ))
-    })?;
-    if fixture.schema_version != 1 {
-        return Err(ElectricPropulsionError::InvalidInput(
-            "embedded APC 12x6E fixture has an unsupported schema or incomplete table".to_owned(),
-        ));
+fn unavailable(id: &str, loaded: &super::prop_data::LoadedTables) -> ElectricPropulsionError {
+    ElectricPropulsionError::PropellerDataUnavailable {
+        id: id.to_owned(),
+        reason: unavailable_reason(loaded),
     }
-    let table = PropellerPerformanceMap {
-        propeller_id: fixture.source.propeller_id,
-        model: "12x6E".to_owned(),
-        source_file: "PER3_12x6E.dat".to_owned(),
-        diameter_m: fixture.source.diameter_m,
-        curves: fixture.curves,
-    };
-    validate_table(&table, "embedded APC 12x6E fixture")?;
-    Ok(table)
 }
 
-fn parse_apc_table_bundle() -> Result<Vec<PropellerPerformanceMap>, ElectricPropulsionError> {
-    let mut reader = BundleReader::new(APC_TABLE_BUNDLE);
-    if reader.take(APC_TABLE_MAGIC.len())? != APC_TABLE_MAGIC {
-        return Err(bundle_error("has an invalid magic header"));
+impl PropellerPerformanceMap {
+    pub(super) fn validate(&self, source_name: &str) -> Result<(), ElectricPropulsionError> {
+        validate_table(self, source_name)
     }
-    let schema_version = reader.u16()?;
-    if schema_version != 1 {
-        return Err(bundle_error("has an unsupported schema version"));
-    }
-    let table_count = usize::from(reader.u16()?);
-    if table_count == 0 {
-        return Err(bundle_error("contains no propeller tables"));
-    }
-    let mut tables = Vec::with_capacity(table_count);
-    for _ in 0..table_count {
-        let propeller_id = reader.ascii_string()?;
-        let model = reader.ascii_string()?;
-        let source_file = reader.ascii_string()?;
-        let diameter_m = f64::from(reader.u32()?) * 1.0e-4 * INCH_TO_M;
-        let _pitch_m = f64::from(reader.u32()?) * 1.0e-4 * INCH_TO_M;
-        let curve_count = usize::from(reader.u16()?);
-        let mut curves = Vec::with_capacity(curve_count);
-        for _ in 0..curve_count {
-            let rpm = f64::from(reader.u32()?);
-            let sample_count = usize::from(reader.u16()?);
-            let mut points = Vec::with_capacity(sample_count);
-            for _ in 0..sample_count {
-                points.push(PropellerSample {
-                    speed_m_s: f64::from(reader.u16()?) * 0.01 * MPH_TO_M_S,
-                    thrust_coefficient: f64::from(reader.i16()?) * 1.0e-4,
-                    power_coefficient: f64::from(reader.i16()?) * 1.0e-4,
-                });
-            }
-            curves.push(RpmCurve { rpm, points });
-        }
-        let table = PropellerPerformanceMap {
-            propeller_id,
-            model,
-            source_file,
-            diameter_m,
-            curves,
-        };
-        validate_table(&table, "embedded APC performance bundle")?;
-        tables.push(table);
-    }
-    if reader.remaining() != 0 {
-        return Err(bundle_error("has trailing bytes"));
-    }
-    tables.sort_by(|left, right| left.propeller_id.cmp(&right.propeller_id));
-    if tables
-        .windows(2)
-        .any(|pair| pair[0].propeller_id == pair[1].propeller_id)
-    {
-        return Err(bundle_error("contains duplicate propeller identifiers"));
-    }
-    Ok(tables)
 }
 
 fn validate_table(
@@ -299,62 +230,6 @@ fn validate_table(
         previous_rpm = curve.rpm;
     }
     Ok(())
-}
-
-struct BundleReader<'a> {
-    bytes: &'a [u8],
-    offset: usize,
-}
-
-impl<'a> BundleReader<'a> {
-    fn new(bytes: &'a [u8]) -> Self {
-        Self { bytes, offset: 0 }
-    }
-
-    fn remaining(&self) -> usize {
-        self.bytes.len().saturating_sub(self.offset)
-    }
-
-    fn take(&mut self, count: usize) -> Result<&'a [u8], ElectricPropulsionError> {
-        let end = self
-            .offset
-            .checked_add(count)
-            .ok_or_else(|| bundle_error("overflows"))?;
-        let bytes = self
-            .bytes
-            .get(self.offset..end)
-            .ok_or_else(|| bundle_error("ends before a complete table"))?;
-        self.offset = end;
-        Ok(bytes)
-    }
-
-    fn u16(&mut self) -> Result<u16, ElectricPropulsionError> {
-        let bytes = self.take(2)?;
-        Ok(u16::from_le_bytes([bytes[0], bytes[1]]))
-    }
-
-    fn u32(&mut self) -> Result<u32, ElectricPropulsionError> {
-        let bytes = self.take(4)?;
-        Ok(u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
-    }
-
-    fn i16(&mut self) -> Result<i16, ElectricPropulsionError> {
-        let bytes = self.take(2)?;
-        Ok(i16::from_le_bytes([bytes[0], bytes[1]]))
-    }
-
-    fn ascii_string(&mut self) -> Result<String, ElectricPropulsionError> {
-        let count = usize::from(self.take(1)?[0]);
-        let bytes = self.take(count)?;
-        if !bytes.is_ascii() {
-            return Err(bundle_error("contains non-ASCII text"));
-        }
-        String::from_utf8(bytes.to_vec()).map_err(|_| bundle_error("contains invalid text"))
-    }
-}
-
-fn bundle_error(detail: &str) -> ElectricPropulsionError {
-    ElectricPropulsionError::InvalidInput(format!("embedded APC performance bundle {detail}"))
 }
 
 fn sample_at_speed(curve: &RpmCurve, speed_m_s: f64) -> Option<PropellerSample> {

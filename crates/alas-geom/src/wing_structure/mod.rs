@@ -199,7 +199,13 @@ impl WingStructureGeometry {
         let sweep_out = planform.outboard_le_sweep_deg.to_radians();
 
         let dx_break = planform.kink.leading_edge_x_m;
-        let dx_tip = planform.tip.leading_edge_x_m;
+        // The structural box ends on the straight edges the design tip chord belongs to; a
+        // swept-back tip (aerodynamic loft only) is not part of the box.
+        let dx_tip = if planform.tip_rake.is_some() {
+            dx_break + (semi_span - y_break) * sweep_out.tan()
+        } else {
+            planform.tip.leading_edge_x_m
+        };
 
         // The frozen reference places each spar's break and tip reference point
         // along the leading-edge-normal rib cut at that station. Across a

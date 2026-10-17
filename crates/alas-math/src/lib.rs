@@ -18,6 +18,12 @@
 //! [`lstsq::least_squares`], the overdetermined Householder-QR fit that a
 //! curve-fitting caller needs and that a square solve cannot answer.
 //!
+//! [`clamped_bspline`] evaluates a clamped B-spline of any degree from its knots
+//! and coefficients with derivatives to third order, [`gauss`] holds the
+//! Gauss-Legendre rules, [`spline_fit`] fits a spline to weighted samples under
+//! equality constraints and a derivative roughness penalty, and [`special`]
+//! the gamma and digamma functions.
+//!
 //! Two of those are both "a cubic through the same points" and are not
 //! interchangeable. [`CubicSpline`] takes an explicit first- or
 //! second-derivative condition at each end and is the object SciPy's
@@ -27,13 +33,19 @@
 //! near the ends of the data, so a caller picks the one its upstream picked.
 
 mod bicubic;
+pub mod block_lu;
 mod bspline;
 mod chebyshev;
+pub mod clamped_bspline;
+pub mod gauss;
 pub mod hybrd;
 mod interp;
 pub mod linalg;
 pub mod lstsq;
+pub mod special;
 mod spline;
+pub mod spline_fit;
+pub mod stage_profile;
 
 pub use bicubic::{Axis, BicubicSpline, BicubicSplineError};
 pub use bspline::{CubicBSpline, CubicBSplineError};

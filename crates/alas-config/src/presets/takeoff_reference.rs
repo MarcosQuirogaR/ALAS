@@ -60,10 +60,14 @@ pub fn published_takeoff_reference(name: &str) -> Option<&'static PublishedTakeo
 pub(super) fn apply(preset: &mut AircraftPreset) {
     if let Some(reference) = published_takeoff_reference(preset.name) {
         let performance = preset.performance.get_or_insert_with(Default::default);
-        let ratio = performance.v2_vstall_factor;
+        // The model flies the effective V2/VSR of the CS 25.107 rule
+        // (selected factor, V2MIN 1.13 or 1.08 VSR, 1.10 VMC estimate), so
+        // the published V2 minimum is inverted with that ratio and the model
+        // reproduces it by construction.
+        let ratio = performance.takeoff_speed_ratios().v2;
         performance.cl_max_to = reference.cl_max_to(ratio);
         performance.cl_max_to_source = format!(
-            "{}; effective model CLmax_TO recovered as 2*m*g/(rho*S*(V2_min/{ratio})^2), rho={} kg/m^3; {}",
+            "{}; effective model CLmax_TO recovered as 2*m*g/(rho*S*(V2_min/{ratio:.4})^2), rho={} kg/m^3; {}",
             reference.source, reference.density_kg_m3, reference.applicability
         );
     }
@@ -77,7 +81,7 @@ const REFERENCES: [PublishedTakeoffReference; 1] = [PublishedTakeoffReference {
     density_kg_m3: 1.225,
     speed_uncertainty_m_s: KNOT_M_S,
     source: "ATR 72-600 PW127M/N Factsheet, 2020, p.2: Take-off speed (V2 min @ MTOW) 116 KCAS; weight table includes option-1 MTOW 23,000 kg and wing area 61 m^2; https://www.atr-aircraft.com/wp-content/uploads/2020/07/Factsheets_-_ATR_72-600.pdf",
-    applicability: "The single family-wide V2 minimum line is not column-paired with the 22,800 kg basic or 23,000 kg optional MTOW; assigning it to the preset's 23,000 kg option is a declared applicability assumption. The minimum is taken as the model-selected V2; retained V2/VS1g 1.20 is a model convention, rather than the twin-turboprop 25.107(b) stall floor 1.13. Flap configuration and whether V2 min is stall-, control- or climb-limited are unpublished. Effective lift recovery does not establish measured CLmax, VMC or a certified V2 schedule; speed reconstruction is an input check, not independent validation. Source CAS is interpreted on the ISA sea-level equivalent-density basis.",
+    applicability: "The single family-wide V2 minimum line is not column-paired with the 22,800 kg basic or 23,000 kg optional MTOW; assigning it to the preset's 23,000 kg option is a declared applicability assumption. The minimum is taken as the model-selected V2; the model V2/VSR is the CS 25.107 rule max(selected 1.20, V2MIN 1.13 VSR, 1.10 VMC estimate = 1.10 x 1.13 VSR) = 1.243, so the published minimum is inverted with that ratio. Flap configuration and whether V2 min is stall-, control- or climb-limited are unpublished. Effective lift recovery does not establish measured CLmax, VMC or a certified V2 schedule; speed reconstruction is an input check, not independent validation. Source CAS is interpreted on the ISA sea-level equivalent-density basis.",
 }];
 
 #[cfg(test)]
@@ -126,7 +130,9 @@ mod tests {
             .ok_or("ATR performance is absent")?;
         let reference = published_takeoff_reference(preset.name).ok_or("ATR source is absent")?;
         assert!(
-            (performance.cl_max_to / reference.cl_max_to(performance.v2_vstall_factor) - 1.0).abs()
+            (performance.cl_max_to / reference.cl_max_to(performance.takeoff_speed_ratios().v2)
+                - 1.0)
+                .abs()
                 < 1e-12
         );
         assert!(performance.cl_max_to_source.contains("V2 min @ MTOW"));

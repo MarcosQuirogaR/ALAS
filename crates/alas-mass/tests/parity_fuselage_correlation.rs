@@ -62,6 +62,7 @@ impl DesignVectorRecord {
             bump_upper_rear: self.bump_upper_rear,
             bump_lower_mid: self.bump_lower_mid,
             bump_lower_rear: self.bump_lower_rear,
+            mtow_kg: None,
         }
     }
 }

@@ -47,6 +47,28 @@ pub struct LoadCase {
     pub total_force_n: f64,
 }
 
+impl LoadCase {
+    /// +1 for a lift acting upward on the semi-wing, -1 when the total force is
+    /// negative (push-down).
+    pub(crate) fn lift_sign(&self) -> f64 {
+        if self.total_force_n >= 0.0 {
+            1.0
+        } else {
+            -1.0
+        }
+    }
+
+    /// The sign of the gravity vector along the structural vertical: -1 for a
+    /// non-negative load factor, +1 for a negative one.
+    pub(crate) fn gravity_sign(&self) -> f64 {
+        if self.load_factor >= 0.0 {
+            -1.0
+        } else {
+            1.0
+        }
+    }
+}
+
 /// Pull-up ultimate / push-down ultimate / 1g level.
 ///
 /// Reuses [`DesignRequirements`]' own `ultimate_load_factor` /
@@ -127,6 +149,14 @@ pub struct WingInertiaRelief {
     /// Wing-mounted point masses as `(spanwise station m, mass kg)`, one entry
     /// per item on the modelled semi-wing.
     pub point_masses_kg: Vec<(f64, f64)>,
+    /// The torque sources the strength cases also carry (engine inertia and
+    /// thrust offsets, section moment, flaps, ailerons), resolved on the
+    /// station grid. Empty for the frozen reference law and plain callers.
+    pub torque: crate::torque_sources::PreparedTorque,
+    /// Lower bound on the rib count, set by the relieved-load fixed point when
+    /// the integer rib count cycles between two values (see
+    /// `sizing::scoped::solve_relieved`). Zero means no floor.
+    pub rib_count_floor: i64,
 }
 
 impl WingInertiaRelief {
@@ -474,6 +504,7 @@ mod tests {
         let relief = WingInertiaRelief {
             running_mass_kg_m: vec![200.0, 100.0],
             point_masses_kg: vec![(4.0, 2_500.0)],
+            ..Default::default()
         };
         // Trapezoid of 200 -> 100 over 10 m is 1 500 kg, plus the 2 500 kg item.
         assert!((relief.total_mass_kg(&y) - 4_000.0).abs() < 1e-9);

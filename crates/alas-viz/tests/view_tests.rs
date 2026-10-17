@@ -3,6 +3,10 @@
 
 //! Unit and property tests for `alas-viz` scene rendering and transforms.
 
+// A test asserts on values it constructed or loaded from a fixture it
+// controls, so a failed unwrap there is the assertion failing.
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 use alas_report::scene::{
     Color, Fill, Point2D, Scene, SceneElement, Stroke, TextAlign, TextBaseline,
 };

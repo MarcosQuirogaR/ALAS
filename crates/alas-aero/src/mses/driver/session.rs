@@ -158,8 +158,22 @@ impl Mses {
         result.cdw = cdw;
         result.xtr_top = xtr_top;
         result.xtr_bot = xtr_bot;
-        result.status = polar_completion_status(alphas.len(), converged);
-        if result.status == MsesStatus::PartialConvergence {
+        let converged_points = result
+            .alpha_deg
+            .iter()
+            .copied()
+            .zip(result.cl.iter().copied())
+            .collect::<Vec<_>>();
+        result.point_classes =
+            classify_requested_points(alphas.len(), &result.point_diagnostics, &converged_points);
+        let outside = result.count_class(MsesPointClass::OutsideValidityDomain);
+        result.status = classified_completion_status(alphas.len(), converged, outside);
+        if result.status == MsesStatus::OutsideValidityDomain {
+            result.error = Some(format!(
+                "MSES converged at {converged} of {} requested alpha points; the other {outside} show                  separated flow and lie outside the section's attached-flow validity domain",
+                alphas.len()
+            ));
+        } else if result.status == MsesStatus::PartialConvergence {
             result.error = Some(if outcome.cancelled {
                 format!(
                     "MSES sweep cancelled after {converged} of {} requested alpha points",
@@ -167,8 +181,9 @@ impl Mses {
                 )
             } else {
                 format!(
-                    "MSES converged at {converged} of {} requested alpha points",
-                    alphas.len()
+                    "MSES converged at {converged} of {} requested alpha points ({outside} outside the                      attached-flow domain, {} solver failures)",
+                    alphas.len(),
+                    result.count_class(MsesPointClass::SolverFailure)
                 )
             });
         } else if outcome.cancelled {
@@ -407,7 +422,9 @@ impl Mses {
                                     // Never extract from a failed exact-target
                                     // attempt: restore the known-good off-target
                                     // anchor so mplot reads a converged state.
-                                    let _ = std::fs::copy(&anchor_dst, &anchor_src);
+                                    if let Err(error) = std::fs::copy(&anchor_dst, &anchor_src) {
+                                        return result.into_error(anchor_restore_message(&error));
+                                    }
                                 }
                             }
                             Err(failure) if cancelled(&failure) => {
@@ -415,7 +432,9 @@ impl Mses {
                                     .into_error("MSES pressure analysis cancelled".to_owned());
                             }
                             Err(_) => {
-                                let _ = std::fs::copy(&anchor_dst, &anchor_src);
+                                if let Err(error) = std::fs::copy(&anchor_dst, &anchor_src) {
+                                    return result.into_error(anchor_restore_message(&error));
+                                }
                             }
                         }
                     }
@@ -425,11 +444,19 @@ impl Mses {
                     // reason to discard an already-known-good converged
                     // candidate.
                     Ok(BridgeOutcome::Exhausted) | Err(_) => {
-                        let _ = std::fs::copy(&anchor_dst, &anchor_src);
+                        if let Err(error) = std::fs::copy(&anchor_dst, &anchor_src) {
+                            return result.into_error(anchor_restore_message(&error));
+                        }
                     }
                 }
             }
         }
         self.finish_pressure_result(result, workdir.path(), converged_alpha, cancel)
     }
+}
+
+/// Failure text when the converged off-target anchor cannot be restored, so
+/// MPlot would otherwise read the failed exact-target state.
+fn anchor_restore_message(error: &std::io::Error) -> String {
+    format!("MSES pressure analysis could not restore the converged anchor state: {error}")
 }

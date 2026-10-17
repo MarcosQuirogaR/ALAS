@@ -356,11 +356,56 @@ fn the_atr_turboprop_evaluates_from_shaft_power_and_never_from_a_thrust() {
 }
 
 #[test]
-fn an_undeclared_turboprop_propulsion_record_is_refused_by_name() {
-    // Removing the declared record must block the buildup with the specific
-    // missing inputs rather than falling back to a fraction or a thrust.
+fn an_undeclared_turboprop_propulsion_record_is_completed_from_the_installed_engine() {
+    // A clean-sheet turboprop declares no propeller or nacelle record. It is
+    // completed from the catalogue propeller and published statistics, and the
+    // evaluation record says so; it is never completed from a thrust or a
+    // fraction of takeoff mass.
     let (mut config, plane) = preset_case("ATR72-600");
     config.mass_model.flops_turboprop = alas_config::FlopsTurbopropConfig::default();
+    let buildup = calculate_flops_mass_buildup(
+        &plane,
+        &config.requirements,
+        &config.geometry,
+        &config.control_surfaces,
+        Some(&config.mass_model),
+        &config.landing_gear,
+        &config.cabin,
+    )
+    .unwrap_or_else(|error| panic!("an undeclared record must be completed: {error}"));
+    let ProductMassBuildup::PureFlops(build) = buildup else {
+        panic!("a clean-sheet turboprop comes out of the production architecture");
+    };
+    let group = build
+        .airframe
+        .turboprop_propulsion
+        .expect("the shaft-power propulsion group must be present");
+    assert_eq!(
+        group.propeller_mass_basis,
+        "clean_sheet_statistical_hamilton_standard"
+    );
+    assert_eq!(
+        group.nacelle_area_density_basis,
+        "clean_sheet_atr42_engine_section_anchor"
+    );
+    assert_eq!(group.engine_mass_source, "gasp_turboshaft_specific_weight");
+    // Six 568F-1 blades at 3.93 m: the regression lands in the few-hundred
+    // kilogram class of a real regional-turboprop propeller (163.7 kg each).
+    assert!(
+        (100.0..300.0).contains(&group.propeller_each_kg),
+        "{}",
+        group.propeller_each_kg
+    );
+}
+
+#[test]
+fn an_invalid_declared_turboprop_input_is_still_refused() {
+    let (mut config, plane) = preset_case("ATR72-600");
+    config.mass_model.flops_turboprop = alas_config::FlopsTurbopropConfig::default();
+    config
+        .mass_model
+        .flops_turboprop
+        .propeller_weight_coefficient = Some(-1.0);
     let result = calculate_flops_mass_buildup(
         &plane,
         &config.requirements,
@@ -371,8 +416,7 @@ fn an_undeclared_turboprop_propulsion_record_is_refused_by_name() {
         &config.cabin,
     );
     let Err(ComponentMassError::FlopsUnverified { reasons, .. }) = result else {
-        panic!("an undeclared turboprop record must not publish a mass");
+        panic!("an invalid declared coefficient must not publish a mass");
     };
     assert!(reasons.contains(&FlopsTransportUnverifiedReason::TurbopropPropellerGeometry));
-    assert!(reasons.contains(&FlopsTransportUnverifiedReason::TurbopropNacelleArchitecture));
 }
