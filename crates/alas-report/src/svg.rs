@@ -560,10 +560,7 @@ mod tests {
         let start = svg.find("data:image/png;base64,").unwrap() + 22;
         let end = start + svg[start..].find('"').unwrap();
         let png = BASE64.decode(&svg[start..end]).unwrap();
-        assert_eq!(
-            png,
-            expected_png
-        );
+        assert_eq!(png, expected_png);
     }
 
     #[test]

@@ -320,6 +320,10 @@ jobs:
     name: Dependency licenses, advisories and sources
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # The cargo-deny container has no sccache; an empty wrapper disables the
+    # workflow-level one so `cargo metadata` can run.
+    env:
+      RUSTC_WRAPPER: ""
     steps:
       - name: Check out source
         uses: actions/checkout@v4
