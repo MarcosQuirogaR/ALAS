@@ -66,6 +66,7 @@ const PINNED: &[(&str, u64)] = &[
 #[test]
 fn presets_without_a_wingtip_device_are_bit_identical() {
     let print = std::env::var_os("ALAS_PRINT_GEOMETRY_HASHES").is_some();
+    let mut moved = Vec::new();
     for name in presets::available() {
         let preset = presets::get(name).unwrap();
         let plane = AircraftBuilder::new(Some(preset.geometry.clone()))
@@ -84,7 +85,12 @@ fn presets_without_a_wingtip_device_are_bit_identical() {
                 .iter()
                 .find(|entry| entry.0 == key)
                 .map(|entry| entry.1);
-            assert_eq!(pinned, Some(hash), "{name}: geometry hash moved");
+            if cfg!(windows) {
+                assert_eq!(pinned, Some(hash), "{name}: geometry hash moved");
+            } else {
+                moved.push(format!("{name} {hash} (pinned {pinned:?})"));
+            }
         }
     }
+    assert!(moved.is_empty(), "host-family hashes: {moved:?}");
 }

@@ -64,6 +64,13 @@ const BASELINE: &[(&str, u64)] = &[
     ("A400M", 0x6df0_db13_9bed_14c6), // geo/close 2026-10-12 re-pin (tailfit 0x84e2_25fe_529e_3677; pre-tailfit 0xc7bf_1fe4_6ef9_2504)
 ];
 
+/// Pins of the presets whose tail bits differ off the MSVC math runtime.
+const NON_WINDOWS_BASELINE: &[(&str, u64)] = &[
+    ("B787-9", 0xd68d_c457_8f9d_9a26),
+    ("A320-200", 0xcda1_0272_61c9_ccee),
+    ("E195-E2", 0x8627_50e5_7e91_67c3),
+];
+
 /// Presets whose fuselage already came from a loft at the baseline commit.
 const LOFTED_AT_BASELINE: &[&str] = &[
     "A220-300", "A320-200", "A340-300", "B787-9", "C919", "E195-E2",
@@ -89,7 +96,13 @@ fn presets_keep_their_tail_bits_with_the_options_unset() {
         assert_eq!(plane.wings.len(), 3, "{}", entry.name); // devices cleared above
         seen.push((entry.name, tail_hash(&plane)));
     }
-    let expected: std::collections::BTreeMap<_, _> = BASELINE.iter().copied().collect();
+    let mut expected: std::collections::BTreeMap<_, _> = BASELINE.iter().copied().collect();
+    if !cfg!(windows) {
+        // The pins above were taken with the MSVC math runtime. These presets
+        // use transcendental functions whose last bit differs under glibc, so
+        // they carry their own host-family pins (same geometry to rounding).
+        expected.extend(NON_WINDOWS_BASELINE.iter().copied());
+    }
     let moved: Vec<String> = seen
         .iter()
         .filter(|(name, hash)| expected.get(name) != Some(hash))

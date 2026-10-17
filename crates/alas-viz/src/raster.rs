@@ -626,8 +626,8 @@ mod tests {
         if skip_without_earth_texture() {
             return;
         }
-        let texture = tiny_skia::Pixmap::decode_png(earth_texture_bytes())
-            .expect("configured Earth texture");
+        let texture =
+            tiny_skia::Pixmap::decode_png(earth_texture_bytes()).expect("configured Earth texture");
 
         assert_eq!(texture.width(), 2 * texture.height());
     }
@@ -648,9 +648,9 @@ mod tests {
         });
 
         let (_, _, pixels) = render_scene_rgba(&scene).expect("Earth sphere rasterization");
-        let texture = tiny_skia::Pixmap::decode_png(earth_texture_bytes())
-            .expect("configured Earth texture");
-        let x =(texture.width() - 1) / 2 + 1;
+        let texture =
+            tiny_skia::Pixmap::decode_png(earth_texture_bytes()).expect("configured Earth texture");
+        let x = (texture.width() - 1) / 2 + 1;
         let y = (texture.height() - 1) / 2 + 1;
         let texture_pixel = &texture.data()[((y * texture.width() + x) * 4) as usize..][..4];
         let globe_center = &pixels[((32 * 65 + 32) * 4) as usize..][..4];

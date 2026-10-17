@@ -32,4 +32,10 @@ is ignored: `paste` is an archived proc-macro crate reached through `faer`'s
 `gemm` kernels, runs only at compile time, and ships no code in the binary; the
 exception is removed when faer drops it.
 
+[unsafe-libyaml RUSTSEC-2024-0449](https://rustsec.org/advisories/RUSTSEC-2024-0449)
+is ignored as an unmaintained notice, not a vulnerability: it is reached only
+through `serde_yaml` (also archived), which parses locally authored configuration
+and preset files. The exception is removed when the YAML layer moves to a maintained
+parser.
+
 Configuration semantics follow the [cargo-deny documentation](https://embarkstudios.github.io/cargo-deny/checks/index.html).

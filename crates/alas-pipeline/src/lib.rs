@@ -28,12 +28,12 @@ pub mod acceptance;
 pub mod avl;
 pub mod baseline;
 pub mod cabin_scene;
-pub mod earth_texture;
 pub mod cpacs;
 #[path = "cpacs/adapters.rs"]
 pub mod cpacs_adapters;
 pub mod cruise_mass;
 pub mod dual_solver;
+pub mod earth_texture;
 pub mod export;
 pub mod feasibility;
 pub mod field_performance;
