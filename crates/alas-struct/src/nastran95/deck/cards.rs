@@ -194,7 +194,9 @@ pub(super) fn static_loads(
                 Field::Real(gravity_sign),
             ],
         );
-        for (nid, force) in elliptic_forces_by_y(&nid_y, case.total_force_n.abs(), semi_span) {
+        for (nid, force) in
+            elliptic_forces_by_y_trapezoid(&nid_y, case.total_force_n.abs(), semi_span)
+        {
             card(
                 out,
                 tags,

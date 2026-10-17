@@ -35,8 +35,11 @@ pub fn a220_300() -> AircraftPreset {
             mlw_kg: Some(58_740.0),
             mzfw_kg: Some(55_792.0),
             oew_kg: crate::oew_reference::preset_reference_oew_kg("A220-300"),
-            usable_fuel_volume_l: Some(21_504.92),
-            usable_fuel_mass_kg: Some(17_395.27),
+            // ACAP BD500-3AB48-13800-00 (2023-09-12) PDF p.26, Maximum fuel tank
+            // capacity, BD-500-1A11 column: 5,790 USG (21 918 L), the 149,000 lb MTOW
+            // basis of this preset. Mass = volume x fuel_density_kg_l (0.8089).
+            usable_fuel_volume_l: Some(21_918.0),
+            usable_fuel_mass_kg: Some(17_729.5),
             fuel_density_kg_l: Some(0.8089),
             planning_seats: Some(140),
             design_point: Some(crate::PayloadRangeDesignPoint {

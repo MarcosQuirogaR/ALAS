@@ -16,7 +16,7 @@ const G: f64 = 9.806_65;
 /// of `toda_m`, for a 240 kN two-engine airliner on a 122.6 m^2 wing.
 fn takeoff_miss(mass_kg: f64, toda_m: f64) -> f64 {
     let runway = Airport::custom("Test", 0.0, toda_m, toda_m, 0.0, 0.0, 0.0);
-    takeoff_field_residual(
+    takeoff_field::correlation_residual(
         mass_kg,
         240_000.0,
         122.6,
@@ -87,7 +87,14 @@ fn field_residuals_use_design_masses(mode: alas_config::MtowSizing) {
     let s_ref = outcome.plane.s_ref;
     let thrust_n = outcome.n_engines as f64 * outcome.static_thrust_kn * 1_000.0;
     let tw_mtow = thrust_n / (sized.design_gross_mass_kg * config.requirements.gravity_m_s2);
-    assert!((find("takeoff_field").actual / tw_mtow - 1.0).abs() < 1e-12);
+    // A jet is judged on the CS 25.113 field length against the TODA, in
+    // metres, at the design gross mass; the T/W correlation is the replay's.
+    let field = find("takeoff_field");
+    assert_eq!(field.unit, "m");
+    let departure = outcome.departure.unwrap();
+    assert_eq!(field.actual, departure.toda_m);
+    assert!(field.limit > 0.3 * departure.toda_m && field.limit < 3.0 * departure.toda_m);
+    assert!(tw_mtow > 0.0);
     let ws_mlw = sized.design_landing_mass_kg * config.requirements.gravity_m_s2 / s_ref;
     assert!((find("landing_field").actual / ws_mlw - 1.0).abs() < 1e-12);
 

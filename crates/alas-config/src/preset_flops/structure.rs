@@ -331,17 +331,20 @@ mod tests {
     #[test]
     fn registered_composite_selection_follows_the_construction_table() {
         for (name, fcomp) in [
-            ("AVE", 1.0),
-            ("A220-300", 1.0),
-            ("B787-9", 1.0),
-            ("A380-800", 0.25),
+            ("AVE", 0.125 / 0.30),
+            ("A220-300", 0.125 / 0.30),
+            ("B787-9", 0.125 / 0.30),
+            ("A380-800", 0.25 * 0.125 / 0.30),
             ("A320-200", 0.0),
             ("A340-300", 0.0),
             ("ATR72-600", 0.0),
             ("DC-10", 0.0),
         ] {
             let structure = declared_structure(name);
-            assert_eq!(structure.composite_utilization, fcomp, "{name}");
+            assert!(
+                (structure.composite_utilization - fcomp).abs() < 1e-12,
+                "{name}"
+            );
             assert!(structure.validate().is_ok(), "{name}");
         }
     }

@@ -38,6 +38,7 @@ mod view_controls;
 pub mod viewport;
 pub mod views;
 mod walkthrough_state;
+pub mod worker_stack;
 
 pub use app::AlasApp;
 pub use branding::native_options;

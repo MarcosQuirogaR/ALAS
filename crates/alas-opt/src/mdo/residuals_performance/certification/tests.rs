@@ -66,7 +66,13 @@ fn the_three_checks_are_evaluated_for_the_a320_with_the_clause_speeds_and_gradie
     let approach = evaluated(&checks, ClimbSegment::ApproachClimb);
     let landing = evaluated(&checks, ClimbSegment::LandingClimb);
     assert!((final_segment.cl - perf.cl_max_clean / 1.18_f64.powi(2)).abs() < 1e-12);
-    assert!((approach.cl - perf.cl_max_land / 1.4_f64.powi(2)).abs() < 1e-12);
+    // CS 25.121(d): the approach configuration is the take-off flap when its
+    // stall speed is within 10 % of the landing flap (CLmax_TO x 1.1^2 >=
+    // CLmax_land). The declared-high-lift CLmax_TO of the A320 qualifies; the
+    // 2.10 class default did not.
+    let (cl_max_approach, _) = approach_configuration(perf);
+    assert_eq!(cl_max_approach, perf.cl_max_to);
+    assert!((approach.cl - cl_max_approach / 1.4_f64.powi(2)).abs() < 1e-12);
     assert!((landing.cl - perf.cl_max_land / 1.23_f64.powi(2)).abs() < 1e-12);
     assert_eq!(final_segment.gradient, 0.012);
     assert_eq!(approach.gradient, 0.021);
@@ -122,6 +128,10 @@ fn the_landing_climb_grows_with_the_landing_drag_and_the_spool_up_loss() {
 #[test]
 fn the_approach_climb_includes_the_landing_flap_drag_but_not_the_gear() {
     let (mut config, outcome) = a320();
+    // Pin the landing configuration: the declared take-off CLmax of the A320
+    // would otherwise qualify the take-off flap as the approach flap
+    // (CS 25.121(d), see `approach_configuration`).
+    config.performance.cl_max_to = 2.10;
     let base = evaluated(&evaluate(&config, &outcome), ClimbSegment::ApproachClimb);
     config.performance.landing_gear_delta_cd += 0.05;
     let unchanged = evaluated(&evaluate(&config, &outcome), ClimbSegment::ApproachClimb);

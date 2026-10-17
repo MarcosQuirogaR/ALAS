@@ -122,6 +122,10 @@ pub struct IsaSeaLevelFieldReference {
     pub landing_field_length_m: f64,
     /// Definition of `landing_field_length_m`.
     pub landing_field_length_basis: &'static str,
+    /// The CS 25.113 integration behind the jet take-off distances (all-engine
+    /// distance, balanced `V1`, `VEF`, selected `VR`); `None` for the
+    /// propeller method and the replay correlations.
+    pub takeoff_field: Option<alas_perf::performance::TakeoffField>,
     /// Take-off safety speed `V2` at the take-off mass, m/s (CAS equals TAS
     /// at ISA sea level to within the compressibility correction the speed
     /// model applies).
@@ -272,11 +276,7 @@ pub fn report_isa_sea_level_field_reference(
     let atmosphere = alas_atmo::us1976_compute_values(0.0, 0.0);
     let mach = speeds.v2_ms / atmosphere.speed_of_sound_m_s;
     let (cd0, k) = candidate_field_polar(config, report, cl, mach, 0.0, 0.0)?;
-    let field_polar = if matches!(
-        config.geometry.engine.active_model(),
-        Ok(ActiveEngineModel::Turboprop(_))
-    ) && !perf.legacy_field_correlations
-    {
+    let field_polar = if !perf.legacy_field_correlations {
         Some(crate::field_performance::report_field_polar(
             config, report, mach, &airport,
         )?)
@@ -419,16 +419,15 @@ fn reference_with_field_polar(
         static_thrust_basis,
         static_tw,
         takeoff_field_length_m: field.todr_m,
-        takeoff_field_length_basis: if propeller {
+        takeoff_field_length_basis: if perf.legacy_field_correlations {
+            "translated replay: Raymer take-off-parameter correlation 37.7 (W/S)/(sigma CLmax_TO T/W) [ft, psf] (Aircraft Design, Sec. 5.4, Fig. 5.4)"
+        } else if propeller {
             "Torenbeek ch.5/App.K propeller field estimate with speed-dependent installed thrust; \
              max of 115% AEO distance and eq.5-89 balanced-field approximation. Dry, level, still \
              air; normal AEO rating and installed automatic takeoff reserve on the remaining engines; failed-engine drag (feathered \
              propeller) and asymmetric trim drag from the shared engine-out evidence builder. Conceptual, not certificated."
         } else {
-            "FAR 25 take-off field length: Raymer take-off-parameter \
-             correlation 37.7 (W/S)/(sigma CLmax_TO T/W) [ft, psf] at MTOW, ISA sea level \
-             (Aircraft Design, Sec. 5.4, Fig. 5.4), which is already a balanced-field-type \
-             length; no bfl_factor applied"
+            "CS 25.113(a) take-off field length by integration: max(1.15 x all-engine distance to 35 ft, balanced field length), dry level hard runway, still air, ISA sea level. Ground roll with the deck take-off thrust at every speed (Raymer Eqs. 17.100-17.101, mu 0.02 Torenbeek p. 168), 3 s rotation (Raymer p. 673), airborne distance the larger of the energy (Torenbeek Eq. 5-85) and transition-arc (Raymer Eqs. 17.105-17.112) distances; one-engine continued take-off with the failure at VEF and the failed-engine windmilling plus trim drag; VR searched between the schedule minimum and V2 for the shortest field. Conceptual, not certificated"
         },
         model_balanced_field_length_m: field.bfl_m,
         model_balanced_field_length_basis: if perf.legacy_field_correlations {
@@ -437,11 +436,11 @@ fn reference_with_field_polar(
             "Torenbeek eq.5-89 conceptual balance with integrated ground-roll equivalent acceleration, \
              V2 thrust lapse and configured stop deceleration; no certified V1/ASDA claim"
         } else {
-            "Raymer FAR 25 TOP field correlation; 25.113(a)(2) does not require another 1.15 \
-             on an already factored field length; accelerate-stop is not independently resolved"
+            "balanced field: CS 25.109(a)(1) accelerate-stop (all engines to VEF, one engine to V1, braking at 0.37 g mean (Torenbeek Eq. 5-87, 15 jet transports, no reverse thrust), plus 2 s at V1) equal to the CS 25.113(a)(1) continued take-off distance at the balanced V1"
         },
         landing_field_length_m: field.ldr_m
             / crate::field_performance::dry_landing_distance_share(config),
+        takeoff_field: field.takeoff_field,
         landing_field_length_basis: if propeller {
             "Torenbeek eqs.5-93/5-94 air energy plus braking, no reverse credit, at MLW; \
              divided by configured dry planning share (CAT.POL.A.230(a)(2): 0.70 default, \
@@ -529,7 +528,9 @@ mod tests {
 
     #[test]
     fn a320_reference_is_finite_and_ordered() {
-        let config = AlasConfig::from_value(&json!({ "preset": "A320-200" })).expect("preset");
+        let mut config = AlasConfig::from_value(&json!({ "preset": "A320-200" })).expect("preset");
+        // No fin is built on this path: state the asymmetric trim drag.
+        config.performance.oei_asymmetric_trim_cd = Some(0.001);
         let mtow = config.requirements.mtow_kg;
         let reference =
             isa_sea_level_field_reference(&config, 122.6, 0.02, 0.04, mtow, 0.92 * mtow)
@@ -544,13 +545,14 @@ mod tests {
         ] {
             assert!(value.is_finite() && value > 0.0, "{reference:?}");
         }
-        // The jet TOP correlation already estimates field length; 25.113 does
-        // not add another all-engine margin to that field-length estimate.
-        assert!(
-            (reference.model_balanced_field_length_m / reference.takeoff_field_length_m - 1.0)
-                .abs()
-                < 1e-12
-        );
+        // CS 25.113(a): the field length is the greater of the balanced field
+        // and 1.15 times the all-engine distance; both legs are reported.
+        let solved = reference.takeoff_field.expect("integrated jet field");
+        assert_eq!(reference.takeoff_field_length_m, solved.tofl_m);
+        assert_eq!(reference.model_balanced_field_length_m, solved.balanced_m);
+        assert!((solved.tofl_m - solved.balanced_m.max(1.15 * solved.all_engine_m)).abs() < 1e-9);
+        assert!(solved.balanced_m <= reference.takeoff_field_length_m + 1e-9);
+        assert!(solved.v1_m_s <= solved.vr_m_s && solved.vr_m_s <= reference.v2_m_s + 1e-9);
         // The factored landing field length is the actual distance over 0.6.
         assert!(
             (reference.landing_field_length_m / reference.landing_distance_m - 1.0 / 0.6).abs()

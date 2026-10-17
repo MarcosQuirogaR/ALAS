@@ -109,7 +109,13 @@ fn hard_mtow_finalist_keeps_declared_mass_and_replays_as_hard_feasible() {
             .min(load.usable_capacity_kg.unwrap_or(f64::INFINITY))
     );
     assert!(replay.sized.takeoff_mass_kg <= mtow_kg);
-    assert_eq!(report.sized_takeoff_mass_kg(), Some(load.takeoff_mass_kg));
+    // The published report and the replay are two evaluations of one design
+    // (zero-fuel mass plus the tank-limited fuel); they agree to rounding, not
+    // always bit for bit (TOFL lane 2026-10-16: 67339.07054988155 against
+    // 67339.0705498737 kg, 1e-13 relative, after the finalist moved with the
+    // CS 25.113 field constraint).
+    let published = report.sized_takeoff_mass_kg().expect("sized mass");
+    assert!((published / load.takeoff_mass_kg - 1.0).abs() < 1e-11);
     assert_eq!(
         design_vn_mass_kg(&config, report),
         replay.sized.design_gross_mass_kg

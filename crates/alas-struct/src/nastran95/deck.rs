@@ -45,7 +45,7 @@ pub(crate) use super::units::UnitScale;
 use super::field::{Card, ContinuationTags, Field};
 use crate::loads::{self, LoadCase};
 use crate::mesh::{Deck, MeshNodeIndex, ParamValue};
-use crate::nastran::elliptic_forces_by_y;
+use crate::nastran::elliptic_forces_by_y_trapezoid;
 
 /// Which solver a deck is written for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

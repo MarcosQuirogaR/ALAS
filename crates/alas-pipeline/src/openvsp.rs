@@ -46,7 +46,7 @@ use alas_exec::process::{
 };
 use alas_geom::aircraft::airplane::Airplane;
 use alas_geom::aircraft::fuselage::Fuselage;
-use alas_geom::aircraft::wing::Wing;
+use alas_geom::aircraft::wing::{Wing, WingXSec};
 use alas_perf::landing_gear::{size_landing_gear_with_group_stations, LandingGearLayout};
 
 use crate::full_analysis::AnalysisReport;
@@ -201,7 +201,7 @@ pub fn export_openvsp_script(
         runtime_error: None,
         runtime_stdout_path: None,
         runtime_stderr_path: None,
-        component_count: report.airplane.wings.len() + report.airplane.fuselages.len(),
+        component_count: exported_wings(&report.airplane).len() + report.airplane.fuselages.len(),
         wheel_count: gear.wheels.len(),
         approximations: vec![
             "OpenVSP controls the loft interpolation between ALAS cross-section stations."

@@ -74,14 +74,17 @@ impl GroundDeflection {
     }
 }
 
-/// The sized box's bending stiffness `EI(y)`, N.m^2, at every sizing station:
+/// The sized box's effective spanwise-frame bending stiffness, N.m^2, at every
+/// sizing station (`EI_n cos^3 L`, see [`crate::sizing::swept`]; `EI_n` is the
+/// section normal to the swept box axis, so `w'' = M_x / EI`):
 /// the compatible-strain (plane sections) sum over caps, webs and the two
 /// covers that the strength sizing and the analytical response both use.
 /// The covers and spar flanges are the smeared stiffened skin-stringer panel
 /// of [`crate::sizing::panel`], whose compressive allowable the sizing
 /// enforces; the stiffness is that of the strength-sized section (a
-/// consequence of the allowable, not a separate target), straight-beam and
-/// unswept: see [`crate::flex_check`] for the sweep bound.
+/// consequence of the allowable, not a separate target). The swept-axis
+/// factor of [`crate::flex_check`] is already inside this stiffness, so it must
+/// not be applied again.
 pub fn box_bending_stiffness_nm2(
     sizing: &crate::sizing::WingboxSizing,
     skin: &alas_config::materials::MaterialSpec,
@@ -89,7 +92,7 @@ pub fn box_bending_stiffness_nm2(
     cap: &alas_config::materials::MaterialSpec,
 ) -> Vec<f64> {
     (0..sizing.y_stations.len())
-        .map(|station| crate::sizing::section::station_ei(sizing, station, skin, web, cap))
+        .map(|station| crate::sizing::section::station_ei_spanwise(sizing, station, skin, web, cap))
         .collect()
 }
 

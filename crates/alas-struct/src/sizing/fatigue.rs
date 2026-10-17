@@ -195,6 +195,7 @@ mod tests {
         };
         WingboxSizing {
             y_stations: vec![0.0, 10.0],
+            axis_cos: Vec::new(),
             eta_stations: vec![0.0, 1.0],
             chord: vec![4.0; 2],
             spar_fracs: vec![0.25, 0.75],

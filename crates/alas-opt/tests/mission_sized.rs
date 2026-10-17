@@ -359,6 +359,15 @@ fn registered_hard_mtow_nominals_separate_model_defects_from_physical_findings()
             // starts the heavy AVE at FL307): worst level FL307 at 350,885 kg,
             // 0.2574 required against 0.2655 installed (3.1 % margin; level
             // flight holds up to FL319 at that mass). No finding.
+            // Swept-box re-sizing 2026-10-16 (fix-beam-vs-fe, by probe): the stress
+            // sizing now resolves the moment about the section normal to the swept
+            // elastic axis (M/cos L, Torenbeek 2013 Eq. 11.11). The AVE box grows
+            // from 28.6 t to 30.9-31.0 t (both wings) and exceeds the FLOPS
+            // complete-wing mass (29.45 t), so `structural_inventory_unverified`
+            // fires: no positive secondary remainder.
+            // Final pass 2026-10-16 (by probe, after fix-fcomp): the AVE composite
+            // wing now takes FCOMP 0.417 (FLOPS complete wing 29.5 -> 36.6 t), above
+            // the 31.0 t swept box again, so the finding no longer fires.
             "AVE" => &[],
             // The conventional Korn section factor leaves insufficient
             // cruise thrust and sweep. The empty aircraft's CG lies 3 mm

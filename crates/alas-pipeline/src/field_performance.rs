@@ -6,7 +6,10 @@
 use alas_config::airports::Airport;
 use alas_config::{ActiveEngineModel, AlasConfig};
 use alas_opt::mdo::propulsion::turboprop_unit_model;
-use alas_opt::mdo::{EngineOutCondition, EngineOutModel, EngineOutRating, YawAirframe};
+use alas_opt::mdo::{
+    field_polar, jet_takeoff_field, EngineOutCondition, EngineOutModel, EngineOutRating,
+    JetFieldInputs, YawAirframe,
+};
 use alas_perf::performance::{
     compute_field_performance_for_propulsion, compute_v_speeds_at_masses, landing_runway_share,
     FieldInputs, FieldPerformance, FieldPropulsion,
@@ -117,7 +120,35 @@ pub fn calculate_with_airframe(
         .map_err(|error| error.to_string())?
     {
         ActiveEngineModel::Turbofan(_) => {
-            compute_field_performance_for_propulsion(inputs, FieldPropulsion::Jet)
+            let mut field = compute_field_performance_for_propulsion(inputs, FieldPropulsion::Jet)?;
+            if perf.legacy_field_correlations {
+                return Ok(field);
+            }
+            // CS 25.113 field length by integration: the correlation above is
+            // kept only for the speeds, the landing distance and replay.
+            let static_thrust_n =
+                jet_static_tw * takeoff_mass_kg * config.requirements.gravity_m_s2;
+            let model = EngineOutModel::new(config, airframe, wing_area_m2, None)?
+                .with_weight_kg(takeoff_mass_kg);
+            let solved = jet_takeoff_field(&JetFieldInputs {
+                perf,
+                engine_out: &model,
+                airport,
+                wing_area_m2,
+                mass_kg: takeoff_mass_kg,
+                static_thrust_n,
+                polar: (cd0, k),
+                speeds: field.v_speeds,
+            })?;
+            field.todr_m = solved.tofl_m;
+            field.bfl_m = solved.balanced_m;
+            field.asd_m = solved.accelerate_stop_m;
+            // The speeds the field length was flown with: the balanced V1 and
+            // the selected rotation speed (VR >= the schedule minimum).
+            field.v_speeds.v1_ms = solved.v1_m_s;
+            field.v_speeds.v_r_ms = solved.vr_m_s;
+            field.takeoff_field = Some(solved);
+            Ok(field)
         }
         ActiveEngineModel::Turboprop(spec) => {
             let engine_count = config.geometry.engine.spanwise_positions_m.len();
@@ -240,24 +271,7 @@ pub fn report_field_polar(
     airport: &Airport,
 ) -> Result<(f64, f64), String> {
     let artifacts = report.fuel.artifacts(config, &report.design)?;
-    let cd = |cl| {
-        artifacts.drag.cd_airport_base_at_atmosphere(
-            cl,
-            mach,
-            airport.elevation_m,
-            airport.isa_deviation_c,
-        )
-    };
-    let (c0, c_half, c_one) = (cd(0.0), cd(0.5), cd(1.0));
-    let k = 2.0 * (c_one - 2.0 * c_half + c0);
-    let c1 = c_one - c0 - k;
-    let cd0 = c0 + c1.max(0.0) * config.performance.cl_max_to;
-    if !(cd0.is_finite() && cd0 > 0.0 && k.is_finite() && k > 0.0) {
-        return Err(
-            "candidate field polar needs finite positive CD0 and induced factor".to_owned(),
-        );
-    }
-    Ok((cd0, k))
+    field_polar(&artifacts.drag, &config.performance, mach, airport)
 }
 
 #[cfg(test)]

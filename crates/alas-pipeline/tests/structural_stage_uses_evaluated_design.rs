@@ -147,10 +147,16 @@ fn nastran_deck_spans_the_evaluated_semi_span() {
         }
     }
     assert!(nodes > 100, "the deck has {nodes} grids");
+    // Re-pinned 2026-10-16 by probe (fix-beam-vs-fe, boxed product deck): the
+    // product deck keeps only the box between the outermost spars and drops
+    // grids no element uses, so its outermost grid is the last box rib, not the
+    // leading/trailing-edge grids of the geometric tip. Resized A320: 19.798 m
+    // against the evaluated 19.954 m (0.992). The deck must still follow the
+    // evaluated span, not the preset's (more than 2 m away, tested above).
+    let evaluated = wing_semi_span_m(&config, &design);
     assert!(
-        (y_max - wing_semi_span_m(&config, &design)).abs() < 1e-6,
-        "deck semi-span {y_max} m against evaluated {} m",
-        wing_semi_span_m(&config, &design)
+        y_max <= evaluated + 1e-9 && y_max >= 0.99 * evaluated,
+        "deck semi-span {y_max} m against evaluated {evaluated} m"
     );
 }
 

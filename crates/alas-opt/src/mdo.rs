@@ -4,7 +4,6 @@
 //! Mission-sized design objectives: block fuel, takeoff mass, operating
 //! empty mass or fuel per seat-kilometre, closed by the design mission under
 //! the configured fuel policy and ranked feasibility first.
-//!
 //! [`crate::objective::DesignObjective::evaluate`] delegates here.
 //!
 //! The evaluation is a pipeline of four stages, one module each:
@@ -66,6 +65,7 @@ pub use residuals_performance::oei_deck::{
     second_segment_evidence, EngineOutCondition, EngineOutModel, EngineOutPoint, EngineOutRating,
     SecondSegmentEvidence, TrimDragBasis, YawAirframe,
 };
+pub use residuals_performance::takeoff_field::{field_polar, jet_takeoff_field, JetFieldInputs};
 pub use residuals_performance::thrust_uncertainty::{
     takeoff_thrust_scatter, thrust_scatter, ScatterBasis, ThrustAssessment, ThrustMessage,
     ThrustVerdict,

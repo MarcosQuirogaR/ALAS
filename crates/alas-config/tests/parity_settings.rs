@@ -602,7 +602,7 @@ fn preset_source_corrections() -> BTreeMap<String, SourceCorrection> {
         correction(
             "DC-10.requirements.max_structural_payload_kg",
             48_000.0,
-            46_008.0,
+            56_441.0,
         ),
         correction("DC-10.requirements.max_wing_area_m2", 338.8, 338.84),
         correction("DC-10.requirements.mtow_kg", 259_450.0, 259_454.0),

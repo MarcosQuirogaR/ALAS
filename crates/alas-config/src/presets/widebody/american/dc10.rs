@@ -34,7 +34,10 @@ pub fn dc_10() -> AircraftPreset {
             mrw_kg: None,
             mtow_kg: Some(259_454.0),
             mlw_kg: Some(190_962.0),
-            mzfw_kg: Some(166_922.0),
+            // Boeing DC-10 ACAP (boeing_2023_dc10acap.pdf) PDF p.11, section 2.1, DC-10-30CF
+            // passenger column: MZFW 391,000 lb (177,355 kg). The former 166,922 kg is
+            // 368,000 lb, a value of the 590,000 lb takeoff-weight block of FAA TCDS A22WE.
+            mzfw_kg: Some(177_355.0),
             oew_kg: crate::oew_reference::preset_reference_oew_kg("DC-10"),
             usable_fuel_volume_l: Some(137_509.0),
             usable_fuel_mass_kg: Some(111_387.0),
@@ -345,8 +348,12 @@ pub fn dc_10() -> AircraftPreset {
             optimize_passenger_capacity: true,
             num_passengers: 255,
             cargo_payload_kg: 65_000.0,
-            // ACAP 572k planning option: MZFW 166,922 kg less OEW 120,914 kg.
-            max_structural_payload_kg: 46_008.0,
+            // Structural payload = MZFW 177,355 kg less the registry OEW basis 120,914 kg
+            // (formerly 46,008 kg from the superseded 166,922 kg MZFW). OPEN for the owner:
+            // the registry basis (266,191 lb OEW, 368,000 lb MZFW, DAC-67803A Rev A) does
+            // not match Figure 2.1 on PDF p.11 (268,751 lb OEW, 391,000 lb MZFW, 122,249 lb
+            // payload); the page-consistent 572k payload is 121,870 lb = 55,280 kg.
+            max_structural_payload_kg: 56_441.0,
             dive_speed_m_s: 210.0,
             ..DesignRequirements::default()
         },

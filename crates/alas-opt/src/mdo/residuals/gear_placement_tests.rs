@@ -319,7 +319,11 @@ fn a_three_leg_group_translates_past_its_centre_leg_behind_the_wing_root() {
         // frozen geometry (fitted wing and tails) moved it forward again: a scan of the shift
         // finds the nose-gear-load miss only for shifts above -3.5 m (missed at -3.25 m, met at
         // -3.5 m), so the shift returns to the pre-round-2 value.
-        wing_x_shift_m: -3.277_305_764_442_71,
+        // Swept-box re-sizing 2026-10-16 (by probe): the heavier box moved the empty CG enough
+        // that the miss needs a slightly smaller forward shift. Scan: -3.277 m no miss (met),
+        // -3.20, -3.15, -3.10 miss and the centre leg stays behind the root, -3.05 m the centre
+        // leg is no longer behind the wing trailing edge.
+        wing_x_shift_m: -3.15,
         tail_scale: 1.011_511_624_181_909_5,
         airfoil_thickness_scale: 0.971_979_582_161_175_3,
         airfoil_camber_scale: 0.989_585_468_423_623_5,

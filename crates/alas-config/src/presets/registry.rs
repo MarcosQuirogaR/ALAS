@@ -6,8 +6,8 @@
 use std::sync::OnceLock;
 
 use super::{
-    landing_reference, military, narrowbody, reference, regional, takeoff_reference, widebody,
-    AircraftPreset, UnknownAircraftPreset,
+    high_lift_system, landing_reference, military, narrowbody, reference, regional,
+    takeoff_reference, widebody, AircraftPreset, UnknownAircraftPreset,
 };
 use crate::PerformanceConfig;
 
@@ -128,6 +128,7 @@ fn build() -> Vec<AircraftPreset> {
         register_published_reference(preset);
         landing_reference::apply(preset);
         takeoff_reference::apply(preset);
+        high_lift_system::apply(preset);
         // Converted presets build their fuselage from the embedded fitted loft.
         if let Some(id) = crate::preset_loft_id(preset.name) {
             preset.geometry.fuselage.loft = Some(crate::LoftRef::embedded(id));

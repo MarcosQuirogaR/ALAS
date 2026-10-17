@@ -203,6 +203,36 @@ impl Deck {
         nid
     }
 
+    /// Drop every grid no element, mass, rigid element or constraint refers to.
+    /// The boxed product deck places whole ribs and then keeps only the spar
+    /// window, so the rest are free grids that a solver would have to
+    /// constrain or reject.
+    pub(crate) fn retain_referenced_grids(&mut self) {
+        let mut used = std::collections::HashSet::new();
+        for shell in self.quads.iter().chain(&self.trias) {
+            used.extend(shell.nodes.iter().copied());
+        }
+        for bar in &self.bars {
+            used.insert(bar.ga);
+            used.insert(bar.gb);
+        }
+        used.extend(self.masses.iter().map(|mass| mass.nid));
+        for rigid in &self.rigid_elements {
+            used.insert(rigid.refgrid);
+            used.extend(rigid.gijs.iter().copied());
+        }
+        for constraint in &self.constraints {
+            used.extend(constraint.nodes.iter().copied());
+        }
+        self.grids.retain(|grid| used.contains(&grid.nid));
+        self.positions = self
+            .grids
+            .iter()
+            .enumerate()
+            .map(|(position, grid)| (grid.nid, position))
+            .collect();
+    }
+
     /// The coordinates of grid `nid`, if the deck has one.
     pub fn grid_xyz(&self, nid: i64) -> Option<[f64; 3]> {
         self.positions

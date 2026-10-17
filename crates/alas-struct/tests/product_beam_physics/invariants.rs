@@ -242,6 +242,8 @@ fn tip_point_load_recovers_closed_form_deflection_and_exact_refinement_error() {
             .collect();
         sizing.eta_stations = sizing.y_stations.iter().map(|y| y / length).collect();
         sizing.chord = vec![4.0; count];
+        // A straight rectangular beam: the preset's swept-axis record does not apply.
+        sizing.axis_cos = Vec::new();
         sizing.spar_fracs = vec![0.25, 0.70];
         for (spar, fraction) in sizing.spars.iter_mut().zip(&sizing.spar_fracs) {
             spar.chord_fraction = *fraction;
@@ -304,4 +306,101 @@ fn tip_point_load_recovers_closed_form_deflection_and_exact_refinement_error() {
         }
         previous_error = Some(pull_up_error);
     }
+}
+
+#[test]
+fn swept_axis_follows_the_normal_section_theory() {
+    // Torenbeek 2013 Eq. 11.11: the bending moment about the section normal to
+    // the elastic axis is M_x / cos L. Beam theory along the axis (Niu 1988,
+    // pp. 31-32) with EI_n = (covers cos L + webs + caps) gives w_yy =
+    // M_x / (EI_n cos^3 L). Same loads, so the deflection ratio is exactly the
+    // stiffness ratio, built here independently of the library's section code.
+    let config = AlasConfig::from_value(&serde_json::json!({"preset":"A320-200"})).unwrap();
+    let geometry = rectangular_geometry();
+    let material = materials::get("Al 7075-T6").unwrap();
+    let length = geometry.semi_span;
+    let (width, thickness, depth) = (0.12, 0.008, 0.48_f64);
+    let (web_thickness, skin_thickness) = (0.004, 0.003);
+    let count = 41;
+    let mut sizing = dry_strength_size(&config, &presets::get("A320-200").unwrap().design_vector);
+    sizing.y_stations = (0..count).map(|i| length * i as f64 / 40.0).collect();
+    sizing.eta_stations = sizing.y_stations.iter().map(|y| y / length).collect();
+    sizing.chord = vec![4.0; count];
+    sizing.spar_fracs = vec![0.25, 0.70];
+    for (spar, fraction) in sizing.spars.iter_mut().zip(&sizing.spar_fracs) {
+        spar.chord_fraction = *fraction;
+        spar.h = vec![depth; count];
+        spar.w_cap = vec![width; count];
+        spar.t_cap = vec![thickness; count];
+        spar.a_cap = vec![width * thickness; count];
+        spar.t_web = vec![web_thickness; count];
+        spar.lower_extra_area = vec![0.0; count];
+        spar.frac_moment = vec![0.5; count];
+        spar.margin_of_safety = vec![0.0; count];
+    }
+    sizing.t_skin = skin_thickness;
+    let dry = vec![0.0; count];
+    let run = |sizing: &WingboxSizing| {
+        analyze_structure_with_wing_carried_mass(
+            &geometry,
+            sizing,
+            &config.structures,
+            &config.requirements,
+            &config.geometry.engine,
+            &config.mass_model,
+            material,
+            material,
+            material,
+            &dry,
+            &[],
+        )
+    };
+    sizing.axis_cos = Vec::new();
+    let straight = run(&sizing);
+    let sweep = 30.0_f64.to_radians();
+    let c = sweep.cos();
+    sizing.axis_cos = vec![c; count];
+    let swept = run(&sizing);
+
+    let caps = 4.0
+        * width
+        * thickness
+        * (0.25 * (depth - thickness).powi(2) + thickness * thickness / 12.0);
+    let webs = 2.0 * web_thickness * depth.powi(3) / 12.0;
+    let covers = 2.0 * 1.8 * skin_thickness * (0.5 * depth).powi(2);
+    let ei_straight = material.e_pa * (caps + webs + covers);
+    let ei_swept = material.e_pa * (caps + webs + covers * c) * c.powi(3);
+    for case in 0..3 {
+        let ratio =
+            swept.load_cases[case].tip_deflection_m / straight.load_cases[case].tip_deflection_m;
+        assert!(
+            (ratio - ei_straight / ei_swept).abs() < 1.0e-9 * ratio,
+            "{ratio}"
+        );
+        // The streamwise moment is the physical one; stress sees M_x / cos L.
+        for (a, b) in swept.load_cases[case]
+            .moment_nm
+            .iter()
+            .zip(&straight.load_cases[case].moment_nm)
+        {
+            assert!((a - b).abs() <= 1.0e-9 * b.abs().max(1.0));
+        }
+    }
+    // Between the all-cover bound 1/cos^4 and the all-cap bound 1/cos^3.
+    let ratio = swept.load_cases[0].tip_deflection_m / straight.load_cases[0].tip_deflection_m;
+    assert!(ratio > 1.0 / c.powi(3) - 1.0e-9 && ratio < 1.0 / c.powi(4) + 1.0e-9);
+    // Cap stress follows kappa_n = (M_x / cos L) / EI_n with
+    // EI_n = covers cos L + webs + caps, against M_x / EI_s unswept.
+    let ei_normal = material.e_pa * (caps + webs + covers * c);
+    let station = 10;
+    let stress_ratio = swept.load_cases[0].spar_stress[0].stress_pa[station]
+        / straight.load_cases[0].spar_stress[0].stress_pa[station];
+    let expected_ratio = ei_straight / (ei_normal * c);
+    assert!(
+        (stress_ratio - expected_ratio).abs() < 1.0e-9 * expected_ratio,
+        "{stress_ratio}"
+    );
+    assert!(stress_ratio > 1.0 / c - 1.0e-9 && stress_ratio < 1.0 / c.powi(2) + 1.0e-9);
+    // The effective spanwise stiffness is reported.
+    assert!((swept.ei_nm2[0] - ei_swept).abs() < 1.0e-9 * ei_swept);
 }

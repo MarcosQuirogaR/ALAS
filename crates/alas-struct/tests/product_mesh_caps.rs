@@ -53,16 +53,29 @@ fn product_caps_have_two_physical_flange_centroids_and_no_extra_beam_web() {
             pid
         }
     };
-    let keyed = |quads: &[alas_struct::mesh::Shell], map: &dyn Fn(i64) -> i64| {
-        quads
+    // The web shells keep their nodes; the boxed product deck drops the
+    // leading- and trailing-edge skin, rib web outside the spars and the
+    // trailing-edge strips (secondary structure, outside the sized box), so
+    // element numbers shift and only the webs are compared, by their nodes.
+    let webs = |quads: &[alas_struct::mesh::Shell], map: &dyn Fn(i64) -> i64| {
+        let mut webs: Vec<_> = quads
             .iter()
-            .map(|quad| (quad.eid, map(quad.pid), quad.nodes.clone()))
-            .collect::<Vec<_>>()
+            .filter(|quad| (100..10_000).contains(&quad.pid))
+            .map(|quad| (map(quad.pid), quad.nodes.clone()))
+            .collect::<Vec<_>>();
+        webs.sort();
+        webs
     };
     assert_eq!(
-        keyed(product.quads(), &product_spar),
-        keyed(reference.quads(), &|pid| pid),
-        "web/skin shells are unchanged"
+        webs(product.quads(), &product_spar),
+        webs(reference.quads(), &|pid| pid),
+        "web shells are unchanged"
+    );
+    let skin =
+        |quads: &[alas_struct::mesh::Shell]| quads.iter().filter(|quad| quad.pid == 1).count();
+    assert!(
+        skin(product.quads()) < skin(reference.quads()),
+        "the boxed deck carries less skin than the whole-chord reference"
     );
     assert_eq!(bars.len(), 2 * properties.len());
     for pair in bars.chunks_exact(2) {

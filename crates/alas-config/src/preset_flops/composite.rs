@@ -15,30 +15,53 @@
 //! carries `(1 - 0.3 FCOMP)`. The TM has no fuselage or tail composite
 //! factor (Eq. 56 has none), so none is applied here.
 //!
-//! ## How the point values are chosen
+//! ## How FCOMP is derived (declared fraction x sourced credit scale)
 //!
-//! The TM gives no map from construction to the index, so the values below
-//! are modelling choices made from the **wing-box construction fact only**
-//! and never from an OEW comparison:
+//! The TM defines only the endpoints (0 = no composites, 1 = "maximum use of
+//! composites"), so the index needs a scale. FCOMP is computed as
 //!
-//! * wing box (covers, spars, ribs) of carbon-fibre composite: 1.0, the
-//!   TM's "maximum use of composites" end;
-//! * a metallic box: 0.0;
-//! * a metallic box with a composite centre box/ribs/rear spar: a partial
-//!   value, with the choice stated.
+//! ```text
+//! FCOMP = wing_composite_fraction * FCOMP_ADVANCED_COMPOSITE_WING
+//! ```
 //!
-//! Raymer 6th ed. Table 15.4 (p. 580) gives an advanced-composite wing
-//! multiplier of 0.85-0.90, i.e. a 10-15 % wing-mass saving, against about
-//! 30 % for FCOMP = 1 in the FLOPS wing terms at typical loads. The two
-//! disagree by a factor of two to three on the wing saving, so FCOMP = 1 is
-//! the **upper** end of the plausible composite credit; the OEW effect is
-//! reported by the probe example `oew_composite_probe` of `alas-mass`, and
-//! the wing-mass delta at FCOMP 0.5 and 1 is exported as a diagnostic scenario.
+//! * `wing_composite_fraction` (0..1) is a **declared construction input**
+//!   per aircraft, from the wing-box construction statement and never from an
+//!   OEW comparison: 1.0 for a carbon-fibre box (covers, spars, ribs), 0.0
+//!   for a metallic box, a stated partial value otherwise.
+//! * `FCOMP_ADVANCED_COMPOSITE_WING` is the FLOPS index at which the FLOPS
+//!   wing terms reproduce Raymer's advanced-composite wing credit. Raymer 6th
+//!   ed. Table 15.4 (printed p. 580, "Weights Estimation Fudge Factors"),
+//!   Advanced composites, Wing: multiplier 0.85-0.90, midpoint 0.875, i.e. a
+//!   12.5 % wing-mass saving (10-15 %). The FLOPS terms at FCOMP = 1 remove
+//!   about 30 % of the wing (Eq. 33 x0.6, Eq. 35 x0.83, Eq. 36 x0.7; measured
+//!   30.2 % B787-9 and 28.1 % A220-300 at the 725ebf92 geometry). The scale is
+//!   one global constant: 0.125 / 0.30 = 0.4167 (Raymer band 0.85..0.90 maps to
+//!   0.50..0.33). It is not tuned per aircraft or to any OEW.
+//!
+//! Before this rule FCOMP = 1.0 was applied (about 30 % saving, 2.4x Raymer's),
+//! which moved the B787-9 and A220 OEW by -6.4 % and -3.5 % against the
+//! published values (validation correction 1, 2026-10-16).
 
-/// FLOPS wing `FCOMP` for a registered aircraft, 0..1.
+/// Raymer 6th ed. Table 15.4: advanced-composite wing multiplier midpoint
+/// (band 0.85-0.90).
+pub(super) const RAYMER_COMPOSITE_WING_MULTIPLIER: f64 = 0.875;
+/// Wing-mass saving of the FLOPS wing terms at FCOMP = 1 at typical transport
+/// loads (NASA/TM-2017-219627 Eq. 33, 35, 36; measured 28-30 %).
+pub(super) const FLOPS_WING_SAVING_AT_FCOMP_1: f64 = 0.30;
+/// FLOPS FCOMP that reproduces the Raymer advanced-composite wing credit.
+pub(super) const FCOMP_ADVANCED_COMPOSITE_WING: f64 =
+    (1.0 - RAYMER_COMPOSITE_WING_MULTIPLIER) / FLOPS_WING_SAVING_AT_FCOMP_1;
+
+/// FLOPS wing `FCOMP` for a registered aircraft, 0..1: the declared composite
+/// fraction of the wing structure times the Raymer-consistent credit scale.
+pub(super) fn declared_composite_utilization(name: &str) -> f64 {
+    declared_wing_composite_fraction(name) * FCOMP_ADVANCED_COMPOSITE_WING
+}
+
+/// Declared composite fraction of the wing structure, 0..1 (an input, not a
+/// fit).
 ///
-/// Sources (manufacturer construction statements; the index mapping is the
-/// modelling choice described in the module documentation):
+/// Sources (manufacturer construction statements):
 ///
 /// * **B787-9: 1.0.** Boeing 787 ARFF composite-content diagram (2025 file),
 ///   p. 3: composite airframe, about 50 % by weight, with composite wing and
@@ -63,7 +86,7 @@
 ///   Metallic wing boxes (the A320 and A340 composite empennage is not
 ///   scaled by FCOMP in FLOPS). ATR72-600: the outer-box material is not
 ///   established by a retained source, so the metallic endpoint is kept.
-pub(super) fn declared_composite_utilization(name: &str) -> f64 {
+fn declared_wing_composite_fraction(name: &str) -> f64 {
     match name {
         "B787-9" | "A220-300" | "AVE" => 1.0,
         "A380-800" => 0.25,
@@ -76,11 +99,25 @@ mod tests {
     use super::*;
 
     #[test]
+    fn credit_scale_reproduces_the_raymer_band() {
+        // Raymer Table 15.4 wing 0.85-0.90 maps inside FCOMP 0.33..0.50.
+        assert!((FCOMP_ADVANCED_COMPOSITE_WING - 0.125 / 0.30).abs() < 1e-12);
+        assert!((0.10 / 0.30..=0.15 / 0.30).contains(&FCOMP_ADVANCED_COMPOSITE_WING));
+    }
+
+    #[test]
     fn composite_wing_values_follow_the_construction_facts() {
         for name in ["B787-9", "A220-300", "AVE"] {
-            assert_eq!(declared_composite_utilization(name), 1.0, "{name}");
+            assert_eq!(
+                declared_composite_utilization(name),
+                FCOMP_ADVANCED_COMPOSITE_WING,
+                "{name}"
+            );
         }
-        assert_eq!(declared_composite_utilization("A380-800"), 0.25);
+        assert_eq!(
+            declared_composite_utilization("A380-800"),
+            0.25 * FCOMP_ADVANCED_COMPOSITE_WING
+        );
         for name in [
             "A320-200",
             "A340-300",

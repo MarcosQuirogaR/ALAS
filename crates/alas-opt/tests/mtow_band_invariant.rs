@@ -43,10 +43,13 @@ fn preset_config(preset: &str, sizing: MtowSizing) -> (AlasConfig, DesignVector)
 }
 
 /// `(id, role, actual, limit, raw residual, normalised violation)` of every
-/// residual that ranks candidates (constraints and preferences).
+/// residual that ranks candidates (constraints and preferences). Values are
+/// compared by bit pattern: an unevaluable constraint (the jet take-off field
+/// with no positive one-engine gradient) reports `NaN` limits in both modes,
+/// and `NaN != NaN` would fail the comparison of two identical tables.
 fn ranking_residuals(
     assessment: &CandidateAssessment,
-) -> Vec<(&'static str, ResidualRole, f64, f64, f64, f64)> {
+) -> Vec<(&'static str, ResidualRole, u64, u64, u64, u64)> {
     assessment
         .residuals
         .iter()
@@ -55,10 +58,10 @@ fn ranking_residuals(
             (
                 residual.id,
                 residual.role,
-                residual.actual,
-                residual.limit,
-                residual.raw_residual,
-                residual.normalized_violation,
+                residual.actual.to_bits(),
+                residual.limit.to_bits(),
+                residual.raw_residual.to_bits(),
+                residual.normalized_violation.to_bits(),
             )
         })
         .collect()

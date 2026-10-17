@@ -41,7 +41,10 @@ const CERTIFIED: [(&str, f64, f64); 8] = [
 /// Model (LFL m, Vref m/s, MLW kg, area m^2) at ISA sea level.
 fn model(name: &str) -> (f64, f64, f64, f64) {
     let preset = presets::get(name).unwrap();
-    let config = AlasConfig::from_value(&serde_json::json!({ "preset": name })).unwrap();
+    let mut config = AlasConfig::from_value(&serde_json::json!({ "preset": name })).unwrap();
+    // The landing leg is under test; the jet take-off leg of the same call
+    // needs an explicit asymmetric-trim assumption because no fin is built.
+    config.performance.oei_asymmetric_trim_cd = Some(0.001);
     let area = AircraftBuilder::new(Some(config.geometry.clone()))
         .build(Some(&preset.design_vector), true)
         .unwrap()

@@ -15,6 +15,7 @@
 use alas_config::{DesignRequirements, EngineConfig, MassModelConfig, StructuresConfig};
 use alas_geom::wing_structure::{RibStation, WingStructureGeometry};
 
+use super::boxed::{attach_engine_by_pylon_spider, boxed_front_start, spar_window};
 use super::build::RibRegions;
 use super::cards::{Cbar, Conm2, Deck, Pbarl, Shell};
 use super::nodes::{NodeMap, Surface};
@@ -84,6 +85,7 @@ pub(super) fn add_tria(deck: &mut Deck, eid: &mut i64, corners: [i64; 3], pid: i
 
 /// Skin panels between two consecutive skin ribs, bridging any difference in
 /// their chordwise point counts with a fan of triangles: `_zipper_skin_strip`.
+/// With `boxed` the strip covers only each rib's spar window.
 pub(super) fn zipper_skin_strip(
     deck: &mut Deck,
     eid: &mut i64,
@@ -91,25 +93,31 @@ pub(super) fn zipper_skin_strip(
     nodes: &NodeMap,
     pair: &[usize],
     surface: Surface,
+    boxed: bool,
 ) {
     let (current, next) = (pair[0], pair[1]);
-    let points = |rib: usize| match surface {
+    let full_len = |rib: usize| match surface {
         Surface::Ext => stations[rib].extrados.len(),
         Surface::Int => stations[rib].intrados.len(),
     };
-    let (len_current, len_next) = (points(current), points(next));
+    // First chordwise point and point count of each rib's strip.
+    let window = |rib: usize| {
+        let len = full_len(rib);
+        match (boxed, spar_window(&stations[rib])) {
+            (true, Some((front, rear))) if rear < len => (front, rear - front + 1),
+            _ => (0, len),
+        }
+    };
+    let ((start_current, len_current), (start_next, len_next)) = (window(current), window(next));
+    let at_current = |j: usize| nodes.at(current, start_current + j, surface);
+    let at_next = |j: usize| nodes.at(next, start_next + j, surface);
     let shortest = len_current.min(len_next);
     // The intrados is walked the other way round so its panels keep an outward
     // normal.
     let reversed = surface == Surface::Int;
 
     for j in 0..shortest.saturating_sub(1) {
-        let corners = [
-            nodes.at(current, j, surface),
-            nodes.at(next, j, surface),
-            nodes.at(next, j + 1, surface),
-            nodes.at(current, j + 1, surface),
-        ];
+        let corners = [at_current(j), at_next(j), at_next(j + 1), at_current(j + 1)];
         let ordered = if reversed {
             [corners[0], corners[3], corners[2], corners[1]]
         } else {
@@ -119,12 +127,9 @@ pub(super) fn zipper_skin_strip(
     }
 
     if len_current > len_next {
-        let pivot = nodes.at(next, shortest - 1, surface);
+        let pivot = at_next(shortest - 1);
         for j in shortest - 1..len_current - 1 {
-            let (a, b) = (
-                nodes.at(current, j, surface),
-                nodes.at(current, j + 1, surface),
-            );
+            let (a, b) = (at_current(j), at_current(j + 1));
             let corners = if reversed {
                 [a, b, pivot]
             } else {
@@ -133,9 +138,9 @@ pub(super) fn zipper_skin_strip(
             add_tria(deck, eid, corners, PID_SKIN);
         }
     } else if len_next > len_current {
-        let pivot = nodes.at(current, shortest - 1, surface);
+        let pivot = at_current(shortest - 1);
         for j in shortest - 1..len_next - 1 {
-            let (a, b) = (nodes.at(next, j, surface), nodes.at(next, j + 1, surface));
+            let (a, b) = (at_next(j), at_next(j + 1));
             let corners = if reversed {
                 [b, a, pivot]
             } else {
@@ -153,6 +158,7 @@ pub(super) fn add_rib_panels(
     stations: &[RibStation],
     nodes: &NodeMap,
     regions: &RibRegions,
+    boxed: bool,
 ) {
     let skin_ribs_main: HashSet<usize> = regions.skin_ribs_main.iter().copied().collect();
     for &rib in &regions.all_structural {
@@ -178,8 +184,14 @@ pub(super) fn add_rib_panels(
         };
 
         // The leading-edge point is skipped: both surfaces share one grid
-        // there, so the first panel would be degenerate.
-        for j in 1..end.max(0) as usize {
+        // there, so the first panel would be degenerate. The boxed deck closes
+        // the rib between the outermost spars only.
+        let end = match (boxed, spar_window(station)) {
+            (true, Some((_, rear))) => rear as i64,
+            _ => end,
+        };
+        let start = boxed_front_start(station, boxed);
+        for j in start..end.max(0) as usize {
             add_quad(
                 deck,
                 eid,
@@ -336,14 +348,23 @@ pub(super) fn add_spar_caps(
 }
 
 /// Every grid on the root rib, upper surface first, each listed once.
-pub(super) fn root_constraint_nodes(stations: &[RibStation], nodes: &NodeMap) -> Vec<i64> {
+pub(super) fn root_constraint_nodes(
+    stations: &[RibStation],
+    nodes: &NodeMap,
+    boxed: bool,
+) -> Vec<i64> {
     let Some(root) = stations.first() else {
         return Vec::new();
     };
-    let mut constrained: Vec<i64> = (0..root.extrados.len())
+    // The boxed deck has no root-rib grids outside the spar window.
+    let (first, last_ext, last_int) = match (boxed, spar_window(root)) {
+        (true, Some((front, rear))) => (front, rear + 1, rear + 1),
+        _ => (0, root.extrados.len(), root.intrados.len()),
+    };
+    let mut constrained: Vec<i64> = (first..last_ext.min(root.extrados.len()))
         .map(|j| nodes.at(0, j, Surface::Ext))
         .collect();
-    for j in 0..root.intrados.len() {
+    for j in first..last_int.min(root.intrados.len()) {
         let nid = nodes.at(0, j, Surface::Int);
         if !constrained.contains(&nid) {
             constrained.push(nid);
@@ -383,6 +404,21 @@ pub(super) fn add_engine_masses(
         };
         let nid = nodes.at(nearest, front, Surface::Int);
         let chord = wsg.local_chord(station.eta);
+        if preserve_declared_station {
+            attach_engine_by_pylon_spider(
+                deck,
+                eid,
+                stations,
+                nodes,
+                regions,
+                nearest,
+                nid,
+                mass,
+                [-0.15 * chord, y_engine.abs() - deck.node_y(nid), -1.0],
+            );
+            attached.push(nid);
+            continue;
+        }
         deck.masses.push(Conm2 {
             eid: *eid,
             nid,

@@ -47,7 +47,7 @@ pub(super) fn size_wingbox_with_law(
     // full envelope (manoeuvre, gust, torque, fatigue limit).
     let set = match law {
         SizingLaw::Product => case_set,
-        SizingLaw::Frozen => CaseSet::MANOEUVRE_ONLY,
+        SizingLaw::Frozen => CaseSet::FROZEN_REFERENCE,
     };
     let loaded = envelope::case_loads(wsg, cfg, req, set, &y, relief);
     // Sized by whichever case has the larger |root moment| once the inertia
@@ -274,8 +274,14 @@ pub(super) fn size_wingbox_with_law(
         None
     };
 
+    let axis_cos = if matches!(law, SizingLaw::Product) {
+        super::swept::axis_cos(wsg, &y)
+    } else {
+        Vec::new()
+    };
     let mut result = WingboxSizing {
         y_stations: y,
+        axis_cos,
         eta_stations: eta,
         chord,
         spar_fracs: wsg.spar_fracs.clone(),

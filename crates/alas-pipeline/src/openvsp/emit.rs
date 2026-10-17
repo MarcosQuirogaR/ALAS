@@ -5,6 +5,9 @@
 
 use super::*;
 
+mod tailplane_split;
+pub(super) use tailplane_split::{exported_wings, WingPose};
+
 /// Size the gear this export draws, or report that this aircraft has no
 /// main-gear station to draw it at.
 ///
@@ -165,7 +168,7 @@ pub(super) fn emit_fuselage(script: &mut String, index: usize, fuselage: &Fusela
     script.push('\n');
 }
 
-pub(super) fn emit_wing(script: &mut String, index: usize, wing: &Wing) {
+pub(super) fn emit_wing_in_pose(script: &mut String, index: usize, wing: &Wing, pose: WingPose) {
     if wing.xsecs.len() < 2 {
         return;
     }
@@ -182,6 +185,11 @@ pub(super) fn emit_wing(script: &mut String, index: usize, wing: &Wing) {
     set_parm(script, &id, "X_Rel_Location", "XForm", root.xyz_le[0]);
     set_parm(script, &id, "Y_Rel_Location", "XForm", root.xyz_le[1]);
     set_parm(script, &id, "Z_Rel_Location", "XForm", root.xyz_le[2]);
+    if pose == WingPose::LeftHalf {
+        // A left half built along +y in its own frame and turned about the
+        // x axis lies along -y, the mirror image of the right half.
+        set_parm(script, &id, "X_Rel_Rotation", "XForm", 180.0);
+    }
     set_parm(
         script,
         &id,
@@ -205,7 +213,9 @@ pub(super) fn emit_wing(script: &mut String, index: usize, wing: &Wing) {
     // holds for a mirrored surface rooted off the symmetry plane (a wingtip
     // device on the wing tip): it has no seam to close and its cant can
     // approach 90 degrees.
-    let closes_seam = wing.symmetric && root.xyz_le[1].abs() < 1.0e-9;
+    // A tailplane half is flat and untwisted, so it takes the seam frame too.
+    let closes_seam =
+        pose != WingPose::Standard || (wing.symmetric && root.xyz_le[1].abs() < 1.0e-9);
     set_parm(
         script,
         &id,

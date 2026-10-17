@@ -23,6 +23,7 @@
 
 mod analysis;
 mod decks;
+mod forces;
 mod format;
 mod results;
 mod run;
@@ -35,10 +36,11 @@ pub(crate) mod text;
 
 pub use analysis::{is_solver_not_configured, run_nastran_analysis};
 pub use decks::{
-    build_sol101_bulk, build_sol103_bulk, build_sol111_random_bulk, build_sol111_sine_bulk,
-    build_sol111_sine_bulk_msc, elliptic_forces_by_y,
+    build_sol101_bulk, build_sol101_bulk_product, build_sol103_bulk, build_sol111_random_bulk,
+    build_sol111_sine_bulk, build_sol111_sine_bulk_msc,
 };
 pub(crate) use decks::{FORCE_SID_BASE, GRAVITY_SID_BASE};
+pub use forces::{elliptic_forces_by_y, elliptic_forces_by_y_trapezoid};
 pub use format::free_field;
 pub use results::{
     read_force_psd_rms, read_harmonic_response, read_modes, read_static, read_vibration,

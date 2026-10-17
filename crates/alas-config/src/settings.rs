@@ -904,7 +904,12 @@ mod tests {
         let config = AlasConfig::from_value(&json!({"preset": "A220-300"})).unwrap();
         assert_eq!(config.mass_model.systems_mass_fraction, 0.13);
         assert_eq!(config.mass_model.furnishings_mass_fraction, 0.12);
-        assert_eq!(config.performance.cl_max_to, 2.10);
+        // CLmax_TO is derived from the declared high-lift system (Raymer Eq. 12.21),
+        // not the 2.10 class default.
+        let derived = crate::presets::preset_breakdown(crate::presets::get("A220-300").unwrap())
+            .unwrap()
+            .takeoff();
+        assert_eq!(config.performance.cl_max_to, derived);
     }
 
     #[test]

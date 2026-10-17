@@ -44,6 +44,7 @@ impl UavWorkflowState {
         let cancel_flag = self.cancel_flag.clone();
         match thread::Builder::new()
             .name("alas-uav-competition".to_owned())
+            .stack_size(crate::worker_stack::ANALYSIS_STACK_BYTES)
             .spawn(move || run_worker(request, sender, cancel_flag))
         {
             Ok(_) => true,

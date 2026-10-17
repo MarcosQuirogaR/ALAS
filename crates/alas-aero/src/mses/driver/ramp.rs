@@ -29,6 +29,10 @@ const RAMP_MAX_STEP: f64 = 0.1;
 const RAMP_MIN_STEP: f64 = RAMP_MAX_STEP / 8.0;
 /// Resource bound on the number of solver runs one ramp may take.
 const RAMP_MAX_RUNS: usize = 16;
+/// Angle offset of the lower-lift anchor used when a cold point's Mach walk
+/// stalls at its own angle. Two bounded continuation steps
+/// ([`MAX_CONTINUATION_STEP_DEG`] each) below the requested angle.
+const CL_ANCHOR_OFFSET_DEG: f64 = 2.0 * MAX_CONTINUATION_STEP_DEG;
 /// Newton iterations allowed to each intermediate ramp stage. Converging
 /// stages need 10-40; a stage that has not converged by 60 is diverging, so a
 /// longer budget only delays the halved retry. The first (M=0.3) stage and
@@ -117,8 +121,70 @@ impl Mses {
         if self.run_mset_or_cancel(dir, alpha, cancel)? {
             return Ok(Some(RampOutcome::Cancelled));
         }
-        self.mach_ramp_cold_start(dir, alpha, reynolds, mach, cancel, attempts)
-            .map(Some)
+        match self.mach_ramp_cold_start(dir, alpha, reynolds, mach, cancel, attempts)? {
+            RampOutcome::Stalled => self
+                .cl_anchored_cold_start(dir, alpha, reynolds, mach, cancel, attempts)
+                .map(Some),
+            outcome => Ok(Some(outcome)),
+        }
+    }
+
+    /// Lower-lift start for a cold point whose Mach walk stalled at its own
+    /// angle. The walk is repeated [`CL_ANCHOR_OFFSET_DEG`] below the requested
+    /// angle, where the shock is weaker, the solution is then carried up to the
+    /// requested angle by bounded alpha bridging at the target Mach, and the
+    /// requested angle is solved from that converged state. This is the MSES
+    /// guide's standard order for a hard case: converge the lower-CL condition
+    /// first and step the angle up. A stall at any stage returns `Stalled`.
+    pub(super) fn cl_anchored_cold_start(
+        &self,
+        dir: &Path,
+        alpha: f64,
+        reynolds: f64,
+        mach: f64,
+        cancel: Option<&AtomicBool>,
+        attempts: &mut Vec<MsesSolverAttempt>,
+    ) -> Result<RampOutcome, MsesFailure> {
+        let anchor = alpha - CL_ANCHOR_OFFSET_DEG;
+        if self.run_mset_or_cancel(dir, anchor, cancel)? {
+            return Ok(RampOutcome::Cancelled);
+        }
+        match self.mach_ramp_cold_start(dir, anchor, reynolds, mach, cancel, attempts)? {
+            RampOutcome::Converged(_) => {}
+            RampOutcome::Stalled => return Ok(RampOutcome::Stalled),
+            RampOutcome::Cancelled => return Ok(RampOutcome::Cancelled),
+        }
+        if !save_converged_state(dir) {
+            return Ok(RampOutcome::Stalled);
+        }
+        match self.bridge_to_target(dir, anchor, alpha, reynolds, mach, cancel, attempts)? {
+            BridgeOutcome::Reached(_) => {}
+            BridgeOutcome::Exhausted => return Ok(RampOutcome::Stalled),
+            BridgeOutcome::Cancelled => return Ok(RampOutcome::Cancelled),
+        }
+        let run = match self.run_mses_case(dir, alpha, reynolds, mach, cancel) {
+            Ok(run) => run,
+            Err(failure) if cancelled(&failure) => return Ok(RampOutcome::Cancelled),
+            Err(failure) => return Err(failure),
+        };
+        let converged = parse::is_converged(&run.stdout);
+        attempts.push(MsesSolverAttempt {
+            alpha_deg: alpha,
+            purpose: format!(
+                "lower-lift anchored start: converged at M={mach:.4} from alpha={anchor:.6} deg,                  bridged to alpha={alpha:.6} deg"
+            ),
+            status: if converged {
+                MsesPolarPointStatus::Converged
+            } else {
+                MsesPolarPointStatus::NotConverged
+            },
+            solver_output: run.stdout.clone(),
+        });
+        Ok(if converged {
+            RampOutcome::Converged(run)
+        } else {
+            RampOutcome::Stalled
+        })
     }
 
     /// Walk the cold-started mesh in `dir` from [`RAMP_START_MACH`] to `mach`

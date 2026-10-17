@@ -461,18 +461,19 @@ mod tests {
         let plane = alas_geom::builder::AircraftBuilder::new(Some(config.geometry.clone()))
             .build(Some(&design), true)
             .unwrap();
-        // The FE deck carries material the native beam inventory does not
-        // (the skin and ribs ahead of and behind the box), so a wing budget
-        // the native mass meets can still be exceeded by the deck that is
-        // actually solved. The budget is placed between the two rather than
-        // pinned, so the check survives any change to the sizing law: the
-        // mesh row must report the deck's own mass and land over the budget
-        // the native row lands under, and both rows stay diagnostic.
+        // The FE deck's material mass and the native inventory are two
+        // different numbers (the deck is boxed to the spars like the native
+        // section, but meshes the actual airfoil, ribs and rivets), so a wing
+        // budget one meets can still be exceeded by the other. The budget is
+        // placed between the two rather than pinned, so the check survives any
+        // change to the sizing law or the mesh: each row must report its own
+        // mass, the heavier one lands over the budget and the lighter under
+        // it, and both rows stay diagnostic.
         let assessment = assess_candidate(&config, &design, &plane).unwrap();
         let native_kg = assessment.primary_mass_kg;
         let mesh_kg = assessment.mesh_primary_mass_kg.unwrap();
         assert!(
-            mesh_kg > native_kg,
+            (mesh_kg - native_kg).abs() > 1.0,
             "mesh {mesh_kg} kg vs native {native_kg} kg"
         );
         let budget = 0.5 * (native_kg + mesh_kg);
@@ -487,8 +488,8 @@ mod tests {
             .unwrap();
         assert_eq!(native.actual, native_kg);
         assert_eq!(mesh.actual, mesh_kg);
-        assert!(native.raw_residual < 0.0);
-        assert!(mesh.raw_residual > 0.0);
+        assert_eq!(native.raw_residual < 0.0, native_kg < mesh_kg);
+        assert_eq!(mesh.raw_residual > 0.0, mesh_kg > native_kg);
         for row in [native, mesh] {
             assert_eq!(row.role, ResidualRole::Diagnostic);
             assert_eq!(row.normalized_violation, 0.0);

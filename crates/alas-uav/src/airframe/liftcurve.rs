@@ -4,7 +4,7 @@
 //! Closed-form lifting-surface estimates used by the simple neutral-point
 //! method: lift-curve slope, downwash, control-surface effectiveness.
 //!
-//! Sources (all read on the page of the PDFs in `TFM/data/bibliografia`):
+//! Sources (page and equation numbers refer to the cited editions):
 //!
 //! * Raymer, Aircraft Design: A Conceptual Approach, 6th ed., Eq. 12.6-12.9,
 //!   p. 400 (wing lift-curve slope, fuselage lift factor).

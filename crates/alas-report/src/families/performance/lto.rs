@@ -137,6 +137,9 @@ fn draw_lto(
     scene.suppress_derived_title();
     let labels = if legacy {
         ["TODR", "BFL", "ASD", "LDR"]
+    } else if performance.takeoff_field.is_some() {
+        // Integrated CS 25.113 / 25.109 legs, not proxies.
+        ["TODR", "BFL", "ASD", "LFL"]
     } else {
         ["TODR", "BFL proxy", "ASD proxy", "LFL"]
     };
@@ -499,6 +502,7 @@ mod tests {
                 v_app_ms: 72.0,
                 v_td_ms: 64.0,
             },
+            takeoff_field: None,
             todr_m: 2200.0,
             bfl_m: 2400.0,
             asd_m: 2400.0,

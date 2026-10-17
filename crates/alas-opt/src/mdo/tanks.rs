@@ -169,10 +169,10 @@ mod tests {
         }
     }
 
-    /// The A220-300 publishes 21,504.92 L at 0.8089 kg/L (17,395 kg) while
-    /// its registered cells total 21,508 L: the 3 L rounding difference is
-    /// reconciled onto the published volume, and a published volume 3 %
-    /// away from the cells is an unexplained inventory and is rejected.
+    /// The A220-300 publishes 21,918 L at 0.8089 kg/L (17,729.5 kg) while its
+    /// registered cells total 21,508 L: the 1.9 % difference is reconciled
+    /// onto the published volume, and a published volume 3 % away from the
+    /// cells is an unexplained inventory and is rejected.
     #[test]
     fn a_preset_inventory_outside_the_source_tolerance_is_rejected() {
         let preset = presets::get("A220-300").unwrap_or_else(|error| panic!("{error}"));
@@ -184,9 +184,12 @@ mod tests {
         let tanks = resolve_product_layout(&config, &preset.design_vector, &plane)
             .unwrap_or_else(|error| panic!("{error}"));
         assert!((tanks.density_kg_m3 - 808.9).abs() < 1.0e-9);
-        assert!((tanks.usable_capacity_kg() - 21_504.92 * 0.8089).abs() < 1.0e-6);
+        // Re-pinned 2026-10-16 by probe: the preset now publishes 21,918 L (ACAP
+        // BD500-3AB48-13800-00 p.26, 5,790 USG, fix-preset-data); the 410 L
+        // difference from the 21,508 L cells (1.9 %) is reconciled onto it.
+        assert!((tanks.usable_capacity_kg() - 21_918.0 * 0.8089).abs() < 1.0e-6);
         assert!(matches!(
-            tanks.reconciled_to_published_volume(1.03 * 21_504.92),
+            tanks.reconciled_to_published_volume(1.03 * 21_918.0),
             Err(TankLayoutError::PublishedInventoryMismatch { .. })
         ));
     }

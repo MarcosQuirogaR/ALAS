@@ -10,8 +10,8 @@ use alas_config::airports::Airport;
 use alas_config::{AlasConfig, DesignRequirements, ObjectiveConfig, PerformanceConfig};
 use alas_perf::performance::{
     assess_oei_climb, compute_v_speeds_at_masses, cs25_115_net_path_reduction, density_ratio,
-    far25_oei_gradient, landing_runway_share, oei_cl_at_v2, tw_takeoff_constraint,
-    ws_landing_field_limit, OeiClimbStatus, JET_DRY_LANDING_SHARE,
+    far25_oei_gradient, landing_runway_share, oei_cl_at_v2, ws_landing_field_limit, OeiClimbStatus,
+    JET_DRY_LANDING_SHARE,
 };
 use alas_units::KNOT;
 
@@ -29,11 +29,14 @@ pub mod improved_climb;
 /// and asymmetric trim drag).
 pub mod oei_deck;
 pub mod planned_cruise;
+/// The CS 25.113 jet take-off field length shared by the constraint and the reports.
+pub mod takeoff_field;
 /// The scatter-aware verdict of the cruise-thrust and top-of-climb checks.
 pub mod thrust_uncertainty;
 
 use certification::{certification_residuals, net_path_gradient_margin, CertificationInputs};
 use oei_deck::{second_segment_evidence, EngineOutModel, YawAirframe};
+use takeoff_field::{takeoff_field_row, ResidualInputs};
 
 use super::sizing::SizingOutcome;
 use super::types::CandidateDrag;
@@ -354,17 +357,18 @@ pub(super) fn performance_residuals(
     // (`alas_config::MassSizingBasis`): the declared weights of a fixed
     // aircraft, the closure of a coupled design.
     if let Some(departure) = outcome.departure {
-        residuals.push(takeoff_field_residual(
-            sized.design_gross_mass_kg,
-            outcome.n_engines as f64 * outcome.static_thrust_kn * 1_000.0,
-            s_ref,
-            req.gravity_m_s2,
+        residuals.push(takeoff_field_row(&ResidualInputs {
+            perf,
+            engine_out: engine_out.as_ref(),
+            drag: &sized.fuel_artifacts.drag,
             departure,
-            // An improved-climb V2 lengthens the field (same T/W correlation, lower
-            // effective CLmax).
-            perf.takeoff_field_cl_max(perf.cl_max_to),
+            speeds: departure_speeds,
+            s_ref_m2: s_ref,
+            mass_kg: sized.design_gross_mass_kg,
+            static_thrust_n: outcome.n_engines as f64 * outcome.static_thrust_kn * 1_000.0,
+            gravity_m_s2: req.gravity_m_s2,
             role,
-        ));
+        }));
     }
 
     if let Some(arrival) = outcome.arrival {
@@ -375,39 +379,6 @@ pub(super) fn performance_residuals(
 
     residuals.extend(super::residuals_vmc::vmc_residuals(&vmc, role));
     residuals
-}
-
-/// The takeoff field-length residual at `mass_kg`, as a thrust-to-weight
-/// requirement.
-///
-/// Raymer's empirical takeoff relation (`alas_perf::performance::
-/// tw_takeoff_constraint`) gives the required `T/W` from the wing loading at
-/// `mass_kg`; the available `T/W` is the installed static thrust over the same
-/// weight. Both sides move with the mass, so a field that a light dispatch
-/// clears can be missed at the maximum takeoff mass.
-fn takeoff_field_residual(
-    mass_kg: f64,
-    static_thrust_n: f64,
-    s_ref: f64,
-    gravity_m_s2: f64,
-    departure: &Airport,
-    cl_max_to: f64,
-    role: ResidualRole,
-) -> ConstraintResidual {
-    let weight_n = mass_kg * gravity_m_s2;
-    let available_tw = static_thrust_n / weight_n;
-    let sigma = density_ratio(departure.elevation_m, departure.isa_deviation_c);
-    let required_tw =
-        tw_takeoff_constraint(&[weight_n / s_ref], departure.toda_m, sigma, cl_max_to)[0];
-    ConstraintResidual::scaled(
-        "takeoff_field",
-        Performance,
-        available_tw,
-        required_tw,
-        "T/W",
-        required_tw - available_tw,
-        role,
-    )
 }
 
 /// Single-point clean-drag projection for the engine-out assessor. Both

@@ -77,9 +77,23 @@ fn unset_options_leave_the_physics_output_bit_identical() {
     // test's own eprintln): the first level of a climb ladder is held to the
     // planner's flyability rule (B747-400 7480989053690636170 ->
     // 9552556230291174144; A320 unchanged: its configured level qualifies).
+    // Re-pinned by lane TOFL (2026-10-16, by probe, value from the test's own
+    // eprintln): the `takeoff_field` residual is the CS 25.113 integrated field
+    // length against the TODA, in metres (was the Raymer T/W correlation).
+    // Disabling only that row in place (a temporary switch, since removed)
+    // reproduces the previous hashes exactly: the change is that row alone
+    // (A320 2125890983014824348 -> 14438840883493581074, B747-400
+    // 9552556230291174144 -> 9852762159868136202).
+    // Re-pinned by lane CLmax-TO (2026-10-16, by probe from the same eprintln):
+    // the registered CLmax_TO now comes from the declared high-lift system
+    // (Raymer Eq. 12.21). With only that derivation disabled in place (a
+    // temporary env switch, removed) the tree gives A320 13006190495559274761
+    // and B747-400 8092820004634198083: the pin above was already stale at the
+    // integration base 65d3d3a1 (other merged work), so this re-pin also absorbs
+    // that drift. New: A320 7204725775780450666, B747-400 15835521684524083561.
     let expected: [(&str, u64); 2] = [
-        ("A320-200", 2_125_890_983_014_824_348),
-        ("B747-400", 9_552_556_230_291_174_144),
+        ("A320-200", 7_204_725_775_780_450_666),
+        ("B747-400", 15_835_521_684_524_083_561),
     ];
     let got = expected.map(|(name, _)| (name, fnv1a(&physics_text(name, false))));
     eprintln!("{got:?}");

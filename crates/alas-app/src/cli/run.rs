@@ -6,7 +6,7 @@
 use std::fs;
 use std::path::Path;
 
-use super::args::{apply_cli_tool_preferences, load_config, parse_args};
+use super::args::{apply_cli_tool_preferences, load_config, parse_args, CliArgs};
 use super::plots::{plots_dir, save_result_plots};
 use super::summaries::{
     print_cpacs_summary, print_mses_summary, print_optimization_summary, print_structural_summary,
@@ -35,6 +35,12 @@ pub fn run_cli(args: &[String]) -> i32 {
         return 0;
     }
 
+    // Headless runs hold deep pipeline frames: leave the 1 MiB main-thread
+    // stack. The GUI branch above stays on the main thread (winit).
+    alas_gui::worker_stack::run_on_large_stack(move || run_headless(cli))
+}
+
+fn run_headless(cli: CliArgs) -> i32 {
     let mut config = match load_config(&cli) {
         Ok(c) => c,
         Err(e) => {
