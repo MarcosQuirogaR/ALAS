@@ -63,10 +63,32 @@ const PINNED: &[(&str, u64)] = &[
     ("A400M", 8243637745584233548), // provenance paths made repo-relative 2026-10-16 (was 7323503594127204010);  // integration round 4 2026-10-12 re-pin (was 15403258036913307423 on reference-coupling, 3791940184766590783 on tailcone; merged LEMAC 15.415 + aft-body refit) // fix/reference-coupling 2026-10-12 re-pin (was 6908957092296681392; LEMAC 15.415) // geo/freeze 2026-10-12 re-pin (was 16620310613232825262; Published reference wing, A340 wing TE) // geo/close 2026-10-12 re-pin (was 10878223092227262083)
 ];
 
+/// Pins taken on the hosted Linux runner (glibc math). The Windows pins above
+/// come from the MSVC math runtime; the same geometry rounds differently in the
+/// last bit of some transcendental functions, so each host family has its own.
+const PINNED_NON_WINDOWS: &[(&str, u64)] = &[
+    ("AVE", 10582155959289792503),
+    ("A340-300", 11136206995863573642),
+    ("A380-800", 7116123445881229003),
+    ("B787-9", 6114416057696758041),
+    ("A320-200", 14494018555771940497),
+    ("A220-300", 7959044399074464838),
+    ("ATR72-600", 133399923079807697),
+    ("DC-10", 10351383403503179438),
+    ("E195-E2", 13100599957855145443),
+    ("C919", 17572042800260240221),
+    ("B747-400", 8373683345785915172),
+    ("A400M", 6526896418783252873),
+];
+
 #[test]
 fn presets_without_a_wingtip_device_are_bit_identical() {
     let print = std::env::var_os("ALAS_PRINT_GEOMETRY_HASHES").is_some();
-    let mut moved = Vec::new();
+    let table = if cfg!(windows) {
+        PINNED
+    } else {
+        PINNED_NON_WINDOWS
+    };
     for name in presets::available() {
         let preset = presets::get(name).unwrap();
         let plane = AircraftBuilder::new(Some(preset.geometry.clone()))
@@ -81,16 +103,11 @@ fn presets_without_a_wingtip_device_are_bit_identical() {
         }
         if !print {
             let key = name.to_string();
-            let pinned = PINNED
+            let pinned = table
                 .iter()
                 .find(|entry| entry.0 == key)
                 .map(|entry| entry.1);
-            if cfg!(windows) {
-                assert_eq!(pinned, Some(hash), "{name}: geometry hash moved");
-            } else {
-                moved.push(format!("{name} {hash} (pinned {pinned:?})"));
-            }
+            assert_eq!(pinned, Some(hash), "{name}: geometry hash moved");
         }
     }
-    assert!(moved.is_empty(), "host-family hashes: {moved:?}");
 }
