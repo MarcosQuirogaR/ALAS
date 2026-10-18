@@ -117,7 +117,7 @@ pub(super) fn render_mission_form(
     };
 
     ui.add_space(8.0);
-    if let Some(config) = state.typed_config() {
+    if let Some(config) = state.typed_config_arc() {
         show_mission_profile_preview(ui, &config);
     } else {
         ui.colored_label(

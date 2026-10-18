@@ -1,0 +1,262 @@
+{
+  "id": "acc-2026",
+  "version": 1,
+  "family": "acc",
+  "name": "Air Cargo Challenge 2026 (Stuttgart), cans",
+  "status": "official",
+  "citation": "ACC 2026 Participation Handbook v1.3 (27.6.2026), s4.3 requirements, s4.6 mission procedure, s4.7 scoring (eq. 1-8); local copy refs/competitions/ACC2026_rules.pdf; transcription checked against the PDF text on 2026-10-12",
+  "gates": [
+    {
+      "id": "mtow",
+      "description": "Take-off mass including payload <= 25 kg",
+      "margin_expr": "(25 kg - mtow) / (25 kg)",
+      "hard": true,
+      "citation": "ACC 2026 Participation Handbook v1.3 (27.6.2026) s4.3 A/C 5"
+    },
+    {
+      "id": "box_sum",
+      "description": "Transport box inner L+W+H <= 1500 mm",
+      "margin_expr": "(1.5 m - transport_box_sum) / (1.5 m)",
+      "hard": true,
+      "citation": "ACC 2026 Participation Handbook v1.3 (27.6.2026) s4.3 transport box Prop 1-2"
+    },
+    {
+      "id": "box_mass",
+      "description": "Box + aircraft + assembly tools <= 23 kg",
+      "margin_expr": "(23 kg - transport_box_mass) / (23 kg)",
+      "hard": true,
+      "citation": "ACC 2026 Participation Handbook v1.3 (27.6.2026) s4.3 transport box"
+    },
+    {
+      "id": "motors",
+      "description": "One or two T-MOTOR AT2814 900 kV motors",
+      "margin_expr": "min(2 - motor_count, motor_count - 1)",
+      "hard": true,
+      "citation": "ACC 2026 Participation Handbook v1.3 (27.6.2026) s4.3 Motor"
+    },
+    {
+      "id": "cells",
+      "description": "At most 3 cells in series",
+      "margin_expr": "(3 - cell_count) / 3",
+      "hard": true,
+      "citation": "ACC 2026 Participation Handbook v1.3 (27.6.2026) s4.3 Bat 1, Bat 6"
+    },
+    {
+      "id": "pack_voltage",
+      "description": "Pack voltage <= 12.6 V",
+      "margin_expr": "(12.6 V - pack_voltage_max) / (12.6 V)",
+      "hard": true,
+      "citation": "ACC 2026 Participation Handbook v1.3 (27.6.2026) s4.3 Bat 2"
+    },
+    {
+      "id": "pack_energy",
+      "description": "Energy per pack <= 100 Wh",
+      "margin_expr": "(100 Wh - pack_energy_max) / (100 Wh)",
+      "hard": true,
+      "citation": "ACC 2026 Participation Handbook v1.3 (27.6.2026) s4.3 Bat 6"
+    },
+    {
+      "id": "pack_rating",
+      "description": "Continuous discharge rating >= 40 A",
+      "margin_expr": "(battery_continuous_rating - 40 A) / (40 A)",
+      "hard": true,
+      "citation": "ACC 2026 Participation Handbook v1.3 (27.6.2026) s4.3 Bat 4"
+    },
+    {
+      "id": "bay",
+      "description": "Cargo bay holds at least two cans",
+      "margin_expr": "(bay_can_capacity - 2) / 2",
+      "hard": true,
+      "citation": "ACC 2026 Participation Handbook v1.3 (27.6.2026) s4.3 Payload 6"
+    },
+    {
+      "id": "static_margin",
+      "description": "Static margin 5 % to 50 % for 0..max cans",
+      "margin_expr": "min((static_margin_min - 0.05) / 0.05, (0.5 - static_margin_max) / 0.5)",
+      "hard": true,
+      "citation": "ACC 2026 Participation Handbook v1.3 (27.6.2026) s4.3 Stab 2"
+    },
+    {
+      "id": "announcement",
+      "description": "Announced take-off distance is 40 m or 60 m",
+      "margin_expr": "if(announced_takeoff == 40 m || announced_takeoff == 60 m, 0, -1)",
+      "hard": true,
+      "citation": "ACC 2026 Participation Handbook v1.3 (27.6.2026) s4.7.1 eq. 1"
+    },
+    {
+      "id": "zero_voltage",
+      "description": "Recorded voltage never above 12.75 V (else zero flight)",
+      "margin_expr": "(12.75 V - peak_voltage) / (12.75 V)",
+      "hard": true,
+      "citation": "ACC 2026 Participation Handbook v1.3 (27.6.2026) s4.7.4 item 2"
+    },
+    {
+      "id": "zero_current",
+      "description": "Recorded current never above 70 A (else zero flight)",
+      "margin_expr": "(70 A - peak_current) / (70 A)",
+      "hard": true,
+      "citation": "ACC 2026 Participation Handbook v1.3 (27.6.2026) s4.7.4 item 3"
+    },
+    {
+      "id": "takeoff_within_announcement",
+      "description": "Predicted take-off distance within the announcement (else B_to = 0)",
+      "margin_expr": "(announced_takeoff - takeoff_distance) / announced_takeoff",
+      "hard": false,
+      "citation": "ACC 2026 Participation Handbook v1.3 (27.6.2026) s4.7.1 eq. 1"
+    }
+  ],
+  "parameters": [
+    {
+      "name": "current_limit",
+      "unit_si": "A",
+      "default": 30,
+      "min": 1,
+      "max": 200,
+      "doc": "Battery-side current limit, both motors summed (s4.7.4 item 1)"
+    },
+    {
+      "name": "block_window",
+      "unit_si": "s",
+      "default": 0.5,
+      "min": 0.1,
+      "max": 5,
+      "doc": "Averaging block of the 10 Hz current log (s4.7.4 item 1)"
+    },
+    {
+      "name": "flight_valid",
+      "unit_si": "1",
+      "default": 1,
+      "min": 0,
+      "max": 1,
+      "doc": "1 when the flight is legal; 0 for a rule breach the simulator cannot see (lost part, flight-zone breach, failed static test)"
+    },
+    {
+      "name": "flight_clock_throttle_up",
+      "unit_si": "1",
+      "default": 1,
+      "min": 0,
+      "max": 1,
+      "doc": "Flight time starts at throttle-up (current > 5 A or 5 km/h), so the 60 s climb includes the ground roll (s4.6.4-4.6.5)"
+    }
+  ],
+  "segments": [
+    {
+      "name": "loading",
+      "kind": {
+        "kind": "loading",
+        "seconds": 60.0
+      }
+    },
+    {
+      "name": "takeoff",
+      "kind": {
+        "kind": "takeoff",
+        "runway_m": 60.0,
+        "surface": "hard"
+      }
+    },
+    {
+      "name": "climb",
+      "kind": {
+        "kind": "climb",
+        "end": {
+          "until": "time",
+          "seconds": 60.0
+        }
+      }
+    },
+    {
+      "name": "distance",
+      "kind": {
+        "kind": "cruise",
+        "end": {
+          "until": "time",
+          "seconds": 120.0
+        },
+        "altitude_window_m": [
+          10.0,
+          200.0
+        ]
+      }
+    },
+    {
+      "name": "landing",
+      "kind": {
+        "kind": "landing",
+        "zone_m": null
+      }
+    }
+  ],
+  "score": {
+    "terms": [
+      {
+        "name": "b_to",
+        "expr": "if(takeoff_distance > announced_takeoff, 0, step(announced_takeoff, 40 m, 1.15, 60 m, 1, 0))",
+        "additive_bonus": false
+      },
+      {
+        "name": "i_over",
+        "expr": "integral_above(block_mean(battery_current, block_window), current_limit)",
+        "additive_bonus": false
+      },
+      {
+        "name": "p_current",
+        "expr": "min(1, 0.002 * (i_over / (1 A*s)))",
+        "additive_bonus": false
+      },
+      {
+        "name": "s_raw",
+        "expr": "b_to * payload_mass * distance_120s^2 * (1 - p_current)",
+        "additive_bonus": false
+      },
+      {
+        "name": "flight_ok",
+        "expr": "if(peak_voltage <= 12.75 V && peak_current <= 70 A && takeoff_distance <= announced_takeoff, 1, 0) * flight_valid",
+        "additive_bonus": false
+      },
+      {
+        "name": "b_load",
+        "expr": "if(loading_time < 120 s, 60 * (1 - loading_time / (120 s)), 0)",
+        "additive_bonus": true
+      },
+      {
+        "name": "b_pred",
+        "expr": "min(60, step(declared_payload_count - payload_count, 0, 3, 1, 2, 2, 1, 0) * declared_payload_count)",
+        "additive_bonus": true
+      }
+    ],
+    "round_expr": "flight_ok * (rel(s_raw, s_raw_best) * 1000 + b_load + b_pred)",
+    "aggregation": {
+      "kind": "mean_best_k",
+      "k": 2,
+      "min_rounds": 3
+    },
+    "reference_field": [
+      {
+        "name": "s_raw_best",
+        "default": 34465000.0,
+        "unit_si": "kg*m^2",
+        "note": "ASSUMPTION: best raw score of the round is unknown before the event; default 10 cans (3.5 kg) x (3138 m)^2 from AeroUD ACC2026 report 09 (competitions.md s2.3, 10 cans, 3.138 km). Set to the field best."
+      }
+    ]
+  },
+  "variants": [
+    {
+      "id": "eq6_multiplicative",
+      "description": "v1.3 text: S_raw = B_to m d^2 (1 - P_current), P_current = min(1, 0.002 * integral(max(0, I - 30 A)) dt) (eq. 2 and 6)",
+      "overrides": [],
+      "default": true
+    },
+    {
+      "id": "legacy_additive",
+      "description": "Pre-v1.3 reading (change-log 2026-06-27): S_raw = B_to m d^2 - 2 * integral(max(0, I - 30 A)) dt; superseded, shipped for reproducing earlier analyses. The penalty is subtracted in kg*m^2 as printed, so it is numerically negligible against 1e7 kg*m^2.",
+      "overrides": [
+        [
+          "s_raw",
+          "b_to * payload_mass * distance_120s^2 - 2 * (i_over / (1 A*s)) * (1 kg*m^2)"
+        ]
+      ],
+      "default": false
+    }
+  ]
+}

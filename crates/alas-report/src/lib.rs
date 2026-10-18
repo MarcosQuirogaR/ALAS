@@ -41,6 +41,7 @@ pub mod status_figure;
 pub mod svg;
 pub mod theme;
 
+pub use alas_pipeline::earth_texture;
 pub use chart_kit::{draw_axes, draw_colorbar, draw_legend, LegendMarker};
 pub use colormap::Colormap;
 pub use document::{export_airfoil_dat, export_json, format_summary, DesignDatabase};

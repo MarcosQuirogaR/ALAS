@@ -59,4 +59,5 @@ pub use types::{
     FixedNonBoxStructure, MovableSurface, TorenbeekWingGroup, WingInventoryDiagnostics,
     WingInventoryEntry, WingInventoryError, WingInventoryFinding, WingInventoryInputs,
     WingInventoryStatus, WingMovableSurfaces, WingNonBoxInventory, ITEM_COUNT, MAX_FINDINGS,
+    NON_OPTIMUM_ITEM_COUNT,
 };

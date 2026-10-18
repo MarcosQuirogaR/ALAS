@@ -369,7 +369,9 @@ fn analyze_structure_with_rib_mass(
     let ei = if credit_cover_skin {
         (0..n)
             .map(|station| {
-                crate::sizing::section::station_ei(sizing, station, skin_mat, web_mat, cap_mat)
+                crate::sizing::section::station_ei_spanwise(
+                    sizing, station, skin_mat, web_mat, cap_mat,
+                )
             })
             .collect()
     } else {
@@ -431,9 +433,16 @@ fn analyze_structure_with_rib_mass(
         let deflection_m: Vec<f64> = defl_curve.iter().map(|&d| d * sign).collect();
         let m_signed: Vec<f64> = m.iter().map(|&mj| mj * sign).collect();
 
+        // Stress follows the moment about the section normal to the swept
+        // axis, M_x / cos L (Torenbeek 2013, Eq. 11.11); 1 when unswept.
+        let m_normal: Vec<f64> = m_signed
+            .iter()
+            .enumerate()
+            .map(|(j, m)| m / sizing.axis_cos_at(j).max(1.0e-3))
+            .collect();
         let spar_stress = stress::recover(
             sizing,
-            &m_signed,
+            &m_normal,
             &v,
             skin_mat,
             web_mat,
@@ -514,6 +523,7 @@ mod tests {
     fn rib_mass_is_conserved_in_the_distributed_analytical_density() {
         let sizing = WingboxSizing {
             y_stations: vec![0.0, 5.0],
+            axis_cos: Vec::new(),
             eta_stations: vec![0.0, 1.0],
             chord: vec![2.0, 2.0],
             spar_fracs: Vec::new(),

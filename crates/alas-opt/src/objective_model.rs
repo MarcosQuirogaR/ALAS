@@ -248,6 +248,16 @@ impl DesignObjective {
         let design = DesignVector::from_array(x).map_err(|error| error.to_string())?;
         let space = &self.config.optimizer.design_space;
         space.validate()?;
+        if self.config.optimizer.objective.mtow_sizing == alas_config::MtowSizing::MtowBand {
+            let (lower_kg, upper_kg) = self.config.mtow_band_limits_kg();
+            let mass_kg = design.mtow_kg.unwrap_or(self.config.mtow_band_target_kg());
+            let slack = 1.0e-9 * upper_kg;
+            if !(mass_kg >= lower_kg - slack && mass_kg <= upper_kg + slack) {
+                return Err(format!(
+                    "band takeoff mass {mass_kg} kg lies outside [{lower_kg}, {upper_kg}] kg"
+                ));
+            }
+        }
         let envelopes = self.config.design_envelope(&self.design_space_nominal);
         for (index, (value, envelope)) in design.to_array().into_iter().zip(envelopes).enumerate() {
             // The clean-sheet passenger fuselage is a derived coordinate,

@@ -50,16 +50,22 @@ use crate::tanks;
 
 mod arc_mass;
 mod cap_search;
+pub mod envelope;
+mod fatigue;
 mod law;
+pub mod panel;
 mod product_strength;
 mod scoped;
 pub(crate) mod section;
 mod solve;
 mod stiffness;
 mod stiffness_distribution;
+pub(crate) mod swept;
+mod torque_cases;
 mod types;
 mod web;
 
+pub use envelope::CaseSet;
 pub use scoped::{size_wingbox_with_scope, SizedWingbox, WingFuelRelief};
 pub use stiffness::{size_for_linear_model, StiffnessSizingResult};
 pub use types::{
@@ -152,6 +158,69 @@ pub fn size_wingbox_with_wing_carried_mass(
     integral_fuel_kg_m: Option<&[f64]>,
     wing_mounted_point_masses: &[(f64, f64)],
 ) -> WingboxSizing {
+    size_wingbox_with_case_set(
+        wsg,
+        cfg,
+        req,
+        skin_mat,
+        web_mat,
+        cap_mat,
+        rib_mat,
+        integral_fuel_kg_m,
+        wing_mounted_point_masses,
+        CaseSet::ALL,
+    )
+}
+
+/// [`size_wingbox_with_wing_carried_mass`] with the cases beyond the manoeuvre
+/// set chosen by the caller, to measure what each adds (see [`CaseSet`]). The
+/// product entry points always size to [`CaseSet::ALL`].
+#[allow(clippy::too_many_arguments)] // mirrors upstream's own signature
+pub fn size_wingbox_with_case_set(
+    wsg: &WingStructureGeometry,
+    cfg: &StructuresConfig,
+    req: &DesignRequirements,
+    skin_mat: &MaterialSpec,
+    web_mat: &MaterialSpec,
+    cap_mat: &MaterialSpec,
+    rib_mat: &MaterialSpec,
+    integral_fuel_kg_m: Option<&[f64]>,
+    wing_mounted_point_masses: &[(f64, f64)],
+    case_set: CaseSet,
+) -> WingboxSizing {
+    size_wingbox_with_torque_sources(
+        wsg,
+        cfg,
+        req,
+        skin_mat,
+        web_mat,
+        cap_mat,
+        rib_mat,
+        integral_fuel_kg_m,
+        wing_mounted_point_masses,
+        &crate::torque_sources::TorqueSources::default(),
+        case_set,
+    )
+}
+
+/// [`size_wingbox_with_case_set`] with the torque sources of the
+/// configuration ([`crate::torque_sources::TorqueSources::from_config`]):
+/// engine inertia and thrust offsets, flaps, ailerons. The product entry
+/// points of the mass reconciliation use this form.
+#[allow(clippy::too_many_arguments)] // mirrors upstream's own signature
+pub fn size_wingbox_with_torque_sources(
+    wsg: &WingStructureGeometry,
+    cfg: &StructuresConfig,
+    req: &DesignRequirements,
+    skin_mat: &MaterialSpec,
+    web_mat: &MaterialSpec,
+    cap_mat: &MaterialSpec,
+    rib_mat: &MaterialSpec,
+    integral_fuel_kg_m: Option<&[f64]>,
+    wing_mounted_point_masses: &[(f64, f64)],
+    torque_sources: &crate::torque_sources::TorqueSources,
+    case_set: CaseSet,
+) -> WingboxSizing {
     let n = cfg.spanwise_stations.max(0) as usize;
     let y = linspace(0.0, wsg.semi_span, n);
     let (front, rear) = box_chord_band(wsg);
@@ -170,8 +239,10 @@ pub fn size_wingbox_with_wing_carried_mass(
         rib_mat,
         &fuel,
         wing_mounted_point_masses,
+        torque_sources,
         front,
         rear,
+        case_set,
     )
     .0
 }
@@ -205,6 +276,7 @@ pub fn size_wingbox_reference_compatibility(
         rib_mat,
         SizingLaw::Frozen,
         &WingInertiaRelief::default(),
+        CaseSet::MANOEUVRE_ONLY,
     )
 }
 
@@ -252,8 +324,13 @@ pub fn box_running_mass_kg_m(
         .map(|j| 2.0 * skin_width * sizing.chord[j] * sizing.t_skin * skin_mat.rho_kg_m3)
         .collect();
     for spar in &sizing.spars {
-        for (mass, (&h, &a)) in running.iter_mut().zip(spar.h.iter().zip(&spar.a_cap)) {
-            *mass += spar.t_web * h * web_mat.rho_kg_m3 + 2.0 * a * cap_mat.rho_kg_m3;
+        for (j, (mass, (&h, &a))) in running
+            .iter_mut()
+            .zip(spar.h.iter().zip(&spar.a_cap))
+            .enumerate()
+        {
+            *mass += spar.t_web[j] * h * web_mat.rho_kg_m3
+                + (2.0 * a + spar.lower_extra_area[j]) * cap_mat.rho_kg_m3;
         }
     }
     let span = match (sizing.y_stations.first(), sizing.y_stations.last()) {
@@ -354,6 +431,7 @@ mod tests {
     fn installed_rib_spacing_uses_the_selected_count_not_the_allowable_limit() {
         let mut sizing = WingboxSizing {
             y_stations: vec![0.0, 35.875],
+            axis_cos: Vec::new(),
             num_ribs: 25,
             rib_spacing_m: 0.96738451494986,
             ..test_sizing()
@@ -369,6 +447,7 @@ mod tests {
     fn installed_rib_spacing_uses_the_station_span_when_the_grid_has_a_datum_offset() {
         let sizing = WingboxSizing {
             y_stations: vec![4.0, 14.0],
+            axis_cos: Vec::new(),
             num_ribs: 6,
             rib_spacing_m: 2.0,
             ..test_sizing()
@@ -385,7 +464,8 @@ mod tests {
             w_cap: vec![1.0],
             t_cap: vec![1.0],
             a_cap: vec![1.0],
-            t_web: 0.1,
+            t_web: vec![0.1; 1],
+            lower_extra_area: vec![0.0; 1],
             frac_moment: vec![1.0],
             margin_of_safety: vec![-0.1],
         }];
@@ -406,7 +486,8 @@ mod tests {
                 w_cap: vec![1.0, 1.0],
                 t_cap: vec![1.0, 1.0],
                 a_cap: vec![1.0, 1.0],
-                t_web: 0.1,
+                t_web: vec![0.1; 2],
+                lower_extra_area: vec![0.0; 2],
                 frac_moment: vec![1.0, 1.0],
                 margin_of_safety: vec![0.5, 1.0],
             },
@@ -416,7 +497,8 @@ mod tests {
                 w_cap: vec![1.0, 1.0],
                 t_cap: vec![1.0, 1.0],
                 a_cap: vec![1.0, 1.0],
-                t_web: 0.1,
+                t_web: vec![0.1; 2],
+                lower_extra_area: vec![0.0; 2],
                 frac_moment: vec![1.0, 1.0],
                 margin_of_safety: vec![-4.2e-7, 2.0],
             },
@@ -444,7 +526,8 @@ mod tests {
                 w_cap: vec![1.0, 1.0],
                 t_cap: vec![1.0, 1.0],
                 a_cap: vec![1.0, 1.0],
-                t_web: 0.1,
+                t_web: vec![0.1; 2],
+                lower_extra_area: vec![0.0; 2],
                 frac_moment: vec![1.0, 1.0],
                 margin_of_safety: vec![-1.0, f64::NAN],
             },
@@ -454,7 +537,8 @@ mod tests {
                 w_cap: vec![1.0],
                 t_cap: vec![1.0],
                 a_cap: vec![1.0],
-                t_web: 0.1,
+                t_web: vec![0.1; 1],
+                lower_extra_area: vec![0.0; 1],
                 frac_moment: vec![1.0],
                 margin_of_safety: vec![-5.0],
             },
@@ -578,7 +662,8 @@ mod tests {
             w_cap: vec![1.0],
             t_cap: vec![1.0],
             a_cap: vec![1.0],
-            t_web: 0.1,
+            t_web: vec![0.1; 1],
+            lower_extra_area: vec![0.0; 1],
             frac_moment: vec![1.0],
             margin_of_safety: vec![-0.14],
         }];
@@ -681,6 +766,14 @@ mod tests {
         let relief = WingInertiaRelief {
             running_mass_kg_m: fuel.iter().zip(&structure).map(|(&f, &s)| f + s).collect(),
             point_masses_kg: Vec::new(),
+            // The product solve resolves the section moments once per sizing.
+            torque: crate::torque_sources::PreparedTorque::new(
+                &crate::torque_sources::TorqueSources::default(),
+                &wsg,
+                &req,
+                &sized.y_stations,
+            ),
+            rib_count_floor: 0,
         };
         let resized = size_wingbox_with_law(
             &wsg,
@@ -692,6 +785,7 @@ mod tests {
             al,
             SizingLaw::Product,
             &relief,
+            CaseSet::ALL,
         );
         let drift = (resized.total_mass_kg - sized.total_mass_kg).abs() / sized.total_mass_kg;
         assert!(drift < 1.0e-6, "relief fixed point drifted by {drift}");
@@ -724,6 +818,7 @@ mod tests {
     fn test_sizing() -> WingboxSizing {
         WingboxSizing {
             y_stations: vec![0.0, 35.875],
+            axis_cos: Vec::new(),
             eta_stations: vec![0.0, 1.0],
             chord: vec![1.0, 1.0],
             spar_fracs: vec![0.25, 0.75],

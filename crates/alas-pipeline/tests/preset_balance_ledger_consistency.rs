@@ -25,7 +25,7 @@ fn a220_search_and_finalist_gate_use_the_same_item_ledger() {
     let search = alas_opt::assess_product_candidate(&config, &design)
         .unwrap_or_else(|error| panic!("{error}"));
     let report = alas_pipeline::FullAnalysis::new(config.clone())
-        .run_at_sized_takeoff_mass(&search.resolved.design, true, search.sized.takeoff_mass_kg)
+        .run_sized_candidate(&search.resolved.design, &search.sized)
         .unwrap_or_else(|error| panic!("{error}"));
     let physical =
         alas_pipeline::assess_physical_feasibility(&config, &search.resolved.design, &report, None);

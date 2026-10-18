@@ -167,8 +167,11 @@ pub(crate) fn plan_fuel_loading(
         unusable_fuel_kg,
         config.mass_model.mass_architecture.is_pure_flops(),
     );
-    let hard_mtow = config.optimizer.objective.mtow_sizing
-        == alas_config::MtowSizing::FixedRequirement
+    let hard_mtow = config
+        .optimizer
+        .objective
+        .mtow_sizing
+        .sizes_at_declared_mass()
         && config.mass_model.mass_architecture.is_pure_flops();
     let zero_fuel_mass_kg = analysis_mass_basis_kg - usable_mtow_closure_fuel_kg;
     let (mass_limit_kg, usable_budget_kg) = if hard_mtow {

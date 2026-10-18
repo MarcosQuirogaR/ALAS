@@ -81,7 +81,8 @@ pub(super) fn deck_with_refinement(model: &Model, divisions: usize) -> io::Resul
             vec![
                 Field::Int(index as i64 + 2),
                 Field::Int(2),
-                Field::Real(spar.t_web),
+                // One property per spar: the validation deck carries the root (largest) gauge.
+                Field::Real(spar.t_web.iter().copied().fold(0.0_f64, f64::max)),
                 Field::Int(2),
                 Field::Blank,
                 Field::Int(2),
@@ -294,8 +295,7 @@ fn validate(model: &Model, divisions: usize) -> io::Result<()> {
     }
     for spar in &model.sizing.spars {
         if !spar.chord_fraction.is_finite()
-            || !spar.t_web.is_finite()
-            || spar.t_web <= 0.0
+            || spar.t_web.iter().any(|v| !v.is_finite() || *v <= 0.0)
             || [
                 spar.h.len(),
                 spar.w_cap.len(),
@@ -401,7 +401,7 @@ fn centroid(model: &Model, station: usize) -> f64 {
     let mut first = 0.0;
     for spar in &model.sizing.spars {
         let a = 2.0 * spar.a_cap[station]
-            + model.web.e_pa / model.cap.e_pa * spar.t_web * spar.h[station];
+            + model.web.e_pa / model.cap.e_pa * spar.t_web[station] * spar.h[station];
         area += a;
         first += a * spar.chord_fraction * model.sizing.chord[station];
     }

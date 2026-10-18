@@ -151,6 +151,50 @@ impl LegacyTurbofanModel {
         }
     }
 
+    /// Number of installed engines.
+    pub(crate) fn engine_count(&self) -> f64 {
+        self.inputs.number_of_engines
+    }
+
+    /// Gas-generator (core) mass flow of one engine at sea-level static at
+    /// full throttle, kg/s: the corrected-flow basis the empirical deck
+    /// scales to flight conditions for its bleed and power-extraction losses.
+    pub(crate) fn static_core_mass_flow_kg_s(&self) -> Result<f64, PropulsionError> {
+        let air = alas_atmo::us1976_compute_values(0.0, 0.0);
+        let mach = 0.01;
+        let freestream = crate::mission_turbofan::freestream_from_atmosphere(
+            &air,
+            0.0,
+            mach * air.speed_of_sound_m_s,
+            mach,
+            9.806_65,
+        );
+        let output = evaluate_thrust(
+            &freestream,
+            &self.inputs,
+            &self.params,
+            self.compressor_nondimensional_massflow,
+            1.0,
+        );
+        if output.core_mass_flow_rate_kg_s.is_finite() && output.core_mass_flow_rate_kg_s > 0.0 {
+            Ok(output.core_mass_flow_rate_kg_s)
+        } else {
+            Err(PropulsionError::NonFiniteOutput("static core mass flow"))
+        }
+    }
+
+    /// Stagnation-temperature ratio `T_t3 / T_t2` of the core compressors:
+    /// the fixed low-pressure ratio then the high-pressure ratio that
+    /// completes the catalogue overall pressure ratio, each at its polytropic
+    /// efficiency, air `R / c_p = 0.2857` (`gamma` = 1.4).
+    pub(crate) fn compressor_temperature_ratio(&self) -> f64 {
+        const R_OVER_CP: f64 = 0.285_714_285_7;
+        let lpc = self.params.lpc_pressure_ratio.max(1.0);
+        let hpc = (self.inputs.overall_pressure_ratio / lpc).max(1.0);
+        lpc.powf(R_OVER_CP / self.params.lpc_polytropic_efficiency)
+            * hpc.powf(R_OVER_CP / self.params.hpc_polytropic_efficiency)
+    }
+
     fn raw_evaluate(
         &self,
         flight: FlightCondition,

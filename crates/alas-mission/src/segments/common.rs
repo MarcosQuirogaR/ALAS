@@ -22,6 +22,7 @@ use alas_atmo::Us1976Values;
 use super::analyses::MissionAnalyses;
 use super::conditions::{Conditions, Initials};
 use super::frames::compute_gravity;
+use crate::numerics::integrate_row;
 
 /// Altitude is the negated `z` of the inertial position, nothing more.
 pub fn update_altitude(conditions: &mut Conditions) {
@@ -285,12 +286,7 @@ pub fn update_weights(conditions: &mut Conditions, integrate: &[Vec<f64>]) {
     let initial_mass = conditions.total_mass_kg[0];
     let mass: Vec<f64> = (0..points)
         .map(|row| {
-            initial_mass
-                - integrate[row]
-                    .iter()
-                    .zip(&conditions.vehicle_mass_rate_kg_s)
-                    .map(|(&weight, &rate)| weight * rate)
-                    .sum::<f64>()
+            initial_mass - integrate_row(&integrate[row], &conditions.vehicle_mass_rate_kg_s)
         })
         .collect();
 

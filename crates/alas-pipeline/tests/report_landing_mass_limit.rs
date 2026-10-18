@@ -3,7 +3,7 @@
 
 //! The landing-mass limit a report is judged against is the design landing
 //! mass the sized run designed its gear for, including the `ZFW + reserves`
-//! floor of the MTOW band and payload-adjusted modes.
+//! floor of the payload-adjusted mode.
 
 // A test asserts on values it constructed here directly, so a failed unwrap
 // is the assertion failing.
@@ -18,7 +18,7 @@ fn a_floored_sized_report_reads_the_floored_design_landing_mass() {
     let preset = presets::get("A320-200").unwrap();
     let mut config = AlasConfig::from_value(&serde_json::json!({ "preset": "A320-200" })).unwrap();
     config.optimizer.design_space.mode = DesignMode::ReferenceAdaptation;
-    config.optimizer.objective.mtow_sizing = MtowSizing::MtowBand;
+    config.optimizer.objective.mtow_sizing = MtowSizing::PayloadAdjusted;
     let closure_kg = 0.8 * config.requirements.mtow_kg;
     let ratio_kg = config.design_landing_mass_at_closure(closure_kg);
     let floor_kg = 0.95 * closure_kg;

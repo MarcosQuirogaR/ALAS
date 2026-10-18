@@ -22,15 +22,14 @@
 
 use alas_geom::aircraft::airplane::Airplane;
 use alas_geom::aircraft::wing::{SpacingFunction, Wing};
-use alas_math::linalg::{DenseMatrix, LuFactorization};
+use alas_math::linalg::DenseMatrix;
 use rayon::prelude::*;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, OnceLock};
 
 use super::streamlines::PanelSample;
-use super::{VlmError, VlmResult, TRAILING_VORTEX_DIRECTION, VORTEX_CORE_RADIUS};
+use super::{VlmError, VlmResult};
 use crate::operating_point::{AxisFrame, OperatingPoint};
-use crate::singularities::calculate_induced_velocity_horseshoe_cored;
 use crate::vector3::{add3, cross3, dot3, norm3, scale3, sub3};
 
 /// Panel count below which the O(n^2) loops stay on the calling thread.
@@ -46,8 +45,18 @@ const PARALLEL_PANEL_THRESHOLD: usize = 128;
 mod kernel_cache;
 use kernel_cache::{build_kernel_cache, velocity_at_points};
 
+mod schur;
+use schur::AicFactorization;
+
+mod fast_kernel;
+mod fast_rows;
+
 mod cache;
 pub use cache::VlmGeometryCache;
+
+// The incidence-offset boundary condition is split into its own file to keep
+// this one under its production-line budget.
+mod incidence;
 
 /// The largest `max |pivot| / min |pivot|` a solve may report and still be
 /// treated as a flow field, see [`VlmError::IllConditionedAic`].
@@ -75,7 +84,7 @@ pub(super) use mesh::*;
 pub struct VlmSystem<'a> {
     airplane: &'a Airplane,
     panels: Vec<Panel>,
-    factorization: Arc<LuFactorization>,
+    factorization: Arc<AicFactorization>,
     /// The near-field horseshoe kernel at every vortex center against every
     /// panel: see [`build_kernel_cache`]. Candidate assembly supplies this
     /// eagerly for reuse. Ordinary `assemble` fills it on the second solve:
@@ -101,42 +110,79 @@ impl<'a> VlmSystem<'a> {
         spanwise_resolution: usize,
         chordwise_resolution: usize,
     ) -> Result<Self, VlmError> {
+        let _profile =
+            alas_math::stage_profile::scope(alas_math::stage_profile::Stage::VlmAssembly);
+        alas_math::stage_profile::count(alas_math::stage_profile::Counter::VlmAssemblies, 1);
+        alas_math::stage_profile::count(alas_math::stage_profile::Counter::VlmRefactorizations, 1);
         let panels = mesh_panels(airplane, spanwise_resolution, chordwise_resolution)?;
         let n = panels.len();
+        alas_math::stage_profile::count(alas_math::stage_profile::Counter::VlmColdAssemblies, 1);
+        let fill_profile =
+            alas_math::stage_profile::scope(alas_math::stage_profile::Stage::VlmColdFill);
 
         // AIC[i][j]: the velocity horseshoe j (unit strength) induces at
         // collocation point i, dotted with that collocation panel's own
         // normal. Row i is written by one task into its own slice.
         let mut aic = vec![0.0_f64; n * n];
-        let fill_row = |(row, collocation_panel): (&mut [f64], &Panel)| {
+        let fast = super::speed::fast_kernel();
+        let unit_constant = 1.0 / (4.0 * std::f64::consts::PI);
+        let columns = fast_kernel::all_columns(&panels, fast);
+        let fill_row = |scratch: &mut fast_rows::RowScratch,
+                        (row, collocation_panel): (&mut [f64], &Panel)| {
+            if let Some(columns) = &columns {
+                fast_rows::evaluate_row(
+                    collocation_panel.collocation_point,
+                    collocation_panel.wing_index,
+                    columns,
+                    (1.0, unit_constant),
+                    scratch,
+                );
+                for (j, entry) in row.iter_mut().enumerate() {
+                    let induced = [
+                        scratch.velocity[0][j],
+                        scratch.velocity[1][j],
+                        scratch.velocity[2][j],
+                    ];
+                    *entry = dot3(induced, collocation_panel.normal_direction);
+                }
+                return;
+            }
             for (entry, source_panel) in row.iter_mut().zip(&panels) {
-                let induced = calculate_induced_velocity_horseshoe_cored(
+                let induced = fast_kernel::horseshoe(
+                    fast,
                     collocation_panel.collocation_point,
                     source_panel.left_vortex_vertex,
                     source_panel.right_vortex_vertex,
-                    TRAILING_VORTEX_DIRECTION,
-                    1.0,
-                    VORTEX_CORE_RADIUS,
+                    (1.0, unit_constant),
                     inter_surface_core(collocation_panel.wing_index, source_panel),
                 );
                 *entry = dot3(induced, collocation_panel.normal_direction);
             }
         };
         if n < PARALLEL_PANEL_THRESHOLD {
-            aic.chunks_mut(n.max(1)).zip(&panels).for_each(fill_row);
+            let mut scratch = fast_rows::RowScratch::default();
+            aic.chunks_mut(n.max(1))
+                .zip(&panels)
+                .for_each(|item| fill_row(&mut scratch, item));
         } else {
-            aic.par_chunks_mut(n)
-                .zip(panels.par_iter())
-                .for_each(fill_row);
+            aic.par_chunks_mut(n).zip(panels.par_iter()).for_each_init(
+                fast_rows::RowScratch::default,
+                |scratch, item| {
+                    fill_row(scratch, item);
+                },
+            );
         }
 
+        drop(fill_profile);
+        let _factor_profile =
+            alas_math::stage_profile::scope(alas_math::stage_profile::Stage::VlmColdFactor);
         let factorization = DenseMatrix::from_row_major(n, &aic)
             .factor()
             .map_err(VlmError::SingularAic)?;
         Ok(Self {
             airplane,
             panels,
-            factorization: Arc::new(factorization),
+            factorization: Arc::new(AicFactorization::Full(factorization)),
             kernel_cache: OnceLock::new(),
             trefftz: Arc::default(),
             solves: AtomicUsize::new(0),
@@ -175,6 +221,7 @@ impl<'a> VlmSystem<'a> {
         result: &VlmResult,
         op_point: &OperatingPoint,
     ) -> Option<f64> {
+        let _profile = alas_math::stage_profile::scope(alas_math::stage_profile::Stage::VlmTrefftz);
         self.trefftz
             .get_or_init(|| super::trefftz::TrefftzOperator::from_panels(&result.panels))
             .as_ref()?
@@ -193,7 +240,38 @@ impl<'a> VlmSystem<'a> {
     ///
     /// [`VlmError::NonFiniteResult`].
     pub fn solve(&self, op_point: &OperatingPoint) -> Result<VlmResult, VlmError> {
-        self.solve_about(op_point, self.airplane.xyz_ref)
+        self.solve_about(op_point, self.airplane.xyz_ref, None)
+    }
+
+    /// Solve at `op_point` with an incidence offset on every panel's
+    /// flow-tangency condition: the modified-incidence handle a viscous
+    /// section correction needs.
+    ///
+    /// `offsets_rad[i]` rotates panel `i`'s boundary-condition normal about
+    /// the panel's bound-vortex leg, so a positive offset raises the panel's
+    /// effective angle of attack by that many radians (positive nose-up about
+    /// the leg, as a positive twist does) without changing the geometry, the
+    /// influence matrix or its factorization. The forces are still evaluated
+    /// on the true freestream and the true panel geometry (Kutta-Joukowski
+    /// with the total induced velocity), so only the circulation changes.
+    /// All-zero offsets reproduce [`Self::solve`] exactly.
+    ///
+    /// The offsets are in the order of [`VlmResult::panels`]; use
+    /// [`crate::strips::wing_strips`] to find the panels of each strip.
+    ///
+    /// # Errors
+    ///
+    /// [`VlmError::NonFiniteResult`] for a non-finite offset or a length
+    /// different from [`Self::panel_count`], and as [`Self::solve`].
+    pub fn solve_with_incidence_offsets(
+        &self,
+        op_point: &OperatingPoint,
+        offsets_rad: &[f64],
+    ) -> Result<VlmResult, VlmError> {
+        if offsets_rad.len() != self.panels.len() || !offsets_rad.iter().all(|o| o.is_finite()) {
+            return Err(VlmError::NonFiniteResult);
+        }
+        self.solve_about(op_point, self.airplane.xyz_ref, Some(offsets_rad))
     }
 
     /// Solve at `op_point` with the frozen reference convention, rotation
@@ -207,14 +285,17 @@ impl<'a> VlmSystem<'a> {
         &self,
         op_point: &OperatingPoint,
     ) -> Result<VlmResult, VlmError> {
-        self.solve_about(op_point, [0.0; 3])
+        self.solve_about(op_point, [0.0; 3], None)
     }
 
     fn solve_about(
         &self,
         op_point: &OperatingPoint,
         rotation_reference: [f64; 3],
+        incidence_offsets: Option<&[f64]>,
     ) -> Result<VlmResult, VlmError> {
+        let _profile = alas_math::stage_profile::scope(alas_math::stage_profile::Stage::VlmSolve);
+        alas_math::stage_profile::count(alas_math::stage_profile::Counter::VlmSolves, 1);
         let airplane = self.airplane;
         let panels = &self.panels;
         let n = panels.len();
@@ -231,9 +312,14 @@ impl<'a> VlmSystem<'a> {
         let rhs: Vec<f64> = panels
             .iter()
             .zip(&rotation_at_collocation)
-            .map(|(panel, &rotation_velocity)| {
+            .enumerate()
+            .map(|(index, (panel, &rotation_velocity))| {
                 let freestream_velocity = add3(steady_freestream_velocity, rotation_velocity);
-                -dot3(freestream_velocity, panel.normal_direction)
+                let normal = match incidence_offsets {
+                    None => panel.normal_direction,
+                    Some(offsets) => incidence::rotated_normal(panel, offsets[index]),
+                };
+                -dot3(freestream_velocity, normal)
             })
             .collect();
 

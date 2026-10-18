@@ -30,6 +30,15 @@ pub fn is_converged(mses_stdout: &str) -> bool {
     mses_stdout.contains("Converged on tolerance")
 }
 
+/// The last printed `rms(dR)` Newton residual of an `mses` transcript, when
+/// it is a finite number. `None` for a transcript without iteration lines or
+/// one whose last residual is `NaN`/`Infinity` (a diverged solve).
+pub fn last_rms_residual(mses_stdout: &str) -> Option<f64> {
+    let tail = &mses_stdout[mses_stdout.rfind("rms(dR):")? + "rms(dR):".len()..];
+    let value: f64 = tail.split_whitespace().next()?.parse().ok()?;
+    value.is_finite().then_some(value)
+}
+
 /// The polar summary's key renamings, applied before [`parse_unformatted_data_output`].
 ///
 /// `mplot` labels three quantities in words that the `key = value` scanner
@@ -257,6 +266,17 @@ pub fn parse_flowfield(text: &str) -> FlowfieldColumns {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn last_residual_reads_the_final_iteration_and_rejects_divergence() {
+        let slow = "  99 S rms(dR): 0.120E-01 Max(dR)
+ 100   rms(dR): 0.164E-04  Max(dR): -.3E-03
+";
+        assert_eq!(last_rms_residual(slow), Some(0.164e-4));
+        assert_eq!(last_rms_residual("  7 rms(dR): NaN Max(dR)"), None);
+        assert_eq!(last_rms_residual("  7 rms(dR): Infinity Max(dR)"), None);
+        assert_eq!(last_rms_residual("no iteration lines"), None);
+    }
 
     #[test]
     fn key_value_scanner_reads_a_drela_summary_line() {

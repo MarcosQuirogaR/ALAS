@@ -90,11 +90,32 @@ fn hard_mtow_finalist_keeps_declared_mass_and_replays_as_hard_feasible() {
     let replay =
         alas_opt::assess_product_candidate(&config, &report.design).expect("finalist replay");
     assert!(replay.hard_feasible, "{:?}", replay.violated_hard_ids());
-    assert_eq!(replay.sized.takeoff_mass_kg, config.requirements.mtow_kg);
+    // The declared mass is the hard ceiling and the design gross mass the
+    // weights are closed on; the mass flown is the loading the weight and the
+    // tank volume admit, min(MTOW - ZFW, usable capacity). The A220-300 is
+    // tank-limited already at its registered design (140 seats, 17.4 t of
+    // usable fuel), so its takeoff mass sits below the MTOW by the unfillable
+    // budget rather than at it.
+    let mtow_kg = config.requirements.mtow_kg;
+    let load = replay
+        .sized
+        .takeoff_loading
+        .expect("hard MTOW carries its takeoff loading");
+    assert_eq!(replay.sized.design_gross_mass_kg, mtow_kg);
+    assert_eq!(replay.sized.takeoff_mass_kg, load.takeoff_mass_kg);
     assert_eq!(
-        report.sized_takeoff_mass_kg(),
-        Some(config.requirements.mtow_kg)
+        load.carried_usable_fuel_kg,
+        load.mtow_fuel_budget_kg
+            .min(load.usable_capacity_kg.unwrap_or(f64::INFINITY))
     );
+    assert!(replay.sized.takeoff_mass_kg <= mtow_kg);
+    // The published report and the replay are two evaluations of one design
+    // (zero-fuel mass plus the tank-limited fuel); they agree to rounding, not
+    // always bit for bit (TOFL lane 2026-10-16: 67339.07054988155 against
+    // 67339.0705498737 kg, 1e-13 relative, after the finalist moved with the
+    // CS 25.113 field constraint).
+    let published = report.sized_takeoff_mass_kg().expect("sized mass");
+    assert!((published / load.takeoff_mass_kg - 1.0).abs() < 1e-11);
     assert_eq!(
         design_vn_mass_kg(&config, report),
         replay.sized.design_gross_mass_kg

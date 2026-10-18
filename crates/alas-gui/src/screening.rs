@@ -12,7 +12,6 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
-use std::thread;
 
 use alas_config::{AlasConfig, DesignVector};
 use alas_screen::runner::run_airfoil_screening_product;
@@ -114,7 +113,7 @@ impl ScreeningState {
         let options = self.options.clone();
         let cancel = self.cancel_flag.clone();
 
-        thread::spawn(move || {
+        let spawned = crate::worker_stack::spawn_analysis_thread("alas-screening", move || {
             let cancel_check = cancel.clone();
             let should_cancel = move || cancel_check.load(Ordering::Relaxed);
             let tx_progress = tx.clone();
@@ -131,6 +130,7 @@ impl ScreeningState {
             );
             let _ = tx.send(ScreeningMessage::Finished(Box::new(result)));
         });
+        drop(spawned);
     }
 
     /// Ask a running sweep to stop at its next checkpoint.
@@ -234,18 +234,22 @@ impl ScreeningPreview {
         self.filter = Some(filter.to_owned());
     }
 
+    /// Airfoil names that pass the current text filter.
     pub fn filtered_names(&self) -> &[String] {
         &self.filtered_names
     }
 
+    /// Name of the airfoil currently selected, if any.
     pub fn selected(&self) -> Option<&str> {
         self.selected.as_deref()
     }
 
+    /// Coordinates of the selected airfoil as (x, y) pairs, if loaded.
     pub fn coordinates(&self) -> Option<&[(f64, f64)]> {
         self.coordinates.as_deref()
     }
 
+    /// Selects the named airfoil and loads its coordinates.
     pub fn select(&mut self, name: &str) {
         if self.selected() == Some(name) {
             return;

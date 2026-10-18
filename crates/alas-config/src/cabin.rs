@@ -21,7 +21,9 @@ mod cargo;
 mod seat_class;
 
 use allocation::proportional_integer_allocation;
-pub use cargo::{BaggagePolicy, CargoDeckConfig, HoldCompartmentConfig, HoldDeck};
+pub use cargo::{
+    BaggagePolicy, CargoDeckConfig, FreightHoldConfig, HoldCompartmentConfig, HoldDeck,
+};
 pub use seat_class::SeatClassConfig;
 
 use serde::{Deserialize, Serialize};

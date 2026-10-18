@@ -45,15 +45,17 @@ use std::rc::Rc;
 use alas_mass::fuel_plan::{FuelModelError, LegEstimate};
 use alas_prop::system::{FlightCondition, PropulsionRating};
 
-use super::cruise_levels::CruiseOutcome;
+use super::cruise_levels::{CruiseOutcome, CruiseState};
 use super::profile::{ProfilePlan, Segment, SegmentKind};
 use super::SegmentMissionModel;
 use crate::mdo::propulsion::{DeckError, DeckKind, OperatingPoint, ThrustLimit};
 
+mod lift_off;
+
 pub(crate) const DEFAULT_STEPS_PER_SEGMENT: usize = 4;
 /// Service-ceiling criterion, 100 ft/min, m/s: a rating-limited climb step
 /// slower than this is a thrust deficit, not a slow climb.
-const MINIMUM_CLIMB_RATE_M_S: f64 = 100.0 * 0.3048 / 60.0;
+const MINIMUM_CLIMB_RATE_M_S: f64 = 100.0 * alas_units::FOOT / 60.0;
 /// Route-closure tolerance on the cruise distance, m.
 const CRUISE_DISTANCE_TOLERANCE_M: f64 = 1.0;
 /// Fixed-point passes on the flown descent footprint. With step climbs the
@@ -121,6 +123,8 @@ pub struct FlownLeg {
     pub final_cruise_altitude_m: f64,
     /// Where each step climb began, as fractions of the cruise distance.
     pub step_positions: Vec<f64>,
+    /// Every level cruise segment flown, in order.
+    pub cruise_states: Vec<CruiseState>,
     /// Horizontal distance integrated over every step, m; closes on the
     /// requested route to the cruise-distance tolerance.
     pub flown_distance_m: f64,
@@ -179,6 +183,8 @@ pub(super) struct Integrator<'a> {
     /// day and gravity are fixed per flight, so a hit is bit-identical to a
     /// fresh deck call; the descent passes and the cruise steps repeat keys.
     pub(super) deck_memo: DeckMemo,
+    /// Start state of every level cruise segment flown.
+    pub(super) cruise_states: Vec<CruiseState>,
 }
 
 /// Rating/idle points already solved in this flight; see `Integrator::deck_memo`.
@@ -233,12 +239,14 @@ impl Integrator<'_> {
         let limits = &self.model.phase_limits;
         let (cl_limit, delta_cd, clean) = match kind {
             SegmentKind::Takeoff => (limits.takeoff_cl_max, limits.high_lift_delta_cd, false),
-            SegmentKind::Landing => (limits.landing_cl_max, limits.high_lift_delta_cd, false),
+            SegmentKind::Landing => (limits.landing_cl_max, limits.landing_delta_cd, false),
             SegmentKind::Climb | SegmentKind::Cruise | SegmentKind::Descent => {
                 (limits.clean_cl_max, 0.0, true)
             }
         };
-        let (cl, drag_n) = self.model.drag_components_n(flight, mass_kg, delta_cd)?;
+        let (cl, drag_n) = self
+            .model
+            .drag_components_n(flight, mass_kg, delta_cd, !clean)?;
         if cl > cl_limit {
             return Err(FuelModelError::NotConverged(format!(
                 "polar validity: {kind:?} lift coefficient {cl:.3} exceeds the {cl_limit:.3} limit at {:.0} m and {:.1} m/s",
@@ -286,7 +294,7 @@ impl Integrator<'_> {
         let deck = &self.model.propulsion;
         let v = step.tas_m_s;
         let drag_n = self.phase_drag_n(step.kind, flight, mass_kg)?;
-        let weight_n = mass_kg * self.model.gravity_m_s2;
+        let weight_n = mass_kg * self.model.gravity_at(step.altitude_m);
         let dh = step.dh_m;
         let planned_dt = step.planned_dt_s;
         let planned_vz = dh / planned_dt;
@@ -419,7 +427,7 @@ impl Integrator<'_> {
         let flight = self.model.propulsion.flight_condition(
             step.altitude_m,
             step.tas_m_s,
-            self.model.gravity_m_s2,
+            self.model.gravity_at(step.altitude_m),
             self.model.isa_deviation_c,
         )?;
         let start_mass_kg = self.mass_kg;
@@ -441,7 +449,7 @@ impl Integrator<'_> {
             ))
             .into());
         }
-        let weight_n = mid_mass_kg * self.model.gravity_m_s2;
+        let weight_n = mid_mass_kg * self.model.gravity_at(step.altitude_m);
         self.ledger.propulsive_work_j += solved.thrust_n * v * solved.dt_s;
         self.ledger.drag_work_j += solved.drag_n * v * solved.dt_s;
         self.ledger.potential_energy_j += weight_n * solved.vertical_rate_m_s * solved.dt_s;
@@ -565,6 +573,7 @@ impl SegmentMissionModel {
         flight: &FlightCondition,
         mass_kg: f64,
         delta_cd: f64,
+        high_lift: bool,
     ) -> Result<(f64, f64), FuelModelError> {
         let speed = flight.velocity_m_s;
         let dynamic_pressure_pa = 0.5 * flight.density_kg_m3 * speed * speed;
@@ -574,8 +583,14 @@ impl SegmentMissionModel {
                 flight.altitude_m
             )));
         }
-        let cl = mass_kg * self.gravity_m_s2 / (dynamic_pressure_pa * self.wing_area_m2);
-        let cd = self.clean_cd(cl, flight.mach, flight.altitude_m) + delta_cd;
+        let cl = mass_kg * self.gravity_at(flight.altitude_m)
+            / (dynamic_pressure_pa * self.wing_area_m2);
+        let base_cd = if high_lift {
+            self.high_lift_base_cd(cl, flight.mach, flight.altitude_m)
+        } else {
+            self.clean_cd(cl, flight.mach, flight.altitude_m)
+        };
+        let cd = base_cd + delta_cd;
         if !cl.is_finite() || !cd.is_finite() || cd <= 0.0 {
             return Err(FuelModelError::NotConverged(format!(
                 "invalid drag state CL={cl}, CD={cd}"
@@ -590,7 +605,7 @@ impl SegmentMissionModel {
         flight: &FlightCondition,
         mass_kg: f64,
     ) -> Result<f64, FuelModelError> {
-        self.drag_components_n(flight, mass_kg, 0.0)
+        self.drag_components_n(flight, mass_kg, 0.0, false)
             .map(|(_, drag_n)| drag_n)
     }
 
@@ -614,23 +629,8 @@ impl SegmentMissionModel {
             }
             .into());
         }
-        let mut climbed = Integrator {
-            model: self,
-            mass_kg: start_mass_kg,
-            fuel_kg: 0.0,
-            time_s: 0.0,
-            distance_m: 0.0,
-            previous_tas_m_s: None,
-            pending_kinetic_j: 0.0,
-            ledger: EnergyLedger::default(),
-            rate_limited_steps: 0,
-            minimum_climb_rate_m_s: f64::INFINITY,
-            minimum_descent_rate_m_s: f64::INFINITY,
-            maximum_clean_cl: 0.0,
-            allow_route_transition_deficit: true,
-            deck_memo: DeckMemo::default(),
-        };
-        let mut climb_footprint_m = 0.0;
+        let (mut climbed, mut climb_footprint_m) =
+            Integrator::at_lift_off(self, plan, start_mass_kg)?;
         let mut previous: Option<&Segment> = None;
         for segment in &plan.climb {
             // An unpaid speed change belongs to the rung that held it.
@@ -727,6 +727,7 @@ impl SegmentMissionModel {
             climb_fuel_kg,
             final_cruise_altitude_m: cruise.final_altitude_m,
             step_positions: cruise.step_positions,
+            cruise_states: integrator.cruise_states,
             flown_distance_m: integrator.distance_m,
             ledger: EnergyLedger {
                 unrealized_kinetic_j: unrealized_j,
@@ -798,6 +799,7 @@ mod tests {
             maximum_clean_cl: 0.0,
             allow_route_transition_deficit: false,
             deck_memo: DeckMemo::default(),
+            cruise_states: Vec::new(),
         }
     }
 
@@ -976,7 +978,7 @@ mod tests {
             .flight_condition(
                 altitude_m,
                 tas_m_s,
-                model.gravity_m_s2,
+                model.gravity_at(altitude_m),
                 model.isa_deviation_c,
             )
             .expect("fixture flight condition");
@@ -988,7 +990,7 @@ mod tests {
             .propulsion
             .rated_point(flight, PropulsionRating::MaximumClimb)
             .expect("fixture rating");
-        let weight_n = mass_kg * model.gravity_m_s2;
+        let weight_n = mass_kg * model.gravity_at(altitude_m);
         let excess_power_w = (rated.thrust_n - drag_n) * tas_m_s;
         let rating_rate_m_s = excess_power_w / weight_n;
         assert!(rating_rate_m_s > MINIMUM_CLIMB_RATE_M_S);
@@ -1031,7 +1033,7 @@ mod tests {
         assert_eq!(solved.kinetic_delivered_j, pending_kinetic_j);
         let propulsive_j = solved.thrust_n * step.tas_m_s * solved.dt_s;
         let drag_j = solved.drag_n * step.tas_m_s * solved.dt_s;
-        let potential_j = mass_kg * model.gravity_m_s2 * step.dh_m;
+        let potential_j = mass_kg * model.gravity_at(step.altitude_m) * step.dh_m;
         let residual_j = propulsive_j - drag_j - potential_j - pending_kinetic_j;
         assert!(
             residual_j.abs() <= 1.0e-10 * propulsive_j.abs().max(1.0),
@@ -1042,7 +1044,7 @@ mod tests {
     #[test]
     fn an_unreachable_bound_limited_climb_still_rejects_below_service_ceiling_rate() {
         let (model, step, flight, mass_kg, _, excess_power_w) = rating_limited_vertical_fixture();
-        let weight_n = mass_kg * model.gravity_m_s2;
+        let weight_n = mass_kg * model.gravity_at(step.altitude_m);
         let impossible_rate_m_s = 0.5 * MINIMUM_CLIMB_RATE_M_S;
         let pending_kinetic_j =
             excess_power_w * step.dh_m / impossible_rate_m_s - weight_n * step.dh_m;
@@ -1086,7 +1088,7 @@ mod tests {
             .flight_condition(
                 altitude_m,
                 tas_m_s,
-                model.gravity_m_s2,
+                model.gravity_at(altitude_m),
                 model.isa_deviation_c,
             )
             .expect("ATR descent flight condition");
@@ -1095,7 +1097,8 @@ mod tests {
         let drag_n = probe
             .phase_drag_n(SegmentKind::Descent, &flight, mass_kg)
             .expect("ATR clean descent drag");
-        let rate_thrust_n = drag_n + mass_kg * model.gravity_m_s2 * (dh_m / planned_dt_s) / tas_m_s;
+        let rate_thrust_n =
+            drag_n + mass_kg * model.gravity_at(altitude_m) * (dh_m / planned_dt_s) / tas_m_s;
         // Five newtons is above the adapter's neutral zero-force idle
         // surrogate and below its governed rating map in the current
         // PW127M model. Choosing the target through the step equation keeps

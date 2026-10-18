@@ -7,13 +7,44 @@ license.workspace = true
 authors.workspace = true
 rust-version.workspace = true
 
+# `test = false` on a binary with no `#[test]` skips building and linking a
+# libtest harness that would list zero tests (one link per binary in every
+# workspace test run). The binaries with unit tests keep the default.
 [[bin]]
 name = "alas-bench"
 path = "src/bin/benchmark.rs"
+test = false
 
 [[bin]]
 name = "external_preset_audit"
 path = "src/bin/external_preset_audit.rs"
+test = false
+
+[[bin]]
+name = "correlation_audit"
+path = "src/bin/correlation_audit.rs"
+test = false
+
+[[bin]]
+name = "smoke_cell"
+path = "src/bin/smoke_cell.rs"
+test = false
+
+[[bin]]
+name = "preset_audit"
+path = "src/bin/preset_audit.rs"
+test = false
+
+[[bin]]
+name = "wingbox_nastran_validation"
+path = "src/bin/wingbox_nastran_validation.rs"
+test = false
+
+# Native matrix runner: orchestrates `optimization_preset_audit measure` child
+# processes. It has unit tests, so it keeps the default test harness.
+[[bin]]
+name = "matrix_native"
+path = "src/bin/matrix_native.rs"
 
 [dependencies]
 alas-config = { path = "../alas-config" }
@@ -22,18 +53,23 @@ alas-geom = { path = "../alas-geom" }
 alas-atmo = { path = "../alas-atmo" }
 alas-aero = { path = "../alas-aero" }
 alas-mass = { path = "../alas-mass" }
-alas-payload = { path = "../alas-payload" }
 alas-mission = { path = "../alas-mission" }
 alas-struct = { path = "../alas-struct" }
 alas-opt = { path = "../alas-opt" }
 alas-screen = { path = "../alas-screen" }
 alas-report = { path = "../alas-report" }
 alas-pipeline = { path = "../alas-pipeline" }
-alas-app = { path = "../alas-app" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 serde_yaml = { workspace = true }
 tracing = { workspace = true }
+
+# Only the acceptance matrix test and the closeout example use these; keeping
+# them out of [dependencies] keeps the GUI stack out of library and bin builds.
+[dev-dependencies]
+alas-app = { path = "../alas-app" }
+alas-payload = { path = "../alas-payload" }
+alas-perf = { path = "../alas-perf" }
 
 [lints]
 workspace = true

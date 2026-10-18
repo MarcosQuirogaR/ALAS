@@ -5,19 +5,22 @@
 
 use super::*;
 
-/// Deck-constant anchors of the maximum-climb correlation, evaluated once at
-/// construction instead of per request (each needs a US 1976 atmosphere call).
-#[derive(Debug, Clone, Copy, PartialEq)]
+/// Deck-constant maximum-climb thrust table and reference-point anchor,
+/// evaluated once at construction instead of per request (each needs US 1976
+/// atmosphere calls).
+#[derive(Debug, Clone, PartialEq)]
 pub(super) struct ClimbReference {
-    /// Standard pressure at 3,048 m (10,000 ft), Pa.
-    pub(super) p10_pa: f64,
-    /// Standard pressure at the maximum-climb reference altitude, Pa.
-    pub(super) pcr_pa: f64,
-    /// Calibrated airspeed at the reference Mach and pressure (gamma 1.4), m/s.
-    pub(super) cas_m_s: f64,
-    /// Installed maximum-climb thrust at the reference point, the anchor the
-    /// correlation's ratio multiplies, N ([super::max_climb]).
+    /// The engine's maximum-climb thrust ratio table ([super::max_climb]).
+    pub(super) table: MaximumClimbTable,
+    /// The engine anchor factor already applied to `table`, if any.
+    pub(super) engine_scale: Option<f64>,
+    /// Installed maximum-climb thrust at the reference point, N: the
+    /// catalogue's cruise altitude and Mach evaluated on the table. It sets
+    /// the part-power utilization of the catalogue cruise thrust.
     pub(super) max_climb_thrust_n: f64,
+    /// Catalogue part-power cruise thrust over the maximum-climb rating at the
+    /// reference point (may exceed 1, see `EmpiricalTurbofanModel::new`).
+    pub(super) catalogue_cruise_over_maximum_climb: f64,
 }
 
 pub(super) fn standard_pressure_pa(altitude_m: f64) -> f64 {
@@ -27,6 +30,7 @@ pub(super) fn standard_pressure_pa(altitude_m: f64) -> f64 {
     alas_atmo::us1976_compute_values(altitude_m, 0.0).pressure_pa
 }
 
+#[cfg(test)]
 pub(super) fn cas_m_s(mach: f64, pressure_pa: f64, gamma: f64) -> f64 {
     let qc = pressure_pa
         * ((1.0 + 0.5 * (gamma - 1.0) * mach.powi(2)).powf(gamma / (gamma - 1.0)) - 1.0);

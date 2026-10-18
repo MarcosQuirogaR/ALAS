@@ -23,6 +23,7 @@ mod model;
 pub use model::actuator_disk_thrust_bound_n;
 mod evidence;
 mod inverse;
+mod propeller_loss;
 mod ratings;
 mod system;
 pub use evidence::*;
@@ -212,9 +213,10 @@ mod tests {
         );
     }
 
-    /// PSFC is flat in power setting and scales as `sqrt(T / T_ref)`
-    /// (Majeed 2009, SRS-TSD-002 Tab. 4.1-4.3), from a reference inside
-    /// the source's 0.28-0.31 kg/kWh band.
+    /// PSFC is flat in power setting over the sourced band (at and above the
+    /// knee) and scales as `sqrt(T / T_ref)` (Majeed 2009, SRS-TSD-002
+    /// Tab. 4.1-4.3), from a reference inside the source's 0.28-0.31 kg/kWh
+    /// band.
     #[test]
     fn psfc_is_flat_in_power_and_scales_with_the_root_of_ambient_temperature() {
         let model = Pw127m568fModel::default();
@@ -238,7 +240,7 @@ mod tests {
         };
         let reference = at(254.4, Pw127mRating::MaximumCruise, 1.0);
         for (rating, fraction) in [
-            (Pw127mRating::MaximumCruise, 0.46),
+            (Pw127mRating::MaximumCruise, 0.6),
             (Pw127mRating::MaximumClimb, 0.8),
             (Pw127mRating::NormalTakeoff, 1.0),
         ] {
@@ -680,6 +682,168 @@ mod tests {
         );
     }
 
+    /// PROP-13: a full normalized throttle is the maximum-climb force with all
+    /// engines running, below the take-off force; the one-engine-inoperative
+    /// case keeps the automatic reserve rating.
+    #[test]
+    fn a_full_normalized_throttle_is_the_maximum_climb_rating_not_take_off() {
+        let system = atr_system();
+        let rated = |demand| {
+            let mut request = system_request(FailureState::None);
+            request.demand = demand;
+            system.evaluate(&request).unwrap()
+        };
+        let full = rated(PropulsionDemand::NormalizedForce(1.0));
+        let climb = rated(PropulsionDemand::Rating(PropulsionRating::MaximumClimb));
+        let takeoff = rated(PropulsionDemand::Rating(PropulsionRating::TakeoffGoAround));
+        assert!((full.body_force_n[0] - climb.body_force_n[0]).abs() < 1.0e-6);
+        assert!(full.body_force_n[0] < takeoff.body_force_n[0]);
+        assert!(full.active_limits[0].name.contains("MaximumClimb"));
+        let mut oei = system_request(FailureState::UnitsUnavailable(vec![0]));
+        oei.demand = PropulsionDemand::NormalizedForce(1.0);
+        let oei = system.evaluate(&oei).unwrap();
+        assert!(oei.active_limits[0].name.contains("MaximumTakeoffReserve"));
+    }
+
+    /// The part-power multiplier is 1 on the sourced band, continuous at the
+    /// knee, monotone non-increasing in power, and sets the flagged idle fuel.
+    #[test]
+    fn part_power_psfc_multiplier_is_flat_above_the_knee_and_rises_below_it() {
+        let model = Pw127m568fModel::default();
+        let knee = model.part_power_knee_fraction;
+        assert_eq!(model.part_power_psfc_multiplier(1.0), 1.0);
+        assert_eq!(model.part_power_psfc_multiplier(knee), 1.0);
+        assert!((model.part_power_psfc_multiplier(knee * (1.0 - 1.0e-9)) - 1.0).abs() < 1.0e-8);
+        let mut previous = f64::INFINITY;
+        for step in 1..=100 {
+            let multiplier = model.part_power_psfc_multiplier(f64::from(step) / 100.0);
+            assert!(multiplier >= 1.0 && multiplier <= previous + 1.0e-15);
+            previous = multiplier;
+        }
+        // The Raymer cruise/loiter class ratio of 1.2 is reproduced at the
+        // assumed 35 % loiter power the exponent was shaped on.
+        assert!((model.part_power_psfc_multiplier(0.35) - 1.2).abs() < 2.0e-3);
+        // Flight idle burns several times the flat-PSFC fuel flow (class
+        // shape, flagged), not the former 8 % x flat PSFC.
+        let at = |rating, fraction| {
+            model
+                .evaluate_at_temperature(
+                    TurbopropCondition {
+                        density_kg_m3: 1.225,
+                        true_airspeed_m_s: 100.0,
+                    },
+                    288.15,
+                    TurbopropCommand {
+                        rating,
+                        power_fraction: fraction,
+                        mode: TurbopropMode::FlightIdle,
+                        propeller_speed_rpm: model.governed_propeller_speed_rpm,
+                    },
+                )
+                .unwrap()
+        };
+        let idle = at(Pw127mRating::FlightIdleSurrogate, 1.0);
+        let flat_flow_kg_s = idle.engine_shaft_power_w * model.psfc_kg_kwh(288.15) / JOULES_PER_KWH;
+        assert!(idle.fuel_flow_kg_s > 2.5 * flat_flow_kg_s);
+        assert!(idle.psfc_kg_kwh > model.psfc_kg_kwh(288.15));
+    }
+
+    /// Propulsive efficiency is energy-bounded over the whole operating map:
+    /// every rating, power fraction, density, speed and rpm the model accepts
+    /// returns eta in [0, maximum_propulsive_efficiency] <= 1, with and
+    /// without a tip-Mach loss, and is never above the ideal actuator-disk
+    /// efficiency at the same power.
+    #[test]
+    fn propulsive_efficiency_never_exceeds_one_over_the_whole_map() {
+        let model = Pw127m568fModel::default();
+        let mut worst = 0.0_f64;
+        let mut evaluated = 0_u32;
+        for rating in [
+            Pw127mRating::NormalTakeoff,
+            Pw127mRating::MaximumTakeoffReserve,
+            Pw127mRating::MaximumContinuous,
+            Pw127mRating::MaximumClimb,
+            Pw127mRating::MaximumCruise,
+        ] {
+            for density_kg_m3 in [1.225, 0.9, 0.7, 0.55, 0.4] {
+                for speed_m_s in [0.0, 1.0, 5.0, 40.0, 80.0, 140.0, 200.0, 250.0] {
+                    for rpm in [900.0, 1_200.0, 1_500.0, 1_900.0] {
+                        for fraction in [0.15, 0.3, 0.5, 0.75, 1.0] {
+                            let temperature_k =
+                                isa_temperature_from_density_k(density_kg_m3, 1.225);
+                            let output = model.evaluate_at_temperature(
+                                TurbopropCondition {
+                                    density_kg_m3,
+                                    true_airspeed_m_s: speed_m_s,
+                                },
+                                temperature_k,
+                                TurbopropCommand {
+                                    rating,
+                                    power_fraction: fraction,
+                                    mode: TurbopropMode::Governed,
+                                    propeller_speed_rpm: rpm,
+                                },
+                            );
+                            let Ok(output) = output else { continue };
+                            evaluated += 1;
+                            let eta = output.propulsive_efficiency;
+                            assert!(
+                                (0.0..=model.maximum_propulsive_efficiency).contains(&eta),
+                                "eta {eta}"
+                            );
+                            worst = worst.max(eta);
+                            if speed_m_s > 0.0 {
+                                // Ideal (loss-free) actuator-disk efficiency
+                                // V / (V + v_i) at the same power.
+                                let area = PI * model.propeller_diameter_m.powi(2) / 4.0;
+                                let ideal = actuator_disk_thrust_bound_n(
+                                    output.propeller_power_w,
+                                    density_kg_m3,
+                                    area,
+                                    speed_m_s,
+                                ) * speed_m_s
+                                    / output.propeller_power_w;
+                                assert!(eta <= ideal + 1.0e-12, "eta {eta} ideal {ideal}");
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        assert!(evaluated > 1_000, "{evaluated}");
+        assert!(worst <= 1.0);
+    }
+
+    /// Tip-Mach loss: inert below the onset, monotone and bounded above it,
+    /// and it lowers the thrust at a supersonic helical tip.
+    #[test]
+    fn tip_mach_loss_is_inert_below_the_onset_and_monotone_above_it() {
+        let model = Pw127m568fModel::default();
+        assert_eq!(model.tip_mach_efficiency_factor(0.5), 1.0);
+        assert_eq!(
+            model.tip_mach_efficiency_factor(model.tip_mach_critical),
+            1.0
+        );
+        let mut previous = 1.0;
+        for step in 0..=40 {
+            let factor = model.tip_mach_efficiency_factor(0.89 + f64::from(step) * 0.01);
+            assert!(factor > 0.0 && factor <= previous);
+            previous = factor;
+        }
+        // ATR 72 at FL170, 275 KTAS, 1,200 rpm: helical tip Mach near onset.
+        let atr = model.helical_tip_mach(141.5, 1_200.0, 253.35);
+        assert!((0.85..0.93).contains(&atr), "{atr}");
+        // An A400M-like tip (5.334 m at 842 rpm, V 206 m/s, a 303 m/s) is
+        // reported as supersonic-helical and loses efficiency.
+        let big = Pw127m568fModel {
+            propeller_diameter_m: 5.334,
+            ..model
+        };
+        let a400m = big.helical_tip_mach(206.0, 842.0, 303.0_f64.powi(2) / (1.4 * 287.052_87));
+        assert!((a400m - 1.03).abs() < 0.02, "{a400m}");
+        assert!(big.tip_mach_efficiency_factor(a400m) < 1.0);
+    }
+
     #[test]
     fn governed_high_advance_ratio_rejects_negative_map_thrust_and_extrapolates() {
         let model = Pw127m568fModel::default();
@@ -719,11 +883,20 @@ mod tests {
             )
             .unwrap();
         let disk_area_m2 = PI * model.propeller_diameter_m.powi(2) / 4.0;
-        // The fallback bounds the thrust on the blade-efficiency share of the
-        // shaft power, which is the same effective-power loss factor the
-        // governed branch applies, and not on the whole of it.
+        // Thrust is bounded on the blade-efficiency share of the shaft power
+        // times the tip-Mach factor (helical tip Mach 0.94 here, above the
+        // 0.89 onset), and not on the whole shaft power.
+        let temperature_k = isa_temperature_from_density_k(density_kg_m3, 1.225);
+        let tip_mach = model.helical_tip_mach(
+            true_airspeed_m_s,
+            model.governed_propeller_speed_rpm,
+            temperature_k,
+        );
+        assert!(tip_mach > model.tip_mach_critical);
         let expected_fallback_thrust_n = actuator_disk_thrust_bound_n(
-            model.blade_efficiency(advance_ratio) * output.propeller_power_w,
+            model.blade_efficiency(advance_ratio)
+                * model.tip_mach_efficiency_factor(tip_mach)
+                * output.propeller_power_w,
             density_kg_m3,
             disk_area_m2,
             true_airspeed_m_s,
@@ -836,9 +1009,9 @@ mod tests {
     #[test]
     fn normalized_force_is_inverted_in_force_space_not_power_space() {
         let system = atr_system();
-        let maximum = system
-            .evaluate(&system_request(FailureState::None))
-            .unwrap();
+        let mut maximum_request = system_request(FailureState::None);
+        maximum_request.demand = PropulsionDemand::NormalizedForce(1.0);
+        let maximum = system.evaluate(&maximum_request).unwrap();
         let mut half_request = system_request(FailureState::None);
         half_request.demand = PropulsionDemand::NormalizedForce(0.5);
         let half = system.evaluate(&half_request).unwrap();

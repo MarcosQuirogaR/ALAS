@@ -75,7 +75,7 @@ impl DesignProvenance {
         let Ok(preset) = presets::get(&config.preset) else {
             return Self::CleanSheet { derived_from: None };
         };
-        if *design != preset.design_vector {
+        if !design.same_geometry(&preset.design_vector) {
             return Self::CleanSheet {
                 derived_from: Some(preset.name.to_owned()),
             };

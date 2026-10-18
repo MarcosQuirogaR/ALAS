@@ -7,6 +7,10 @@
 //! are headless renders, not desktop screenshots: they prove colour, placement
 //! and composition, not typography.
 
+// A test asserts on values it constructed or loaded from a fixture it
+// controls, so a failed unwrap there is the assertion failing.
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 use alas_gui::state::AppState;
 use egui::{vec2, Color32, Context, FullOutput, Pos2, RawInput, Rect, Shape};
 

@@ -148,8 +148,22 @@ fn every_other_preset_keeps_its_method_and_its_sourced_operating_empty_mass() {
             (record.preset_reference_oew_kg(), record.uncertainty_kg)
         {
             compared += 1;
+            // Owner's matching-basis rule (2026-10-16): the DC-10 operating
+            // empty mass is the ACAP p.11 figure, 268,751 lb = 121,903 kg (the
+            // registry's 120,914 kg is a different weight basis). Tolerance
+            // kept at the registry uncertainty.
+            let reference_kg = if name == "DC-10" {
+                121_903.0
+            } else {
+                reference_kg
+            };
+            // Pin re-probed 2026-10-16 (validation correction 1): with FCOMP
+            // from the Raymer-consistent scale (`preset_flops/composite.rs`),
+            // the A220-300 OEW is inside the registry band without the
+            // former 1.3 t composite-credit allowance.
+            let composite_credit_residual_kg = 0.0;
             assert!(
-                (oew - reference_kg).abs() <= uncertainty_kg,
+                (oew - reference_kg).abs() <= uncertainty_kg + composite_credit_residual_kg,
                 "{name}: modelled OEW {oew:.0} kg against {reference_kg} kg +- {uncertainty_kg} kg"
             );
         }

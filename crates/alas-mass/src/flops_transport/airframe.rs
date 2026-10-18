@@ -387,13 +387,15 @@ pub fn evaluate_airframe_product(request: &FlopsAirframeRequest<'_>) -> FlopsAir
                 nacelle_wetted_area_m2,
                 maximum_fuel_capacity_kg,
             };
-            match estimate_turboprop_propulsion(
-                &turboprop_inputs,
-                &mass_model.flops_turboprop,
-                maximum_mach,
-            ) {
+            // Undeclared propeller/nacelle inputs: installed engine + statistics.
+            let resolved = mass_model.flops_turboprop.resolved_for_engine(spec);
+            match estimate_turboprop_propulsion(&turboprop_inputs, &resolved.config, maximum_mach) {
                 Ok(mut group) => {
                     group.design_mach_basis = "requirements_cruise_mach";
+                    group.propeller_mass_basis =
+                        resolved.propeller_basis(group.propeller_mass_basis);
+                    group.nacelle_area_density_basis =
+                        resolved.nacelle_basis(group.nacelle_area_density_basis);
                     group.nacelle_area_basis = nacelle_area_basis;
                     Some(group)
                 }

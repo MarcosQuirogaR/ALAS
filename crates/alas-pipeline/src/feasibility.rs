@@ -15,19 +15,20 @@ use alas_config::{AlasConfig, DesignVector};
 #[cfg(test)]
 use alas_mass::breakdown::{FUEL, PROPULSION};
 use alas_mission::MissionResult;
-use alas_perf::performance::{
-    compute_v_speeds_at_masses, density_ratio, OeiClimbAssessment, OeiClimbStatus,
-};
+use alas_perf::performance::{compute_v_speeds_at_masses, density_ratio};
 
 use crate::full_analysis::AnalysisReport;
 use crate::mission_stage::SelectedLoadCase;
 
 mod acceptance;
+mod cruise_deck;
 mod cruise_equilibrium;
 mod design_mass;
 mod dispatch;
+mod engine_match;
 mod field;
 mod fuel;
+mod improved_climb;
 mod mass_balance;
 mod mission_fuel;
 mod model_cg;
@@ -42,10 +43,12 @@ mod static_thrust;
 mod structural_mass;
 pub(crate) mod structure;
 mod types;
+mod vmc;
 
 pub use acceptance::{
     DeliveryBlocker, DeliveryClassification, DeliveryVerdict, DesignProvenance, RunCompletion,
 };
+pub use cruise_deck::{thrust_checks, PlannedLevels, ThrustChecks};
 pub(crate) use cruise_equilibrium::assess as assess_cruise_equilibrium;
 pub use cruise_equilibrium::CruiseEquilibriumAssessment;
 pub use design_mass::{
@@ -192,6 +195,7 @@ pub fn assess_physical_feasibility_with_load_case(
         mission,
     );
     findings.extend(fuel::findings(config.requirements.mtow_kg, &fuel_loading));
+    engine_match::append(config, report, &mut findings);
     structural_mass::append_structural_mass_findings(
         config,
         design,
@@ -209,24 +213,30 @@ pub fn assess_physical_feasibility_with_load_case(
     // moving it ahead of `model_cg_assessment` changes no result of its own.
     let mass_balance =
         mass_balance::assess_mass_balance(config, design, report, &fuel_loading, &mut findings);
-    let model_cg = match model_cg_assessment(config, report, &fuel_loading, mass_balance.as_ref()) {
-        Ok(assessment) => {
-            append_model_cg_findings(&mut findings, &assessment);
-            Some(assessment)
-        }
-        Err(message) => {
-            findings.push(error(
-                FindingCode::ModelCgAssessmentUnavailable,
-                message,
-                None,
-                None,
-                "",
-            ));
-            None
-        }
-    };
+    // The forward CG limits read `cl_max_land` (landing trim), so the CG gate
+    // is evaluated with the same geometry-scaled CLmax the sizing closure and
+    // the search flew (AERL-01), not the declared one; `resolve_report` below
+    // applies the same scaling to the speed gates.
+    let cg_config = crate::report_config::config_with_geometry_clmax(config, report);
+    let model_cg =
+        match model_cg_assessment(&cg_config, report, &fuel_loading, mass_balance.as_ref()) {
+            Ok(assessment) => {
+                append_model_cg_findings(&mut findings, &assessment);
+                Some(assessment)
+            }
+            Err(message) => {
+                findings.push(error(
+                    FindingCode::ModelCgAssessmentUnavailable,
+                    message,
+                    None,
+                    None,
+                    "",
+                ));
+                None
+            }
+        };
     let design_model_cg = match design_model_cg_assessment(
-        config,
+        &cg_config,
         report,
         &fuel_loading,
         mass_balance.as_ref(),
@@ -355,14 +365,14 @@ pub fn assess_physical_feasibility_with_load_case(
         .airplane
         .wings
         .first()
-        .map_or(f64::NAN, alas_geom::aircraft::wing::Wing::projected_area);
+        .map_or(f64::NAN, alas_geom::aircraft::wing::Wing::reference_area);
     let area_roundoff_m2 = config.requirements.max_wing_area_m2.abs().max(1.0) * 1.0e-12;
     if !projected_area_m2.is_finite()
         || projected_area_m2 > config.requirements.max_wing_area_m2 + area_roundoff_m2
     {
         findings.push(error(
             FindingCode::WingAreaLimit,
-            "projected wing reference area exceeds the configured maximum",
+            "wing reference area exceeds the configured maximum",
             Some(projected_area_m2),
             Some(config.requirements.max_wing_area_m2),
             "m^2",
@@ -380,6 +390,21 @@ pub fn assess_physical_feasibility_with_load_case(
         .unwrap_or(f64::NAN);
     let takeoff_mass_kg = fuel_loading.analyzed_takeoff_mass_kg;
     let gravity_m_s2 = config.requirements.gravity_m_s2;
+    // The candidate's geometry-scaled maximum lift coefficients (AERL-01) and
+    // then its computed minimum control speed replace the declared values in
+    // the speed schedules below (CS 25.107(b), (e)); see `report_config`.
+    let resolution = crate::report_config::resolve_report(
+        config,
+        report,
+        takeoff_mass_kg,
+        fuel_loading
+            .analyzed_landing_mass_kg
+            .unwrap_or(landing_mass_limit_kg(config, report).min(takeoff_mass_kg)),
+        wing_area_m2,
+    );
+    vmc::append(&resolution.vmc, &mut findings);
+    findings.extend(improved_climb::finding(resolution.improved_climb));
+    let config = &*resolution.config;
     // The installed sea-level reference thrust, taken from whichever physical
     // model the aircraft actually has: the certificated jet rating for a
     // turbofan, the propeller model's ground-roll mean thrust for a
@@ -428,18 +453,12 @@ pub fn assess_physical_feasibility_with_load_case(
     let landing_mass_kg = fuel_loading
         .analyzed_landing_mass_kg
         .unwrap_or(mlw_limit_kg.min(takeoff_mass_kg));
-    if fuel_loading
-        .analyzed_landing_mass_kg
-        .is_some_and(|mass_kg| mass_kg > mlw_limit_kg)
-    {
-        findings.push(error(
-            FindingCode::LandingMassLimitViolation,
-            "analyzed arrival mass exceeds the configured maximum landing mass",
-            Some(landing_mass_kg),
-            Some(mlw_limit_kg),
-            "kg",
-        ));
-    }
+    design_mass::landing_mass_findings(
+        design_mass::design_mission_landing_mass_kg(config, report),
+        fuel_loading.analyzed_landing_mass_kg,
+        mlw_limit_kg,
+        &mut findings,
+    );
     let wing_loading_pa = takeoff_mass_kg * gravity_m_s2 / wing_area_m2;
     let matching_inputs_are_finite = wing_loading_pa.is_finite()
         && wing_loading_pa > 0.0
@@ -464,60 +483,33 @@ pub fn assess_physical_feasibility_with_load_case(
         ));
     }
     if matching_inputs_are_finite && static_tw.is_finite() && static_tw > 0.0 {
-        let oei_assessment = oei_drag::assess(config, report, takeoff_mass_kg, wing_area_m2)
-            .unwrap_or_else(|reason| {
-                findings.push(error(
-                    FindingCode::FieldPerformanceUnavailable,
-                    format!("OEI drag could not be assessed: {reason}"),
-                    None,
-                    None,
-                    "",
-                ));
-                OeiClimbAssessment {
-                    status: OeiClimbStatus::EvidenceGap,
-                    required_inflight_tw: None,
-                    required_sls_tw: None,
-                    diagnostic: "OEI shared candidate drag is unavailable; no SLS floor is scored.",
-                }
-            });
+        // Mid-cruise mass of the analysed mission: the mean of the take-off
+        // mass and the dispatch's landing mass (take-off less trip fuel),
+        // the same definition the optimizer's cruise row uses. Without a
+        // settled dispatch the sized candidate's own mid-cruise mass stands in
+        // (see `cruise_deck::level_mass_kg`).
+        let mid_cruise_mass_kg = cruise_deck::level_mass_kg(&fuel_loading, report);
         findings.extend(static_thrust::cruise_thrust_margin(
             config,
             report,
             static_tw,
             wing_loading_pa,
             takeoff_mass_kg * gravity_m_s2,
+            mid_cruise_mass_kg,
         ));
-        // An in-flight OEI estimate is useful as a diagnostic, but it is not
-        // dimensionally comparable with the SLS axis used here. Only the
-        // shared assessor's condition-specific SLS result may create a hard
-        // thrust-margin finding. Surface the missing evidence as a warning so
-        // callers do not mistake a conceptual fallback for Part 25 evidence.
-        if let Some(required_sls_tw) = oei_assessment.required_sls_tw {
-            if required_sls_tw.is_finite() && static_tw < required_sls_tw {
-                findings.push(error(
-                    FindingCode::ThrustMarginViolation,
-                    format!(
-                        "engine-out second-segment climb requires static T/W {:.4}, but the configured rating provides {:.4}",
-                        required_sls_tw, static_tw
-                    ),
-                    Some(static_tw),
-                    Some(required_sls_tw),
-                    "T/W",
-                ));
-            }
-        } else if !matches!(
-            oei_assessment.status,
-            OeiClimbStatus::NotApplicable | OeiClimbStatus::ConceptualInflight
-        ) {
-            findings.push(PhysicalFinding {
-                code: FindingCode::FieldPerformanceUnavailable,
-                severity: FindingSeverity::Warning,
-                message: oei_assessment.diagnostic.to_owned(),
-                actual: None,
-                limit: None,
-                unit: "",
-            });
-        }
+        findings.extend(cruise_deck::toc_findings(config, report));
+        oei_drag::push_findings(
+            config,
+            report,
+            oei_drag::ClimbBasis {
+                takeoff_mass_kg,
+                landing_mass_kg,
+                wing_area_m2,
+                static_thrust_n,
+                static_tw,
+            },
+            &mut findings,
+        );
     }
     field::assess_airports(
         config,

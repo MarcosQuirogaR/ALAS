@@ -3,7 +3,8 @@
 The hybrid parasite buildup uses gross projected wing area for coefficient
 normalization and exposed wing area for skin friction. With
 `drag_model.exclude_buried_main_wing_area = true` (the product default), the
-main-wing center section inside the body is subtracted before applying the
+center section inside the body of the main wing (and of a fuselage-mounted
+horizontal tail, see below) is subtracted before applying the
 configured wing wetted-area factor. Setting it to `false` retains the gross
 wing-area convention; `AeroAnalysis::new_reference_compatibility` also retains
 the frozen convention independently of this flag.
@@ -19,8 +20,16 @@ aircraft reference area is unchanged.
 This is a local extruded-body approximation, not a mesh intersection: it does
 not resolve fairings, thickness, changing body contour over the chord, twist
 in the buried-area metric, or dihedral crossing the body surface. It is limited
-to symmetric main wings and centered fuselages. Tail wetted-area conventions
-are unchanged. OpenVSP's [Comp Geom](https://www.nasa.gov/reference/openvsp-comp-geom/)
+to symmetric lifting surfaces and centered fuselages. Despite the flag name
+(`exclude_buried_main_wing_area`), the correction is applied to every
+symmetric surface in `plane.wings` whose root lies inside the body, which
+includes a fuselage-mounted horizontal tail; a fin, a T-tail and a detached
+surface subtract nothing (`wetted.rs`, `parasite.rs`; the unit test
+`bodies_take_their_wetted_area_from_the_loft_and_tails_their_exposed_planform`
+pins the tail case). The wing wetted-area factor
+(`geometry.wing_wetted_area_factor`) is read only by the frozen
+reference-compatibility path; the product path uses Raymer's
+thickness-ratio-dependent factor. OpenVSP's [Comp Geom](https://www.nasa.gov/reference/openvsp-comp-geom/)
 offers an intersected-surface calculation for higher-fidelity checks.
 
 Reproduce the numerical change with
@@ -378,14 +387,42 @@ approved LOPA.
 # Propulsion-specific field performance
 
 `performance.legacy_field_correlations = false` selects the corrected field
-method. Jet takeoff retains Raymer's FAR-25 TOP correlation (5th edition,
-section 5.4, Fig. 5.4): 37.7 TOP in ft with wing loading in psf. It already
-estimates field length; its BFL proxy receives no additional 1.15 multiplier.
-[CS/FAR 25.113](https://www.govinfo.gov/content/pkg/CFR-2025-title14-vol1/pdf/CFR-2025-title14-vol1-sec25-113.pdf)
-applies 1.15 to an all-engine takeoff-distance candidate, compared with the
-engine-out distance. It does not multiply a balanced field length by 1.15.
-The historical low-level APIs and the explicit replay selection preserve the
-translated correlation, speed schedule and BFL multiplier for parity.
+method. Jet takeoff field length is the CS 25.113(a) take-off distance by
+integration (`alas_perf::performance::takeoff_field`, one definition for the
+optimiser constraint, the airport findings, the ISA sea-level field reference
+and the report inputs): `TOFL = max(1.15 x all-engine distance to 35 ft, BFL)`,
+the balanced field being the equality of the one-engine continued take-off
+(failure at VEF) and the CS 25.109(a) accelerate-stop distance at the decision
+speed V1. Ground roll integrates the engine-deck take-off thrust (Jenkinson
+chart) at every speed with Raymer Eqs. 17.100-17.101 and rolling friction 0.02
+(Torenbeek p. 168); rotation takes 3 s (Raymer p. 673); the airborne distance
+is the larger of the energy distance (Torenbeek Eq. 5-85) and the Raymer
+transition arc (Eqs. 17.105-17.112, n = 1.2) with gear down and no ground
+effect; the failed engine adds its windmilling and asymmetric-trim drag; the
+stop uses 0.37 g mean deceleration without reverse thrust (Torenbeek p. 169)
+plus 2 s at V1 (CS 25.109(a)(1)(iv)); VR is searched between the schedule
+minimum and V2 for the shortest field (Raymer p. 676). The optimiser
+constraint `takeoff_field` compares this length with the take-off distance
+available, in metres. Dry level hard runway, still air, no clearway, stopway or
+lift dump: a conceptual estimate, not a certified field length. The field
+length follows V2 and so the configured `CLmax_TO`; a class-default `CLmax_TO`
+shifts it with the square of the V2 error. Raymer's TOP correlation (5th
+edition, section 5.4, Fig. 5.4: 37.7 TOP in ft, psf) and the translated BFL
+multiplier remain only for the explicit replay selection and the low-level
+historical APIs, and drive the matching chart.
+
+The registered jets (A320-200, A340-300, A380-800, B787-9, B747-400, DC-10,
+A220-300, E195-E2, C919) take `CLmax_TO` from their declared high-lift system
+instead of the class default: Raymer 5th ed. Eq. 12.21 and Table 12.2 (printed
+p. 415), also Jenkinson Ch. 8, `CLmax_TO = CLmax_clean + 0.70 dCL_flap(landing)
++ dCL_LE` with `dCL = 0.9 dcl_max (S_flapped/S_ref) cos(hinge sweep)`, c'/c 1.275
+(Fowler) and 1.075 (slat), and the 60-80 % take-off share at its midpoint. Flap
+and slat runs are the declared control-surface spans measured on each preset's
+planform (`alas-config::presets::high_lift_system`; device type and document
+page per preset are recorded there). A conceptual estimate, not a measured
+CLmax: against the Vref-recovered landing coefficients the same method misses
+by 12 % on average (up to +34 % on the 747-400), and its take-off values sit
+above Jenkinson's statistical 1.7-2.2.
 
 Propeller distances use Torenbeek, *Synthesis of Subsonic Airplane Design*
 (1982), sections 5.4.5-5.4.6, pp. 167-170, equations 5-73/74, 5-89 and
@@ -467,9 +504,10 @@ d = x_P - x_cg and kappa = th''/g the balance is `kappa d^2 + d - r = 0`,
 r = A - kappa (k_y^2 + h_cg^2), A the non-weight moments over W. The forward
 limit is the larger root, evaluated as `d = 2 r / (1 + sqrt(1 + 4 kappa r))`.
 k_y is the mass ledger's takeoff pitch radius of gyration (Raymer's
-jet-transport 0.38 L/2 without a ledger); th'' is 7 deg/s^2 for every class
-(Torenbeek/Roskam 6-8 deg/s^2 midpoint; Sadraey's Table 9.6 class values could
-not be confirmed from an accessible source). Both are overridable with the
+jet-transport 0.38 L/2 without a ledger); th'' is 5 deg/s^2 for every class
+(the midpoint of Sadraey's transport range of 4-6 deg/s^2, sec. 12.3; the
+earlier 7 deg/s^2 had no retrieved source; Sadraey's Table 9.6 class values
+could not be confirmed from an accessible source). Both are overridable with the
 optional `landing_gear.rotation_pitch_acceleration_deg_s2` and
 `landing_gear.pitch_radius_of_gyration_frac_mac`.
 
@@ -492,6 +530,8 @@ omitted; its moment `D (h_D - h_cg)` is bounded by about 1 %MAC.
 These are implementation and plausibility checks: the derived CL_h of the
 registered presets is now -0.85 to -0.97 (the thin-airfoil upper bound gave
 -1.22 to -1.42), the section cap does not bind, and the rotation boundaries
-lie forward of the A220 certified (18.4) and A320 ACAP (17) limits (9.2 and
--3.0 %MAC) but aft of the A340 ACAP 20.3 (28.3 %MAC), a known residual. These
+lie forward of the A220 flight-envelope and A320 ACAP (17) limits (A320 1.3,
+A220 -13.5 %MAC, with the 4.3 deg trimmable-stabiliser setting; 9.2 and -3.0 at
+the built -2 deg incidence) but aft of the A340 ACAP 20.3 (22.0 %MAC; 28.3 at
+the built incidence), a known residual (`published_forward_cg_limits.rs`). These
 are checks, not calibration targets, and not a validation of the boundary.

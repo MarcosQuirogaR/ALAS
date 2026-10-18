@@ -26,8 +26,9 @@
 
 use super::exec::{self, RunError, WorkDir};
 use super::{
-    deck, parse, MsesConvergedCheckpoint, MsesOsmapStatus, MsesPolarPointDiagnostic,
-    MsesPolarPointStatus, MsesPolarResult, MsesPressureResult, MsesSolverAttempt, MsesStatus,
+    classify_requested_points, deck, parse, MsesConvergedCheckpoint, MsesOsmapStatus,
+    MsesPointClass, MsesPolarPointDiagnostic, MsesPolarPointStatus, MsesPolarResult,
+    MsesPressureResult, MsesSolverAttempt, MsesStatus,
 };
 use alas_config::MsesConfig;
 use alas_geom::aircraft::airfoil::Airfoil;
@@ -41,6 +42,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 mod osmap;
 use osmap::*;
 mod case;
+mod ramp;
+use ramp::RampOutcome;
 mod session;
 pub use session::*;
 mod polar_io;

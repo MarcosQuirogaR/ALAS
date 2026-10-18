@@ -77,6 +77,7 @@ use alas_math::linalg::SolveDiagnostics;
 
 use crate::operating_point::OperatingPoint;
 
+pub mod speed;
 pub mod stability_derivatives;
 pub mod streamlines;
 pub mod system;

@@ -51,6 +51,6 @@ pub use navdata::{navdata_available, Fix, NavdataGraph};
 pub use planner::{load_navdata, plan_route, RouteSources};
 pub use route::{haversine_m, Route, RouteSource, Waypoint, EARTH_RADIUS_M};
 pub use simbrief::{
-    fetch_route, fetch_route_with_status, route_from_document, route_from_ofp,
-    SimbriefFetchOutcome, SimbriefFetchStatus, SimbriefTransport,
+    fetch_route_with_status, route_from_document, route_from_ofp, SimbriefFetchOutcome,
+    SimbriefFetchStatus, SimbriefTransport,
 };

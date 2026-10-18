@@ -28,6 +28,7 @@ pub mod dispatch;
 pub mod flops_transport;
 pub mod fuel_plan;
 pub mod fuel_policy;
+pub mod ground_clearance;
 pub mod inertia;
 pub mod ledger;
 pub mod loading;

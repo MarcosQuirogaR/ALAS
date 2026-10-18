@@ -49,7 +49,7 @@ fn metrics(
         "root_cap_thicknesses_m": sizing.spars.iter().map(|s| s.t_cap[0]).collect::<Vec<_>>(),
         "root_cap_areas_m2": sizing.spars.iter().map(|s| s.a_cap[0]).collect::<Vec<_>>(),
         "root_spar_heights_m": sizing.spars.iter().map(|s| s.h[0]).collect::<Vec<_>>(),
-        "web_thicknesses_m": sizing.spars.iter().map(|s| s.t_web).collect::<Vec<_>>(),
+        "web_thicknesses_m": sizing.spars.iter().map(|s| s.t_web.clone()).collect::<Vec<_>>(),
         "cover_thickness_m": sizing.t_skin, "num_ribs": sizing.num_ribs,
         "passes": feasibility.passes(), "input_valid": feasibility.input_valid,
         "strength_utilization": feasibility.max_strength_utilization,
@@ -208,7 +208,8 @@ fn main() -> Result<(), Box<dyn Error>> {
                             .as_array()
                             .ok_or("missing historical web gauges")?,
                     ) {
-                        spar.t_web = gauge.as_f64().ok_or("invalid historical web gauge")?;
+                        spar.t_web
+                            .fill(gauge.as_f64().ok_or("invalid historical web gauge")?);
                     }
                     let (deck, _, _) = build_wing_mesh_bdf_product(
                         &geometry,

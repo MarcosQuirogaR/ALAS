@@ -5,6 +5,9 @@
 
 use super::*;
 
+// Each argument is an independent runtime control or typed input boundary, as in
+// `run_solver_optimizations`, which is the only caller.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn run_avl_optimizer(
     config: AlasConfig,
     seed: Option<u64>,
@@ -12,6 +15,7 @@ pub(super) fn run_avl_optimizer(
     nominal: DesignVector,
     bounds: Option<&[(f64, f64)]>,
     output_dir: Option<PathBuf>,
+    acceptance_route: Option<&AcceptanceRoute>,
     cancel: Option<&AtomicBool>,
 ) -> SolverOptimizationResult {
     let Some(executable) = environment.avl_exe.clone() else {
@@ -51,8 +55,8 @@ pub(super) fn run_avl_optimizer(
         output_root.join("evaluations"),
         cancel,
     );
-    let mut optimizer = DesignOptimizer::new(effective_config);
-    let optimization = match optimizer.run_with_evaluator_cancellable(
+    let mut optimizer = DesignOptimizer::new(effective_config.clone());
+    let mut optimization = match optimizer.run_with_evaluator_cancellable(
         bounds,
         Some(&nominal),
         &mut objective,
@@ -76,17 +80,27 @@ pub(super) fn run_avl_optimizer(
             CANCELLED_DURING_OPTIMIZATION,
         );
     }
-    let design = optimization.best_design;
-    let report = match FullAnalysis::new(config.clone()).run(&design, true) {
-        Ok(report) => report,
-        Err(error) => {
-            return SolverOptimizationResult::failed(
-                SolverKind::Avl,
-                output_dir,
-                format!("AVL best-design analysis failed: {error}"),
-            )
-        }
+    // The same reporting-fidelity ladder the VLM branch runs: the in-loop AVL
+    // score alone never makes the branch `Completed`.
+    let LadderOutcome {
+        delivered,
+        reporting_nominal,
+    } = match run_reporting_ladder(
+        ReportingLadder {
+            solver: SolverKind::Avl,
+            config: &config,
+            effective_config: &effective_config,
+            nominal: &nominal,
+            acceptance_route,
+            cancel,
+        },
+        &mut optimization,
+    ) {
+        Ok(outcome) => outcome,
+        Err(error) => return SolverOptimizationResult::failed(SolverKind::Avl, output_dir, error),
     };
+    let design = delivered.report.design;
+    let report = delivered.report.clone();
     let final_dir = output_root.join("final");
     let avl_result = crate::avl::run_avl_analysis_cancellable(
         &report,
@@ -110,14 +124,19 @@ pub(super) fn run_avl_optimizer(
         );
     }
     let status = SolverOptimizationStatus::for_delivered(&optimization);
+    let baseline_verification = reporting_nominal
+        .as_ref()
+        .and_then(|nominal| nominal.verified_analysis(&config, acceptance_route));
+    let verification =
+        crate::acceptance::VerifiedAnalysis::new(config, acceptance_route.cloned(), delivered);
     SolverOptimizationResult {
         solver: SolverKind::Avl,
         status,
         design: Some(design),
         optimization: Some(optimization),
         report: Some(report),
-        verification: None,
-        baseline_verification: None,
+        verification: Some(verification),
+        baseline_verification,
         avl_result: Some(avl_result),
         output_dir,
         error: None,
@@ -269,11 +288,16 @@ impl AvlObjective<'_> {
         };
         let cd0 = table.cd0(point.mach, self.config.requirements.cruise_altitude_m);
         let wave_drag_cd = table.wave_cd(required_cl, point.mach);
+        // The external polar is one parabola, so the lift-dependent viscous
+        // drag (zero unless configured) joins AVL's induced curvature.
+        let viscous_lift_cd = table.viscous_lift_cd(required_cl, cd0);
         let polar = ExternalPolar {
             cd0,
-            induced_factor_k: point.induced_drag_coefficient / (required_cl * required_cl),
+            induced_factor_k: (point.induced_drag_coefficient + viscous_lift_cd)
+                / (required_cl * required_cl),
             wave_drag_cd,
-            lift_to_drag: required_cl / (cd0 + wave_drag_cd + point.induced_drag_coefficient),
+            lift_to_drag: required_cl
+                / (cd0 + wave_drag_cd + point.induced_drag_coefficient + viscous_lift_cd),
             alpha_deg: point.alpha_deg,
             incidence_deg: report
                 .trimmed_design_point

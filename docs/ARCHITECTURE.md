@@ -70,7 +70,7 @@ crates each one uses in `[dependencies]`.
 | Crate | Role | Depends on |
 |---|---|---|
 | `alas-atmo` | ISA, US 1976 and the fitted atmosphere used by the reference model. | math |
-| `alas-config` | Every tunable value, the registered aircraft presets, fuel policy, airport data, and the settings metadata. | atmo, config-derive, i18n |
+| `alas-config` | Every tunable value, the registered aircraft presets, fuel policy, airport data, and the settings metadata. | atmo, config-derive, i18n, math |
 | `alas-geom` | Airfoils, wings, fuselages and the aircraft builder. | config, math |
 | `alas-route` | Great-circle, airway and flight-plan routes; navigation data assets. | config |
 
@@ -80,20 +80,21 @@ crates each one uses in `[dependencies]`.
 |---|---|---|
 | `alas-aero` | In-process and mission vortex-lattice methods, airfoil and lift surrogates, drag build-up. | atmo, config, geom, math, exec |
 | `alas-prop` | On-design turbofan cycle. | atmo, config |
-| `alas-mass` | Component mass methods (Torenbeek, FLOPS transport), item-level mass ledger, tanks, fuel policy, dispatch closure. | geom, config, struct, units |
+| `alas-mass` | Component mass methods (Torenbeek, FLOPS transport), item-level mass ledger, tanks, fuel policy, dispatch closure. | geom, config, struct, units, atmo |
 | `alas-payload` | Cabin, cargo and baggage layout; payload centre of gravity. | geom, config, mass, math |
 | `alas-stab` | Static margin, neutral point, trim, dynamic modes. | aero, config, geom, atmo, math |
 | `alas-perf` | Point and field performance, V-speeds, landing-gear sizing. | config, atmo |
 | `alas-mission` | Segment-based mission solver. | aero, atmo, config, math, prop |
 | `alas-struct` | Wingbox loads and sizing, analytical deflection, Nastran and NASTRAN-95 decks, OP2 reader. | config, exec, geom |
 | `alas-uav` | Fixed-wing electric UAV component catalogue and feasibility physics. | geom, aero, atmo |
+| `alas-uav-db` | Provenance-tracked UAV component database (schema v2): units, importers, offers, user overlay, v1 converter, curated kit. | none |
 | `alas-cfd` | Two-dimensional OpenFOAM airfoil study contract (Gmsh extrusion, case lifecycle, parsers). | exec, geom |
 
 **Composed analyses, orchestration and output**
 
 | Crate | Role | Depends on |
 |---|---|---|
-| `alas-opt` | Objective evaluation, envelope checks, multidisciplinary sizing loop, L-SHADE differential evolution. | types, config, geom, atmo, mass, struct, payload, perf, aero, prop, stab, math, units, mission |
+| `alas-opt` | Objective evaluation, envelope checks, multidisciplinary sizing loop, L-SHADE differential evolution. | config, geom, atmo, mass, struct, payload, perf, aero, prop, stab, units, mission |
 | `alas-screen` | Airfoil-database batch screening. | config, geom, atmo, mass, aero, stab, opt |
 | `alas-pipeline` | Stage sequencing, feasibility, CPACS and OpenVSP/AVL/VSPAERO adapters, run manifests. | config, geom, atmo, mass, payload, perf, aero, stab, opt, struct, mission, prop, route, math, exec, units |
 | `alas-report` | Figure scenes, SVG/PNG/PDF export, design report. | most analysis crates, screen, opt, pipeline |

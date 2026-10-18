@@ -89,7 +89,7 @@ fn a_candidate_that_shrinks_the_tanks_below_the_nominal_fails() {
 fn a_design_mission_sets_the_requirement_and_the_nominal_capacity_is_the_fallback() {
     use alas_config::MtowSizing;
     let mut nominal_capacity = None;
-    for sizing in [MtowSizing::FixedRequirement, MtowSizing::MtowBand] {
+    for sizing in [MtowSizing::FixedRequirement, MtowSizing::PayloadAdjusted] {
         let mut config = config("A320-200", "reference_adaptation");
         config.optimizer.objective.mtow_sizing = sizing;
         let outcome = sized(&config);
@@ -97,7 +97,7 @@ fn a_design_mission_sets_the_requirement_and_the_nominal_capacity_is_the_fallbac
         let sized = &outcome.sized;
         assert_eq!(
             outcome.plan.design_mission.is_some(),
-            sizing == MtowSizing::MtowBand,
+            sizing == MtowSizing::PayloadAdjusted,
             "{sizing:?}"
         );
         if outcome.plan.design_mission.is_some() {

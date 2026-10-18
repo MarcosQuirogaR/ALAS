@@ -70,7 +70,9 @@ fn every_native_preset_mission_reads_the_carried_trimmed_drag_table() {
                         reynolds_number_per_m,
                     );
                     let cl = solution.lift_coefficient;
-                    let parasite = table.cd0_at_reynolds_per_m(mach, reynolds_number_per_m);
+                    let cd0 = table.cd0_at_reynolds_per_m(mach, reynolds_number_per_m);
+                    // The viscous (parasite) term carries kappa CD0 CL^2.
+                    let parasite = cd0 + table.viscous_lift_cd(cl, cd0);
                     let induced = table.induced_cd(cl);
                     let wave = table.wave_cd(cl, mach);
                     assert_eq!(

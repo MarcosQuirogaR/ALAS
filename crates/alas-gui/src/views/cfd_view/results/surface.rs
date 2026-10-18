@@ -53,7 +53,7 @@ pub(super) fn show_surface_distribution(result: &alas_cfd::CfdResults, ui: &mut 
             );
         });
         if closures > 0 {
-            ui.label(RichText::new(format!("{closures} vertical closure face(s) omitted from branch curves; retained in integrated loads.")).weak().small());
+            ui.label(RichText::new(tr_fields("{closures} vertical closure face(s) omitted from branch curves; retained in integrated loads.", &[("closures", closures.to_string())])).weak().small());
         }
     });
     ui.add_space(6.0);

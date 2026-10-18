@@ -34,8 +34,8 @@ pub use mtow_plan::{
 pub use objective::{MtowSizing, ObjectiveConfig, ObjectiveKind, DEFAULT_MTOW_BAND_FRACTION};
 pub use plausibility::PlausibilityLimits;
 pub use solver::{
-    SeedOutOfRange, SolverSettings, StageBudget, LEGACY_METHOD_TOKENS, MAXIMUM_STAGE_TIME_LIMIT_S,
-    PRODUCT_DE_METHOD,
+    SeedOutOfRange, SolverSettings, StageBudget, DEFAULT_REPRODUCIBLE_EVALUATIONS, DEFAULT_SEED,
+    LEGACY_METHOD_TOKENS, MAXIMUM_STAGE_TIME_LIMIT_S, PRODUCT_DE_METHOD,
 };
 pub use weights::ObjectiveWeights;
 

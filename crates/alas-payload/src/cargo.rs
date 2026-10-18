@@ -35,6 +35,7 @@ mod engine;
 mod headroom;
 pub(crate) use headroom::lacks_underfloor_hold;
 mod manager;
+mod military_pallet;
 mod slot;
 
 pub use capacity::CargoCapacity;
@@ -45,6 +46,7 @@ pub use compartments::{
 pub use engine::{build_cargo_layout, build_cargo_layout_reference_compatibility};
 pub use manager::CargoLoadManager;
 pub use manager::CargoMassSemantics;
+use military_pallet::P463L;
 pub use slot::CargoSlot;
 pub(crate) use slot::MIN_LOADED_KG;
 
@@ -440,7 +442,9 @@ const BLK: UldType = UldType {
 };
 
 /// Every container type the loader can place.
-pub static ULD_DATABASE: [UldType; 11] = [LD1, LD2, LD3, LD3_45, LD6, LD8, LD11, PAG, PMC, M1, BLK];
+pub static ULD_DATABASE: [UldType; 12] = [
+    LD1, LD2, LD3, LD3_45, LD6, LD8, LD11, PAG, PMC, M1, P463L, BLK,
+];
 
 /// The lower holds' fit-check fallback chain, tried in order when the
 /// configured container's envelope fails at every station.
@@ -614,6 +618,7 @@ mod tests {
             uld: LOWER_DECK_DEFAULT,
             realized_height_m: LOWER_DECK_DEFAULT.height,
             payload: 0.5,
+            net_limit_kg: None,
         };
         assert_eq!(slot.total_weight(), 0.0);
         slot.payload = 500.0;

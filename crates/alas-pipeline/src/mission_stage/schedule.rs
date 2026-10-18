@@ -4,11 +4,12 @@
 //! Mission profile construction and route-distance closure.
 
 use alas_atmo::us1976_try_compute_values;
-use alas_config::mission::{resolve_true_airspeed_m_s, SpeedReference};
+use alas_config::mission::SpeedReference;
 use alas_mission::segments::{SegmentKind, SegmentSpec};
 use alas_mission::MissionRequest;
 
 mod closure;
+mod speed;
 use closure::profile_horizontal_distance_of_schedule;
 pub(super) use closure::{
     close_schedule_distance, fit_altitude_profile, schedule_horizontal_distance,
@@ -55,6 +56,10 @@ pub(super) fn build_schedule(request: &MissionRequest) -> Result<Vec<SegmentSpec
     let second_level =
         (cruise_altitude * p.step_climb_1_altitude_fraction).max(first_level + 300.0);
     let temperature_deviation_k = request.departure_isa_deviation_c;
+    // Declared cruise speeds are standard-day `M a_ISA`; the same Mach is
+    // `M a(T)` on the flown day (MIS-04).
+    let cruise_speed_ratio =
+        speed::standard_day_speed_ratio(cruise_altitude, temperature_deviation_k)?;
     let reference = p.climb_descent_speed_reference;
     let mut schedule = Vec::with_capacity(12);
 
@@ -86,7 +91,7 @@ pub(super) fn build_schedule(request: &MissionRequest) -> Result<Vec<SegmentSpec
             "cruise_step_1",
             None,
             0.0,
-            p.cruise_1_air_speed_m_s,
+            p.cruise_1_air_speed_m_s * cruise_speed_ratio,
             temperature_deviation_k,
         ));
     }
@@ -104,7 +109,7 @@ pub(super) fn build_schedule(request: &MissionRequest) -> Result<Vec<SegmentSpec
             "cruise_step_2",
             None,
             0.0,
-            p.cruise_2_air_speed_m_s,
+            p.cruise_2_air_speed_m_s * cruise_speed_ratio,
             temperature_deviation_k,
         ));
     }
@@ -122,7 +127,7 @@ pub(super) fn build_schedule(request: &MissionRequest) -> Result<Vec<SegmentSpec
             "cruise_step_3",
             None,
             0.0,
-            p.cruise_3_air_speed_m_s,
+            p.cruise_3_air_speed_m_s * cruise_speed_ratio,
             temperature_deviation_k,
         ));
     }
@@ -172,6 +177,8 @@ pub(super) fn build_schedule(request: &MissionRequest) -> Result<Vec<SegmentSpec
         p.landing_descent_rate_m_s,
         temperature_deviation_k,
     ));
+
+    speed::apply_speed_caps(&mut schedule, p);
 
     // Preserve the full configured altitude profile when it fits. For a short
     // route, reduce its altitude excursion continuously while keeping both
@@ -310,12 +317,18 @@ fn validate_profile_inputs(request: &MissionRequest) -> Result<(), String> {
                         .map_err(|error| {
                             format!("mission atmosphere at {altitude_m} m is unusable: {error}")
                         })?;
-                let tas = resolve_true_airspeed_m_s(
-                    SpeedReference::CalibratedAirspeed,
-                    cas_m_s,
-                    atmosphere.pressure_pa,
-                    atmosphere.temperature_k,
-                )
+                let caps = if name.starts_with("descent") || name == "final landing" {
+                    p.descent_caps()
+                } else {
+                    p.climb_caps()
+                };
+                let tas = caps
+                    .true_airspeed_m_s(
+                        SpeedReference::CalibratedAirspeed,
+                        cas_m_s,
+                        atmosphere.pressure_pa,
+                        atmosphere.temperature_k,
+                    )
                 .map_err(|error| {
                     format!(
                         "mission {name} calibrated airspeed {cas_m_s} m/s cannot be flown at {altitude_m:.0} m: {error}"
@@ -338,6 +351,19 @@ fn validate_profile_inputs(request: &MissionRequest) -> Result<(), String> {
             return Err(format!(
                 "mission {name} airspeed must be finite and positive, got {speed}"
             ));
+        }
+        if p.max_operating_mach > 0.0 {
+            let mach = speed::cruise_mach(
+                speed,
+                request.cruise_altitude_m,
+                request.departure_isa_deviation_c,
+            )?;
+            if mach > p.max_operating_mach * (1.0 + 1.0e-9) {
+                return Err(format!(
+                    "mission {name} airspeed is Mach {mach:.4} at the cruise altitude, above MMO {}",
+                    p.max_operating_mach
+                ));
+            }
         }
     }
     for (name, fraction) in [
@@ -408,6 +434,7 @@ fn climb(
         },
         air_speed_m_s: speed,
         air_speed_reference: speed_reference,
+        speed_caps: alas_config::mission::SpeedCaps::default(),
         true_course_rad: 0.0,
         temperature_deviation_k,
         number_control_points: CONTROL_POINTS,
@@ -432,6 +459,7 @@ fn cruise(
         // one for a preset's operational route): never calibrated airspeed,
         // regardless of the profile's climb/descent speed reference.
         air_speed_reference: SpeedReference::TrueAirspeed,
+        speed_caps: alas_config::mission::SpeedCaps::default(),
         true_course_rad: 0.0,
         temperature_deviation_k,
         number_control_points: CONTROL_POINTS,
@@ -456,6 +484,7 @@ fn descent(
         },
         air_speed_m_s: speed,
         air_speed_reference: speed_reference,
+        speed_caps: alas_config::mission::SpeedCaps::default(),
         true_course_rad: 0.0,
         temperature_deviation_k,
         number_control_points: CONTROL_POINTS,
@@ -698,6 +727,80 @@ mod tests {
             assert!(
                 refined_error < production_error,
                 "ISA{isa_deviation_c:+}: refinement did not shrink the error: production {production_error:e}, refined {refined_error:e}"
+            );
+        }
+    }
+
+    // The CAS/Mach ladder of a widebody (B787-9: 163 m/s CAS, M 0.84 above
+    // the crossover, MMO 0.90): both paths apply the one `SpeedCaps`
+    // definition, so their climb and descent footprints agree to the
+    // discretization of the kink at the crossover, on a standard and a hot
+    // day. The gaps are recorded in the failure messages.
+    #[test]
+    fn native_and_mdo_cas_mach_footprints_agree_for_a_widebody_ladder() {
+        let config = AlasConfig::from_value(&serde_json::json!({"preset": "B787-9"})).unwrap();
+        let operational = alas_config::presets::get("B787-9")
+            .unwrap()
+            .operational_mission_defaults();
+        let cruise_m = operational.cruise_altitude_m;
+        assert!(
+            operational.profile.climb_mach > 0.0 && operational.profile.max_operating_mach > 0.0
+        );
+        for isa_deviation_c in [0.0, 15.0] {
+            let request = MissionRequest {
+                mission_tag: "RJTT_to_YSSY".to_owned(),
+                cruise_altitude_m: cruise_m,
+                departure_elevation_m: 0.0,
+                arrival_elevation_m: 0.0,
+                departure_isa_deviation_c: isa_deviation_c,
+                route_distance_m: 7.8e6,
+                profile: operational.profile.clone(),
+            };
+            let native_m =
+                profile_horizontal_distance_of_schedule(&build_schedule(&request).unwrap(), 0.0);
+            let deck = PropulsionDeck::from_engine(
+                &config.geometry.engine,
+                config.requirements.cruise_mach,
+                cruise_m,
+                max_climb_rate_ft_min(request.profile.initial_climb_rate_m_s),
+            )
+            .unwrap();
+            let model = SegmentMissionModel::new(
+                request.profile.clone(),
+                config.requirements.cruise_mach,
+                cruise_m,
+                0.0,
+                0.0,
+                377.0,
+                std::sync::Arc::new(alas_opt::mdo::mission_model::ParabolicPolar::new(
+                    0.02,
+                    0.045,
+                    0.0,
+                    config.requirements.cruise_mach,
+                )),
+                config.requirements.gravity_m_s2,
+                457.2,
+                PhaseAeroLimits::from_config(&config),
+                deck,
+            )
+            .unwrap()
+            .with_isa_deviation_c(isa_deviation_c);
+            let footprint = |model: &SegmentMissionModel| {
+                let plan = model.plan_trip(7.8e6).unwrap();
+                assert!(!plan.adapted);
+                plan.climb_footprint_m + plan.descent_footprint_m
+            };
+            let production_m = footprint(&model);
+            let refined_m = footprint(&model.clone().with_cas_subdivisions(4096));
+            let production_error = (production_m - native_m).abs() / native_m;
+            let refined_error = (refined_m - native_m).abs() / native_m;
+            assert!(
+                production_error < 5.0e-3,
+                "ISA{isa_deviation_c:+}: 8 sub-rungs: MDO {production_m} m vs native {native_m} m ({production_error:e})"
+            );
+            assert!(
+                refined_error < 5.0e-3,
+                "ISA{isa_deviation_c:+}: 4096 sub-rungs: MDO {refined_m} m vs native {native_m} m ({refined_error:e})"
             );
         }
     }

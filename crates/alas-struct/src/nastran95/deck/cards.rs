@@ -7,7 +7,13 @@ use super::beam_cards::bars;
 use super::*;
 
 /// Reformulate every mesh card into fixed-field bulk data.
-pub(super) fn bulk(out: &mut String, tags: &mut ContinuationTags, deck: &Deck, dialect: Dialect) {
+pub(in crate::nastran95) fn bulk(
+    out: &mut String,
+    tags: &mut ContinuationTags,
+    deck: &Deck,
+    dialect: Dialect,
+    units: UnitScale,
+) {
     params(out, deck, dialect);
     for grid in deck.grids() {
         card(
@@ -17,9 +23,9 @@ pub(super) fn bulk(out: &mut String, tags: &mut ContinuationTags, deck: &Deck, d
             vec![
                 Field::Int(grid.nid),
                 Field::Blank,
-                Field::Real(grid.xyz[0]),
-                Field::Real(grid.xyz[1]),
-                Field::Real(grid.xyz[2]),
+                Field::Real(grid.xyz[0] * units.length),
+                Field::Real(grid.xyz[1] * units.length),
+                Field::Real(grid.xyz[2] * units.length),
             ],
         );
     }
@@ -33,7 +39,7 @@ pub(super) fn bulk(out: &mut String, tags: &mut ContinuationTags, deck: &Deck, d
         fields.extend(shell.nodes.iter().map(|&nid| Field::Int(nid)));
         card(out, tags, name, fields);
     }
-    bars(out, tags, deck);
+    bars(out, tags, deck, units);
     for mass in &deck.masses {
         card(
             out,
@@ -43,10 +49,10 @@ pub(super) fn bulk(out: &mut String, tags: &mut ContinuationTags, deck: &Deck, d
                 Field::Int(mass.eid),
                 Field::Int(mass.nid),
                 Field::Int(mass.cid),
-                Field::Real(mass.mass),
-                Field::Real(mass.offset[0]),
-                Field::Real(mass.offset[1]),
-                Field::Real(mass.offset[2]),
+                Field::Real(mass.mass * units.mass),
+                Field::Real(mass.offset[0] * units.length),
+                Field::Real(mass.offset[1] * units.length),
+                Field::Real(mass.offset[2] * units.length),
             ],
         );
     }
@@ -78,7 +84,7 @@ pub(super) fn bulk(out: &mut String, tags: &mut ContinuationTags, deck: &Deck, d
             vec![
                 Field::Int(property.pid),
                 Field::Int(property.mid1),
-                Field::Real(property.t),
+                Field::Real(property.t * units.length),
                 Field::Int(property.mid2),
             ],
         );
@@ -90,10 +96,10 @@ pub(super) fn bulk(out: &mut String, tags: &mut ContinuationTags, deck: &Deck, d
             "MAT1",
             vec![
                 Field::Int(material.mid),
-                Field::Real(material.e),
-                Field::Real(material.g),
+                Field::Real(material.e * units.stress()),
+                Field::Real(material.g * units.stress()),
                 Field::Real(material.nu),
-                Field::Real(material.rho),
+                Field::Real(material.rho * units.density()),
             ],
         );
     }
@@ -142,6 +148,7 @@ pub(super) fn static_loads(
     node_index: &MeshNodeIndex,
     req: &DesignRequirements,
     cases: &[LoadCase],
+    units: UnitScale,
 ) {
     let front_upper: &[i64] = node_index
         .spar_upper_nids
@@ -181,13 +188,15 @@ pub(super) fn static_loads(
             vec![
                 Field::Int(gravity_sid),
                 Field::Int(0),
-                Field::Real(gravity_magnitude),
+                Field::Real(gravity_magnitude * units.acceleration()),
                 Field::Real(0.0),
                 Field::Real(0.0),
                 Field::Real(gravity_sign),
             ],
         );
-        for (nid, force) in elliptic_forces_by_y(&nid_y, case.total_force_n.abs(), semi_span) {
+        for (nid, force) in
+            elliptic_forces_by_y_trapezoid(&nid_y, case.total_force_n.abs(), semi_span)
+        {
             card(
                 out,
                 tags,
@@ -196,7 +205,7 @@ pub(super) fn static_loads(
                     Field::Int(force_sid),
                     Field::Int(nid),
                     Field::Int(0),
-                    Field::Real(force.abs() * lift_sign),
+                    Field::Real(force.abs() * lift_sign * units.force()),
                     Field::Real(0.0),
                     Field::Real(0.0),
                     Field::Real(1.0),
@@ -207,31 +216,32 @@ pub(super) fn static_loads(
 }
 
 /// The eigenvalue-extraction card each dialect uses to ask for the lowest
-/// `n_modes`.
+/// modes.
 ///
 /// `EIGRL,,,,N` asks the modern solver for the lowest `N` directly. NASTRAN-95's
 /// Givens methods need a positive-definite mass matrix, which a shell-and-mass
 /// model does not have, so it uses `EIGR,,INV` over a bounded low-frequency
-/// interval.  `NE` is an estimate of the roots in that interval, not the
-/// requested output count: supplying `n_modes` for both while retaining the
-/// 500 Hz SOL 111 response ceiling made NASTRAN-95 skip the elastic roots.
-/// Extracting at least sixteen modes with a four-to-one root estimate gives the
-/// historic solver enough shifts to return the requested band. Its broad
-/// inverse-power search can still print message 3307 for an intermediate shift;
-/// callers must use the final Sturm `ROOTS BELOW` count to establish that no
-/// lower emitted root was omitted. The continuation card is required by the
-/// `EIGR` format.
+/// interval `[0, band.upper_hz]`. `NE` (`band.estimate`) is an estimate of the
+/// roots in that interval, not the requested output count; `ND`
+/// (`band.extract`) is the number of roots wanted.
+///
+/// Inverse power places its shifts across the *whole* interval. Over a wide
+/// interval (the previous fixed 0-100 Hz) it converged on `ND` roots anywhere
+/// in the band and printed message 3307 ("N eigenvalue(s) at low freq. end not
+/// found"), so the first reported frequency of an A320 wingbox was 15.5 Hz
+/// while the 19 roots below it (first wing bending 1.84 Hz, matching MSC's
+/// 1.83 Hz) were never extracted. The caller therefore narrows the band until
+/// the final Sturm `ROOTS BELOW` counts account for every reported root (see
+/// `modal_band`), and message 3307 itself is not trusted in either direction.
+/// The continuation card is required by the `EIGR` format.
 pub(super) fn eigenvalue_card(
     out: &mut String,
     tags: &mut ContinuationTags,
     cfg: &StructuresConfig,
     dialect: Dialect,
+    band: ModalBand,
 ) {
     let n_modes = cfg.n_modes.max(1);
-    let local_extract_count = n_modes.max(NASTRAN95_MINIMUM_EXTRACTED_MODES);
-    let local_root_estimate =
-        local_extract_count.saturating_mul(NASTRAN95_MODAL_ROOT_ESTIMATE_FACTOR);
-    let local_upper_hz = NASTRAN95_MODAL_SEARCH_UPPER_HZ;
     match dialect {
         Dialect::Modern => card(
             out,
@@ -252,9 +262,9 @@ pub(super) fn eigenvalue_card(
                 Field::Int(METHOD_SET),
                 Field::Text("INV"),
                 Field::Real(0.0),
-                Field::Real(local_upper_hz),
-                Field::Int(local_root_estimate),
-                Field::Int(local_extract_count),
+                Field::Real(band.upper_hz),
+                Field::Int(band.estimate),
+                Field::Int(band.extract),
                 Field::Blank,
                 Field::Blank,
                 Field::Text("MASS"),
@@ -270,7 +280,7 @@ pub(super) fn param(out: &mut String, key: &'static str, value: Field) {
 }
 
 /// Render one card into `out`.
-pub(super) fn card(
+pub(in crate::nastran95) fn card(
     out: &mut String,
     tags: &mut ContinuationTags,
     name: &'static str,

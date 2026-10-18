@@ -95,7 +95,7 @@ use crate::cancellation::{CancelPhase, CancelScope};
 mod evaluation;
 #[path = "lshade_de_ops.rs"]
 mod ops;
-pub(super) use evaluation::evaluate;
+pub(super) use evaluation::{evaluate, track_winner};
 use evaluation::{feasible_fraction, prefix_termination, record, tally};
 use ops::{
     choose_distinct, choose_from_union, choose_pbest, epsilon_key, epsilon_schedule, lehmer_mean,

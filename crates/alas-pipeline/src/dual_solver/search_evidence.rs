@@ -35,9 +35,16 @@ impl<'a> SearchEvidence<'a> {
 fn write(directory: &Path, optimization: &OptimizationResult) -> io::Result<()> {
     let bytes =
         serde_json::to_vec_pretty(&SearchEvidence::new(optimization)).map_err(io::Error::other)?;
-    let temporary = directory.join("optimization_search.json.tmp");
+    let temporary = directory.join(format!(
+        "optimization_search.json.{}.tmp",
+        std::process::id()
+    ));
     std::fs::write(&temporary, bytes)?;
-    std::fs::rename(temporary, directory.join("optimization_search.json"))
+    let published = directory.join("optimization_search.json");
+    std::fs::rename(&temporary, published).inspect_err(|_| {
+        // Best effort: leave no stray temporary behind when publication fails.
+        let _ = std::fs::remove_file(&temporary);
+    })
 }
 
 /// Publish search-only accounting atomically; evidence I/O cannot reject a design.
@@ -64,7 +71,7 @@ mod tests {
             best_cost: 1.0,
             best_valid: true,
             history: OptimizationHistory {
-                design_vectors: vec![DesignVector::default()],
+                design_vectors: vec![Some(DesignVector::default())],
                 valid: vec![true],
                 cost: vec![1.0],
                 objective_value: vec![2.0],

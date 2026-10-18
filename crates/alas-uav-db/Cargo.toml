@@ -1,0 +1,21 @@
+[package]
+name = "alas-uav-db"
+description = "Provenance-tracked fixed-wing UAV component database (schema v2): units, importers, offers, user overlay, v1 converter and a curated kit."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+# Records, offers and the JSON bundle cross file and crate boundaries as typed
+# serde values; the schema is a Rust type, not a convention.
+serde = { workspace = true }
+# JSON is the storage and interchange format (no new parser dependency); the
+# validators also walk the serialized form to enforce the field inventory.
+serde_json = { workspace = true }
+# Error types derive `Display` and `Error` the way the other library crates do.
+thiserror = { workspace = true }
+
+[lints]
+workspace = true

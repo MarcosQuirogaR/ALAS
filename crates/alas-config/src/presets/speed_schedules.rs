@@ -3,6 +3,9 @@
 
 //! Takeoff-speed derivation and per-type mission speed schedules for presets that carry one.
 
+mod openap_ladders;
+pub(super) use openap_ladders::apply_registered_ladder;
+
 /// International knot, m/s.
 const KNOT_M_S: f64 = 1852.0 / 3600.0;
 /// Feet per minute, m/s.
@@ -178,6 +181,9 @@ pub(super) fn apply_a320_200_speed_schedule(
     cl_max_takeoff: f64,
 ) {
     profile.climb_descent_speed_reference = crate::SpeedReference::CalibratedAirspeed;
+    // EASA TCDS EASA.A.064 Issue 62: MMO 0.82, VMO 350 kt.
+    profile.max_operating_mach = 0.82;
+    profile.max_operating_cas_m_s = 350.0 * KNOT_M_S;
     let transition_m = 10_000.0 * 0.3048;
     let stall_reference_m_s = (2.0 * mtow_kg * STANDARD_GRAVITY_M_S2
         / (ISA_SEA_LEVEL_DENSITY_KG_M3 * wing_area_m2 * cl_max_takeoff))

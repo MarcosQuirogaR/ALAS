@@ -30,6 +30,7 @@ pub fn protected_geometry(reference: &GeometryConfig, current: &GeometryConfig) 
     let mut engine = current.engine.clone();
     engine.spanwise_positions_m = reference.engine.spanwise_positions_m.clone();
     engine.z_m = reference.engine.z_m;
+    engine.z_per_engine_m = reference.engine.z_per_engine_m.clone();
     engine.inlet_x_offset_m = reference.engine.inlet_x_offset_m;
     protected.engine = engine;
     protected

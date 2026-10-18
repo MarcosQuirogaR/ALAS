@@ -241,3 +241,15 @@ fn msc_phase_output_is_converted_to_real_and_imaginary_components() {
     assert!((response.imag[0][0][3] + 4.0).abs() < 1e-12);
     assert!((response.real[0][0][4].hypot(response.imag[0][0][4]) - 5.0).abs() < 1e-12);
 }
+
+#[test]
+fn a_record_overrunning_the_file_is_reported_as_truncated() {
+    let mut bytes = fortran_record(&[0u8; 8]);
+    let second = bytes.len();
+    bytes.extend_from_slice(&64i32.to_le_bytes());
+    bytes.extend_from_slice(&[0u8; 12]);
+    assert_eq!(
+        split_records(&bytes),
+        Err(Op2Error::TruncatedRecord { offset: second })
+    );
+}

@@ -15,7 +15,7 @@ use alas_config::AlasConfig;
 use alas_opt::{assess_product_candidate, CandidateAssessment};
 
 mod support;
-use support::{nominal, violates};
+use support::{assess_view, nominal, violates, AssessmentView};
 
 /// Every layout residual identifier this suite covers.
 const LAYOUT_IDS: &[&str] = &[
@@ -36,14 +36,14 @@ const LAYOUT_IDS: &[&str] = &[
 /// `DesignMode::ReferenceAdaptation` the GUI's default preset selection
 /// loads: the registered/published geometry is kept intact rather than
 /// re-derived.
-fn assess_reference(preset: &str) -> Result<CandidateAssessment, String> {
+fn assess_reference(preset: &str) -> Result<AssessmentView, String> {
     assess_reference_mode(preset, alas_config::MtowSizing::FixedRequirement)
 }
 
 fn assess_reference_mode(
     preset: &str,
     mode: alas_config::MtowSizing,
-) -> Result<CandidateAssessment, String> {
+) -> Result<AssessmentView, String> {
     let mut config = AlasConfig::from_value(&serde_json::json!({ "preset": preset }))
         .unwrap_or_else(|error| panic!("{preset}: {error}"));
     assert_eq!(
@@ -52,7 +52,7 @@ fn assess_reference_mode(
         "a bare preset document loads as reference adaptation"
     );
     config.optimizer.objective.mtow_sizing = mode;
-    assess_product_candidate(&config, &nominal(preset))
+    assess_view(&config, &nominal(preset))
 }
 
 #[test]
@@ -67,24 +67,10 @@ fn mission_sized_reference_geometry_passes_layout_residuals() {
                 Err(_) => continue,
             };
         for id in LAYOUT_IDS {
-            if matches!(preset, "DC-10" | "B747-400") && *id == "sweep_consistent_with_cruise_mach"
-            {
-                // B747-400 (new preset): same exception, a 1960s conventional
-                // section at the 0.87 Korn lower bound cruising at Mach 0.85.
-                // Documented exception. DC-10 cruises beyond model Mdd (0.800
-                // vs 0.82): 1970s aft-loaded DSMA airfoil class has no sourced
-                // Korn technology factor; kappa held at the conventional 0.87
-                // lower bound (Mason ch. 7; Malone & Mason 1995). Finding, not
-                // tuning. Its cruise wave drag must still exceed the ceiling,
-                // so this flips when the model is fixed.
-                let residual = assessment.residuals.iter().find(|r| r.id == *id).unwrap();
-                assert!(residual.actual.is_finite() && residual.limit.is_finite());
-                assert!(
-                    violates(&assessment, id) && residual.actual > residual.limit,
-                    "DC-10 wave drag now meets its ceiling: remove this exception: {residual:?}"
-                );
-                continue;
-            }
+            // The DC-10 and B747-400 exceptions that stood here are gone (fuel-chain
+            // lane 2026-10-14): their wing thickness distributions are now the printed ones
+            // (Obert Figs. 24.21 and 24.82), not an 11 % average and a 777-class CRM
+            // distribution, and the mid-cruise wave drag meets the Korn ceiling.
             if violates(&assessment, id) {
                 let residual = assessment.residuals.iter().find(|r| r.id == *id);
                 failures.push(format!("{preset}: {id} violated; residual: {residual:?}"));
@@ -113,19 +99,19 @@ fn hard_mtow_reference_layouts_keep_named_drag_divergence_findings() {
                 assert!(residual.limit.is_finite() && residual.limit > 0.0);
                 assert_eq!(residual.role, alas_opt::mdo::ResidualRole::Constraint);
                 let finding = match preset {
-                    // At mid-cruise of the maximum-fuel design mission (its
-                    // own trip, the trip-share contingency of that trip
-                    // kept) the lift still lies past the Korn drag-divergence
-                    // boundary at the preset cruise point (27.5 against 26.9
-                    // counts). The A380 clears it at that mass (19.5 counts).
-                    "AVE" => {
-                        Some("maximum-fuel mid-cruise lift exceeds the drag-divergence boundary")
-                    }
+                    // The AVE's finding (27.5 against 26.9 counts at mid-cruise of the
+                    // maximum-fuel design mission) is gone at the merged tree: 26.0 counts
+                    // against the 26.9 ceiling (fix lane deck-altitude, mission_sized pins), so
+                    // only the DC-10 keeps one at this start-of-cruise gating (the B747-400 clears
+                    // it with its printed thickness distribution, fuel-chain lane 2026-10-14).
                     // The conventional factor is not calibrated to this
                     // aircraft's aft-loaded section (Mason, chapter 7).
-                    "DC-10" | "B747-400" => {
-                        Some("aft-loaded section lacks a sourced Korn technology factor")
-                    }
+                    "DC-10" => Some("aft-loaded section lacks a sourced Korn technology factor"),
+                    // Final freeze 2026-10-15: with the printed plateau node (Obert Fig. 24.82,
+                    // 2y/b 0.5) the C2 thickness spline no longer dips to 7.4 % between the
+                    // kink and the tip, and the B747-400 meets the start-of-cruise ceiling
+                    // again as a finding: 0.00290 against 0.00269 (7.7 % over).
+                    "B747-400" => Some("the printed 8.0 % outboard thickness leaves the Korn drag rise above the ceiling"),
                     _ => None,
                 };
                 if let Some(reason) = finding {

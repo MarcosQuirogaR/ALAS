@@ -154,7 +154,8 @@ fn dump(name: &str) -> Result<Value, String> {
         .wing
         .transport_planform(dv)
         .map_err(|e| e.to_string())?;
-    let semi = dv.span_m / 2.0;
+    // Wing proper (tip station), not the design span that may include a tip device.
+    let semi = pf.tip.y_m;
     let (yk, cr, cb, ct) = (
         pf.kink.y_m,
         pf.root.chord_m,
@@ -187,9 +188,9 @@ fn dump(name: &str) -> Result<Value, String> {
         .copied()
         .unwrap_or(f64::NAN);
     let geometry = json!({
-        "span_m": dv.span_m,
+        "span_m": 2.0 * semi,
         "wing_area_m2": s_ref,
-        "aspect_ratio": dv.span_m * dv.span_m / s_ref,
+        "aspect_ratio": 4.0 * semi * semi / s_ref,
         "mac_m": mac,
         "lemac_from_nose_m": x_lemac,
         "sweep_le_deg": dv.sweep_deg,

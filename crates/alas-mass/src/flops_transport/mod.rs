@@ -18,10 +18,11 @@ mod airframe;
 mod airframe_geometry;
 mod equations;
 mod movable_area;
-mod product;
+pub(crate) mod product;
 pub mod propulsion;
 pub mod structure;
 pub mod turboprop;
+mod units;
 pub mod wing_bending;
 
 pub use airframe::{

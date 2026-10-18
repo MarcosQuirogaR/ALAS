@@ -436,7 +436,6 @@ pub fn build_result_figure_with_camera(
                         .mission_result
                         .as_ref()
                         .filter(|mission| mission.figure_data_ready()),
-                    result.mses_result.as_ref(),
                     result.vspaero_result.as_ref(),
                     selected_avl_result(state, result),
                     Some(theme),

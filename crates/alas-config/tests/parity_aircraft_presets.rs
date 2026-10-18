@@ -109,8 +109,28 @@ fn every_product_preset_has_one_continuous_leading_edge_sweep() {
             .transport_planform(&preset.design_vector)
             .unwrap_or_else(|error| panic!("{}: {error}", preset.name));
         for panel in planform.panels() {
+            // A declared swept-back tip (geometry round 2) sweeps the last panel
+            // further aft; the leading edge is straight up to it and the
+            // trailing edge continuous through it.
+            if planform.tip_rake.is_some()
+                && panel.outboard.kind == alas_config::MainWingStationKind::Tip
+            {
+                assert!(
+                    panel.leading_edge_sweep_deg > preset.design_vector.sweep_deg,
+                    "{}: a tip rake must sweep aft",
+                    preset.name
+                );
+                continue;
+            }
             assert!(
-                (panel.leading_edge_sweep_deg - preset.design_vector.sweep_deg).abs() < 1.0e-10,
+                (panel.leading_edge_sweep_deg
+                    - if panel.outboard.y_m <= planform.kink.y_m {
+                        planform.inboard_le_sweep_deg
+                    } else {
+                        preset.design_vector.sweep_deg
+                    })
+                .abs()
+                    < 1.0e-10, // step B: a declared inboard crank (A380-800) applies up to the kink
                 "{} {:?}->{:?}: {} deg instead of {} deg",
                 preset.name,
                 panel.inboard.kind,
@@ -312,7 +332,14 @@ fn source_corrected_presets_name_the_revision_locked_evidence() {
         dc_10.reference.reference_wing_area_m2,
         Some(dc_10.requirements.max_wing_area_m2)
     );
-    assert!((preset_projected_area(dc_10) - dc_10.requirements.max_wing_area_m2).abs() < 1.0e-9);
+    // Geometry freeze 2026-10-12: the DC-10 reference wing is the Published one (338.84 m2, asserted
+    // above and in `requirements`); the drawn planform with its inboard trailing-edge extension is
+    // 360.652794505 m2 (+6.4 %), no longer the area the analysis uses as S_ref.
+    let projected = preset_projected_area(dc_10);
+    assert!(
+        (projected - 360.652_794_505).abs() < 1.0e-6,
+        "DC-10 projected area {projected} m2",
+    );
 }
 
 #[test]
@@ -468,7 +495,7 @@ fn preset_projected_area(preset: &AircraftPreset) -> f64 {
         .transport_planform(&preset.design_vector)
         .unwrap_or_else(|error| panic!("{}: {error}", preset.name));
     planform
-        .stations()
+        .stations_with_rake()
         .windows(2)
         .map(|pair| (pair[1].y_m - pair[0].y_m) * (pair[0].chord_m + pair[1].chord_m))
         .sum()
@@ -536,17 +563,21 @@ fn source_corrections() -> BTreeMap<String, SourceCorrection> {
         ),
         source_correction("A380-800.design_vector.fuselage_length_m", 72.72, 72.73),
         // Airbus A380 AC Rev 20, Figure 2-2-0-991-001-A01 sheet 2: 3.98 m tip
-        // and 17.67 m side-of-body chords; the centreline and kink chords
-        // close the 845 m^2 reference area and the 12.295 m section 7 MAC.
+        // and 17.67 m side-of-body chords. Geometry round 2: the drawn trailing
+        // edge runs straight through the body to the centreline (root 19.678 m,
+        // was 17.935 m with a trailing-edge crank at the side of body), and the
+        // kink chord (11.620 m, was 11.739 m) closes the 845 m^2 reference area
+        // behind the swept-back tip; the section 7 MAC moves from 12.295 m to
+        // 12.444 m (the study report gives the before/after).
         source_correction(
             "A380-800.design_vector.root_chord_m",
             23.0,
-            17.934_637_703_217_59,
+            19.678_256_676_269_644,
         ),
         source_correction(
             "A380-800.design_vector.break_chord_m",
             11.3,
-            11.738_539_338_676_212,
+            11.620_165_533_861_56,
         ),
         source_correction("A380-800.design_vector.tip_chord_m", 3.5, 3.98),
         source_correction("A380-800.engine_name", "Trent 900", "Trent 970-84"),
@@ -605,21 +636,9 @@ fn source_corrections() -> BTreeMap<String, SourceCorrection> {
             "DC-10-30 ACAP 572,000 lb option with three CF6-50C engines.",
         ),
         source_correction("DC-10.design_vector.span_m", 50.41, 50.39),
-        source_correction(
-            "DC-10.design_vector.root_chord_m",
-            12.8,
-            10.705_424_735_302_275,
-        ),
-        source_correction(
-            "DC-10.design_vector.break_chord_m",
-            7.8,
-            7.918_672_469_211_44,
-        ),
-        source_correction(
-            "DC-10.design_vector.tip_chord_m",
-            1.8,
-            2.743_275_403_614_176,
-        ),
+        source_correction("DC-10.design_vector.root_chord_m", 12.8, 13.61),
+        source_correction("DC-10.design_vector.break_chord_m", 7.8, 7.564),
+        source_correction("DC-10.design_vector.tip_chord_m", 1.8, 2.64),
         source_correction(
             "DC-10.display_name",
             DC_10_UPSTREAM_DISPLAY_NAME,
@@ -628,7 +647,7 @@ fn source_corrections() -> BTreeMap<String, SourceCorrection> {
         source_correction(
             "DC-10.requirements.max_structural_payload_kg",
             48_000.0,
-            46_008.0,
+            56_441.0,
         ),
         source_correction("DC-10.requirements.max_wing_area_m2", 338.8, 338.84),
         source_correction("DC-10.requirements.mtow_kg", 259_450.0, 259_454.0),
@@ -701,12 +720,12 @@ fn add_spanwise_panel_corrections(corrections: &mut BTreeMap<String, SourceCorre
 fn add_transport_planform_corrections(corrections: &mut BTreeMap<String, SourceCorrection>) {
     for (preset, kink_fraction) in [
         ("AVE", 0.35),
-        ("A340-300", 9.5 / 30.15),
+        ("A340-300", 0.275_290_215_588_723_1),
         ("A380-800", 0.359_236_516_064_625_5),
-        ("B787-9", 0.353_771_245_388_011_8),
+        ("B787-9", 0.3696),
         ("A320-200", 0.379_3),
-        ("A220-300", 0.382_736_255_076_680_5),
-        ("DC-10", 0.35),
+        ("A220-300", 0.34),
+        ("DC-10", 0.3747),
     ] {
         for (field, value) in [
             (

@@ -183,7 +183,11 @@ fn run_evaluation(
         &config.geometry.engine,
         &config.mass_model,
         &design_req,
-    );
+    )
+    .with_torque_sources(alas_struct::torque_sources::TorqueSources::from_config(
+        config,
+        &design_req,
+    ));
     let fuel_scope = declared.as_ref().map_or(
         alas_struct::sizing::WingFuelRelief::EnclosedBoxVolume,
         |case| alas_struct::sizing::WingFuelRelief::Declared {
@@ -355,10 +359,15 @@ fn run_evaluation(
         run_clock,
         primary_solver_clock,
         primary_solver_stage,
-        if scfg.run_nastran && work_dir.is_some() {
-            "Completed"
-        } else {
-            "Skipped"
+        match (
+            scfg.run_nastran && work_dir.is_some(),
+            nastran_results
+                .as_ref()
+                .map(|results| results.static_solve.status),
+        ) {
+            (true, Some(ResultStatus::Error)) => "Failed",
+            (true, _) => "Completed",
+            (false, _) => "Skipped",
         },
     );
     // When MSC is available, retain its result in `nastran` and run the
@@ -442,7 +451,11 @@ fn run_evaluation(
             run_clock,
             patran_clock,
             "downstream/patran",
-            "Completed",
+            match result.status.as_str() {
+                "ok" => "Completed",
+                "error" => "Failed",
+                _ => "Skipped",
+            },
         );
         result
     });
@@ -459,7 +472,12 @@ fn run_evaluation(
         patran,
         torenbeek_wing_mass_kg: torenbeek_mass,
         wing_mass: Some(wing_mass),
-        evaluation_inputs: Some(EvaluationInputs::from_deck(config, report, &mesh_deck)),
+        evaluation_inputs: Some(EvaluationInputs::from_deck(
+            config,
+            report,
+            &mesh_deck,
+            &node_index.engine_nids,
+        )),
     }
 }
 
@@ -478,6 +496,7 @@ mod tests {
     fn sample_sizing() -> WingboxSizing {
         WingboxSizing {
             y_stations: vec![0.0, 10.0],
+            axis_cos: Vec::new(),
             eta_stations: vec![0.0, 1.0],
             chord: vec![1.0, 1.0],
             spar_fracs: vec![0.25, 0.75],
@@ -487,7 +506,8 @@ mod tests {
                 w_cap: vec![1.0, 1.0],
                 t_cap: vec![1.0, 1.0],
                 a_cap: vec![1.0, 1.0],
-                t_web: 0.1,
+                t_web: vec![0.1; 2],
+                lower_extra_area: vec![0.0; 2],
                 frac_moment: vec![1.0, 1.0],
                 margin_of_safety: vec![-0.1, 0.5],
             }],

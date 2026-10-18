@@ -29,10 +29,25 @@ fn attached_t_tail_follows_scaled_fin(name: &str) {
         let plane = builder.build(Some(&dv), false).expect("finite geometry");
         let h = &plane.wings[1].xsecs[0];
         let v = plane.wings[2].xsecs.last().expect("fin tip");
-        for axis in 0..3 {
-            assert!((h.xyz_le[axis] - v.xyz_le[axis]).abs() < 1e-9);
+        // The seat is a fixed offset from the fin tip leading edge (zero on the ATR in x; the drawn
+        // tailplanes sit 0.6 m (ATR) and 1.0 m (A400M) below the fin top, geo/close 2026-10-12).
+        let e = &preset.geometry.empennage;
+        let offset = [
+            e.vstab_offset_from_tail_m - e.hstab_offset_from_tail_m - e.vstab_tip_le_m.0,
+            0.0,
+            e.hstab_z_m - e.vstab_z_m - e.vstab_tip_le_m.2,
+        ];
+        for (axis, off) in offset.iter().enumerate() {
+            assert!((h.xyz_le[axis] - v.xyz_le[axis] - off).abs() < 1e-9);
         }
-        assert!((h.chord - v.chord).abs() < 1e-9);
+        // Both chords scale with the tail, so their ratio stays the declared one
+        // (1 on the ATR 72-600; the A400M fin tip is 6.8 m against a 4.55 m
+        // tail-plane root, the plane sitting on a fin-tip fairing).
+        let e = &preset.geometry.empennage;
+        assert!(
+            (h.chord / v.chord - e.hstab_root_chord_m / e.vstab_tip_chord_m).abs() < 1e-9,
+            "{name}"
+        );
         assert!(h.xyz_le.iter().all(|v| v.is_finite()));
     }
 }
@@ -72,9 +87,15 @@ fn t_tail_root_follows_the_fin_scale_when_the_fin_is_resized() {
     let plane = builder.build(Some(&dv), false).expect("finite geometry");
     let h = &plane.wings[1].xsecs[0];
     let v = plane.wings[2].xsecs.last().expect("fin tip");
-    for axis in 0..3 {
+    let e = &preset.geometry.empennage;
+    let offset = [
+        e.vstab_offset_from_tail_m - e.hstab_offset_from_tail_m - e.vstab_tip_le_m.0,
+        0.0,
+        e.hstab_z_m - e.vstab_z_m - e.vstab_tip_le_m.2,
+    ];
+    for (axis, off) in offset.iter().enumerate() {
         assert!(
-            (h.xyz_le[axis] - v.xyz_le[axis]).abs() < 1e-9,
+            (h.xyz_le[axis] - v.xyz_le[axis] - off).abs() < 1e-9,
             "axis {axis}"
         );
     }
@@ -159,7 +180,9 @@ fn fin_scale_ratio_scales_only_the_fin_and_keeps_the_t_tail_attached() {
         if preset.name == "ATR72-600" {
             let h = &sized.wings[1].xsecs[0];
             let v = sized.wings[2].xsecs.last().expect("fin tip");
-            assert!((h.xyz_le[2] - v.xyz_le[2]).abs() < 1e-9);
+            let e = &preset.geometry.empennage;
+            let offset = e.hstab_z_m - e.vstab_z_m - e.vstab_tip_le_m.2; // geo/close: tailplane 0.6 m below the fin tip
+            assert!((h.xyz_le[2] - v.xyz_le[2] - offset).abs() < 1e-9);
         } else {
             assert!(
                 (sized.wings[1].xsecs[0].chord - base.wings[1].xsecs[0].chord).abs() < 1e-12,

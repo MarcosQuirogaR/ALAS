@@ -6,6 +6,11 @@ const RELEASES_URL = 'https://github.com/MarcosQuirogaR/ALAS/releases'
 // bodies can contain historical branding or editorial notes that do not belong
 // in the current product site.
 const RELEASE_SUMMARIES: Record<string, string[]> = {
+  'v1.4.0': [
+    'Consistency and validation release: geometry, drag, thrust, mass and payload bookkeeping corrected across the registered presets; results move, so v1.4 designs are not comparable with v1.3.2 designs.',
+    'New take-off thrust table and wing structure sized from spanwise load cases; the native 36-cell matrix runs in about 41 minutes instead of 87.',
+    'Known limitations are listed in the release notes, including infeasible MTOW-band cells and the experimental UAV module, which is not validated.',
+  ],
   'v1.3.2': [
     'Boeing 747-400 upper-deck hump and partial upper deck, with business class upstairs and first class in the nose; the model OEW is +13.8 % over the published 178,755 kg, which exposes a FLOPS over-prediction.',
   ],

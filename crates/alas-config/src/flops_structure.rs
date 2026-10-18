@@ -11,9 +11,10 @@
 //!
 //! Every technology factor below is a FLOPS input variable
 //! (NASA/TM-2017-219627 Vol. I, section 5.2-5.3 and Appendix D) with the
-//! FLOPS default. `FCOMP` is an empirical composite-utilization coefficient,
-//! not a measured percentage of composite structural mass; a zero value is
-//! the published metallic-equation endpoint and does not prove that a named
+//! FLOPS default. `FCOMP` is the TM's 0..1 composite-utilization factor for
+//! wing structure (0.0 no composites, 1.0 maximum use of composites), not a
+//! measured percentage of composite structural mass; a zero value is the
+//! published metallic-equation endpoint and does not prove that a named
 //! aircraft is all-metal. The wing-bending factor, the landing-gear lengths
 //! and the design landing weight are the quantities FLOPS itself estimates
 //! when the user leaves them blank; the same rule applies here, with the
@@ -204,17 +205,19 @@ pub struct FlopsStructureConfig {
     )]
     pub wing_bending_method: FlopsWingBendingMethod,
 
-    /// Composite-utilization coefficient in the FLOPS wing fit, `FCOMP`.
+    /// Composite utilization factor for wing structure in the FLOPS wing fit,
+    /// `FCOMP`.
     ///
-    /// This is not a percentage of the aircraft's composite material. NASA's
-    /// Appendix D defines an empirical technology coefficient between the metallic
-    /// endpoint and the maximum composite benefit represented by the fits;
-    /// no retained aircraft source maps a material percentage to it.
+    /// NASA/TM-2017-219627 Vol. I nomenclature (p. 78) defines it as ranging
+    /// from 0.0 for no composites to 1.0 for maximum use of composites. It is
+    /// not a percentage of the aircraft's composite material, and no source
+    /// maps a mass percentage to it; registered presets set it from the
+    /// wing-box construction (`preset_flops/composite.rs`).
     #[config(
         advanced,
         label = "Wing composite utilization",
         unit = "0-1",
-        help = "FLOPS FCOMP is an empirical technology coefficient, not a composite material percentage. 0 is the published metallic-equation endpoint and does not prove a named aircraft is all-metal; 1 is the maximum composite benefit represented by the fits. At fixed geometry it multiplies bending, shear/control and miscellaneous wing terms by (1 - 0.4 FCOMP), (1 - 0.17 FCOMP) and (1 - 0.3 FCOMP)."
+        help = "FLOPS FCOMP is the composite utilization factor for wing structure, 0.0 for no composites to 1.0 for maximum use of composites (NASA/TM-2017-219627), not a composite material percentage. At fixed geometry it multiplies bending, shear/control and miscellaneous wing terms by (1 - 0.4 FCOMP), (1 - 0.17 FCOMP) and (1 - 0.3 FCOMP)."
     )]
     pub composite_utilization: f64,
 
@@ -474,16 +477,16 @@ impl FlopsStructureConfig {
 
     /// Interpret the FCOMP value for reports and exports.
     ///
-    /// A zero value is an explicit metallic-equation baseline when no
-    /// aircraft-specific mapping exists; it is not evidence that the named
-    /// aircraft contains no composite structure. Nonzero values remain
-    /// declared FLOPS coefficients and must not be relabelled as material
+    /// A zero value is the metallic-wing endpoint of the TM's 0..1 index;
+    /// where no construction fact is retained it is not evidence that the
+    /// named aircraft contains no composite structure. Nonzero values are
+    /// declared utilization indices and must not be relabelled as material
     /// percentages.
     pub const fn composite_utilization_interpretation(&self) -> &'static str {
         if self.composite_utilization == 0.0 {
-            "declared FLOPS metallic-equation baseline; not an aircraft material percentage"
+            "declared FLOPS metallic wing endpoint (FCOMP 0); not an aircraft material percentage"
         } else {
-            "declared FLOPS empirical technology coefficient; not an aircraft material percentage"
+            "declared FLOPS composite-utilization index for wing structure; not an aircraft material percentage"
         }
     }
 
@@ -617,7 +620,7 @@ mod tests {
         assert_eq!(config.wing_load_fraction, 1.0);
         assert_eq!(
             config.composite_utilization_interpretation(),
-            "declared FLOPS metallic-equation baseline; not an aircraft material percentage"
+            "declared FLOPS metallic wing endpoint (FCOMP 0); not an aircraft material percentage"
         );
         assert!(config.thrust_reversers_installed);
         assert_eq!(config.starter_scope, FlopsStarterScope::SeparateEquation89);
@@ -637,7 +640,7 @@ mod tests {
         };
         assert_eq!(
             declared_composite.composite_utilization_interpretation(),
-            "declared FLOPS empirical technology coefficient; not an aircraft material percentage"
+            "declared FLOPS composite-utilization index for wing structure; not an aircraft material percentage"
         );
         let declared = FlopsStructureConfig {
             baseline_engine_thrust_kn: Some(0.0),

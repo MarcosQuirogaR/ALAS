@@ -14,6 +14,10 @@
 //! shapes egui emits against the clip rectangle each was painted under, which
 //! is exactly the condition that produced the cut glyphs.
 
+// A test asserts on values it constructed or loaded from a fixture it
+// controls, so a failed unwrap there is the assertion failing.
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 use alas_gui::layout;
 use alas_gui::state::AppState;
 use alas_gui::views::show_inputs_view;

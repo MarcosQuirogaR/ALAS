@@ -87,9 +87,13 @@ const MACH_NORMAL_CEILING: f64 = 0.95;
 /// `DragComponents`.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct DragComponents {
-    /// Viscous/parasite drag coefficient, Raymer buildup, viscous margin
-    /// included.
+    /// Zero-lift viscous/parasite drag coefficient, Raymer buildup, viscous
+    /// margin included.
     pub cd_parasite: f64,
+    /// Lift-dependent viscous (profile and interference) drag,
+    /// `lift_dependent_viscous_fraction * cd_parasite * CL^2`; exactly zero
+    /// on the frozen reference path and while the fraction is zero.
+    pub cd_viscous_lift: f64,
     /// Lift-induced drag coefficient of the vortex-lattice solve, as the
     /// caller passed it: the product entry points pass the Trefftz-plane
     /// value, the frozen reference path the near-field sum.
@@ -99,9 +103,17 @@ pub struct DragComponents {
 }
 
 impl DragComponents {
-    /// The three terms summed, in upstream's own order.
+    /// The terms summed, in upstream's own order with the lift-dependent
+    /// viscous term appended (an exact `+ 0.0` while it is disabled).
     pub fn cd_total(&self) -> f64 {
-        self.cd_parasite + self.cd_induced + self.cd_wave
+        self.cd_parasite + self.cd_induced + self.cd_wave + self.cd_viscous_lift
+    }
+
+    /// The parasite term as the polar reports it at this operating point:
+    /// zero-lift parasite drag plus the lift-dependent viscous drag, so that
+    /// `parasite + induced + wave` is the total drag.
+    pub fn cd_viscous(&self) -> f64 {
+        self.cd_parasite + self.cd_viscous_lift
     }
 }
 
@@ -293,10 +305,10 @@ impl<'a> AeroAnalysis<'a> {
     ///
     /// `cl` is accepted and unused, exactly as upstream accepts and ignores
     /// it: a flat-plate buildup is lift-independent, and the argument is
-    /// there so the three drag terms read alike at their call sites. A unit
-    /// test states that independence, since a reader will go looking for a
-    /// lift-dependent term and should find the absence recorded rather than
-    /// have to infer it.
+    /// there so the drag terms read alike at their call sites. The
+    /// lift-dependent viscous drag is a separate term,
+    /// [`Self::lift_dependent_viscous_drag`], so this stays the zero-lift
+    /// value the drag table tabulates.
     pub fn parasite_drag(
         &self,
         mach: f64,
@@ -308,6 +320,30 @@ impl<'a> AeroAnalysis<'a> {
         let _ = cl;
         self.parasite_breakdown(mach, altitude_m, atmosphere, section_thickness)
             .cd0
+    }
+
+    /// Lift-dependent viscous drag `CD_v = kappa CD0 CL^2` (AERL-04 / DRG-01),
+    /// with `kappa` the configured `lift_dependent_viscous_fraction` and
+    /// `cd0` the zero-lift parasite drag including the viscous margin.
+    ///
+    /// Together with the inviscid Trefftz-plane induced drag it gives the
+    /// total Oswald factor `1/e = 1/e_inviscid + kappa CD0 pi A` (Vos and
+    /// Farokhi, *Introduction to Transonic Aerodynamics*, 2015, p. 447).
+    /// The frozen reference path carries no such term, and the product term is
+    /// exactly zero while `kappa` is zero, so `CD(CL) - CD(0)` stays the
+    /// induced drag alone.
+    pub fn lift_dependent_viscous_drag(&self, cd0: f64, cl: f64) -> f64 {
+        self.lift_dependent_viscous_fraction() * cd0 * cl * cl
+    }
+
+    /// The fraction `kappa` in effect: the configured value on the product
+    /// path, exactly zero on the frozen reference path.
+    pub fn lift_dependent_viscous_fraction(&self) -> f64 {
+        if self.reference_compatibility {
+            0.0
+        } else {
+            self.drag.lift_dependent_viscous_fraction
+        }
     }
 
     /// A body's streamwise length, from the x of its first station to the x
@@ -339,14 +375,11 @@ impl<'a> AeroAnalysis<'a> {
             .copied()
             .unwrap_or_else(|| Atmosphere::new(altitude_m));
         let thickness = self.section_thickness();
+        let cd_parasite =
+            self.parasite_drag(mach, altitude_m, cl, Some(&atmosphere), Some(thickness));
         DragComponents {
-            cd_parasite: self.parasite_drag(
-                mach,
-                altitude_m,
-                cl,
-                Some(&atmosphere),
-                Some(thickness),
-            ),
+            cd_parasite,
+            cd_viscous_lift: self.lift_dependent_viscous_drag(cd_parasite, cl),
             cd_induced,
             cd_wave: self.wave_drag(mach, cl, self.reference_compatibility.then_some(thickness)),
         }
@@ -471,6 +504,85 @@ mod tests {
             analysis.parasite_drag(0.8, 10000.0, 0.0, None, None),
             analysis.parasite_drag(0.8, 10000.0, 1.4, None, None)
         );
+    }
+
+    fn with_viscous_fraction(plane: &Airplane, fraction: f64) -> AeroAnalysis<'_> {
+        let drag = DragModelConfig {
+            lift_dependent_viscous_fraction: fraction,
+            ..DragModelConfig::default()
+        };
+        AeroAnalysis::new(plane, 32.0, None, Some(drag), None)
+    }
+
+    #[test]
+    fn lift_dependent_viscous_drag_is_the_closed_form_and_off_by_default() {
+        let plane = probe();
+        let (mach, altitude, kappa) = (0.78, 11_000.0, 0.30);
+        let off = with_viscous_fraction(&plane, 0.0);
+        let on = with_viscous_fraction(&plane, kappa);
+        let cd0 = on.parasite_drag(mach, altitude, 0.0, None, None);
+        for cl in [0.0, 0.3, 0.5, 1.2] {
+            let before = off.drag_components(mach, altitude, cl, 0.01, None);
+            let after = on.drag_components(mach, altitude, cl, 0.01, None);
+            assert_eq!(before.cd_viscous_lift, 0.0);
+            // Disabled: total bit-identical to parasite + induced + wave.
+            assert_eq!(
+                before.cd_total().to_bits(),
+                (before.cd_parasite + before.cd_induced + before.cd_wave).to_bits()
+            );
+            // CD(CL) - CD(0 lift term) = kappa CD0 CL^2 exactly.
+            assert!((after.cd_viscous_lift - kappa * cd0 * cl * cl).abs() < 1e-15);
+            assert!((after.cd_total() - before.cd_total() - after.cd_viscous_lift).abs() < 1e-15);
+            // The reported viscous term keeps parasite + induced + wave = total.
+            assert!(
+                (after.cd_viscous() + after.cd_induced + after.cd_wave - after.cd_total()).abs()
+                    < 1e-15
+            );
+        }
+    }
+
+    #[test]
+    fn the_oswald_decomposition_adds_the_viscous_term_to_the_inviscid_inverse_efficiency() {
+        // 1/e_total = 1/e_inviscid + kappa CD0 pi A. Limits: kappa = 0 gives
+        // e_inviscid; a large kappa gives e -> 1/(kappa CD0 pi A) -> 0.
+        let (aspect, e_inviscid, cd0) = (9.5, 0.97, 0.0195);
+        let cl = 0.5;
+        let cdi = cl * cl / (std::f64::consts::PI * aspect * e_inviscid);
+        let efficiency = |kappa: f64| {
+            let lift_drag = cdi + kappa * cd0 * cl * cl;
+            cl * cl / (std::f64::consts::PI * aspect * lift_drag)
+        };
+        assert!((efficiency(0.0) - e_inviscid).abs() < 1e-15);
+        for kappa in [0.26, 0.30, 0.39] {
+            let expected = 1.0 / (1.0 / e_inviscid + kappa * cd0 * std::f64::consts::PI * aspect);
+            assert!((efficiency(kappa) - expected).abs() < 1e-13);
+        }
+        // kappa 0.30, CD0 0.0195, A 9.5: 1/e = 1.0309 + 0.1746, e = 0.8295,
+        // inside the transport band 0.75-0.85 (Anderson; Vos and Farokhi).
+        assert!(
+            (efficiency(0.30) - 0.8295).abs() < 5e-4,
+            "{}",
+            efficiency(0.30)
+        );
+        assert!(efficiency(1.0e6) < 1e-4);
+        // CL 0.5, A 9.5: 86.4 counts at e 0.97 versus 104.7 at e 0.80.
+        let counts = |e: f64| 1.0e4 * cl * cl / (std::f64::consts::PI * aspect * e);
+        assert!((counts(0.97) - 86.4).abs() < 0.1);
+        assert!((counts(0.80) - 104.7).abs() < 0.1);
+    }
+
+    #[test]
+    fn the_frozen_reference_path_never_carries_the_lift_dependent_term() {
+        let plane = probe();
+        let drag = DragModelConfig {
+            lift_dependent_viscous_fraction: 0.4,
+            ..DragModelConfig::default()
+        };
+        let frozen =
+            AeroAnalysis::new_reference_compatibility(&plane, 32.0, None, Some(drag), None);
+        let components = frozen.drag_components(0.8, 10_000.0, 1.0, 0.02, None);
+        assert_eq!(components.cd_viscous_lift, 0.0);
+        assert_eq!(frozen.lift_dependent_viscous_fraction(), 0.0);
     }
 
     fn tail(tip_x: f64, airfoil_name: &str) -> Wing {

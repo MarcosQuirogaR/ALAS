@@ -925,7 +925,7 @@ impl CfdStudyConfig {
         if let Err(solver_errors) = self.solver.validate() {
             errors.extend(solver_errors);
         }
-        if let Err(boundary_errors) = self.boundaries.validate() {
+        if let Err(boundary_errors) = self.boundaries.validate(self.flow_regime()) {
             errors.extend(boundary_errors);
         }
         if errors.is_empty() {
@@ -1124,25 +1124,6 @@ impl SolverSettings {
                 "A non-upwind final scheme requires at least one final-stage iteration after upwind startup."
                     .to_owned(),
             );
-        }
-        ok_if_empty(errors)
-    }
-}
-
-impl BoundarySettings {
-    fn validate(&self) -> Result<(), Vec<String>> {
-        let mut errors = Vec::new();
-        if self.inlet_patch != "inlet"
-            || self.outlet_patch != "outlet"
-            || self.airfoil_patch != "airfoil"
-        {
-            errors.push(
-                "The initial versioned template requires inlet, outlet and airfoil patch names."
-                    .to_owned(),
-            );
-        }
-        if !self.pressure_reference_pa.is_finite() {
-            errors.push("Pressure reference must be finite.".to_owned());
         }
         ok_if_empty(errors)
     }

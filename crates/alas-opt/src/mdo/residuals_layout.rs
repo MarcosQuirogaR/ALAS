@@ -48,6 +48,9 @@ use crate::mdo::ResidualRole;
 use alas_config::AlasConfig;
 use alas_geom::aircraft::airplane::Airplane;
 
+mod rake;
+use rake::dihedral_tip_station;
+
 use super::sizing::SizingOutcome;
 use super::types::ConstraintFamily::Geometry;
 use super::types::ConstraintResidual;
@@ -65,7 +68,7 @@ pub(super) fn layout_residuals(
     if let (Some(fuselage_length), Some(root), Some(tip)) = (
         fuselage_length_m(plane),
         root_station(plane),
-        tip_station(plane),
+        dihedral_tip_station(plane, config),
     ) {
         residuals.extend(dihedral_residuals(root, tip, role));
         residuals.extend(apex_on_fuselage_residuals(root, fuselage_length, role));
@@ -230,9 +233,10 @@ fn mean_dihedral_deg(root: WingStation, tip: WingStation) -> f64 {
 /// deg (A320-200); the low-wing band is that span with margin, [3.0, 10.0]
 /// deg. The one registered high/shoulder wing (ATR72-600) is built with 0.0
 /// deg, consistent with the qualitative rule above; the high-wing band,
-/// [-3.0, 5.0] deg, is therefore a single measured point plus the same
+/// [-5.0, 5.0] deg, is therefore a single measured point plus the same
 /// literature-qualitative margin rather than an independently-fitted range,
 /// and is stated as such.
+/// Lower high-wing bound: see [`rake`] (Raymer Table 4.2).
 fn dihedral_residuals(
     root: WingStation,
     tip: WingStation,
@@ -240,7 +244,7 @@ fn dihedral_residuals(
 ) -> Vec<ConstraintResidual> {
     let dihedral_deg = mean_dihedral_deg(root, tip);
     let low_wing = root.xyz_le[2] < 0.0;
-    let (min_deg, max_deg) = if low_wing { (3.0, 10.0) } else { (-3.0, 5.0) };
+    let (min_deg, max_deg) = if low_wing { (3.0, 10.0) } else { (-5.0, 5.0) };
     signed_window_residuals("wing_dihedral", dihedral_deg, min_deg, max_deg, "deg", role)
 }
 

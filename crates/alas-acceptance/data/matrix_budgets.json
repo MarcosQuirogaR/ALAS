@@ -1,0 +1,100 @@
+{
+  "name": "matrix",
+  "schema": 1,
+  "seed": 20260922,
+  "stop_on_evaluations_only": true,
+  "status": "PROVISIONAL (M8 heuristic, not yet validated by the L3 budget study)",
+  "provenance": "Derived 2026-10-12 from the 2026-10-07 full-analysis matrix: replay counts in harness/budgets.json (idle machine, CleanSheet, balanced 30 s + 120 s, seed 20260922) and the refinement best-so-far penalised-cost curves in runs/<preset>/CleanSheet/pipeline/solvers/vlm/optimization_search.json. Only the refinement stage has a recorded curve; screening budgets are a flagged 40% heuristic. Presets with no feasible candidate in the source run (ATR72-600, C919) carry no curve information. Per-preset objective stability against the 30 s + 120 s result is the L3 study, not claimed here.",
+  "mode_scale": {
+    "fixed_requirement": 1.0,
+    "mtow_band": 0.3,
+    "payload_adjusted": 0.3
+  },
+  "mode_scale_basis": "Per-candidate cost measured in the 2026-10-07 matrix (candidate_time_s, loaded 16-lane host, so an upper bound): at these budgets the table costs about 9.8k core-s in fixed_requirement but about 40k core-s in each of mtow_band and payload_adjusted (3-6x per evaluation; A380 mtow_band 41 core-s per screening candidate). Scaling the two iterating modes to 0.3 brings the 36 cells to about 34k core-s, about 44 min on 15 threads at 0.85 utilization [E]. Without it the matrix is about 110 min. Replace by the L3 study or by L5 speed-ups.",
+  "estimate_core_s": 33800,
+  "mode_cost_factor": {
+    "fixed_requirement": 1.0,
+    "mtow_band": 4.0,
+    "payload_adjusted": 4.0
+  },
+  "default": {
+    "screening": 128,
+    "refinement": 200,
+    "core_s_per_evaluation": 2.0,
+    "basis": "conservative uniform budget for any preset absent from the table (flagged)"
+  },
+  "presets": {
+    "A220-300": {
+      "screening": 200,
+      "refinement": 200,
+      "core_s_per_evaluation": 1.37,
+      "basis": "refinement history reaches 99% of its final cost improvement at evaluation 163; budget = max(125, 1.15 x that) rounded up to 25, capped at the 704 observed; screening = 40% of the 544 observed, within [64, 200]"
+    },
+    "A320-200": {
+      "screening": 200,
+      "refinement": 250,
+      "core_s_per_evaluation": 1.09,
+      "basis": "refinement history reaches 99% of its final cost improvement at evaluation 201; budget = max(125, 1.15 x that) rounded up to 25, capped at the 475 observed; screening = 40% of the 688 observed, within [64, 200]"
+    },
+    "A340-300": {
+      "screening": 200,
+      "refinement": 350,
+      "core_s_per_evaluation": 1.65,
+      "basis": "refinement history reaches 99% of its final cost improvement at evaluation 295; budget = max(125, 1.15 x that) rounded up to 25, capped at the 570 observed; screening = 40% of the 496 observed, within [64, 200]"
+    },
+    "A380-800": {
+      "screening": 64,
+      "refinement": 190,
+      "core_s_per_evaluation": 6.71,
+      "basis": "refinement history reaches 99% of its final cost improvement at evaluation 183; budget = max(125, 1.15 x that) rounded up to 25, capped at the 190 observed; screening = 40% of the 80 observed, within [64, 200]"
+    },
+    "A400M": {
+      "screening": 100,
+      "refinement": 200,
+      "core_s_per_evaluation": 4.58,
+      "basis": "no usable best-so-far curve (first-evaluation plateau or no feasible candidate); capped at 200 refinement evaluations; screening = 40% of the 192 observed, within [64, 200]"
+    },
+    "ATR72-600": {
+      "screening": 150,
+      "refinement": 200,
+      "core_s_per_evaluation": 2.29,
+      "basis": "no usable best-so-far curve (first-evaluation plateau or no feasible candidate); capped at 200 refinement evaluations; screening = 40% of the 368 observed, within [64, 200]"
+    },
+    "AVE": {
+      "screening": 200,
+      "refinement": 450,
+      "core_s_per_evaluation": 1.41,
+      "basis": "refinement history reaches 99% of its final cost improvement at evaluation 373; budget = max(125, 1.15 x that) rounded up to 25, capped at the 636 observed; screening = 40% of the 592 observed, within [64, 200]"
+    },
+    "B747-400": {
+      "screening": 125,
+      "refinement": 360,
+      "core_s_per_evaluation": 2.51,
+      "basis": "refinement history reaches 99% of its final cost improvement at evaluation 308; budget = max(125, 1.15 x that) rounded up to 25, capped at the 360 observed; screening = 40% of the 304 observed, within [64, 200]"
+    },
+    "B787-9": {
+      "screening": 200,
+      "refinement": 475,
+      "core_s_per_evaluation": 1.59,
+      "basis": "refinement history reaches 99% of its final cost improvement at evaluation 406; budget = max(125, 1.15 x that) rounded up to 25, capped at the 617 observed; screening = 40% of the 464 observed, within [64, 200]"
+    },
+    "C919": {
+      "screening": 200,
+      "refinement": 200,
+      "core_s_per_evaluation": 1.02,
+      "basis": "no usable best-so-far curve (first-evaluation plateau or no feasible candidate); capped at 200 refinement evaluations; screening = 40% of the 848 observed, within [64, 200]"
+    },
+    "DC-10": {
+      "screening": 150,
+      "refinement": 275,
+      "core_s_per_evaluation": 2.22,
+      "basis": "refinement history reaches 99% of its final cost improvement at evaluation 236; budget = max(125, 1.15 x that) rounded up to 25, capped at the 428 observed; screening = 40% of the 368 observed, within [64, 200]"
+    },
+    "E195-E2": {
+      "screening": 200,
+      "refinement": 150,
+      "core_s_per_evaluation": 1.13,
+      "basis": "refinement history reaches 99% of its final cost improvement at evaluation 123; budget = max(125, 1.15 x that) rounded up to 25, capped at the 783 observed; screening = 40% of the 720 observed, within [64, 200]"
+    }
+  }
+}

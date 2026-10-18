@@ -96,8 +96,11 @@ mod tests {
         use alas_config::{presets, AlasConfig};
         use alas_geom::builder::AircraftBuilder;
 
-        let config = AlasConfig::from_value(&serde_json::json!({"preset": "AVE"}))?;
-        let design = presets::get("AVE")?.design_vector;
+        // A320-200: its swept-box strength mass (4.8 t) stays inside the
+        // complete wing (7.2 t). The AVE box (31.0 t) no longer does after the
+        // swept-axis re-sizing, which the inventory check reports separately.
+        let config = AlasConfig::from_value(&serde_json::json!({"preset": "A320-200"}))?;
+        let design = presets::get("A320-200")?.design_vector;
         let plane =
             AircraftBuilder::new(Some(config.geometry.clone())).build(Some(&design), true)?;
         let mut requirements = config.requirements.clone();

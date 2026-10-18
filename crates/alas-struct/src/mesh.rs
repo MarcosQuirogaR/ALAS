@@ -21,6 +21,15 @@
 //!    Without them a physically shorter rib floats free of the skin around it
 //!    instead of deforming with it.
 //!
+//! The product deck ([`build_wing_mesh_bdf_product`]) differs from the reference
+//! in three ways that make it the same structure the native beam describes:
+//! skin and rib web exist only between the outermost spars (the leading- and
+//! trailing-edge skins are secondary structure outside the sized box and its
+//! mass inventory, so they carry neither stiffness nor mass); each engine is a
+//! centre-of-gravity `CONM2` tied by a translation-only `RBE3` to the front-spar
+//! frames of the nearest ribs instead of sitting on one skin grid (which made the
+//! engine a spurious local mode); and grids no element uses are dropped.
+//!
 //! Five geometric health checks come back in a [`MeshHealthReport`] rather than
 //! being printed: rib-to-leading-edge perpendicularity, shell warping,
 //! degenerate triangles, spar straightness, and that no grid sits inboard of
@@ -33,11 +42,13 @@
 //! the eleven card types this mesh emits and nothing else, which is what lets
 //! the deck be read next to the calls that built it.
 
+mod boxed;
 mod build;
 mod cards;
 mod elements;
 mod fuel;
 mod health;
+mod load_introduction;
 mod mass;
 mod nodes;
 mod product_caps;
@@ -50,6 +61,7 @@ pub use cards::{
     Cbar, Conm2, Deck, Grid, Mat1, Param, ParamValue, Pbarl, Pshell, Rbe3, Shell, Spc1,
 };
 pub use fuel::{add_distributed_fuel_mass, FuelMassError};
+pub use load_introduction::{assessed_peak, LOAD_INTRODUCTION_LAYERS, MIN_ASSESSED_SHARE};
 
 /// The shell warping coefficient above which a panel is reported as badly
 /// non-planar: `WARPING_THRESHOLD`.
@@ -186,6 +198,10 @@ pub enum MeshError {
         /// How many non-finite reals the deck carries in total.
         count: usize,
     },
+    /// The front spar line has no nodes, so the root, kink and tip node ids
+    /// the loads and results index on do not exist.
+    #[error("the front spar line is empty: no wing root, kink or tip node to report")]
+    EmptySparLine,
 }
 
 /// Whether the rib at position `pos` in the main skin-rib list gets

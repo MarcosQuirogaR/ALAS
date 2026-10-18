@@ -41,12 +41,16 @@ pub struct CruiseEquilibriumAssessment {
     pub minimum_true_airspeed_m_s: Option<f64>,
     /// Highest analyzed true airspeed, m/s.
     pub maximum_true_airspeed_m_s: Option<f64>,
+    /// Number of inspected control points with any non-finite input or derived
+    /// value. `f64::max`/`min` drop a NaN operand, so this is counted separately.
+    pub non_finite_points: usize,
 }
 
 impl CruiseEquilibriumAssessment {
     /// Whether every reported value is finite and a cruise point was present.
     pub fn is_finite(&self) -> bool {
         self.control_points > 0
+            && self.non_finite_points == 0
             && [
                 self.max_abs_thrust_minus_drag_n,
                 self.max_abs_lift_minus_weight_n,
@@ -115,6 +119,26 @@ pub(crate) fn assess(mission: &MissionResult) -> CruiseEquilibriumAssessment {
                 (velocity[0] * velocity[0] + velocity[1] * velocity[1] + velocity[2] * velocity[2])
                     .sqrt();
 
+            let residual_acceleration =
+                (force[0] * force[0] + force[1] * force[1] + force[2] * force[2]).sqrt() / mass;
+            let altitude = segment.conditions.altitude_m[point];
+            if !([
+                thrust,
+                drag,
+                lift,
+                weight,
+                mass,
+                altitude,
+                true_airspeed,
+                residual_acceleration,
+            ]
+            .iter()
+            .chain(force.iter())
+            .all(|value| value.is_finite()))
+            {
+                assessment.non_finite_points += 1;
+            }
+
             update_max(
                 &mut assessment.max_abs_thrust_minus_drag_n,
                 (thrust - drag).abs(),
@@ -130,16 +154,10 @@ pub(crate) fn assess(mission: &MissionResult) -> CruiseEquilibriumAssessment {
             update_max(&mut assessment.max_abs_vertical_residual_n, force[2].abs());
             update_max(
                 &mut assessment.max_abs_residual_acceleration_m_s2,
-                (force[0] * force[0] + force[1] * force[1] + force[2] * force[2]).sqrt() / mass,
+                residual_acceleration,
             );
-            update_min(
-                &mut assessment.minimum_altitude_m,
-                segment.conditions.altitude_m[point],
-            );
-            update_max(
-                &mut assessment.maximum_altitude_m,
-                segment.conditions.altitude_m[point],
-            );
+            update_min(&mut assessment.minimum_altitude_m, altitude);
+            update_max(&mut assessment.maximum_altitude_m, altitude);
             update_min(&mut assessment.minimum_true_airspeed_m_s, true_airspeed);
             update_max(&mut assessment.maximum_true_airspeed_m_s, true_airspeed);
             assessment.control_points += 1;
@@ -157,4 +175,39 @@ fn update_max(value: &mut Option<f64>, candidate: f64) {
 
 fn update_min(value: &mut Option<f64>, candidate: f64) {
     *value = Some(value.map_or(candidate, |current| current.min(candidate)));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn finite_assessment() -> CruiseEquilibriumAssessment {
+        CruiseEquilibriumAssessment {
+            control_points: 2,
+            all_segments_converged: true,
+            max_abs_thrust_minus_drag_n: Some(1.0),
+            max_abs_lift_minus_weight_n: Some(1.0),
+            max_abs_longitudinal_residual_n: Some(1.0),
+            max_abs_vertical_residual_n: Some(1.0),
+            max_abs_residual_acceleration_m_s2: Some(1.0),
+            minimum_altitude_m: Some(9000.0),
+            maximum_altitude_m: Some(10000.0),
+            minimum_true_airspeed_m_s: Some(220.0),
+            maximum_true_airspeed_m_s: Some(230.0),
+            non_finite_points: 0,
+        }
+    }
+
+    #[test]
+    fn nan_dropped_by_max_is_still_flagged_through_the_counter() {
+        // f64::max keeps the finite operand, so the extrema alone look finite.
+        let mut value = Some(1.0);
+        update_max(&mut value, f64::NAN);
+        assert_eq!(value, Some(1.0));
+
+        let mut assessment = finite_assessment();
+        assert!(assessment.is_finite());
+        assessment.non_finite_points = 1;
+        assert!(!assessment.is_finite());
+    }
 }

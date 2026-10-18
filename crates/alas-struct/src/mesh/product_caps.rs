@@ -42,6 +42,8 @@ pub(super) fn add_spar_caps(
             let eta = ((a[1] + b[1]) / (2.0 * geometry.semi_span)).clamp(0.0, 1.0);
             let thickness = station_value(eta, &sizing.eta_stations, &section.t_cap);
             let width = station_value(eta, &sizing.eta_stations, &section.w_cap);
+            let extra = station_value(eta, &sizing.eta_stations, &section.lower_extra_area);
+            let lower_thickness = thickness + extra / width.max(1.0e-12);
             let (normal_a, height_a) = direction(c, a).ok_or(error)?;
             let (normal_b, height_b) = direction(d, b).ok_or(error)?;
             let (tangent, _) = direction(a, b).ok_or(error)?;
@@ -52,33 +54,45 @@ pub(super) fn add_spar_caps(
                 .sum::<f64>();
             if !thickness.is_finite()
                 || !width.is_finite()
+                || !lower_thickness.is_finite()
                 || thickness <= 0.0
                 || width <= 0.0
-                || 2.0 * thickness >= height_a.min(height_b)
+                || thickness + lower_thickness >= height_a.min(height_b)
                 || 1.0 - projection * projection <= 1.0e-12
             {
                 return Err(error);
             }
-            deck.bar_properties.push(Pbarl {
-                pid,
-                mid: MID_CAP,
-                section: "BAR",
-                dim: vec![width, thickness],
-            });
-            for (ga, gb, sign) in [(nodes[0], nodes[1], -1.0), (nodes[2], nodes[3], 1.0)] {
+            // One property for both flanges, unless the lower flange carries
+            // the fatigue area of the lower cover: then it has its own.
+            let separate = extra > 0.0;
+            let lower_pid = if separate { pid + 1 } else { pid };
+            for (flange_pid, flange_thickness, nodes_pair, sign) in [
+                (pid, thickness, [nodes[0], nodes[1]], -1.0),
+                (lower_pid, lower_thickness, [nodes[2], nodes[3]], 1.0),
+            ] {
+                if flange_pid == pid && sign > 0.0 {
+                    // The shared property is already written.
+                } else {
+                    deck.bar_properties.push(Pbarl {
+                        pid: flange_pid,
+                        mid: MID_CAP,
+                        section: "BAR",
+                        dim: vec![width, flange_thickness],
+                    });
+                }
                 deck.bars.push(Cbar {
                     eid: *eid,
-                    pid,
-                    ga,
-                    gb,
+                    pid: flange_pid,
+                    ga: nodes_pair[0],
+                    gb: nodes_pair[1],
                     x: normal_a,
                     offt: "GGG",
-                    offset_a: normal_a.map(|v| sign * 0.5 * thickness * v),
-                    offset_b: normal_b.map(|v| sign * 0.5 * thickness * v),
+                    offset_a: normal_a.map(|v| sign * 0.5 * flange_thickness * v),
+                    offset_b: normal_b.map(|v| sign * 0.5 * flange_thickness * v),
                 });
                 *eid += 1;
             }
-            pid += 1;
+            pid += if separate { 2 } else { 1 };
         }
     }
     Ok(())

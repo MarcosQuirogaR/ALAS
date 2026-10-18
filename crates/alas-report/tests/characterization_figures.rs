@@ -21,7 +21,7 @@ use alas_report::families::{
 use alas_report::registry::{PREVIEW_FIGURES, RESULT_FIGURES, SCREENING_FIGURES};
 use alas_report::svg::render_svg;
 use alas_screen::AirfoilCandidateResult;
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::collections::HashSet;
 
 fn sample_report() -> AnalysisReport {
@@ -64,11 +64,11 @@ fn sample_report() -> AnalysisReport {
         static_margin: 0.125,
         x_neutral_point: 16.5,
         trimmed_design_point: None,
-        component_masses: HashMap::new(),
+        component_masses: BTreeMap::new(),
         flops_mass_buildup: None,
-        mass_coordinates: HashMap::new(),
+        mass_coordinates: BTreeMap::new(),
         physical_cg: [15.2, 0.0, 0.0],
-        geometry_summary: HashMap::new(),
+        geometry_summary: BTreeMap::new(),
         payload_layout: None,
         cg_envelope_ok: Some(true),
         neutral_point_conditions: None,

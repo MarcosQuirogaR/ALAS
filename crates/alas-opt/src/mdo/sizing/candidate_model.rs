@@ -87,8 +87,20 @@ pub(super) fn route_mission_model(
     propulsion: PropulsionDeck,
 ) -> Result<SegmentMissionModel, String> {
     let req = &config.requirements;
+    let mut profile = config.mission.profile.clone();
+    if config.cruise_profile_follows_requirement() {
+        // The cruise speeds are declared true airspeeds read as a Mach at the
+        // level the model references: derive them from the requirement's Mach
+        // there, so the flown Mach is `requirements.cruise_mach` on any route.
+        let sound =
+            alas_atmo::us1976_compute_values(route.flown_cruise_altitude_m, 0.0).speed_of_sound_m_s;
+        let tas_m_s = req.cruise_mach * sound;
+        profile.cruise_1_air_speed_m_s = tas_m_s;
+        profile.cruise_2_air_speed_m_s = tas_m_s;
+        profile.cruise_3_air_speed_m_s = tas_m_s;
+    }
     SegmentMissionModel::new(
-        config.mission.profile.clone(),
+        profile,
         req.cruise_mach,
         route.flown_cruise_altitude_m,
         route.departure_elevation_m,
@@ -103,6 +115,7 @@ pub(super) fn route_mission_model(
     .map(|model| {
         model
             .with_design_cruise_altitude_m(req.cruise_altitude_m)
+            .with_cruise_ceiling_band(cruise_ceiling_band(config))
             .with_isa_deviation_c(
                 route
                     .departure
@@ -110,6 +123,18 @@ pub(super) fn route_mission_model(
                     .unwrap_or(0.0),
             )
     })
+}
+
+/// Scatter band of the planner's max-cruise-thrust ceiling: the `cruise_thrust`
+/// check's band for a jet on the deck basis, no ceiling otherwise (a
+/// turboprop's level search is not validated, the lapse basis has no deck).
+fn cruise_ceiling_band(config: &AlasConfig) -> Option<f64> {
+    let turboprop = matches!(
+        config.geometry.engine.active_model(),
+        Ok(alas_config::ActiveEngineModel::Turboprop(_))
+    );
+    (config.performance.cruise_thrust_from_deck && !turboprop)
+        .then(|| crate::mdo::thrust_scatter(config))
 }
 
 /// The candidate's mission model, rebuilt from its carried `artifacts`: the
@@ -127,6 +152,9 @@ pub fn candidate_mission_model(
     config: &AlasConfig,
     artifacts: &CandidateFuelArtifacts,
 ) -> Result<SegmentMissionModel, String> {
+    // The closure flew the candidate with its geometry-scaled maximum lift
+    // coefficients; the re-flown mission reads the same ones (AERL-01).
+    let config = &*artifacts.config_with_clmax(config);
     let route = route::resolve(config);
     let model = route_mission_model(
         config,

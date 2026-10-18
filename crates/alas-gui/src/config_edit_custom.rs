@@ -31,13 +31,8 @@ fn write_custom_airports(path: &Path, airports: &[CustomAirport]) -> Result<(), 
         fs::create_dir_all(parent)
             .map_err(|error| format!("cannot create {}: {error}", parent.display()))?;
     }
-    let temporary = path.with_file_name(format!(".custom-airports-{}.tmp", std::process::id()));
-    fs::write(&temporary, text)
-        .map_err(|error| format!("cannot write {}: {error}", temporary.display()))?;
-    fs::rename(&temporary, path).map_err(|error| {
-        let _ = fs::remove_file(&temporary);
-        format!("cannot replace {}: {error}", path.display())
-    })
+    crate::fs_atomic::write_atomic(path, text)
+        .map_err(|error| format!("cannot write {}: {error}", path.display()))
 }
 
 /// Read a persisted registry.
@@ -329,7 +324,7 @@ impl AppState {
             }
         };
         let path = self.config_path.clone();
-        match std::fs::write(&path, text) {
+        match crate::fs_atomic::write_atomic(Path::new(&path), text) {
             Ok(()) => self.log(
                 tr_fields("Saved configuration to {path}.", &[("path", path)]),
                 LogKind::Info,

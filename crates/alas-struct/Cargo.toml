@@ -11,6 +11,12 @@ rust-version.workspace = true
 # `load_cases`/`engine_point_loads_n` read directly off `DesignRequirements`,
 # `EngineConfig` and `MassModelConfig`, exactly as the reference does.
 alas-config = { path = "../alas-config" }
+# The discrete gust load factor reads the ISA density and speed of sound at the
+# case altitude. `alas-atmo` is a leaf crate (alas-math only).
+alas-atmo = { path = "../alas-atmo" }
+# The zero-lift section pitching moment and lift slope of the torque sources
+# come from the NeuralFoil surrogate the aerodynamic model already uses.
+alas-aero = { path = "../alas-aero" }
 # `nastran::run` spawns the solver through the same windowless-spawn and
 # process-tree-kill primitives `alas-aero::mses` drives its own binaries with.
 alas-exec = { path = "../alas-exec" }

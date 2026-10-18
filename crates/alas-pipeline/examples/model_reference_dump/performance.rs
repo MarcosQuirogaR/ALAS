@@ -209,7 +209,7 @@ fn field_performance(config: &AlasConfig, report: &AnalysisReport, mlw_kg: f64) 
                 "required_inflight_tw": f.oei.required_inflight_tw,
                 "required_sls_tw": f.oei.required_sls_tw,
                 "status": format!("{:?}", f.oei.status),
-                "available_gradient": null,
+                "available_gradient": f.oei.available_gradient,
                 "basis": f.oei.basis,
             },
         }),

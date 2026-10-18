@@ -14,6 +14,7 @@ impl Wing {
             name: name.into(),
             xsecs,
             symmetric,
+            reference: None,
         }
     }
 
@@ -23,6 +24,7 @@ impl Wing {
             name: self.name.clone(),
             xsecs: self.xsecs.iter().map(|xsec| xsec.translate(xyz)).collect(),
             symmetric: self.symmetric,
+            reference: self.reference.map(|reference| reference.translate(xyz[0])),
         }
     }
 
@@ -97,6 +99,7 @@ impl Wing {
             name: self.name.clone(),
             xsecs: new_xsecs,
             symmetric: self.symmetric,
+            reference: self.reference,
         })
     }
 
@@ -239,7 +242,8 @@ impl Wing {
     /// comparisons.  [`Self::unfolded_span`] remains available only for the
     /// frozen compatibility geometry path.
     pub fn reference_span(&self) -> f64 {
-        self.projected_span()
+        self.reference
+            .map_or_else(|| self.projected_span(), |reference| reference.span_m)
     }
 
     /// Reference-plane area projected onto the aircraft XY plane.
@@ -269,8 +273,13 @@ impl Wing {
     /// plane for `Airplane::s_ref`, aerodynamic coefficient normalization, and
     /// manufacturer/source comparisons.  [`Self::unfolded_area`] remains
     /// available only for the frozen compatibility geometry path.
+    ///
+    /// When the wing carries a [`WingReference`] (the manufacturer
+    /// reference-wing convention), this is that reference wing's area, not the
+    /// drawn planform's; [`Self::projected_area`] is always the drawn one.
     pub fn reference_area(&self) -> f64 {
-        self.projected_area()
+        self.reference
+            .map_or_else(|| self.projected_area(), |reference| reference.area_m2)
     }
 
     /// Each lofted section's planform area: the internal

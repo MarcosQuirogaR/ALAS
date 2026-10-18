@@ -165,6 +165,9 @@ fn w62_lto_matches_the_reference_intermediates_in_renderer_order() {
         .expect("LTO fixture has its recorded schema");
     let mut config = AlasConfig::default();
     config.performance.legacy_field_correlations = true;
+    // The frozen reference approach factor; the product default is the
+    // CS 25.125 floor 1.23 (lane A1).
+    config.performance.vapp_vstall_land_factor = 1.30;
 
     assert_eq!(root.config.departure_airport, config.departure_airport);
     assert_eq!(root.config.arrival_airport, config.arrival_airport);
@@ -237,11 +240,11 @@ fn w62_lto_matches_the_reference_intermediates_in_renderer_order() {
             config.performance.cl_max_land,
             case.performance_limits.cl_max_land,
         );
-        close(
-            "limits.k_land",
-            config.performance.k_land,
-            case.performance_limits.k_land,
-        );
+        // The frozen 0.60 m/Pa is replaced by the calibrated 0.505 m/Pa
+        // (`PerformanceConfig::default`); the frozen distances below still use
+        // the case's own value, so the translated algebra stays pinned.
+        close("limits.k_land frozen", case.performance_limits.k_land, 0.60);
+        close("limits.k_land product", config.performance.k_land, 0.505);
         close(
             "limits.bfl_factor",
             config.performance.bfl_factor,

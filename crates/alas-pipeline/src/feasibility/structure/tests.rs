@@ -273,6 +273,78 @@ fn finite_extreme_stress_is_not_accepted_as_available_evidence() {
 }
 
 #[test]
+fn artefact_corner_peak_in_a_load_introduction_zone_is_a_warning_not_a_strength_veto() {
+    // A320 wingbox, 2026-10-07: the pull-up corner maximum was 835 MPa on a
+    // transition-rib element whose four corners were RBE3 reference grids,
+    // while the centroid stress outside the load-introduction zones was far
+    // below the allowable.
+    let config = AlasConfig::default();
+    let allowable = strongest_declared_allowable(&config).unwrap();
+    let mut result = solved_static();
+    let response = &mut result.nastran.as_mut().unwrap().static_solve;
+    response.root_von_mises_max_pa = Default::default();
+    response.assessed_von_mises_max_pa = Default::default();
+    for case in ["pull-up", "push-down", "level"] {
+        response.root_von_mises_max_pa.push(case, 2.2 * allowable);
+        response
+            .assessed_von_mises_max_pa
+            .push(case, 0.9 * allowable);
+    }
+    let mut findings = Vec::new();
+    append_downstream(&config, Some(&result), &mut findings);
+    assert!(!findings.iter().any(|f| {
+        f.code == FindingCode::StructuralStrengthViolation
+            && f.severity == crate::feasibility::FindingSeverity::Error
+    }));
+    assert_eq!(
+        findings
+            .iter()
+            .filter(|f| f.code == FindingCode::StructuralStrengthViolation
+                && f.severity == crate::feasibility::FindingSeverity::Warning)
+            .count(),
+        3
+    );
+}
+
+#[test]
+fn assessed_centroid_stress_above_the_allowable_remains_a_strength_veto() {
+    let config = AlasConfig::default();
+    let allowable = strongest_declared_allowable(&config).unwrap();
+    let mut result = solved_static();
+    let response = &mut result.nastran.as_mut().unwrap().static_solve;
+    response.assessed_von_mises_max_pa = Default::default();
+    for case in ["pull-up", "push-down", "level"] {
+        response
+            .assessed_von_mises_max_pa
+            .push(case, 1.05 * allowable);
+    }
+    let mut findings = Vec::new();
+    append_downstream(&config, Some(&result), &mut findings);
+    assert!(findings.iter().any(|f| {
+        f.code == FindingCode::StructuralStrengthViolation
+            && f.severity == crate::feasibility::FindingSeverity::Error
+    }));
+}
+
+#[test]
+fn without_an_assessed_metric_the_peak_corner_stress_still_gates() {
+    let config = AlasConfig::default();
+    let allowable = strongest_declared_allowable(&config).unwrap();
+    let mut result = solved_static();
+    let response = &mut result.nastran.as_mut().unwrap().static_solve;
+    response.root_von_mises_max_pa = Default::default();
+    for case in ["pull-up", "push-down", "level"] {
+        response.root_von_mises_max_pa.push(case, 2.0 * allowable);
+    }
+    let mut findings = Vec::new();
+    append_downstream(&config, Some(&result), &mut findings);
+    assert!(findings.iter().any(|f| {
+        f.code == FindingCode::StructuralStrengthViolation
+            && f.severity == crate::feasibility::FindingSeverity::Error
+    }));
+}
+
+#[test]
 fn extreme_tip_response_cannot_pass_as_a_linear_solution() {
     assert!(fem_curvature_lower_bound(20.0, Some(33.0)).unwrap() > 0.05);
     assert_eq!(

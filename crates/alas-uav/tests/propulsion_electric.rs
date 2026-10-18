@@ -5,7 +5,7 @@
 // test target; production calculation paths return typed errors instead.
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
-//! Legacy electric-propulsion parity and source-boundary tests.
+//! Electric-propulsion solver and source-boundary tests on SYNTHETIC propeller tables.
 
 use alas_uav::full_catalog;
 use alas_uav::propulsion_electric::{
@@ -16,75 +16,32 @@ use alas_uav::propulsion_electric::{
     ElectricMissionPlan, ElectricMotorModel, ElectricPowertrainModel, EscElectricalModel,
     FixedVoltageBattery,
 };
-use serde::Deserialize;
+#[path = "support/prop_tables.rs"]
+mod prop_tables;
+use prop_tables::use_synthetic_tables;
 
-const FIXTURE: &str = include_str!("../../../golden/prop_elec/apc_12x6e_fixture.json");
-const UIUC_STATIC_BENCHMARK: &str =
-    include_str!("../../../golden/prop_elec/uiuc_apc_12x6_static_benchmark.json");
-
-#[derive(Debug, Deserialize)]
-struct LegacyFixture {
-    legacy_ideal_cases: Vec<LegacyCase>,
-}
-
-#[derive(Debug, Deserialize)]
-struct LegacyCase {
-    name: String,
-    speed_m_s: f64,
-    battery_voltage_v: f64,
-    throttle: f64,
-    motor_kv_rpm_per_v: f64,
-    motor_resistance_ohm: f64,
-    motor_no_load_current_a: f64,
-    expected: ExpectedPoint,
-}
-
-#[derive(Debug, Deserialize)]
-struct ExpectedPoint {
-    rpm: f64,
-    motor_current_a: f64,
-    thrust_n: f64,
-    shaft_power_w: f64,
-    battery_power_w: f64,
-}
-
-#[derive(Debug, Deserialize)]
-struct UiucStaticBenchmark {
-    comparison: BenchmarkComparison,
-    samples: Vec<BenchmarkSample>,
-}
-
-#[derive(Debug, Deserialize)]
-struct BenchmarkComparison {
-    maximum_relative_ct_error: f64,
-    maximum_relative_cp_error: f64,
-}
-
-#[derive(Debug, Deserialize)]
-struct BenchmarkSample {
-    rpm: f64,
-    thrust_coefficient: f64,
-    power_coefficient: f64,
-}
-
+/// The tables are SYNTHETIC (made-up numbers), so this checks the solver's
+/// physics against the table itself, not against any manufacturer value: at the
+/// returned point the motor voltage balance and the Ct/Cp scaling must hold.
 #[test]
-fn the_bracketed_solver_matches_the_legacy_ideal_torque_balance() {
-    let fixture: LegacyFixture = serde_json::from_str(FIXTURE).expect("fixture parses");
+fn the_bracketed_solver_satisfies_the_torque_balance_on_the_table() {
+    use_synthetic_tables();
     let propeller = apc_12x6e_performance_map()
-        .expect("APC source table parses")
+        .expect("synthetic table parses")
         .clone();
+    let (voltage, kv, resistance, rho) = (11.4_f64, 900.0_f64, 0.082_f64, 1.225_f64);
 
-    for case in fixture.legacy_ideal_cases {
+    for speed in [0.0, 10.0, 20.0] {
         let result = solve_powertrain(
             &ElectricPowertrainModel {
                 battery: FixedVoltageBattery {
-                    open_circuit_voltage_v: case.battery_voltage_v,
+                    open_circuit_voltage_v: voltage,
                     internal_resistance_ohm: 0.0,
                 },
                 motor: ElectricMotorModel {
-                    kv_rpm_per_v: case.motor_kv_rpm_per_v,
-                    no_load_current_a: case.motor_no_load_current_a,
-                    resistance_ohm: case.motor_resistance_ohm,
+                    kv_rpm_per_v: kv,
+                    no_load_current_a: 0.0,
+                    resistance_ohm: resistance,
                 },
                 esc: EscElectricalModel {
                     series_resistance_ohm: 0.0,
@@ -92,40 +49,33 @@ fn the_bracketed_solver_matches_the_legacy_ideal_torque_balance() {
                 propeller: propeller.clone(),
                 motor_count: 1,
             },
-            ElectricFlightCondition {
-                speed_m_s: case.speed_m_s,
-                air_density_kg_m3: 1.225,
-                throttle: case.throttle,
-            },
+            ElectricFlightCondition::full_power(speed, rho),
         )
-        .unwrap_or_else(|error| panic!("{}: {error}", case.name));
-
-        assert_close(case.expected.rpm, result.per_motor.rpm, &case.name);
-        assert_close(
-            case.expected.motor_current_a,
-            result.per_motor.motor_current_a,
-            &case.name,
+        .unwrap_or_else(|error| panic!("{speed} m/s: {error}"));
+        let point = result.per_motor;
+        let coefficients = propeller
+            .coefficients_at(point.rpm, speed)
+            .expect("the solution lies inside the table");
+        let n = point.rpm / 60.0;
+        let d = propeller.diameter_m();
+        let thrust = rho * coefficients.thrust_coefficient * n * n * d.powi(4);
+        let torque =
+            rho * coefficients.power_coefficient * n * n * d.powi(5) / (2.0 * std::f64::consts::PI);
+        let current = torque * 2.0 * std::f64::consts::PI * kv / 60.0;
+        assert_close(thrust, point.thrust_n, "thrust from Ct");
+        assert_close(current, point.motor_current_a, "current from Cp");
+        let residual = voltage - point.rpm / kv - current * resistance;
+        assert!(
+            residual.abs() < 1.0e-6,
+            "{speed} m/s: voltage residual {residual}"
         );
-        assert_close(
-            case.expected.thrust_n,
-            result.per_motor.thrust_n,
-            &case.name,
-        );
-        assert_close(
-            case.expected.shaft_power_w,
-            result.per_motor.shaft_power_w,
-            &case.name,
-        );
-        assert_close(
-            case.expected.battery_power_w,
-            result.battery_power_w,
-            &case.name,
-        );
+        assert_close(voltage * current, result.battery_power_w, "battery power");
     }
 }
 
 #[test]
 fn density_scales_the_table_load_without_reusing_static_thrust() {
+    use_synthetic_tables();
     let propeller = apc_12x6e_performance_map()
         .expect("APC source table parses")
         .clone();
@@ -155,31 +105,8 @@ fn density_scales_the_table_load_without_reusing_static_thrust() {
 }
 
 #[test]
-fn apc_source_table_stays_bounded_against_independent_uiuc_static_characterization() {
-    let benchmark: UiucStaticBenchmark =
-        serde_json::from_str(UIUC_STATIC_BENCHMARK).expect("UIUC benchmark fixture parses");
-    let table = apc_12x6e_performance_map().expect("APC source table parses");
-    for sample in benchmark.samples {
-        let predicted = table
-            .coefficients_at(sample.rpm, 0.0)
-            .unwrap_or_else(|| panic!("source table covers {} RPM static", sample.rpm));
-        assert_relative_error(
-            sample.thrust_coefficient,
-            predicted.thrust_coefficient,
-            benchmark.comparison.maximum_relative_ct_error,
-            "UIUC static Ct",
-        );
-        assert_relative_error(
-            sample.power_coefficient,
-            predicted.power_coefficient,
-            benchmark.comparison.maximum_relative_cp_error,
-            "UIUC static Cp",
-        );
-    }
-}
-
-#[test]
 fn zero_throttle_is_a_nonpropulsive_state_without_a_table_extrapolation() {
+    use_synthetic_tables();
     let result = solve_powertrain(
         &ElectricPowertrainModel {
             battery: FixedVoltageBattery {
@@ -214,6 +141,7 @@ fn zero_throttle_is_a_nonpropulsive_state_without_a_table_extrapolation() {
 
 #[test]
 fn a_reviewed_selection_produces_the_optimizer_map_without_manual_operating_points() {
+    use_synthetic_tables();
     let catalog = full_catalog().expect("full catalogue parses");
     let selection = selected_powertrain();
     let map = native_propulsion_map(&catalog, &selection, &[20.0, 10.0], 1.225)
@@ -231,23 +159,30 @@ fn a_reviewed_selection_produces_the_optimizer_map_without_manual_operating_poin
 }
 
 #[test]
-fn every_supplied_apc_table_is_addressable_without_curve_fitting() {
-    let tables = apc_performance_maps().expect("the compact APC bundle parses");
-    assert_eq!(tables.len(), 436);
+fn every_installed_table_is_addressable_without_curve_fitting() {
+    use_synthetic_tables();
+    let tables = apc_performance_maps().expect("the synthetic tables parse");
+    assert_eq!(tables.len(), 6);
     let catalog = full_catalog().expect("full catalogue parses");
     assert!(tables
         .iter()
         .all(|table| catalog.get(table.propeller_id()).is_some()));
-    let table = apc_performance_map("apc-13x4-5ep-f2b")
+    let table = apc_performance_map("apc-9x4-5ep-f2b")
         .expect("the F2B source file has a stable catalogue key");
-    assert_eq!(table.source_file(), "PER3_13x45EP(F2B).dat");
-    assert_eq!(table.model(), "13x4.5EP");
+    assert_eq!(table.source_file(), "PER3_9x45EP(F2B).dat");
+    assert_eq!(table.model(), "9x4.5EP");
+    assert!((table.diameter_m() - 9.0 * 0.0254).abs() < 1.0e-12);
+    assert!((table.pitch_m() - 4.5 * 0.0254).abs() < 1.0e-12);
     assert!(table.rpm_bounds_at_speed(10.0).is_some());
     assert!(table.coefficients_at(5_000.0, 10.0).is_some());
+    // Outside the sampled envelope nothing is extrapolated.
+    assert!(table.coefficients_at(9_000.0, 10.0).is_none());
+    assert!(table.coefficients_at(5_000.0, 25.0).is_none());
 }
 
 #[test]
 fn multi_motor_map_and_mission_sum_battery_demand_but_keep_motor_ratings_per_unit() {
+    use_synthetic_tables();
     let catalog = full_catalog().expect("full catalogue parses");
     let mut selection = selected_powertrain();
     selection.motor_count = 2;
@@ -309,6 +244,7 @@ fn multi_motor_map_and_mission_sum_battery_demand_but_keep_motor_ratings_per_uni
 
 #[test]
 fn kv_only_motor_estimates_remain_explicitly_unverified() {
+    use_synthetic_tables();
     let mut catalog = full_catalog().expect("full catalogue parses");
     let record = catalog
         .records
@@ -361,6 +297,7 @@ fn kv_only_motor_estimates_remain_explicitly_unverified() {
 
 #[test]
 fn acc_screening_keeps_unverified_hardware_details_visible() {
+    use_synthetic_tables();
     let catalog = full_catalog().expect("full catalogue parses");
     let mut selection = selected_powertrain();
     selection.motor_count = 2;
@@ -430,13 +367,5 @@ fn assert_close(expected: f64, actual: f64, case: &str) {
     assert!(
         (expected - actual).abs() <= 1.0e-11 * scale,
         "{case}: expected {expected:.15}, got {actual:.15}"
-    );
-}
-
-fn assert_relative_error(expected: f64, actual: f64, maximum: f64, label: &str) {
-    let relative_error = (expected - actual).abs() / expected.abs();
-    assert!(
-        relative_error <= maximum,
-        "{label}: expected {expected:.6}, got {actual:.6}, relative error {relative_error:.3} exceeds {maximum:.3}"
     );
 }

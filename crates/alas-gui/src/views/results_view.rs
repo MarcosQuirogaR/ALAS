@@ -505,8 +505,16 @@ fn unavailable_reason(state: &AppState, id: &str) -> String {
     }
 }
 
-fn format_cg_pct_mac(cg_fraction: f64) -> String {
-    format!("{cg_fraction:.1}% MAC")
+/// One style for every mean-aerodynamic-chord percentage the results show:
+/// the value, a space, then `% MAC` (the same unit text the forms use).
+fn format_pct_mac(percent: f64) -> String {
+    format!("{percent:.1} % MAC")
+}
+
+/// A CG position in the report convention: percent of the mean aerodynamic
+/// chord of the registered reference wing, measured from its leading edge.
+fn format_cg_pct_mac(percent: f64) -> String {
+    format!("{}, {}", format_pct_mac(percent), tr("reference wing"))
 }
 
 #[cfg(test)]

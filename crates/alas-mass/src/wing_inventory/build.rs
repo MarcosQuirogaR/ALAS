@@ -142,6 +142,11 @@ pub fn build_wing_inventory(
             / torenbeek_basic_structure_kg,
         total_to_torenbeek_group_ratio: complete_wing_mass_kg / inputs.torenbeek.group_total_kg,
         total_to_flops_group_ratio: complete_wing_mass_kg / group.total_kg,
+        non_optimum_total_kg: 0.0,
+        box_plus_non_optimum_to_torenbeek_basic_ratio: sized_box_mass_kg
+            / torenbeek_basic_structure_kg,
+        flops_miscellaneous_inside_box_kg: group.miscellaneous_kg
+            * (1.0 - inputs.fixed_structure.chord_fraction_outside_box),
     };
 
     let mut findings = [None; MAX_FINDINGS];
@@ -178,6 +183,7 @@ pub fn build_wing_inventory(
 
     Ok(WingNonBoxInventory {
         items,
+        non_optimum: None,
         total_kg,
         first_moment_kg_m,
         centroid_m,

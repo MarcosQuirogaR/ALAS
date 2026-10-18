@@ -40,6 +40,24 @@ rectangular fit model can reject a contoured ULD that fits an actual aircraft.
 The ATR's main-deck baggage compartments also require an explicit compartment
 model; lower-hold container volume cannot validate those spaces.
 
+A preset can declare a freight hold (`cabin.cargo.freight_hold`: floor start,
+floor length, ramp length, clear width and height, optional ramp load limit),
+as the A400M does from Jane's All the World's Aircraft 2008-2009 (book p.298:
+17.71 m floor, 5.40 m ramp, 4.00 m wide, 3.85 m / 4.00 m high) and the Airbus
+brochure TMMA0026/01/2025 (p.4 nine military pallets, p.5 ramp "up to 6 tonnes
+when airborne"). The payload then rides on 463L pallets (88 x 108 in, the 88 in
+side along the axis) in a single row down the floor and the ramp: seven on the
+A400M floor and two on its ramp, no pallet straddling the ramp hinge, no
+underfloor or bulk position. The floor height follows the declared clear height
+under the interior crown, not the airliner main-deck floor at the cabin axis.
+The balance target is the existing `target_cg_pct_mac` (default 25 % MAC): it
+is the loader's own target, not a published A400M loading rule, and the A400M
+CG envelope is AFM-only (not found). The 463L rated load (4,536 kg), loaded
+height (2.44 m) and volume are engineering values not found on a source page;
+no pallet tare is added because military payload is quoted as the floor load.
+Vehicles, helicopters and troops are not represented. Tests:
+`crates/alas-payload/tests/freight_hold.rs`.
+
 Regression tests in `crates/alas-payload/tests/cargo_capacity.rs` verify that
 an empty and loaded 787 hold report identical available capacity, a bulk-only
 hold reports zero ULD volume/count while retaining its mass and bulk volume,

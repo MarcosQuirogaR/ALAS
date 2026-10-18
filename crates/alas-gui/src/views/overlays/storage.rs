@@ -24,15 +24,15 @@ pub fn show_storage_dialog(state: &mut AppState, ctx: &Context) {
     if !state.show_storage {
         return;
     }
-    let config = state.typed_config().unwrap_or_default();
+    let config = state.typed_config_arc().unwrap_or_default();
     let output_dir = state
         .pipeline_options
         .output_dir
         .clone()
         .unwrap_or_else(|| std::path::PathBuf::from("outputs"));
     let cfd_case_root = std::path::PathBuf::from("outputs/airfoil-cfd");
-    let navdata_dir = std::path::PathBuf::from(config.mission.navdata_dir);
-    let texture_path = std::path::PathBuf::from(config.mission.texture_path);
+    let navdata_dir = std::path::PathBuf::from(config.mission.navdata_dir.clone());
+    let texture_path = std::path::PathBuf::from(config.mission.texture_path.clone());
     let locations = StorageLocations {
         output_dir: &output_dir,
         cfd_case_root: &cfd_case_root,

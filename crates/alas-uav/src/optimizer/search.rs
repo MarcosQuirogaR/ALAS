@@ -202,16 +202,16 @@ pub(super) fn interpolate(lower: f64, upper: f64, fraction: f64) -> f64 {
     lower + fraction * (upper - lower)
 }
 
-struct SplitMix64 {
+pub(super) struct SplitMix64 {
     state: u64,
 }
 
 impl SplitMix64 {
-    fn new(seed: u64) -> Self {
+    pub(super) fn new(seed: u64) -> Self {
         Self { state: seed }
     }
 
-    fn next(&mut self) -> u64 {
+    pub(super) fn next(&mut self) -> u64 {
         self.state = self.state.wrapping_add(0x9e37_79b9_7f4a_7c15);
         let mut value = self.state;
         value = (value ^ (value >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
@@ -219,12 +219,12 @@ impl SplitMix64 {
         value ^ (value >> 31)
     }
 
-    fn unit(&mut self) -> f64 {
+    pub(super) fn unit(&mut self) -> f64 {
         let mantissa = self.next() >> 11;
         mantissa as f64 * (1.0 / ((1_u64 << 53) as f64))
     }
 
-    fn index(&mut self, length: usize) -> usize {
+    pub(super) fn index(&mut self, length: usize) -> usize {
         if length == 0 {
             0
         } else {

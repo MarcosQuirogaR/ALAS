@@ -12,9 +12,10 @@
 
 use alas_config::design_variables::DesignVector;
 use alas_config::AlasConfig;
-use alas_opt::{assess_product_candidate, CandidateAssessment};
+mod support;
+use support::{assess_view, AssessmentView};
 
-fn assess(preset: &str, design: &DesignVector) -> CandidateAssessment {
+fn assess(preset: &str, design: &DesignVector) -> AssessmentView {
     assess_mode(preset, design, alas_config::MtowSizing::FixedRequirement)
 }
 
@@ -22,11 +23,12 @@ fn assess_mode(
     preset: &str,
     design: &DesignVector,
     mode: alas_config::MtowSizing,
-) -> CandidateAssessment {
+) -> AssessmentView {
     let mut config = AlasConfig::from_value(&serde_json::json!({ "preset": preset }))
         .unwrap_or_else(|error| panic!("{preset}: {error}"));
     config.optimizer.objective.mtow_sizing = mode;
-    assess_product_candidate(&config, design).unwrap_or_else(|error| panic!("{preset}: {error}"))
+    // The nominal assessments are shared with the other residual suites.
+    assess_view(&config, design).unwrap_or_else(|error| panic!("{preset}: {error}"))
 }
 
 fn nominal(preset: &str) -> DesignVector {
@@ -35,7 +37,7 @@ fn nominal(preset: &str) -> DesignVector {
         .design_vector
 }
 
-fn load_factor(assessment: &CandidateAssessment, id: &str) -> Option<(f64, f64)> {
+fn load_factor(assessment: &AssessmentView, id: &str) -> Option<(f64, f64)> {
     assessment
         .residuals
         .iter()
@@ -105,7 +107,9 @@ fn hard_mtow_nominal_buffet_margins_keep_named_absolute_findings() {
             // Declared MTOW raises cruise CL; the Korn estimate reaches buffet
             // below the nominal plausibility floor at this fixed cruise point.
             "AVE" => Some("declared-MTOW wing loading exceeds the Korn buffet estimate"),
-            "A380-800" => Some("declared-MTOW wing loading exceeds the Korn buffet estimate"),
+            // Geometry round 2 (wing lane): the A380 now carries the CRM thickness
+            // distribution (15.4 % root to 9.5 % tip), which raises the Korn buffet
+            // floor above 0.9 g (1.003 g); the finding is cleared, no longer pinned.
             // The conventional technology factor is not calibrated to the
             // DC-10's aft-loaded section; see the mission-sized regression.
             "DC-10" | "B747-400" => {

@@ -48,6 +48,23 @@ pub(super) fn polar_completion_status(requested: usize, converged: usize) -> Mse
     }
 }
 
+/// Sweep status once non-converged points have been classified: when every
+/// missing point shows solver evidence of separated flow (`outside` of them),
+/// the sweep is [`MsesStatus::OutsideValidityDomain`] rather than a partial
+/// solver failure. Neither is [`MsesStatus::Ok`].
+pub(super) fn classified_completion_status(
+    requested: usize,
+    converged: usize,
+    outside: usize,
+) -> MsesStatus {
+    match polar_completion_status(requested, converged) {
+        MsesStatus::PartialConvergence if outside == requested - converged => {
+            MsesStatus::OutsideValidityDomain
+        }
+        status => status,
+    }
+}
+
 pub(super) fn installation_message(directory: &Path, status: MsesStatus) -> String {
     match status {
         MsesStatus::Absent => format!("MSES installation was not found at {}", directory.display()),

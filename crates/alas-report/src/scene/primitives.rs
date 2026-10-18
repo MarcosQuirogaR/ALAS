@@ -53,6 +53,11 @@ impl Color {
             _ => {}
         }
         let clean = trimmed.trim_start_matches('#');
+        // The branches below slice by byte offset; a multi-byte character would
+        // split inside a code point and panic, so non-ASCII input is invalid.
+        if !clean.is_ascii() {
+            return Self::rgb(0, 0, 0);
+        }
         match clean.len() {
             3 => {
                 let r = u8::from_str_radix(&clean[0..1].repeat(2), 16).unwrap_or(0);

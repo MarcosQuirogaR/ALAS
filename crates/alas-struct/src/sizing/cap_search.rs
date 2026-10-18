@@ -5,6 +5,7 @@
 //! original bisection arithmetic, evaluating only undecided midpoints.
 
 use super::law::station_cap_dimensions;
+use super::panel::CoverPanel;
 use super::section::{cap_inertia, non_cap_ei};
 use super::WingboxSizing;
 use crate::allowables::bending_allowable_pa;
@@ -18,7 +19,10 @@ pub(super) struct CapSearch<'a> {
     height: f64,
     chord: f64,
     non_cap: f64,
-    cap_cover: f64,
+    panel: CoverPanel,
+    cap_limit: f64,
+    skin_limit: f64,
+    skin_modulus: f64,
     cap_modulus: f64,
     web_modulus: f64,
     web_allowable: f64,
@@ -53,9 +57,10 @@ impl<'a> CapSearch<'a> {
             height,
             chord: section.chord[station],
             non_cap: non_cap_ei(section, station, skin, web),
-            cap_cover: (cap.e_pa / bending_allowable_pa(cap))
-                .max(skin.e_pa / bending_allowable_pa(skin))
-                * height,
+            panel: CoverPanel::new(section, station),
+            cap_limit: bending_allowable_pa(cap),
+            skin_limit: bending_allowable_pa(skin),
+            skin_modulus: skin.e_pa,
             cap_modulus: cap.e_pa,
             web_modulus: web.e_pa,
             web_allowable: bending_allowable_pa(web),
@@ -67,6 +72,7 @@ impl<'a> CapSearch<'a> {
         let mut derivative = 0.0;
         let mut clear_height = 0.0_f64;
         let mut clear_derivative = 0.0;
+        let mut flange = 0.0;
         for spar in &self.section.spars {
             let height = spar.h[self.station];
             let requested = if self.height > 0.0 {
@@ -77,6 +83,9 @@ impl<'a> CapSearch<'a> {
             let (width, thickness) =
                 station_cap_dimensions(requested, self.chord, height, self.minimum_gauge);
             stiffness += self.cap_modulus * cap_inertia(height, width, thickness);
+            if height > 0.0 {
+                flange += width * thickness;
+            }
             let (width_slope, thickness_slope) = if DERIVATIVE {
                 dimension_slopes(
                     requested,
@@ -105,8 +114,21 @@ impl<'a> CapSearch<'a> {
         }
         let ei = self.non_cap + stiffness;
         let web_lever = self.web_modulus * clear_height / self.web_allowable;
-        let lever = self.cap_cover.max(web_lever);
-        let lever_derivative = if web_lever > self.cap_cover {
+        // The installed flanges are part of the stiffened cover whose
+        // compressive allowable they raise, so the cover lever arm shrinks as
+        // caps are added and the search predicate stays monotone.
+        let cap_cover = (self.cap_modulus
+            / self
+                .panel
+                .allowable_for_pa(self.cap_modulus, self.cap_limit, flange))
+        .max(
+            self.skin_modulus
+                / self
+                    .panel
+                    .allowable_for_pa(self.skin_modulus, self.skin_limit, flange),
+        ) * self.height;
+        let lever = cap_cover.max(web_lever);
+        let lever_derivative = if web_lever > cap_cover {
             self.web_modulus * clear_derivative / self.web_allowable
         } else {
             0.0

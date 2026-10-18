@@ -16,13 +16,18 @@
 //! price the same aircraft.
 
 mod adapt;
+mod adapt_memory;
 mod climb_bands;
+mod climb_revision;
+mod cruise_ceiling;
 mod cruise_flight;
 mod cruise_levels;
 mod drag;
 mod frozen_plan;
 mod integrate;
+mod ladder_level;
 mod profile;
+pub use cruise_levels::CruiseState;
 pub use drag::{CruiseDrag, ParabolicPolar};
 pub use frozen_plan::{
     FreezeError, FrozenMissionPlan, SizingBudget, MISSION_STEP_UNCONVERGED, SIZING_BUDGET_EXHAUSTED,
@@ -32,7 +37,6 @@ pub use profile::envelope_limit_m_s;
 
 use std::sync::Arc;
 
-use alas_atmo::Atmosphere;
 use alas_config::mission::MissionProfileConfig;
 use alas_mass::fuel_plan::{FuelBurnModel, FuelModelError, LegEstimate};
 use alas_prop::system::PropulsionRating;
@@ -66,7 +70,7 @@ pub struct SegmentMissionModel {
     pub wing_area_m2: f64,
     /// Cruise true airspeed, m/s, derived from the configured cruise Mach.
     pub cruise_tas_m_s: f64,
-    /// Gravity, m/s^2.
+    /// Sea-level gravity g0, m/s^2; weight at altitude is `gravity_at`.
     pub gravity_m_s2: f64,
     /// Holding altitude above mean sea level, m.
     pub holding_altitude_m: f64,
@@ -81,13 +85,11 @@ pub struct SegmentMissionModel {
     /// to every ambient state the flown mission evaluates: the calibrated
     /// airspeed resolution of the profile ladders, the flight condition
     /// (density, temperature, speed of sound) every integration step hands the
-    /// polar and the propulsion deck, and the holding and taxi conditions. The
-    /// native pseudospectral mission applies the *departure* airport's
-    /// deviation to every segment; the pipeline and sizing callers pass the
-    /// same value here so the two paths share one ambient convention. The
-    /// cruise true airspeed derived from the cruise Mach stays a standard-day
-    /// number, as the configured profile states it (see
-    /// `with_isa_deviation_c`).
+    /// polar and the propulsion deck, and the taxi condition (holding is
+    /// priced in standard conditions, AMC1 CAT.OP.MPA.181). The native
+    /// pseudospectral mission applies the *departure* airport's deviation to
+    /// every segment; the pipeline and sizing callers pass the same value
+    /// here so the two paths share one ambient convention.
     pub isa_deviation_c: f64,
     /// Lift limits and high-lift drag increment per phase.
     pub phase_limits: PhaseAeroLimits,
@@ -105,7 +107,11 @@ pub struct SegmentMissionModel {
     pub(crate) budget: Option<frozen_plan::BudgetState>,
     /// Last recovered flown altitude per leg, the warm start of the next
     /// recovery search.
-    pub(crate) memory: adapt::AdaptationMemory,
+    pub(crate) memory: adapt_memory::AdaptationMemory,
+    /// Scatter band of the maximum-cruise thrust (0 with an engine datum)
+    /// when the planner holds its levels under the max-cruise-thrust ceiling
+    /// (jets); `None` for no ceiling (turboprops, the lapse basis).
+    pub cruise_ceiling_band: Option<f64>,
 }
 
 /// Validity limits of the trimmed cruise polar per mission phase.
@@ -124,8 +130,13 @@ pub struct PhaseAeroLimits {
     pub takeoff_cl_max: f64,
     /// Maximum lift coefficient in the landing configuration.
     pub landing_cl_max: f64,
-    /// Drag-coefficient increment of the high-lift/gear configuration.
+    /// Drag-coefficient increment of the take-off segment: take-off flaps,
+    /// gear retracted (the second-segment configuration, which the segment
+    /// to 1,500 ft AGL flies after the first seconds).
     pub high_lift_delta_cd: f64,
+    /// Drag-coefficient increment of the landing segment: landing flaps plus
+    /// the extended gear.
+    pub landing_delta_cd: f64,
     /// The aircraft's own design dive speed, m/s *equivalent* airspeed
     /// (`requirements.dive_speed_m_s`).
     ///
@@ -150,6 +161,8 @@ impl PhaseAeroLimits {
             takeoff_cl_max: config.performance.cl_max_to,
             landing_cl_max: config.performance.cl_max_land,
             high_lift_delta_cd: config.performance.oei_climb_delta_cd,
+            landing_delta_cd: config.performance.landing_flap_delta_cd
+                + config.performance.landing_gear_delta_cd,
             dive_speed_eas_m_s: config.requirements.dive_speed_m_s,
         }
     }
@@ -165,6 +178,12 @@ impl PhaseAeroLimits {
                     "phase aero limit {name} must be finite and positive, got {value}"
                 ));
             }
+        }
+        if !self.landing_delta_cd.is_finite() || self.landing_delta_cd < 0.0 {
+            return Err(format!(
+                "phase aero limit landing_delta_cd must be finite and nonnegative, got {}",
+                self.landing_delta_cd
+            ));
         }
         if !self.high_lift_delta_cd.is_finite() || self.high_lift_delta_cd < 0.0 {
             return Err(format!(
@@ -225,8 +244,7 @@ impl SegmentMissionModel {
         phase_limits: PhaseAeroLimits,
         propulsion: PropulsionDeck,
     ) -> Result<Self, String> {
-        let cruise_atmosphere = Atmosphere::try_new(cruise_altitude_m)
-            .map_err(|error| format!("cruise atmosphere is invalid: {error}"))?;
+        let cruise_tas_m_s = fuel_burn::cruise_tas_us1976(cruise_mach, cruise_altitude_m, 0.0)?;
         let model = Self {
             cancellation: None,
             phase_limits,
@@ -239,7 +257,7 @@ impl SegmentMissionModel {
             arrival_elevation_m,
             profile,
             wing_area_m2,
-            cruise_tas_m_s: cruise_mach * cruise_atmosphere.speed_of_sound(),
+            cruise_tas_m_s,
             gravity_m_s2,
             holding_altitude_m,
             propulsion,
@@ -247,7 +265,8 @@ impl SegmentMissionModel {
             cruise_drag: drag::DragHandle(cruise_drag),
             frozen: None,
             budget: None,
-            memory: adapt::AdaptationMemory::default(),
+            memory: adapt_memory::AdaptationMemory::default(),
+            cruise_ceiling_band: None,
         };
         model.validate()?;
         Ok(model)
@@ -404,11 +423,24 @@ impl SegmentMissionModel {
 
     /// Fly on a day `isa_deviation_c` warmer than the standard atmosphere
     /// (negative for colder). Applied to every ambient evaluation of the
-    /// flown mission, see the field; the configured cruise true airspeed is
-    /// not re-derived, matching the native mission which flies the profile's
-    /// cruise TAS literally. A non-finite value is rejected by `validate`.
+    /// flown mission, see the field, and to the cruise true airspeed, which
+    /// is the cruise Mach times the speed of sound of the flown day (the
+    /// native mission applies the same factor to the profile's cruise TAS).
+    /// A non-finite value is rejected by `validate`.
     pub fn with_isa_deviation_c(mut self, isa_deviation_c: f64) -> Self {
         self.isa_deviation_c = isa_deviation_c;
+        if let Ok(tas) = self.cruise_true_airspeed_m_s(self.cruise_altitude_m) {
+            self.cruise_tas_m_s = tas;
+        }
+        self
+    }
+
+    /// Hold the planned cruise levels (initial and step) under the
+    /// maximum-cruise-thrust ceiling: level flight at the maximum-cruise
+    /// rating must be flyable under the band rule `band` (the
+    /// `cruise_thrust` check's rule, `ThrustAssessment::flyable`).
+    pub fn with_cruise_ceiling_band(mut self, band: Option<f64>) -> Self {
+        self.cruise_ceiling_band = band;
         self
     }
 
@@ -503,28 +535,6 @@ impl SegmentMissionModel {
     ) -> Result<FlownLeg, FuelModelError> {
         self.fly_leg(LegKind::Diversion, start_mass_kg, distance_m)
     }
-
-    /// Fuel flow in steady level flight at `altitude_m` and `tas_m_s`, kg/s.
-    fn level_fuel_flow_kg_s(
-        &self,
-        mass_kg: f64,
-        altitude_m: f64,
-        tas_m_s: f64,
-    ) -> Result<f64, FuelModelError> {
-        if !mass_kg.is_finite() || mass_kg <= 0.0 {
-            return Err(FuelModelError::MassOutOfRange { mass_kg });
-        }
-        let flight = self
-            .propulsion
-            .flight_condition(altitude_m, tas_m_s, self.gravity_m_s2, self.isa_deviation_c)
-            .map_err(deck_error)?;
-        let drag_n = self.drag_n(&flight, mass_kg)?;
-        let point = self
-            .propulsion
-            .at_thrust(flight, drag_n, PropulsionRating::Cruise)
-            .map_err(deck_error)?;
-        Ok(point.fuel_flow_kg_s)
-    }
 }
 
 fn deck_error(error: DeckError) -> FuelModelError {
@@ -534,6 +544,34 @@ fn deck_error(error: DeckError) -> FuelModelError {
 mod fuel_burn;
 #[cfg(test)]
 mod physics_tests;
+mod takeoff_acceleration;
+mod takeoff_roll;
+
+/// The engine the mission-physics fixtures fly: the catalogue engine uprated by
+/// 25 %. The fixtures pair a synthetic generic polar with the speed ladders of
+/// the default and registered configurations, whose low-altitude climbs at
+/// 240-250 m/s calibrated airspeed need more thrust than the Jenkinson-chart
+/// maximum-climb rating gives the catalogue ratings (the Howe anchor with the
+/// Bartel-Young lapse overstated that rating by 13-19 % at low altitude). The
+/// tests check conservation, convergence and the schedule logic, not a rating:
+/// "the values are fixture inputs, not references".
+#[cfg(test)]
+pub(crate) fn fixture_engine(engine: &alas_config::EngineConfig) -> alas_config::EngineConfig {
+    let mut engine = engine.clone();
+    // The fixtures are synthetic: no engine anchor (the catalogue cruise point
+    // becomes a class statistic for the deck).
+    if let Some(turbofan) = engine.turbofan.as_mut() {
+        turbofan.off_design.evidence = "openap-static-fallback".to_owned();
+    }
+    // Turboprops are power-rated (zero thrust): their deck is not a jet deck.
+    let rated_kn = engine.thrust_kn();
+    if rated_kn > 0.0 {
+        engine
+            .set_thrust_kn(1.25 * rated_kn)
+            .unwrap_or_else(|error| panic!("fixture engine: {error}"));
+    }
+    engine
+}
 
 #[cfg(test)]
 mod tests {
@@ -548,7 +586,7 @@ mod tests {
             .unwrap_or_else(|failure| panic!("geometry: {}", failure.reason));
         let req = &config.requirements;
         let deck = PropulsionDeck::from_engine(
-            &config.geometry.engine,
+            &fixture_engine(&config.geometry.engine),
             req.cruise_mach,
             req.cruise_altitude_m,
             max_climb_rate_ft_min(config.mission.profile.initial_climb_rate_m_s),
@@ -629,15 +667,14 @@ mod tests {
     }
 
     /// The default widebody cannot hold its configured FL390 at MTOW on the
-    /// fixture polar (211 kN required in level flight against 194 kN of
-    /// maximum-cruise thrust), and the 300 ft/min residual-climb rule admits
-    /// FL390 only near 80 % MTOW, so the residual-climb policy starts the
-    /// MTOW trip lower. The conservation checks run where the configured
-    /// level qualifies.
+    /// fixture polar and engine, and the 300 ft/min residual-climb rule
+    /// admits FL390 only at part load, so the residual-climb policy starts
+    /// the MTOW trip lower. The conservation checks run at 75 % of MTOW,
+    /// where the configured level qualifies.
     #[test]
     fn a_design_range_trip_flies_the_configured_altitude_and_conserves_mass_energy_and_time() {
         let (model, mtow) = model();
-        let mass = 0.8 * mtow;
+        let mass = 0.75 * mtow;
         let flown = model.fly_trip(mass, 3.0e6).unwrap();
         assert!(flown.leg.fuel_kg > 0.0 && flown.leg.fuel_kg < mass);
         assert!(flown.leg.time_s > 0.0);
@@ -831,7 +868,7 @@ mod tests {
     /// the empirical turbofan deck's Mach domain up to the fixture's cruise
     /// altitude, not sourced operating speeds of any aircraft. They exercise
     /// the CAS ladders end to end (fuel, time, distance). The returned mass
-    /// is 80 % MTOW: at MTOW the fixture cannot climb to its declared FL390
+    /// is 75 % MTOW: at MTOW the fixture cannot climb to its declared FL390
     /// on the maximum-climb rating even at the 0.5 m/s floor rate, and the
     /// declared policy does not lower a level for a climb shortfall.
     fn calibrated_model() -> (SegmentMissionModel, f64) {
@@ -851,7 +888,7 @@ mod tests {
         p.descent_4_air_speed_m_s = 110.0;
         p.landing_air_speed_m_s = 75.0;
         model.validate().expect("a valid calibrated profile");
-        (model, 0.8 * mtow)
+        (model, 0.75 * mtow)
     }
 
     /// The CAS sub-rung count is a discretization of the flown mission, not
@@ -899,11 +936,21 @@ mod tests {
             .expect("the calibrated widebody trip flies");
         assert_ledger_closes(&reference);
         assert!(!reference.adapted);
-        // Every sub-rung boundary books its speed change. The net kinetic
-        // term is negative for this fixture, which lands slower (75 m/s) than
-        // it lifts off (128.6 m/s), and nothing is left unrealized beyond the
+        // Every sub-rung boundary books its speed change. Apart from the
+        // acceleration from the take-off safety speed to the climb speed,
+        // which the leg opens with, the net kinetic term is negative for this
+        // fixture, which lands slower (75 m/s) than it climbs out
+        // (128.6 m/s), and nothing is left unrealized beyond the
         // integrator's own bound.
-        assert!(reference.ledger.kinetic_energy_j < 0.0);
+        let acceleration = model
+            .takeoff_acceleration(
+                model.departure_elevation_m,
+                mass,
+                model.profile.takeoff_air_speed_m_s,
+            )
+            .expect("the take-off acceleration of the calibrated widebody");
+        assert!(acceleration.ledger.kinetic_energy_j > 0.0);
+        assert!(reference.ledger.kinetic_energy_j - acceleration.ledger.kinetic_energy_j < 0.0);
         assert!(
             reference.ledger.unrealized_kinetic_j.abs()
                 <= 1.0e-3 * reference.ledger.propulsive_work_j
@@ -1158,11 +1205,10 @@ mod tests {
             model.clean_cd(0.5, 0.5, 10_000.0),
             polar.cd(0.5, 0.5, 10_000.0)
         );
-        // At MTOW the fixture cannot hold FL390 on maximum-cruise thrust
-        // (211 kN required, 194 kN available); cruise is priced at the same
-        // 80 % MTOW as the hold.
-        let cruise = model.cruise_fuel_flow_kg_s(0.8 * mtow).unwrap();
-        let holding = model.holding_fuel_flow_kg_s(0.8 * mtow, 457.2).unwrap();
+        // At MTOW the fixture cannot hold FL390 on maximum-cruise thrust;
+        // cruise is priced at 75 % MTOW, as the hold.
+        let cruise = model.cruise_fuel_flow_kg_s(0.75 * mtow).unwrap();
+        let holding = model.holding_fuel_flow_kg_s(0.75 * mtow, 457.2).unwrap();
         let taxi = model.taxi_fuel_flow_kg_s().unwrap();
         assert!(cruise > 0.0 && holding > 0.0 && taxi > 0.0);
         assert!(taxi < cruise);

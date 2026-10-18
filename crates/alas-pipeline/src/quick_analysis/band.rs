@@ -97,7 +97,7 @@ pub fn design_mission_band_check(
         return DesignMissionBand::unavailable("usable fuel capacity is unavailable");
     };
     let model = match report_mission_model(config, report) {
-        Ok(model) => model,
+        Ok(model) => model.for_range_search(),
         Err(reason) => return DesignMissionBand::unavailable(reason),
     };
     let taxi_kg = match model.taxi_fuel_flow_kg_s() {

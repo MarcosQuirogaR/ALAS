@@ -189,7 +189,9 @@ pub struct AppState {
     pub run_log_search: String,
     /// Severity visibility toggles for the run-log toolbar.
     pub run_log_show_info: bool,
+    /// Whether warning-level run-log lines are shown.
     pub run_log_show_warn: bool,
+    /// Whether error-level run-log lines are shown.
     pub run_log_show_error: bool,
     /// Feedback from the most recent run-log export.
     pub run_log_export_status: Option<String>,
@@ -199,6 +201,8 @@ pub struct AppState {
     pub run_log_height: f32,
     /// Whether the guided-workspace run-log dock is visible.
     pub run_log_open: bool,
+    /// `requirements.cruise_mach` at the previous edit (cruise-speed follow-Mach sync).
+    pub(crate) synced_cruise_mach: Option<f64>,
     /// The current validation findings.
     pub validation_findings: Vec<ValidationIssue>,
     /// The preview figure selected in the dock's exterior tab.
@@ -309,6 +313,7 @@ impl Default for AppState {
         let tool_locator = ToolLocator::for_current_process();
         let tool_preferences = tool_locator.load_preferences();
         let mut config = AlasConfig::default();
+        crate::config_edit::apply_interactive_solver(&mut config);
         apply_tool_preferences(&mut config, &tool_preferences);
         let schema = config.schema();
         let config_values = crate::config_edit::full_config_values(&config);
@@ -419,6 +424,7 @@ impl Default for AppState {
             run_log_tab: RunLogTab::Console,
             run_log_height: 220.0,
             run_log_open: false,
+            synced_cruise_mach: None,
             validation_findings: findings,
             selected_preview_id: "exterior_3d".to_owned(),
             preview_scene: None,

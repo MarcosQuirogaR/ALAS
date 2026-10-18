@@ -65,8 +65,19 @@ pub(crate) struct PlanformProjection {
     kink_fraction: f64,
     /// `(span fraction, chord ratio)` of a pinned side-of-body station.
     side_of_body: Option<(f64, f64)>,
+    /// Span fraction of the side-of-body station, pinned chord ratio or not.
+    side_fraction: f64,
+    /// `wing_span_m(span) - span`, m: minus twice the reach of a wingtip
+    /// device whose published span is the design span, else 0. The builder's
+    /// semispan is `(span + span_offset_m) / 2`.
+    span_offset_m: f64,
+    /// Drawn inboard leading-edge sweep, deg, when the wing carries one.
+    inboard_sweep_deg: Option<f64>,
     area_limit_m2: f64,
     coupling: Option<CoupledGeometry>,
+    /// `(start span fraction, chord at the extreme tip)` of a swept-back tip: the design
+    /// tip chord is then the one the straight edges reach, and the rake cuts the corner.
+    rake: Option<(f64, f64)>,
 }
 
 impl PlanformProjection {
@@ -91,11 +102,22 @@ impl PlanformProjection {
                 root,
                 kink_fraction,
                 side_of_body,
+                side_fraction,
+                span_offset_m: wing.wing_span_m(0.0),
+                inboard_sweep_deg: wing.inboard_le_sweep_deg.filter(|_| {
+                    wing.side_of_body_span_fraction.is_some() || wing.kink_span_fraction.is_some()
+                }),
                 area_limit_m2: config
                     .requirements
                     .max_wing_area_m2
                     .min(config.requirements.mtow_kg / config.requirements.min_wing_loading_kg_m2),
                 coupling: CoupledGeometry::new(config),
+                rake: wing
+                    .tip_rake_start_span_fraction
+                    .zip(wing.tip_rake_tip_chord_m)
+                    .filter(|(start, chord)| {
+                        *start > kink_fraction && *start < 1.0 && *chord > 0.0
+                    }),
             })
     }
 
@@ -111,10 +133,11 @@ impl PlanformProjection {
         let lower = self.root.0.max(kink_chord / ratio);
         let upper = {
             let inboard = self.side_of_body.map_or(0.0, |(fraction, _)| fraction);
-            let run = (self.kink_fraction - inboard) * span / 2.0;
+            let run = (self.kink_fraction - inboard) * self.semispan_m(span);
+            let inboard_sweep = self.inboard_sweep_deg.unwrap_or(sweep);
             self.root
                 .1
-                .min((run * sweep.to_radians().tan() + kink_chord) / ratio)
+                .min((run * inboard_sweep.to_radians().tan() + kink_chord) / ratio)
         };
         (lower.is_finite() && upper.is_finite() && lower <= upper).then_some((lower, upper))
     }
@@ -129,15 +152,61 @@ impl PlanformProjection {
         }
     }
 
-    /// Full projected planform area, m^2, integrating the linear chords on both sides.
+    /// Semispan of the built wing proper for a design-vector span, m
+    /// (`WingConfig::wing_span_m`: a device counted in the span shortens it).
+    fn semispan_m(&self, design_span_m: f64) -> f64 {
+        (design_span_m + self.span_offset_m) / 2.0
+    }
+
+    /// The builder's planform stations `(y, chord)`, m, root to extreme tip
+    /// (`WingConfig::transport_planform`): the side-of-body chord is the pinned
+    /// ratio of the root chord, or else the root-to-kink interpolation clipped
+    /// so that its trailing edge stays aft of the kink's (unswept inboard TE)
+    /// and not below the kink chord.
+    fn stations(&self, point: &[f64]) -> Vec<(f64, f64)> {
+        let semispan = self.semispan_m(point[SPAN]);
+        let (root, kink_chord, tip_chord) = (point[ROOT_CHORD], point[KINK_CHORD], point[3]);
+        let kink_y = self.kink_fraction * semispan;
+        let mut stations = vec![(0.0, root)];
+        if self.side_fraction > 0.0 {
+            let side_y = self.side_fraction * semispan;
+            let chord = match self.side_of_body {
+                Some((_, ratio)) => ratio * root,
+                None => {
+                    let tan = self
+                        .inboard_sweep_deg
+                        .unwrap_or(point[SWEEP])
+                        .to_radians()
+                        .tan();
+                    let interpolated =
+                        root + (self.side_fraction / self.kink_fraction) * (kink_chord - root);
+                    interpolated
+                        .min((kink_y - side_y) * tan + kink_chord)
+                        .max(kink_chord)
+                }
+            };
+            stations.push((side_y, chord));
+        }
+        stations.push((kink_y, kink_chord));
+        if let Some((start, final_chord)) = self.rake {
+            let t = (start - self.kink_fraction) / (1.0 - self.kink_fraction);
+            stations.push((start * semispan, kink_chord + t * (tip_chord - kink_chord)));
+            stations.push((semispan, final_chord));
+        } else {
+            stations.push((semispan, tip_chord));
+        }
+        stations
+    }
+
+    /// Full projected planform area of the drawn wing, m^2: the builder's
+    /// `TransportPlanform::reference_area_m2` (the main wing's `projected_area`).
+    /// The reference area `s_ref` follows `ReferenceWingMode` (Published,
+    /// Trapezoid or Drawn) and is read from the planform by the pre-gate, not here.
     pub(super) fn area_m2(&self, point: &[f64]) -> f64 {
-        let (side, ratio) = self.side_of_body.unwrap_or((0.0, 1.0));
-        let kink = self.kink_fraction;
-        let root_weight = side * (1.0 + ratio) + (kink - side) * ratio;
-        point[SPAN] / 2.0
-            * (root_weight * point[ROOT_CHORD]
-                + (1.0 - side) * point[KINK_CHORD]
-                + (1.0 - kink) * point[3])
+        self.stations(point)
+            .windows(2)
+            .map(|pair| (pair[0].1 + pair[1].1) * (pair[1].0 - pair[0].0))
+            .sum()
     }
 
     pub(super) fn area_limit_m2(&self) -> f64 {
@@ -157,19 +226,12 @@ impl PlanformProjection {
     }
 
     pub(super) fn outboard_span_m(&self, point: &[f64]) -> f64 {
-        (1.0 - self.kink_fraction) * point[0] / 2.0
+        (1.0 - self.kink_fraction) * self.semispan_m(point[SPAN])
     }
 
     /// Semispan integrals of chord, y*chord and chord^2: m^2, m^3, m^3.
     pub(super) fn chord_integrals(&self, point: &[f64]) -> (f64, f64, f64) {
-        let (side, ratio) = self.side_of_body.unwrap_or((0.0, 1.0));
-        let semispan = point[0] / 2.0;
-        let stations = [
-            (0.0, point[1]),
-            (side * semispan, ratio * point[1]),
-            (self.kink_fraction * semispan, point[2]),
-            (semispan, point[3]),
-        ];
+        let stations = self.stations(point);
         stations.windows(2).fold((0.0, 0.0, 0.0), |sum, pair| {
             let ((y0, c0), (y1, c1)) = (pair[0], pair[1]);
             let span = y1 - y0;
@@ -203,8 +265,12 @@ mod tests {
             root: (2.0, 6.0),
             kink_fraction: 0.4,
             side_of_body: None,
+            side_fraction: 0.0,
+            span_offset_m: 0.0,
+            inboard_sweep_deg: None,
             area_limit_m2: 100.0,
             coupling: None,
+            rake: None,
         };
         let mut point = [0.0; 16];
         point[..5].copy_from_slice(&[20.0, 4.0, 2.0, 1.0, 30.0]);

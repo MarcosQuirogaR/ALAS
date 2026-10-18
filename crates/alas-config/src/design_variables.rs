@@ -98,6 +98,12 @@ macro_rules! design_space {
                 #[doc = $description]
                 pub $name: f64,
             )*
+            /// Takeoff mass chosen by the search, kg, under the MTOW band mode
+            /// (`MtowSizing::MtowBand`): the 17th element of the flat vector,
+            /// absent (`None`) for every other mode. It is not one of the
+            /// sixteen geometric variables in [`SPECS`].
+            #[serde(default, skip_serializing_if = "Option::is_none")]
+            pub mtow_kg: Option<f64>,
         }
 
         /// Every design variable, in the order of the flat optimizer vector.
@@ -120,24 +126,27 @@ macro_rules! design_space {
 
         impl Default for DesignVector {
             fn default() -> Self {
-                Self { $( $name: $default, )* }
+                Self { $( $name: $default, )* mtow_kg: None }
             }
         }
 
         impl DesignVector {
             /// Flatten to the ordered vector the optimizer operates on.
             pub fn to_array(&self) -> Vec<f64> {
-                vec![ $( self.$name, )* ]
+                let mut values = vec![ $( self.$name, )* ];
+                values.extend(self.mtow_kg);
+                values
             }
 
             /// Rebuild a named vector from a flat one.
             ///
             /// # Errors
             ///
-            /// [`DesignVectorError`] when the length does not match the
-            /// design space. Upstream raises for the same input.
+            /// [`DesignVectorError`] when the length is neither the design space's
+            /// nor one more (the MTOW band mode's takeoff mass, `mtow_kg`).
+            /// Upstream raises for the same input.
             pub fn from_array(values: &[f64]) -> Result<Self, DesignVectorError> {
-                if values.len() != SPECS.len() {
+                if values.len() != SPECS.len() && values.len() != SPECS.len() + 1 {
                     return Err(DesignVectorError {
                         expected: SPECS.len(),
                         actual: values.len(),
@@ -152,7 +161,8 @@ macro_rules! design_space {
                     index += 1;
                     value
                 };
-                Ok(Self { $( $name: next(), )* })
+                let named = Self { $( $name: next(), )* mtow_kg: None };
+                Ok(Self { mtow_kg: values.get(SPECS.len()).copied(), ..named })
             }
         }
     };
@@ -184,6 +194,26 @@ design_space! {
 }
 
 impl DesignVector {
+    /// Whether the two vectors describe the same airframe geometry: all
+    /// sixteen variables equal, whatever takeoff mass `mtow_kg` each carries.
+    /// The test for "this is the registered aircraft's vector", which a band
+    /// mass must not turn into a redesigned candidate.
+    pub fn same_geometry(&self, other: &Self) -> bool {
+        Self {
+            mtow_kg: None,
+            ..*self
+        } == Self {
+            mtow_kg: None,
+            ..*other
+        }
+    }
+
+    /// The band takeoff mass, kg, a flat vector carries beyond the sixteen
+    /// geometric variables (`None` for a 16-element vector).
+    pub fn band_mass_of(values: &[f64]) -> Option<f64> {
+        values.get(SPECS.len()).copied()
+    }
+
     /// The `(lower, upper)` bounds, in vector order.
     pub fn bounds() -> Vec<(f64, f64)> {
         SPECS.iter().map(|spec| (spec.lower, spec.upper)).collect()

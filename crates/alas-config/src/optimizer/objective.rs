@@ -71,12 +71,13 @@ pub enum MtowSizing {
     /// sizing mode for producing a certifiable design against a declared
     /// requirement.
     Unconstrained,
-    /// The takeoff mass is closed on the design mission (design range at
-    /// design payload, with the fuel-policy reserves), seeded at the MTOW
-    /// target `T` and clamped at `T (1 + p)`. A closure outside
-    /// `[T (1 - p), T (1 + p)]` is rejected on either side; inside the band
-    /// nothing pulls it toward `T`. The selected route is then flown
-    /// off-design at the closed mass as a check.
+    /// A relaxation of `FixedRequirement`: the takeoff mass is a design
+    /// variable `m` in `[T (1 - p), T (1 + p)]`, seeded at the target `T`.
+    /// Everything that depends on the takeoff mass (structure, gear, loads,
+    /// fuel cap, field performance) is evaluated at `m` exactly as
+    /// `FixedRequirement` evaluates it at the requirement, so a design
+    /// feasible there at `m` is feasible here with the same constraint
+    /// values. The mission must fit under `m` (fuel capped at the tanks).
     MtowBand,
     /// The takeoff mass is closed with no ceiling at the configured payload
     /// on the selected route, or on the design range when one is set, with
@@ -118,14 +119,22 @@ impl MtowSizing {
     /// Whether the mode closes the takeoff mass on a mission rather than
     /// taking it as the requirement value.
     pub const fn closes_mass(self) -> bool {
-        !matches!(self, Self::FixedRequirement)
+        !self.sizes_at_declared_mass()
+    }
+
+    /// Whether the mode evaluates the aircraft at a declared takeoff mass in
+    /// one pass: `FixedRequirement` at the requirement, `MtowBand` at the
+    /// band mass `m` the search chose (the same path with `m` in place of
+    /// the requirement).
+    pub const fn sizes_at_declared_mass(self) -> bool {
+        matches!(self, Self::FixedRequirement | Self::MtowBand)
     }
 
     /// Whether the mode is evaluated by the mission-sized closure under
     /// every optimizer method. The two design modes are; the three original
     /// modes keep the reference replay under the legacy profile.
     pub const fn requires_mission_sized_evaluation(self) -> bool {
-        matches!(self, Self::MtowBand | Self::PayloadAdjusted)
+        matches!(self, Self::PayloadAdjusted)
     }
 }
 
@@ -159,7 +168,7 @@ pub struct ObjectiveConfig {
     #[config(
         options = MtowSizing,
         label = "Takeoff mass sizing",
-        help = "Whether the maximum takeoff mass is the fixed requirement value, is iterated by the mission up to the requirement value, or is iterated by the mission with the requirement used only to seed the first pass. Sizing by mission makes the structural mass follow the closed takeoff mass, which is what lets a lighter wing pay for itself. Unconstrained runs the same mission-sized iteration with the requirement dropped as a ceiling after the seed, for asking what the closure converges to on its own rather than for producing a design bounded by a declared requirement. MTOW band closes the takeoff mass on the design mission (design range at design payload, with reserves), rejects a closure outside the target plus or minus the band fraction, and then flies the selected route off-design at the closed mass as a check. Payload adjusted closes it with no ceiling at the configured payload on the route, or on the design range when one is set. In both design modes the structure is sized at the closed mass."
+        help = "Whether the maximum takeoff mass is the fixed requirement value, is iterated by the mission up to the requirement value, or is iterated by the mission with the requirement used only to seed the first pass. Sizing by mission makes the structural mass follow the closed takeoff mass, which is what lets a lighter wing pay for itself. Unconstrained runs the same mission-sized iteration with the requirement dropped as a ceiling after the seed, for asking what the closure converges to on its own rather than for producing a design bounded by a declared requirement. MTOW band relaxes the fixed requirement: the takeoff mass becomes a design variable inside the target plus or minus the band fraction, and the aircraft is evaluated at the chosen mass exactly as the fixed requirement evaluates it at its own value, so a design feasible at a fixed mass inside the band stays feasible here. Payload adjusted closes the takeoff mass with no ceiling at the configured payload on the route, or on the design range when one is set, with the structure sized at the closed mass."
     )]
     pub mtow_sizing: MtowSizing,
 
@@ -167,14 +176,14 @@ pub struct ObjectiveConfig {
     #[config(
         label = "MTOW target",
         unit = "kg",
-        help = "Centre of the MTOW band: the takeoff mass the design mission is expected to close at. Zero uses the requirement MTOW. Read only by the MTOW band mode."
+        help = "Centre of the MTOW band: the search starts at this takeoff mass, and the band extends by the band fraction on either side. Zero uses the requirement MTOW. Read only by the MTOW band mode."
     )]
     pub mtow_target_kg: f64,
 
     /// Half-width of the MTOW band as a fraction of its target.
     #[config(
         label = "MTOW band fraction",
-        help = "Half-width of the MTOW band as a fraction of the target: a closed takeoff mass below the target times one minus this fraction, or above the target times one plus it, is rejected. Inside the band the closure is free and nothing pulls it toward the target. Read only by the MTOW band mode."
+        help = "Half-width of the MTOW band as a fraction of the target: the search may choose any takeoff mass from the target times one minus this fraction to the target times one plus it, and nothing pulls it toward the target beyond the structural mass it saves. Read only by the MTOW band mode."
     )]
     pub mtow_band_fraction: f64,
 
@@ -254,10 +263,11 @@ impl Default for ObjectiveConfig {
 
 /// Default half-width of the MTOW band, as a fraction of the target.
 ///
-/// Engineering estimate: plus or minus five per cent is of the order of the
-/// MTOW step between successive weight variants of one transport type, so a
-/// closure outside it describes a different variant from the targeted one.
-pub const DEFAULT_MTOW_BAND_FRACTION: f64 = 0.05;
+/// Engineering estimate (owner decision 2026-10-15): plus or minus ten per cent
+/// spans the MTOW steps between successive weight variants of one transport
+/// type, so the search can trade structure against mission capability across
+/// them.
+pub const DEFAULT_MTOW_BAND_FRACTION: f64 = 0.10;
 
 impl ObjectiveConfig {
     /// Reject values the sizing loop cannot run with.

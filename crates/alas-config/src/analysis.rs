@@ -178,6 +178,14 @@ pub struct AnalysisConfig {
     )]
     pub include_fuselage_stability: bool,
 
+    /// Whether the trim attitude is solved on the Goethert-stretched lattice.
+    #[serde(default = "default_compressible_trim", skip_serializing_if = "is_true")]
+    #[config(
+        label = "Compressible trim (Goethert stretch)",
+        help = "Solve the cruise trim attitude (body angle of attack, stabilizer incidence, lift and moment slopes, neutral point) on the Goethert/Prandtl-Glauert stretched lattice at the cruise Mach, the same transform the neutral-point conditions use. Off keeps the incompressible lattice relabelled by the Prandtl-Glauert factor, which understates the lift slope by about 30 % at Mach 0.78 and overstates the body angle by 1 to 1.5 degrees. Drag always comes from the incompressible lattice."
+    )]
+    pub compressible_trim: bool,
+
     /// Lower lift-coefficient bound of the drag-polar fit window.
     #[config(
         label = "Drag-polar fit window: CL minimum",
@@ -234,6 +242,14 @@ fn default_avl_timeout_s() -> f64 {
     600.0
 }
 
+fn default_compressible_trim() -> bool {
+    true
+}
+
+fn is_true(value: &bool) -> bool {
+    *value
+}
+
 impl Default for AnalysisConfig {
     fn default() -> Self {
         Self {
@@ -254,6 +270,7 @@ impl Default for AnalysisConfig {
             autobalance_alpha_high_deg: 2.0,
             tail_efficiency: 0.90,
             include_fuselage_stability: true,
+            compressible_trim: true,
             polar_fit_cl_min: 0.3,
             polar_fit_cl_max: 0.6,
             polar_fit_cl_min_fallback: 0.1,

@@ -96,7 +96,10 @@ pub(crate) fn cruise_condition_with_geometry(
         return Err("aircraft geometry has no wings".to_string());
     }
     let wing = &plane.wings[0];
-    let mac = wing.mean_aerodynamic_chord();
+    let mac = match geometry {
+        ScreeningGeometry::Product => wing.reference_mac(),
+        ScreeningGeometry::ReferenceCompatibility => wing.mean_aerodynamic_chord(),
+    };
     let s = match geometry {
         ScreeningGeometry::Product => wing.reference_area(),
         // The compatibility scorer intentionally replays the

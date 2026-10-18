@@ -269,6 +269,10 @@ pub struct RunManifest {
     pub stage_totals_ms: BTreeMap<String, u64>,
     /// Search dispatch and cost, when the run optimized.
     pub search: Option<SearchManifest>,
+    /// External-tool throughput profile; `reduced` marks a run whose VSPAERO,
+    /// MSES and AVL sweeps are not full fidelity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_profile: Option<crate::tool_profile::ToolProfileStatus>,
 }
 
 impl RunManifest {
@@ -357,6 +361,7 @@ impl RunManifest {
             stages,
             stage_totals_ms,
             search,
+            tool_profile: Some(result.execution.tool_profile.clone()),
         }
     }
 

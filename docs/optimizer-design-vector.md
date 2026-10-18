@@ -41,6 +41,11 @@ configured".
 
 ## The sixteen design variables
 
+The MTOW band mode appends a seventeenth coordinate to the flat vector, the
+takeoff mass `m` in kg (`DesignVector::mtow_kg`, bounded by `[T (1 - p), T (1 + p)]`,
+seeded at `T`). It is not one of the sixteen geometric variables below: it is
+`None` and absent from the vector in every other mode.
+
 `default` is the shipped nominal. `lower`/`upper` are the clean-sheet search
 bounds. `preset lower`/`preset upper` are the wider guardrails a registered
 preset may be adapted within (`DesignVariableSpec::preset_lower`,
@@ -49,9 +54,9 @@ preset may be adapted within (`DesignVariableSpec::preset_lower`,
 | # | Component | Unit | Default | Lower | Upper | Preset lower | Preset upper | Meaning and sign |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | 1 | `span_m` | m | 71.75 | 60.0 | 80.0 | 20.0 | 90.0 | Full projected wingspan, tip to tip, so twice the semi-span. Always positive. |
-| 2 | `root_chord_m` | m | 16.50 | 12.0 | 19.0 | 3.0 | 26.0 | Streamwise chord at the wing root. |
+| 2 | `root_chord_m` | m | 16.50 | 12.0 | 19.0 | 2.0 | 26.0 | Streamwise chord at the wing root. |
 | 3 | `break_chord_m` | m | 7.80 | 6.0 | 10.0 | 2.0 | 14.0 | Chord at the trailing-edge break (yehudi). |
-| 4 | `tip_chord_m` | m | 1.60 | 1.0 | 3.0 | 0.5 | 4.0 | Chord at the wing tip. |
+| 4 | `tip_chord_m` | m | 1.60 | 1.0 | 3.0 | 0.5 | 5.0 | Chord at the wing tip. |
 | 5 | `sweep_deg` | deg | 34.00 | 25.0 | 45.0 | 0.0 | 45.0 | Inboard **leading-edge** sweep. **Positive is aft**, matching `WingConfig`. |
 | 6 | `tip_twist_deg` | deg | 0.00 | -5.0 | 1.0 | -5.0 | 2.0 | Incidence of the tip section, **absolute** and **positive nose-up**, not a washout relative to the root: the built washout is this value minus the root (and break) incidence of the geometry. Every spanwise run must be non-increasing toward the tip, so the tip may not sit above the break incidence. |
 | 7 | `wing_x_shift_m` | m | 0.00 | -5.0 | 8.0 | -10.0 | 5.0 | Longitudinal shift of the wing root along `x`, for CG balance. **Positive moves the wing aft.** |
@@ -135,13 +140,14 @@ Every kernel receives `(lower, upper)` per component and must keep every
 evaluated candidate inside them. Two repairs are used, deliberately
 different:
 
-- **Reflection** for a mutant a difference vector pushed out of the box
-  (`constrained_de::reflect_into_bounds`). A component that overshoots by a
-  little lands a little inside the bound it crossed. The fold is a pure
-  function of the mutant, so repair does not consume the random generator and
-  a seeded run replays exactly.
-- **Clamping** for a caller-supplied starting point
-  (`constrained_de::clamp_into_bounds`). The nearest admissible design is the
+- **Midpoint repair** for a trial component a difference vector pushed out of
+  the box (`search_methods::lshade_de_ops::repair_midpoint`). A component
+  outside a bound is placed halfway between the crossed bound and the
+  parent's value. The repair is a pure function of the mutant and the parent,
+  so it does not consume the random generator and a seeded run replays
+  exactly.
+- **Clamping** for a caller-supplied starting point or seed
+  (`search_methods::clamp_to_bounds`). The nearest admissible design is the
   honest repair for a point that was chosen deliberately.
 
 Non-finite values fail closed to the lower bound rather than propagating.
@@ -174,6 +180,28 @@ global box for the rest. Every window contains every registered turbofan
 (a unit test checks it). A cabin-sized fuselage is solved over
 `[nose + tail cone + diameter, 90 m]` rather than the global 65-85 m. A
 registered preset, or a brief equal to the shipped one, is unaffected.
+
+A brief whose `engine_name` is a turboprop takes the regional turboprop
+class instead of the turbofan fleet and the jet defaults
+(`alas_config::clean_sheet::turboprop_class`; values, pages and the
+sources are in that module's documentation). The class is the median of the
+four regional turboprop transports whose entries state the quantity in
+Jane's 2008-2009 (ATR 42-500, ATR 72-500, Dash 8-300, Dash 8 Q400):
+
+| Quantity | Value |
+|---|---|
+| Aspect ratio, wing loading | 12.40, 355 kg/m2 (area `S = MTOW / 355`), floor 331.7 kg/m2 |
+| Planform | constant-chord centre section (break chord = root), tip/root 0.584, straight |
+| Section | NACA 23018 / 23012, conventional class, centre-section incidence 2 deg |
+| Engine station | 0.317 semispan |
+| High lift | `CLmax` take-off 2.07, landing 2.71 (Sadraey Table 5.14, double-slotted flaps) |
+| Ultimate load factor | `1.5 n`, `n = 2.1 + 24000/(W + 10000)` in [2.5, 3.8], `W` the MTOW in lb (14 CFR 25.337(b); 3.75 above 50,000 lb; evaluated at the brief's MTOW, while the envelope check reads the closed mass) |
+| FLOPS block | `VMAX` 1.25 cruise Mach, attendants `ceil(seats/50)`, two tanks, no APU, bulk holds, short/medium haul, `FMXTOT` 0.242 MTOW, certified ceiling 7,620 m |
+| Route | the curated pair of ordinary aerodromes whose longest generated route (great circle times `mission.max_airway_stretch`) is nearest below the design range, when no airport is named |
+
+Explicit keys still win. The engine is the catalogue entry named by the
+brief (engine scaling is not a design freedom), so installed power is fixed
+by that choice; no class relation sizes it.
 
 Explicit keys override the derivation variable by variable in any
 clean-sheet run, with or without a preset:
@@ -291,16 +319,20 @@ reducing the configured evaluation ceiling. A feasible search continues within
 the remaining clock budget when later candidates cost less than its pilot;
 the recorded schedule and evaluation prefix still reproduce its trajectory.
 
-## Known gap: no geometric interference constraint
+## Known gap: no full geometric interference constraint
 
-Nothing in the optimizer checks that the wing does not intersect the
+The optimizer does not run a mesh intersection test between wing and
 fuselage. `docs/methods.md` states plainly that the exposed-area correction
 "is not a mesh intersection" and does not resolve dihedral crossing the body
-surface; it is an aerodynamic correction, not a feasibility test. There is
-also no residual relating `wing_x_shift_m` or `tail_x_shift_m` to
-`fuselage_length_m`, so longitudinal placement is bounded only by the
-component ranges above, which are not derived from the fuselage the wing is
-being placed on.
+surface; it is an aerodynamic correction, not a feasibility test. Since the
+layout residuals of `crates/alas-opt/src/mdo/residuals_layout.rs` were added,
+the built geometry is checked for wing root leading and trailing edges on the
+fuselage (`wing_root_le_on_fuselage`, `wing_root_te_on_fuselage`), the wing
+apex fraction (`wing_apex_fraction`) and the wingbox root depth fitting the
+fuselage (`wingbox_root_depth_fits_fuselage`), among others. These are
+hard geometry residuals, but they are band and containment checks on station
+positions, not a surface intersection test, and `tail_x_shift_m` is not
+related to `fuselage_length_m` by a dedicated residual.
 
 The consequence is directional: a search that is better at finding the edges
 of the declared box is also better at finding geometry the box does not

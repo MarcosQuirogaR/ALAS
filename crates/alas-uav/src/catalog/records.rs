@@ -15,10 +15,6 @@ const MULTI_SOURCE_CATALOG_JSON: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/data/multi_source_catalog.json"
 ));
-const APC_PERFORMANCE_CATALOG_JSON: &str = include_str!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/data/apc_performance_catalog.json"
-));
 
 /// A normalized component catalogue.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -118,16 +114,67 @@ pub fn multi_source_catalog() -> Result<&'static Catalog, &'static CatalogError>
         .as_ref()
 }
 
-/// APC propeller records generated from the supplied official performance files.
+/// Propeller records derived from the tables in the user's local data directory.
 ///
-/// These records establish geometry and the existence of a bounded Ct/Cp
-/// table.  They intentionally retain unknown purchased mass, hub geometry,
-/// and non-electric compatibility where the source file does not publish it.
+/// These records establish geometry (from the table title) and the existence of
+/// a bounded Ct/Cp table.  They intentionally leave purchased mass, hub
+/// geometry, and non-electric compatibility unknown.  The catalogue is empty
+/// when no tables are installed (see `propulsion_electric::prop_data`) and is
+/// a snapshot of the directory as read on first use.
 pub fn apc_performance_catalog() -> Result<&'static Catalog, &'static CatalogError> {
-    static CATALOG: OnceLock<Result<Catalog, CatalogError>> = OnceLock::new();
-    CATALOG
-        .get_or_init(|| Catalog::from_json(APC_PERFORMANCE_CATALOG_JSON))
+    let loaded = crate::propulsion_electric::prop_data::loaded_prop_tables();
+    loaded
+        .catalog
+        .get_or_init(|| {
+            let known = multi_source_catalog().map_err(|error| (*error).clone())?;
+            let covered = |id: &str| {
+                let stripped = id.strip_suffix('e').unwrap_or(id);
+                [id, stripped]
+                    .into_iter()
+                    .any(|key| known.get(key).is_some() || known.get(&format!("{key}e")).is_some())
+            };
+            let records = loaded
+                .tables
+                .iter()
+                .filter(|table| !covered(table.propeller_id()))
+                .map(derived_propeller_record)
+                .collect();
+            let catalog = Catalog {
+                schema_version: 1,
+                records,
+            };
+            catalog.validate()?;
+            Ok(catalog)
+        })
         .as_ref()
+}
+
+fn derived_propeller_record(
+    table: &crate::propulsion_electric::PropellerPerformanceMap,
+) -> ComponentRecord {
+    ComponentRecord {
+        id: table.propeller_id().to_owned(),
+        manufacturer: "APC Propellers".to_owned(),
+        model: table.model().to_owned(),
+        kind: ComponentKind::Propeller(PropellerSpec {
+            diameter_m: Some(table.diameter_m()),
+            pitch_m: Some(table.pitch_m()),
+            blade_count: None,
+            mass_kg: None,
+            bore_diameter_m: None,
+            electric_compatible: table.model().to_ascii_uppercase().contains('E').then_some(true),
+        }),
+        provenance: Provenance {
+            publisher: "APC Propellers".to_owned(),
+            source_url: "https://www.apcprop.com/technical-information/performance-data/".to_owned(),
+            source_title: format!("APC performance data: {}", table.source_file()),
+            transformations: vec![
+                "diameter and pitch multiplied by 0.0254 from the performance-file title in inches to m".to_owned(),
+                "Ct/Cp tables are read from the user's local propeller data directory without extrapolation".to_owned(),
+                "E-series electric compatibility is retained only when the model designation contains E; other compatibility fields remain absent".to_owned(),
+            ],
+        },
+    }
 }
 
 /// Merge the reviewed RC Innovations records with the independently sourced

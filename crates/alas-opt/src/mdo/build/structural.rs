@@ -35,7 +35,7 @@ fn structural_failure() -> CandidateFailure {
 /// candidate geometry. Those have opposite remedies.
 ///
 /// Each reason's stable `as_str()` name becomes the rejection label, so
-/// `OptimizationHistory::reject_reason_counts` separates them. The first
+/// the reject-reason grouping separates them. The first
 /// blocker is the one named: the reasons are accumulated in a fixed
 /// evaluation order, so it is the earliest invariant that failed rather than
 /// an arbitrary pick.
@@ -75,7 +75,7 @@ fn product_mass_failure(error: &ComponentMassError) -> CandidateFailure {
 /// candidate pays nothing for it.
 ///
 /// A missing main-gear station rejects the candidate and
-/// `OptimizationHistory::reject_reason_counts` separates it from every other coordinate failure, which is what tells a
+/// the reject-reason grouping separates it from every other coordinate failure, which is what tells a
 /// reviewer to register the aircraft's published gear stations rather than to
 /// look for a geometry bug.
 fn mass_coordinate_failure(config: &AlasConfig, plane: &Airplane) -> CandidateFailure {

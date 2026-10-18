@@ -36,8 +36,8 @@ pub(super) fn mass_per_length(
         .map(|j| 2.0 * skin_cover_fraction * sizing.chord[j] * sizing.t_skin * skin_rho)
         .collect();
     for s in &sizing.spars {
-        for (m, (&h, &a)) in m_y.iter_mut().zip(s.h.iter().zip(&s.a_cap)) {
-            *m += s.t_web * h * web_rho + 2.0 * a * cap_rho;
+        for (j, (m, (&h, &a))) in m_y.iter_mut().zip(s.h.iter().zip(&s.a_cap)).enumerate() {
+            *m += s.t_web[j] * h * web_rho + (2.0 * a + s.lower_extra_area[j]) * cap_rho;
         }
     }
     if include_ribs {

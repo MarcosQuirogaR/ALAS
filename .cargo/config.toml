@@ -2,3 +2,13 @@
 # alias is what makes a workspace member reachable under that name.
 [alias]
 xtask = "run --quiet --package xtask --"
+
+# Optional, Windows MSVC only: link with the rust-lld that ships with the
+# toolchain instead of link.exe. It relinked the ~270 test binaries of a
+# workspace test build about twice as fast. It is not enabled here because the
+# release package must keep the reviewed link.exe toolchain; enable it for a
+# development shell with
+#   $env:CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER = "rust-lld"
+# or uncomment the lines below in a user-level ~/.cargo/config.toml.
+# [target.x86_64-pc-windows-msvc]
+# linker = "rust-lld"

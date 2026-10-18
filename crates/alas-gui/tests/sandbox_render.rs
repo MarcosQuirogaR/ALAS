@@ -9,6 +9,10 @@
 //! path tessellation of egui places their feathering vertices at
 //! `normal / |normal|^2`, which is unbounded for a near-reversing corner.
 
+// A test asserts on values it constructed or loaded from a fixture it
+// controls, so a failed unwrap there is the assertion failing.
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 use alas_gui::sandbox::scene::{build_sandbox_scene, SANDBOX_CAMERA_ID};
 use alas_gui::sandbox::viewport::{overlay_rect_tagged, overlay_rects, pointer_over_overlay};
 use alas_gui::sandbox::workspace::show_sandbox_workspace;

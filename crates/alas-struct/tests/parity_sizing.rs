@@ -237,7 +237,12 @@ fn compare(comparison: &mut Comparison, name: &str, got: &WingboxSizing, want: &
             gs.chord_fraction,
             ws.chord_fraction,
         );
-        comparison.scalar(&format!("{sp}.t_web"), gs.t_web, ws.t_web);
+        compare_vec(
+            comparison,
+            &format!("{sp}.t_web"),
+            &gs.t_web,
+            &vec![ws.t_web; gs.t_web.len()],
+        );
         compare_vec(comparison, &format!("{sp}.h"), &gs.h, &ws.h);
         compare_vec(comparison, &format!("{sp}.w_cap"), &gs.w_cap, &ws.w_cap);
         compare_vec(comparison, &format!("{sp}.t_cap"), &gs.t_cap, &ws.t_cap);

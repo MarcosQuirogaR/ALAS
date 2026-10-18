@@ -40,6 +40,9 @@ pub enum MsesStatus {
     Ok,
     /// At least one requested polar point converged, but the sweep is incomplete.
     PartialConvergence,
+    /// Every non-converged point shows separated flow
+    /// ([`MsesPointClass::OutsideValidityDomain`]); usable data, never a pass.
+    OutsideValidityDomain,
     /// The solver ran but did not produce a converged result.
     Error,
 }
@@ -57,6 +60,7 @@ impl MsesStatus {
             Self::ParseFailure => "parse_failure",
             Self::Ok => "ok",
             Self::PartialConvergence => "partial_convergence",
+            Self::OutsideValidityDomain => "outside_validity_domain",
             Self::Error => "error",
         }
     }
@@ -230,6 +234,12 @@ pub struct MsesPolarResult {
     /// anchor instead of starting from a cold clean mesh: see
     /// [`MsesConvergedCheckpoint`] for the identity checks that gate reuse.
     pub checkpoints: Vec<MsesConvergedCheckpoint>,
+    /// Outcome class of every requested angle (parallel to the schedule).
+    pub point_classes: Vec<MsesPointClass>,
+    /// The design (cruise) angle, deg; always one of the requested angles.
+    pub design_alpha_deg: Option<f64>,
+    /// Kink and tip sections at their own chord and Reynolds number.
+    pub span_sections: Vec<MsesSpanSection>,
 }
 
 /// A self-contained snapshot of one genuinely converged MSES solve:
@@ -368,8 +378,10 @@ impl MsesConvergedCheckpoint {
 impl MsesPolarResult {
     /// Whether the result contains converged points that consumers may inspect.
     pub fn has_usable_data(&self) -> bool {
-        matches!(self.status, MsesStatus::Ok | MsesStatus::PartialConvergence)
-            && self.converged_alpha_count > 0
+        matches!(
+            self.status,
+            MsesStatus::Ok | MsesStatus::PartialConvergence | MsesStatus::OutsideValidityDomain
+        ) && self.converged_alpha_count > 0
             && self.transition_model_is_valid()
             && self.has_valid_coefficient_schema()
     }
@@ -470,25 +482,4 @@ impl MsesPolarResult {
         self.error = Some(message);
         self
     }
-}
-
-/// Select the closest genuinely converged checkpoint to `target_alpha_deg` from a
-/// slice of checkpoints, selecting the finite closest using [`f64::total_cmp`].
-///
-/// Returns `None` if `target_alpha_deg` is non-finite or no candidate has a finite angle.
-pub fn select_closest_checkpoint(
-    checkpoints: &[MsesConvergedCheckpoint],
-    target_alpha_deg: f64,
-) -> Option<&MsesConvergedCheckpoint> {
-    if !target_alpha_deg.is_finite() {
-        return None;
-    }
-    checkpoints
-        .iter()
-        .filter(|cp| cp.alpha_deg.is_finite())
-        .min_by(|a, b| {
-            let dist_a = (a.alpha_deg - target_alpha_deg).abs();
-            let dist_b = (b.alpha_deg - target_alpha_deg).abs();
-            dist_a.total_cmp(&dist_b)
-        })
 }

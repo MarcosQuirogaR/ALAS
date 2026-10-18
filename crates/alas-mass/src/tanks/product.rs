@@ -109,7 +109,7 @@ pub fn resolve_product_layout(
     let published_l = preset.and_then(|p| p.reference.usable_fuel_volume_l);
     let density = inventory_density_kg_m3(config);
     let inventory_l = preset.and_then(|p| published_inventory_l(config, p, density));
-    if let Some(preset) = preset.filter(|p| p.design_vector != *design) {
+    if let Some(preset) = preset.filter(|p| !design.same_geometry(&p.design_vector)) {
         let reference = AircraftBuilder::new(Some(config.geometry.clone()))
             .build(Some(&preset.design_vector), false)
             .map_err(|error| {

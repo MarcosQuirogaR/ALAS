@@ -28,16 +28,17 @@
 //! needs the whole floor the multiplier is one and the truncation below is
 //! what decides the count instead.
 
-use std::collections::VecDeque;
-
 use alas_config::{CertifiedExitLayout, PassengerCabinConfig, SeatClassConfig};
 
+mod block;
+
+use self::block::{BlockPlan, STRETCH_BACKOFF_ITERATIONS};
 use super::door_seating::place_declared_deck;
 use super::{
-    abreast, abreast_and_aisles, cabin_deck_segments, ceil_div, effective_pair_capacity,
-    largest_pair_rating, max_certifiable_capacity_reference_compatibility,
-    max_certifiable_capacity_with_source_layout, min_exit_pairs, seat_blocks, select_exit_type,
-    Bay, DeckCapacities, MIN_PITCH, MIN_SEAT_WIDTH, MONUMENT_LEN, SEAT_BOX_H,
+    abreast, cabin_deck_segments, ceil_div, effective_pair_capacity, largest_pair_rating,
+    max_certifiable_capacity_reference_compatibility, max_certifiable_capacity_with_source_layout,
+    min_exit_pairs, seat_blocks, select_exit_type, Bay, DeckCapacities, MIN_PITCH, MIN_SEAT_WIDTH,
+    MONUMENT_LEN, SEAT_BOX_H,
 };
 use crate::geometry::CabinGeometry;
 use crate::layout::{DeckItem, ItemKind, ItemMeta, SeatMeta};
@@ -235,11 +236,44 @@ pub(super) fn place_seats(
         // A fuselage without an under-floor hold stows its baggage on the
         // main deck, in the floor the seats leave: stretching the pitch over
         // it would remove the compartments, so its seats keep their pitch.
-        let pitch_stretch = if sim_len > 0.0 && !main_deck_baggage {
+        let mut pitch_stretch = if sim_len > 0.0 && !main_deck_baggage {
             (seating_room / sim_len).max(1.0)
         } else {
             1.0
         };
+        let block = BlockPlan {
+            g,
+            deck,
+            x0: segment.x0,
+            x1: segment.x1,
+            aisle_w,
+            deck_cap,
+            start_class: ci,
+            sim_len,
+            n_charged_bays,
+            n_pairs_est,
+            n_mid,
+        };
+        // The simulation seated the deck at the configured pitch. Spreading
+        // the rows moves the last ones aft, into the narrowing tail, where a
+        // row can lose a seat abreast: a stretch that no longer seats what the
+        // simulation did (and the fast auto-sizer counted) is backed off
+        // towards the configured pitch. The frozen replay keeps its stretch.
+        if product_exit_capacity && pitch_stretch > 1.0 {
+            let seats_at = |stretch: f64| block.run(classes, stretch).seated;
+            if seats_at(pitch_stretch) < sim_seated {
+                let (mut fits, mut over) = (1.0, pitch_stretch);
+                for _ in 0..STRETCH_BACKOFF_ITERATIONS {
+                    let mid = 0.5 * (fits + over);
+                    if seats_at(mid) >= sim_seated {
+                        fits = mid;
+                    } else {
+                        over = mid;
+                    }
+                }
+                pitch_stretch = fits;
+            }
+        }
         let block_len = sim_len * pitch_stretch + n_charged_bays as f64 * MONUMENT_LEN;
         deck_utilization.push((
             deck.name,
@@ -254,69 +288,42 @@ pub(super) fn place_seats(
         // block does not need is left aft, near the rear bulkhead, which is
         // where a real aircraft's spare cabin length is; centring the block
         // would put half of it forward and drag the payload CG with it.
-        let mut x = segment.x0 + MONUMENT_LEN;
-        let block_start = x;
-        let mut mid_stations: VecDeque<f64> = (1..=n_mid)
-            .map(|i| block_start + block_len * (i as f64 / n_pairs_est as f64))
-            .collect();
-
         bays.push(Bay::new(
             segment.x0 + MONUMENT_LEN / 2.0,
             deck.name,
             g.usable_width(deck, segment.x0),
         ));
 
-        let mut seated_here = 0i64;
-        while ci < classes.len() && x < segment.x1 - MONUMENT_LEN && seated_here < deck_cap {
-            if mid_stations
-                .front()
-                .is_some_and(|station| x >= station - 1e-6)
-            {
-                bays.push(Bay::new(
-                    x + MONUMENT_LEN / 2.0,
-                    deck.name,
-                    g.usable_width(deck, x),
-                ));
-                x += MONUMENT_LEN;
-                mid_stations.pop_front();
-                continue;
-            }
-            if classes[ci].remaining <= 0 {
-                ci += 1;
-                if ci < classes.len() {
-                    bays.push(Bay::new(
-                        x + MONUMENT_LEN / 2.0,
-                        deck.name,
-                        g.usable_width(deck, x),
-                    ));
-                    x += MONUMENT_LEN;
-                }
-                continue;
-            }
-
-            let class = &classes[ci];
-            let (row_abreast, n_aisles) = abreast_and_aisles(&class.config, deck, g, aisle_w, x);
-            let seats_row = row_abreast.min(class.remaining).min(deck_cap - seated_here);
-            let pitch = class.config.pitch_m.max(MIN_PITCH) * pitch_stretch;
+        let placed = block.run(classes, pitch_stretch);
+        for &x in &placed.bay_stations {
+            bays.push(Bay::new(
+                x + MONUMENT_LEN / 2.0,
+                deck.name,
+                g.usable_width(deck, x),
+            ));
+        }
+        for row in &placed.rows {
+            let class = &classes[row.class];
+            let (row_abreast, n_aisles) = (row.abreast, row.aisles);
             max_abreast = max_abreast.max(row_abreast);
             max_aisles = max_aisles.max(n_aisles);
-
             items.push(seat_row_item(
                 g,
                 deck,
                 class,
-                x,
-                pitch,
-                seats_row,
+                row.x0,
+                row.pitch,
+                row.seats,
                 (row_abreast, n_aisles),
                 aisle_w,
             ));
-
-            classes[ci].remaining -= seats_row;
-            classes[ci].seated += seats_row;
-            seated_here += seats_row;
-            x += pitch;
         }
+        for row in &placed.rows {
+            classes[row.class].remaining -= row.seats;
+            classes[row.class].seated += row.seats;
+        }
+        let (seated_here, x) = (placed.seated, placed.x_end);
+        ci = placed.class_end;
 
         // On a main deck that also stows the baggage, the aft monuments
         // follow the last row and the floor behind them is the aft

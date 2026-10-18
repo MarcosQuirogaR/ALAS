@@ -29,9 +29,12 @@
 
 use serde::{Deserialize, Serialize};
 
+use super::nacelle_model::{is_legacy_nacelle_model, NacelleModel};
+use super::CentreEngineInstallation;
 use crate::engines::{PropulsionTechnology, TurbofanEngineSpec, TurbopropEngineSpec};
 use crate::ConfigNode;
-
+#[path = "engine_default.rs"]
+mod engine_default;
 #[path = "engine_wire.rs"]
 mod engine_wire;
 
@@ -113,6 +116,11 @@ pub struct EngineConfig {
     )]
     pub nacelle_profile: Vec<(f64, f64)>,
 
+    /// Legacy polyline or G2 revolve nacelle (see [`NacelleModel`]); presets opt in.
+    #[serde(default, skip_serializing_if = "is_legacy_nacelle_model")]
+    #[config(skip)]
+    pub nacelle_model: NacelleModel,
+
     /// The radius those fractions are of.
     #[config(
         advanced,
@@ -140,6 +148,12 @@ pub struct EngineConfig {
     )]
     pub z_m: f64,
 
+    /// Per-engine override of [`Self::z_m`], one entry per spanwise position;
+    /// empty keeps `z_m` for every engine.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[config(skip)]
+    pub z_per_engine_m: Vec<f64>,
+
     /// How far ahead of the wing leading edge the inlet face sits.
     #[config(
         advanced,
@@ -148,6 +162,11 @@ pub struct EngineConfig {
         help = "How far forward of the (swept) wing leading edge the nacelle inlet face sits."
     )]
     pub inlet_x_offset_m: f64,
+
+    /// Tail-engine pod of a trijet; `None`: catalogue nacelle on the tail cone.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[config(skip)]
+    pub centre_engine: Option<CentreEngineInstallation>,
 
     /// Deprecated turbofan compatibility mirror: bypass flow over core flow.
     #[config(
@@ -220,48 +239,14 @@ pub struct EngineConfig {
     pub part_power_source: String,
 }
 
-impl Default for EngineConfig {
-    fn default() -> Self {
-        // The GE9X entry of the engine table, copied out. A bare
-        // `EngineConfig` is constructed before anything has had a chance to
-        // call `apply_engine_spec`, and it has to describe a real engine by
-        // the time something asks it for thrust.
-        Self {
-            engine_name: "GE9X".to_owned(),
-            propulsion_technology: PropulsionTechnology::Turbofan,
-            turbofan: crate::engines::get("GE9X")
-                .ok()
-                .and_then(crate::engines::EngineSpec::turbofan_spec),
-            turboprop: None,
-            nacelle_profile: vec![
-                (0.0, 0.40),
-                (0.6, 0.92),
-                (1.2, 1.0),
-                (4.3, 1.0),
-                (5.9, 0.82),
-                (7.8, 0.45),
-            ],
-            radius_scale_m: 2.1,
-            spanwise_positions_m: vec![9.8, -9.8],
-            z_m: -2.9,
-            inlet_x_offset_m: 4.2,
-            bypass_ratio: 10.0,
-            overall_pressure_ratio: 60.0,
-            fan_pressure_ratio: 1.45,
-            turbine_inlet_temp_k: 1670.0,
-            cruise_tsfc_kg_kgf_hr: 0.50,
-            fan_diameter_m: 3.40,
-            // GE9X is not present in the March 2026 EEDB release. Until a
-            // manufacturer deck is available, retain an explicit GEnx family
-            // proxy rather than pretending the old linear law is measured.
-            part_power_fuel_flow_ratios: vec![0.082_578_70, 0.253_287_04, 0.815, 1.0],
-            part_power_source: "ICAO EEDB 03/2026 family proxy: 07P27GE235 GEnx-1B74/75/P2"
-                .to_owned(),
-        }
-    }
-}
-
 impl EngineConfig {
+    /// Centreline offset of engine `index` (position in `spanwise_positions_m`) below the wing
+    /// reference plane: the per-engine entry when given, else [`Self::z_m`].
+    #[must_use]
+    pub fn z_for_engine_m(&self, index: usize) -> f64 {
+        self.z_per_engine_m.get(index).copied().unwrap_or(self.z_m)
+    }
+
     /// Authoritative per-engine sea-level static thrust, kN. Turboprops are
     /// power-rated and return zero; incoherent bindings return NaN.
     pub fn thrust_kn(&self) -> f64 {
@@ -425,10 +410,15 @@ impl EngineConfig {
                         "direct-openap"
                             | "openap-static-fallback"
                             | "family-proxy"
+                            | "secondary-simulation"
                             | "aircraft-kinematic-calibration"
                             | "aircraft-requirement-calibration"
                     )
                     || payload.off_design.source.trim().is_empty()
+                    || !matches!(
+                        payload.off_design.rating.as_deref(),
+                        None | Some("maximum-cruise" | "maximum-climb")
+                    )
                     || payload
                         .part_power_fuel_flow_ratios
                         .iter()

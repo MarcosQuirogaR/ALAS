@@ -318,6 +318,8 @@ mod tests {
             iterates: Vec::new(),
             landing_mass_exceeds_mlw: false,
             zero_fuel_mass_exceeds_mzfw: false,
+            settled_at_discontinuity: false,
+            stalled_at_evaluable_edge: false,
         }
     }
 

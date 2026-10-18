@@ -934,7 +934,7 @@ def write_source_note(output_root: Path) -> None:
 
     note = f"""# Report boundary-condition extraction
 
-Source: `{REPORT_PATH}` (read locally; no external upload).
+Source: `{REPORT_PATH}` (path recorded only; the report text was transcribed manually and the file is not read or hashed by this script).
 
 Relevant line references from the source report:
 

@@ -3,7 +3,7 @@
 
 //! Runtime registry and static lookup adapters for custom airports.
 
-use std::sync::{OnceLock, RwLock};
+use std::sync::{Mutex, OnceLock, RwLock};
 
 use crate::airports::{self, Airport};
 
@@ -16,7 +16,7 @@ pub fn register_custom_airport(mut airport: CustomAirport) -> Result<(), Airport
         .write()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     ensure_no_collision(&airport, &registry)?;
-    let static_airport = Box::leak(Box::new(to_airport(&airport)));
+    let static_airport = intern_airport(to_airport(&airport));
     registry.push(RegisteredAirport {
         airport,
         static_airport,
@@ -31,7 +31,7 @@ pub fn replace_custom_airports(airports: Vec<CustomAirport>) -> Result<(), Airpo
         airport.validate_and_normalize()?;
         ensure_no_collision(&airport, &replacement)?;
         replacement.push(RegisteredAirport {
-            static_airport: Box::leak(Box::new(to_airport(&airport))),
+            static_airport: intern_airport(to_airport(&airport)),
             airport,
         });
     }
@@ -70,6 +70,23 @@ pub(crate) fn airport_by_name_or_icao(name_or_icao: &str) -> Option<&'static Air
         .iter()
         .find(|registered| same_key(&registered.airport, name_or_icao))
         .map(|registered| registered.static_airport)
+}
+
+/// Return a `&'static` record for `airport`, reusing the earlier leak when an
+/// identical record was interned before, so repeated edits, rollbacks and file
+/// loads leak at most one record per distinct airport.
+fn intern_airport(airport: Airport) -> &'static Airport {
+    static INTERNED: OnceLock<Mutex<Vec<&'static Airport>>> = OnceLock::new();
+    let mut interned = INTERNED
+        .get_or_init(|| Mutex::new(Vec::new()))
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let Some(existing) = interned.iter().find(|known| ***known == airport) {
+        return existing;
+    }
+    let leaked: &'static Airport = Box::leak(Box::new(airport));
+    interned.push(leaked);
+    leaked
 }
 
 struct RegisteredAirport {
@@ -149,5 +166,31 @@ fn to_airport(airport: &CustomAirport) -> Airport {
         notes: format!("Custom airport; {runway_kind}; provenance: {provenance}"),
         latitude_deg: airport.latitude_deg,
         longitude_deg: airport.longitude_deg,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn identical_records_share_one_leaked_airport() {
+        let record = Airport {
+            name: "Interning Test Field".to_owned(),
+            icao: "ZZIN".to_owned(),
+            elevation_m: 10.0,
+            toda_m: 2000.0,
+            lda_m: 1900.0,
+            isa_deviation_c: 0.0,
+            notes: "test".to_owned(),
+            latitude_deg: 1.0,
+            longitude_deg: 2.0,
+        };
+        let first = intern_airport(record.clone());
+        let second = intern_airport(record.clone());
+        assert!(std::ptr::eq(first, second));
+        let mut other = record;
+        other.toda_m = 2100.0;
+        assert!(!std::ptr::eq(first, intern_airport(other)));
     }
 }

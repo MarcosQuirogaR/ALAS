@@ -268,6 +268,7 @@ fn stability_and_trim_with_reference_mode(
                 trim_ih_deg: f64::NAN,
                 cl_ih: 0.0,
                 cm_ih: 0.0,
+                compressible: None,
             });
         }
     };
@@ -326,10 +327,20 @@ fn stability_and_trim_with_reference_mode(
             velocity,
             a_lo + d_a,
             i_h0 + d_ih,
+            0.0,
         )?;
         (alpha, incidence, refined)
     } else {
         (a_lo + d_a, i_h0 + d_ih, converged)
+    };
+
+    // The product attitude on the stretched lattice (AERL-02). The
+    // compatibility path never runs it; the incompressible fields above stay
+    // the state the Trefftz-plane drag is solved at.
+    let compressible = if !reference_compatibility && analysis.compressible_trim && converged {
+        super::compressible::compressible_trim(airplane, analysis, cl_target, mach, altitude_m)?
+    } else {
+        None
     };
 
     Ok(StabilityTrimResult {
@@ -342,5 +353,6 @@ fn stability_and_trim_with_reference_mode(
         trim_ih_deg,
         cl_ih,
         cm_ih,
+        compressible,
     })
 }

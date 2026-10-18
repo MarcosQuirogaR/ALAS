@@ -1,15 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! Mission, hardware, and propulsion controls for the fixed-wing UAV workflow.
+//! Competition and mission-requirement controls for the fixed-wing UAV page.
 
-mod hardware;
 mod mission;
-mod propulsion;
 
-pub(super) use hardware::component_inputs;
 pub(super) use mission::mission_inputs;
-pub(super) use propulsion::propulsion_inputs;
 
 use egui::{Grid, Ui};
 

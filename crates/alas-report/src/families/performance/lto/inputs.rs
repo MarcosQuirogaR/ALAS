@@ -4,11 +4,15 @@
 //! Report inputs for the same propulsion-specific field method as feasibility.
 
 use alas_config::airports::Airport;
-use alas_config::{ActiveEngineModel, AlasConfig};
+use alas_config::AlasConfig;
+use alas_opt::mdo::YawAirframe;
 use alas_perf::performance::{compute_v_speeds_at_masses, FieldPerformance};
-use alas_pipeline::field_performance::{calculate, dry_landing_distance_share, report_field_polar};
+use alas_pipeline::field_performance::{
+    calculate_with_airframe, dry_landing_distance_share, report_field_polar,
+};
 use alas_pipeline::field_reference::sea_level_static_thrust_n;
 use alas_pipeline::full_analysis::AnalysisReport;
+use alas_pipeline::report_config::config_for_report;
 
 pub(super) fn field_performance(
     report: &AnalysisReport,
@@ -40,6 +44,10 @@ pub(super) fn field_performance(
     {
         return Err("Field masses and wing area must be finite and positive.".to_owned());
     }
+    // The V speeds use the computed minimum control speed (CS 25.107), the same
+    // resolution as the feasibility gate and the ISA reference.
+    let resolved = config_for_report(config, report, takeoff_mass_kg, landing_mass_kg, area_m2);
+    let config = &*resolved;
     let perf = &config.performance;
     let speeds_at = |field: &Airport| {
         compute_v_speeds_at_masses(
@@ -57,11 +65,7 @@ pub(super) fn field_performance(
     // The corrected propeller calculation resolves thrust at each roll speed.
     let (thrust_n, _) = sea_level_static_thrust_n(config, speeds_at(&sea_level).v_r_ms)?;
     let static_tw = thrust_n / (takeoff_mass_kg * config.requirements.gravity_m_s2);
-    let (cd0, k) = if matches!(
-        config.geometry.engine.active_model(),
-        Ok(ActiveEngineModel::Turboprop(_))
-    ) && !perf.legacy_field_correlations
-    {
+    let (cd0, k) = if !perf.legacy_field_correlations {
         let atmosphere =
             alas_atmo::us1976_compute_values(airport.elevation_m, airport.isa_deviation_c);
         report_field_polar(
@@ -71,11 +75,17 @@ pub(super) fn field_performance(
             airport,
         )?
     } else {
-        // Jets and historical replay do not consume the propeller roll polar.
+        // The historical replay does not consume the field polar.
         (0.0, 0.0)
     };
-    let mut field = calculate(
+    // The propeller failed-engine state needs the fin and the centre of gravity,
+    // as in the ISA reference.
+    let mut field = calculate_with_airframe(
         config,
+        Some(YawAirframe {
+            plane: &report.airplane,
+            cg_x_m: report.physical_cg[0],
+        }),
         airport,
         area_m2,
         takeoff_mass_kg,
@@ -96,6 +106,7 @@ mod tests {
     use super::*;
     use crate::families::performance::figure_lto_for_airport_at_masses;
     use crate::scene::{Scene, SceneElement};
+    use alas_pipeline::field_performance::calculate;
     use alas_pipeline::field_reference::report_isa_sea_level_field_reference;
     use alas_pipeline::full_analysis::FullAnalysis;
 
@@ -166,7 +177,14 @@ mod tests {
                 text.contains(&"LFL"),
                 "{name} did not render its landing field length"
             );
-            assert!(text.contains(&"BFL proxy"));
+            // Jets carry the integrated CS 25.113/25.109 legs; the propeller
+            // balance stays a labelled proxy.
+            let balanced = if field.takeoff_field.is_some() {
+                "BFL"
+            } else {
+                "BFL proxy"
+            };
+            assert!(text.contains(&balanced));
             assert!(!text.contains(&"LDR"));
 
             config.performance.legacy_field_correlations = true;

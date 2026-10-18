@@ -6,13 +6,18 @@
 //! Provides the primary interactive user environment for conceptual aircraft
 //! design, multi-stage engineering analysis, optimization, and visualization.
 
+// Unit tests assert that their constructed fixture inputs are valid.
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 pub mod airport_editor;
 pub mod app;
 mod branding;
 pub mod cfd;
 pub mod config_edit;
+mod config_edit_cruise;
 pub mod export;
 pub mod feedback;
+mod fs_atomic;
 pub mod layout;
 #[cfg(debug_assertions)]
 mod layout_debug;
@@ -33,6 +38,7 @@ mod view_controls;
 pub mod viewport;
 pub mod views;
 mod walkthrough_state;
+pub mod worker_stack;
 
 pub use app::AlasApp;
 pub use branding::native_options;

@@ -4,6 +4,7 @@
 //! Bounded output capture and process-tree supervision.
 
 use super::*;
+use std::collections::VecDeque;
 use std::io::Read;
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::Ordering;
@@ -18,24 +19,58 @@ enum PipeMessage {
     Closed(OpenFoamOutputStream),
 }
 
+pub(super) const HEAD_CAPTURE_BYTES: usize = (MAX_CAPTURE_BYTES / 2) as usize;
+const TAIL_CAPTURE_BYTES: usize = MAX_CAPTURE_BYTES as usize - HEAD_CAPTURE_BYTES;
+
+/// Bounded capture of one stream: the first `HEAD_CAPTURE_BYTES` are kept
+/// verbatim and the most recent `MAX_CAPTURE_BYTES - HEAD_CAPTURE_BYTES` are
+/// kept in a ring, so the end of a very long log (where a fatal error or the
+/// last residuals live) survives. Whatever falls between is counted, not kept.
 pub(super) struct CapturedPipe {
-    pub(super) bytes: Vec<u8>,
+    pub(super) head: Vec<u8>,
+    tail: VecDeque<u8>,
+    pub(super) omitted_bytes: u64,
     closed: bool,
 }
 
 impl CapturedPipe {
     pub(super) fn new() -> Self {
         Self {
-            bytes: Vec::new(),
+            head: Vec::new(),
+            tail: VecDeque::new(),
+            omitted_bytes: 0,
             closed: false,
         }
     }
 
-    pub(super) fn append(&mut self, bytes: &[u8]) -> usize {
-        let remaining = (MAX_CAPTURE_BYTES as usize).saturating_sub(self.bytes.len());
-        let accepted = remaining.min(bytes.len());
-        self.bytes.extend_from_slice(&bytes[..accepted]);
-        accepted
+    /// Retain what fits and count what is dropped. Always drains the input.
+    pub(super) fn append(&mut self, bytes: &[u8]) {
+        let head_room = HEAD_CAPTURE_BYTES.saturating_sub(self.head.len());
+        let (head_part, tail_part) = bytes.split_at(head_room.min(bytes.len()));
+        self.head.extend_from_slice(head_part);
+        self.tail.extend(tail_part.iter().copied());
+        let excess = self.tail.len().saturating_sub(TAIL_CAPTURE_BYTES);
+        if excess > 0 {
+            self.tail.drain(..excess);
+            self.omitted_bytes = self.omitted_bytes.saturating_add(excess as u64);
+        }
+    }
+
+    /// The retained text: head, then a marker naming the omitted byte count
+    /// (only when something was omitted), then the tail.
+    pub(super) fn text(&self) -> String {
+        let mut bytes = self.head.clone();
+        if self.omitted_bytes > 0 {
+            bytes.extend_from_slice(
+                format!(
+                    "\n[... {} bytes omitted by the ALAS capture limit ...]\n",
+                    self.omitted_bytes
+                )
+                .as_bytes(),
+            );
+        }
+        bytes.extend(self.tail.iter().copied());
+        String::from_utf8_lossy(&bytes).into_owned()
     }
 }
 
@@ -74,6 +109,7 @@ where
                 exit_code: None,
                 stdout: String::new(),
                 stderr: format!("could not launch {}: {error}", command.program.display()),
+                truncated_bytes: 0,
                 elapsed_seconds: started.elapsed().as_secs_f64(),
             };
         }
@@ -145,8 +181,9 @@ where
     OpenFoamProcessResult {
         status,
         exit_code,
-        stdout: String::from_utf8_lossy(&stdout.bytes).into_owned(),
-        stderr: String::from_utf8_lossy(&stderr.bytes).into_owned(),
+        stdout: stdout.text(),
+        stderr: stderr.text(),
+        truncated_bytes: stdout.omitted_bytes.saturating_add(stderr.omitted_bytes),
         elapsed_seconds: started.elapsed().as_secs_f64(),
     }
 }
@@ -201,13 +238,10 @@ fn consume_pipe_message<F>(
                 OpenFoamOutputStream::Stdout => stdout,
                 OpenFoamOutputStream::Stderr => stderr,
             };
-            let accepted = target.append(&bytes);
-            if accepted > 0 {
-                callback(
-                    stream,
-                    String::from_utf8_lossy(&bytes[..accepted]).into_owned(),
-                );
-            }
+            target.append(&bytes);
+            // The live stream keeps flowing past the retention cap, so a long
+            // run still reports its latest residuals.
+            callback(stream, String::from_utf8_lossy(&bytes).into_owned());
         }
         PipeMessage::Closed(stream) => match stream {
             OpenFoamOutputStream::Stdout => stdout.closed = true,

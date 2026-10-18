@@ -7,7 +7,6 @@
 
 use std::sync::atomic::Ordering;
 use std::sync::mpsc::{channel, Receiver, Sender};
-use std::thread;
 use std::time::Instant;
 
 use alas_pipeline::DesignPipeline;
@@ -21,6 +20,17 @@ use alas_exec::supervise::{launches_after, LaunchRecord};
 #[path = "run/preset_barrier.rs"]
 mod preset_barrier;
 use alas_pipeline::{PipelineResult, RunEvent, RunEventKind, RunEventSeverity, RunObservers};
+
+/// Prefix every pipeline stage uses for an error that is a cooperative
+/// cancellation, not a failure (see `alas_pipeline::dual_solver`). The worker
+/// uses it for a cancel seen before the pipeline starts, so both paths are
+/// classified identically by `is_safe_cancellation`.
+const CANCELLED_SAFELY: &str = "Cancelled safely";
+
+/// Whether a run error reports a cooperative cancellation.
+fn is_safe_cancellation(error: &str) -> bool {
+    error.starts_with(CANCELLED_SAFELY)
+}
 
 impl AppState {
     /// Launch a full or baseline-only pipeline run in the background.
@@ -154,12 +164,12 @@ impl AppState {
             Path::new(self.tool_preferences.avl_exe.as_deref().unwrap_or("")),
         );
 
-        thread::spawn(move || {
+        let spawned = crate::worker_stack::spawn_analysis_thread("alas-run", move || {
             let pipeline = DesignPipeline::new(config);
             if cancel.load(Ordering::Relaxed) {
-                let _ = tx.send(WorkerMessage::Finished(Box::new(Err(
-                    "Cancelled".to_owned()
-                ))));
+                let _ = tx.send(WorkerMessage::Finished(Box::new(Err(format!(
+                    "{CANCELLED_SAFELY} before the run started"
+                )))));
                 return;
             }
             let event_tx = tx.clone();
@@ -199,20 +209,22 @@ impl AppState {
             );
             let _ = tx.send(WorkerMessage::Finished(Box::new(result)));
         });
+        // A failed spawn drops `tx`; the receiver sees the closed channel.
+        drop(spawned);
     }
 
     /// Drain any pending progress and update the UI when a run finishes.
     pub fn poll_worker(&mut self) {
         let mut completed = None;
         let mut events = Vec::new();
-        let mut snapshots = Vec::new();
+        let mut latest_snapshot = None;
         if let Some(rx) = &self.worker_rx {
             while let Ok(msg) = rx.try_recv() {
                 match msg {
                     WorkerMessage::Event(event) => events.push(event),
                     WorkerMessage::Snapshot(snapshot) => {
                         self.pipeline_result_complete = false;
-                        snapshots.push(*snapshot);
+                        latest_snapshot = Some(*snapshot);
                     }
                     WorkerMessage::Finished(res) => completed = Some(*res),
                 }
@@ -222,7 +234,7 @@ impl AppState {
         // Snapshots are immutable report boundaries. Keep the latest one so
         // the Results page can use its normal gallery while the worker still
         // runs downstream exports and optional analyses.
-        if let Some(snapshot) = snapshots.into_iter().last() {
+        if let Some(snapshot) = latest_snapshot {
             self.pipeline_result = Some(snapshot);
             self.update_result_scene();
         }
@@ -291,7 +303,7 @@ impl AppState {
                     // A snapshot may remain visible after cancellation or a
                     // downstream failure, but it is never a finalized report.
                     self.pipeline_result_complete = false;
-                    if e.starts_with("Cancelled safely") {
+                    if is_safe_cancellation(&e) {
                         self.status_message = "Cancelled.".to_owned();
                         self.log("Run cancelled safely.", LogKind::Warn);
                     } else {
@@ -471,6 +483,27 @@ mod tests {
         assert!(lines.iter().all(|line| line.stage == "downstream/mses"
             && line.kind == RunEventKind::Diagnostic
             && line.elapsed_ms == 1_000));
+    }
+
+    #[test]
+    fn a_cancel_before_the_worker_starts_is_reported_as_cancelled_not_failed() {
+        let (tx, rx) = channel();
+        let mut state = AppState {
+            is_running: true,
+            worker_rx: Some(rx),
+            ..Default::default()
+        };
+        tx.send(WorkerMessage::Finished(Box::new(Err(format!(
+            "{CANCELLED_SAFELY} before the run started"
+        )))))
+        .unwrap();
+        state.poll_worker();
+        assert!(!state.is_running);
+        assert_eq!(state.status_message, "Cancelled.");
+        assert!(is_safe_cancellation(
+            "Cancelled safely: finalist replay interrupted"
+        ));
+        assert!(!is_safe_cancellation("Cancelled"));
     }
 
     #[test]

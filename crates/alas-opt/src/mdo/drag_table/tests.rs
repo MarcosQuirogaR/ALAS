@@ -40,7 +40,13 @@ struct Trimmed {
 
 impl Trimmed {
     fn new(name: &'static str) -> Self {
-        let config = AlasConfig::from_value(&serde_json::json!({ "preset": name })).unwrap();
+        Self::with_viscous_fraction(name, 0.0)
+    }
+
+    /// The same candidate with `lift_dependent_viscous_fraction` set.
+    fn with_viscous_fraction(name: &'static str, kappa: f64) -> Self {
+        let mut config = AlasConfig::from_value(&serde_json::json!({ "preset": name })).unwrap();
+        config.drag_model.lift_dependent_viscous_fraction = kappa;
         let x = alas_config::presets::get(name)
             .unwrap()
             .design_vector
@@ -361,11 +367,14 @@ fn a_design_point_with_a_loose_moment_residual_is_retrimmed() {
     assert!((corrected - loose.cd_induced).abs() > 1e-8);
     let table = TrimmedDragTable::build(&aero, &loose).unwrap();
     assert!((table.induced_cd(cl) - corrected).abs() < 1e-12);
+    // The lattice factorization update (Schur complement) differs from a
+    // fresh LU by rounding, so the retrimmed node is the same to 1e-9, not
+    // the same bits.
     assert!(table
         .induced
         .pieces
         .iter()
-        .any(|piece| piece.nodes[1] == cl));
+        .any(|piece| (piece.nodes[1] - cl).abs() <= 1e-9));
 
     // A separate trim from the standard initial state verifies the same
     // physical target. A 1e-7 CL/Cm stopping error resolves CDi much more
@@ -391,4 +400,124 @@ fn a_design_point_with_a_loose_moment_residual_is_retrimmed() {
         .unwrap();
     assert!(converged.cm_residual.abs() <= 1e-7);
     assert!((corrected - converged.cd_induced).abs() / converged.cd_induced < 1e-5);
+}
+
+#[test]
+fn lift_dependent_viscous_drag_adds_exactly_kappa_cd0_cl_squared() {
+    // AERL-04 / DRG-01 on the A320 table: CD(CL) - CD_off(CL) = kappa CD0 CL^2
+    // at fixed M and h, and the inviscid terms are untouched.
+    let kappa = 0.30;
+    let off = Trimmed::new("A320-200");
+    let on = Trimmed::with_viscous_fraction("A320-200", kappa);
+    let (mach, altitude_m) = (off.design.mach, off.design.altitude_m);
+    let cd0 = on.table.cd0(mach, altitude_m);
+    assert_eq!(cd0.to_bits(), off.table.cd0(mach, altitude_m).to_bits());
+    for cl in [0.2, 0.35, 0.5, 0.8, 1.1] {
+        let added = on.table.cd(cl, mach, altitude_m) - off.table.cd(cl, mach, altitude_m);
+        assert!(
+            (added - kappa * cd0 * cl * cl).abs() < 1e-12,
+            "CL {cl}: {added}"
+        );
+        assert_eq!(
+            on.table.induced_cd(cl).to_bits(),
+            off.table.induced_cd(cl).to_bits()
+        );
+        assert_eq!(
+            off.table.viscous_lift_cd_at(cl, mach, altitude_m),
+            0.0,
+            "disabled term is exactly zero"
+        );
+    }
+}
+
+#[test]
+fn the_total_oswald_factor_follows_the_viscous_decomposition() {
+    // 1/e_total = 1/e_inviscid(trim) + kappa CD0 pi A at fixed CL.
+    let kappa = 0.30;
+    let on = Trimmed::with_viscous_fraction("A320-200", kappa);
+    let (mach, altitude_m) = (on.design.mach, on.design.altitude_m);
+    let aspect = on.plane.b_ref * on.plane.b_ref / on.plane.s_ref;
+    let cd0 = on.table.cd0(mach, altitude_m);
+    for cl in [0.4, 0.5, 0.7] {
+        let e_inv = on.table.effective_oswald(cl);
+        let e_total = on.table.effective_oswald_total(cl, mach, altitude_m);
+        let expected = 1.0 / (1.0 / e_inv + kappa * cd0 * std::f64::consts::PI * aspect);
+        assert!((e_total - expected).abs() < 1e-12, "CL {cl}");
+        assert!(e_total < e_inv);
+    }
+}
+
+#[test]
+fn the_tangent_parabola_and_the_min_drag_cl_see_the_viscous_curvature() {
+    let kappa = 0.30;
+    let on = Trimmed::with_viscous_fraction("A320-200", kappa);
+    let (mach, altitude_m) = (0.60, on.design.altitude_m);
+    // Slope of the tangent parabola equals the finite-difference dCD/dCL
+    // / (2 CL), viscous term included.
+    let cl = 0.55;
+    let h = 1e-4;
+    let (cd0_eq, k) = on.table.parabolic_equivalent_at(cl, mach, altitude_m);
+    let fd =
+        (on.table.cd(cl + h, mach, altitude_m) - on.table.cd(cl - h, mach, altitude_m)) / (2.0 * h);
+    assert!(
+        (2.0 * k * cl - fd).abs() < 2e-4 * fd.abs(),
+        "{} vs {fd}",
+        2.0 * k * cl
+    );
+    assert!((cd0_eq + k * cl * cl - on.table.cd(cl, mach, altitude_m)).abs() < 1e-12);
+    // Below the wave onset CD = CD0 + (k_i + kappa CD0) CL^2 locally, so a
+    // larger kappa moves the best-L/D CL down by the analytic factor
+    // sqrt(k_off / k_on) on a purely quadratic polar; check the direction
+    // and the closed form of the tangent curvature.
+    let off = Trimmed::new("A320-200");
+    let cl_best_off = off.table.min_drag_cl(mach, altitude_m);
+    let cl_best_on = on.table.min_drag_cl(mach, altitude_m);
+    assert!(cl_best_on < cl_best_off, "{cl_best_on} vs {cl_best_off}");
+    let (_, k_off) = off.table.parabolic_equivalent_at(cl, mach, altitude_m);
+    let cd0_here = on.table.cd0(mach, altitude_m);
+    assert!((k - k_off - kappa * cd0_here).abs() < 1e-9);
+}
+
+/// D8 evidence for the geometric body-alpha window: the incompressible and
+/// compressible cruise trim angle of every registered transport preset at its
+/// nominal design. Run with
+/// `cargo test -p alas-opt --release --lib body_alpha_window_probe -- --ignored --nocapture`
+/// and derive `geometric_body_alpha_min/max_deg` from the compressible column.
+#[test]
+#[ignore = "evidence probe for decision D8; prints a table"]
+// A probe prints its numbers for the lane report; it asserts nothing.
+#[allow(clippy::print_stdout)]
+fn body_alpha_window_probe() {
+    for preset in presets() {
+        let attitude = preset.design.trim.attitude();
+        println!(
+            "ALPHA {:<10} incompressible {:7.3} deg  compressible {:7.3} deg  ih {:6.3} -> {:6.3}",
+            preset.name,
+            preset.design.trim.trim_alpha_deg,
+            attitude.alpha_deg,
+            preset.design.trim.trim_ih_deg,
+            attitude.incidence_deg
+        );
+    }
+}
+
+#[test]
+fn the_high_lift_base_polar_carries_no_lift_dependent_viscous_term() {
+    // Torenbeek (2013) p. 96 states k_L for the en-route configuration: a
+    // high-lift configuration adds its own increment to the polar without it.
+    let on = Trimmed::with_viscous_fraction("A320-200", 0.43);
+    let off = Trimmed::new("A320-200");
+    let (mach, altitude_m) = (on.design.mach, on.design.altitude_m);
+    for cl in [0.5, 1.0, 1.5] {
+        let base = on.table.cd_without_lift_viscous(cl, mach, altitude_m);
+        let clean = on.table.cd(cl, mach, altitude_m);
+        let term = on.table.viscous_lift_cd_at(cl, mach, altitude_m);
+        assert!(term > 0.0);
+        assert!((clean - base - term).abs() < 1e-15, "CL {cl}");
+        assert_eq!(
+            base.to_bits(),
+            off.table.cd(cl, mach, altitude_m).to_bits(),
+            "CL {cl}: the base equals the polar with the term switched off"
+        );
+    }
 }

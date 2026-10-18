@@ -325,6 +325,47 @@ pub fn run_mses_polar_with_cancel(
     };
     let half = config.alpha_sweep_halfwidth_deg.max(0.5);
     let count = config.alpha_sweep_n_points.max(3) as usize;
-    let alphas = linspace(trim_alpha_deg - half, trim_alpha_deg + half, count);
-    Mses::new(repaneled, config, mses_dir).polar_with_cancel(&alphas, reynolds, mach, cancel)
+    let alphas = design_centred_schedule(trim_alpha_deg, half, count);
+    let mut result =
+        Mses::new(repaneled, config, mses_dir).polar_with_cancel(&alphas, reynolds, mach, cancel);
+    result.design_alpha_deg = Some(trim_alpha_deg);
+    result
+}
+
+/// The requested angle schedule: `count` angles over
+/// `[design - half, design + half]`, ascending, with `design` itself always
+/// one of them. An even `count` is raised to the next odd number so the
+/// design (cruise) angle is requested exactly rather than only bracketed; the
+/// centre node is set to `design_alpha_deg` bit-for-bit so the result can
+/// find it again.
+pub fn design_centred_schedule(
+    design_alpha_deg: f64,
+    half_width_deg: f64,
+    count: usize,
+) -> Vec<f64> {
+    let count = if count % 2 == 0 { count + 1 } else { count };
+    let mut alphas = linspace(
+        design_alpha_deg - half_width_deg,
+        design_alpha_deg + half_width_deg,
+        count,
+    );
+    alphas[count / 2] = design_alpha_deg;
+    alphas
+}
+
+#[cfg(test)]
+mod schedule_tests {
+    use super::design_centred_schedule;
+
+    #[test]
+    fn the_design_angle_is_always_a_requested_node() {
+        for count in [3, 4, 5, 7] {
+            let alphas = design_centred_schedule(2.25, 1.5, count);
+            assert!(alphas.len() % 2 == 1 && alphas.len() >= count);
+            assert!(alphas.contains(&2.25), "count {count}: {alphas:?}");
+            assert!(alphas.windows(2).all(|w| w[0] < w[1]));
+            assert_eq!(alphas[0], 0.75);
+            assert_eq!(alphas[alphas.len() - 1], 3.75);
+        }
+    }
 }

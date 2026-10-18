@@ -103,10 +103,10 @@ pub fn solve_planned_dispatch(
     let mut pass = 0;
     loop {
         pass += 1;
-        let solve = |planned: &SegmentMissionModel| {
+        let solve = |planned: &SegmentMissionModel, start_kg: f64| {
             solve_dispatch_with_initial_guess(
                 zero_fuel_mass_kg,
-                planning_mass_kg,
+                start_kg,
                 range_m,
                 policy,
                 planned,
@@ -116,15 +116,26 @@ pub fn solve_planned_dispatch(
             )
         };
         let solution = if carried {
-            solve(model)
+            solve(model, planning_mass_kg)
         } else {
-            match model.solve_on_frozen_plans(planning_mass_kg, range_m, &altitude_policy, solve) {
-                Ok((_, solution)) => solution,
+            match model.solve_on_descending_plans(
+                planning_mass_kg,
+                zero_fuel_mass_kg,
+                range_m,
+                &altitude_policy,
+                solve,
+            ) {
+                Ok((_, solution, planned_at_kg)) => {
+                    // The plan is the one made at `planned_at_kg`, lighter than
+                    // the planning mass when no plan can be made there.
+                    planning_mass_kg = planned_at_kg;
+                    solution
+                }
                 Err(
                     error @ (FreezeError::StepUnconverged { .. }
                     | FreezeError::Fuel(FuelModelError::Cancelled)),
                 ) => return Err(error),
-                Err(FreezeError::Fuel(_)) => solve(model),
+                Err(FreezeError::Fuel(_)) => solve(model, planning_mass_kg),
             }
         };
         let settled = matches!(
@@ -184,6 +195,10 @@ impl FuelBurnModel for PlannedTrips<'_> {
         self.0.holding_fuel_flow_kg_s(mass_kg, altitude_m)
     }
 
+    fn destination_elevation_m(&self) -> f64 {
+        self.0.destination_elevation_m()
+    }
+
     fn cruise_fuel_flow_kg_s(&self, mass_kg: f64) -> Result<f64, FuelModelError> {
         self.0.cruise_fuel_flow_kg_s(mass_kg)
     }
@@ -203,7 +218,7 @@ mod tests {
     use alas_config::AlasConfig;
 
     /// The sized A340-300 prices its design mission on the closure's own
-    /// plan, and a route half as long again on a plan frozen for that route,
+    /// plan, and a route twice as long on a plan frozen for that route,
     /// which climbs in steps under `OptimumStep` as the closure's would: the
     /// unfrozen trip held its initial level for 4,770 nmi.
     #[test]
@@ -214,8 +229,11 @@ mod tests {
         let assessment = crate::mdo::assess_product_candidate(&config, &design).unwrap();
         let sized = &assessment.sized;
         let model = candidate_mission_model(&config, &sized.fuel_artifacts).unwrap();
+        // The test freezes plans; it does not test the take-off mass limit,
+        // which the longer route meets by 2 t with the chart climb rating
+        // (a lower initial level burns more fuel).
         let limits = DispatchLimits {
-            mtow_kg: config.requirements.mtow_kg,
+            mtow_kg: 1.2 * config.requirements.mtow_kg,
             mzfw_kg: None,
             mlw_kg: None,
             usable_capacity_kg: None,
@@ -241,7 +259,10 @@ mod tests {
             design_mission.takeoff_mass_kg,
             sized.dispatch.takeoff_mass_kg
         );
-        let range_m = 1.5 * sized.design_range_m;
+        // Geometry round 2 (wing lane) lowered the A340 cruise drag (CD0 0.0200 to 0.0189 at
+        // the same lift), so the optimum-step plan first climbs in steps at twice the
+        // design range (no step at 1.5 to 1.9 times it).
+        let range_m = 2.0 * sized.design_range_m;
         let route = dispatch(range_m);
         assert_eq!(route.status, DispatchStatus::Converged);
         let planned = plan_for_mission(&model, route.takeoff_mass_kg, range_m).unwrap();

@@ -82,9 +82,9 @@ pub(super) fn controls(
         std::thread::spawn(move || {
             let outcome = (|| -> Result<(), String> {
                 if !executable.is_file() {
-                    return Err(format!(
-                        "ParaView pvpython was not found: {}",
-                        executable.display()
+                    return Err(crate::views::tr_fields(
+                        "ParaView pvpython was not found: {path}",
+                        &[("path", executable.display().to_string())],
                     ));
                 }
                 let directory = case.join("postProcessing/alas-field-figures");
@@ -98,6 +98,8 @@ pub(super) fn controls(
                     )),
                 )
                 .map_err(|e| e.to_string())?;
+                use alas_exec::process::{NewProcessGroup, NoConsoleWindow};
+                use alas_exec::SupervisedSpawn;
                 let mut command = std::process::Command::new(executable);
                 command
                     .arg(&script)
@@ -110,11 +112,6 @@ pub(super) fn controls(
                         .arg("--pressure-reference-pa")
                         .arg(config.effective_static_pressure_pa().to_string());
                 }
-                #[cfg(windows)]
-                {
-                    use std::os::windows::process::CommandExt;
-                    command.creation_flags(0x0800_0000);
-                }
                 // Stream diagnostics to disk rather than accumulating an
                 // unbounded capture in memory while ParaView runs.
                 command.stdout(
@@ -126,26 +123,29 @@ pub(super) fn controls(
                         .map_err(|e| e.to_string())?,
                 );
                 command.stdin(std::process::Stdio::null());
-                let mut child = command.spawn().map_err(|e| e.to_string())?;
-                let started = std::time::Instant::now();
-                let status = loop {
-                    match child.try_wait() {
-                        Ok(Some(status)) => break status,
-                        Ok(None) if started.elapsed() < std::time::Duration::from_secs(120) => {
-                            std::thread::sleep(std::time::Duration::from_millis(100));
-                        }
-                        result => {
-                            let reason = match result {
-                                Err(error) => format!("cannot poll ParaView: {error}"),
-                                _ => "ParaView exceeded the 120 s rendering deadline".to_owned(),
-                            };
-                            let _ = child.kill();
-                            let _ = child.wait();
-                            return Err(format!(
-                                "{reason}; see {}",
-                                directory.join("renderer.stderr.log").display()
-                            ));
-                        }
+                // Supervised spawn: a render outliving a crashed ALAS is ended
+                // by the job object; the wait kills the whole tree at the deadline.
+                let mut child = command
+                    .no_window()
+                    .new_process_group()
+                    .spawn_supervised("ParaView render")
+                    .map_err(|e| e.to_string())?;
+                let status = match alas_exec::process::wait_with_timeout(
+                    &mut child,
+                    std::time::Duration::from_secs(120),
+                ) {
+                    alas_exec::process::DeadlineWait::Exited(status) => status,
+                    outcome => {
+                        let reason = match outcome {
+                            alas_exec::process::DeadlineWait::PollFailed(error) => {
+                                format!("cannot poll ParaView: {error}")
+                            }
+                            _ => "ParaView exceeded the 120 s rendering deadline".to_owned(),
+                        };
+                        return Err(format!(
+                            "{reason}; see {}",
+                            directory.join("renderer.stderr.log").display()
+                        ));
                     }
                 };
                 if !status.success() {

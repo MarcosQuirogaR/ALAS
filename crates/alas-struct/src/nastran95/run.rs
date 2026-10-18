@@ -47,7 +47,8 @@ mod tests;
 mod workspace;
 
 pub use print_file::{
-    displacement_of, read_displacement_tables, read_eigenvalues, read_eigenvector_tables, Mode,
+    displacement_of, read_displacement_tables, read_eigenvalues, read_eigenvector_tables,
+    EigenvectorModeError, EigenvectorTables, Mode, MAX_EIGENVECTOR_MODE,
 };
 use process::*;
 use runtime::*;
@@ -298,7 +299,7 @@ pub fn run_nastran95(
     let mut command = Command::new(&solver.exe);
     command
         .current_dir(&work_dir)
-        .env("DBMEM", dbmem)
+        .env("DBMEM", &dbmem)
         .env("OCMEM", &open_core)
         .env("RFDIR", short(&rf))
         .env("DIRCTY", short(&scratch))
@@ -322,5 +323,29 @@ pub fn run_nastran95(
 
     // A bare carriage return lands in column 81 and fails the scanner.
     let stdin_text = deck.replace('\r', "");
-    supervise(command, &stdin_text, timeout)
+    // Opt-in result cache (`ALAS_TOOL_CACHE_DIR`): the deck, memory options,
+    // executable and the staged run directory fully determine the print file.
+    let cache = alas_exec::tool_cache::DirCache::begin(
+        "nastran95",
+        &solver.exe,
+        &work_dir,
+        &[],
+        &[
+            stdin_text.as_bytes(),
+            open_core.as_bytes(),
+            dbmem.as_bytes(),
+        ],
+    );
+    if let Some(print) = cache
+        .as_ref()
+        .and_then(|cache| cache.restore())
+        .and_then(|bytes| String::from_utf8(bytes).ok())
+    {
+        return RunOutcome::Print(print);
+    }
+    let outcome = supervise(command, &stdin_text, timeout);
+    if let (Some(cache), RunOutcome::Print(print)) = (&cache, &outcome) {
+        cache.store(print.as_bytes());
+    }
+    outcome
 }
