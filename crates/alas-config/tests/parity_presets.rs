@@ -249,6 +249,57 @@ fn compare_settings(
             continue;
         }
         let actual_value = actual.get(key).unwrap_or(&Value::Null);
+        if key == "k_land" && path.starts_with("performance.") {
+            // One calibrated coefficient replaces the frozen class values
+            // 0.58 / 0.60 / 0.63; the frozen value stays pinned.
+            let frozen = match path {
+                "performance.conservative_simple_flaps" => 0.58,
+                "performance.advanced_highlift_widebody" => 0.63,
+                _ => 0.60,
+            };
+            comparison.exact(
+                &format!("{path}.{key}: frozen Python value"),
+                expected_value,
+                &serde_json::json!(frozen),
+            );
+            comparison.exact(
+                &format!("{path}.{key}: product value"),
+                actual_value,
+                &serde_json::json!(0.505),
+            );
+            continue;
+        }
+        if path.starts_with("performance.")
+            && matches!(
+                key.as_str(),
+                "oei_climb_delta_cd" | "vapp_vstall_land_factor"
+            )
+        {
+            // Fix lane A1: handbook take-off flap increment and the
+            // CS 25.125 VREF floor replace the frozen class values; the
+            // frozen value stays pinned.
+            let (frozen, product) = if key == "oei_climb_delta_cd" {
+                let frozen = match path {
+                    "performance.conservative_simple_flaps" => 0.020,
+                    "performance.advanced_highlift_widebody" => 0.030,
+                    _ => 0.025,
+                };
+                (frozen, 0.015)
+            } else {
+                (1.30, 1.23)
+            };
+            comparison.exact(
+                &format!("{path}.{key}: frozen Python value"),
+                expected_value,
+                &serde_json::json!(frozen),
+            );
+            comparison.exact(
+                &format!("{path}.{key}: product value"),
+                actual_value,
+                &serde_json::json!(product),
+            );
+            continue;
+        }
         if let Some(upstream) = mesh_resolution_correction(path, key) {
             // The mesh resolutions diverge from the frozen registry on
             // purpose; both sides stay pinned. See the module doc.
@@ -288,6 +339,16 @@ fn compare_settings(
             );
             continue;
         }
+        // The solver presets are wall-clock presets; the library default is
+        // the evaluation-budget stop (audit SIZ-06), so they state it off.
+        if key == "stop_on_evaluations_only" && path.starts_with("solver.") {
+            comparison.exact(
+                &format!("{path}.{key}: wall-clock preset"),
+                &actual[key],
+                &false.into(),
+            );
+            continue;
+        }
         if !expected.contains_key(key) {
             comparison.exact(
                 &format!("{path}.{key}"),
@@ -300,7 +361,7 @@ fn compare_settings(
 
 /// `AnalysisConfig` fields the Rust application added after the frozen
 /// registry was recorded. The fidelity presets do not set them.
-const NATIVE_ANALYSIS_ADDITIONS: &[&str] = &["avl_timeout_s"];
+const NATIVE_ANALYSIS_ADDITIONS: &[&str] = &["avl_timeout_s", "compressible_trim"];
 
 /// The frozen fidelity-registry value for a vortex-lattice mesh field this
 /// port deliberately moved, or `None` for every other field.

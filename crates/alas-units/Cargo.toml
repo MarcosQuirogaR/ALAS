@@ -11,7 +11,6 @@ rust-version.workspace = true
 
 [dev-dependencies]
 alas-testkit = { path = "../alas-testkit" }
-serde_json = { workspace = true }
 
 [lints]
 workspace = true

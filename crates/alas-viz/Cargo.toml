@@ -17,4 +17,5 @@ tiny-skia = { workspace = true }
 # display budget at desktop densities.
 rayon = { workspace = true }
 
-[dev-dependencies]
+[lints]
+workspace = true

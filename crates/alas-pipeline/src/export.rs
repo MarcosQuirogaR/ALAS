@@ -3,7 +3,7 @@
 
 //! Exporting design databases to JSON, Selig `.dat` files, and formatted summaries.
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::fs::File;
 use std::io::{self, Write};
 use std::path::Path;
@@ -22,11 +22,11 @@ use crate::full_analysis::AnalysisReport;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DesignDatabase {
     /// Source and tool metadata.
-    pub metadata: HashMap<String, String>,
+    pub metadata: BTreeMap<String, String>,
     /// Optimized design variables.
     pub design_vector: serde_json::Value,
     /// Derived geometry metrics.
-    pub geometry: HashMap<String, f64>,
+    pub geometry: BTreeMap<String, f64>,
     /// Aerodynamic operating point and polar characteristics.
     pub aerodynamics: serde_json::Value,
     /// Weights and mass properties.
@@ -56,7 +56,7 @@ mod aerodynamics;
 /// Convert an [`AnalysisReport`] and [`AlasConfig`] into the standard [`DesignDatabase`].
 pub fn report_to_database(report: &AnalysisReport, config: &AlasConfig) -> DesignDatabase {
     let req = &config.requirements;
-    let mut meta = HashMap::new();
+    let mut meta = BTreeMap::new();
     meta.insert("name".to_owned(), "ALAS optimized design".to_owned());
     meta.insert("source".to_owned(), "alas.pipeline".to_owned());
     meta.insert("tool".to_owned(), "ALAS".to_owned());
@@ -104,7 +104,11 @@ pub fn report_to_database(report: &AnalysisReport, config: &AlasConfig) -> Desig
     DesignDatabase {
         metadata: meta,
         design_vector: serde_json::to_value(report.design).unwrap_or_default(),
-        geometry: report.geometry_summary.clone(),
+        geometry: report
+            .geometry_summary
+            .iter()
+            .map(|(key, value)| (key.clone(), *value))
+            .collect(),
         aerodynamics: aero,
         weights,
         feasibility: serde_json::Value::Null,
@@ -142,8 +146,8 @@ fn flops_mass_buildup_to_json(
         "provenance": &*buildup.provenance,
         "wing_composite_assumption": {
             "fcomp": airframe.structure_inputs.wing.composite_utilization,
-            "meaning": "FLOPS wing technology coefficient, not aircraft composite mass fraction",
-            "zero_meaning": "published no-composite-credit baseline; not evidence that the real aircraft is metallic",
+            "meaning": "FLOPS wing composite utilization factor (NASA/TM-2017-219627: 0.0 no composites, 1.0 maximum use of composites), not aircraft composite mass fraction",
+            "zero_meaning": "metallic wing endpoint of the index; set from the wing-box construction fact per preset, so 0 means no composite wing was established",
             "scenarios": composite_scenarios,
             "scenario_scope": "fixed geometry, loads and other inputs; not applied to OEW, not an uncertainty interval or aircraft calibration",
         },
@@ -656,7 +660,7 @@ mod tests {
     use alas_config::design_variables::DesignVector;
     use alas_config::AlasConfig;
     use alas_geom::aircraft::airplane::Airplane;
-    use std::collections::HashMap;
+    use std::collections::BTreeMap;
 
     #[test]
     fn resolved_cabin_and_propulsion_sources_survive_export() {
@@ -771,10 +775,10 @@ mod tests {
             },
             static_margin: 0.0,
             x_neutral_point: 0.0,
-            geometry_summary: HashMap::new(),
-            component_masses: HashMap::new(),
+            geometry_summary: BTreeMap::new(),
+            component_masses: BTreeMap::new(),
             flops_mass_buildup: None,
-            mass_coordinates: HashMap::new(),
+            mass_coordinates: BTreeMap::new(),
             physical_cg: [0.0, 0.0, 0.0],
             payload_layout: None,
             trimmed_design_point: None,

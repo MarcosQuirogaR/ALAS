@@ -57,6 +57,7 @@ fn synthetic(name: &str, coordinates: Vec<(f64, f64)>) -> AirfoilSnapshot {
         name: name.to_owned(),
         coordinates,
         coordinate_hash: hashed,
+        correction: None,
     }
 }
 

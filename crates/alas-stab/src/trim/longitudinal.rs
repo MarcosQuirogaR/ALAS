@@ -52,6 +52,74 @@ pub struct StabilityTrimResult {
     /// `dCm/di_h`, per degree of stabilizer incidence; `0.0` with no
     /// stabilizer.
     pub cm_ih: f64,
+    /// The attitude and slopes of the same trim on the Goethert-stretched
+    /// (compressible) lattice at the cruise Mach, when
+    /// `AnalysisConfig::compressible_trim` is on and the product solve ran.
+    /// Every field above stays the incompressible-lattice state, which is the
+    /// state the Trefftz-plane drag solves must be made at; consumers that
+    /// report or constrain the flight attitude read [`Self::attitude`].
+    pub compressible: Option<super::CompressibleTrim>,
+}
+
+/// The flight-attitude view of a [`StabilityTrimResult`]: the compressible
+/// solution when there is one, else the incompressible lattice relabelled by
+/// the caller as before.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TrimAttitudeView {
+    /// Whether the attitude solve converged.
+    pub converged: bool,
+    /// Body angle of attack, degrees; compressible when `compressible`.
+    pub alpha_deg: f64,
+    /// Stabilizer incidence, degrees.
+    pub incidence_deg: f64,
+    /// `dCL/dalpha`, per degree.
+    pub cl_alpha: f64,
+    /// `dCL/di_h`, per degree.
+    pub cl_ih: f64,
+    /// `dCm/dalpha`, per degree.
+    pub cm_alpha: f64,
+    /// `dCm/di_h`, per degree.
+    pub cm_ih: f64,
+    /// Neutral-point station, geometry axes, m.
+    pub x_np: f64,
+    /// Static margin at the real CG.
+    pub static_margin: f64,
+    /// Whether these values came from the compressible lattice.
+    pub compressible: bool,
+}
+
+impl StabilityTrimResult {
+    /// The flight attitude: compressible when available (see
+    /// [`Self::compressible`]), else the incompressible lattice values.
+    #[must_use]
+    pub fn attitude(&self) -> TrimAttitudeView {
+        match self.compressible {
+            Some(c) => TrimAttitudeView {
+                converged: self.converged && c.converged,
+                alpha_deg: c.trim_alpha_deg,
+                incidence_deg: c.trim_ih_deg,
+                cl_alpha: c.cl_alpha,
+                cl_ih: c.cl_ih,
+                cm_alpha: c.cm_alpha,
+                cm_ih: c.cm_ih,
+                x_np: c.x_np,
+                static_margin: c.static_margin,
+                compressible: true,
+            },
+            None => TrimAttitudeView {
+                converged: self.converged,
+                alpha_deg: self.trim_alpha_deg,
+                incidence_deg: self.trim_ih_deg,
+                cl_alpha: self.cl_alpha,
+                cl_ih: self.cl_ih,
+                cm_alpha: self.cm_alpha,
+                cm_ih: self.cm_ih,
+                x_np: self.x_np,
+                static_margin: self.static_margin,
+                compressible: false,
+            },
+        }
+    }
 }
 
 /// The Munk `(k2 - k1)` apparent-mass factor against fuselage fineness ratio
@@ -98,11 +166,9 @@ pub(super) fn fuselage_cm_alpha_with_reference_mode(
     // `np.argsort` on the station X coordinates, then applied to the widths
     // and heights (which are `_xsec_width`/`_xsec_height`; see the module doc).
     let mut order: Vec<usize> = (0..fus.xsecs.len()).collect();
-    order.sort_by(|&a, &b| {
-        fus.xsecs[a].xyz_c[0]
-            .partial_cmp(&fus.xsecs[b].xyz_c[0])
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
+    // `total_cmp` is a total order; `+ 0.0` folds -0.0 into +0.0 so finite
+    // stations compare exactly as `partial_cmp` did.
+    order.sort_by(|&a, &b| (fus.xsecs[a].xyz_c[0] + 0.0).total_cmp(&(fus.xsecs[b].xyz_c[0] + 0.0)));
     let xs: Vec<f64> = order.iter().map(|&i| fus.xsecs[i].xyz_c[0]).collect();
     let ws: Vec<f64> = order.iter().map(|&i| fus.xsecs[i].width).collect();
     let hs: Vec<f64> = order.iter().map(|&i| fus.xsecs[i].height).collect();

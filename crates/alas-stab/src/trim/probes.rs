@@ -23,7 +23,12 @@ impl<'a> TrimAssembly<'a> {
         let Some(cache) = self.cache else {
             return assemble(airplane, self.analysis);
         };
-        let mut cache = cache.lock().map_err(|_| VlmError::NonFiniteResult)?;
+        // The cache is a geometry memo keyed by the mesh; an entry left behind
+        // by a panicking holder is rebuilt on a key mismatch, so recover the
+        // guard rather than report a poisoned lock as a numerical failure.
+        let mut cache = cache
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         VlmSystem::assemble_cached(
             airplane,
             resolution(self.analysis.spanwise_resolution),
@@ -107,6 +112,13 @@ pub(super) fn with_hstab_twist(airplane: &Airplane, twist_deg: f64) -> Airplane 
 /// changes the mesh geometry, so the two-point Jacobian is only a local model.
 /// This Newton refinement is intentionally product-only; the explicit
 /// compatibility API keeps the historical one-shot result and its fixtures.
+///
+/// `body_cm_per_deg` is the pitching-moment slope, per degree, of the airframe
+/// the lattice does not carry (fuselage and nacelles, STAB-02), in the units of
+/// the lattice's own `Cm`: the trim condition is
+/// `Cm_lattice + body_cm_per_deg * alpha_deg = 0`. Pass `0.0` for the
+/// wings-only trim.
+#[allow(clippy::too_many_arguments)] // one named physical input each; a struct would only rename them
 pub(super) fn refine_trim(
     airplane: &Airplane,
     assembly: &TrimAssembly<'_>,
@@ -115,6 +127,7 @@ pub(super) fn refine_trim(
     velocity: f64,
     mut alpha_deg: f64,
     mut incidence_deg: f64,
+    body_cm_per_deg: f64,
 ) -> Result<(f64, f64, bool), VlmError> {
     const MAX_ITERATIONS: usize = 8;
     const RESIDUAL_TOLERANCE: f64 = 1.0e-7;
@@ -131,7 +144,7 @@ pub(super) fn refine_trim(
         let at_incidence = assembly.assemble(&at_incidence)?;
         let base = probe(&at_incidence, atmosphere, velocity, alpha_deg)?;
         let residual_cl = base.cl_lift - cl_target;
-        let residual_cm = base.cm_pitch;
+        let residual_cm = base.cm_pitch + body_cm_per_deg * alpha_deg;
         if residual_cl.is_finite()
             && residual_cm.is_finite()
             && residual_cl.abs().max(residual_cm.abs()) <= RESIDUAL_TOLERANCE
@@ -161,7 +174,7 @@ pub(super) fn refine_trim(
                 (incidence_probe.cl_lift - base.cl_lift) / INCIDENCE_STEP_DEG,
             ],
             vec![
-                (alpha_probe.cm_pitch - base.cm_pitch) / ALPHA_STEP_DEG,
+                (alpha_probe.cm_pitch - base.cm_pitch) / ALPHA_STEP_DEG + body_cm_per_deg,
                 (incidence_probe.cm_pitch - base.cm_pitch) / INCIDENCE_STEP_DEG,
             ],
         ];
@@ -380,8 +393,48 @@ mod tests {
         assert_eq!(values(actual), values(expected));
     }
 
+    /// The Schur factorization update differs from the ordinary LU by
+    /// rounding only; trim quantities agree to far better than 1e-9.
+    fn assert_trim_close(expected: StabilityTrimResult, actual: StabilityTrimResult) {
+        let values = |result: StabilityTrimResult| {
+            [
+                result.x_np,
+                result.static_margin,
+                result.cl_alpha,
+                result.cm_alpha,
+                result.trim_alpha_deg,
+                result.trim_ih_deg,
+                result.cl_ih,
+                result.cm_ih,
+            ]
+        };
+        assert_eq!(actual.converged, expected.converged);
+        for (a, e) in values(actual).into_iter().zip(values(expected)) {
+            assert!((a - e).abs() <= 1.0e-9 * e.abs().max(1.0e-6), "{a} vs {e}");
+        }
+    }
+
+    #[test]
+    fn cached_trim_with_the_schur_update_matches_fresh_assemblies_to_rounding() {
+        cached_trim_across_lift_targets(
+            VlmGeometryCache::with_schur_update(true),
+            assert_trim_close,
+        );
+    }
+
     #[test]
     fn cached_trim_matches_fresh_assemblies_across_lift_targets_and_cg_changes() {
+        // The ordinary LU: bitwise equal to the fresh assemblies.
+        cached_trim_across_lift_targets(
+            VlmGeometryCache::with_schur_update(false),
+            assert_trim_bits_equal,
+        );
+    }
+
+    fn cached_trim_across_lift_targets(
+        cache: VlmGeometryCache,
+        compare: fn(StabilityTrimResult, StabilityTrimResult),
+    ) {
         let mut plane = probe_airplane(true);
         plane.wings[0].xsecs[0].airfoil = naca("naca2412");
         plane.wings[0].xsecs[1].airfoil = naca("naca2412");
@@ -391,7 +444,7 @@ mod tests {
             chordwise_resolution: 3,
             ..Default::default()
         };
-        let cache = Arc::new(Mutex::new(VlmGeometryCache::default()));
+        let cache = Arc::new(Mutex::new(cache));
         for (cg_x, cl_target, mach, altitude_m) in [
             (1.0, 0.25, 0.3, 0.0),
             (1.3, 0.45, 0.7, 10_000.0),
@@ -405,13 +458,13 @@ mod tests {
                 &plane, &analysis, cl_target, mach, altitude_m, &cache,
             )
             .expect("cached trim solve");
-            assert_trim_bits_equal(expected, actual);
+            compare(expected, actual);
         }
     }
 
     #[test]
     fn cached_trim_invalidates_geometry_and_mesh_and_preserves_missing_tail_fallback() {
-        let cache = Arc::new(Mutex::new(VlmGeometryCache::default()));
+        let cache = Arc::new(Mutex::new(VlmGeometryCache::with_schur_update(false)));
         for (with_tail, spanwise, chordwise, wing_x) in [
             (true, 1, 2, 0.0),
             (true, 2, 3, 0.0),

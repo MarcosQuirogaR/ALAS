@@ -79,7 +79,7 @@ pub(super) fn store(
                     modes: Vec::new(),
                     eigenvalues: Vec::new(),
                     mode_cycles: Vec::new(),
-                    node_ids: nodes.node_ids.clone(),
+                    node_ids: std::mem::take(&mut nodes.node_ids),
                     data: Vec::new(),
                 });
             table.modes.push(mode);
@@ -101,7 +101,7 @@ pub(super) fn store(
                     .entry(subcase)
                     .or_insert_with(|| ComplexVectorTable {
                         freqs: Vec::new(),
-                        node_ids: nodes.node_ids.clone(),
+                        node_ids: std::mem::take(&mut nodes.node_ids),
                         real: Vec::new(),
                         imag: Vec::new(),
                     });

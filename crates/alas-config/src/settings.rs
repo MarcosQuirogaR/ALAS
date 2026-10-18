@@ -6,7 +6,7 @@
 //! The one object that fully specifies a run.
 //!
 //! Every other module in this crate describes one group of settings. This is
-//! the aggregate the pipeline is handed: fifteen groups, the name of the
+//! the aggregate the pipeline is handed: seventeen groups, the name of the
 //! aircraft preset the user started from, and the two airports the route is
 //! flown between. Nothing downstream reaches past it for a value, so what a
 //! run was configured with is exactly what one of these held.
@@ -304,7 +304,9 @@ impl AlasConfig {
                     }
                     // FLOPS `WLDG` is the aircraft's *design landing weight*,
                     // and equation 63 makes the main gear go as `WLDG^0.95`.
-                    // The 0.92 default in `MassModelConfig` is a generic
+                    // The `MassModelConfig` default (0.7574 long haul,
+                    // 0.8598 short/medium haul, `landing_mass_ratio`; the
+                    // historical uniform default was 0.92) is a generic
                     // study fraction, not a property of any registered
                     // aircraft: the certified MLW/MTOW ratio is 0.689 on the
                     // A380-800 and 0.972 on the ATR 72-600, so leaving the
@@ -397,6 +399,8 @@ impl AlasConfig {
             });
 
         let mut loaded: Self = overlay(&instance, data)?;
+        crate::cruise_speed::follow_requirement_mach(&mut loaded, &instance);
+        loaded.drop_mismatched_clean_sheet_loft();
         // The overlay merges `data` onto the *serialized defaults*, so the
         // schema version the merged document carries is this build's, not the
         // file's. Read the file's own claim instead, from `data` directly: a
@@ -556,7 +560,7 @@ mod tests {
         let mut config = AlasConfig::from_value(&json!({"preset": "ATR72-600"})).unwrap();
         config.optimizer.design_space.mode = crate::optimizer::DesignMode::BaselineSandbox;
         assert_eq!(config.requirements.mtow_kg, 23_000.0);
-        // The generic fraction would give 23_000 * 0.92 = 21_160, not the
+        // The historical generic 0.92 would give 23_000 * 0.92 = 21_160, not the
         // preset's declared certified MLW of 22_350.
         assert_eq!(
             config.landing_mass_limit_kg(config.requirements.mtow_kg),
@@ -900,7 +904,12 @@ mod tests {
         let config = AlasConfig::from_value(&json!({"preset": "A220-300"})).unwrap();
         assert_eq!(config.mass_model.systems_mass_fraction, 0.13);
         assert_eq!(config.mass_model.furnishings_mass_fraction, 0.12);
-        assert_eq!(config.performance.cl_max_to, 2.10);
+        // CLmax_TO is derived from the declared high-lift system (Raymer Eq. 12.21),
+        // not the 2.10 class default.
+        let derived = crate::presets::preset_breakdown(crate::presets::get("A220-300").unwrap())
+            .unwrap()
+            .takeoff();
+        assert_eq!(config.performance.cl_max_to, derived);
     }
 
     #[test]
@@ -910,8 +919,11 @@ mod tests {
         assert_eq!(config.departure_airport, "Riga (EVRA)");
         assert_eq!(config.arrival_airport, "Stockholm Arlanda (ESSA)");
         let operational = preset.operational_mission_defaults();
-        let atmosphere = alas_atmo::Atmosphere::new(operational.cruise_altitude_m);
-        let expected = operational.cruise_mach * atmosphere.speed_of_sound();
+        // The cruise TAS is the declared Mach times the exact US1976 speed of
+        // sound (not the differentiable spline), the mission models' own
+        // atmosphere.
+        let ambient = alas_atmo::us1976_compute_values(operational.cruise_altitude_m, 0.0);
+        let expected = operational.cruise_mach * ambient.speed_of_sound_m_s;
         assert!((config.mission.profile.cruise_1_air_speed_m_s - expected).abs() < 1e-9);
         assert_ne!(
             config.mission.profile.cruise_1_air_speed_m_s,
@@ -952,7 +964,8 @@ mod tests {
     }
 
     /// A configuration that names no registered aircraft has nothing to
-    /// adapt, so it keeps the clean sheet it always had.
+    /// adapt, so it keeps the clean sheet it always had. An unregistered name
+    /// still loads (the file keeps its values) but the validator rejects it.
     #[test]
     fn a_document_without_a_registered_preset_still_starts_a_clean_sheet() {
         assert_eq!(

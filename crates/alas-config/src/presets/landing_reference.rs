@@ -76,8 +76,8 @@ pub(super) fn apply(preset: &mut AircraftPreset) {
     }
 }
 
-// old 7 -> 8 published landing references: Boeing 747-400 added.
-const REFERENCES: [PublishedLandingReference; 8] = [
+// old 8 -> 9 published landing references: C919 added (ACAP R9 DM 03-05).
+const REFERENCES: [PublishedLandingReference; 9] = [
     PublishedLandingReference {
         preset_name: "A220-300",
         mass_kg: 129_500.0 * POUND_KG,
@@ -131,22 +131,22 @@ const REFERENCES: [PublishedLandingReference; 8] = [
     PublishedLandingReference {
         preset_name: "B787-9",
         mass_kg: 425_000.0 * POUND_KG,
-        reference_area_m2: 377.0,
+        reference_area_m2: 360.464,
         vref_m_s: 153.0 * KNOT_M_S,
         density_kg_m3: ISA_SEA_LEVEL_DENSITY_KG_M3,
         speed_uncertainty_m_s: KNOT_M_S,
-        source: "Boeing Airport Compatibility Engineering, FAA Reference Code and Approach Speeds for Boeing Aircraft, 30 Mar 2016, p.3: 787-9 approach speed 153 kt, MLW 425,000 lb; https://www.boeing.com/content/dam/boeing/v2/airports/faq/arcandapproachspeeds.pdf; 377 m^2 gross reference area from OpenAP data release (Sun et al., Aerospace 2020, doi:10.3390/aerospace7080104), https://github.com/junzis/openap/blob/master/openap/data/aircraft/b789.yml",
-        applicability: "Legacy 561,500 lb MTW / 425,000 lb MLW source matches the preset mass; manufacturer planning speed treated as sea-level CAS; effective gross-area coefficient is distinct from the generic takeoff CLmax assumption",
+        source: "Boeing Airport Compatibility Engineering, FAA Reference Code and Approach Speeds for Boeing Aircraft, 30 Mar 2016, p.3: 787-9 approach speed 153 kt, MLW 425,000 lb; https://www.boeing.com/content/dam/boeing/v2/airports/faq/arcandapproachspeeds.pdf; 360.464 m^2 (3,880 ft^2) is the preset's own planform area, used for both this recovery and the model so Vref is reproduced (Boeing prints no wing area; an untraceable 377 m^2 OpenAP/secondary value, 4.4 % larger, was used before 2026-10-07 and made the model Vref 156.5 kt against 153 kt published)",
+        applicability: "Legacy 561,500 lb MTW / 425,000 lb MLW source matches the preset mass; area origin unverified (flugzeuginfo.net 361.0 m^2 corroborates); manufacturer planning speed treated as sea-level CAS; effective gross-area coefficient is distinct from the generic takeoff CLmax assumption",
     },
     PublishedLandingReference {
         preset_name: "DC-10",
-        mass_kg: 403_000.0 * POUND_KG,
+        mass_kg: 421_000.0 * POUND_KG,
         reference_area_m2: 338.8,
-        vref_m_s: 149.0 * KNOT_M_S,
+        vref_m_s: 145.4 * KNOT_M_S,
         density_kg_m3: ISA_SEA_LEVEL_DENSITY_KG_M3,
         speed_uncertainty_m_s: KNOT_M_S,
-        source: "Boeing Airport Compatibility Engineering, FAA Reference Code and Approach Speeds for Boeing Aircraft, 30 Mar 2016, p.3: DC-10-30 approach speed 149 kt, MLW 403,000 lb; https://www.boeing.com/content/dam/boeing/v2/airports/faq/arcandapproachspeeds.pdf; EASA IM.A.210 Issue 2, 2024: trapezoidal reference wing area 338.8 m^2",
-        applicability: "Lower-MLW DC-10-30 source, not the preset's 421,000 lb option; coefficient transferred at unchanged reference area/flap configuration with sqrt(mass) speed scaling; manufacturer planning speed treated as sea-level CAS; historical certification used 1.3 VS, so this is the requested 1.23 VS1g equivalent",
+        source: "Boeing DC-10 Airplane Characteristics for Airport Planning (ACAP, D6-58327) sec. 3.5 Approach Speed (Threshold), doc p.67: DC-10-30/30CF curve, 145.4 kt equivalent airspeed at maximum landing weight 421,000 lb (+-1 kt raster read, 1.3 Vs, flaps 50); https://www.boeing.com/content/dam/boeing/v2/airports/acaps/DC10.pdf; EASA IM.A.210 Issue 2, 2024: trapezoidal reference wing area 338.8 m^2",
+        applicability: "ACAP value at the preset's own 421,000 lb MLW (the earlier 149 kt at 403,000 lb from the FAA approach-speed list is 3.6 kt higher than the ACAP curve at that weight, 142.7 kt); raster-scan read, +-1 kt; ACAP speed treated as sea-level CAS, 1.3 Vs read as the requested 1.23 VS1g equivalent",
     },
     PublishedLandingReference {
         preset_name: "B747-400",
@@ -157,6 +157,16 @@ const REFERENCES: [PublishedLandingReference; 8] = [
         speed_uncertainty_m_s: KNOT_M_S,
         source: "Boeing Airport Compatibility Engineering, FAA Reference Code and Approach Speeds for Boeing Aircraft, 30 Mar 2016, p.2: 747-400 approach speed 153 kt, MTW 877,000 lb, MLW 630,000 lb, wingspan 213.00 ft; https://www.boeing.com/content/dam/boeing/v2/airports/faq/arcandapproachspeeds.pdf; 525 m^2 reference area is Boeing's published 5,650 ft^2 (recalled, not retrieved in this session: estimate)",
         applicability: "630,000 lb is the preset's optional landing weight (Boeing 747-400 ACAP D6-58326-1 Rev F section 2.1.1); manufacturer planning speed treated as sea-level CAS; historical certification used 1.3 VS, so this is the requested 1.23 VS1g equivalent",
+    },
+    PublishedLandingReference {
+        preset_name: "C919",
+        mass_kg: 67_800.0,
+        reference_area_m2: 129.15,
+        vref_m_s: 141.7 * KNOT_M_S,
+        density_kg_m3: ISA_SEA_LEVEL_DENSITY_KG_M3,
+        speed_uncertainty_m_s: 0.1 * KNOT_M_S,
+        source: "COMAC C919 Airplane Characteristics for Airport Planning C919-SVV19-50009-00 R9, 17 Oct 2025, DM 03-05 Reference Speed - Performance Issue 004, PDF p131: 141.7 kt (262.4 km/h) indicated airspeed at 15 m threshold height, certificated maximum flap, maximum certificated landing weight 67,800 kg, standard atmosphere, approach category D, for information only; http://www.comac.cc/fujian/c919acap_en.pdf; reference area 129.15 m^2 per the ICAO AOP/SG/8 WP/26 aircraft data (area definition not stated)",
+        applicability: "STD and ER share one value; planning IAS treated as sea-level CAS; reference-area definition unverified (family secondary value), so the coefficient is an effective gross-area one",
     },
 ];
 
@@ -178,7 +188,18 @@ mod tests {
                 "{}",
                 reference.preset_name
             );
-            assert!(reference.source.contains("https://"));
+            // The COMAC C919 ACAP is published over plain http only; every other
+            // record cites an https source.
+            let scheme = if reference.preset_name == "C919" {
+                "http://"
+            } else {
+                "https://"
+            };
+            assert!(
+                reference.source.contains(scheme),
+                "{}",
+                reference.preset_name
+            );
             assert!(!reference.applicability.is_empty());
         }
     }
@@ -229,11 +250,10 @@ mod tests {
                 assert!((performance.cl_max_land - reference.cl_max_land()).abs() < 1e-12);
             } else {
                 // AVE is notional; no landing-speed source was found for the
-                // E195-E2 (Embraer prints field lengths, not a Vref) or the
-                // C919 (no airport-planning manual is public); the A400M
-                // publishes no landing speed.
+                // E195-E2 (Embraer prints field lengths, not a Vref); the
+                // A400M publishes no landing speed with its mass.
                 assert!(
-                    matches!(preset.name, "AVE" | "E195-E2" | "C919" | "A400M"),
+                    matches!(preset.name, "AVE" | "E195-E2" | "A400M"),
                     "{} has no published landing reference",
                     preset.name
                 );

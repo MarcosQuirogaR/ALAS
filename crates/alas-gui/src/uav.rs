@@ -1,17 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! Persistent interaction state for the fixed-wing UAV workflow.
+//! Persistent interaction state for the fixed-wing UAV page: the competition
+//! search, its inputs, and its last completed result.
 
 mod model;
 mod request;
 mod support;
 mod workflow;
 
-pub use model::{
-    ComponentRole, MissionPlanMode, PropulsionInputMode, UavExecutionStatus, UavSection,
-    UavSelections, UavWorkflowOutcome,
-};
+pub use model::{CompetitionResult, UavExecutionStatus, UavSection, UavWorkflowOutcome};
 
 use std::sync::atomic::AtomicBool;
 use std::sync::mpsc::Receiver;
@@ -20,51 +18,55 @@ use std::sync::Arc;
 use alas_uav::optimizer::{
     DesignObjectives, GeometrySearchBounds, PreliminaryModel, SystemsDefinition,
 };
-use alas_uav::propulsion_electric::{ElectricMissionPhase, ElectricMissionResult};
-use alas_uav::{ComponentKind, SharedCoreInputs, UavTopology};
-use request::{default_selections, selected_record, UavWorkerMessage};
+use request::UavWorkerMessage;
 use support::{bounds, dimensions};
 
-/// User-editable UAV objectives, assumptions, hardware, and solver evidence.
+/// Competition inputs: the preset and the rule quantities the simulation cannot
+/// know (the test values are not competition figures).
+#[derive(Debug, Clone, PartialEq)]
+pub struct CompetitionSettings {
+    /// Preset identifier, for example `acc-2026`.
+    pub preset_id: String,
+    /// Announced take-off distance the aircraft must meet, m.
+    pub announced_takeoff_m: f64,
+    /// Payload count for the ACC cans gates (rule quantity), count.
+    pub payload_count: f64,
+    /// Payload volume for the XC payload gates (rule quantity), m^3.
+    pub payload_volume_m3: f64,
+}
+
+impl Default for CompetitionSettings {
+    fn default() -> Self {
+        Self {
+            preset_id: "acc-2026".to_owned(),
+            announced_takeoff_m: 60.0,
+            payload_count: 2.0,
+            payload_volume_m3: 0.25 * 0.12 * 0.10,
+        }
+    }
+}
+
+/// User-editable competition, mission and airframe inputs, and the worker state.
 #[derive(Debug)]
 pub struct UavWorkflowState {
+    /// Mission and performance objectives of the design brief.
     pub objectives: DesignObjectives,
     /// Which workflow section the desktop is currently displaying.
     pub active_section: UavSection,
-    /// Fixed-wing arrangement selected before a sizing run.
-    pub topology: UavTopology,
+    /// Search bounds on the airframe geometry variables.
     pub geometry_bounds: GeometrySearchBounds,
+    /// Preliminary sizing model assumptions.
     pub model: PreliminaryModel,
+    /// Systems definition (payload, avionics, and similar loads).
     pub systems: SystemsDefinition,
-    pub selections: UavSelections,
-    pub required_electronics_role: String,
+    /// Competition preset and rule quantities.
+    pub competition: CompetitionSettings,
+    /// Objective-evaluation budget of the competition search.
     pub evaluations: usize,
+    /// Random seed of the competition search.
     pub seed: u64,
-    /// Normal workflow derives map points from the selected source-backed hardware.
-    pub propulsion_input_mode: PropulsionInputMode,
-    /// Number of identical motor, ESC, and propeller installations on one pack.
-    pub propulsion_motor_count: u16,
-    /// Normal workflow derives four steady phases from the design brief.
-    pub mission_plan_mode: MissionPlanMode,
-    /// Designer-entered phases used only when [`MissionPlanMode::Advanced`] is active.
-    pub mission_phases: Vec<ElectricMissionPhase>,
-    /// Manual-map battery cell count, used behind the advanced mode.
-    pub propulsion_series_cells: u16,
-    /// Manual-map provenance, used behind the advanced mode.
-    pub propulsion_evidence: String,
-    pub stall_thrust_n: f64,
-    pub stall_current_a: f64,
-    pub stall_power_w: f64,
-    pub cruise_thrust_n: f64,
-    pub cruise_current_a: f64,
-    pub cruise_power_w: f64,
-    pub shared_core_inputs: SharedCoreInputs,
-    /// Latest automatically resolved electrical mission, including rejected designs.
-    pub last_electrical_mission: Option<ElectricMissionResult>,
-    /// Last completed accepted or evidence-rejected result.
+    /// Last completed search result.
     pub outcome: UavWorkflowOutcome,
-    /// Design convention used by the last completed search, if any.
-    pub last_completed_topology: Option<UavTopology>,
     /// Current worker state; failures do not erase [`Self::outcome`].
     pub execution: UavExecutionStatus,
     worker_rx: Option<Receiver<UavWorkerMessage>>,
@@ -73,19 +75,6 @@ pub struct UavWorkflowState {
 
 impl Default for UavWorkflowState {
     fn default() -> Self {
-        let selections = default_selections();
-        let required_electronics_role = selected_record(&selections, ComponentRole::Electronics)
-            .and_then(|record| match &record.kind {
-                ComponentKind::Electronics(spec) => Some(spec.role.clone()),
-                _ => None,
-            })
-            .unwrap_or_else(|| "gps_sensor".to_owned());
-        let propulsion_series_cells = selected_record(&selections, ComponentRole::Battery)
-            .and_then(|record| match &record.kind {
-                ComponentKind::Battery(spec) => spec.series_cells,
-                _ => None,
-            })
-            .unwrap_or(3);
         Self {
             objectives: DesignObjectives {
                 endurance_s: 900.0,
@@ -98,7 +87,6 @@ impl Default for UavWorkflowState {
                 efficiency_priority: 0.5,
             },
             active_section: UavSection::Mission,
-            topology: UavTopology::ConventionalTail,
             geometry_bounds: GeometrySearchBounds {
                 wing_area_m2: bounds(0.9, 1.2),
                 wing_aspect_ratio: bounds(8.0, 10.0),
@@ -145,34 +133,10 @@ impl Default for UavWorkflowState {
                 maximum_depth_of_discharge: 0.8,
                 reserve_fraction: 0.2,
             },
-            selections,
-            required_electronics_role,
+            competition: CompetitionSettings::default(),
             evaluations: 256,
             seed: 0x5eed_cafe,
-            propulsion_input_mode: PropulsionInputMode::Automatic,
-            propulsion_motor_count: 1,
-            mission_plan_mode: MissionPlanMode::Standard,
-            mission_phases: Vec::new(),
-            propulsion_series_cells,
-            propulsion_evidence: String::new(),
-            stall_thrust_n: 40.0,
-            stall_current_a: 25.0,
-            stall_power_w: 500.0,
-            cruise_thrust_n: 30.0,
-            cruise_current_a: 35.0,
-            cruise_power_w: 750.0,
-            shared_core_inputs: SharedCoreInputs {
-                main_airfoil_name: "naca2412".to_owned(),
-                tail_airfoil_name: "naca0012".to_owned(),
-                altitude_m: 0.0,
-                speed_m_s: 20.0,
-                angle_of_attack_deg: 4.0,
-                spanwise_resolution: 8,
-                chordwise_resolution: 4,
-            },
-            last_electrical_mission: None,
             outcome: UavWorkflowOutcome::NotRun,
-            last_completed_topology: None,
             execution: UavExecutionStatus::Idle,
             worker_rx: None,
             cancel_flag: Arc::new(AtomicBool::new(false)),

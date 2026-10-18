@@ -45,6 +45,8 @@ mod geometry;
 mod planform;
 #[cfg(test)]
 mod tests;
+mod turboprop_class;
+mod turboprop_mission;
 
 use std::sync::OnceLock;
 
@@ -184,6 +186,16 @@ impl AlasConfig {
             && self.optimizer.design_space.clean_sheet_brief == Some(true)
     }
 
+    /// Drop a body loft whose section the clean-sheet brief no longer matches
+    /// (no-op unless [`Self::derives_clean_sheet_start`]); a file that names
+    /// the loft explicitly is overlaid after the derivation, so the loader
+    /// applies this to the loaded configuration as well.
+    pub(crate) fn drop_mismatched_clean_sheet_loft(&mut self) {
+        if self.derives_clean_sheet_start() {
+            geometry::drop_mismatched_loft(&mut self.geometry.fuselage);
+        }
+    }
+
     /// Apply a committed clean-sheet brief's derived values: resolve an
     /// `Auto` aerodrome code to the letter of the class span, then (when
     /// `with_geometry`) re-derive the brief-dependent geometry, keeping
@@ -248,7 +260,7 @@ impl AlasConfig {
         if self.optimizer.design_space.mode == DesignMode::CleanSheet {
             design = self.optimizer.design_space.apply_explicit_start(design);
         }
-        design
+        self.band_design(design)
     }
 
     /// The class-sized start of a derived clean sheet, before explicit
@@ -275,9 +287,9 @@ impl AlasConfig {
     }
 
     /// The fuselage-length interval a cabin-sized clean sheet solves the
-    /// shortest seating length in, m: an explicit `bounds` entry, else for a
-    /// derived clean sheet from just over the two tapers plus one diameter to
-    /// the design space's guardrail, else the global box.
+    /// shortest seating length in, m: an explicit `bounds` entry, else from
+    /// just over the two tapers plus one diameter to the design space's
+    /// guardrail (registered presets included), else the global box.
     pub fn fuselage_sizing_interval_m(&self) -> (f64, f64) {
         let spec = spec("fuselage_length_m");
         if self.optimizer.design_space.mode == DesignMode::CleanSheet {
@@ -285,12 +297,13 @@ impl AlasConfig {
                 return (lower, upper);
             }
         }
-        if self.derives_clean_sheet_start() {
-            let f = &self.geometry.fuselage;
-            let shortest_m = f.cabin_start_x_m + f.tailcone_length_m + f.diameter_m;
-            if shortest_m.is_finite() && shortest_m < spec.preset_upper {
-                return (shortest_m.max(spec.preset_lower), spec.preset_upper);
-            }
+        // Registered presets use the same interval as a derived clean sheet:
+        // the global [65, 85] m box is a wide-body default and pinned every
+        // narrow-body CleanSheet fuselage to 65 m (finding F44).
+        let f = &self.geometry.fuselage;
+        let shortest_m = f.cabin_start_x_m + f.tailcone_length_m + f.diameter_m;
+        if shortest_m.is_finite() && shortest_m < spec.preset_upper {
+            return (shortest_m.max(spec.preset_lower), spec.preset_upper);
         }
         (spec.lower, spec.upper)
     }
@@ -384,6 +397,9 @@ impl AlasConfig {
 
     /// The class-sized wing area, span and sweep of this brief.
     pub(crate) fn class_wing(&self) -> Option<ClassWing> {
+        if self.is_turboprop_brief() {
+            return turboprop_class::class_wing(self);
+        }
         let stats = fleet_statistics()?;
         let r = &self.requirements;
         let q = cruise_dynamic_pressure_pa(r.cruise_mach, r.cruise_altitude_m)?;
@@ -409,11 +425,19 @@ impl AlasConfig {
     /// the linear first guess.
     fn chords_for_area(&self, wing: ClassWing) -> Option<DesignVector> {
         let stats = fleet_statistics()?;
+        let (break_ratio, tip_ratio) = if self.is_turboprop_brief() {
+            (
+                turboprop_class::BREAK_ROOT_CHORD_RATIO,
+                turboprop_class::turboprop_class().tip_root_chord_ratio,
+            )
+        } else {
+            (stats.break_root_chord_ratio, stats.tip_root_chord_ratio)
+        };
         let at = |root_chord_m: f64| DesignVector {
             span_m: wing.span_m,
             root_chord_m,
-            break_chord_m: root_chord_m * stats.break_root_chord_ratio,
-            tip_chord_m: root_chord_m * stats.tip_root_chord_ratio,
+            break_chord_m: root_chord_m * break_ratio,
+            tip_chord_m: root_chord_m * tip_ratio,
             sweep_deg: wing.sweep_deg,
             ..DesignVector::default()
         };

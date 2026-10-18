@@ -52,6 +52,19 @@ fn aerodynamic_stations(config: &AlasConfig, design: &DesignVector) -> [(f64, f6
     [station(root), station(kink), station(tip)]
 }
 
+/// The evaluated design's wing-proper semi-span: the design-vector span includes the sharklet
+/// reach on both sides for the A320 (`span_includes_device`, geometry phase 1), the box spans the
+/// planar wing.
+fn wing_semi_span_m(config: &AlasConfig, design: &DesignVector) -> f64 {
+    config
+        .geometry
+        .wing
+        .wingtip_device
+        .as_ref()
+        .map_or(design.span_m, |device| device.wing_span_m(design.span_m))
+        / 2.0
+}
+
 fn structural_geometry(config: &AlasConfig, design: &DesignVector) -> WingStructureGeometry {
     let plane = AircraftBuilder::new(Some(config.geometry.clone()))
         .build(Some(design), true)
@@ -76,7 +89,7 @@ fn wing_structure_planform_is_the_evaluated_designs_aerodynamic_planform() {
     let geometry = structural_geometry(&config, &design);
 
     let tolerance = 1e-9;
-    assert!((geometry.semi_span - design.span_m / 2.0).abs() < tolerance);
+    assert!((geometry.semi_span - wing_semi_span_m(&config, &design)).abs() < tolerance);
     assert!((geometry.semi_span - tip.1).abs() < tolerance);
     assert!((geometry.c_root - root.2).abs() < tolerance);
     assert!((geometry.c_break - kink.2).abs() < tolerance);
@@ -134,10 +147,16 @@ fn nastran_deck_spans_the_evaluated_semi_span() {
         }
     }
     assert!(nodes > 100, "the deck has {nodes} grids");
+    // Re-pinned 2026-10-16 by probe (fix-beam-vs-fe, boxed product deck): the
+    // product deck keeps only the box between the outermost spars and drops
+    // grids no element uses, so its outermost grid is the last box rib, not the
+    // leading/trailing-edge grids of the geometric tip. Resized A320: 19.798 m
+    // against the evaluated 19.954 m (0.992). The deck must still follow the
+    // evaluated span, not the preset's (more than 2 m away, tested above).
+    let evaluated = wing_semi_span_m(&config, &design);
     assert!(
-        (y_max - design.span_m / 2.0).abs() < 1e-6,
-        "deck semi-span {y_max} m against evaluated {} m",
-        design.span_m / 2.0
+        y_max <= evaluated + 1e-9 && y_max >= 0.99 * evaluated,
+        "deck semi-span {y_max} m against evaluated {evaluated} m"
     );
 }
 

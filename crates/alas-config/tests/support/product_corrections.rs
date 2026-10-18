@@ -11,6 +11,10 @@ use serde_json::{json, Value};
 #[path = "performance_fields.rs"]
 mod performance_fields;
 pub use performance_fields::published_landing_change;
+#[path = "geometry_phase1.rs"]
+mod geometry_phase1;
+#[path = "wing_round2.rs"]
+mod wing_round2;
 
 /// The frozen A380 engine offset below the wing reference plane, in metres.
 /// Named because the lint reads 3.14 as a mistyped pi; it is a length.
@@ -20,6 +24,21 @@ const A380_FROZEN_ENGINE_Z_M: f64 = -3.14;
 /// Geometry corrections pinned by the Airbus dimension references alongside
 /// the preset definitions, and the continuous-leading-edge sweep convention.
 pub fn dimensions(path: &str) -> Option<(Value, Value)> {
+    let base = dimensions_before_phase1(path);
+    let numbers = base
+        .as_ref()
+        .and_then(|(old, new)| Some((old.as_f64()?, new.as_f64()?)));
+    match geometry_phase1::moved(path, numbers) {
+        Some((old, new)) => Some((json!(old), json!(new))),
+        None => base,
+    }
+}
+
+/// Ledger entries before geometry phase 1 (`geometry_phase1` supersedes the paths it lists).
+fn dimensions_before_phase1(path: &str) -> Option<(Value, Value)> {
+    if let Some((old, new)) = wing_round2::lookup(path) {
+        return Some((json!(old), json!(new)));
+    }
     // This default differs for every preset, so it is matched by suffix
     // rather than one entry per preset name. Raymer ch.11 / Torenbeek
     // recommend ~6-8% minimum nose-gear load for steering/braking authority;
@@ -27,6 +46,11 @@ pub fn dimensions(path: &str) -> Option<(Value, Value)> {
     // inside the aerodynamic aft limit for most configured presets.
     if path.ends_with(".mass_model.pct_load_nlg_min") {
         return Some((json!(0.02), json!(0.06)));
+    }
+    // Fix lane kappa-cal (2026-10-12): viscous margin fitted with the
+    // lift-dependent viscous fraction on (see `DEFAULT_VISCOUS_MARGIN`).
+    if path.ends_with(".drag_model.viscous_margin") {
+        return Some((json!(1.10), json!(1.00)));
     }
     let (old, new) = match path {
         "A340-300.geometry.empennage.hstab_tip_le_m[1]" => (9.0, 9.7),
@@ -52,7 +76,7 @@ pub fn dimensions(path: &str) -> Option<(Value, Value)> {
         "A380-800.engine_spanwise_positions[3]"
         | "A380-800.geometry.engine.spanwise_positions_m[3]" => (-18.5, -25.7),
         "A380-800.geometry.engine.inlet_x_offset_m" => (4.5, 6.285),
-        "A380-800.geometry.engine.z_m" => (A380_FROZEN_ENGINE_Z_M, -0.872),
+        "A380-800.geometry.engine.z_m" => (A380_FROZEN_ENGINE_Z_M, -0.82),
         "A380-800.geometry.wing.break_z_m" => (-0.4, -2.5),
         "A380-800.geometry.wing.tip_z_m" => (3.0, -0.876),
         "A380-800.geometry.empennage.hstab_offset_from_tail_m" => (11.0, 15.45),
@@ -68,7 +92,17 @@ pub fn dimensions(path: &str) -> Option<(Value, Value)> {
         // No fin station is published; the frozen offset left the 10.5 m
         // root chord 0.5 m past the tail tip, and this one keeps it over the
         // body.
-        "DC-10.geometry.empennage.vstab_offset_from_tail_m" => (10.0, 10.55),
+        "DC-10.geometry.empennage.vstab_offset_from_tail_m" => (10.0, 13.6),
+        "DC-10.geometry.empennage.vstab_root_chord_m" => (10.5, 5.0),
+        "DC-10.geometry.empennage.vstab_tip_chord_m" => (3.8, 2.9),
+        "DC-10.geometry.empennage.vstab_tip_le_m[0]" => (7.5, 9.25),
+        "DC-10.geometry.empennage.vstab_tip_le_m[2]" => (9.5, 9.3),
+        "DC-10.geometry.empennage.vstab_z_m" => (2.2, 3.1),
+        // DAC-67803A Rev A Figure 2.2 plan and side view: the underwing
+        // nacelle inlet face is 19.7 m aft of the nose, 6.0 m ahead of the
+        // wing leading edge at the 8.18 m engine station (the frozen 3.5 m
+        // put it at 22.2 m).
+        "DC-10.geometry.engine.inlet_x_offset_m" => (3.5, 6.0),
         // Quarter-chord sweeps entered as leading-edge angles, converted
         // through the outboard taper: NASA/TP-20210023843 (2022) Table I,
         // 787-9 c/4 32 deg (32.2 deg in the preset's open database; the
@@ -96,7 +130,7 @@ pub fn dimensions(path: &str) -> Option<(Value, Value)> {
         "A340-300.engine_spanwise_positions[3]"
         | "A340-300.geometry.engine.spanwise_positions_m[3]" => (-14.0, -19.27),
         "A340-300.geometry.engine.inlet_x_offset_m" => (3.0, 4.227),
-        "A340-300.geometry.engine.z_m" => (-1.94, -1.436),
+        "A340-300.geometry.engine.z_m" => (-1.94, -1.2742),
         "A340-300.geometry.wing.break_z_m" => (-0.3, -0.922),
         "A340-300.geometry.wing.tip_z_m" => (2.0, 1.315),
         "A340-300.geometry.empennage.hstab_offset_from_tail_m" => (9.0, 8.42),
@@ -129,22 +163,22 @@ pub fn dimensions(path: &str) -> Option<(Value, Value)> {
         | "A220-300.geometry.engine.spanwise_positions_m[1]"
         | "preset_only.geometry.engine.spanwise_positions_m[1]" => (-5.2, -5.44),
         "A220-300.geometry.engine.inlet_x_offset_m"
-        | "preset_only.geometry.engine.inlet_x_offset_m" => (2.3, 3.668),
-        "A220-300.geometry.engine.z_m" | "preset_only.geometry.engine.z_m" => (-1.71, -1.410),
+        | "preset_only.geometry.engine.inlet_x_offset_m" => (2.3, 3.6871),
+        "A220-300.geometry.engine.z_m" | "preset_only.geometry.engine.z_m" => (-1.71, -1.211),
         "A220-300.geometry.empennage.hstab_offset_from_tail_m"
-        | "preset_only.geometry.empennage.hstab_offset_from_tail_m" => (5.0, 5.82),
+        | "preset_only.geometry.empennage.hstab_offset_from_tail_m" => (5.0, 6.55),
         "A220-300.geometry.empennage.hstab_root_chord_m"
         | "preset_only.geometry.empennage.hstab_root_chord_m" => (3.8, 4.629),
         "A220-300.geometry.empennage.hstab_tip_chord_m"
         | "preset_only.geometry.empennage.hstab_tip_chord_m" => (1.1, 1.340),
         "A220-300.geometry.empennage.hstab_tip_le_m[0]"
-        | "preset_only.geometry.empennage.hstab_tip_le_m[0]" => (3.2, 3.60),
+        | "preset_only.geometry.empennage.hstab_tip_le_m[0]" => (3.2, 4.26),
         "A220-300.geometry.empennage.hstab_tip_le_m[1]"
         | "preset_only.geometry.empennage.hstab_tip_le_m[1]" => (5.5, 6.1315),
         "A220-300.geometry.empennage.vstab_root_chord_m"
-        | "preset_only.geometry.empennage.vstab_root_chord_m" => (5.0, 4.516),
+        | "preset_only.geometry.empennage.vstab_root_chord_m" => (5.0, 4.31),
         "A220-300.geometry.empennage.vstab_tip_chord_m"
-        | "preset_only.geometry.empennage.vstab_tip_chord_m" => (1.6, 1.616),
+        | "preset_only.geometry.empennage.vstab_tip_chord_m" => (1.6, 2.0),
         "A220-300.geometry.empennage.vstab_tip_le_m[2]"
         | "preset_only.geometry.empennage.vstab_tip_le_m[2]" => (5.5, 6.193),
         "A220-300.geometry.empennage.vstab_z_m" | "preset_only.geometry.empennage.vstab_z_m" => {
@@ -202,7 +236,8 @@ pub fn dimensions(path: &str) -> Option<(Value, Value)> {
         "A320-200.geometry.empennage.vstab_z_m" => (1.2, 2.17),
         "A320-200.geometry.empennage.hstab_root_chord_m" => (4.0, 3.740),
         "A320-200.geometry.empennage.hstab_tip_chord_m" => (1.2, 1.24),
-        "A320-200.geometry.empennage.hstab_tip_le_m[0]" => (3.5, 3.31),
+        "A320-200.geometry.empennage.hstab_tip_le_m[0]" => (3.5, 4.02),
+        "A320-200.geometry.empennage.hstab_offset_from_tail_m" => (5.5, 6.06),
         "A320-200.geometry.empennage.hstab_tip_le_m[1]" => (6.0, 6.225),
         "A320-200.geometry.empennage.vstab_root_chord_m" => (5.2, 5.444),
         "A320-200.geometry.empennage.vstab_tip_chord_m" => (1.8, 1.884),
@@ -216,7 +251,7 @@ pub fn dimensions(path: &str) -> Option<(Value, Value)> {
         // 0.577 m sets the engine axis under the lowered wing.
         "A320-200.geometry.wing.break_z_m" => (-0.2, -0.62),
         "A320-200.geometry.wing.tip_z_m" => (1.5, 0.33),
-        "A320-200.geometry.engine.z_m" => (-1.71, -1.50),
+        "A320-200.geometry.engine.z_m" => (-1.71, -1.48),
         // Airbus A320 AC Jun 01/24, FIGURE-2-2-0-991-004-A01 sheet 4: CFM56
         // nacelle front 11.19 m aft of the nose.
         "A320-200.geometry.engine.inlet_x_offset_m" => (2.5, 3.646),
@@ -242,17 +277,48 @@ pub fn dimensions(path: &str) -> Option<(Value, Value)> {
         "B787-9.geometry.fuselage.height_m" | "preset_then_field.geometry.fuselage.height_m" => {
             return Some((Value::Null, json!(5.94)))
         }
-        "B787-9.geometry.engine.z_m" | "preset_then_field.geometry.engine.z_m" => (-2.55, -1.821),
+        "B787-9.geometry.engine.z_m" | "preset_then_field.geometry.engine.z_m" => (-2.55, -1.828),
         "B787-9.geometry.empennage.hstab_offset_from_tail_m"
-        | "preset_then_field.geometry.empennage.hstab_offset_from_tail_m" => (9.5, 6.99),
+        | "preset_then_field.geometry.empennage.hstab_offset_from_tail_m" => (9.5, 9.75),
         "B787-9.geometry.empennage.hstab_tip_le_m[1]"
         | "preset_then_field.geometry.empennage.hstab_tip_le_m[1]" => (9.5, 9.905),
+        // Fin positions fitted to the manufacturers' side-view drawings (A320 AC
+        // Fig 2-2-0-991-004-A01, A220 ACP Fig 1 sheet 1, 787 Rev Q 2.2.2): the
+        // frozen offsets put the fin 1.1-1.5 m too far aft, its tip trailing
+        // edge past the tail cone.
+        "A320-200.geometry.empennage.vstab_offset_from_tail_m" => (6.5, 7.7),
+        "A220-300.geometry.empennage.vstab_tip_le_m[0]"
+        | "preset_only.geometry.empennage.vstab_tip_le_m[0]" => (4.5, 5.38),
+        "B787-9.geometry.empennage.hstab_tip_le_m[0]"
+        | "preset_then_field.geometry.empennage.hstab_tip_le_m[0]" => (6.0, 8.76),
+        "B787-9.geometry.empennage.vstab_root_chord_m"
+        | "preset_then_field.geometry.empennage.vstab_root_chord_m" => (8.0, 7.5),
+        "B787-9.geometry.empennage.vstab_tip_chord_m"
+        | "preset_then_field.geometry.empennage.vstab_tip_chord_m" => (2.8, 2.4),
+        "B787-9.geometry.empennage.vstab_tip_le_m[0]"
+        | "preset_then_field.geometry.empennage.vstab_tip_le_m[0]" => (7.5, 8.5),
+        "A220-300.geometry.empennage.vstab_offset_from_tail_m"
+        | "preset_only.geometry.empennage.vstab_offset_from_tail_m" => (6.0, 8.64),
         "B787-9.geometry.empennage.vstab_offset_from_tail_m"
-        | "preset_then_field.geometry.empennage.vstab_offset_from_tail_m" => (10.5, 9.69),
+        | "preset_then_field.geometry.empennage.vstab_offset_from_tail_m" => (10.5, 11.19),
         "B787-9.geometry.empennage.vstab_tip_le_m[2]"
         | "preset_then_field.geometry.empennage.vstab_tip_le_m[2]" => (8.5, 9.12),
         "B787-9.geometry.empennage.vstab_z_m"
         | "preset_then_field.geometry.empennage.vstab_z_m" => (1.8, 3.17),
+        // Nose tip heights of the drawing-fitted noses (geometry round 2): the tip
+        // height read from each manufacturer drawing; the frozen generic nose
+        // droop was a single class estimate.
+        "AVE.geometry.fuselage.nose_z_m" => (-0.5, 0.25),
+        "A340-300.geometry.fuselage.nose_z_m" => (-0.4, 0.25),
+        "A380-800.geometry.fuselage.nose_z_m" => (-0.6, -1.02),
+        "B787-9.geometry.fuselage.nose_z_m" | "preset_then_field.geometry.fuselage.nose_z_m" => {
+            (-0.4, -0.71)
+        }
+        "A320-200.geometry.fuselage.nose_z_m" => (-0.3, -0.57),
+        "A220-300.geometry.fuselage.nose_z_m" | "preset_only.geometry.fuselage.nose_z_m" => {
+            (-0.2, -1.01)
+        }
+        "DC-10.geometry.fuselage.nose_z_m" => (-0.4, 0.53),
         "A320-200.geometry.wing.root_datum_x_m" => (12.9, 11.891),
         // Wing roots re-anchored so the model quarter-MAC point sits on the
         // manufacturer weight-and-balance one, derived by two-point statics
@@ -332,7 +398,30 @@ pub fn retired_reference_key(path: &str, key: &str) -> bool {
 /// Additive propulsion fields are validated by the active-binding unit tests.
 pub fn native_field(path: &str, key: &str) -> bool {
     performance_fields::is_native_field(path, key)
+        // Lift-dependent viscous drag fraction: a native product addition
+        // (default 0 = the frozen lumped-margin convention).
+        || (key == "compressible_trim"
+            && (path.ends_with("AnalysisConfig") || path.ends_with(".analysis")))
+        || (key == "lift_dependent_viscous_fraction"
+            && (path.ends_with("DragModelConfig") || path.ends_with(".drag_model")))
+        || (matches!(
+            key,
+            "vstab_root_le_x_m"
+                | "hstab_root_le_x_m"
+                | "hstab_root_station_y_m"
+                | "vstab_dorsal_x_start_m"
+                | "vstab_dorsal_height_m"
+                | "vstab_dorsal_in_aero"
+        ) && (path.ends_with("EmpennageConfig") || path.ends_with(".empennage")))
         || (matches!(key, "fuel_policy" | "fuel_tanks" | "downstream") && !path.contains('.'))
+        // Native rudder deflection limit of the engine-out yaw balance.
+        || (key == "rudder_max_deflection_deg"
+            && (path.ends_with("ControlSurfacesConfig") || path.ends_with(".control_surfaces")))
+        // The drawn tail-engine pod of a trijet; the frozen schema places the
+        // centreline engine by a rule (`None` keeps that rule).
+        || (key == "centre_engine" && (path.ends_with("EngineConfig") || path.ends_with(".engine")))
+        || (key == "nacelle_model" && (path.ends_with("EngineConfig") || path.ends_with(".engine")))
+        || (key == "z_per_engine_m" && (path.ends_with("EngineConfig") || path.ends_with(".engine")))
         // Optional belly-upsweep length; the frozen schema has no such field.
         || (key == "belly_upsweep_length_m"
             && (path.ends_with("FuselageConfig") || path.ends_with(".fuselage")))
@@ -343,6 +432,12 @@ pub fn native_field(path: &str, key: &str) -> bool {
             && (path.ends_with("FuselageConfig") || path.ends_with(".fuselage")))
         // Optional upper-deck hump and upper deck (all unset = no hump).
         || ((key.starts_with("hump_") || key.starts_with("upper_deck_"))
+            && (path.ends_with("FuselageConfig") || path.ends_with(".fuselage")))
+        // Optional shaped aft body (all unset = tailcone law).
+        || ((key.starts_with("aft_") || key.starts_with("tail_end_") || key == "hold_interior_end_x_m")
+            && (path.ends_with("FuselageConfig") || path.ends_with(".fuselage")))
+        // Optional lofted outer surface (hidden; unset = parametric laws).
+        || (key == "loft"
             && (path.ends_with("FuselageConfig") || path.ends_with(".fuselage")))
         || (path.ends_with(".landing_gear")
             && matches!(
@@ -373,6 +468,23 @@ pub fn native_field(path: &str, key: &str) -> bool {
                     | "cl_ground_attitude_frac_of_cl_max_to"
                     | "rotation_rolling_friction_coefficient"
             ))
+        // Spanwise dihedral and thickness stations and the swept-back tip of the
+        // main wing: native additions, omitted from serialization when unset
+        // (geometry round 2); their behaviour is pinned by the wing-profile
+        // tests in `alas-geom` and `alas-config`.
+        || (matches!(
+            key,
+            "dihedral_stations"
+                | "thickness_stations"
+                | "tip_rake_start_span_fraction"
+                | "tip_rake_tip_chord_m"
+                | "wing_profile_interpolation"
+                | "flight_root_rise_m"
+                | "nacelles_hold_ground_height"
+                | "wingtip_device"
+                | "inboard_le_sweep_deg"
+                | "reference_wing"
+        ) && (path.ends_with("WingConfig") || path.ends_with(".wing")))
         || (path.ends_with(".optimizer") && matches!(key, "objective" | "design_space"))
         || (path.ends_with(".mass_model")
             && matches!(
@@ -410,7 +522,8 @@ pub fn native_field(path: &str, key: &str) -> bool {
         // or true airspeed. The frozen configuration has one ladder in literal
         // true airspeed and no way to say otherwise, so this is a native
         // addition rather than a disagreement about a value.
-        || (path.ends_with(".mission.profile") && key == "climb_descent_speed_reference")
+        || (path.ends_with(".mission.profile")
+            && matches!(key, "climb_descent_speed_reference" | "climb_mach" | "descent_mach" | "max_operating_mach" | "max_operating_cas_m_s" | "takeoff_roll_time_s"))
         || (path.ends_with(".optimizer.solver")
             && matches!(
                 key,
@@ -452,6 +565,16 @@ pub fn operational(path: &str) -> Option<Value> {
     // operational default, which is the authority here, rather than against a
     // frozen number that was never about them.
     if let Some(key) = field.strip_prefix("mission.profile.") {
+        // The cruise speeds follow the requirement's Mach (one source of
+        // truth): the `preset_then_field` document edits it to 0.80.
+        if case == "preset_then_field"
+            && key.starts_with("cruise_")
+            && key.ends_with("_air_speed_m_s")
+        {
+            let sound = alas_atmo::us1976_compute_values(defaults.cruise_altitude_m, 0.0)
+                .speed_of_sound_m_s;
+            return Some(json!(0.80 * sound));
+        }
         let profile = serde_json::to_value(&defaults.profile).ok()?;
         return profile.get(key).cloned();
     }
@@ -477,15 +600,22 @@ pub fn added_planform(path: &str) -> Option<Value> {
         "A320-200.geometry.wing.side_of_body_chord_ratio" => Some(json!(0.852_98)),
         // Airbus A380 AC Rev 20, Figure 2-2-0-991-001-A01 sheet 2: 17.67 m
         // chord at the side of the body.
-        "A380-800.geometry.wing.side_of_body_chord_ratio" => Some(json!(0.985_244_323_994_896_8)),
+        "A380-800.geometry.wing.side_of_body_chord_ratio" => Some(json!(0.897_945_396_825_144_8)),
         "DC-10.geometry.wing.side_of_body_chord_ratio" => Some(json!(0.925_625_096_354_822)),
+        // A220-300 pass 2: 6.078 m side-of-body chord over the 7.071 m root chord.
+        "A220-300.geometry.wing.side_of_body_chord_ratio"
+        | "preset_only.geometry.wing.side_of_body_chord_ratio" => Some(json!(0.8595)),
         "A320-200.geometry.wing.kink_span_fraction" => Some(json!(0.379_3)),
         "A320-200.geometry.wing.side_of_body_span_fraction" => Some(json!(0.115_84)),
         // Airbus A380 AC Rev 20, Figure 2-2-0-991-001-A01: half the 7.14 m body.
         "A380-800.geometry.wing.side_of_body_span_fraction" => Some(json!(3.57 / 39.875)),
         // Airbus A380 Facts and Figures (February 2022): the wing flexes
         // upwards by over 4 m during take-off, over the 39.875 m semispan.
-        "A380-800.geometry.wing.flight_tip_rise_semispan_fraction" => Some(json!(4.0 / 39.875)),
+        "A380-800.geometry.wing.flight_tip_rise_semispan_fraction" => Some(json!(0.002_733)),
+        // Geometry round 2: the static ground shape stays at its published clearances and the
+        // flight shape carries the drawing fit (root and tip rises, interior station rises).
+        "A320-200.geometry.wing.flight_tip_rise_semispan_fraction" => Some(json!(0.016_681)),
+        "A340-300.geometry.wing.flight_tip_rise_semispan_fraction" => Some(json!(0.013_999)),
         _ => None,
     }
 }

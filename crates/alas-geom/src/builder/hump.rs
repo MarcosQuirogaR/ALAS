@@ -52,9 +52,14 @@ mod tests {
     use super::*;
     use alas_config::{presets, FuselageConfig, GeometryConfig};
 
+    /// The generated-station fuselage of `preset` with the loft CLEARED: these
+    /// tests pin the legacy station law (the hump stations and the twenty
+    /// generated stations), which a lofted body replaces by its own polyline.
     fn fuselage(geometry: &GeometryConfig, preset: &str) -> crate::aircraft::fuselage::Fuselage {
         let design = presets::get(preset).expect("preset").design_vector;
-        AircraftBuilder::new(Some(geometry.clone()))
+        let mut geometry = geometry.clone();
+        geometry.fuselage.loft = None;
+        AircraftBuilder::new(Some(geometry))
             .build(Some(&design), false)
             .expect("builds")
             .fuselages

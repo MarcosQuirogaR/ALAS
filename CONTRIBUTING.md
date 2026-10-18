@@ -43,13 +43,18 @@ tests that use them are marked `#[ignore]` and run with
      `origin/dev`).
    - `cargo xtask gate` at phase integration and in CI: the repository checks,
      formatting, lints, and every test in the workspace.
-   - `cargo xtask gate --slow`: only the slow tests, on their own.
+   - `cargo xtask gate --integration` (alias `--slow`): only the heavy
+     integration tests (all-preset replays, acceptance matrices, staged
+     searches), on their own.
 
-   The tiers need [cargo-nextest](https://nexte.st):
-   `cargo install cargo-nextest --locked`. `cargo nextest run` runs the fast
-   tier and `cargo nextest run --profile full` everything; the split is defined
-   in `.config/nextest.toml`. Without nextest the gate still works but falls
-   back to `cargo test` and cannot separate the slow tests.
+   The tiers need [cargo-nextest](https://nexte.st) (prebuilt Windows binaries
+   are published on its GitHub releases, or `cargo install cargo-nextest
+   --locked`). `cargo nextest run` runs the fast dev-loop tier,
+   `cargo nextest run --profile integration` the heavy tier and
+   `cargo nextest run --profile full` everything; the split is defined in
+   `.config/nextest.toml` and regenerated from measured test times
+   (`docs/RUNNING.md`, "Fast iteration"). Without nextest the gate still works
+   but falls back to `cargo test` and cannot separate the heavy tests.
 
    Doctests are not used: the gate does not run them, and the repository checks
    reject a doc example that rustdoc would run. Put the test in a unit test and
@@ -76,7 +81,8 @@ first, and the search space for the bug is the whole tree. Checked one at a
 time, it is always the module just written.
 
 Tolerances are not chosen per test. They come from the tiers in
-`golden/tolerances.toml`, each of which has a documented reason to exist:
+`crates/alas-testkit/src/lib.rs` (the `Tier` enum), each of which has a
+documented reason to exist:
 closed-form arithmetic is held to a much tighter bound than anything that has
 been through a linear solve, and `f32` kernels tighter still than iterative
 solutions. Picking a looser tier than a module deserves is how a real

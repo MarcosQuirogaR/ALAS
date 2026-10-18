@@ -370,8 +370,8 @@ fn cumulative_arc_length(points: &[(f64, f64)]) -> Vec<f64> {
 /// few hundred points, and a scan needs no fallible `f64` ordering to
 /// implement without panicking.
 pub(crate) fn numpy_interp(x: f64, xp: &[f64], fp: &[f64]) -> f64 {
-    let Some(&first_x) = xp.first() else {
-        return f64::NAN; // `numpy.interp` itself raises on empty `xp`; nothing here calls it that way.
+    let (Some(&first_x), true) = (xp.first(), fp.len() == xp.len()) else {
+        return f64::NAN; // `numpy.interp` raises on empty or mismatched input; nothing calls it that way.
     };
     let last = xp.len() - 1;
     if x <= first_x {

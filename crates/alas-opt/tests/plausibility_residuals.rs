@@ -14,7 +14,7 @@ use alas_config::{AerodromeReferenceCode, AlasConfig};
 use alas_opt::{assess_product_candidate, CandidateAssessment};
 
 mod support;
-use support::{nominal, violates};
+use support::{assess_view, nominal, violates, AssessmentView};
 
 /// Assess `design` against `preset`'s configuration in the **clean-sheet**
 /// design mode, so the envelope is the global box widened to contain the
@@ -28,7 +28,7 @@ use support::{nominal, violates};
 /// plausibility residual is reached. That default is correct for the product
 /// (adapting a registered aircraft is what a preset document asks for) and
 /// wrong for these tests, which exist to exercise the residuals themselves.
-fn assess(preset: &str, design: DesignVector) -> Result<CandidateAssessment, String> {
+fn assess(preset: &str, design: DesignVector) -> Result<AssessmentView, String> {
     assess_under_code(preset, design, AerodromeReferenceCode::F)
 }
 
@@ -39,12 +39,12 @@ fn assess_under_code(
     preset: &str,
     design: DesignVector,
     code: AerodromeReferenceCode,
-) -> Result<CandidateAssessment, String> {
+) -> Result<AssessmentView, String> {
     let mut config = AlasConfig::from_value(&serde_json::json!({ "preset": preset }))
         .unwrap_or_else(|error| panic!("{preset}: {error}"));
     config.optimizer.design_space.mode = alas_config::optimizer::DesignMode::CleanSheet;
     config.optimizer.objective.aerodrome_reference_code = code;
-    assess_product_candidate(&config, &design)
+    assess_view(&config, &design)
 }
 
 /// Every plausibility residual identifier, so a test can assert that none of
@@ -67,35 +67,15 @@ const PLAUSIBILITY_IDS: &[&str] = &[
 ];
 
 /// The registered aircraft whose *sized* fuselage leaves the validity domain
-/// even though the aircraft itself does not.
+/// even though the aircraft itself does not: none.
 ///
-/// As built from the preset
-/// geometry, every registered type has a transport fuselage: fineness 9.2 to
-/// 12.4 and a tail arm of 0.42 to 0.48 of body length. Evaluating the same
-/// aircraft in the **clean-sheet** design mode, which these tests use because
-/// it is the default a bare `{"preset": name}` document loads, re-derives the
-/// fuselage from the cabin and gives fineness 16.1 (A320-200), 18.6
-/// (A220-300) and 23.5 (ATR72-600) with tail arms of 0.68, 0.69 and 0.78. A
-/// twenty-seven metre body a metre and a bit across is not a regional
-/// turboprop, so the limits are right and the derived geometry is wrong. The
-/// A320-200 lands inside both windows despite the same distortion, so it is
-/// not listed.
-///
-/// In `DesignMode::ReferenceAdaptation`, which is the mode a registered
-/// aircraft is actually optimized in, the fuselage is not re-derived and the
-/// distortion does not occur: no plausibility residual appears among any
-/// preset's rejection reasons. The defect is therefore in the cabin-derived
-/// fuselage sizing.
-///
-/// The E195-E2 joins them: in the clean-sheet mode its 132-seat, four-abreast
-/// cabin re-derives to a fuselage of fineness 20.4 against the limit of 18.0,
-/// the same cabin-derived distortion (the four-abreast cabin is the likely
-/// cause, as for the ATR 72-600; not isolated).
-///
-/// This list is an expectation, not a permission: when the cabin/geometry
-/// owner fixes it, the assertion below fails and the entry is deleted.
-// old ["A220-300", "ATR72-600"] -> new: E195-E2 appended
-const SIZED_FUSELAGE_LEAVES_THE_DOMAIN: &[&str] = &["A220-300", "ATR72-600", "E195-E2"];
+/// Before finding F44 was fixed, the clean-sheet mode pinned every registered
+/// fuselage to the global 65 m floor (fineness 16 to 23, tail arm 0.68 to
+/// 0.78 of body length for A220-300, ATR72-600 and E195-E2). The sizing
+/// interval now starts at the shortest body that can hold the cabin
+/// (`AlasConfig::fuselage_sizing_interval_m`), so every registered aircraft
+/// sits inside all plausibility windows. A new entry is a regression.
+const SIZED_FUSELAGE_LEAVES_THE_DOMAIN: &[&str] = &[];
 
 #[test]
 fn only_the_recorded_cabin_defect_pushes_a_registered_aircraft_out_of_the_domain() {

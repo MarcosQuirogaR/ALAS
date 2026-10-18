@@ -38,7 +38,12 @@ fn full_fidelity_valid_counts_distinct_feasible_designs_only() {
         ..nominal
     };
     let history = alas_opt::OptimizationHistory {
-        design_vectors: vec![nominal, nominal, signed_zero, changed],
+        design_vectors: vec![
+            Some(nominal),
+            Some(nominal),
+            Some(signed_zero),
+            Some(changed),
+        ],
         valid: vec![true, true, true, false],
         hard_violation: vec![0.0; 4],
         cost: vec![1.0; 4],

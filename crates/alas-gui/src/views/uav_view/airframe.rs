@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! Airframe and shared-core controls for the fixed-wing UAV workflow.
+//! Airframe controls for the fixed-wing UAV workflow.
 
 use egui::{DragValue, Grid, RichText, Ui};
 
@@ -9,7 +9,7 @@ use crate::uav::UavWorkflowState;
 
 use super::super::tr;
 use super::presentation::{card, card_column_count, collapsing_card};
-use super::uav_fields::{bounds_row, integer, text_value, usize_value, value};
+use super::uav_fields::{bounds_row, integer, usize_value, value};
 
 pub(super) fn airframe_inputs(state: &mut UavWorkflowState, ui: &mut Ui) {
     if card_column_count(ui.available_width()) == 2 {
@@ -334,58 +334,6 @@ fn systems_inputs(state: &mut UavWorkflowState, ui: &mut Ui) {
         );
         ui.end_row();
     });
-}
-
-pub(super) fn shared_core_inputs(state: &mut UavWorkflowState, ui: &mut Ui) {
-    card(
-        ui,
-        "Shared production-core verification",
-        Some(
-            "The accepted geometry is rebuilt as production Airplane primitives and evaluated by native VLM. Parasite drag remains the explicit preliminary CD0 input and is not attributed to VLM.",
-        ),
-        |ui| {
-            form_grid(ui, "uav_shared_core_grid", |ui| {
-                text_value(
-                    ui,
-                    "Main-wing airfoil",
-                    &mut state.shared_core_inputs.main_airfoil_name,
-                );
-                text_value(
-                    ui,
-                    "Tail or control-surface airfoil",
-                    &mut state.shared_core_inputs.tail_airfoil_name,
-                );
-                value(
-                    ui,
-                    "VLM altitude",
-                    &mut state.shared_core_inputs.altitude_m,
-                    "m",
-                );
-                value(
-                    ui,
-                    "VLM speed",
-                    &mut state.shared_core_inputs.speed_m_s,
-                    "m/s",
-                );
-                value(
-                    ui,
-                    "VLM angle of attack",
-                    &mut state.shared_core_inputs.angle_of_attack_deg,
-                    "deg",
-                );
-                usize_value(
-                    ui,
-                    "Spanwise resolution",
-                    &mut state.shared_core_inputs.spanwise_resolution,
-                );
-                usize_value(
-                    ui,
-                    "Chordwise resolution",
-                    &mut state.shared_core_inputs.chordwise_resolution,
-                );
-            });
-        },
-    );
 }
 
 fn form_grid(ui: &mut Ui, id: impl std::hash::Hash, contents: impl FnOnce(&mut Ui)) {

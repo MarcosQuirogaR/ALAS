@@ -7,6 +7,7 @@ use alas_atmo::Atmosphere;
 use alas_config::airports::Airport;
 use alas_config::PerformanceConfig;
 
+use super::landing::{ws_landing_field_limit, JET_DRY_LANDING_SHARE};
 use super::{far25_engine_count_supported, linspace, M_TO_FT, PA_TO_PSF};
 
 /// Cruise thrust-to-weight constraint, sea-level static: `tw_cruise_constraint`.
@@ -426,16 +427,6 @@ pub fn tw_takeoff_constraint(ws_pa: &[f64], toda_m: f64, sigma: f64, cl_max_to: 
         .collect()
 }
 
-/// Maximum wing loading [Pa] the landing-distance constraint allows:
-/// `ws_landing_limit`.
-///
-/// ```text
-/// (W/S)_max = LDA * sigma * CL_max_land / K
-/// ```
-pub fn ws_landing_limit(lda_m: f64, sigma: f64, cl_max_land: f64, k_factor: f64) -> f64 {
-    lda_m * sigma * cl_max_land / k_factor
-}
-
 /// Pre-computed constraint curves ready for plotting: `MatchingChartData`.
 ///
 /// `tw_takeoff` and `ws_land_limits` are keyed by aerodrome name in the order
@@ -527,7 +518,13 @@ pub fn build_matching_chart(
         ));
         ws_land_limits.push((
             airport.name.clone(),
-            ws_landing_limit(airport.lda_m, sigma, cl_max_land, k_land),
+            ws_landing_field_limit(
+                airport.lda_m,
+                JET_DRY_LANDING_SHARE,
+                sigma,
+                cl_max_land,
+                k_land,
+            ),
         ));
     }
 

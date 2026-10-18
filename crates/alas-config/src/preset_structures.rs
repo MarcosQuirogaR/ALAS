@@ -32,6 +32,24 @@ pub fn cap_material_source(preset_name: &str) -> Option<&'static str> {
     matches!(preset_name, "B787-9" | "A220-300").then_some(TRANSPORT_CAP_SOURCE)
 }
 
+/// 1 g tensile stress limit of the lower cover of a metallic civil transport, Pa.
+///
+/// Torenbeek, *Advanced Aircraft Design* (2013), section 11.7.1 (book p.350,
+/// PDF p.366), read on the page: a short-range (regional) airliner must stay
+/// crack-free for more than 50 000 flights, and conventional fabricated and
+/// riveted 2024-T3 skin-stringer panels are held to a 1 g tensile stress no
+/// higher than 75 MPa; a long-range airliner achieves about 25 000 flights, and
+/// integrally machined panels allow a 1 g stress of 110 MPa. The class is the
+/// aircraft's declared haul class (the selector the FLOPS operating-item
+/// relations already read), not a per-aircraft fit; the fabrication type of
+/// each wing is not sourced, so the class statement's own construction applies.
+fn lower_cover_fatigue_stress_1g_pa(preset_name: &str) -> f64 {
+    match crate::preset_flops::declared_haul_class(preset_name) {
+        crate::OperatingHaulClass::LongHaul => 110.0e6,
+        crate::OperatingHaulClass::ShortMediumHaul => 75.0e6,
+    }
+}
+
 /// The structural configuration registered for the named preset, if it has one.
 ///
 /// `None` means the preset has not declared a specialized structural
@@ -43,6 +61,7 @@ pub fn config_for(preset_name: &str) -> Option<StructuresConfig> {
         // Alloy, temper and gauge are NOT sourced; the alloy below is the database's metallic default, not a source claim.
         "A320-200" => Some(StructuresConfig {
             spar_cap_material: "Al 7075-T6".to_owned(),
+            lower_cover_fatigue_stress_1g_pa: lower_cover_fatigue_stress_1g_pa(preset_name),
             ..StructuresConfig::default()
         }),
 
@@ -51,6 +70,7 @@ pub fn config_for(preset_name: &str) -> Option<StructuresConfig> {
         // Alloy, temper and gauge are NOT sourced; the alloy below is the database's metallic default, not a source claim.
         "A340-300" => Some(StructuresConfig {
             spar_cap_material: "Al 7075-T6".to_owned(),
+            lower_cover_fatigue_stress_1g_pa: lower_cover_fatigue_stress_1g_pa(preset_name),
             ..StructuresConfig::default()
         }),
 
@@ -60,6 +80,7 @@ pub fn config_for(preset_name: &str) -> Option<StructuresConfig> {
         // Alloy, temper and gauge are NOT sourced; the alloy below is the database's metallic default, not a source claim.
         "A380-800" => Some(StructuresConfig {
             spar_cap_material: "Al 7075-T6".to_owned(),
+            lower_cover_fatigue_stress_1g_pa: lower_cover_fatigue_stress_1g_pa(preset_name),
             ..StructuresConfig::default()
         }),
 
@@ -68,6 +89,7 @@ pub fn config_for(preset_name: &str) -> Option<StructuresConfig> {
         // No source states the alloy. Not a verified assignment.
         "DC-10" => Some(StructuresConfig {
             spar_cap_material: "Al 7075-T6".to_owned(),
+            lower_cover_fatigue_stress_1g_pa: lower_cover_fatigue_stress_1g_pa(preset_name),
             ..StructuresConfig::default()
         }),
 
@@ -76,6 +98,7 @@ pub fn config_for(preset_name: &str) -> Option<StructuresConfig> {
         // No source states the alloy. Not a verified assignment.
         "B747-400" => Some(StructuresConfig {
             spar_cap_material: "Al 7075-T6".to_owned(),
+            lower_cover_fatigue_stress_1g_pa: lower_cover_fatigue_stress_1g_pa(preset_name),
             ..StructuresConfig::default()
         }),
 
@@ -85,6 +108,7 @@ pub fn config_for(preset_name: &str) -> Option<StructuresConfig> {
         // real source. Not a verified assignment.
         "ATR72-600" => Some(StructuresConfig {
             spar_cap_material: "Al 7075-T6".to_owned(),
+            lower_cover_fatigue_stress_1g_pa: lower_cover_fatigue_stress_1g_pa(preset_name),
             ..StructuresConfig::default()
         }),
 

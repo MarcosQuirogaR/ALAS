@@ -49,15 +49,16 @@ pub mod analyses;
 pub mod common;
 pub mod conditions;
 pub mod drag;
+pub mod error;
 pub mod frames;
 
 pub use analyses::{AeroSolution, LegacyTurbofanCompatibility, MissionAnalyses};
 pub use conditions::{Conditions, Initials, Matrix3, Vector3};
 pub use drag::{MissionDragCoefficients, MissionDragModel, MissionDragSource};
+pub use error::SegmentError;
 
 use crate::numerics::Numerics;
-use alas_config::mission::SpeedReference;
-use alas_math::ChebyshevError;
+use alas_config::mission::{SpeedCaps, SpeedReference};
 
 /// Which of the three trajectories a segment flies.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -112,6 +113,10 @@ pub struct SegmentSpec {
     /// meaningful (a cruise is already flown at one altitude) and is treated
     /// as true airspeed regardless of this field.
     pub air_speed_reference: SpeedReference,
+    /// The CAS/Mach schedule's Mach hold and the MMO/VMO limits a climb or
+    /// descent resolves its true airspeed against ([`SpeedCaps`]); all zero
+    /// (the default) leaves the speed reference unchanged.
+    pub speed_caps: SpeedCaps,
     /// Course over the ground, radians. Zero on every segment this program
     /// builds, and carried because the ground-track integral projects onto it.
     pub true_course_rad: f64,
@@ -127,51 +132,6 @@ pub struct SegmentSpec {
     pub temperature_deviation_k: f64,
     /// How many control points the segment is discretized on. Sixteen.
     pub number_control_points: usize,
-}
-
-/// Why a segment could not be set up.
-#[derive(Debug, Clone, PartialEq, thiserror::Error)]
-pub enum SegmentError {
-    /// The pseudospectral operators could not be built.
-    #[error("the discretization operators could not be built: {0}")]
-    Discretization(#[from] ChebyshevError),
-    /// The segment's starting altitude was left to the previous segment and
-    /// there is no previous segment. Upstream raises an `AttributeError`
-    /// here; a library here reports rather than panicking.
-    #[error("segment {tag} takes its starting altitude from a predecessor it does not have")]
-    NoStartingAltitude {
-        /// The segment that could not start.
-        tag: String,
-    },
-    /// A calibrated airspeed and a control point's real ambient state implied
-    /// an invalid or supersonic condition.
-    #[error("segment {tag} calibrated airspeed at control point {point}: {source}")]
-    InvalidCalibratedAirspeed {
-        /// The segment that could not resolve its airspeed.
-        tag: String,
-        /// Which control point failed.
-        point: usize,
-        /// Why.
-        source: alas_atmo::airspeed::AirspeedError,
-    },
-    /// A resolved airspeed at a control point did not exceed the segment's
-    /// vertical rate, so no real horizontal velocity exists there. Checked
-    /// per control point in calibrated-airspeed mode because true airspeed
-    /// varies along the ramp; a true-airspeed segment is checked once, before
-    /// construction, by its caller.
-    #[error(
-        "segment {tag} vertical rate {vertical_velocity_m_s} m/s at or above the {resolved_speed_m_s} m/s airspeed resolved at control point {point}"
-    )]
-    VerticalRateExceedsAirspeed {
-        /// The segment that could not fly its ramp.
-        tag: String,
-        /// Which control point failed.
-        point: usize,
-        /// The configured vertical rate, m/s.
-        vertical_velocity_m_s: f64,
-        /// The true airspeed resolved at that control point, m/s.
-        resolved_speed_m_s: f64,
-    },
 }
 
 /// One mission leg: its schedule, its discretization and its state.
@@ -270,6 +230,7 @@ impl Segment {
                 altitude_end_m,
                 climb_rate_m_s,
             } => {
+                error::check_vertical_rate(&self.spec.tag, "climb", climb_rate_m_s)?;
                 let start = self.starting_altitude(altitude_start_m)?;
                 // z points down, so a *climb* rate is a negative z velocity.
                 self.lay_down_ramp(&nodes, start, altitude_end_m, air_speed, -climb_rate_m_s)?;
@@ -280,6 +241,7 @@ impl Segment {
                 altitude_end_m,
                 descent_rate_m_s,
             } => {
+                error::check_vertical_rate(&self.spec.tag, "descent", descent_rate_m_s)?;
                 let start = self.starting_altitude(altitude_start_m)?;
                 self.lay_down_ramp(&nodes, start, altitude_end_m, air_speed, descent_rate_m_s)?;
                 self.update_differentials_altitude();
@@ -336,24 +298,26 @@ impl Segment {
         let tag = self.spec.tag.clone();
         for (point, &node) in nodes.iter().enumerate() {
             let altitude = node * (end_altitude_m - start_altitude_m) + start_altitude_m;
-            let true_air_speed_m_s = match reference {
-                SpeedReference::TrueAirspeed => air_speed_m_s,
-                SpeedReference::CalibratedAirspeed => {
-                    let atmosphere =
-                        alas_atmo::us1976_compute_values(altitude, temperature_deviation_k);
-                    alas_atmo::airspeed::true_from_calibrated(
+            let true_air_speed_m_s = if reference == SpeedReference::TrueAirspeed
+                && self.spec.speed_caps == SpeedCaps::default()
+            {
+                air_speed_m_s
+            } else {
+                let atmosphere =
+                    alas_atmo::us1976_compute_values(altitude, temperature_deviation_k);
+                self.spec
+                    .speed_caps
+                    .true_airspeed_m_s(
+                        reference,
                         air_speed_m_s,
                         atmosphere.pressure_pa,
                         atmosphere.temperature_k,
                     )
-                    .map_err(|source| {
-                        SegmentError::InvalidCalibratedAirspeed {
-                            tag: tag.clone(),
-                            point,
-                            source,
-                        }
+                    .map_err(|source| SegmentError::InvalidCalibratedAirspeed {
+                        tag: tag.clone(),
+                        point,
+                        source,
                     })?
-                }
             };
             let horizontal_sq = true_air_speed_m_s * true_air_speed_m_s
                 - vertical_velocity_m_s * vertical_velocity_m_s;
@@ -569,6 +533,7 @@ mod tests {
             },
             air_speed_m_s: 150.0,
             air_speed_reference: SpeedReference::TrueAirspeed,
+            speed_caps: alas_config::mission::SpeedCaps::default(),
             true_course_rad: 0.0,
             temperature_deviation_k: 0.0,
             number_control_points: 16,
@@ -729,6 +694,7 @@ mod tests {
             },
             air_speed_m_s: 250.0,
             air_speed_reference: SpeedReference::TrueAirspeed,
+            speed_caps: alas_config::mission::SpeedCaps::default(),
             true_course_rad: 0.0,
             temperature_deviation_k: 0.0,
             number_control_points: 2,
@@ -760,6 +726,7 @@ mod tests {
             },
             air_speed_m_s: 170.0 * KNOT,
             air_speed_reference: SpeedReference::CalibratedAirspeed,
+            speed_caps: alas_config::mission::SpeedCaps::default(),
             true_course_rad: 0.0,
             temperature_deviation_k: 0.0,
             number_control_points: 16,
@@ -973,6 +940,50 @@ mod tests {
         assert!(matches!(
             Segment::new(too_steep, None),
             Err(SegmentError::VerticalRateExceedsAirspeed { point: 0, .. })
+        ));
+    }
+
+    // A zero, negative or non-finite climb or descent rate is a typed error,
+    // not an infinite or NaN segment time.
+    #[test]
+    fn a_non_positive_vertical_rate_is_rejected() {
+        for rate in [0.0, -5.0, f64::NAN, f64::INFINITY] {
+            let climb = SegmentSpec {
+                kind: SegmentKind::Climb {
+                    altitude_start_m: Some(0.0),
+                    altitude_end_m: 1000.0,
+                    climb_rate_m_s: rate,
+                },
+                air_speed_m_s: 100.0,
+                air_speed_reference: SpeedReference::TrueAirspeed,
+                speed_caps: alas_config::mission::SpeedCaps::default(),
+                ..cas_climb_spec()
+            };
+            assert!(
+                matches!(
+                    Segment::new(climb, None),
+                    Err(SegmentError::NonPositiveVerticalRate { kind: "climb", .. })
+                ),
+                "climb rate {rate}"
+            );
+        }
+        let descent = SegmentSpec {
+            kind: SegmentKind::Descent {
+                altitude_start_m: Some(1000.0),
+                altitude_end_m: 0.0,
+                descent_rate_m_s: 0.0,
+            },
+            air_speed_m_s: 100.0,
+            air_speed_reference: SpeedReference::TrueAirspeed,
+            speed_caps: alas_config::mission::SpeedCaps::default(),
+            ..cas_climb_spec()
+        };
+        assert!(matches!(
+            Segment::new(descent, None),
+            Err(SegmentError::NonPositiveVerticalRate {
+                kind: "descent",
+                ..
+            })
         ));
     }
 }

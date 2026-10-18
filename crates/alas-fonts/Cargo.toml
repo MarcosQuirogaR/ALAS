@@ -7,5 +7,9 @@ license.workspace = true
 authors.workspace = true
 rust-version.workspace = true
 
+# No tests: skip the empty libtest harness (one link per workspace test run).
+[lib]
+test = false
+
 [lints]
 workspace = true

@@ -89,7 +89,8 @@ pub struct TrimmedPerformance {
     pub incidence_deg: f64,
     /// Total drag coefficient, all three components.
     pub cd: f64,
-    /// Parasite drag coefficient at the trimmed operating point.
+    /// Viscous drag coefficient at the trimmed operating point: the parasite
+    /// term plus the lift-dependent viscous drag (zero unless configured).
     pub cd_parasite: f64,
     /// Induced drag coefficient of the vortex-lattice solve: Trefftz-plane
     /// in the product, the near-field sum on the frozen reference path.
@@ -126,7 +127,9 @@ pub struct PolarSweep {
     pub cd_induced: Vec<f64>,
     /// The Korn wave-drag term.
     pub cd_wave: Vec<f64>,
-    /// The Raymer parasite term.
+    /// The viscous term: Raymer parasite drag plus the lift-dependent
+    /// viscous drag (zero unless configured), so that parasite, induced and
+    /// wave drag sum to `cd`.
     pub cd_parasite: Vec<f64>,
     /// Pitching-moment coefficient.
     pub cm: Vec<f64>,
@@ -295,7 +298,7 @@ impl AeroAnalysis<'_> {
             alpha_deg: alpha_report,
             incidence_deg: trim.trim_ih_deg,
             cd: components.cd_total(),
-            cd_parasite: components.cd_parasite,
+            cd_parasite: components.cd_viscous(),
             cd_induced: components.cd_induced,
             cd_wave: components.cd_wave,
             cl: cl_trim,
@@ -443,7 +446,7 @@ impl AeroAnalysis<'_> {
                 sweep.cd.push(components.cd_total());
                 sweep.cd_induced.push(components.cd_induced);
                 sweep.cd_wave.push(components.cd_wave);
-                sweep.cd_parasite.push(components.cd_parasite);
+                sweep.cd_parasite.push(components.cd_viscous());
                 sweep.l_over_d.push(solved.cl_lift / components.cd_total());
             }
         }

@@ -39,15 +39,6 @@ serde_json = { workspace = true }
 
 [dev-dependencies]
 alas-testkit = { path = "../alas-testkit" }
-# The two mission parity tests check the port's own analysis settings and
-# engine constants against the fixture before comparing a number, so they name
-# the crates those constants live in.
-alas-aero = { path = "../alas-aero" }
-alas-prop = { path = "../alas-prop" }
-# The parity test walks the request as JSON so one comparison covers the whole
-# document, numbers at their tier and strings exactly.
-serde = { workspace = true }
-serde_json = { workspace = true }
 
 [lints]
 workspace = true

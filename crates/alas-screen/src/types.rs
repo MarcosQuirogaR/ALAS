@@ -3,7 +3,7 @@
 
 //! Data structures and constants for airfoil database screening.
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
@@ -237,7 +237,7 @@ pub struct AirfoilScreeningResult {
     /// Ranked list of top candidates.
     pub candidates: Vec<AirfoilCandidateResult>,
     /// Diagnostic sample of failed candidates.
-    pub errors: Vec<HashMap<String, String>>,
+    pub errors: Vec<BTreeMap<String, String>>,
 }
 
 /// Options configuring the multi-stage airfoil screening sweep.

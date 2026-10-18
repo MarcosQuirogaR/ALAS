@@ -29,7 +29,8 @@ pub struct CliArgs {
     pub no_parallel: bool,
     /// Generate and save comparison plots.
     pub plots: bool,
-    /// Interactively display plots (implies plots).
+    /// Write the figures as SVG files to the output directory (implies plots).
+    /// There is no interactive viewer; open the files in a browser or editor.
     pub show: bool,
     /// Launch the interactive desktop graphical user interface.
     pub gui: bool,
@@ -70,6 +71,19 @@ impl Default for CliArgs {
     }
 }
 
+/// The value of an option that takes one. A missing value, or a next token
+/// that is itself an option, is an error: `--save-config --quiet` must not
+/// write a file named `--quiet`.
+fn flag_value<'a>(
+    iter: &mut impl Iterator<Item = &'a String>,
+    flag: &str,
+) -> Result<&'a String, String> {
+    match iter.next() {
+        Some(value) if !value.starts_with('-') => Ok(value),
+        _ => Err(format!("missing argument for {flag}")),
+    }
+}
+
 /// Parse command line arguments into [`CliArgs`].
 pub fn parse_args(args: &[String]) -> Result<Option<CliArgs>, String> {
     let mut cli = CliArgs::default();
@@ -82,15 +96,15 @@ pub fn parse_args(args: &[String]) -> Result<Option<CliArgs>, String> {
                 return Ok(None);
             }
             "-c" | "--config" => {
-                let val = iter.next().ok_or("missing argument for --config")?;
+                let val = flag_value(&mut iter, "--config")?;
                 cli.config = Some(PathBuf::from(val));
             }
             "--cpacs-input" => {
-                let val = iter.next().ok_or("missing argument for --cpacs-input")?;
+                let val = flag_value(&mut iter, "--cpacs-input")?;
                 cli.cpacs_input = Some(PathBuf::from(val));
             }
             "-o" | "--output" => {
-                let val = iter.next().ok_or("missing argument for --output")?;
+                let val = flag_value(&mut iter, "--output")?;
                 cli.output = PathBuf::from(val);
             }
             "--no-optimize" => cli.no_optimize = true,
@@ -104,23 +118,21 @@ pub fn parse_args(args: &[String]) -> Result<Option<CliArgs>, String> {
             }
             "--gui" => cli.gui = true,
             "--seed" => {
-                let val = iter.next().ok_or("missing argument for --seed")?;
+                let val = flag_value(&mut iter, "--seed")?;
                 let s: u64 = val.parse().map_err(|_| "invalid seed integer")?;
                 cli.seed = Some(s);
             }
             "--aero-solver" => {
-                let val = iter.next().ok_or("missing argument for --aero-solver")?;
+                let val = flag_value(&mut iter, "--aero-solver")?;
                 cli.aerodynamic_solver = val.parse()?;
             }
             "--optimization-solver" => {
-                let val = iter
-                    .next()
-                    .ok_or("missing argument for --optimization-solver")?;
+                let val = flag_value(&mut iter, "--optimization-solver")?;
                 cli.optimization_solver = val.parse()?;
             }
             "--quiet" => cli.quiet = true,
             "--save-config" => {
-                let val = iter.next().ok_or("missing argument for --save-config")?;
+                let val = flag_value(&mut iter, "--save-config")?;
                 cli.save_config = Some(PathBuf::from(val));
             }
             "--download-navdata" => cli.download_navdata = true,
@@ -136,26 +148,37 @@ pub fn parse_args(args: &[String]) -> Result<Option<CliArgs>, String> {
 }
 
 fn print_help() {
-    println!("Usage: alas [OPTIONS]");
-    println!();
-    println!("Options:");
-    println!("  -c, --config <PATH>       Load configuration overlay from YAML or JSON");
-    println!("      --cpacs-input <PATH>  Use a CPACS 3.5 aircraft as the geometry input");
-    println!("  -o, --output <PATH>       Output directory for reports (default: outputs)");
-    println!("      --gui                 Launch the interactive desktop interface");
-    println!("      --no-optimize         Skip design space optimization");
-    println!("      --no-baseline         Skip baseline high-fidelity polar analysis");
-    println!("      --no-mission          Disable native mission analysis");
-    println!("      --no-parallel         Run stages sequentially");
-    println!("      --plots               Generate and save figures");
-    println!("      --show                Display figures interactively");
-    println!("      --seed <INT>          Random seed for optimization");
-    println!("      --aero-solver <MODE>  Result model: vlm, avl, or both");
-    println!("      --optimization-solver <MODE>  Optimizer: vlm, avl, or both");
-    println!("      --quiet               Reduce console logging");
-    println!("      --save-config <PATH>  Write effective configuration to YAML and exit");
-    println!("      --download-navdata    Download missing navigation-data files and exit");
-    println!("  -h, --help                Display this help message");
+    print!("{}", help_text());
+}
+
+/// The help text; kept separate so a test can cross-check it against the flags.
+pub(super) fn help_text() -> String {
+    let mut text = String::new();
+    let mut line = |line: &str| {
+        text.push_str(line);
+        text.push('\n');
+    };
+    line("Usage: alas [OPTIONS]");
+    line("");
+    line("Options:");
+    line("  -c, --config <PATH>       Load configuration overlay from YAML or JSON");
+    line("      --cpacs-input <PATH>  Use a CPACS 3.5 aircraft as the geometry input");
+    line("  -o, --output <PATH>       Output directory for reports (default: outputs)");
+    line("      --gui                 Launch the interactive desktop interface");
+    line("      --no-optimize         Skip design space optimization");
+    line("      --no-baseline         Skip baseline high-fidelity polar analysis");
+    line("      --no-mission          Disable native mission analysis");
+    line("      --no-parallel         Run stages sequentially");
+    line("      --plots               Generate and save figures (SVG files)");
+    line("      --show                Same as --plots: writes SVG files to the output directory");
+    line("      --seed <INT>          Random seed for optimization (default 20260922)");
+    line("      --aero-solver <MODE>  Result model: vlm, avl, or both");
+    line("      --optimization-solver <MODE>  Optimizer: vlm, avl, or both");
+    line("      --quiet               Reduce console logging");
+    line("      --save-config <PATH>  Write effective configuration to YAML and exit");
+    line("      --download-navdata    Download missing navigation-data files and exit");
+    line("  -h, --help                Display this help message");
+    text
 }
 
 /// Load configuration from file (YAML/JSON) or defaults, applying CLI overrides.

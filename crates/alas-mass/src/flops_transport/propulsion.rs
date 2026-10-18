@@ -21,20 +21,9 @@
 //! user-declared masses FLOPS adds without an equation and are not
 //! represented here.
 
+use super::units::{kg, lb, lbf};
 use alas_config::{FlopsNozzleScope, FlopsStarterScope, PylonMassMethod};
-use alas_units::{FOOT, POUND_FORCE, POUND_MASS};
-
-fn lb(kilograms: f64) -> f64 {
-    kilograms / POUND_MASS
-}
-
-fn kg(pounds: f64) -> f64 {
-    pounds * POUND_MASS
-}
-
-fn lbf(newtons: f64) -> f64 {
-    newtons / POUND_FORCE
-}
+use alas_units::FOOT;
 
 /// Equation 74: the total nacelle count `TNAC`, the engine count plus one
 /// half when an odd engine is centre-mounted.
@@ -455,6 +444,7 @@ pub fn pod_mass_kg(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alas_units::{POUND_FORCE, POUND_MASS};
 
     fn twin_inputs() -> FlopsPropulsionInputs {
         FlopsPropulsionInputs {

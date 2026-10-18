@@ -15,9 +15,11 @@ use alas_atmo::Atmosphere;
 use alas_config::analysis::AnalysisConfig;
 use alas_geom::aircraft::airplane::Airplane;
 
-use super::surfaces::{combine, goethert_stretch, per_surface_contributions};
+use super::surfaces::{combine, goethert_stretch, per_surface_contributions, tail_slope_loss};
 use super::{fuselage, nacelles, FuselageTerms, NacelleTerm, NpDiagnostics};
 use crate::trim::{hstab, main_wing, resolution, AC_CHORD_FRACTION, HSTAB_NAME, MAIN_WING_NAME};
+
+pub(crate) mod compressible;
 
 /// Beta floor shared with [`goethert_stretch`], kept here too so
 /// `1.0 - mach*mach` is never evaluated at `mach >= 1.0` (this module has no
@@ -261,7 +263,7 @@ fn np_from_shared_terms(
         &shared.contributions,
         shared.tail_wing_index,
         eta_tail,
-        tail_deps_extra,
+        tail_slope_loss(tail_deps_extra, shared.deps_dalpha_vlm),
     )
     .unwrap_or(airplane.xyz_ref[0]);
     let x_wing_alone_ac = shared

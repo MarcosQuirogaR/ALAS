@@ -20,11 +20,13 @@ pub use stage_summary::{
     StageSummary, WorkDistribution, SEARCH_SCOPE,
 };
 
+use std::sync::atomic::AtomicBool;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use alas_config::design_variables::DesignVector;
 use alas_config::AlasConfig;
 
+use crate::cancellation::CancelScope;
 use crate::evaluator::{ObjectiveEvaluation, ObjectiveEvaluator};
 use crate::history::OptimizationHistory;
 use crate::objective::{restore_winning_payload_load_case, DesignObjective};
@@ -45,10 +47,12 @@ fn runtime_seed() -> u64 {
 }
 
 fn validate_bounds(bounds: &[(f64, f64)]) -> Result<(), OptimizationError> {
-    if bounds.len() != alas_config::DESIGN_VARIABLE_SPECS.len() {
+    // The sixteen geometric variables, plus the band takeoff mass.
+    let variables = alas_config::DESIGN_VARIABLE_SPECS.len();
+    if bounds.len() != variables && bounds.len() != variables + 1 {
         return Err(OptimizationError::InvalidBounds(format!(
             "expected {} design-variable bounds, got {}",
-            alas_config::DESIGN_VARIABLE_SPECS.len(),
+            variables,
             bounds.len()
         )));
     }
@@ -249,7 +253,8 @@ trait SearchObjective {
     /// Evaluate a candidate batch and return `(cost, valid)` in input order.
     ///
     /// Backends with mutable external state use the serial default. The native
-    /// objective overrides this to parallelize its CPU-bound, cloned analyses.
+    /// pool (`optimizer::native_pool`) overrides this to parallelize its
+    /// CPU-bound, cloned analyses; it is the only parallel batch engine.
     fn evaluate_batch(&mut self, designs: &[Vec<f64>], _workers: usize) -> Vec<(f64, bool)> {
         designs
             .iter()
@@ -271,87 +276,22 @@ impl SearchObjective for DesignObjective {
     fn history(&self) -> &OptimizationHistory {
         &self.history
     }
-
-    fn evaluate_batch(&mut self, designs: &[Vec<f64>], workers: usize) -> Vec<(f64, bool)> {
-        if workers <= 1 || designs.len() <= 1 {
-            return designs
-                .iter()
-                .map(|design| {
-                    let cost = DesignObjective::evaluate(self, design);
-                    let valid =
-                        self.history.valid.last().copied().unwrap_or(false) && cost.is_finite();
-                    (cost, valid)
-                })
-                .collect();
-        }
-
-        let worker_count = workers.min(designs.len());
-        let chunk_size = designs.len().div_ceil(worker_count);
-        let mut baseline = self.clone();
-        // Only the new batch belongs in each worker's returned trace. The
-        // caller's prior history is merged once after all joins succeed.
-        baseline.history = OptimizationHistory::new();
-
-        let mut handles = Vec::with_capacity(worker_count);
-        for chunk in designs.chunks(chunk_size) {
-            let mut local = baseline.clone();
-            let candidates = chunk.to_vec();
-            handles.push(std::thread::spawn(move || {
-                let mut evaluations = Vec::with_capacity(candidates.len());
-                for candidate in candidates {
-                    let cost = DesignObjective::evaluate(&mut local, &candidate);
-                    let valid =
-                        local.history.valid.last().copied().unwrap_or(false) && cost.is_finite();
-                    evaluations.push((cost, valid));
-                }
-                (evaluations, local.history)
-            }));
-        }
-
-        let mut merged = Vec::with_capacity(designs.len());
-        let mut histories = Vec::with_capacity(handles.len());
-        for handle in handles {
-            match handle.join() {
-                Ok((evaluations, history)) => {
-                    merged.extend(evaluations);
-                    histories.push(history);
-                }
-                Err(_) => {
-                    // A worker panic is not allowed to lose the optimizer's
-                    // history or leave it partially merged. Re-run this batch
-                    // serially in the caller thread, where any ordinary
-                    // objective rejection remains represented as data.
-                    return designs
-                        .iter()
-                        .map(|design| {
-                            let cost = DesignObjective::evaluate(self, design);
-                            let valid = self.history.valid.last().copied().unwrap_or(false)
-                                && cost.is_finite();
-                            (cost, valid)
-                        })
-                        .collect();
-                }
-            }
-        }
-        for history in histories {
-            self.history.append(history);
-        }
-        merged
-    }
 }
 
 struct DelegatedObjective<'a, E: ObjectiveEvaluator + ?Sized> {
     evaluator: &'a mut E,
     history: OptimizationHistory,
     failure_cost: f64,
+    cancel: Option<&'a AtomicBool>,
 }
 
 impl<'a, E: ObjectiveEvaluator + ?Sized> DelegatedObjective<'a, E> {
-    fn new(evaluator: &'a mut E, failure_cost: f64) -> Self {
+    fn new(evaluator: &'a mut E, failure_cost: f64, cancel: Option<&'a AtomicBool>) -> Self {
         Self {
             evaluator,
             history: OptimizationHistory::new(),
             failure_cost,
+            cancel,
         }
     }
 }
@@ -363,7 +303,7 @@ impl<E: ObjectiveEvaluator + ?Sized> SearchObjective for DelegatedObjective<'_, 
             Err(_) => {
                 let evaluation = ObjectiveEvaluation::rejected(self.failure_cost, "geometry_build");
                 self.history.record(
-                    DesignVector::default(),
+                    crate::mdo::parsed_design(design),
                     evaluation.valid,
                     evaluation.cost,
                     evaluation.l_over_d,
@@ -393,5 +333,36 @@ impl<E: ObjectiveEvaluator + ?Sized> SearchObjective for DelegatedObjective<'_, 
 
     fn history(&self) -> &OptimizationHistory {
         &self.history
+    }
+
+    /// The serial default, except that the cancellation flag is checked
+    /// before each candidate: once it is set, every remaining candidate is
+    /// recorded as `cancelled_unstarted` instead of starting another external
+    /// analysis. Identical to the default while the flag is clear.
+    fn evaluate_batch(&mut self, designs: &[Vec<f64>], _workers: usize) -> Vec<(f64, bool)> {
+        let cancel = CancelScope::attach(self.cancel);
+        designs
+            .iter()
+            .map(|design| {
+                if cancel.requested() {
+                    let design = crate::mdo::parsed_design(design);
+                    self.history.record(
+                        design,
+                        false,
+                        self.failure_cost,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        crate::evaluation_trace::CANCELLED_UNSTARTED,
+                    );
+                    return (self.failure_cost, false);
+                }
+                let cost = self.evaluate(design);
+                let valid = self.history.valid.last().copied().unwrap_or(false) && cost.is_finite();
+                (cost, valid)
+            })
+            .collect()
     }
 }

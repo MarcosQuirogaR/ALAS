@@ -14,7 +14,6 @@ use std::hash::{Hash, Hasher};
 use std::sync::atomic::Ordering;
 use std::sync::mpsc::channel;
 use std::sync::Arc;
-use std::thread;
 
 use alas_aero::wing_analysis::{analyse, build_wing_model, WingAnalysisOutcome};
 use alas_config::{AlasConfig, DesignVector};
@@ -168,7 +167,7 @@ impl WingAnalysisState {
         let cancel = self.cancel_flag.clone();
         let (tx, rx) = channel();
         self.rx = Some(rx);
-        thread::spawn(move || {
+        let spawned = crate::worker_stack::spawn_analysis_thread("alas-wing", move || {
             let cancelled = move || cancel.load(Ordering::Relaxed);
             let result = analyse(&model, &inputs, &cancelled).map_err(|error| error.to_string());
             let _ = tx.send(WingAnalysisRun::Finished {
@@ -177,6 +176,7 @@ impl WingAnalysisState {
                 result: Box::new(result),
             });
         });
+        drop(spawned);
         Ok(run_id)
     }
 

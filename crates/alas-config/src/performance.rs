@@ -12,11 +12,14 @@
 //! out. Defaults follow Raymer (*Aircraft Design: A Conceptual Approach*,
 //! 5th ed.) and FAR Part 25.
 //!
-//! The configurable speed factors preserve the translated legacy schedule.
-//! Current 14 CFR 25.125(b)(2) sets a non-icing Vref floor of 1.23 VSR0;
-//! the propulsion-specific field method uses 1.23 VS1g as its preliminary
-//! approximation. The legacy approach factor of 1.30 remains selectable for
-//! numerical replay and is not the current regulatory minimum.
+//! The speed factors follow CS 25.107 and 25.125. Every stall-referenced
+//! speed uses the reference stall speed VSR taken on a 1-g basis:
+//! `VSR = sqrt(2 W / (rho S CLmax))` with the configured CLmax read as the
+//! lift coefficient at the CS 25.103 reference stall speed (load factor
+//! normal to the flight path of one). V2 is at least 1.13 VSR (1.08 for the
+//! exceptions in CS 25.107(b)) and 1.10 VMC; Vref is at least 1.23 VSR0
+//! (CS 25.125(b)(2)(i)). The legacy approach factor of 1.30 is selectable
+//! for numerical replay and is not the regulatory minimum.
 
 use serde::{Deserialize, Serialize};
 
@@ -63,6 +66,38 @@ pub struct PerformanceConfig {
         help = "Reproduce the translated jet correlation for every propulsion type, including its additional balanced-field multiplier and configured approach-speed factor. Disable for propulsion-specific sourced field estimates."
     )]
     pub legacy_field_correlations: bool,
+
+    /// Move the declared maximum lift coefficients with the candidate wing.
+    #[serde(default = "default_geometry_scaled_clmax")]
+    #[config(
+        label = "Scale CLmax with wing geometry",
+        help = "During design optimization, scale the declared clean, take-off and landing maximum lift coefficients with the candidate wing: clean by cos(quarter-chord sweep) and the flap and slat increments by flapped-area ratio times cos(hinge sweep), both relative to the registered geometry (Raymer eqs. 12.15 and 12.21; Roskam VI eq. 8.29). At the registered geometry the declared values are used unchanged. Off keeps the declared values for every candidate, a calibration input independent of sweep and flap span."
+    )]
+    pub geometry_scaled_clmax: bool,
+
+    /// Improved-climb take-off safety speed.
+    #[serde(default = "default_improved_climb_v2")]
+    #[config(
+        label = "Improved-climb take-off speed",
+        help = "Fly the take-off safety speed V2 above the schedule when that is what it takes to meet the CS 25.121(b) second-segment gradient (improved climb, overspeed): V2 is raised from the schedule value to the lowest speed that meets the gradient, no higher than the best-climb speed, and the longer take-off field it implies is charged in the field checks. Jets only. Off keeps V2 at the schedule value and reports a second-segment shortfall as it is."
+    )]
+    pub improved_climb_v2: bool,
+
+    /// The V2/VSR the improved-climb selection resolved to, when it is above the schedule.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[config(
+        hidden,
+        help = "Resolved improved-climb take-off safety speed over the reference stall speed. Written by the analysis, not a user input."
+    )]
+    pub improved_climb_v2_over_vsr: Option<f64>,
+
+    /// Cruise-altitude thrust requirements from the engine deck.
+    #[serde(default = "default_cruise_thrust_from_deck")]
+    #[config(
+        label = "Cruise thrust from the engine deck",
+        help = "Judge the cruise-altitude thrust requirements with the thrust the engine deck delivers at the design cruise Mach and altitude (maximum-cruise rating for level flight, maximum-climb rating for the climb rate), instead of the flat thrust lapse ratio: level flight at the mid-cruise weight, and a 300 ft/min residual rate of climb at the top-of-climb mass (initial cruise altitude capability, the criterion the mission cruise-level search applies). Off restores the flat Thrust lapse ratio for the cruise check."
+    )]
+    pub cruise_thrust_from_deck: bool,
 
     /// Dry hard-runway rolling coefficient for the propeller takeoff calculation.
     #[serde(default = "default_takeoff_rolling_friction")]
@@ -159,12 +194,72 @@ pub struct PerformanceConfig {
     )]
     pub oei_climb_cl: f64,
 
-    /// High-lift drag added during the engine-out climb with gear retracted.
+    /// Take-off flap/slat drag added during the engine-out climb, gear up.
     #[config(
         label = "OEI climb high-lift drag increment (gear up)",
-        help = "Parasite-drag increment added to clean CD0 for the takeoff flap/slat configuration with landing gear retracted, as required by 14 CFR 25.121(b). Asymmetric trim/control and inoperative-engine or windmilling drag require separate source values; this field does not represent them."
+        help = "Take-off flap/slat drag increment on the reference wing area, landing gear retracted (14 CFR 25.121(b) second-segment configuration). Default 0.015: Roskam, Airplane Design Part I, Table 3.6, take-off flaps 0.010-0.020 (first estimate, zero-lift increment); component methods (Roskam VI Sec. 4.6, Raymer 6th ed. Eq. 12.61-12.62, Torenbeek App. G-4) give 0.010-0.013 for a 20 deg Fowler flap including flap-induced drag, plus 0.002-0.007 for slats. Windmilling and asymmetric trim drag are separate terms."
     )]
     pub oei_climb_delta_cd: f64,
+
+    /// Landing-gear drag with take-off flaps: ground roll, rotation and the
+    /// first segment.
+    #[serde(default = "default_takeoff_gear_delta_cd")]
+    #[config(
+        label = "Landing-gear drag increment, take-off",
+        help = "Drag increment of the extended landing gear on the reference wing area in the take-off phase (ground roll, rotation, 14 CFR 25.121(a) first segment). Default 0.020: Roskam, Airplane Design Part I, Table 3.6, landing gear 0.015-0.025 (first estimate); Torenbeek Sec. 5.4.3(d) 0.015-0.020 typical; component methods span 0.015 (Raymer 6th ed. Sec. 12.5.7) to 0.030 (Torenbeek Eq. G-66 with sheltering)."
+    )]
+    pub takeoff_gear_delta_cd: f64,
+
+    /// Landing flap/slat drag with the gear retracted.
+    #[serde(default = "default_landing_flap_delta_cd")]
+    #[config(
+        label = "Landing flap/slat drag increment",
+        help = "Landing flap/slat drag increment on the reference wing area, landing gear retracted (14 CFR 25.121(d) approach-climb basis). Default 0.040: Roskam VI Sec. 4.6 and Raymer 6th ed. Eq. 12.61-12.62 give 0.025-0.033 for a 35 deg Fowler flap including flap-induced drag, plus 0.002-0.007 for slats; Roskam I Table 3.6 lists 0.055-0.075 for large-deflection (about 60 deg) plain or split flaps."
+    )]
+    pub landing_flap_delta_cd: f64,
+
+    /// Landing-gear drag in the landing phase.
+    #[serde(default = "default_landing_gear_delta_cd")]
+    #[config(
+        label = "Landing-gear drag increment, landing",
+        help = "Drag increment of the extended landing gear on the reference wing area in the landing phase (approach, flare, 14 CFR 25.119 landing climb). Default 0.020, same basis as the take-off value; the main gear is sheltered by flap lift (Torenbeek Eq. G-67), so the landing value is not larger."
+    )]
+    pub landing_gear_delta_cd: f64,
+
+    /// Go-around thrust available 8 s after the thrust levers are advanced.
+    #[serde(default = "default_go_around_spool_thrust_fraction")]
+    #[config(
+        label = "Go-around thrust fraction at 8 s (spool-up)",
+        unit = "fraction",
+        help = "Ratio of the thrust available 8 seconds after advancing from minimum flight idle (CS 25.119) to the full go-around thrust. 1.0 is the upper bound and is non-conservative: 14 CFR 33.73(b) only requires 95 percent of rated take-off thrust within 5 s at sea-level static, so a defensible lower bound is 0.95. Replace with an engine-specific acceleration datum when available."
+    )]
+    pub go_around_spool_thrust_fraction: f64,
+
+    /// Minimum take-off safety speed relative to the reference stall speed.
+    #[serde(default = "default_v2_min_vsr_factor")]
+    #[config(
+        label = "V2MIN / VSR",
+        help = "CS 25.107(b): minimum take-off safety speed as a multiple of the reference stall speed VSR. 1.13 for two- and three-engined turbo-propeller aeroplanes and turbojets without provisions for a significant reduction in one-engine-inoperative power-on stall speed; 1.08 for turbo-propeller aeroplanes with more than three engines and turbojets with such provisions. V2 is also never below 1.10 VMC (CS 25.107(b))."
+    )]
+    pub v2_min_vsr_factor: f64,
+
+    /// Whether the landing field-length check assumes a wet runway.
+    #[serde(default)]
+    #[config(
+        label = "Wet landing runway",
+        help = "Apply the wet-runway landing distance factor. EU Air OPS CAT.POL.A.235(a)(2): when the flight manual gives no wet-runway distance, the landing distance available must be at least 115 percent of the dry distance required by CAT.POL.A.230, so the usable dry share of the runway falls by 1/1.15 (jets 0.60 to 0.522). Off by default (dry runway); the wet take-off distance of CS 25.113(b) is not modelled."
+    )]
+    pub wet_landing_runway: bool,
+
+    /// Accepted ratio band between the closed take-off mass and the mass the
+    /// engine was designed for.
+    #[serde(default = "default_engine_match_tolerance")]
+    #[config(
+        label = "Engine-to-mass match tolerance",
+        unit = "fraction",
+        help = "Half-width of the accepted band for the closed take-off mass divided by the take-off mass the selected engine was designed for. A ratio outside 1 +/- this value raises a warning: a fixed engine rating no longer matches the aircraft it was sized with. Default 0.15."
+    )]
+    pub engine_match_tolerance: f64,
 
     /// Ratio of installed thrust available at the selected OEI V2 condition
     /// to the rated sea-level-static thrust. This must come from an
@@ -173,7 +268,7 @@ pub struct PerformanceConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[config(
         label = "OEI thrust at V2 / rated SLS thrust",
-        help = "Optional condition-to-SLS installed thrust ratio for the FAR 25.121(b) V2 engine-out check. Supply a value from the selected engine deck at the departure altitude, temperature, Mach, bleed state and take-off thrust setting. A missing value keeps the OEI result as conceptual and reports an evidence gap."
+        help = "Optional manual override of the condition-to-SLS installed thrust ratio for the CS 25.121 engine-out checks. Empty (default): the ratio is taken from the selected engine deck, take-off/go-around rating, at V2, the departure elevation and ISA deviation (one shared helper for the optimizer, the feasibility findings and the report). Supply a value only from approved performance data."
     )]
     pub oei_condition_to_sls_thrust_ratio: Option<f64>,
 
@@ -185,7 +280,7 @@ pub struct PerformanceConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[config(
         label = "OEI asymmetric trim/control drag increment",
-        help = "Optional additional OEI trim/control drag coefficient at V2. Set only from an aircraft-specific yaw/trim analysis or source. Leave empty when no such evidence is available."
+        help = "Optional manual override of the asymmetric trim drag coefficient at V2 (reference wing area). Empty (default): Torenbeek, Synthesis of Subsonic Airplane Design, App. G-8.3, Eqs. G-84 to G-89 (fin induced drag plus rudder profile drag for the zero-sideslip yaw balance of the failed-engine thrust and windmilling drag) from the candidate fin, rudder and engine positions. That value is an upper-bound estimate: it ignores the sideslip and 5 deg bank relief CS 25.149 allows."
     )]
     pub oei_asymmetric_trim_cd: Option<f64>,
 
@@ -193,7 +288,7 @@ pub struct PerformanceConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[config(
         label = "OEI inoperative-engine/windmilling drag increment",
-        help = "Optional additional drag coefficient for the failed engine or propeller at V2. Set only from the engine/airframe drag source for the selected failure state; it is not a generic zero."
+        help = "Optional manual override of the failed-engine drag coefficient at V2 (reference wing area). Empty (default): Roskam, Airplane Design Part VI, Eq. 4.67 (equal to Torenbeek Eq. G-82) windmilling turbofan drag area from the fan diameter and nozzle stream data, or Eq. 4.69 (Torenbeek G-83) for a stopped propeller; it is never a generic zero."
     )]
     pub oei_windmilling_cd: Option<f64>,
 
@@ -223,7 +318,7 @@ pub struct PerformanceConfig {
     /// Minimum control speed as a multiple of takeoff stall speed.
     #[config(
         label = "VMC / VS_TO",
-        help = "Minimum-control speed as a multiple of take-off stall speed. FAR 25.149 caps VMC at 1.13*VSR; that ceiling is used as the default."
+        help = "Declared minimum-control speed as a multiple of the take-off reference stall speed VSR. The speed schedules use the VMC computed from the one-engine-inoperative yaw balance of the built fin and rudder; this value is the fallback when that balance cannot be evaluated and, for a registered (certified) aircraft, the cap on the computed value. CS 25.149(c) puts the certification ceiling at 1.13 VSR. VMC drives V2 >= 1.10 VMC and VR >= 1.05 VMC."
     )]
     pub vmc_vstall_factor: f64,
 
@@ -244,7 +339,7 @@ pub struct PerformanceConfig {
     /// Takeoff safety speed as a multiple of takeoff stall speed.
     #[config(
         label = "V2 / VS_TO",
-        help = "Take-off safety speed as a multiple of take-off stall speed (FAR 25.107). V2 = max(v2_vstall_factor*VS_TO, VR)."
+        help = "Selected take-off safety speed as a multiple of the take-off reference stall speed VSR. V2 = max(v2_vstall_factor*VSR, V2MIN, VR) with V2MIN = max(v2_min_vsr_factor*VSR, 1.10*VMC) per CS 25.107(b)-(c); the regulatory minimum therefore overrides a lower selected factor."
     )]
     pub v2_vstall_factor: f64,
 
@@ -277,6 +372,18 @@ pub struct PerformanceConfig {
     pub matching_chart_resolution: i64,
 }
 
+fn default_geometry_scaled_clmax() -> bool {
+    true
+}
+
+fn default_cruise_thrust_from_deck() -> bool {
+    true
+}
+
+fn default_improved_climb_v2() -> bool {
+    true
+}
+
 impl Default for PerformanceConfig {
     fn default() -> Self {
         Self {
@@ -285,6 +392,10 @@ impl Default for PerformanceConfig {
             cl_max_land: 2.60,
             cl_max_land_source: default_landing_lift_source(),
             legacy_field_correlations: false,
+            geometry_scaled_clmax: true,
+            cruise_thrust_from_deck: true,
+            improved_climb_v2: true,
+            improved_climb_v2_over_vsr: None,
             propeller_takeoff_rolling_friction: default_takeoff_rolling_friction(),
             propeller_takeoff_stop_deceleration_g: default_takeoff_stop_deceleration(),
             propeller_takeoff_inertia_distance_m: default_takeoff_inertia_distance(),
@@ -295,9 +406,28 @@ impl Default for PerformanceConfig {
             cl_min_clean: -1.00,
             thrust_lapse: 0.235,
             oei_gradient: 0.024,
-            k_land: 0.60,
+            // Unfactored 25.125 landing distance from 50 ft, m per Pa of
+            // (W/S)/(sigma CLmax_land) at MLW. One value for every class and
+            // aircraft (the earlier 0.58 / 0.60 / 0.63 variants had no source
+            // and over-predicted the certified LFL by +27.8 % on average).
+            // Calibrated 2026-10-07 as the mean of K_i = 0.6 LFL_i /
+            // (0.5 rho0 (Vref_i/1.23)^2) over eight certified jets (A220-300,
+            // A320, A340-300, A380, B747-400, B787-9, DC-10, C919; spread
+            // 0.43-0.57, s.d. 0.045, in-sample mean |LFL error| about 8 %; refit-without-one is only
+            // that residual inflated by n/(n-1), not out-of-sample evidence).
+            // Cross-checks: Loftin NASA RP-1060 Fig. 3.4 via Scholz, Aircraft
+            // Design ch. 5, gives 0.572; Raymer eq. 5.11 gives 0.51 m/Pa
+            // before the air-distance term. Calibration, not validation.
+            k_land: 0.505,
             oei_climb_cl: 1.2,
-            oei_climb_delta_cd: 0.025,
+            oei_climb_delta_cd: 0.015,
+            takeoff_gear_delta_cd: default_takeoff_gear_delta_cd(),
+            landing_flap_delta_cd: default_landing_flap_delta_cd(),
+            landing_gear_delta_cd: default_landing_gear_delta_cd(),
+            go_around_spool_thrust_fraction: default_go_around_spool_thrust_fraction(),
+            v2_min_vsr_factor: default_v2_min_vsr_factor(),
+            wet_landing_runway: false,
+            engine_match_tolerance: default_engine_match_tolerance(),
             oei_condition_to_sls_thrust_ratio: None,
             oei_asymmetric_trim_cd: None,
             oei_windmilling_cd: None,
@@ -309,7 +439,7 @@ impl Default for PerformanceConfig {
             vr_vstall_factor: 1.10,
             v2_vstall_factor: 1.20,
             v1_vr_factor: 0.95,
-            vapp_vstall_land_factor: 1.30,
+            vapp_vstall_land_factor: 1.23,
             vtd_vstall_land_factor: 1.15,
             matching_chart_resolution: 150,
         }
@@ -341,6 +471,24 @@ fn default_landing_deceleration() -> f64 {
 }
 fn default_propeller_landing_distance_share() -> f64 {
     0.70
+}
+fn default_takeoff_gear_delta_cd() -> f64 {
+    0.020
+}
+fn default_landing_flap_delta_cd() -> f64 {
+    0.040
+}
+fn default_landing_gear_delta_cd() -> f64 {
+    0.020
+}
+fn default_go_around_spool_thrust_fraction() -> f64 {
+    1.0
+}
+fn default_v2_min_vsr_factor() -> f64 {
+    1.13
+}
+fn default_engine_match_tolerance() -> f64 {
+    0.15
 }
 
 // A test asserts on values it constructed here directly, so a failed unwrap

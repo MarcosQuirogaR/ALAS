@@ -27,9 +27,19 @@ pub struct WingMountedRelief {
     /// Wing-carried items that are real relief and are not in
     /// [`Self::point_masses_kg`].
     pub omitted: Vec<NotAvailable>,
+    /// The torque sources of the configuration (engine inertia and thrust
+    /// offsets, flaps, ailerons). Empty until
+    /// [`Self::with_torque_sources`] attaches them.
+    pub torque: crate::torque_sources::TorqueSources,
 }
 
 impl WingMountedRelief {
+    /// The same relief with the configuration's torque sources attached.
+    pub fn with_torque_sources(mut self, torque: crate::torque_sources::TorqueSources) -> Self {
+        self.torque = torque;
+        self
+    }
+
     /// Total resolved wing-mounted mass on the modelled semi-wing, kg.
     pub fn total_mass_kg(&self) -> f64 {
         self.point_masses_kg.iter().map(|&(_, m)| m).sum()
@@ -127,6 +137,7 @@ pub fn wing_mounted_relief(
                     return WingMountedRelief {
                         point_masses_kg: Vec::new(),
                         omitted,
+                        torque: Default::default(),
                     };
                 }
             }
@@ -136,6 +147,7 @@ pub fn wing_mounted_relief(
             return WingMountedRelief {
                 point_masses_kg: Vec::new(),
                 omitted,
+                torque: Default::default(),
             };
         }
     };
@@ -144,6 +156,7 @@ pub fn wing_mounted_relief(
         return WingMountedRelief {
             point_masses_kg: Vec::new(),
             omitted,
+            torque: Default::default(),
         };
     }
     WingMountedRelief {
@@ -154,6 +167,7 @@ pub fn wing_mounted_relief(
             .map(|&y_pos| (y_pos, installed_kg))
             .collect(),
         omitted,
+        torque: Default::default(),
     }
 }
 

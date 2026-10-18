@@ -1,0 +1,337 @@
+{
+ "schema": 1,
+ "preset": "A220-300",
+ "body": "fuselage",
+ "reference_length_m": 38.7,
+ "degree": 5,
+ "frame": "x aft of nose tip, y right, z up, metres; z datum identical to the preset fuselage frame (cabin_z_m etc.)",
+ "curves": {
+  "A": {
+   "knots": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.021124031007751936,
+    0.11970284237726098,
+    0.1408268733850129,
+    0.1408268733850129,
+    0.1408268733850129,
+    0.7441860465116279,
+    0.7441860465116279,
+    0.7441860465116279,
+    0.7953488372093023,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0
+   ],
+   "coeffs": [
+    -7.965473995190917e-17,
+    0.0653999999999999,
+    0.631745313012848,
+    1.8977295210188996,
+    2.436198739009154,
+    3.062499999999998,
+    3.0625000000000013,
+    3.062500000000004,
+    3.0625000000000044,
+    3.0624999999999973,
+    3.0625000000000018,
+    0.07776670810880068,
+    2.1281038590194905,
+    0.02335274269125244,
+    0.00019902028324034204
+   ]
+  },
+  "E": {
+   "knots": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.1449612403100775,
+    0.17054263565891473,
+    0.17054263565891473,
+    0.17054263565891473,
+    0.656330749354005,
+    0.656330749354005,
+    0.656330749354005,
+    0.725064599483204,
+    0.8453488372093023,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0
+   ],
+   "coeffs": [
+    1.7173198058982508e-15,
+    0.4488000000000004,
+    2.041284877834239,
+    3.0962264584554617,
+    3.4614602499999996,
+    3.4614602499999987,
+    3.46146025,
+    3.461460249999999,
+    3.461460250000001,
+    3.4614602499999996,
+    2.1433284034027693,
+    1.494155293532269,
+    0.8080527335777163,
+    0.29559901802670785,
+    0.1253790035874673
+   ]
+  },
+  "zc": {
+   "knots": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.1449612403100775,
+    0.17054263565891473,
+    0.17054263565891473,
+    0.17054263565891473,
+    0.656330749354005,
+    0.656330749354005,
+    0.656330749354005,
+    0.725064599483204,
+    0.8453488372093023,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0
+   ],
+   "coeffs": [
+    -0.6987895053560467,
+    -0.5550676053636309,
+    -0.3491714943312809,
+    0.05112217933264719,
+    0.09999999999999991,
+    0.10000000000000035,
+    0.09999999999999962,
+    0.10000000000000031,
+    0.1000000000000005,
+    0.1000000000000011,
+    0.3998669489680923,
+    0.6044850987744225,
+    0.8365979466840696,
+    0.9888387923532117,
+    1.0596513883913736
+   ]
+  },
+  "n": {
+   "knots": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0
+   ],
+   "coeffs": [
+    2.0,
+    2.0,
+    2.0,
+    2.0,
+    2.0,
+    2.0
+   ]
+  },
+  "k": {
+   "knots": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0
+   ],
+   "coeffs": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ]
+  }
+ },
+ "front": {
+  "kind": "point",
+  "tip_radius_m": 0.2
+ },
+ "rear": {
+  "kind": "base"
+ },
+ "cabin": {
+  "x_start_m": 3.2,
+  "x_end_m": 31.700000000000003
+ },
+ "fairness": {
+  "inflections": {
+   "crown": 1,
+   "keel": 2,
+   "plan": 2
+  },
+  "tv_ratio_max": 1.5
+ },
+ "fit": {
+  "rms_m": 0.023960733109410718,
+  "max_m": 0.1101364441897878,
+  "lambda": 7.085031686256147e-05,
+  "tool_version": "loft_fit 0.1"
+ },
+ "provenance": [
+  {
+   "group": "A",
+   "kind": "measured",
+   "drawing": {
+    "id": "airbus_2025_a220acp",
+    "title": "Airbus Canada A220 Aircraft Characteristics Publication, Issue 013, 2025-11-27",
+    "page": "Fig.1 sheets 1-2",
+    "sha256": "ac489084ac6fd0b68f7d8df65bde42f01644442dc6069b9c0562b42bc7ae678b",
+    "path": "<fit-workdir>/A220_ACP_issue013.pdf"
+   },
+   "view": "top",
+   "px_per_m": 84.06358480059254,
+   "n_samples": 858,
+   "rms_m": 0.0234907388184314,
+   "max_m": 0.07134418175786639,
+   "confidence": "A",
+   "note": "plan half-width from the calibrated top silhouette (both halves averaged, centreline offset -0.006 m removed); wing/hstab/fairing intervals excluded (exclusions/A220-300.json); plateau value = preset D/2, line-width correction +0.011 m/side"
+  },
+  {
+   "group": "E",
+   "kind": "measured",
+   "drawing": {
+    "id": "airbus_2025_a220acp",
+    "title": "Airbus Canada A220 Aircraft Characteristics Publication, Issue 013, 2025-11-27",
+    "page": "Fig.1 sheets 1-2",
+    "sha256": "ac489084ac6fd0b68f7d8df65bde42f01644442dc6069b9c0562b42bc7ae678b",
+    "path": "<fit-workdir>/A220_ACP_issue013.pdf"
+   },
+   "view": "side",
+   "px_per_m": 84.20998216547339,
+   "n_samples": 1701,
+   "rms_m": 0.0242225235349618,
+   "max_m": 0.1101364441897878,
+   "confidence": "A",
+   "note": "half-height from crown and keel of the side silhouette; fin/engine/gear/fairing intervals excluded; plateau = preset height_m/2 (H measured 3.721 m)"
+  },
+  {
+   "group": "zc",
+   "kind": "measured",
+   "drawing": {
+    "id": "airbus_2025_a220acp",
+    "title": "Airbus Canada A220 Aircraft Characteristics Publication, Issue 013, 2025-11-27",
+    "page": "Fig.1 sheets 1-2",
+    "sha256": "ac489084ac6fd0b68f7d8df65bde42f01644442dc6069b9c0562b42bc7ae678b",
+    "path": "<fit-workdir>/A220_ACP_issue013.pdf"
+   },
+   "view": "side",
+   "px_per_m": 84.20998216547339,
+   "n_samples": 1701,
+   "rms_m": 0.0242225235349618,
+   "max_m": 0.1101364441897878,
+   "confidence": "A",
+   "note": "centreline height; z datum: crown of the drawing = cabin_z + H/2 of the preset; nose tip z from the drawing -0.699 m (preset nose_z_m -1.01)"
+  },
+  {
+   "group": "n",
+   "kind": "template",
+   "drawing": {
+    "id": "airbus_2025_a220acp",
+    "title": "Airbus Canada A220 Aircraft Characteristics Publication, Issue 013, 2025-11-27",
+    "page": "Fig.1 sheets 1-2",
+    "sha256": "ac489084ac6fd0b68f7d8df65bde42f01644442dc6069b9c0562b42bc7ae678b",
+    "path": "<fit-workdir>/A220_ACP_issue013.pdf"
+   },
+   "view": "front",
+   "px_per_m": 84.20998216547339,
+   "n_samples": 0,
+   "rms_m": 0.0,
+   "max_m": 0.0,
+   "confidence": "A",
+   "note": "n = 2 (ellipse): no dimensioned cabin cross-section is available in the masks; unmeasured"
+  },
+  {
+   "group": "k",
+   "kind": "template",
+   "drawing": {
+    "id": "airbus_2025_a220acp",
+    "title": "Airbus Canada A220 Aircraft Characteristics Publication, Issue 013, 2025-11-27",
+    "page": "Fig.1 sheets 1-2",
+    "sha256": "ac489084ac6fd0b68f7d8df65bde42f01644442dc6069b9c0562b42bc7ae678b",
+    "path": "<fit-workdir>/A220_ACP_issue013.pdf"
+   },
+   "view": "side",
+   "px_per_m": 84.20998216547339,
+   "n_samples": 0,
+   "rms_m": 0.0,
+   "max_m": 0.0,
+   "confidence": "A",
+   "note": "k = 0 (shoulder at centreline): unmeasured"
+  },
+  {
+   "group": "closure",
+   "kind": "measured",
+   "drawing": {
+    "id": "airbus_2025_a220acp",
+    "title": "Airbus Canada A220 Aircraft Characteristics Publication, Issue 013, 2025-11-27",
+    "page": "Fig.1 sheets 1-2",
+    "sha256": "ac489084ac6fd0b68f7d8df65bde42f01644442dc6069b9c0562b42bc7ae678b",
+    "path": "<fit-workdir>/A220_ACP_issue013.pdf"
+   },
+   "view": "side",
+   "px_per_m": 84.20998216547339,
+   "n_samples": 0,
+   "rms_m": 0.0,
+   "max_m": 0.0,
+   "confidence": "A",
+   "note": "front: point nose, tip radius 0.20 m (scan 0.10-0.30 m, minimum-knot/minimum-RMS choice, resolution-limited); rear: finite base A=0.000 m2 (a=0.014 m), E=0.125 m2 (e=0.354 m)"
+  },
+  {
+   "group": "cabin",
+   "kind": "dimension",
+   "drawing": {
+    "id": "airbus_2025_a220acp",
+    "title": "Airbus Canada A220 Aircraft Characteristics Publication, Issue 013, 2025-11-27",
+    "page": "Fig.1 sheets 1-2",
+    "sha256": "ac489084ac6fd0b68f7d8df65bde42f01644442dc6069b9c0562b42bc7ae678b",
+    "path": "<fit-workdir>/A220_ACP_issue013.pdf"
+   },
+   "view": "side",
+   "px_per_m": 84.20998216547339,
+   "n_samples": 0,
+   "rms_m": 0.0,
+   "max_m": 0.0,
+   "confidence": "A",
+   "note": "cabin_start_x_m / tailcone_length_m of the preset (payload semantics, unchanged); the flat plateau of the loft is fitted from the drawing and is NOT the payload cabin interval"
+  }
+ ]
+}

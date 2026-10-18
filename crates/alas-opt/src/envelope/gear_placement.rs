@@ -51,6 +51,22 @@ use super::{
     PhaseLimits,
 };
 
+/// Relative margin inside the static nose-load window the placement solves to.
+///
+/// The solve picks the feasible station nearest the published one, which is
+/// the station where the binding nose reaction equals its limit exactly. The
+/// verdict is then taken on a ledger that is not the one solved: the
+/// translated first closure differs from the solved one by floating-point
+/// round-off (the envelope's zero-fuel nose fraction came out 2.4e-16 below
+/// its limit for a redesigned ATR 72) and the re-sized closure by its mass and
+/// trim round-off (2.7e-8 of the limit in the ATR 72 payload-adjusted search),
+/// so a candidate placed onto the boundary was rejected for a violation no
+/// design change could remove. Solving to a limit tightened by this fraction
+/// leaves the unchanged envelope as the verdict with 1e-6 of the limit as
+/// closure slack (about 40 times the largest drift observed); no limit or
+/// tolerance of the verdict is widened.
+const NOSE_LOAD_PLACEMENT_SLACK: f64 = 1.0e-6;
+
 /// The main-gear translation `config` already carries, m; zero for the
 /// configured stations.
 #[must_use]
@@ -397,8 +413,10 @@ pub fn place_main_gear(
             main_gear_mass_kg: translated_kg,
             moment_without_main_gear_kg_m: mass_kg * x_m - translated_kg * stations.x_mlg_m,
             cg_height_m: z_m - ground_m,
-            minimum_nose_fraction: minimum_nose_gear_fraction(config, published_split, mass_kg),
-            maximum_nose_fraction: config.mass_model.pct_load_nlg_max_handling,
+            minimum_nose_fraction: minimum_nose_gear_fraction(config, published_split, mass_kg)
+                * (1.0 + NOSE_LOAD_PLACEMENT_SLACK),
+            maximum_nose_fraction: config.mass_model.pct_load_nlg_max_handling
+                * (1.0 - NOSE_LOAD_PLACEMENT_SLACK),
             forward_cg_boundary: boundary,
         });
     }

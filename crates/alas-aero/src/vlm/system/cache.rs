@@ -10,14 +10,12 @@
 
 use std::sync::Arc;
 
-use super::{
-    build_kernel_cache, inter_surface_core, mesh_wing_panels, Panel, VlmError, VlmSystem,
-    TRAILING_VORTEX_DIRECTION, VORTEX_CORE_RADIUS,
-};
-use crate::singularities::calculate_induced_velocity_horseshoe_cored;
-use crate::vector3::dot3;
+use super::fast_kernel;
+use super::schur::{AicFactorization, FrozenLattice};
+use super::{build_kernel_cache, mesh_wing_panels, Panel, VlmError, VlmSystem, MAX_PIVOT_RATIO};
 use alas_geom::aircraft::airplane::Airplane;
-use alas_math::linalg::{DenseMatrix, LuFactorization};
+use alas_math::block_lu::BlockFactorization;
+use alas_math::linalg::DenseMatrix;
 
 /// Geometry-only work retained within one candidate evaluation.
 ///
@@ -30,20 +28,63 @@ pub struct VlmGeometryCache {
     wings: Vec<alas_geom::aircraft::wing::Wing>,
     resolution: (usize, usize),
     panels: Vec<Panel>,
-    aic: Vec<f64>,
-    factorization: Option<Arc<LuFactorization>>,
+    aic: Arc<Vec<f64>>,
+    factorization: Option<Arc<AicFactorization>>,
+    /// Frozen-panel base for the Schur update, see [`super::schur`].
+    frozen: Option<FrozenLattice>,
+    /// Whether the previous assembly was an incremental update.
+    incremental_before: bool,
+    /// Per-cache override of [`crate::vlm::speed::schur_lu`].
+    schur_override: Option<bool>,
     kernel: Option<Arc<Vec<[f64; 3]>>>,
     trace: Vec<(usize, usize, [u64; 4])>,
     trefftz: Arc<std::sync::OnceLock<Option<super::super::trefftz::TrefftzOperator>>>,
 }
 
 impl VlmGeometryCache {
+    fn with_schur_update_override(schur_override: Option<bool>) -> Self {
+        Self {
+            schur_override,
+            ..Self::default()
+        }
+    }
+
+    /// A cache that uses the Schur factorization update (`true`) or always
+    /// the ordinary LU (`false`), regardless of [`crate::vlm::speed`]: for
+    /// bit-diff comparisons and tests.
+    pub fn with_schur_update(use_schur: bool) -> Self {
+        Self::with_schur_update_override(Some(use_schur))
+    }
+
+    /// The block factorization of the current `aic`, when the frozen-panel
+    /// base applies (or can now be built because the previous assembly was
+    /// also an incremental update). `None` selects the ordinary LU.
+    fn block_factorization(
+        &mut self,
+        panels: &[Panel],
+        changed: &[bool],
+    ) -> Option<BlockFactorization> {
+        if !self.frozen.as_ref().is_some_and(|f| f.applies_to(panels)) {
+            self.frozen = None;
+            let moving = changed.iter().filter(|&&c| c).count();
+            if self.incremental_before && moving > 0 && 2 * moving <= panels.len() {
+                self.frozen = FrozenLattice::build(&self.aic, panels, changed);
+            }
+        }
+        self.frozen
+            .as_ref()?
+            .factor(self.aic.clone(), MAX_PIVOT_RATIO)
+    }
+
     pub(super) fn assemble<'a>(
         &mut self,
         airplane: &'a Airplane,
         spanwise: usize,
         chordwise: usize,
     ) -> Result<VlmSystem<'a>, VlmError> {
+        let _profile =
+            alas_math::stage_profile::scope(alas_math::stage_profile::Stage::VlmAssembly);
+        alas_math::stage_profile::count(alas_math::stage_profile::Counter::VlmAssemblies, 1);
         let mut panels = Vec::with_capacity(self.panels.len());
         for (index, wing) in airplane.wings.iter().enumerate() {
             if self.resolution == (spanwise, chordwise) && self.wings.get(index) == Some(wing) {
@@ -65,55 +106,61 @@ impl VlmGeometryCache {
             .map(|(i, panel)| !same_size || *panel != self.panels[i])
             .collect();
         if !same_size {
-            self.aic.resize(n * n, 0.0);
+            Arc::make_mut(&mut self.aic).resize(n * n, 0.0);
+            self.frozen = None;
         }
         if changed.iter().any(|&change| change) || self.factorization.is_none() {
-            for (i, field) in panels.iter().enumerate() {
-                for (j, source) in panels.iter().enumerate() {
-                    if changed[i] || changed[j] {
-                        let induced = calculate_induced_velocity_horseshoe_cored(
-                            field.collocation_point,
-                            source.left_vortex_vertex,
-                            source.right_vortex_vertex,
-                            TRAILING_VORTEX_DIRECTION,
-                            1.0,
-                            VORTEX_CORE_RADIUS,
-                            inter_surface_core(field.wing_index, source),
-                        );
-                        self.aic[i * n + j] = dot3(induced, field.normal_direction);
+            use alas_math::stage_profile::{count, scope, Counter, Stage};
+            count(Counter::VlmRefactorizations, 1);
+            let (fill_stage, factor_stage) = if same_size {
+                (Stage::VlmFill, Stage::VlmFactor)
+            } else {
+                count(Counter::VlmColdAssemblies, 1);
+                (Stage::VlmColdFill, Stage::VlmColdFactor)
+            };
+            let fill_profile = scope(fill_stage);
+            let aic = Arc::make_mut(&mut self.aic);
+            let fast = crate::vlm::speed::fast_kernel();
+            // A same-size update refreshes the cached kernel in the same
+            // pass; otherwise it is rebuilt whole below.
+            let kernel_entries = if same_size {
+                self.kernel
+                    .as_mut()
+                    .map(|kernel| Arc::make_mut(kernel).as_mut_slice())
+            } else {
+                None
+            };
+            let update_kernel = kernel_entries.is_some();
+            fast_kernel::fill_changed(&panels, &changed, fast, aic, kernel_entries);
+            drop(fill_profile);
+            let factor_profile = scope(factor_stage);
+            let block = if same_size
+                && self
+                    .schur_override
+                    .unwrap_or_else(crate::vlm::speed::schur_lu)
+            {
+                self.block_factorization(&panels, &changed)
+            } else {
+                None
+            };
+            let factorization = if let Some(block) = block {
+                AicFactorization::Block(block)
+            } else {
+                match DenseMatrix::from_row_major(n, &self.aic).factor() {
+                    Ok(factorization) => AicFactorization::Full(factorization),
+                    Err(pivot) => {
+                        // The AIC has already been updated; discard it rather
+                        // than leave entries paired with the previous mesh.
+                        *self = Self::with_schur_update_override(self.schur_override);
+                        return Err(VlmError::SingularAic(pivot));
                     }
-                }
-            }
-            let factorization = match DenseMatrix::from_row_major(n, &self.aic).factor() {
-                Ok(factorization) => factorization,
-                Err(pivot) => {
-                    // The AIC has already been updated; discard it rather
-                    // than leave entries paired with the previous mesh.
-                    *self = Self::default();
-                    return Err(VlmError::SingularAic(pivot));
                 }
             };
+            drop(factor_profile);
+            self.incremental_before = same_size;
             self.factorization = Some(Arc::new(factorization));
-            if same_size && self.kernel.is_some() {
-                if let Some(kernel) = self.kernel.as_mut() {
-                    let entries = Arc::make_mut(kernel);
-                    for (i, field) in panels.iter().enumerate() {
-                        for (j, source) in panels.iter().enumerate() {
-                            if changed[i] || changed[j] {
-                                entries[i * n + j] = calculate_induced_velocity_horseshoe_cored(
-                                    field.vortex_center,
-                                    source.left_vortex_vertex,
-                                    source.right_vortex_vertex,
-                                    TRAILING_VORTEX_DIRECTION,
-                                    4.0 * std::f64::consts::PI,
-                                    VORTEX_CORE_RADIUS,
-                                    inter_surface_core(field.wing_index, source),
-                                );
-                            }
-                        }
-                    }
-                }
-            } else {
+            if !update_kernel {
+                let _kernel_profile = scope(fill_stage);
                 let centers: Vec<_> = panels.iter().map(|panel| panel.vortex_center).collect();
                 self.kernel = build_kernel_cache(&centers, &panels).map(Arc::new);
             }
@@ -180,6 +227,7 @@ impl VlmGeometryCache {
 mod tests {
     use super::*;
     use crate::operating_point::OperatingPoint;
+    use crate::vector3::dot3;
     use alas_atmo::Atmosphere;
     use alas_geom::aircraft::airfoil::Airfoil;
     use alas_geom::aircraft::wing::{Wing, WingXSec};
@@ -211,7 +259,7 @@ mod tests {
     #[test]
     fn changing_incidence_cg_geometry_and_mesh_matches_fresh_solve_bitwise() {
         let mut plane = airplane();
-        let mut cache = VlmGeometryCache::default();
+        let mut cache = VlmGeometryCache::with_schur_update(false);
         for (incidence, alpha, chordwise, tip_delta) in [
             (-4.0, -1.0, 4, 0.0),
             (2.0, 6.0, 4, 0.0),
@@ -236,6 +284,73 @@ mod tests {
                 fresh.trefftz_induced_drag_coefficient(&expected, &point)
             );
         }
+    }
+
+    #[test]
+    fn fast_fill_is_bit_identical_to_the_ordinary_kernel_fill() {
+        let mut plane = airplane();
+        // A tail pitched into the wing's near field exercises the cores.
+        for section in &mut plane.wings[1].xsecs {
+            section.twist = 4.0;
+            section.xyz_le[2] = 0.05;
+        }
+        let panels = super::super::mesh_panels(&plane, 3, 4).unwrap();
+        let n = panels.len();
+        let tail_only: Vec<bool> = panels.iter().map(|p| p.wing_index == 1).collect();
+        for mask in [vec![true; n], tail_only] {
+            let mut results = Vec::new();
+            for fast in [false, true] {
+                let mut aic = vec![0.0; n * n];
+                let mut kernel = vec![[0.0; 3]; n * n];
+                super::fast_kernel::fill_changed(&panels, &mask, fast, &mut aic, Some(&mut kernel));
+                let aic_bits: Vec<u64> = aic.iter().map(|v| v.to_bits()).collect();
+                let kernel_bits: Vec<u64> = kernel.iter().flatten().map(|v| v.to_bits()).collect();
+                results.push((aic_bits, kernel_bits));
+            }
+            assert!(
+                results[0] == results[1],
+                "fast fill differs from the ordinary kernel"
+            );
+        }
+    }
+
+    #[test]
+    fn schur_update_matches_fresh_solve_to_rounding_and_is_taken() {
+        let mut plane = airplane();
+        let mut cache = VlmGeometryCache::with_schur_update(true);
+        let mut taken = 0;
+        for (index, incidence) in [-4.0, 2.0, 3.5, -1.0, 0.5, 5.0].into_iter().enumerate() {
+            for section in &mut plane.wings[1].xsecs {
+                section.twist = incidence;
+            }
+            plane.xyz_ref[0] += 0.01;
+            let point =
+                OperatingPoint::new(Atmosphere::new(9000.0), 180.0, 3.0, 0.0, 0.0, 0.0, 0.0);
+            let fresh = VlmSystem::assemble(&plane, 2, 4).unwrap();
+            let reused = VlmSystem::assemble_cached(&plane, 2, 4, &mut cache).unwrap();
+            taken += usize::from(reused.factorization.is_block());
+            let (expected, actual) = (fresh.solve(&point).unwrap(), reused.solve(&point).unwrap());
+            let scale = expected
+                .vortex_strengths
+                .iter()
+                .fold(0.0_f64, |m, g| m.max(g.abs()));
+            for (a, e) in actual
+                .vortex_strengths
+                .iter()
+                .zip(&expected.vortex_strengths)
+            {
+                assert!((a - e).abs() <= 1.0e-11 * scale, "step {index}: {a} vs {e}");
+            }
+            for (a, e) in [
+                (actual.cl_lift, expected.cl_lift),
+                (actual.cd_drag, expected.cd_drag),
+                (actual.cm_pitch, expected.cm_pitch),
+            ] {
+                assert!((a - e).abs() <= 1.0e-11 * e.abs().max(1.0e-3), "{a} vs {e}");
+            }
+        }
+        // Cold, one ordinary incremental LU to arm the base, then blocks.
+        assert_eq!(taken, 4);
     }
 
     #[test]

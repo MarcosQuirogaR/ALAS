@@ -1,43 +1,30 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! Starting, polling and querying the UAV optimization workflow.
+//! Starting, polling and cancelling the competition search.
 
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, TryRecvError};
+use std::sync::Arc;
 use std::thread;
 
-use super::model::*;
-use super::request::{role_matches, run_worker, selected_record, UavWorkerMessage};
-use super::support::missing_field;
+use alas_uav::optimizer::{OptimizationError, OptimizationProgress};
+
+use super::model::{CompetitionResult, UavExecutionStatus, UavSection, UavWorkflowOutcome};
+use super::request::{run_worker, UavWorkerMessage};
 use super::UavWorkflowState;
-use alas_uav::optimizer::{OptimizationError, OptimizationProgress, SelectedComponents};
-use alas_uav::{
-    optimization_catalog, optimized_aircraft_bom, AircraftBillOfMaterials, ComponentKind,
-    ComponentRecord, TopologyAvailability, UavAnalysisPath,
-};
 
 impl UavWorkflowState {
-    /// Snapshot inputs and start one deterministic search in a background worker.
+    /// Snapshot the inputs and start one deterministic competition search in a
+    /// background worker.
     ///
-    /// Returns `false` when a worker is already active or the snapshot is
+    /// Returns `false` when a worker is already active or the inputs are
     /// invalid. Invalid input is exposed through [`Self::execution`].
     pub fn start(&mut self) -> bool {
         if self.is_running() {
             return false;
         }
-        if let TopologyAvailability::Unavailable(reason) = self
-            .topology
-            .availability(UavAnalysisPath::PreliminaryOptimization)
-        {
-            self.execution = UavExecutionStatus::Failed(format!(
-                "{} cannot start: {}",
-                self.topology.label(),
-                reason.description()
-            ));
-            return false;
-        }
-        let request = match self.run_request() {
+        let request = match self.competition_request() {
             Ok(request) => request,
             Err(message) => {
                 self.execution = UavExecutionStatus::Failed(message);
@@ -45,7 +32,7 @@ impl UavWorkflowState {
             }
         };
         let total_candidates = request.evaluations;
-        self.cancel_flag.store(false, Ordering::Relaxed);
+        self.cancel_flag = Arc::new(AtomicBool::new(false));
         self.execution = UavExecutionStatus::Running(OptimizationProgress {
             evaluated_candidates: 0,
             total_candidates,
@@ -56,7 +43,8 @@ impl UavWorkflowState {
         self.worker_rx = Some(receiver);
         let cancel_flag = self.cancel_flag.clone();
         match thread::Builder::new()
-            .name("alas-uav-optimizer".to_owned())
+            .name("alas-uav-competition".to_owned())
+            .stack_size(crate::worker_stack::ANALYSIS_STACK_BYTES)
             .spawn(move || run_worker(request, sender, cancel_flag))
         {
             Ok(_) => true,
@@ -107,20 +95,16 @@ impl UavWorkflowState {
                 }
                 UavWorkerMessage::Finished(finished) => {
                     self.worker_rx = None;
-                    self.last_electrical_mission = finished.electrical_mission;
                     match finished.result {
-                        Ok(accepted) => {
-                            self.outcome = UavWorkflowOutcome::PreliminaryFeasible {
-                                optimized: Box::new(accepted.optimized),
-                                shared_core: accepted.shared_core,
-                            };
-                            self.last_completed_topology = Some(self.topology);
-                            self.active_section = UavSection::Results;
-                            self.execution = UavExecutionStatus::Completed;
-                        }
-                        Err(OptimizationError::NoFeasibleDesign(summary)) => {
-                            self.outcome = UavWorkflowOutcome::NoFeasibleDesign(summary);
-                            self.last_completed_topology = Some(self.topology);
+                        Ok(optimum) => {
+                            let preset_name = alas_uav::score::presets::load(&finished.preset_id)
+                                .map_or_else(|_| finished.preset_id.clone(), |preset| preset.name);
+                            self.outcome =
+                                UavWorkflowOutcome::Competition(Box::new(CompetitionResult {
+                                    preset_id: finished.preset_id,
+                                    preset_name,
+                                    optimum,
+                                }));
                             self.active_section = UavSection::Results;
                             self.execution = UavExecutionStatus::Completed;
                         }
@@ -131,8 +115,8 @@ impl UavWorkflowState {
                                 evaluated_candidates,
                             };
                         }
-                        Err(OptimizationError::InvalidProblem(message)) => {
-                            self.execution = UavExecutionStatus::Failed(message);
+                        Err(error) => {
+                            self.execution = UavExecutionStatus::Failed(error.to_string());
                         }
                     }
                 }
@@ -152,153 +136,5 @@ impl UavWorkflowState {
             self.execution,
             UavExecutionStatus::Running(_) | UavExecutionStatus::CancelRequested(_)
         )
-    }
-
-    /// All source-reviewed records compatible with a required role.
-    ///
-    /// This uses the complete embedded catalogue, including manufacturer and
-    /// specialist-source records beyond the RC Innovations seed.
-    /// Optional physical fields remain optional in each record; this method
-    /// only filters by role and never fills missing evidence.
-    pub fn records_for(&self, role: ComponentRole) -> Vec<&'static ComponentRecord> {
-        optimization_catalog()
-            .map(|catalog| {
-                catalog
-                    .records
-                    .iter()
-                    .filter(|record| role_matches(role, &record.kind))
-                    .collect()
-            })
-            .unwrap_or_default()
-    }
-
-    /// The currently selected source-reviewed record, if the catalogue contains it.
-    pub fn selected_record(&self, role: ComponentRole) -> Option<&'static ComponentRecord> {
-        selected_record(&self.selections, role)
-    }
-
-    /// Return selected catalogue fields that the optimizer must have before it
-    /// can build a physically reviewable airframe.
-    ///
-    /// A selected record is not the same as complete engineering evidence.
-    /// The page uses this list for section status and the run summary, while
-    /// the optimizer remains the authority that rejects missing values.
-    pub fn selected_evidence_gaps(&self) -> Vec<String> {
-        let mut gaps = Vec::new();
-        for role in ComponentRole::ALL {
-            let Some(record) = self.selected_record(role) else {
-                gaps.push(format!("{}: selected record", role.label()));
-                continue;
-            };
-            match &record.kind {
-                ComponentKind::Battery(spec) => {
-                    missing_field(&mut gaps, role, record, spec.mass_kg, "mass");
-                    missing_field(&mut gaps, role, record, spec.dimensions, "dimensions");
-                    missing_field(
-                        &mut gaps,
-                        role,
-                        record,
-                        spec.nominal_voltage_v,
-                        "nominal voltage",
-                    );
-                    missing_field(
-                        &mut gaps,
-                        role,
-                        record,
-                        spec.series_cells,
-                        "series-cell count",
-                    );
-                }
-                ComponentKind::Motor(spec) => {
-                    missing_field(&mut gaps, role, record, spec.mass_kg, "mass");
-                }
-                ComponentKind::Esc(spec) => {
-                    missing_field(&mut gaps, role, record, spec.mass_kg, "mass");
-                    missing_field(&mut gaps, role, record, spec.dimensions, "dimensions");
-                }
-                ComponentKind::Propeller(spec) => {
-                    missing_field(&mut gaps, role, record, spec.mass_kg, "mass");
-                    missing_field(&mut gaps, role, record, spec.diameter_m, "diameter");
-                }
-                ComponentKind::Servo(spec) => {
-                    missing_field(&mut gaps, role, record, spec.mass_kg, "mass");
-                    missing_field(&mut gaps, role, record, spec.dimensions, "dimensions");
-                    if spec
-                        .stall_current_at_voltage(self.systems.control_bus_voltage_v)
-                        .is_none()
-                    {
-                        gaps.push(format!(
-                            "{} {}: stall current at {:.1} V",
-                            role.label(),
-                            record.id,
-                            self.systems.control_bus_voltage_v
-                        ));
-                    }
-                }
-                ComponentKind::MaterialStock(spec) => {
-                    missing_field(&mut gaps, role, record, spec.mass_kg, "stock mass");
-                    missing_field(&mut gaps, role, record, spec.dimensions, "stock dimensions");
-                    missing_field(
-                        &mut gaps,
-                        role,
-                        record,
-                        spec.youngs_modulus_pa,
-                        "Young's modulus",
-                    );
-                    missing_field(
-                        &mut gaps,
-                        role,
-                        record,
-                        spec.allowable_stress_pa,
-                        "allowable stress",
-                    );
-                }
-                ComponentKind::Receiver(spec) => {
-                    missing_field(&mut gaps, role, record, spec.mass_kg, "mass");
-                    missing_field(&mut gaps, role, record, spec.dimensions, "dimensions");
-                    if spec.min_voltage_v.is_none() || spec.max_voltage_v.is_none() {
-                        gaps.push(format!(
-                            "{} {}: published supply-voltage range",
-                            role.label(),
-                            record.id
-                        ));
-                    }
-                }
-                ComponentKind::Electronics(spec) => {
-                    missing_field(&mut gaps, role, record, spec.mass_kg, "mass");
-                    missing_field(&mut gaps, role, record, spec.dimensions, "dimensions");
-                }
-                ComponentKind::LandingGear(spec) => {
-                    missing_field(&mut gaps, role, record, spec.mass_kg, "mass");
-                    missing_field(&mut gaps, role, record, spec.dimensions, "dimensions");
-                    missing_field(
-                        &mut gaps,
-                        role,
-                        record,
-                        spec.max_aircraft_mass_kg,
-                        "maximum supported aircraft mass",
-                    );
-                }
-            }
-        }
-        gaps
-    }
-
-    /// Build the currently selected full-aircraft BOM before running a search.
-    pub fn selected_aircraft_bom(&self) -> AircraftBillOfMaterials {
-        optimized_aircraft_bom(&SelectedComponents {
-            battery_id: self.selections.battery.clone(),
-            motor_id: self.selections.motor.clone(),
-            motor_count: self.propulsion_motor_count,
-            esc_id: self.selections.esc.clone(),
-            propeller_id: self.selections.propeller.clone(),
-            servo_id: self.selections.servo.clone(),
-            servo_count: 3,
-            material_id: self.selections.material.clone(),
-            receiver_id: self.selections.receiver.clone(),
-            electronics_id: self.selections.electronics.clone(),
-            landing_gear_id: self.selections.landing_gear.clone(),
-            propulsion_evidence: self.propulsion_evidence.clone(),
-        })
     }
 }

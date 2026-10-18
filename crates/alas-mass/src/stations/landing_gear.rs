@@ -98,8 +98,9 @@ fn resolved_gear_stations(
 ) -> LandingGearStationPositions {
     let (start_x, length, _) = fuselage_datum(fuselage);
     let fallback_x_nlg = start_x + length * mass_model.nlg_x_fraction;
-    let mac = main_wing.mean_aerodynamic_chord();
-    let mac_le_x = main_wing.aerodynamic_center(0.0)[0];
+    // `mlg_x_fraction_mac` is a fraction of the reference MAC.
+    let mac = main_wing.reference_mac();
+    let mac_le_x = main_wing.reference_mac_le_x();
     let fallback_x_mlg = mac_le_x + mass_model.mlg_x_fraction_mac * mac;
     landing_gear
         .map(|config| {

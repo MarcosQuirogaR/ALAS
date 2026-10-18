@@ -7,7 +7,7 @@ use alas_config::{airport_dataset, airports, AlasConfig, MtowPlan};
 use alas_geom::aircraft::airplane::Airplane;
 use alas_mass::breakdown::{MassBreakdown, MassCoordinates};
 
-use crate::mdo::mda::retrim_needed;
+use crate::mdo::mda::{retrim_needed, retrim_needed_within};
 use crate::mdo::trim::TrimmedPolar;
 use crate::mdo::types::{HistoryFields, PayloadCapacity, SizedCandidate};
 
@@ -64,6 +64,44 @@ pub(crate) struct SizingOutcome {
     /// The closure's native trim, offered to a re-sizing of this airframe;
     /// `None` when an external polar replaced the native trim.
     pub trim_reuse: Option<TrimReuse>,
+    /// The geometry-scaled maximum lift coefficients this candidate was sized
+    /// with, `None` when it keeps the configuration's declared values.
+    pub clmax: Option<alas_perf::performance::clmax::ClmaxSet>,
+    /// The registered aircraft's declared coefficients, present exactly when
+    /// [`Self::clmax`] is: what the nominal references are keyed on and
+    /// resolved under (lever A12).
+    pub declared_clmax: Option<alas_perf::performance::clmax::ClmaxSet>,
+}
+
+impl SizingOutcome {
+    /// `config` as the registered-aircraft references must read it: the
+    /// candidate's solved gear and everything else, but the declared CLmax
+    /// of the registered aircraft instead of this candidate's scaled ones.
+    /// The reference nominal is a property of the registered aircraft, not
+    /// of the candidate being compared with it.
+    pub(crate) fn registered_config<'a>(
+        &self,
+        config: &'a AlasConfig,
+    ) -> std::borrow::Cow<'a, AlasConfig> {
+        match &self.declared_clmax {
+            Some(set) if crate::mdo::speedups::enabled(crate::mdo::speedups::Lever::NominalKey) => {
+                std::borrow::Cow::Owned(super::clmax_geometry::with_clmax(config, set))
+            }
+            _ => std::borrow::Cow::Borrowed(config),
+        }
+    }
+
+    /// `config` as the residuals and the cost must read it: with this
+    /// candidate's scaled maximum lift coefficients when it has them.
+    pub(crate) fn config_with_clmax<'a>(
+        &self,
+        config: &'a AlasConfig,
+    ) -> std::borrow::Cow<'a, AlasConfig> {
+        match &self.clmax {
+            Some(set) => std::borrow::Cow::Owned(super::clmax_geometry::with_clmax(config, set)),
+            None => std::borrow::Cow::Borrowed(config),
+        }
+    }
 }
 
 /// One closure's native trim and lattice work, offered to a re-sizing of the
@@ -91,9 +129,45 @@ pub(crate) struct TrimReuse {
     pub(super) trim_cg_x_m: f64,
     pub(super) screening_drag_table: bool,
     pub(super) vlm_cache: crate::mdo::trim::CandidateVlmCache,
+    /// Re-trim tolerance this trim may stand under, percent MAC (lever A13);
+    /// `None` is the configured `retrim_cg_tolerance_pct_mac`.
+    pub(super) cg_tolerance_pct_mac: Option<f64>,
 }
 
 impl TrimReuse {
+    /// The trim (polar and centre of gravity) a closure left on `plane`, for a candidate configured as
+    /// `config` and built as `untrimmed` from `dv`.
+    pub(super) fn of_closure(
+        config: &AlasConfig,
+        dv: alas_config::DesignVector,
+        untrimmed: Airplane,
+        plane: &Airplane,
+        trim: (&TrimmedPolar, f64),
+        screening_drag_table: bool,
+        vlm_cache: crate::mdo::trim::CandidateVlmCache,
+    ) -> Self {
+        let mut without_gear = config.clone();
+        without_gear.landing_gear.derived_main_gear = None;
+        Self {
+            config: without_gear,
+            dv,
+            untrimmed,
+            trimmed: plane.clone(),
+            polar: trim.0.clone(),
+            trim_cg_x_m: trim.1,
+            screening_drag_table,
+            vlm_cache,
+            cg_tolerance_pct_mac: None,
+        }
+    }
+
+    /// This trim, standing for a centre-of-gravity shift of up to
+    /// `pct_mac` percent of the chord instead of the configured tolerance.
+    pub(crate) fn with_cg_tolerance(mut self, pct_mac: f64) -> Self {
+        self.cg_tolerance_pct_mac = Some(pct_mac);
+        self
+    }
+
     /// Whether this trim stands for `config`, `dv` and the freshly built
     /// `plane` with its centre of gravity at `cg_x_m`.
     pub(super) fn stands_for(
@@ -111,6 +185,9 @@ impl TrimReuse {
             && self.dv == *dv
             && self.untrimmed == *plane
             && self.config == without_gear
-            && !retrim_needed(config, plane, cg_x_m, self.trim_cg_x_m)
+            && !self.cg_tolerance_pct_mac.map_or_else(
+                || retrim_needed(config, plane, cg_x_m, self.trim_cg_x_m),
+                |pct| retrim_needed_within(pct, plane, cg_x_m, self.trim_cg_x_m),
+            )
     }
 }

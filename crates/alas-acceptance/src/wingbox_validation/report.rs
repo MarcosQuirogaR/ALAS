@@ -163,7 +163,21 @@ fn maximum(values: &[f64]) -> usize {
         .0
 }
 
+/// Linear interpolation of `values` at `position` along ascending `y`.
+/// Fewer than two stations (or a short `values`) is NaN rather than an
+/// index panic; a position outside the stations clamps to the nearest end
+/// value instead of extrapolating segment 0. In range the result is the
+/// plain segment interpolation.
 fn interpolate(y: &[f64], values: &[f64], position: f64) -> f64 {
+    if y.len() < 2 || values.len() < y.len() {
+        return f64::NAN;
+    }
+    if position < y[0] {
+        return values[0];
+    }
+    if position > y[y.len() - 1] {
+        return values[y.len() - 1];
+    }
     let i = y
         .windows(2)
         .position(|pair| position >= pair[0] && position <= pair[1])
@@ -183,7 +197,7 @@ pub(super) fn write(path: &Path, rows: &[Value]) -> io::Result<()> {
         let p = |key: &str, precision| percent_text(&row[key]["difference_percent"], precision);
         summary.push_str(&format!("| {} | {:.6} / {:.6} | {} | {:.6} / {:.6} | {} | {:.3} / {:.3} | {} | {:.3} / {:.3} | {:.6} / {:.6} | {} |\n", row["preset"].as_str().unwrap_or("?"), v("tip_m","native"),v("tip_m","nastran"),p("tip_m",3),v("mid_span_m","native"),v("mid_span_m","nastran"),p("mid_span_m",3),v("root_stress_pa","native")/1e6,v("root_stress_pa","nastran")/1e6,p("root_stress_pa",4),v("max_stress_pa","native")/1e6,v("max_stress_pa","nastran")/1e6,row["native_max_station_m"].as_f64().unwrap_or(f64::NAN),row["nastran_max_station_m"].as_f64().unwrap_or(f64::NAN),percent_text(&row["max_station_difference_percent_span"],3)));
     }
-    summary.push_str("\n## Idealisation and reproducibility\n\nCBEAM/PBEAM at the unchanged native stations; endpoint properties vary linearly. Reference MAT1 uses cap E and nu, I1=actual compatible EI/E_cap. Transformed A and I2 retain material axial ratios. J is an unloaded Bredt outer-cell proxy; torsion is not validated. End stress recovery at +/-maximum spar depth/2 gives maximum cap fibre stress. K1=K2=0 removes transverse shear. No GRAV or density load is added because q_net already contains final structure and declared fuel relief. Constant segment-average PLOAD1 reproduces native double-trapezoid station moments, and concentrated PLOAD1 applies point inertia at actual positions. The final product stiffness-sized response supplies the loads, so swept member mass relief is retained even though the validation beam is straight.\n\nNative trapezoidal curvature integration and tapered-element integration can differ; the conditional displacement criterion below quantifies the native quadrature bound. Max-stress stations can be ambiguous on near-constant strength-sized stress plateaus. Agreement is numerical verification of this beam idealisation, not aircraft physical validation. Shell deformation is a separate higher-fidelity check with transverse shear, Poisson and taper effects; it has no ribs or buckling/nonlinear validation.\n\nReproduce: `cargo run -p alas-acceptance --bin wingbox_nastran_validation -- --output-dir .agent/nastran/<new-run>`. Optional `--shell` exports and solves the separate straight shell box. Existing result directories are retained rather than overwritten. Native profiles and assumptions are in each preset's native.json; decks, F06 and solver status are alongside them.\n\nPrimary card semantics: [MSC Linear Static Analysis User Guide](https://documentation-be.hexagon.com/bundle/MSC_Nastran_2025.1_Linear_Static_Analysis_User_Guide/raw/resource/enus/MSC_Nastran_2025.1_Linear_Static_Analysis_User_Guide.pdf), [MSC Quick Reference Guide](https://documentation-be.hexagon.com/bundle/MSC_Nastran_2022.1_Quick_Reference_Guide/raw/resource/enus/MSC_Nastran_2022.1_Quick_Reference_Guide.pdf).\n");
+    summary.push_str("\n## Idealisation and reproducibility\n\nCBEAM/PBEAM at the unchanged native stations; endpoint properties vary linearly. Reference MAT1 uses cap E and nu, I1=actual compatible EI/E_cap. Transformed A and I2 retain material axial ratios. J is an unloaded Bredt outer-cell proxy; torsion is not validated. End stress recovery at +/-maximum spar depth/2 gives maximum cap fibre stress. K1=K2=0 removes transverse shear. No GRAV or density load is added because q_net already contains final structure and declared fuel relief. Constant segment-average PLOAD1 reproduces native double-trapezoid station moments, and concentrated PLOAD1 applies point inertia at actual positions. The final product stiffness-sized response supplies the loads, so swept member mass relief is retained even though the validation beam is straight.\n\nNative trapezoidal curvature integration and tapered-element integration can differ; the conditional displacement criterion below quantifies the native quadrature bound. Max-stress stations can be ambiguous on near-constant strength-sized stress plateaus. Agreement is numerical verification of this beam idealisation, not aircraft physical validation. Shell deformation is a separate higher-fidelity check with transverse shear, Poisson and taper effects; it has no ribs or buckling/nonlinear validation.\n\nReproduce: `cargo run -p alas-acceptance --bin wingbox_nastran_validation -- --output-dir <new-run-dir>` (default: `<temp>/alas-nastran/<run>`). Optional `--shell` exports and solves the separate straight shell box. Existing result directories are retained rather than overwritten. Native profiles and assumptions are in each preset's native.json; decks, F06 and solver status are alongside them.\n\nPrimary card semantics: [MSC Linear Static Analysis User Guide](https://documentation-be.hexagon.com/bundle/MSC_Nastran_2025.1_Linear_Static_Analysis_User_Guide/raw/resource/enus/MSC_Nastran_2025.1_Linear_Static_Analysis_User_Guide.pdf), [MSC Quick Reference Guide](https://documentation-be.hexagon.com/bundle/MSC_Nastran_2022.1_Quick_Reference_Guide/raw/resource/enus/MSC_Nastran_2022.1_Quick_Reference_Guide.pdf).\n");
     for row in rows {
         summary.push_str(&format!("\n{}: MSC {}; {} stations; moment equilibrium residual {} of maximum native moment; product sizing converged={}.", row["preset"].as_str().unwrap_or("?"),row["version"].as_str().unwrap_or("?"),row["stations"],percent_text(&row["max_moment_error_percent_root_scale"],6),row["sizing_converged"]));
         let c = &row["displacement_criterion"];
@@ -226,6 +240,20 @@ pub(super) fn write(path: &Path, rows: &[Value]) -> io::Result<()> {
 mod tests {
     use super::*;
     use std::collections::BTreeSet;
+
+    #[test]
+    fn interpolate_matches_segments_in_range_and_never_panics_outside() {
+        let y = [0.0, 2.0, 6.0];
+        let v = [1.0, 3.0, 11.0];
+        assert_eq!(interpolate(&y, &v, 1.0), 2.0);
+        assert_eq!(interpolate(&y, &v, 4.0), 7.0);
+        assert_eq!(interpolate(&y, &v, 6.0), 11.0);
+        assert_eq!(interpolate(&y, &v, -1.0), 1.0);
+        assert_eq!(interpolate(&y, &v, 7.0), 11.0);
+        assert!(interpolate(&[1.0], &[2.0], 1.0).is_nan());
+        assert!(interpolate(&[], &[], 0.0).is_nan());
+        assert!(interpolate(&y, &v[..2], 1.0).is_nan());
+    }
 
     #[test]
     fn endpoint_coverage_rejects_a_missing_interior_end_and_wrong_grid() {

@@ -158,6 +158,14 @@ pub(super) fn localize_scene_text(text: &str) -> String {
             .replace("{count}", count)
             .replace("{mass}", mass);
     }
+    if let Some((count, mass)) = text
+        .strip_suffix(" t")
+        .and_then(|value| value.split_once(" 463L pallet, "))
+    {
+        return alas_i18n::t(Some("{count} 463L pallet, {mass} t"), None)
+            .replace("{count}", count)
+            .replace("{mass}", mass);
+    }
     localize_route_footer(text).unwrap_or_else(|| text.to_owned())
 }
 

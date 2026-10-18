@@ -155,6 +155,13 @@ pub enum Op2Error {
         /// Byte offset of the record whose two length words disagree.
         offset: usize,
     },
+    /// A record header declared more bytes than the file holds: the file was
+    /// cut short.
+    #[error("OP2 file is truncated: the record at byte {offset} overruns the file")]
+    TruncatedRecord {
+        /// Byte offset of the record that overruns the file.
+        offset: usize,
+    },
     /// A record was shorter than the field being read out of it: a table
     /// whose declared width overran its own data.
     #[error("OP2 record is too short for the field being read")]

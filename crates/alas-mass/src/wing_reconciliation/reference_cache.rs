@@ -47,19 +47,20 @@ pub(super) struct PreparedSizing<'a> {
     pub(super) declared_fuel: bool,
     pub(super) fuel: Vec<f64>,
     pub(super) wing_mounted: Vec<(f64, f64)>,
+    pub(super) torque: alas_struct::torque_sources::TorqueSources,
+    pub(super) main_gear_wing_fraction: f64,
     pub(super) root_x_m: f64,
 }
 
 impl PreparedSizing<'_> {
     fn cache_key(&self) -> Option<String> {
         let representation = format!("{self:?}");
-        (!representation.contains("NaN") && !representation.contains("inf"))
-            .then_some(representation)
+        (!has_non_finite_token(&representation)).then_some(representation)
     }
 
     pub(super) fn solve(&self) -> SizingResult {
         let [skin, web, cap, rib] = self.materials;
-        let sizing = alas_struct::sizing::size_wingbox_with_wing_carried_mass(
+        let sizing = alas_struct::sizing::size_wingbox_with_torque_sources(
             &self.geometry,
             self.structures,
             self.requirements,
@@ -69,6 +70,8 @@ impl PreparedSizing<'_> {
             rib,
             self.declared_fuel.then_some(self.fuel.as_slice()),
             &self.wing_mounted,
+            &self.torque,
+            alas_struct::sizing::CaseSet::ALL,
         );
         let final_section = alas_struct::sizing::size_for_linear_model(
             &self.geometry,
@@ -112,7 +115,14 @@ impl PreparedSizing<'_> {
         let centroid =
             crate::wing_centroid::sized_wingbox_centroid(&self.geometry, &sizing, self.root_x_m)
                 .map_err(|_| WingReconciliationError::StructuralSizing)?;
-        let primary = SizedWingboxMass::symmetric_semiwing(sizing.total_mass_kg, centroid.xyz_m);
+        let quantities = alas_struct::non_optimum::BoxQuantities::from_sizing(
+            &self.geometry,
+            &sizing,
+            cap.rho_kg_m3,
+        );
+        let primary = SizedWingboxMass::symmetric_semiwing(sizing.total_mass_kg, centroid.xyz_m)
+            .with_box_quantities(quantities)
+            .with_main_gear_wing_fraction(self.main_gear_wing_fraction);
         Ok((primary, sizing))
     }
 }
@@ -139,6 +149,17 @@ impl<T> ReferenceCache<T> {
         );
         Arc::clone(cell.get_or_init(|| Arc::new(resolve())))
     }
+}
+
+/// Whether a derived `Debug` representation prints a non-finite float.
+///
+/// `f64`'s `Debug` writes `NaN`, `inf` and `-inf`. Only whole identifier
+/// tokens match, so a field or material name that merely contains the
+/// letters "inf" (for example `info`) does not silently disable reuse.
+fn has_non_finite_token(representation: &str) -> bool {
+    representation
+        .split(|character: char| !(character.is_ascii_alphanumeric() || character == '_'))
+        .any(|token| token == "NaN" || token == "inf")
 }
 
 pub(super) fn reference_primary(
@@ -198,6 +219,7 @@ mod tests {
     use alas_geom::builder::AircraftBuilder;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Barrier;
+    use std::time::{Duration, Instant};
 
     #[test]
     fn cached_reference_sizing_is_bit_identical_to_direct_sizing_for_every_preset() {
@@ -341,12 +363,14 @@ mod tests {
             values.extend(array);
         }
         for spar in &sizing.spars {
-            values.extend([spar.chord_fraction, spar.t_web]);
+            values.push(spar.chord_fraction);
             for array in [
                 &spar.h,
                 &spar.w_cap,
                 &spar.t_cap,
                 &spar.a_cap,
+                &spar.t_web,
+                &spar.lower_extra_area,
                 &spar.frac_moment,
                 &spar.margin_of_safety,
             ] {
@@ -471,19 +495,83 @@ mod tests {
 
     #[test]
     fn independent_reference_keys_do_not_hold_the_map_lock_during_resolution() {
+        // Both resolvers must be inside `resolve` at once. If the map lock were
+        // held during resolution the second would never enter, so the
+        // rendezvous is bounded and fails instead of hanging the suite.
         let cache = ReferenceCache::new();
-        let barrier = Barrier::new(2);
-        std::thread::scope(|scope| {
-            for key in ["one", "two"] {
-                let cache = &cache;
-                let barrier = &barrier;
-                scope.spawn(move || {
-                    cache.get_or_resolve(key.to_owned(), || {
-                        barrier.wait();
-                        key.len()
+        let inside = AtomicUsize::new(0);
+        let rendezvous_reached = AtomicUsize::new(0);
+        let results: Vec<_> = std::thread::scope(|scope| {
+            let handles: Vec<_> = ["one", "two"]
+                .into_iter()
+                .map(|key| {
+                    let (cache, inside, reached) = (&cache, &inside, &rendezvous_reached);
+                    scope.spawn(move || {
+                        cache.get_or_resolve(key.to_owned(), || {
+                            inside.fetch_add(1, Ordering::SeqCst);
+                            let deadline = Instant::now() + Duration::from_secs(10);
+                            while inside.load(Ordering::SeqCst) < 2 && Instant::now() < deadline {
+                                std::thread::yield_now();
+                            }
+                            if inside.load(Ordering::SeqCst) == 2 {
+                                reached.fetch_add(1, Ordering::SeqCst);
+                            }
+                            key.len()
+                        })
                     })
-                });
-            }
+                })
+                .collect();
+            handles
+                .into_iter()
+                .map(|handle| {
+                    handle
+                        .join()
+                        .unwrap_or_else(|error| std::panic::resume_unwind(error))
+                })
+                .collect()
         });
+        assert_eq!(
+            rendezvous_reached.load(Ordering::SeqCst),
+            2,
+            "resolutions of independent keys must overlap"
+        );
+        assert_eq!(
+            results.iter().map(|value| **value).collect::<Vec<_>>(),
+            [3, 3]
+        );
+    }
+
+    #[test]
+    fn only_whole_non_finite_float_tokens_bypass_the_cache() {
+        for text in ["x: NaN,", "x: inf}", "[1.0, -inf]", "(NaN)"] {
+            assert!(has_non_finite_token(text), "{text}");
+        }
+        for text in [
+            "info: 1.0",
+            "infill_factor: 2.0",
+            "Nano",
+            "t: 1e-7, 1.5e300",
+        ] {
+            assert!(!has_non_finite_token(text), "{text}");
+        }
+    }
+
+    #[test]
+    fn nominal_prepared_inputs_have_a_reuse_key() {
+        let preset = presets::get("A320-200").expect("registered preset resolves");
+        let config = AlasConfig::from_value(&serde_json::json!({ "preset": "A320-200" }))
+            .expect("registered configuration resolves");
+        let plane = AircraftBuilder::new(Some(config.geometry.clone()))
+            .build(Some(&preset.design_vector), false)
+            .expect("registered nominal aircraft builds");
+        let requirements = super::super::design_requirements(&config);
+        let prepared = super::super::prepare_primary_wing(
+            &config,
+            &preset.design_vector,
+            &plane,
+            &requirements,
+        )
+        .expect("registered structural preparation succeeds");
+        assert!(prepared.cache_key().is_some());
     }
 }

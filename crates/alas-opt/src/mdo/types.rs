@@ -199,6 +199,14 @@ impl SizedCandidate {
             .map_or(&self.dispatch, |flight| &flight.dispatch)
     }
 
+    /// The landing mass of the design mission this candidate closed on, kg:
+    /// the quantity its design landing mass floor and `landing_mass` residual
+    /// are built on ([`super::mtow_modes::landing_floor_kg`]).
+    #[must_use]
+    pub fn design_mission_landing_mass_kg(&self) -> Option<f64> {
+        super::mtow_modes::landing_floor_kg(&self.dispatch)
+    }
+
     /// Start-of-cruise mass, kg: the takeoff mass with the climb burn not
     /// deducted, so an upper bound of the heaviest cruise state. Reported
     /// beside the gated mid-cruise point, never gated.
@@ -378,8 +386,7 @@ pub(crate) struct PayloadCapacity {
 ///
 /// The reason is one of the weighted-penalty objective's own evaluation-failure labels
 /// (`geometry_build`, `mass_coordinates`, `payload_layout`, `trim_solve`;
-/// see `crate::objective`), which is what lets
-/// `OptimizationHistory::reject_reason_counts` and the differential-evolution
+/// see `crate::objective`), which is what lets the differential-evolution
 /// reject-reason grouping read a mission-sized failure the same way as a
 /// weighted-penalty one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -116,6 +116,55 @@ struct Fixture {
 /// height, tall enough that a lower hold cuts it down and a main deck does not.
 const PROBE_HEIGHT: f64 = 1.25;
 
+/// The wing frame (MAC, aerodynamic centre and leading edge of MAC, metres) the geometry phase 1
+/// wing fits moved, per fixture case: `(frozen Python value, current value)` of
+/// `(mac, x_wing_ac, x_lemac)`. The A320 and its thick-wall variant carry the drawn Yehudi
+/// planform (aerodynamic centre 17.0232 -> 16.8752 m, -0.87 %); the B787-9 and A380 frames move by
+/// 0.003 % to 0.06 %. The percent-MAC conversions below are checked against the Python formula on
+/// both frames, so only the frame itself is a pin.
+const MOVED_FRAMES: [(&str, [(f64, f64); 3]); 4] = [
+    (
+        "a320",
+        [
+            (3.9693561510122883, 3.9693666846708178),
+            (17.02315519153481, 16.875153401434616),
+            (16.030816153781736, 15.882811730266912),
+        ],
+    ),
+    (
+        "thick_wall",
+        [
+            (3.9693561510122883, 3.9693666846708178),
+            (17.02315519153481, 16.875153401434616),
+            (16.030816153781736, 15.882811730266912),
+        ],
+    ),
+    (
+        "b787",
+        [
+            (7.528870936224788, 7.52922444555741),
+            (27.95293681105028, 27.952350426281395),
+            (26.07071907699408, 26.070044314892044),
+        ],
+    ),
+    (
+        "a380",
+        [
+            (13.283894611678662, 13.285167500446642),
+            (31.72075246627472, 31.7189177610506),
+            (28.399778813355056, 28.39762588593894),
+        ],
+    ),
+];
+
+/// The frozen and current `(mac, x_wing_ac, x_lemac)` of a case, when its frame moved.
+fn moved_frame(case: &str) -> Option<[(f64, f64); 3]> {
+    MOVED_FRAMES
+        .iter()
+        .find(|(name, _)| *name == case)
+        .map(|(_, frame)| *frame)
+}
+
 /// The percent-MAC stations the generator converts back to metres.
 const PCT_MAC_PROBES: [f64; 6] = [-20.0, 0.0, 12.5, 25.0, 40.0, 100.0];
 
@@ -288,8 +337,60 @@ fn the_cabin_frame_matches_python_on_every_shipped_fuselage() {
             ("x_wing_le", g.x_wing_le, record.x_wing_le),
             ("wing_root_chord", g.wing_root_chord, record.wing_root_chord),
         ] {
-            sampled.scalar(&at(name), actual, expected);
+            let moved = moved_frame(&case.name).and_then(|frame| match name {
+                "mac" => Some(frame[0]),
+                "x_wing_ac" => Some(frame[1]),
+                "x_lemac" => Some(frame[2]),
+                _ => None,
+            });
+            match moved {
+                Some((frozen, current)) => {
+                    sampled.scalar(&at(&format!("{name} (frozen reference)")), expected, frozen);
+                    sampled.scalar(&at(name), actual, current);
+                }
+                None => {
+                    sampled.scalar(&at(name), actual, expected);
+                }
+            }
         }
+        // The percent-MAC conversions of the moved frame: Python's formulas on the frozen frame
+        // reproduce the record, and on the current frame they are what the product returns.
+        let (record_x_to_pct, record_pct_to_x) = (&record.x_to_pct_mac, &record.pct_mac_to_x);
+        let (x_to_pct_expected, pct_to_x_expected) = match moved_frame(&case.name) {
+            Some([(mac_frozen, mac), _, (lemac_frozen, lemac)]) => {
+                let x_to_pct = |lemac: f64, mac: f64, x: f64| (x - lemac) / mac * 100.0;
+                let pct_to_x = |lemac: f64, mac: f64, p: f64| lemac + p / 100.0 * mac;
+                sampled.slice(
+                    &at("x_to_pct_mac (frozen reference)"),
+                    &record
+                        .stations
+                        .iter()
+                        .map(|&x| x_to_pct(lemac_frozen, mac_frozen, x))
+                        .collect::<Vec<_>>(),
+                    record_x_to_pct,
+                );
+                sampled.slice(
+                    &at("pct_mac_to_x (frozen reference)"),
+                    &PCT_MAC_PROBES
+                        .iter()
+                        .map(|&p| pct_to_x(lemac_frozen, mac_frozen, p))
+                        .collect::<Vec<_>>(),
+                    record_pct_to_x,
+                );
+                (
+                    record
+                        .stations
+                        .iter()
+                        .map(|&x| x_to_pct(lemac, mac, x))
+                        .collect::<Vec<_>>(),
+                    PCT_MAC_PROBES
+                        .iter()
+                        .map(|&p| pct_to_x(lemac, mac, p))
+                        .collect::<Vec<_>>(),
+                )
+            }
+            None => (record_x_to_pct.clone(), record_pct_to_x.clone()),
+        };
 
         let (box_start, box_end) = g.wing_box_x_range();
         sampled
@@ -335,7 +436,7 @@ fn the_cabin_frame_matches_python_on_every_shipped_fuselage() {
                     .iter()
                     .map(|&x| g.x_to_pct_mac(x))
                     .collect::<Vec<_>>(),
-                &record.x_to_pct_mac,
+                &x_to_pct_expected,
             )
             .slice(
                 &at("pct_mac_to_x"),
@@ -343,7 +444,7 @@ fn the_cabin_frame_matches_python_on_every_shipped_fuselage() {
                     .iter()
                     .map(|&p| g.pct_mac_to_x(p))
                     .collect::<Vec<_>>(),
-                &record.pct_mac_to_x,
+                &pct_to_x_expected,
             );
 
         // The generator probes the passenger decks in order and then the

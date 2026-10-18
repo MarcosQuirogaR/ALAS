@@ -31,11 +31,14 @@ pub fn figure_propulsion_altitude_sweep(config: &AlasConfig, theme: Option<&str>
     if super::is_turboprop(config) {
         return super::technology::turboprop_speed_power_scene(config, theme);
     }
+    let eng = match super::turbofan_or_status(config, theme, (1000.0, 480.0)) {
+        Ok(eng) => eng,
+        Err(scene) => return scene,
+    };
     let pal = get_palette(theme);
     let mut scene = Scene::new(1000.0, 480.0, Some(Color::from_hex(pal.bg)));
     scene.title = Some("Per-Engine Thrust and TSFC vs Altitude & Mach".to_owned());
 
-    let eng = super::turbofan_spec(config);
     let cyc_cfg = &config.propulsion_cycle;
     let req = &config.requirements;
 

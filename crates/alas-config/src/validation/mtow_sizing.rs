@@ -48,7 +48,7 @@ pub(super) fn mtow_sizing_issues(config: &AlasConfig) -> Vec<ValidationIssue> {
         ));
     }
     let mode = objective.mtow_sizing;
-    if mode.requires_mission_sized_evaluation()
+    if matches!(mode, MtowSizing::MtowBand | MtowSizing::PayloadAdjusted)
         && config
             .mass_model
             .flops_structure

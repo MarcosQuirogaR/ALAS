@@ -299,7 +299,7 @@ pub(crate) fn show_custom_fuselage_sections(state: &mut AppState, ui: &mut Ui) {
 /// aircraft builder's coordinates, so a new row can be compared directly to
 /// the existing root/side-of-body/kink/tip geometry.
 fn generated_wing_sections(state: &AppState) -> Vec<(MainWingStationKind, WingSection)> {
-    let Some(config) = state.typed_config() else {
+    let Some(config) = state.typed_config_arc() else {
         return Vec::new();
     };
     let Some(design) = state.current_design() else {
@@ -332,7 +332,7 @@ fn generated_wing_sections(state: &AppState) -> Vec<(MainWingStationKind, WingSe
                     wing.break_twist_deg,
                     wing.root_airfoil.clone(),
                 ),
-                MainWingStationKind::Tip => {
+                MainWingStationKind::Tip | MainWingStationKind::TipRake => {
                     (wing.tip_z_m, design.tip_twist_deg, wing.tip_airfoil.clone())
                 }
             };
@@ -388,12 +388,12 @@ fn show_generated_wing_section(
         MainWingStationKind::Root => tr("Root (preset)"),
         MainWingStationKind::SideOfBody => tr("Side of body (preset)"),
         MainWingStationKind::Kink => tr("Kink (preset)"),
-        MainWingStationKind::Tip => tr("Tip (preset)"),
+        MainWingStationKind::Tip | MainWingStationKind::TipRake => tr("Tip (preset)"),
     };
     ui.horizontal_wrapped(|ui| {
         ui.label(label);
         match kind {
-            MainWingStationKind::Root | MainWingStationKind::Tip => {
+            MainWingStationKind::Root | MainWingStationKind::Tip | MainWingStationKind::TipRake => {
                 ui.label(format!("{:.3}", section.span_fraction));
             }
             MainWingStationKind::SideOfBody | MainWingStationKind::Kink => {
@@ -435,7 +435,7 @@ fn show_generated_wing_section(
         if editable_airfoil {
             ui.add(egui::TextEdit::singleline(&mut section.airfoil).desired_width(110.0));
         } else {
-            ui.label(format!("{} (shared)", section.airfoil));
+            ui.label(format!("{} {}", section.airfoil, tr("(shared)")));
         }
     });
 }
@@ -457,7 +457,7 @@ fn apply_generated_wing_sections(
     // mutably triggers a borrow conflict and, more importantly, would make
     // the sweep conversion depend on a partially-updated configuration.
     let current_kink_y = state
-        .typed_config()
+        .typed_config_arc()
         .and_then(|config| config.geometry.wing.transport_planform(&design).ok())
         .map(|planform| planform.kink.y_m);
     for ((kind, old), (_, edited)) in before.iter().zip(after) {
@@ -522,7 +522,7 @@ fn apply_generated_wing_sections(
                     );
                 }
             }
-            MainWingStationKind::Tip => {
+            MainWingStationKind::Tip | MainWingStationKind::TipRake => {
                 set_generated_design_value(state, "tip_chord_m", edited.chord_m);
                 set_generated_config_value(
                     state,
@@ -559,7 +559,7 @@ fn set_generated_design_value(state: &mut AppState, name: &str, value: f64) {
 }
 
 fn generated_fuselage_sections(state: &AppState) -> Vec<FuselageSection> {
-    let Some(config) = state.typed_config() else {
+    let Some(config) = state.typed_config_arc() else {
         return Vec::new();
     };
     let Some(design) = state.current_design() else {
@@ -729,7 +729,7 @@ fn interpolated_wing_section(
     span_fraction: f64,
     existing: &[WingSection],
 ) -> Option<WingSection> {
-    let config = state.typed_config()?;
+    let config = state.typed_config_arc()?;
     let design = state.current_design()?;
     let planform = config.geometry.wing.transport_planform(&design).ok()?;
     let wing = &config.geometry.wing;
@@ -756,7 +756,7 @@ fn interpolated_wing_section(
                     wing.break_twist_deg,
                     wing.root_airfoil.clone(),
                 ),
-                MainWingStationKind::Tip => {
+                MainWingStationKind::Tip | MainWingStationKind::TipRake => {
                     (wing.tip_z_m, design.tip_twist_deg, wing.tip_airfoil.clone())
                 }
             };
@@ -810,7 +810,7 @@ fn interpolated_fuselage_section(
     x_fraction: f64,
     existing: &[FuselageSection],
 ) -> Option<FuselageSection> {
-    let config = state.typed_config()?;
+    let config = state.typed_config_arc()?;
     let design = state.current_design()?;
     let fuselage = &config.geometry.fuselage;
     let length_m = design.fuselage_length_m;

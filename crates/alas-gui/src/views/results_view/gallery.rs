@@ -26,6 +26,22 @@ pub(crate) fn responsive_card_layout(available_width: f32) -> (usize, f32) {
     (columns, card_width.max(1.0))
 }
 
+/// Minimum width of a figure card. The figures are 700-px-wide scenes with
+/// 8 to 10 pt axis text: below about 560 px a card shrinks them until ticks,
+/// legends and route labels are unreadable (worst in Spanish, whose labels are
+/// longer), so a narrow pane shows one figure per row instead of two.
+pub(crate) const FIGURE_CARD_MIN_WIDTH: f32 = 560.0;
+
+/// Column count and card width of the figure gallery.
+pub(crate) fn figure_card_layout(available_width: f32) -> (usize, f32) {
+    let width = available_width.max(1.0);
+    let columns = ((width + CARD_GAP) / (FIGURE_CARD_MIN_WIDTH + CARD_GAP))
+        .floor()
+        .clamp(1.0, 3.0) as usize;
+    let card_width = (width - CARD_GAP * (columns - 1) as f32) / columns as f32;
+    (columns, card_width.max(1.0))
+}
+
 /// Model Comparison is a single, information-dense overlay. Giving it the
 /// whole gallery row keeps its axes and legend readable and avoids wasting the
 /// results viewport below a generic 320 px canvas.
@@ -41,7 +57,7 @@ pub(super) fn figure_gallery_layout(
             (available_height - 52.0).clamp(320.0, 640.0),
         );
     }
-    let (columns, tile_width) = responsive_card_layout(available_width);
+    let (columns, tile_width) = figure_card_layout(available_width);
     (columns, tile_width, 320.0)
 }
 

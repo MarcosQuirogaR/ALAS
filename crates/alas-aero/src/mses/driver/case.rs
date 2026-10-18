@@ -3,6 +3,11 @@
 
 use super::*;
 
+/// Largest last-iteration `rms(dR)` for which a non-converged batch is resumed.
+const EXTENSION_RESIDUAL_LIMIT: f64 = 0.1;
+/// Resumed batches allowed per solve.
+const MAX_RESIDUAL_EXTENSIONS: usize = 2;
+
 impl Mses {
     /// Extract the final surface/flowfield tables from `dir`'s genuinely
     /// converged `mdat.case` at `converged_alpha`, and fold them into
@@ -115,6 +120,64 @@ impl Mses {
         mach: f64,
         cancel: Option<&AtomicBool>,
     ) -> Result<exec::ToolRun, MsesFailure> {
+        self.run_mses_case_with_iterations(dir, alpha, reynolds, mach, self.max_iterations, cancel)
+    }
+
+    pub(super) fn run_mses_case_with_iterations(
+        &self,
+        dir: &Path,
+        alpha: f64,
+        reynolds: f64,
+        mach: f64,
+        iterations: i64,
+        cancel: Option<&AtomicBool>,
+    ) -> Result<exec::ToolRun, MsesFailure> {
+        let mut run = self.run_mses_batch(dir, alpha, reynolds, mach, iterations, cancel)?;
+        // A batch that ends with a small, still-falling Newton residual is
+        // converging slowly, not diverging (diverging solves end at rms(dR)
+        // > 0.1 or NaN): 45 of the 210 unconverged points retained from the
+        // 47-case matrix ended at rms(dR) 1e-6..0.1. MSES keeps its state in
+        // `mdat.case`, so another batch resumes exactly where this one
+        // stopped. The extension stops as soon as the residual no longer
+        // halves, so a limit cycle costs one extra batch at most.
+        for _ in 0..MAX_RESIDUAL_EXTENSIONS {
+            if parse::is_converged(&run.stdout) {
+                break;
+            }
+            let Some(before) = parse::last_rms_residual(&run.stdout) else {
+                break;
+            };
+            if before > EXTENSION_RESIDUAL_LIMIT {
+                break;
+            }
+            let next = self.run_mses_batch(dir, alpha, reynolds, mach, iterations, cancel)?;
+            let after = parse::last_rms_residual(&next.stdout);
+            let improving = parse::is_converged(&next.stdout)
+                || after.is_some_and(|value| value < 0.5 * before);
+            run = exec::ToolRun {
+                status: next.status,
+                stdout: format!(
+                    "[ALAS: continued after a non-converged batch at rms(dR)={before:.3e}]
+{}",
+                    next.stdout
+                ),
+            };
+            if !improving {
+                break;
+            }
+        }
+        Ok(run)
+    }
+
+    fn run_mses_batch(
+        &self,
+        dir: &Path,
+        alpha: f64,
+        reynolds: f64,
+        mach: f64,
+        iterations: i64,
+        cancel: Option<&AtomicBool>,
+    ) -> Result<exec::ToolRun, MsesFailure> {
         std::fs::write(
             dir.join("mses.case"),
             deck::mses_case_with_mucon(
@@ -137,7 +200,7 @@ impl Mses {
             &self.mses_exe,
             &["case"],
             dir,
-            &deck::mses_keystrokes(self.max_iterations),
+            &deck::mses_keystrokes(iterations),
             self.timeout_mses_s,
             cancel,
             &[("MSES_OSMAP", osmap_value)],

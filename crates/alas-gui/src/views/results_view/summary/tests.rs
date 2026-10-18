@@ -181,7 +181,7 @@ fn takeoff_mass_margin_reads_as_one_value() {
 
 #[test]
 fn aircraft_mass_summary_excludes_payload_and_fuel_from_oew() {
-    let masses = std::collections::HashMap::from([
+    let masses = std::collections::BTreeMap::from([
         ("Wing".to_owned(), 12_000.0),
         ("Fuselage".to_owned(), 8_000.0),
         ("Payload".to_owned(), 6_000.0),
@@ -372,14 +372,12 @@ fn assert_sized_by_mission_summary(result: &alas_pipeline::PipelineResult) {
 fn mtow_band_row_needs_the_band_mode_and_a_sized_report() {
     let mut plan = alas_config::AlasConfig::default().mtow_plan();
     plan.mode = alas_config::MtowSizing::MtowBand;
-    plan.lower_bound_kg = Some(60_000.0);
-    plan.upper_bound_kg = Some(66_000.0);
-    let (label, value) = mtow_band_row(&plan, true).expect("sized band report shows the row");
+    plan.band_edges_kg = Some((60_000.0, 66_000.0));
+    let (label, value) = mtow_band_row(&plan, 63_400.0).expect("a band report shows the row");
     assert_eq!(label, "MTOW band (lower to upper edge)");
-    assert_eq!(value, "60.0 to 66.0 t");
-    assert!(mtow_band_row(&plan, false).is_none());
+    assert_eq!(value, "60.0 to 66.0 t, chosen 63.4 t");
     plan.mode = alas_config::MtowSizing::FixedRequirement;
-    assert!(mtow_band_row(&plan, true).is_none());
+    assert!(mtow_band_row(&plan, 63_400.0).is_none());
 }
 
 #[test]

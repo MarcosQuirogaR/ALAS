@@ -141,6 +141,10 @@ pub(super) fn mesh_wing_panels(
     chordwise_resolution: usize,
     panels: &mut Vec<Panel>,
 ) -> Result<(), VlmError> {
+    // Wingtip devices kept for geometry output only carry no aerodynamic model.
+    if wing.is_geometry_only() {
+        return Ok(());
+    }
     let subdivided;
     let wing_ref: &Wing = if spanwise_resolution > 1 {
         subdivided = wing.subdivide_sections(spanwise_resolution, SpacingFunction::Cosspace)?;

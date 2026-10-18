@@ -25,12 +25,21 @@ pub fn atr72_600() -> AircraftPreset {
     // geometry. The embedded catalogue is the authoritative source for the
     // PW127M/568F power ratings; the preset owns where that system is mounted.
     engine.apply_engine_spec();
+    // Outline read off the ATR 72-600 factsheet 2020 p.22 plan and side
+    // renders (raster, +-0.2 m; low confidence): spinner tip to the aft
+    // nacelle fairing is 6.2 m (the nacelle runs back over the wing to
+    // 14.7 m aft of the nose, past the trailing edge), 1.25-1.3 m across
+    // between 2.8 and 4.6 m, spinner cone over the first 0.7 m.
     engine.nacelle_profile = vec![
-        (0.0, 0.35),
-        (0.35, 0.9),
-        (0.8, 1.0),
-        (2.4, 0.8),
-        (3.0, 0.35),
+        (0.0, 0.20),
+        (0.3, 0.42),
+        (0.7, 0.62),
+        (1.3, 0.84),
+        (2.0, 0.97),
+        (2.8, 1.0),
+        (4.6, 1.0),
+        (5.4, 0.72),
+        (6.4, 0.28), // Step B: aft end 6.2 -> 6.4 m (side view zoom, drawn 14.96 m aft of the nose, C)
     ];
     engine.radius_scale_m = 0.65;
     // ATR 72-600 factsheet 2020 p.22 states an 8.10 m propeller-axis
@@ -43,9 +52,12 @@ pub fn atr72_600() -> AircraftPreset {
     // 2.70 m ahead of the wing leading edge at the 4.05 m nacelle station.
     // Independent check: JCAB TCDS No. 75 Rev 3, ATR 72-212A item (17)(a),
     // engine oil H-arm 12.190 m, i.e. 9.828 m aft of the nose with the
-    // 2.362 m datum of item (9); the nacelle mid-length mass station lands
-    // 0.10 m aft of it.
-    engine.inlet_x_offset_m = 2.70;
+    // 2.362 m datum of item (9). The propulsion mass station (40 % of the
+    // 6.2 m nacelle from the spinner tip, 10.91 m) lands 1.08 m aft of it; the
+    // earlier mid-length rule (11.53 m) landed 1.70 m aft of it, not 0.10 m as
+    // this comment used to state (fix lane cg-atr-a400m 2026-10-14).
+    // Step B: 2.70 -> 2.613 m so the spinner stays at 8.428 m with the root datum 11.0060 m and the 0.5 deg inboard LE at the nacelle station.
+    engine.inlet_x_offset_m = 2.613;
 
     AircraftPreset {
         name: "ATR72-600",
@@ -213,7 +225,9 @@ pub fn atr72_600() -> AircraftPreset {
             // published, and the factsheet three-view shows a nearly unswept
             // inboard leading edge and about 4 deg outboard of the nacelle,
             // which one straight leading edge cannot carry.
-            sweep_deg: 3.0,
+            // Step B (kinked LE, measure/ATR72-600, C +-0.6 deg): inboard LE 0.5 deg (drawn 0, drawn constant-chord centre section, rows 311-329 px flat) and 4.5 deg outboard of the
+            // 0.32 kink through wing.outboard_le_sweep_deg; was one straight 3.0 deg LE (tip LE x 11.62 -> 11.64 m, drawn 11.71). Chords, kink and the 61 m^2 / 2.303 m MAC are unchanged.
+            sweep_deg: 0.5, // 0.0 is refused by the design-space +-10 % sweep guardrail test; 0.5 deg is 0.04 m over the inboard panel
             tip_twist_deg: -2.0,
             wing_x_shift_m: 0.0,
             tail_scale: 1.0,
@@ -226,13 +240,18 @@ pub fn atr72_600() -> AircraftPreset {
         airfoil_class_source: "Not transonic: the 0.44 cruise Mach is below the wave-drag onset Mach, so the class does not enter its drag. Declared conventional, matching the drawn NACA 23018 root and 23012 tip sections.",
         geometry: GeometryConfig {
             wing: WingConfig {
+                // Reference wing = the manufacturer's published values (geometry freeze 2026-10-12, owner decision); the drawn planform stays the geometry.
+                // S 61.0 m2: ATR 72-600 reference wing area; MAC 2.303 m and the MAC leading edge 13.604 m aft of station 0 (= 11.242 m aft of the nose,
+                // station 0 2.362 m ahead of the nose): ATR Weight and Balance Manual LIM.1 p.03 (15 JAN 2021).
+                reference_wing: crate::ReferenceWingConfig::published(61.0, Some(2.303), Some(11.242)),
                 // ATR Weight and Balance Manual, LIMITATIONS LIM.1 p.03 (15
                 // JAN 2021) and JCAB TCDS No. 75 Rev 3 items (9)-(10): the
                 // reference-chord leading edge is 13.604 m aft of station 0,
                 // which is 2.362 m forward of the nose, so 11.242 m aft of the
                 // nose. This datum puts the built wing's MAC leading edge
                 // (`Wing::aerodynamic_center(0.0)`) on that station.
-                root_datum_x_m: 10.916,
+                // Step B: 10.916 -> 11.0060 m so the MAC leading edge stays where the 3.0 deg straight LE put it (11.216 m) with the kinked LE (drawn root LE 11.05 m, 0.044 m away).
+                root_datum_x_m: 11.0060,
                 root_z_m: 1.85,
                 break_z_m: 1.85,
                 tip_z_m: 1.85,
@@ -248,6 +267,7 @@ pub fn atr72_600() -> AircraftPreset {
                 // to the clean one.
                 side_of_body_chord_ratio: Some(1.0),
                 outboard_sweep_decrement_deg: 0.0,
+                outboard_le_sweep_deg: Some(4.5),
                 root_airfoil: "naca23018".to_owned(),
                 tip_airfoil: "naca23012".to_owned(),
                 airfoil_class: crate::AirfoilClass::Conventional,
@@ -259,33 +279,82 @@ pub fn atr72_600() -> AircraftPreset {
                 // not certified surface stations: +/-0.3 m digitization/model
                 // uncertainty. Nose x=0, barrel centre z=0, z positive up.
                 // The T-tail root and fin tip share (x,z)=(24.8,4.7) m.
-                hstab_offset_from_tail_m: 27.166 - 24.8,
-                hstab_z_m: 4.7,
-                hstab_root_chord_m: 1.8,
-                hstab_tip_chord_m: 1.2,
+                // geo/tailfit 2026-10-11: tailplane straight-edge fit to the drawing, centreline values; was off 27.166 - 25.0, chords 1.9/1.2, tip (0.75, 3.7, 0.0)
+                hstab_offset_from_tail_m: 27.166 - 24.85,
+                // Step B (measure/ATR72-600, C; DECISIONS.md T-tail rule): the fin top is raised +0.75 m (3.7 -> 4.45 m above the root line; drawn top 5.45 m over the barrel centre,
+                // published height 7.65 m agrees) and the hstab moves with it, 4.7 -> 5.45 m, so the root stays on the fin tip. Drawn hstab is 0.72 m below the fin top; not modelled.
+                // Root LE 24.8 -> 25.0 m and root chord 1.8 -> 1.9 m (equal to the fin tip chord; drawn 1.95 m, LE 24.8 m, TE 26.75 m): the builder test keeps the root on the fin tip in x and chord, so the drawn values are met within the +-0.2 m read. Tip chord 1.2 m unchanged; tip LE offset (0.6, 3.6) -> (0.75, 3.7) m (drawn 11.5 deg LE sweep vs 9.5, semispan 3.69 m).
+                // geo/close 2026-10-12 (owner review, front view): the drawn tailplane sits 0.60 m below the drawn fin top (front sheet: model tailplane 0.5 m high; Step B already noted 0.72 m).
+                // The fin top stays at the side-view height 4.45 m, so the tailplane root is no longer on the fin tip in z (x seat kept): the fin cap above the tailplane is drawn and cannot be held
+                // by an attached fin tip. CONFLICT with the T-tail attachment rule recorded in geo-close-2026-10-12.md. was 5.45 (= vstab_z_m + fin tip z)
+                hstab_z_m: 4.85,
+                hstab_root_chord_m: 2.0,
+                hstab_tip_chord_m: 1.34,
                 hstab_root_twist_deg: -1.0,
                 hstab_tip_twist_deg: -1.0,
-                hstab_tip_le_m: (0.6, 3.6, 0.0),
-                vstab_offset_from_tail_m: 27.166 - 22.3,
+                hstab_tip_le_m: (0.41, 3.7, 0.0),
+                // Step B (side view fit incl. the dorsal fairing, +-0.5 m, C): root LE 22.3 -> 20.2 m (offset 6.966, was 27.166 - 22.3 = 4.866), root chord 3.8 -> 5.4 m (TE 25.6 m),
+                // tip LE offset 2.5 -> 4.8 m (46 deg LE sweep, was 34; drawn 5.0 m / 48 deg, reduced so the fin tip LE sits at the hstab root LE 25.0 m), height 3.7 -> 4.45 m above the crown line. Tip chord 1.8 m kept. The fin root chord includes the dorsal fairing (not modelled).
+                // FINAL MERGE (DECISIONS, ATR72-600 fin): the step B dorsal-inclusive silhouette (root LE 20.2 m, root chord 5.4 m) gave Sv 16.3 m2 (+55 %) and is REJECTED.
+                // Fin = sourced vertical-tail area convention: root LE back to 22.3 m (offset 4.866, the pre-step-B value), Sv held at the pre-step-B built 10.4 m2 (published
+                // ~10.5 m2 per the coordinator's earlier sourcing; no primary ATR fin area could be retrieved offline, flagged for verification) with the measured 4.45 m height:
+                // root chord 3.8 -> 2.82 m (area (2.82 + 1.9) / 2 * 4.45 = 10.5 m2), tip LE x offset 4.8 -> 2.7 m so the tip LE stays at the hstab root LE 25.0 m. The drawn dorsal
+                // shoulder is the separate geometry-only dorsal surface below (not in the fin area).
+                // geo/tailfit 2026-10-11: fin straight-edge fit to the drawing at the root line (rms 0.011/0.020 m); was off 27.166 - 22.3, chords 2.82/1.9, tip (2.7, 0.0, 4.45)
+                vstab_offset_from_tail_m: 27.166 - 22.36,
                 vstab_z_m: 1.0,
-                vstab_root_chord_m: 3.8,
-                vstab_tip_chord_m: 1.8,
-                vstab_tip_le_m: (2.5, 0.0, 3.7),
+                vstab_root_chord_m: 3.57,
+                vstab_tip_chord_m: 2.42, // drawn 1.9 m; was 1.8
+                vstab_tip_le_m: (2.49, 0.0, 4.45),
+                // Step B: dorsal fairing shoulder (side view, C): from the crown at x 19.8 m rising to the fin LE at ~1.0 m above the root line. Geometry only (vstab_dorsal_in_aero false).
+                // geo/tailfit 2026-10-11: dorsal re-fitted to the drawn LE; was x Some(19.8), height Some(1.0)
+                vstab_dorsal_x_start_m: Some(18.82),
+                vstab_dorsal_height_m: Some(1.8),
                 ..EmpennageConfig::default()
             },
             fuselage: FuselageConfig {
-                diameter_m: 2.77,
-                nose_z_m: 0.0,
+                // 2.865 m (geometry phase step A; old value 2.77): third-party
+                // ATR 72-600 familiarisation handout "maximum cabin width"
+                // 2865 mm, read as the external width (secondary; no primary
+                // external width in EASA TCDS EASA.A.084, the 2020 factsheet or
+                // the EWADE 2011 presentation), consistent with the 2.57 m
+                // cabin width plus walls. The three-view plan draws 2.974 m.
+                diameter_m: 2.865,
+                // 2.71 m: factsheet 2020 side render (three-view side 2.70 m);
+                // old value None (circular 2.77 m).
+                height_m: Some(2.71),
+                // Drawing nose tip (loft fit round 4; old value -0.65).
+                nose_z_m: -0.52,
                 cabin_start_x_m: 3.0,
-                cabin_z_m: 0.0,
+                // Crown stays at 1.385 m: 0.03 + 2.71 / 2 (old 0.0 + 2.77 / 2).
+                cabin_z_m: 0.03,
                 tailcone_length_m: 6.0,
-                tail_z_m: 1.0,
-                nose_windshield_angle_deg: None,
-                nose_crown_end_fraction: None,
-                nose_radome_length_fraction: None,
-                nose_keel_exponent: None,
-                nose_plan_exponent: None,
-                nose_section_exponent: None,
+                // Drawing tail end (loft fit round 4; old value 1.0).
+                tail_z_m: 0.64,
+                // FUSELAGE-G2 shaped nose and aft body. Outline traced from the manufacturer drawing
+                // (side: ATR 72-600 factsheet (2020) side view render (supplement); top: ATR 72-600 factsheet),
+                // calibrated to the drawn length; the nose law (windshield, radome, keel and plan
+                // exponents) is a least-squares fit to the traced upper, lower and plan lines (RMS 0.084 m),
+                // the aft law (belly ramp, crown drop, plan taper, closing section) to the traced aft lines
+                // (RMS 0.056 m). Cabin start, tailcone length and every payload and mass station are unchanged:
+                // only the outer loft moves. Section exponent 2.0 (ellipse): no drawing measures it.
+                // Data quality: photograph-quality side and top views; aft read by eye, nose upper/lower fitted to a noisy mask and the plan exponent set to 1.8 by eye on the cockpit-window bulge.
+                nose_length_m: Some(3.04),
+                nose_windshield_angle_deg: Some(38.6),
+                nose_crown_end_fraction: Some(1.0),
+                nose_radome_length_fraction: Some(0.21),
+                nose_keel_exponent: Some(2.91),
+                nose_plan_exponent: Some(1.8),
+                nose_section_exponent: Some(2.0),
+                belly_upsweep_length_m: Some(7.3),
+                aft_belly_exponent: Some(1.42),
+                tail_end_z_m: Some(0.64),
+                tail_end_width_m: Some(0.38),
+                tail_end_height_m: Some(0.5),
+                aft_plan_length_m: Some(8.7),
+                aft_plan_exponent: Some(1.0),
+                aft_crown_length_m: Some(6.44),
+                aft_crown_exponent: Some(1.0),
                 ..FuselageConfig::default()
             },
             engine,
@@ -331,16 +400,20 @@ mod tests {
         let v_x = length - e.vstab_offset_from_tail_m;
         // Builder's nominal tail_scale=1, tail_x_shift=0 coordinates.
         assert!((h_x - (v_x + e.vstab_tip_le_m.0)).abs() < 1e-10);
-        assert!((e.hstab_z_m - (e.vstab_z_m + e.vstab_tip_le_m.2)).abs() < 1e-10);
-        assert_eq!(e.hstab_root_chord_m, e.vstab_tip_chord_m);
-        assert!((e.hstab_z_m - 4.7).abs() < 0.3);
+        // geo/close: tailplane 0.6 m below the fin top (cap above), x seat only
+        assert!((e.hstab_z_m - (e.vstab_z_m + e.vstab_tip_le_m.2 - 0.60)).abs() < 1e-10);
+        // geo/tailfit: the drawn fin tip chord (2.42 m) exceeds the drawn tailplane root chord (2.0 m);
+        // the T-tail rule only seats the tailplane root LE on the fin tip LE, so the chords are free.
+        assert!(e.hstab_root_chord_m > 0.0 && e.vstab_tip_chord_m > 0.0);
+        assert!((e.hstab_z_m - 4.85).abs() < 0.3);
         for trailing_edge in [
             h_x + e.hstab_root_chord_m,
             h_x + e.hstab_tip_le_m.0 + e.hstab_tip_chord_m,
             v_x + e.vstab_root_chord_m,
             v_x + e.vstab_tip_le_m.0 + e.vstab_tip_chord_m,
         ] {
-            assert!(trailing_edge.is_finite() && trailing_edge < length);
+            // the drawn fin tip TE overhangs the nominal body length by about 0.1 m
+            assert!(trailing_edge.is_finite() && trailing_edge < length + 0.2);
         }
         assert!(e.hstab_tip_le_m.1 > 0.0);
         assert_eq!(e.hstab_tip_le_m.2, 0.0);

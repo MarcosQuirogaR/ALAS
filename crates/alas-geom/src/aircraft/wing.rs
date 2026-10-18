@@ -65,10 +65,15 @@
 //! over the projected (XY) planform measure `s_ref`/`b_ref` use instead of
 //! the unfolded YZ one.
 
+mod device;
 mod planform;
+mod reference;
 #[cfg(test)]
 mod tests;
 mod theoretical_mac;
+
+pub use device::{WINGTIP_DEVICE_GEOMETRY_ONLY_NAME, WINGTIP_DEVICE_NAME};
+pub use reference::WingReference;
 
 use std::f64::consts::PI;
 
@@ -124,7 +129,7 @@ impl WingXSec {
 /// A wing: a name, an ordered list of cross-sections, and whether it is
 /// mirrored about the XZ plane, `Wing`, scoped to the fields and methods
 /// this program uses (see the module doc).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub struct Wing {
     /// The wing's name, e.g. `"Main Wing"`.
     pub name: String,
@@ -134,6 +139,10 @@ pub struct Wing {
     /// Whether the wing is mirrored about the XZ plane. If `true`, every
     /// quantity this module computes accounts for both halves.
     pub symmetric: bool,
+    /// The manufacturer reference wing this wing's reference quantities are
+    /// quoted for, if it is not the drawn planform. `None` (every wing
+    /// [`Wing::new`] builds) keeps the drawn planform as the reference.
+    pub reference: Option<WingReference>,
 }
 
 /// Which spacing function [`Wing::subdivide_sections`] uses to place the new

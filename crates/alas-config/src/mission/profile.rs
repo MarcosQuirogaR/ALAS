@@ -141,6 +141,23 @@ pub fn resolve_true_airspeed_m_s(
     }
 }
 
+/// ICAO LTO reference cycle take-off mode time, s (0.7 min; ICAO Annex 16
+/// Vol II, Doc 9889).
+const ICAO_LTO_TAKEOFF_TIME_S: f64 = 42.0;
+
+/// Whether the take-off roll time is the default, for
+/// `#[serde(skip_serializing_if)]`.
+fn is_default_takeoff_roll(time_s: &f64) -> bool {
+    *time_s == ICAO_LTO_TAKEOFF_TIME_S
+}
+
+/// Whether an optional speed limit is unset (zero), for
+/// `#[serde(skip_serializing_if)]`: a file that never declared it is
+/// unchanged on a round trip.
+fn is_unset(value: &f64) -> bool {
+    *value == 0.0
+}
+
 /// Whether `reference` is the legacy default, for
 /// `#[serde(skip_serializing_if)]`: a saved file or wire format that never
 /// asked for calibrated airspeed looks exactly as it did before this field
@@ -161,6 +178,41 @@ pub struct MissionProfileConfig {
         help = "Whether the takeoff/climb/descent/landing air speeds below are true airspeeds (legacy default) or calibrated airspeeds resolved against the real ambient pressure and temperature at each leg's altitude. Cruise legs are never affected by this."
     )]
     pub climb_descent_speed_reference: SpeedReference,
+
+    /// Mach flown above the CAS/Mach crossover on every climb leg.
+    #[serde(skip_serializing_if = "is_unset")]
+    #[config(
+        help = "Mach held on the climb legs above the altitude where the calibrated airspeed schedule reaches it (the CAS/Mach crossover). Zero: constant calibrated airspeed all the way up."
+    )]
+    pub climb_mach: f64,
+
+    /// Mach flown below the crossover on every descent leg.
+    #[serde(skip_serializing_if = "is_unset")]
+    #[config(
+        help = "Mach held on the descent legs above the CAS/Mach crossover altitude, with the calibrated airspeed schedule below it. Zero: constant calibrated airspeed from the top of descent."
+    )]
+    pub descent_mach: f64,
+
+    /// Maximum operating Mach number, MMO.
+    #[serde(skip_serializing_if = "is_unset")]
+    #[config(
+        help = "Maximum operating Mach number (MMO) from the type certificate data sheet. No climb or descent leg is flown above it and the cruise legs are held to it. Zero: not declared."
+    )]
+    pub max_operating_mach: f64,
+
+    /// Maximum operating calibrated airspeed, VMO.
+    #[serde(skip_serializing_if = "is_unset")]
+    #[config(
+        help = "Maximum operating calibrated airspeed (VMO) from the type certificate data sheet; no climb or descent leg is flown faster. Zero: not declared."
+    )]
+    pub max_operating_cas_m_s: f64,
+
+    /// Take-off ground-roll time, s.
+    #[serde(skip_serializing_if = "is_default_takeoff_roll")]
+    #[config(
+        help = "Time from brake release to lift-off flown at take-off rating, which the segment model adds to the trip as a labelled fuel and time allowance (default: the 42 s ICAO LTO take-off mode time, ICAO Annex 16 Vol II). Zero disables it."
+    )]
+    pub takeoff_roll_time_s: f64,
 
     /// Which cruise flight level(s) a trip is flown at.
     #[serde(skip_serializing_if = "is_default_cruise_policy")]
@@ -329,6 +381,11 @@ impl Default for MissionProfileConfig {
     fn default() -> Self {
         Self {
             climb_descent_speed_reference: SpeedReference::TrueAirspeed,
+            climb_mach: 0.0,
+            descent_mach: 0.0,
+            max_operating_mach: 0.0,
+            max_operating_cas_m_s: 0.0,
+            takeoff_roll_time_s: ICAO_LTO_TAKEOFF_TIME_S,
             cruise_altitude_policy: CruiseAltitudePolicy::OptimumStep,
             // Takeoff configuration (TOGA, high-lift drag) to 1,500 ft above
             // the field: the acceleration/flap-retraction height of the ICAO

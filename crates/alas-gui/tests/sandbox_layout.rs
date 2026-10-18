@@ -7,6 +7,10 @@
 //! and Summary card must sit where the layout promises on wide and narrow
 //! viewports without taking the orbit gesture.
 
+// A test asserts on values it constructed or loaded from a fixture it
+// controls, so a failed unwrap there is the assertion failing.
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 mod common;
 
 use alas_gui::sandbox::overlays::{action_block_rect, metric_chips};

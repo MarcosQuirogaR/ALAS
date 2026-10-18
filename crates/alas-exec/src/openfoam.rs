@@ -225,6 +225,11 @@ pub struct OpenFoamProcessResult {
     pub stderr: String,
     /// Wall-clock duration.
     pub elapsed_seconds: f64,
+    /// Bytes dropped from the middle of the two streams by the capture limit
+    /// (zero when nothing was lost). The text keeps the head and the tail and
+    /// carries a marker line where the omission happened.
+    #[serde(default)]
+    pub truncated_bytes: u64,
 }
 
 /// Adapter selected from persisted preferences and current host state.
@@ -714,6 +719,14 @@ mod tests {
         }));
     }
 
+    /// Elapsed-time ceiling for the kill tests below. The child runs for about
+    /// 60 s unless killed, so any bound well under that proves the tree kill
+    /// ended it rather than the child finishing. A tight bound is only a
+    /// scheduling probe: under full-workspace parallel test load spawning the
+    /// shell and `taskkill` alone can take several seconds, so half the
+    /// child's lifetime is used instead of a few seconds.
+    const KILLED_NOT_FINISHED_CEILING: Duration = Duration::from_secs(30);
+
     #[test]
     fn cancellation_stops_a_long_running_process_promptly() {
         #[cfg(windows)]
@@ -732,7 +745,7 @@ mod tests {
         trigger.join().expect("cancellation trigger should finish");
 
         assert_eq!(result.status, OpenFoamProcessStatus::Cancelled);
-        assert!(started.elapsed() < Duration::from_secs(3));
+        assert!(started.elapsed() < KILLED_NOT_FINISHED_CEILING);
     }
 
     #[test]
@@ -747,17 +760,32 @@ mod tests {
         let result = test_adapter().run(&command, &cancel, Duration::from_millis(120));
 
         assert_eq!(result.status, OpenFoamProcessStatus::TimedOut);
-        assert!(started.elapsed() < Duration::from_secs(3));
+        assert!(started.elapsed() < KILLED_NOT_FINISHED_CEILING);
     }
 
     #[test]
     fn captured_output_is_bounded_without_disabling_pipe_drain() {
         let mut captured = process_runner::CapturedPipe::new();
-        let input = vec![b'x'; MAX_CAPTURE_BYTES as usize + 1_024];
-        let accepted = captured.append(&input);
+        let mut input = vec![b'x'; MAX_CAPTURE_BYTES as usize + 1_024];
+        let last = input.len() - 1;
+        input[last] = b'Z';
+        captured.append(&input);
 
-        assert_eq!(accepted, MAX_CAPTURE_BYTES as usize);
-        assert_eq!(captured.bytes.len(), MAX_CAPTURE_BYTES as usize);
+        assert_eq!(captured.head.len(), process_runner::HEAD_CAPTURE_BYTES);
+        assert_eq!(captured.omitted_bytes, 1_024);
+        let text = captured.text();
+        assert!(text.contains("1024 bytes omitted"), "marker missing");
+        assert!(text.ends_with('Z'), "the end of the log must be retained");
+        assert!(text.len() < MAX_CAPTURE_BYTES as usize + 128);
+    }
+
+    #[test]
+    fn captured_output_without_overflow_is_verbatim_with_no_marker() {
+        let mut captured = process_runner::CapturedPipe::new();
+        captured.append(b"abc");
+        captured.append(b"def");
+        assert_eq!(captured.text(), "abcdef");
+        assert_eq!(captured.omitted_bytes, 0);
     }
 
     #[test]

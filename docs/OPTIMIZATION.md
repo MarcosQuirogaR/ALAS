@@ -13,7 +13,9 @@ in `docs/methods.md`; this page is the wiring and the input list.
    the requested branches (native VLM, external AVL, or both in parallel).
    Each branch constructs `DesignOptimizer::new(config)` and calls
    `run(bounds, Some(preset design vector))`. The bounds are the sixteen
-   design-variable bounds of `alas_config::design_variables::SPECS`. With no
+   design-variable bounds of `alas_config::design_variables::SPECS`, plus a
+   seventeenth pair `[T (1 - p), T (1 + p)]` for the takeoff mass under the
+   `mtow_band` mode. With no
    bounds, `DesignOptimizer::resolved_bounds` derives the search box from the
    configured design space and the nominal design (the preset's design vector
    when one is loaded), so the desktop and the command line search the same
@@ -47,6 +49,7 @@ holds; presets override the physical inputs.
 | `kind` | block fuel, takeoff mass, operating empty mass, fuel per seat-kilometre | `block_fuel` |
 | `design_range_nmi` | still-air design range; zero uses the great-circle distance between the departure and arrival aerodromes | 0 |
 | `mtow_sizing` | takeoff mass closed by the mission (`requirements.mtow_kg` is the ceiling) or fixed at the requirement | `sized_by_mission`; registered presets and benchmarks use `fixed_requirement` |
+| `mtow_target_kg`, `mtow_band_fraction` | `mtow_band` only: the takeoff mass is a design variable `m` in `[T (1 - p), T (1 + p)]` (`T` the target, zero = `requirements.mtow_kg`), the 17th coordinate of the search, seeded at `T`; the aircraft is sized and checked at `m` exactly as `fixed_requirement` does at its requirement, so a design feasible there at `m0` is feasible here at `(x, m0)` with the same constraint values | 0, 0.10 |
 | `sizing_max_iterations`, `sizing_tolerance_kg` | sizing-loop budget and closure tolerance | 30, 1 kg |
 | `retrim_cg_tolerance_pct_mac` | CG shift that triggers a re-trim inside the loop; zero keeps one trim | 0.1 |
 | `preference_weight` | scale of intrinsic study-preference penalties; never a constraint allowance | 10 |
@@ -87,7 +90,11 @@ its elite (the best half by the feasibility rule, the rest by max-min distance,
 `(6 D - 1) / 2` members) seeds the refinement, whose initial population is
 `clamp(B / 10, 24, 6 D)` for refinement budget `B`, the baseline and the
 first `(N_init - 1) / 2` elite members included, and shrinks linearly in
-evaluations to 8. A
+evaluations to the population floor. These figures (24, 8) are the kernel
+defaults (`MINIMUM_INITIAL_POPULATION`, `MIN_POPULATION`); for the native
+model `configure_native_population` sets the floor to the 32-lane quantum and
+rounds the initial population to a multiple of 32, capped at the evaluation
+ceiling. A
 screening batch is refilled past the design-vector pre-gate: it draws
 points until 64 of them pass, so it keeps the workers busy. Every stage
 budget counts analysed candidates only: pre-gate rejects cost microseconds,
@@ -228,8 +235,11 @@ gear architecture.
 
 `performance`: `cl_max_to`, `cl_max_land`, `k_land`, `thrust_lapse`,
 `oei_gradient` (overridden by the CS-25.121 value for the engine count),
-`oei_climb_cl`, `oei_climb_delta_cd`, and the approach-speed factors used
-when `max_approach_speed_kt` is set.
+`oei_climb_cl`, the per-phase configuration drag increments
+(`oei_climb_delta_cd` take-off flaps gear up, `takeoff_gear_delta_cd`,
+`landing_flap_delta_cd`, `landing_gear_delta_cd`), `v2_min_vsr_factor`,
+`go_around_spool_thrust_fraction`, `wet_landing_runway`, and the approach-speed
+factors used when `max_approach_speed_kt` is set.
 
 ### Analysis fidelity
 

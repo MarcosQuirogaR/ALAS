@@ -61,7 +61,7 @@ pub(crate) const DRAG_TABLE_FAILURE: &str = "drag_table";
 /// History label for a trim that failed numerically or did not converge.
 ///
 /// Shared with the weighted-penalty objective's evaluation-failure vocabulary so
-/// `OptimizationHistory::reject_reason_counts` groups both paths together.
+/// the reject-reason grouping treats both paths together.
 pub(crate) const TRIM_SOLVE_FAILURE: &str = "trim_solve";
 
 /// History label for a cruise point the candidate cannot physically fly: the
@@ -121,13 +121,15 @@ pub(crate) struct TrimmedPolar {
     pub attitude: Option<TrimAttitude>,
     /// Trimmed lift-to-drag ratio, positive.
     pub lift_to_drag: f64,
-    /// Compressibility-corrected reporting angle of attack, degrees.
+    /// Reporting angle of attack, degrees. With the compressible trim
+    /// (`AnalysisConfig::compressible_trim`) it equals the geometric angle;
+    /// without it, the incompressible angle relabelled by Prandtl-Glauert.
     pub alpha_deg: f64,
-    /// Uncorrected geometric aircraft-body angle used by the VLM trim solve,
-    /// in degrees.  This is kept separately from [`Self::alpha_deg`]: the
-    /// latter is a display quantity after the transonic compressibility
-    /// correction, while sizing constraints and the 2-D section mapping need
-    /// the actual body attitude that generated the solved forces.
+    /// Geometric aircraft-body angle of the trim, in degrees: the solution
+    /// on the Goethert-stretched lattice at the cruise Mach when the
+    /// compressible trim is on, else the incompressible lattice angle that
+    /// generated the solved forces. Sizing constraints and the 2-D section
+    /// mapping read this one.
     pub geometric_body_alpha_deg: f64,
     /// Trimmed horizontal-stabilizer incidence, degrees.
     pub incidence_deg: f64,
@@ -291,6 +293,7 @@ pub(crate) fn trim_and_polar_with_cache(
     cache: &CandidateVlmCache,
     screening_drag_table: bool,
 ) -> Result<TrimmedPolar, CandidateFailure> {
+    let _profile = alas_math::stage_profile::scope(alas_math::stage_profile::Stage::Trim);
     let req = &config.requirements;
     plane.xyz_ref[0] = cg_x;
 
@@ -329,7 +332,13 @@ pub(crate) fn trim_and_polar_with_cache(
     // budget, and for geometry with no horizontal stabilizer (whose
     // `trim_ih_deg` is NaN), so the finiteness checks below never see a
     // deliberately-degraded pure-alpha result.
+    let flight = trim.attitude();
     if !trim.converged
+        || !flight.converged
+        || !flight.alpha_deg.is_finite()
+        || !flight.incidence_deg.is_finite()
+        || !flight.cl_alpha.is_finite()
+        || !flight.x_np.is_finite()
         || !trim.trim_alpha_deg.is_finite()
         || !trim.trim_ih_deg.is_finite()
         || !trim.cl_alpha.is_finite()
@@ -365,6 +374,7 @@ pub(crate) fn trim_and_polar_with_cache(
         return Err(trim_solve_failure());
     }
 
+    let table_profile = alas_math::stage_profile::scope(alas_math::stage_profile::Stage::DragTable);
     let drag_table = TrimmedDragTable::build_with_check_set(
         &aero,
         &DesignTrim {
@@ -385,25 +395,42 @@ pub(crate) fn trim_and_polar_with_cache(
             reason: DRAG_TABLE_FAILURE,
         }
     })?;
+    drop(table_profile);
 
     // `alpha_report = alpha_0L + beta (alpha - alpha_0L)` with
     // `alpha - alpha_0L = CL / CL_alpha` (`TrimmedPerformance::alpha_deg`).
     let lift_angle_deg = perf.cl / trim.cl_alpha;
+    // The flight attitude is the compressible solution when the trim ran on
+    // the stretched lattice (AERL-02): its angle is the true body angle, so
+    // the reporting relabel is the identity (`report_beta` = 1). Otherwise
+    // the legacy Prandtl-Glauert relabel of the incompressible angle applies.
     let attitude = TrimAttitude {
-        cl_alpha: trim.cl_alpha,
-        cl_ih: trim.cl_ih,
-        cm_alpha: trim.cm_alpha,
-        cm_ih: trim.cm_ih,
-        report_beta: 1.0 + (perf.alpha_deg - trim.trim_alpha_deg) / lift_angle_deg,
+        cl_alpha: flight.cl_alpha,
+        cl_ih: flight.cl_ih,
+        cm_alpha: flight.cm_alpha,
+        cm_ih: flight.cm_ih,
+        report_beta: if flight.compressible {
+            1.0
+        } else {
+            1.0 + (perf.alpha_deg - trim.trim_alpha_deg) / lift_angle_deg
+        },
     };
     Ok(TrimmedPolar {
         drag: CandidateDrag::Table(Arc::new(drag_table)),
         attitude: Some(attitude),
         lift_to_drag: perf.l_over_d,
-        alpha_deg: perf.alpha_deg,
-        geometric_body_alpha_deg: trim.trim_alpha_deg,
-        incidence_deg: perf.incidence_deg,
-        x_np: trim.x_np,
+        alpha_deg: if flight.compressible {
+            flight.alpha_deg
+        } else {
+            perf.alpha_deg
+        },
+        geometric_body_alpha_deg: flight.alpha_deg,
+        incidence_deg: if flight.compressible {
+            flight.incidence_deg
+        } else {
+            perf.incidence_deg
+        },
+        x_np: flight.x_np,
         cl_trim: perf.cl,
         cm_residual: Some(perf.cm_residual),
         converged: true,
@@ -578,7 +605,11 @@ mod tests {
             ("report alpha", moved.alpha_deg, light.alpha_deg),
         ] {
             assert!(
-                (jacobian - direct).abs() <= 1.0e-2,
+                // The compressible trim's stabilizer response is more
+                // nonlinear than the incompressible one (stretched, more
+                // swept tail; measured 0.013 deg on the ih step), so the
+                // incidence is allowed two hundredths of a degree.
+                (jacobian - direct).abs() <= if name == "ih" { 2.0e-2 } else { 1.0e-2 },
                 "{name}: Jacobian {jacobian:.5} direct {direct:.5}"
             );
         }

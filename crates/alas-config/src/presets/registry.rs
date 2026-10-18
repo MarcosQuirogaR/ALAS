@@ -6,8 +6,8 @@
 use std::sync::OnceLock;
 
 use super::{
-    landing_reference, military, narrowbody, reference, regional, takeoff_reference, widebody,
-    AircraftPreset, UnknownAircraftPreset,
+    high_lift_system, landing_reference, military, narrowbody, reference, regional,
+    takeoff_reference, widebody, AircraftPreset, UnknownAircraftPreset,
 };
 use crate::PerformanceConfig;
 
@@ -71,6 +71,26 @@ fn sorted_names() -> Vec<String> {
     names
 }
 
+/// Record the built reference trapezoid of the registered geometry, the
+/// denominators of the `Published` reference-wing mapping.
+fn register_published_reference(preset: &mut AircraftPreset) {
+    let x_wing_global_m = preset.geometry.wing.root_datum_x_m + preset.design_vector.wing_x_shift_m;
+    match preset
+        .geometry
+        .wing
+        .transport_planform(&preset.design_vector)
+    {
+        Ok(planform) => preset
+            .geometry
+            .wing
+            .reference_wing
+            .register(&planform, x_wing_global_m),
+        Err(error) => {
+            tracing::error!(%error, preset = preset.name, "the registered planform does not resolve");
+        }
+    }
+}
+
 fn build() -> Vec<AircraftPreset> {
     let mut presets = vec![
         reference::ave(),
@@ -105,8 +125,14 @@ fn build() -> Vec<AircraftPreset> {
     for preset in &mut presets {
         preset.geometry.engine.engine_name = preset.engine_name.to_owned();
         preset.geometry.engine.apply_engine_spec_if_uninitialized();
+        register_published_reference(preset);
         landing_reference::apply(preset);
         takeoff_reference::apply(preset);
+        high_lift_system::apply(preset);
+        // Converted presets build their fuselage from the embedded fitted loft.
+        if let Some(id) = crate::preset_loft_id(preset.name) {
+            preset.geometry.fuselage.loft = Some(crate::LoftRef::embedded(id));
+        }
     }
     presets
 }

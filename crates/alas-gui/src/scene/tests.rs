@@ -80,6 +80,10 @@ fn layout_counts_keep_values_while_translating_their_units() {
         "349 asientos, 65.0 t"
     );
     assert_eq!(localize_scene_text("12 ULD, 30.5 t"), "12 ULD, 30.5 t");
+    assert_eq!(
+        localize_scene_text("9 463L pallet, 30.5 t"),
+        "9 pal\u{e9}s 463L, 30.5 t"
+    );
 }
 
 #[test]

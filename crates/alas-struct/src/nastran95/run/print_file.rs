@@ -52,7 +52,11 @@ pub fn read_displacement_tables(print: &str) -> Vec<Vec<(i64, [f64; 6])>> {
 /// repeated at each printed page, so its `NO.` field, rather than the heading
 /// count, keys the table. The row layout is otherwise the same six
 /// translations/rotations.
-pub fn read_eigenvector_tables(print: &str) -> Vec<Vec<(i64, [f64; 6])>> {
+///
+/// A mode number above [`MAX_EIGENVECTOR_MODE`] is rejected rather than used to
+/// size the table list, so a corrupted heading cannot force an unbounded
+/// allocation.
+pub fn read_eigenvector_tables(print: &str) -> Result<EigenvectorTables, EigenvectorModeError> {
     let mut tables: Vec<Vec<(i64, [f64; 6])>> = Vec::new();
     let mut in_eigenvector = false;
     let mut current_table = None;
@@ -65,6 +69,9 @@ pub fn read_eigenvector_tables(print: &str) -> Vec<Vec<(i64, [f64; 6])>> {
                 .filter(|&mode| mode > 0)
                 .map(|mode| mode - 1);
             if let Some(index) = current_table {
+                if index >= MAX_EIGENVECTOR_MODE {
+                    return Err(EigenvectorModeError { mode: index + 1 });
+                }
                 while tables.len() <= index {
                     tables.push(Vec::new());
                 }
@@ -86,7 +93,25 @@ pub fn read_eigenvector_tables(print: &str) -> Vec<Vec<(i64, [f64; 6])>> {
             }
         }
     }
-    tables
+    Ok(tables)
+}
+
+/// One displacement-row table per extracted mode.
+pub type EigenvectorTables = Vec<Vec<(i64, [f64; 6])>>;
+
+/// The largest `REAL EIGENVECTOR NO.` the parser accepts. Far above any mode
+/// count a wing model extracts; it only bounds allocation on a corrupted print.
+pub const MAX_EIGENVECTOR_MODE: usize = 100_000;
+
+/// A `REAL EIGENVECTOR` heading named a mode number beyond
+/// [`MAX_EIGENVECTOR_MODE`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error(
+    "eigenvector heading names mode {mode}, above the supported maximum {MAX_EIGENVECTOR_MODE}"
+)]
+pub struct EigenvectorModeError {
+    /// The one-based mode number printed in the heading.
+    pub mode: usize,
 }
 
 /// The displacement of one grid in one subcase, or `None` if it is not reported.

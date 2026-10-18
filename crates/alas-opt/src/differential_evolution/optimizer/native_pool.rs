@@ -17,6 +17,10 @@
 //! still has one row per requested design. The same queue checks the stage
 //! deadline before each candidate; a timed stop returns only its started
 //! prefix, with no history rows for unstarted designs.
+//!
+//! A panic inside a candidate evaluation is not recovered. The release
+//! profile builds with `panic = "abort"`, so a panicking candidate aborts the
+//! process; there is no per-candidate failure row and no retry.
 
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{mpsc, Arc};
@@ -27,10 +31,10 @@ use rayon::{ThreadPool, ThreadPoolBuildError, ThreadPoolBuilder};
 use super::{DesignObjective, OptimizationHistory, SearchObjective};
 use crate::cancellation::{CancelScope, EvaluationCancellation};
 
-type CandidateAnswer = Option<(f64, bool, OptimizationHistory)>;
+type CandidateAnswer = (f64, bool, OptimizationHistory);
 
-/// One lane's report on one candidate: its index, its answer (`None` after a
-/// panic), how long it ran and whether it finished after the request.
+/// One lane's report on one candidate: its index, its answer, how long it ran
+/// and whether it finished after the request.
 type LaneReport = (usize, CandidateAnswer, Duration, bool);
 
 pub(super) struct NativeObjective<'a> {
@@ -177,15 +181,9 @@ impl SearchObjective for NativeObjective<'_> {
             .zip(designs)
             .take(count)
             .map(|(answer, values)| match answer {
-                Some(Some((cost, valid, history))) => {
+                Some((cost, valid, history)) => {
                     self.objective.history.append(history);
                     (cost, valid)
-                }
-                // A partial failed history stays in the discarded local
-                // objective. Retrying on the coordinator could re-panic and
-                // would bypass both the lanes and cancellation.
-                Some(None) => {
-                    record_unanalysed(self.objective, values, "evaluation_worker_failure")
                 }
                 None => {
                     record_unanalysed(self.objective, values, super::batch::CANCELLED_UNSTARTED)
@@ -218,19 +216,16 @@ fn run_lane(
 }
 
 fn evaluate_independent(baseline: &DesignObjective, values: &[f64]) -> CandidateAnswer {
-    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let mut local = baseline.clone();
-        let cost = local.evaluate(values);
-        let valid = local.history.valid.last().copied().unwrap_or(false) && cost.is_finite();
-        (cost, valid, local.history)
-    }))
-    .ok()
+    let mut local = baseline.clone();
+    let cost = local.evaluate(values);
+    let valid = local.history.valid.last().copied().unwrap_or(false) && cost.is_finite();
+    (cost, valid, local.history)
 }
 
 /// One history row for a requested design that produced no analysis.
 fn record_unanalysed(objective: &mut DesignObjective, values: &[f64], reason: &str) -> (f64, bool) {
     let cost = objective.config.optimizer.weights.failure_cost;
-    let design = alas_config::DesignVector::from_array(values).unwrap_or_default();
+    let design = crate::mdo::parsed_design(values);
     objective
         .history
         .record(design, false, cost, 0.0, 0.0, 0.0, 0.0, 0.0, reason);
@@ -268,7 +263,7 @@ mod tests {
                 scope.spawn(move || {
                     run_lane(points, next, token, Some(deadline), &sender, |_| {
                         std::thread::sleep(Duration::from_millis(30));
-                        None
+                        (0.0, false, OptimizationHistory::new())
                     });
                 });
             }
@@ -280,19 +275,6 @@ mod tests {
         assert_eq!(
             indices,
             (0..next.load(Ordering::Relaxed)).collect::<Vec<_>>()
-        );
-    }
-
-    #[test]
-    fn a_worker_failure_records_an_invalid_analysis_without_retrying_it() {
-        let mut objective = DesignObjective::new(alas_config::AlasConfig::default());
-        let values = alas_config::DesignVector::default().to_array();
-        let (_, valid) = record_unanalysed(&mut objective, &values, "evaluation_worker_failure");
-        assert!(!valid);
-        assert_eq!(objective.history.n_evaluations(), 1);
-        assert_eq!(
-            objective.history.reject_reason[0],
-            "evaluation_worker_failure"
         );
     }
 

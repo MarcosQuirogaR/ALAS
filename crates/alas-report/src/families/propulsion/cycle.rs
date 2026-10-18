@@ -13,8 +13,8 @@
 use super::design_point;
 use crate::chart_kit::draw_title;
 use crate::scene::{Axes2D, Color, Fill, Scene, SceneElement, Stroke, TextAlign, TextBaseline};
-use crate::theme::{get_palette, Palette};
-use alas_config::{AlasConfig, EngineConfig};
+use crate::theme::get_palette;
+use alas_config::AlasConfig;
 use alas_prop::cycle::{
     anchor_mass_flow_kg_s, classify_engine_by_bpr, compute_turbofan_cycle, TurbofanCycleResult,
 };
@@ -47,6 +47,10 @@ pub fn figure_propulsion_cycle_summary(config: &AlasConfig, theme: Option<&str>)
     if super::is_turboprop(config) {
         return super::technology::turboprop_summary_scene(config, theme);
     }
+    let eng = match super::turbofan_or_status(config, theme, (700.0, 460.0)) {
+        Ok(eng) => eng,
+        Err(scene) => return scene,
+    };
     let pal = get_palette(theme);
     let mut scene = Scene::new(700.0, 460.0, Some(Color::from_hex(pal.bg)));
     let title = "On-Design Cruise Cycle Summary";
@@ -54,7 +58,7 @@ pub fn figure_propulsion_cycle_summary(config: &AlasConfig, theme: Option<&str>)
     draw_title(&mut scene, title, pal);
     scene.suppress_derived_title();
 
-    let out = compute_turbofan_cycle(&design_point(config), &config.propulsion_cycle);
+    let out = compute_turbofan_cycle(&design_point(config, eng), &config.propulsion_cycle);
     if !out.cycle_feasible {
         push_infeasible_text(&mut scene, &out.infeasibility_reason, 475.0, 240.0);
         return scene;
@@ -139,7 +143,11 @@ pub fn propulsion_cycle_summary(config: &AlasConfig) -> Vec<String> {
     if super::is_turboprop(config) {
         return super::technology::turboprop_summary_lines(config);
     }
-    let out = compute_turbofan_cycle(&design_point(config), &config.propulsion_cycle);
+    let eng = match super::turbofan_spec(config) {
+        Ok(eng) => eng,
+        Err(message) => return vec![message],
+    };
+    let out = compute_turbofan_cycle(&design_point(config, eng), &config.propulsion_cycle);
     if !out.cycle_feasible {
         return vec![
             "Cycle infeasible at this design point:".to_owned(),
@@ -163,7 +171,11 @@ pub fn figure_engine_designer_preview(config: &AlasConfig, theme: Option<&str>) 
     if super::is_turboprop(config) {
         return super::turboprop_cycle::figure_turboprop_cycle_preview(config, theme);
     }
-    super::ts_preview::preview(config, theme)
+    let eng = match super::turbofan_or_status(config, theme, (900.0, 560.0)) {
+        Ok(eng) => eng,
+        Err(scene) => return scene,
+    };
+    super::ts_preview::preview(config, eng, theme)
 }
 
 /// Text lines for the on-design cycle summary panel. `verbose` retains the
@@ -180,7 +192,10 @@ fn propulsion_cycle_summary_lines(
     verbose: bool,
 ) -> Vec<String> {
     let engine = &config.geometry.engine;
-    let eng = super::turbofan_spec(config);
+    let eng = match super::turbofan_spec(config) {
+        Ok(eng) => eng,
+        Err(message) => return vec![message],
+    };
     let cyc_cfg = &config.propulsion_cycle;
 
     let (mdot_total, _static) = anchor_mass_flow_kg_s(
@@ -252,135 +267,6 @@ fn propulsion_cycle_summary_lines(
         total_line,
     ]);
     lines
-}
-
-/// Nacelle silhouette: mirrored top/bottom edges through `nacelle_profile`'s
-/// control points, filled between, with each control point marked and
-/// annotated: ported from `figure_engine_designer_preview`'s `ax_nacelle`
-/// block. No `set_aspect("equal")` primitive exists here, so the axes rect is
-/// sized to match the data's own aspect ratio instead, which reads the same.
-#[allow(dead_code)]
-fn draw_nacelle_silhouette(scene: &mut Scene, pal: &Palette, eng: &EngineConfig) {
-    let xs: Vec<f64> = eng.nacelle_profile.iter().map(|&(x, _)| x).collect();
-    let rs: Vec<f64> = eng
-        .nacelle_profile
-        .iter()
-        .map(|&(_, frac)| frac * eng.radius_scale_m)
-        .collect();
-
-    let x_min = xs.iter().copied().fold(f64::INFINITY, f64::min);
-    let x_max = xs.iter().copied().fold(f64::NEG_INFINITY, f64::max);
-    let r_max = rs.iter().copied().fold(0.0f64, f64::max).max(1e-6);
-
-    let margin_x = (x_max - x_min).max(1e-6) * 0.1;
-    let x_lo = x_min - margin_x;
-    let x_hi = x_max + margin_x;
-    let y_lo = -r_max * 1.15;
-    let y_hi = r_max * 1.55; // extra headroom for the point annotations above
-
-    let avail_w = 460.0;
-    let avail_h = 300.0;
-    let data_w = (x_hi - x_lo).max(1e-6);
-    let data_h = (y_hi - y_lo).max(1e-6);
-    let scale = (avail_w / data_w).min(avail_h / data_h);
-    let plot_w = data_w * scale;
-    let plot_h = data_h * scale;
-    let left = 45.0 + (avail_w - plot_w) * 0.5;
-    let top = 60.0 + (avail_h - plot_h) * 0.5;
-
-    let axes = Axes2D::new((left, top, plot_w, plot_h), (x_lo, x_hi), (y_lo, y_hi));
-
-    let top_pts: Vec<(f64, f64)> = xs.iter().zip(&rs).map(|(&x, &r)| (x, r)).collect();
-    let bot_pts: Vec<(f64, f64)> = xs.iter().zip(&rs).map(|(&x, &r)| (x, -r)).collect();
-
-    let mut poly_pts: Vec<[f64; 2]> = top_pts.iter().map(|&(x, y)| axes.map_point(x, y)).collect();
-    poly_pts.extend(bot_pts.iter().rev().map(|&(x, y)| axes.map_point(x, y)));
-    scene.add(SceneElement::Polygon {
-        points: poly_pts,
-        fill: Some(Fill::new(Color::rgba(31, 119, 180, 38))), // tab:blue @ alpha=0.15
-        stroke: None,
-    });
-
-    axes.draw_frame(scene, pal);
-    let line_stroke = Stroke::new(Color::from_hex("tab:blue"), 1.5);
-    axes.add_line_series(scene, &top_pts, line_stroke.clone());
-    axes.add_line_series(scene, &bot_pts, line_stroke);
-
-    let zero_l = axes.map_point(x_lo, 0.0);
-    let zero_r = axes.map_point(x_hi, 0.0);
-    scene.add(SceneElement::Line {
-        p1: zero_l,
-        p2: zero_r,
-        stroke: Stroke::dashed(Color::from_hex("#888888"), 0.6, 4.0, 3.0),
-    });
-
-    for (&(x, r), &(_, frac)) in top_pts.iter().zip(eng.nacelle_profile.iter()) {
-        let p = axes.map_point(x, r);
-        scene.add(SceneElement::Circle {
-            center: p,
-            radius: 3.0,
-            fill: Some(Fill::new(Color::from_hex("tab:blue"))),
-            stroke: None,
-        });
-        scene.add(SceneElement::Text {
-            text: format!("({x:.1}, {frac:.2})"),
-            pos: [p[0], p[1] - 6.0],
-            font_size: 7.0,
-            color: Color::from_hex(pal.title),
-            align: TextAlign::Center,
-            baseline: TextBaseline::Bottom,
-            angle_deg: 0.0,
-            bold: false,
-        });
-    }
-    for &(x, r) in &bot_pts {
-        let p = axes.map_point(x, r);
-        scene.add(SceneElement::Circle {
-            center: p,
-            radius: 3.0,
-            fill: Some(Fill::new(Color::from_hex("tab:blue"))),
-            stroke: None,
-        });
-    }
-
-    scene.add(SceneElement::Text {
-        text: "x-station [m]".to_owned(),
-        pos: [left + plot_w * 0.5, top + plot_h + 16.0],
-        font_size: 8.0,
-        color: Color::from_hex(pal.tick),
-        align: TextAlign::Center,
-        baseline: TextBaseline::Top,
-        angle_deg: 0.0,
-        bold: false,
-    });
-    scene.add(SceneElement::Text {
-        text: "radius [m]".to_owned(),
-        pos: [left - 28.0, top + plot_h * 0.5],
-        font_size: 8.0,
-        color: Color::from_hex(pal.tick),
-        align: TextAlign::Center,
-        baseline: TextBaseline::Middle,
-        angle_deg: -90.0,
-        bold: false,
-    });
-}
-
-/// Bold panel-title text at a fixed vertical position, matching the
-/// convention `figure_threeview` already uses for per-axes titles (this
-/// scene primitive set has no per-`Axes2D` title, only the whole-figure
-/// `Scene::title`).
-#[allow(dead_code)]
-pub(super) fn panel_title(scene: &mut Scene, pal: &Palette, text: &str, x: f64) {
-    scene.add(SceneElement::Text {
-        text: text.to_owned(),
-        pos: [x, 40.0],
-        font_size: 11.5,
-        color: Color::from_hex(pal.title),
-        align: TextAlign::Left,
-        baseline: TextBaseline::Top,
-        angle_deg: 0.0,
-        bold: true,
-    });
 }
 
 /// Centered two-line infeasibility message, matching
@@ -474,7 +360,8 @@ mod tests {
     #[test]
     fn the_text_panel_carries_the_real_specific_thrust_and_tsfc() {
         let config = AlasConfig::default();
-        let out = compute_turbofan_cycle(&design_point(&config), &config.propulsion_cycle);
+        let eng = super::super::turbofan_spec(&config).expect("turbofan binding");
+        let out = compute_turbofan_cycle(&design_point(&config, eng), &config.propulsion_cycle);
         assert!(out.cycle_feasible);
         let lines = propulsion_cycle_summary_lines(&config, &out, true);
         let sfn_line = lines
@@ -492,7 +379,8 @@ mod tests {
     #[test]
     fn compact_verbose_false_drops_only_the_fuel_air_ratio_line() {
         let config = AlasConfig::default();
-        let out = compute_turbofan_cycle(&design_point(&config), &config.propulsion_cycle);
+        let eng = super::super::turbofan_spec(&config).expect("turbofan binding");
+        let out = compute_turbofan_cycle(&design_point(&config, eng), &config.propulsion_cycle);
         let verbose = propulsion_cycle_summary_lines(&config, &out, true);
         let compact = propulsion_cycle_summary_lines(&config, &out, false);
         assert_eq!(verbose.len(), compact.len() + 1);

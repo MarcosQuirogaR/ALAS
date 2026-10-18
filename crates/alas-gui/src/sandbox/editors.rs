@@ -211,6 +211,14 @@ fn optional_editor(state: &mut AppState, ui: &mut Ui, field: &SandboxField, curr
     });
 }
 
+/// An on/off field; a missing value (defaults are not serialised) reads off.
+fn bool_editor(state: &mut AppState, ui: &mut Ui, field: &SandboxField, current: &Value) {
+    let mut on = current.as_bool().unwrap_or(false);
+    if ui.checkbox(&mut on, "").changed() {
+        commit_field(state, field, Value::Bool(on), Gesture::Committed);
+    }
+}
+
 fn airfoil_editor(state: &mut AppState, ui: &mut Ui, field: &SandboxField, current: &Value) {
     let mut text = current.as_str().unwrap_or_default().to_owned();
     let search_id = ui.make_persistent_id(("sandbox_airfoil_search", &field.id));
@@ -442,6 +450,7 @@ pub fn show_field(state: &mut AppState, ui: &mut Ui, field: &SandboxField) {
             numeric_editor(state, ui, field, current.as_f64().unwrap_or(0.0));
         }
         FieldKind::OptionalFloat => optional_editor(state, ui, field, &current),
+        FieldKind::Bool => bool_editor(state, ui, field, &current),
         FieldKind::Airfoil => airfoil_editor(state, ui, field, &current),
         FieldKind::Engine => engine_editor(state, ui, field, &current),
         FieldKind::Vec3 => list_editor(state, ui, field, &current, Some(["x", "y", "z"])),
@@ -480,3 +489,7 @@ pub fn show_group(
     });
     ui.add_space(4.0);
 }
+
+#[cfg(test)]
+#[path = "editors_tests.rs"]
+mod tests;

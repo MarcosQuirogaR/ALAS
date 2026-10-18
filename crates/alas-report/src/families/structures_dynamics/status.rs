@@ -30,27 +30,16 @@ pub fn resolve_structural_result<'a>(
     title: &str,
     pal: &Palette,
 ) -> Result<&'a StructuralAnalysisResult, Scene> {
-    let Some(result) = result else {
-        return Err(status_message_scene(
-            title,
-            "Structural analysis was not run for this design (Advanced Settings -> Structural \
-             Analysis).",
-            false,
-            pal,
-        ));
-    };
-    if result.status != "ok" {
-        return Err(status_message_scene(
-            title,
-            &format!(
-                "Structural analysis failed: {}",
-                result.error.as_deref().unwrap_or("unknown error")
-            ),
-            false,
-            pal,
-        ));
+    let message = crate::families::common::structural_unavailable_message(result);
+    if let (Some(result), None) = (result, &message) {
+        return Ok(result);
     }
-    Ok(result)
+    Err(status_message_scene(
+        title,
+        &message.unwrap_or_default(),
+        false,
+        pal,
+    ))
 }
 
 /// `plt_cm_tab10`'s six colors, as hex: `Color::from_hex` only special-cases
@@ -60,16 +49,7 @@ pub const TAB10: [&str; 6] = [
     "#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd", "#8c564b",
 ];
 
-/// The load-case color map every figure here uses: pull-up red, push-down
-/// blue, level green, anything else matplotlib's `tab:gray` default.
-pub fn load_case_color(name: &str) -> &'static str {
-    match name {
-        "pull-up" => "tab:red",
-        "push-down" => "tab:blue",
-        "level" => "tab:green",
-        _ => "#7f7f7f",
-    }
-}
+pub(super) use crate::families::common::load_case_color;
 
 /// `hex` at a given 8-bit alpha -- the `alpha=0.88` matplotlib bars in this
 /// family use.

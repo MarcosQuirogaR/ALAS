@@ -9,7 +9,7 @@
 use std::collections::{BTreeMap, HashSet};
 
 use crate::loads::LoadCase;
-use crate::mesh::{Deck, MeshNodeIndex};
+use crate::mesh::{Deck, MeshNodeIndex, LOAD_INTRODUCTION_LAYERS};
 use crate::op2::Op2;
 
 use super::{read_static, LabelledValues, ResultStatus};
@@ -27,6 +27,15 @@ pub struct StaticResult {
     /// NASTRAN-95 invariant derived from printed shell-centroid tensors.
     /// This historical field name does not restrict its scope to the root.
     pub root_von_mises_max_pa: LabelledValues,
+    /// Strength-assessment stress by case, Pa: the maximum element-centroid
+    /// von Mises over shells *outside* the load-introduction and constraint
+    /// zones of [`Deck::load_introduction_elements`]. Empty when the solver
+    /// adapter could not produce it, in which case consumers fall back to
+    /// `root_von_mises_max_pa`. Centroid values are the element's own stress
+    /// state; corner values extrapolate it and are dominated by the mesh
+    /// idealisation at rigid spiders and constraints. CTRIA3 elements are
+    /// included only where the solver adapter decodes them.
+    pub assessed_von_mises_max_pa: LabelledValues,
     /// Complete product front-spar response; readers of the summary alone leave it absent.
     pub spanwise: Option<StaticSpanwiseResponse>,
     /// Attributed product shell stresses, when that solver adapter supports it.
@@ -192,6 +201,7 @@ pub fn read_static_product(
     cases: &[LoadCase],
 ) -> StaticResult {
     let mut result = read_static(op2, index, cases);
+    attach_assessed_stress(&mut result, op2, deck, index, cases);
     let response = if !op2.duplicate_static_subcases.is_empty() {
         StaticSpanwiseResponse::invalid(format!(
             "duplicate OP2 static subcase tables: {:?}",
@@ -223,6 +233,41 @@ pub fn read_static_product(
     };
     attach(&mut result, response);
     result
+}
+
+/// Fill [`StaticResult::assessed_von_mises_max_pa`] from the OP2 CQUAD4
+/// centroid rows (`node_ids == 0`, two fibers per element), skipping the
+/// shells in load-introduction zones.
+fn attach_assessed_stress(
+    result: &mut StaticResult,
+    op2: &Op2,
+    deck: &Deck,
+    index: &MeshNodeIndex,
+    cases: &[LoadCase],
+) {
+    let excluded = deck.load_introduction_elements(&index.engine_nids, LOAD_INTRODUCTION_LAYERS);
+    for (position, case) in cases.iter().enumerate() {
+        let Some(table) = op2
+            .cquad4_stress
+            .get(&(position as i64 + 1))
+            .filter(|table| !table.data.is_empty())
+        else {
+            continue;
+        };
+        // Unavailable (not 0 Pa) when nothing is assessed.
+        let peak = crate::mesh::assessed_peak(
+            table
+                .element_ids
+                .iter()
+                .zip(&table.node_ids)
+                .zip(&table.data)
+                .filter(|((_, node), _)| **node == 0)
+                .map(|((element, _), row)| (excluded.contains(element), row[7].abs())),
+        );
+        if let Some(peak) = peak {
+            result.assessed_von_mises_max_pa.push(case.name, peak);
+        }
+    }
 }
 
 pub(crate) fn attach(result: &mut StaticResult, response: StaticSpanwiseResponse) {

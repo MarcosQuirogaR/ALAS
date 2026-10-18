@@ -12,11 +12,8 @@
 //! design modes are those of a structure designed at the closure; the three
 //! original modes keep the rules they had.
 
-use alas_atmo::Atmosphere;
-use alas_config::{
-    AlasConfig, DesignPayloadSource, MassSizingBasis, MtowPlan, MtowSizing, StructuralBasis,
-};
-use alas_mass::dispatch::DispatchSolution;
+use alas_config::{AlasConfig, DesignPayloadSource, MassSizingBasis, MtowPlan, StructuralBasis};
+use alas_mass::dispatch::{DispatchSolution, DispatchStatus};
 use alas_units::NAUTICAL_MILE;
 
 use super::mission_model::SegmentMissionModel;
@@ -98,10 +95,11 @@ pub(crate) fn closure_mission(
     let altitude_m = config.requirements.cruise_altitude_m;
     model.cruise_altitude_m = altitude_m;
     model.design_cruise_altitude_m = altitude_m;
-    model.cruise_tas_m_s = model.cruise_mach
-        * Atmosphere::try_new(altitude_m)
-            .map_err(|error| invalid(error.to_string()))?
-            .speed_of_sound();
+    // M a(T) from the US Standard Atmosphere 1976 on the flown day, as the
+    // route model derives it (audit MIS-03, MIS-04).
+    model.cruise_tas_m_s = model
+        .cruise_true_airspeed_m_s(altitude_m)
+        .map_err(invalid)?;
     model.validate().map_err(invalid)?;
     Ok(Some(ClosureMission {
         model,
@@ -111,24 +109,33 @@ pub(crate) fn closure_mission(
     }))
 }
 
-/// The landing mass a sizing closure has to be able to land at, kg: its
-/// zero-fuel mass plus every fuel the plan carries past the destination
-/// (contingency, alternate, final reserve, additional, extra and the
-/// taxi-in budget), or `None` when the dispatch produced no finite value.
+/// The landing mass a sizing closure has to be able to land at, kg, or
+/// `None` when the dispatch produced no finite value.
 ///
-/// This is the plan's own destination landing mass, so the `landing_mass`
-/// residual compares the mission with a limit built on the same fuel basis
-/// and reserve policy. The floor of
-/// `AlasConfig::design_landing_mass_with_reserve_floor`.
+/// For a settled dispatch it is the plan's own destination landing mass
+/// (takeoff mass less trip fuel at the closure's last iterate), which is the
+/// field the `landing_mass` residual compares and the one the report's
+/// design-mission arrival check reads, so a limit that the floor sets is met
+/// exactly instead of being exceeded by the dispatch's settling residual (3 g
+/// on the 150-seat clean-sheet brief of 2026-10-15). A dispatch that did not
+/// settle (MTOW- or tank-limited, not converged) has a plan at a clamped mass,
+/// so the floor stays the mass the mission has to land at: the zero-fuel mass
+/// plus every fuel the plan carries past the destination (contingency,
+/// alternate, final reserve, additional, extra and the taxi-in budget). The
+/// floor of `AlasConfig::design_landing_mass_with_reserve_floor`.
 pub(crate) fn landing_floor_kg(dispatch: &DispatchSolution) -> Option<f64> {
     let plan = &dispatch.plan;
-    let floor_kg = dispatch.zero_fuel_mass_kg
-        + plan.contingency.kg
-        + plan.alternate.kg
-        + plan.final_reserve.kg
-        + plan.additional.kg
-        + plan.extra.kg
-        + plan.taxi_in_fuel_kg();
+    let floor_kg = if matches!(dispatch.status, DispatchStatus::Converged) {
+        dispatch.destination_landing_mass_kg
+    } else {
+        dispatch.zero_fuel_mass_kg
+            + plan.contingency.kg
+            + plan.alternate.kg
+            + plan.final_reserve.kg
+            + plan.additional.kg
+            + plan.extra.kg
+            + plan.taxi_in_fuel_kg()
+    };
     (floor_kg.is_finite() && floor_kg > 0.0).then_some(floor_kg)
 }
 
@@ -145,7 +152,7 @@ pub(crate) fn design_weights(
     declared_mtow_kg: f64,
     landing_floor_kg: Option<f64>,
 ) -> (&'static str, f64, f64) {
-    if plan.mode == MtowSizing::FixedRequirement {
+    if plan.mode.sizes_at_declared_mass() {
         let basis = config.mass_sizing_basis();
         return match basis {
             MassSizingBasis::FixedAircraft {
@@ -185,39 +192,30 @@ pub(crate) fn design_weights(
         } => (basis.as_str(), design_gross_mass_kg, design_landing_mass_kg),
         MassSizingBasis::Coupled => {
             // The component ledger is closed on this candidate's own
-            // dispatched mass, which is what "coupled" means and is left
-            // alone. The *landing* limit is a different quantity and must
-            // not follow it.
-            //
-            // A maximum landing mass is a structural design weight: a
-            // fraction of the design gross weight the airframe and gear are
-            // built for. Referring it to the mass this particular sector
-            // happens to close at makes the `landing_mass` residual say
-            // "burn at least (1 - mlw_fraction) of your own take-off mass on
-            // this flight", which is a statement about the mission with no
-            // aircraft property in it, and it is unsatisfiable by
-            // construction on a short sector: measured on the shipped
-            // clean-sheet path it rejected 434 of 462 A320-200 candidates,
-            // 438 of 460 A220-300 and 603 of 605 A340-300.
-            //
-            // Under `MtowSizing::SizedByMission` the closure is bounded above
-            // by the declared MTOW, so that declared mass *is* the design
-            // gross weight the structure must support and the closure is
-            // only this mission's dispatch; the limit is taken against it.
-            // `Unconstrained` declares no ceiling, so it keeps the closed
-            // mass, which is the only design weight that mode has.
-            let limit_basis_kg = if plan.mode == MtowSizing::SizedByMission
-                && declared_mtow_kg.is_finite()
-                && declared_mtow_kg > 0.0
-            {
-                declared_mtow_kg
-            } else {
-                analysis_takeoff_mass_kg
-            };
+            // dispatched mass, which is what "coupled" means. The landing
+            // mass is one quantity for the three places that read it (audit
+            // SIZ-03): the gear is designed at it
+            // (`at_sized_closure_mass_with_landing_floor`), the dispatch
+            // limits the landing mass to it (`mda::converge`) and the
+            // `landing_mass` residual compares the mission with it. It is
+            // `WLDG = max(mlw_fraction x closure, ZFW + reserves)`: the
+            // fraction of this candidate's own closure raised to the mass the
+            // mission itself has to land at. A bare fraction of the closure
+            // is unsatisfiable on a short sector (measured on the shipped
+            // clean-sheet path: 434 of 462 A320-200 candidates rejected,
+            // 438 of 460 A220-300, 603 of 605 A340-300), which is why this
+            // limit was once taken against the declared MTOW while the gear
+            // was built at the closure fraction: a 20-28 % mismatch between
+            // the gear's design landing mass and the limit it was checked
+            // against. The floor removes the unsatisfiability without
+            // separating the two bases.
             (
                 basis.as_str(),
                 analysis_takeoff_mass_kg,
-                config.landing_mass_limit_kg(limit_basis_kg),
+                config.design_landing_mass_with_reserve_floor(
+                    analysis_takeoff_mass_kg,
+                    landing_floor_kg,
+                ),
             )
         }
     }

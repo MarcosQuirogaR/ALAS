@@ -318,6 +318,73 @@ is in it.
 
 ---
 
+## Fixed-wing UAV (preliminary)
+
+The **Fixed-Wing UAV** page runs a competition search: it chooses the propulsion
+bundle (motor, speed controller, battery, propeller) and the airframe for one
+competition preset, flies that preset's mission and scores it with the preset's
+own score engine. It is preliminary: a banner at the top of the page says
+**Preliminary: not validated against measured flight data**, and it stays
+there in every section. No output on this page has been checked against a
+measured flight, a weighed aircraft or a competition flight.
+
+The page has three sections:
+
+| Section | What you set |
+|---|---|
+| **Mission** | The competition preset, the announced take-off distance, the payload count (ACC cans gate) and payload volume (XC gate), the evaluation budget and the random seed, and the mission objectives and payload envelope |
+| **Airframe** | Geometry search bounds and the preliminary model assumptions (aerodynamic, tail and control, packaging, systems) |
+| **Results** | The result of the last search (below) |
+
+Start the search from the action bar. Progress shows the evaluated and feasible
+counts and the best feasible score so far. Cancelling stops at the next
+candidate and keeps the last completed result. The same seed and budget
+reproduce the same result; the search time does not.
+
+Propulsion maps are resolved from the reviewed catalogue, which needs the
+propeller performance tables. ALAS does not ship them; without them the search
+stops with the reason.
+
+### Results
+
+The Results section shows the best candidate of the search:
+
+- **Competition search result**: whether a feasible design was found, the
+  preset, the seed, the evaluation count and how many were feasible, the
+  compatible and rejected propulsion bundles, the competition score (points),
+  and the search time (s, not reproducible).
+- **Chosen components**: the battery, motor, speed controller, propeller and
+  the other catalogue records, each with a link to its source.
+- **Geometry and sizing**: wing area (m^2), aspect ratio, span and fuselage
+  length (m), tail volume coefficients, takeoff mass (kg) and take-off distance
+  (m).
+- **Hard gates**: the gates that fail (they bind the search) and any gate that
+  could not be evaluated for lack of an input.
+- **Static stability (preliminary)**: static margin at the loaded centre of
+  gravity (% of the mean aerodynamic chord) against the 5 to 15 % screening
+  band, neutral point and CG (m), and tail volumes. These are estimates.
+- **Cruise trim (preliminary)**: elevator deflection (deg), tail lift (N),
+  required lift coefficient, trim drag (N), and whether the elevator stays
+  within its stops.
+- **Wing spar at limit load (preliminary)**: limit lift (N), root bending
+  moment (N m), tip deflection (mm), spar mass (kg), and the bending and shear
+  margins of safety. A margin below zero is a failure at limit load with the
+  safety factor applied. The spar uses a literature-typical carbon laminate, not
+  a measured allowable.
+- The planform figure, the bill of materials with price evidence, and the
+  physical findings.
+
+### What the search enforces
+
+A candidate is feasible only if every evaluated hard gate of the preset passes,
+the take-off distance meets the announced distance, the preliminary physics
+checks pass, the static margin is inside the 5 to 15 % band, and both spar
+margins of safety are at least zero. The landing is flown: the flare ends at
+touchdown at 1.15 times the 1 g stall speed. A missing input is reported as
+not evaluated, never assumed.
+
+---
+
 ## Menus and view
 
 **File**: *Load configuration…* and *Save configuration…*. Configurations

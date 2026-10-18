@@ -2,7 +2,7 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 use super::{
-    figure_gallery_layout, format_cg_pct_mac, fullscreen_camera_key, fullscreen_id,
+    figure_gallery_layout, format_cg_pct_mac, format_pct_mac, fullscreen_camera_key, fullscreen_id,
     fullscreen_open, fullscreen_slot_key, fullscreen_view_key, open_fullscreen_result,
     responsive_card_layout, scene_has_external_images, set_fullscreen, unavailable_reason,
     CARD_GAP, CARD_MIN_WIDTH,
@@ -99,8 +99,28 @@ fn openvsp_launch_button_has_its_own_row_and_takes_its_click() {
 }
 
 #[test]
+fn figure_cards_stay_wide_enough_to_read() {
+    use super::gallery::{figure_card_layout, FIGURE_CARD_MIN_WIDTH};
+    // The 1280 x 820 shell leaves about 860 pt for the gallery: one column.
+    assert_eq!(figure_card_layout(860.0).0, 1);
+    assert_eq!(
+        figure_card_layout(2.0 * FIGURE_CARD_MIN_WIDTH + CARD_GAP).0,
+        2
+    );
+    for available in [400.0, 860.0, 1_200.0, 1_800.0, 2_600.0] {
+        let (columns, width) = figure_card_layout(available);
+        assert!(columns >= 1);
+        assert!(
+            width >= FIGURE_CARD_MIN_WIDTH || columns == 1,
+            "{available}"
+        );
+    }
+}
+
+#[test]
 fn baseline_cg_fraction_is_displayed_once_as_percent_mac() {
-    assert_eq!(format_cg_pct_mac(25.359), "25.4% MAC");
+    assert_eq!(format_cg_pct_mac(25.359), "25.4 % MAC, reference wing");
+    assert_eq!(format_pct_mac(5.24), "5.2 % MAC");
 }
 
 #[test]

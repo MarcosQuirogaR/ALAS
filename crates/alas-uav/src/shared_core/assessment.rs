@@ -3,7 +3,7 @@
 
 use super::*;
 
-const STANDARD_GRAVITY_M_S2: f64 = 9.806_65;
+const STANDARD_GRAVITY_M_S2: f64 = alas_atmo::STANDARD_GRAVITY;
 
 /// User-controlled inputs that preliminary geometry does not determine.
 #[derive(Debug, Clone, PartialEq)]

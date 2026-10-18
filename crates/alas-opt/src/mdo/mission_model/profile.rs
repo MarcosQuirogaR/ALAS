@@ -19,6 +19,8 @@ use alas_config::mission::{MissionProfileConfig, SpeedReference};
 use alas_mass::fuel_plan::FuelModelError;
 use alas_units::FOOT;
 
+mod crossover;
+
 /// Altitude-bisection resolution, m.
 const ALTITUDE_RESOLUTION_M: f64 = 0.5;
 /// Bisection budget on the cruise altitude.
@@ -44,18 +46,12 @@ const VD_OVER_VC: f64 = 1.25;
 /// a scaled A320-200 climb rung sit at 184 m/s equivalent against its declared
 /// 180 m/s VD, which is the case this bound exists for.
 ///
-/// **There is deliberately no Mach ceiling here, and removing the one this
-/// lane first wrote is a correction, not a relaxation.** That ceiling was
-/// `requirements.cruise_mach`, which is the *design cruise* Mach, the point
-/// the wing and the deck are built at, not MMO. Holding every rung to it
-/// makes an ordinary descent illegal, since a transport's MMO sits above its
-/// cruise Mach and descents are routinely flown faster. Measured: it was the
-/// entire cause of a **2.74 %** disagreement between this model's ATR 72-600
-/// climb/descent footprint and the native pseudospectral schedule's, which
-/// applies no such ceiling; with it removed the two agree to **9.0e-6**, and
-/// VD alone does not bind on that aircraft at all. Nothing in the
-/// configuration declares MMO or VMO, so no aerodynamic ceiling is invented
-/// in its place: the gap is recorded rather than filled with a guess.
+/// **The Mach ceiling is not part of this bound.** It is MMO
+/// (`max_operating_mach`, from the type certificate data sheet), applied by
+/// `mach_scale` in `profile/crossover.rs`. A ceiling at the design cruise
+/// Mach (`requirements.cruise_mach`), tried earlier, made an ordinary descent
+/// illegal (a transport's MMO sits above its cruise Mach) and cost the ATR
+/// 72-600 a 2.74 % footprint disagreement with the native schedule.
 ///
 /// # Errors
 ///
@@ -248,12 +244,7 @@ pub(crate) struct ProfileGeometry<'a> {
     /// The aircraft's declared design dive speed, m/s equivalent airspeed.
     /// Zero or non-finite disables the envelope bound.
     ///
-    /// This is the *only* envelope term. A design-cruise-Mach ceiling was
-    /// carried here briefly and removed on measurement: `requirements.
-    /// cruise_mach` is the point the wing and the deck are built at, not MMO,
-    /// so holding every rung to it made an ordinary descent illegal. Nothing
-    /// in the configuration declares MMO or VMO, so no aerodynamic ceiling
-    /// replaced it; see [`envelope_limit_m_s`].
+    /// MMO is bounded separately, see [`envelope_limit_m_s`].
     pub dive_speed_eas_m_s: f64,
     /// Cruise rungs off the declared level hold the declared Mach (a jet's
     /// Mach-hold cruise) instead of the declared equivalent airspeed (a
@@ -287,60 +278,6 @@ impl ProfileGeometry<'_> {
             LegKind::Diversion => (self.arrival_elevation_m, self.arrival_elevation_m),
         };
         self.cruise_altitude_m.max(departure).max(arrival)
-    }
-
-    /// A climbing or descending leg from `start_m` to `end_m` flown at
-    /// constant calibrated airspeed `cas_m_s`: `subdivisions` segments, each
-    /// with true airspeed resolved from `cas_m_s` at its own midpoint
-    /// altitude's real ambient pressure and temperature: a *discretized*
-    /// approximation of constant CAS (each sub-rung still flies one constant
-    /// true airspeed), not the continuous exact quantity; see
-    /// [`ProfileGeometry::plan`]'s callers for the refinement test showing
-    /// how the approximation error shrinks as `subdivisions` grows. Every
-    /// production call site uses [`alas_config::mission::CAS_SPEED_SUBDIVISIONS`],
-    /// the same count the native pseudospectral schedule
-    /// (`alas-pipeline::mission_stage::schedule`) uses, so both paths apply
-    /// an identical discretization rule rather than two independently chosen
-    /// ones. Unlike the true-airspeed rungs, this needs no
-    /// equivalent-airspeed adaptation trick to stay physically correct when
-    /// the cruise altitude is lowered: the real atmosphere at whatever band
-    /// is actually flown is what is sampled.
-    fn cas_vertical_segments(
-        &self,
-        kind: SegmentKind,
-        start_m: f64,
-        end_m: f64,
-        cas_m_s: f64,
-        rate_m_s: f64,
-        subdivisions: usize,
-    ) -> Result<Vec<Segment>, FuelModelError> {
-        if (end_m - start_m).abs() <= MINIMUM_SEGMENT_ALTITUDE_M {
-            return Ok(Vec::new());
-        }
-        let subdivisions = subdivisions.max(1);
-        let mut segments = Vec::with_capacity(subdivisions);
-        let step_m = (end_m - start_m) / subdivisions as f64;
-        let mut altitude_m = start_m;
-        for _ in 0..subdivisions {
-            let next_m = altitude_m + step_m;
-            let mid_m = 0.5 * (altitude_m + next_m);
-            let atmosphere = self.ambient(mid_m, "calibrated-airspeed")?;
-            let tas_m_s = alas_atmo::airspeed::true_from_calibrated(
-                cas_m_s,
-                atmosphere.pressure_pa,
-                atmosphere.temperature_k,
-            )
-            .map_err(|error| {
-                FuelModelError::InvalidModel(format!(
-                    "{kind:?} calibrated airspeed {cas_m_s} m/s at {mid_m} m: {error}"
-                ))
-            })?;
-            segments.extend(Segment::vertical(
-                kind, altitude_m, next_m, tas_m_s, rate_m_s,
-            )?);
-            altitude_m = next_m;
-        }
-        Ok(segments)
     }
 
     /// Lowest cruise altitude the ladders can be built at, m.
@@ -641,6 +578,9 @@ impl ProfileGeometry<'_> {
         if !declared_m_s.is_finite() || declared_m_s <= 0.0 {
             return Ok(declared_m_s);
         }
+        // The declared number is a standard-day Mach times a(T_ISA); on the
+        // flown day the same Mach is `M a(T_ISA + dT)` (exactly 1 at dT = 0).
+        let declared_m_s = declared_m_s * self.standard_day_speed_ratio(reference_m)?;
         let resolved_m_s = if cruise_m == reference_m {
             declared_m_s
         } else {
@@ -721,7 +661,9 @@ impl ProfileGeometry<'_> {
         // One factor for the whole leg, so the configured schedule's shape -
         // every relative speed and every transition between rungs - is
         // preserved and only its overall pace changes. See `envelope_scale`.
-        let scale = self.envelope_scale(&climb, &descent, &cruise_rungs, top_m)?;
+        let scale = self
+            .envelope_scale(&climb, &descent, &cruise_rungs, top_m)?
+            .min(self.mach_scale(&climb, &descent, &cruise_rungs, top_m)?);
         let (climb, descent, cruise_rungs) = if scale < 1.0 {
             (
                 Self::scaled_segments(&climb, scale)?,

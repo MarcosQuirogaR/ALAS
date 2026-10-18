@@ -63,7 +63,7 @@ use faer::linalg::solvers::{PartialPivLu, Solve};
 use faer::{Mat, Par};
 
 /// Pin faer to its sequential kernels; see the module doc for the measurement.
-fn sequential_kernels() {
+pub(crate) fn sequential_kernels() {
     static PINNED: OnceLock<()> = OnceLock::new();
     PINNED.get_or_init(|| faer::set_global_parallelism(Par::Seq));
 }
@@ -99,13 +99,6 @@ pub struct DenseMatrix {
 }
 
 impl DenseMatrix {
-    /// The `n`-by-`n` zero matrix.
-    pub fn zeros(n: usize) -> Self {
-        Self {
-            inner: Mat::zeros(n, n),
-        }
-    }
-
     /// A matrix from `rows`, each of which must hold one entry per row.
     pub fn from_rows(rows: &[Vec<f64>]) -> Self {
         let n = rows.len();
@@ -124,16 +117,6 @@ impl DenseMatrix {
     /// The number of rows (and columns).
     pub fn dimension(&self) -> usize {
         self.inner.nrows()
-    }
-
-    /// Read one entry.
-    pub fn get(&self, row: usize, column: usize) -> f64 {
-        self.inner[(row, column)]
-    }
-
-    /// Write one entry.
-    pub fn set(&mut self, row: usize, column: usize, value: f64) {
-        self.inner[(row, column)] = value;
     }
 
     /// Factor the matrix as `P A = L U` with partial pivoting.
@@ -217,11 +200,6 @@ impl LuFactorization {
     /// The number of unknowns.
     pub fn dimension(&self) -> usize {
         self.a.nrows()
-    }
-
-    /// Smallest absolute pivot of the factorization.
-    pub fn minimum_pivot(&self) -> f64 {
-        self.minimum_pivot
     }
 
     /// `max |pivot| / min |pivot|`, the conditioning proxy.

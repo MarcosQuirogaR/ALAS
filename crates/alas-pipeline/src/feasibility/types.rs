@@ -50,6 +50,20 @@ pub enum FindingCode {
     TrimUnavailable,
     /// Static margin is below the configured physical floor.
     InsufficientStaticMargin,
+    /// The closed take-off mass lies outside the band around the mass the
+    /// fixed engine rating was matched to.
+    EngineMassMismatch,
+    /// The take-off safety speed was raised above the CS 25.107 schedule to meet
+    /// the second-segment gradient (improved climb); the field length is charged.
+    ImprovedClimbV2,
+    /// The computed airborne minimum control speed exceeds the CS 25.149(c)
+    /// ceiling of 1.13 VSR, or the fin cannot control the engine-out moment.
+    MinimumControlSpeedViolation,
+    /// The minimum control speed could not be evaluated (no fin or fuselage
+    /// data, or an unavailable drag table); the declared ratio stays.
+    MinimumControlSpeedUnavailable,
+    /// The rudder deflection that holds the design crosswind exceeds its limit.
+    CrosswindControlViolation,
     /// The built wing reference area exceeds its configured maximum.
     WingAreaLimit,
     /// The mandatory structural response could not be evaluated.
@@ -86,6 +100,10 @@ pub enum FindingCode {
     LandingMassLimitViolation,
     /// Static thrust-to-weight is below the selected departure-field requirement.
     ThrustMarginViolation,
+    /// A cruise or top-of-climb thrust shortfall inside the documented
+    /// scatter of the Jenkinson chart correlation (an engine without a
+    /// cruise or climb thrust datum): flagged, not a failure.
+    ThrustWithinChartScatter,
     /// A mission control point requires more than full throttle.
     MissionThrottleLimitViolation,
     /// The requested passenger count exceeds the seats the layout placed.
@@ -159,11 +177,17 @@ impl FindingCode {
             Self::InvalidMissionFuelBurn => "invalid_mission_fuel_burn",
             Self::MissionFuelShortfall => "mission_fuel_shortfall",
             Self::InvalidCruiseForceBalance => "invalid_cruise_force_balance",
+            Self::EngineMassMismatch => "engine_mass_mismatch",
+            Self::ImprovedClimbV2 => "improved_climb_v2",
+            Self::MinimumControlSpeedViolation => "minimum_control_speed_violation",
+            Self::MinimumControlSpeedUnavailable => "minimum_control_speed_unavailable",
+            Self::CrosswindControlViolation => "crosswind_control_violation",
             Self::FieldPerformanceUnavailable => "field_performance_unavailable",
             Self::FieldTakeoffDistanceViolation => "field_takeoff_distance_violation",
             Self::FieldLandingDistanceViolation => "field_landing_distance_violation",
             Self::LandingMassLimitViolation => "landing_mass_limit_violation",
             Self::ThrustMarginViolation => "thrust_margin_violation",
+            Self::ThrustWithinChartScatter => "thrust_within_chart_scatter",
             Self::MissionThrottleLimitViolation => "mission_throttle_limit_violation",
             Self::PassengerCapacityShortfall => "passenger_capacity_shortfall",
             Self::BaggageOverload => "baggage_overload",

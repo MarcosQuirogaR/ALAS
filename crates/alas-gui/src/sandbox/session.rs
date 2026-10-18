@@ -120,8 +120,7 @@ pub struct SandboxSession {
     /// The last built aircraft prepared for drawing (faces and painter
     /// partition), reused for every camera frame.
     pub model: Option<SandboxSceneModel>,
-    /// The framing kept across camera motion and geometry edits; `None`
-    /// until the next redraw fits the shown components.
+    /// The framing kept across camera motion and edits; `None` until refit.
     pub framing: Option<FramingReference>,
     /// The viewport size the scene canvas is drawn for, in points.
     pub viewport_size: Option<(f32, f32)>,
@@ -133,6 +132,7 @@ pub struct SandboxSession {
     pub drag: Option<super::drag::ActiveDrag>,
     /// Undo stack capacity.
     pub undo_capacity: usize,
+    pub(super) handle_cache: super::handle_cache::HandleCache,
 }
 
 impl SandboxSession {

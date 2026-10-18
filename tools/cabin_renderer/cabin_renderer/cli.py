@@ -37,7 +37,7 @@ def main(argv: list[str] | None = None) -> int:
                     records.append({"source":str(source),"svg":str(svg_path),"png":str(png_path),"sha256":digest,
                                     "unified_sections":[{"decks":p.metadata["selected_decks"],"x_m":p.station_m} for p in passengers],
                                     "findings":[f.__dict__ for f in findings],"elapsed_s":round(time.perf_counter()-started,6)})
-                except (SceneError, KeyError, TypeError) as exc:
+                except (SceneError, KeyError, TypeError, OSError, ValueError, RuntimeError) as exc:
                     records.append({"source":str(source),"error":str(exc)})
             summary=args.recommended_dir/"summary.json"
             summary.write_text(json.dumps(records,indent=2)+"\n",encoding="utf-8")

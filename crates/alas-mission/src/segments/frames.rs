@@ -27,6 +27,7 @@
 //! exactly the sort of thing a port gets subtly wrong.
 
 use super::conditions::{Conditions, Initials, Matrix3, Vector3};
+use crate::numerics::integrate_row;
 
 /// Radians per degree: mission analysis model's `Units.deg`, used here only where upstream
 /// divides an angle by it.
@@ -292,14 +293,7 @@ pub fn update_planet_position(
     }
 
     let latitude: Vec<f64> = (0..points)
-        .map(|row| {
-            integrate[row]
-                .iter()
-                .zip(&latitude_rate)
-                .map(|(&weight, &rate)| weight * rate)
-                .sum::<f64>()
-                / RADIANS_PER_DEGREE
-        })
+        .map(|row| integrate_row(&integrate[row], &latitude_rate) / RADIANS_PER_DEGREE)
         .collect();
 
     let mut longitude_rate = vec![0.0; points];
@@ -313,14 +307,7 @@ pub fn update_planet_position(
     }
 
     let longitude: Vec<f64> = (0..points)
-        .map(|row| {
-            integrate[row]
-                .iter()
-                .zip(&longitude_rate)
-                .map(|(&weight, &rate)| weight * rate)
-                .sum::<f64>()
-                / RADIANS_PER_DEGREE
-        })
+        .map(|row| integrate_row(&integrate[row], &longitude_rate) / RADIANS_PER_DEGREE)
         .collect();
 
     let latitude_start = conditions.latitude_deg[0];
@@ -356,13 +343,7 @@ pub fn integrate_inertial_horizontal_position(
         .collect();
 
     let distance: Vec<f64> = (0..points)
-        .map(|row| {
-            integrate[row]
-                .iter()
-                .zip(&velocity_x)
-                .map(|(&weight, &v)| weight * v)
-                .sum()
-        })
+        .map(|row| integrate_row(&integrate[row], &velocity_x))
         .collect();
 
     let (sin_course, cos_course) = true_course_rad.sin_cos();

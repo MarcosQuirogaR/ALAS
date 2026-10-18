@@ -13,7 +13,9 @@ the third one:
 1. a **local package** a developer produced on their own machine with `cargo
    xtask dist` (see below), never distributed automatically;
 2. a **CI workflow artifact** produced by the manual `release-preflight.yml`
-   (Windows only) or `release-package.yml` (Windows and Linux) GitHub Actions
+   (Windows only) or `release-package.yml` (Windows and Linux; it runs on
+   manual dispatch, on `v*` tags and on pull requests touching the packaging
+   code) GitHub Actions
    workflows on a clean runner and uploaded as a workflow-run artifact for
    reviewers with repository access: reproducibility evidence, not a
    download, and not published; see
@@ -46,8 +48,8 @@ After extraction, start `ALAS.exe` (Windows) or `./ALAS` (Linux) from the
 package directory. Keep the directory intact: the executable resolves its
 adjacent `configs/`, source manifest, notices, and any separately distributed
 solver directories relative to the package. The exact archive name is
-version- and target-specific, for example `alas-v1.3.2-windows-x86_64.zip` or
-`alas-v1.3.2-linux-x86_64.tar.gz`; the release manifest records the actual
+version- and target-specific, for example `alas-v1.4.0-windows-x86_64.zip` or
+`alas-v1.4.0-linux-x86_64.tar.gz`; the release manifest records the actual
 version, target, source revision, dirty-worktree flag, and hashes.
 
 Every accepted package includes:
@@ -138,7 +140,7 @@ solver qualification.
 A locally produced package reflects whatever is on that machine, including an
 uncommitted change (recorded via the manifest's dirty-worktree flag). To
 reproduce packaging from a clean checkout and the committed `Cargo.lock`
-instead, run the manual `release-package.yml` workflow (Windows and Linux) or
+instead, run the `release-package.yml` workflow (Windows and Linux; manual dispatch) or
 the Windows-only `release-preflight.yml` workflow from the Actions tab and
 download its workflow-run artifact; see [CI release
 package](release-packaging.md#ci-release-package-windows-and-linux). That
@@ -151,12 +153,12 @@ re-check an assembled package as an external artifact, reading only what the
 package directory contains. Point them at the directory, not the archive:
 
 ```powershell
-$env:ALAS_W55_PACKAGE_DIR = "dist/alas-v1.3.2-windows-x86_64"
+$env:ALAS_W55_PACKAGE_DIR = "dist/alas-v1.4.0-windows-x86_64"
 cargo test -p alas-acceptance --test distribution_license_boundary -- --include-ignored
 cargo test -p alas-acceptance --test distribution_acceptance -- --include-ignored
 ```
 
-(On Linux, `export ALAS_W55_PACKAGE_DIR=dist/alas-v1.3.2-linux-x86_64` and the
+(On Linux, `export ALAS_W55_PACKAGE_DIR=dist/alas-v1.4.0-linux-x86_64` and the
 same two `cargo test` commands. Both suites are ignored by default, so that an
 ordinary test run reports them as skipped rather than passing them without a
 package; `--include-ignored` runs them. Both read whatever package directory

@@ -196,8 +196,9 @@ impl FuselageConfig {
     #[must_use]
     pub fn body_station(&self, x_m: f64, length_m: f64) -> BodyStation {
         let aft_start = self.aft_body_start_m(length_m);
-        if x_m < self.cabin_start_x_m && self.cabin_start_x_m > 0.0 {
-            let s = self.nose_station(x_m / self.cabin_start_x_m);
+        let nose_len = self.nose_loft_length_m();
+        if x_m < nose_len && nose_len > 0.0 {
+            let s = self.nose_station(x_m / nose_len);
             BodyStation {
                 x_m,
                 z_m: s.z_m,

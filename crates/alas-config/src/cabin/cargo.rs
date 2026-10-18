@@ -94,6 +94,61 @@ impl HoldCompartmentConfig {
     }
 }
 
+/// A military or freighter main-deck hold: one continuous loadable floor plus a
+/// load-carrying ramp, loaded with pallets rather than underfloor containers.
+///
+/// A body with a declared freight hold has no underfloor hold and no cabin
+/// seat deck: the whole payload rides on this floor. Stations are metres aft
+/// of the nose tip; the clear width and height are the interior dimensions the
+/// source publishes, not the outer loft.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FreightHoldConfig {
+    /// Forward end of the loadable floor, m.
+    pub floor_start_x_m: f64,
+    /// Floor length ahead of the ramp hinge, m.
+    pub floor_length_m: f64,
+    /// Ramp length, m. The ramp continues the floor aft of the hinge.
+    pub ramp_length_m: f64,
+    /// Clear width at the floor, m: sets how many pallets stand side by side.
+    pub clear_width_m: f64,
+    /// Clear height above the floor under the lowest part of the roof, m.
+    pub clear_height_m: f64,
+    /// Total load the ramp may carry, kg, or `None` when the source states no
+    /// ramp limit (the ramp is then as strong as the floor).
+    #[serde(default)]
+    pub ramp_load_limit_kg: Option<f64>,
+}
+
+impl FreightHoldConfig {
+    /// Whether every dimension is finite and positive and the limit sane.
+    pub fn is_valid(&self) -> bool {
+        [
+            self.floor_start_x_m,
+            self.floor_length_m,
+            self.clear_width_m,
+            self.clear_height_m,
+        ]
+        .iter()
+        .all(|value| value.is_finite() && *value > 0.0)
+            && self.ramp_length_m.is_finite()
+            && self.ramp_length_m >= 0.0
+            && self
+                .ramp_load_limit_kg
+                .is_none_or(|limit| limit.is_finite() && limit >= 0.0)
+    }
+
+    /// Station of the ramp hinge, m: floor ahead of it, ramp aft of it.
+    pub fn ramp_start_x_m(&self) -> f64 {
+        self.floor_start_x_m + self.floor_length_m
+    }
+
+    /// Aft end of the ramp, m.
+    pub fn aft_end_x_m(&self) -> f64 {
+        self.ramp_start_x_m() + self.ramp_length_m
+    }
+}
+
 /// Cargo loading configuration.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ConfigNode)]
 #[serde(deny_unknown_fields)]
@@ -177,6 +232,13 @@ pub struct CargoDeckConfig {
         help = "Declared baggage compartments with station extent, volume and optional net-mass limit. Empty means the compartments are derived from the fuselage geometry."
     )]
     pub hold_compartments: Vec<HoldCompartmentConfig>,
+    /// Declared main-deck freight hold of a military or freighter body.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[config(
+        hidden,
+        help = "Declared freight hold (floor, ramp, clear width and height) of a military transport or freighter. When present the payload rides on pallets along this floor and the body has no underfloor hold."
+    )]
+    pub freight_hold: Option<FreightHoldConfig>,
 }
 
 impl Default for CargoDeckConfig {
@@ -194,6 +256,7 @@ impl Default for CargoDeckConfig {
             cg_trim_max_iterations: 2000,
             baggage_policy: BaggagePolicy::TargetCg,
             hold_compartments: Vec::new(),
+            freight_hold: None,
         }
     }
 }
@@ -275,6 +338,54 @@ mod tests {
         ] {
             assert!(!bad.is_valid());
         }
+    }
+
+    #[test]
+    fn a_freight_hold_needs_finite_positive_dimensions_and_round_trips() {
+        let good = FreightHoldConfig {
+            floor_start_x_m: 8.0,
+            floor_length_m: 17.71,
+            ramp_length_m: 5.40,
+            clear_width_m: 4.00,
+            clear_height_m: 3.85,
+            ramp_load_limit_kg: Some(6_000.0),
+        };
+        assert!(good.is_valid());
+        assert!((good.ramp_start_x_m() - 25.71).abs() < 1.0e-12);
+        assert!((good.aft_end_x_m() - 31.11).abs() < 1.0e-12);
+        for bad in [
+            FreightHoldConfig {
+                floor_length_m: 0.0,
+                ..good
+            },
+            FreightHoldConfig {
+                clear_width_m: f64::NAN,
+                ..good
+            },
+            FreightHoldConfig {
+                ramp_length_m: -1.0,
+                ..good
+            },
+            FreightHoldConfig {
+                ramp_load_limit_kg: Some(-1.0),
+                ..good
+            },
+        ] {
+            assert!(!bad.is_valid());
+        }
+        let config = CargoDeckConfig {
+            freight_hold: Some(good),
+            ..CargoDeckConfig::default()
+        };
+        let value = serde_json::to_value(&config).unwrap();
+        assert_eq!(value["freight_hold"]["floor_length_m"], 17.71);
+        let loaded: CargoDeckConfig = serde_json::from_value(value).unwrap();
+        assert_eq!(loaded, config);
+        let default_value = serde_json::to_value(CargoDeckConfig::default()).unwrap();
+        assert!(!default_value
+            .as_object()
+            .unwrap()
+            .contains_key("freight_hold"));
     }
 
     #[test]

@@ -403,7 +403,8 @@ def build_aviary_inputs(record: dict[str, Any]) -> tuple[Any, dict[str, Any]]:
 def get_problem_output(prob: Any, key: str, units: str = "lbm") -> float | None:
     try:
         value = prob.get_val(key, units=units)
-    except Exception:
+    except (KeyError, RuntimeError, ValueError) as exc:
+        print(f"warning: no OpenMDAO output {key!r}: {exc}", file=sys.stderr)
         return None
     value = _jsonable(value)
     if isinstance(value, list):

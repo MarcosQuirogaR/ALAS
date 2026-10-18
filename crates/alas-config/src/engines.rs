@@ -22,6 +22,11 @@ use std::sync::OnceLock;
 
 use serde::{Deserialize, Serialize};
 
+mod nacelle_shape;
+pub use nacelle_shape::{
+    NacelleParamSource, NacelleShape, NacelleShapeV2, CORE_COWL_START_FRACTION,
+};
+
 /// Propulsive conversion technology selected by an engine catalogue row.
 ///
 /// The enum is deliberately non-exhaustive so downstream orchestrators must
@@ -66,6 +71,12 @@ pub struct TurbofanEngineSpec {
     pub part_power_source: String,
     /// Empirical maximum-climb thrust deck used by transport missions.
     pub off_design: TurbofanOffDesignSpec,
+    /// Ambient static temperature at sea-level static up to which the thrust
+    /// rating is flat (the engine certificate's flat-rating temperature), in
+    /// kelvin. `None` (every catalogue row today: no per-engine datum has been
+    /// retrieved) means the rating is not derated on a hot day.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub flat_rating_temperature_k: Option<f64>,
 }
 
 /// Cruise reference point and evidence for the transport turbofan deck.
@@ -73,7 +84,7 @@ pub struct TurbofanEngineSpec {
 /// `cruise_reference_thrust_n` is per engine.  It is the part-power cruise
 /// thrust paired with `cruise_tsfc_kg_kgf_hr`, not a maximum-climb rating:
 /// the deck derives maximum climb at the reference point from the static
-/// rating and bypass ratio (Howe 2000).
+/// rating and bypass ratio (Jenkinson's engine charts).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TurbofanOffDesignSpec {
@@ -85,10 +96,36 @@ pub struct TurbofanOffDesignSpec {
     /// Mach number of the reference point.
     pub cruise_reference_mach: f64,
     /// Machine-readable evidence class: `direct-openap`,
-    /// `openap-static-fallback`, or `family-proxy`.
+    /// `openap-static-fallback`, `family-proxy`, or `secondary-simulation`
+    /// (a grade C open-source engine-simulation table, cross-checked).
     pub evidence: String,
     /// Exact source and, for estimates, the correlation used.
     pub source: String,
+    /// Which rating the cruise reference thrust is a value of. Absent means
+    /// a maximum-cruise value (every catalogue anchor but one); a
+    /// `maximum-climb` datum scales the deck's maximum-climb chart directly.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rating: Option<String>,
+}
+
+impl TurbofanOffDesignSpec {
+    /// Whether the cruise point is a published datum of the engine (a
+    /// manufacturer-class entry of the engine or of its declared family), as
+    /// opposed to the OpenAP/Svoboda class statistic `0.2 F_TO + 890 N`,
+    /// which is computed from the rating and says nothing about the engine.
+    /// Only the former may anchor the engine's thrust scale in the deck.
+    pub fn is_engine_datum(&self) -> bool {
+        matches!(
+            self.evidence.as_str(),
+            "direct-openap" | "family-proxy" | "secondary-simulation"
+        ) && !self.source.contains("Svoboda")
+    }
+
+    /// Whether the datum is a maximum-climb thrust (`rating` is
+    /// `maximum-climb`) rather than a maximum-cruise one.
+    pub fn is_maximum_climb_datum(&self) -> bool {
+        self.rating.as_deref() == Some("maximum-climb")
+    }
 }
 
 /// Typed PW127M/568F installation inputs consumed by the turboprop model.
@@ -115,6 +152,12 @@ pub struct TurbopropEngineSpec {
     pub governed_propeller_speed_rpm: f64,
     /// Engine-to-propeller speed reduction ratio.
     pub reduction_ratio: f64,
+    /// Blade count of the installed propeller, from its type-certificate
+    /// data sheet. Absent for a custom engine record, in which case a
+    /// clean-sheet mass evaluation falls back to the shaft-power statistic of
+    /// `FlopsTurbopropConfig::resolved_for_engine`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub propeller_blade_count: Option<u32>,
     /// Rating evidence and unit-conversion statement.
     pub rating_source: String,
     /// Propeller/installation geometry evidence.
@@ -177,6 +220,14 @@ pub struct EngineSpec {
     /// Turbofan-only off-design thrust anchor and its evidence status.
     #[serde(default)]
     pub off_design: Option<TurbofanOffDesignSpec>,
+    /// Turbofan flat-rating temperature, K; absent when no datum is known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub flat_rating_temperature_k: Option<f64>,
+    /// Take-off mass of the aircraft the engine was sized for, kg, for the
+    /// engine/closed-take-off-mass mismatch warning (FIX-PLAN 0.13); absent
+    /// when no datum is known (no catalogue row carries one yet).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub design_takeoff_mass_kg: Option<f64>,
     /// Human-facing identity. This may be more specific than the stable
     /// compatibility key in [`EngineSpec::name`].
     #[serde(default)]
@@ -207,6 +258,25 @@ pub struct EngineSpec {
     pub nacelle_length_m: f64,
     /// Maximum external nacelle radius, in metres.
     pub nacelle_max_radius_m: f64,
+    /// Drawing-fitted outline parameters. When present,
+    /// [`EngineSpec::nacelle_length_m`] is the inlet face to the plug tip and
+    /// the silhouette comes from [`NacelleShape::profile`]; when absent the
+    /// generic six-station profile is scaled to the length and radius.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nacelle_shape: Option<NacelleShape>,
+    /// The G2 outline of the same installation (loft design, lane H): the six
+    /// numbers of [`EngineSpec::nacelle_shape`] plus lip, boat-tail, trailing
+    /// edge, plug tip, ellipticity and droop. Opt-in: the geometry builder
+    /// reads it only when asked; the legacy silhouette is unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nacelle_shape_v2: Option<NacelleShapeV2>,
+    /// An explicit silhouette, `(station in metres, radius fraction)` pairs
+    /// from the nose to the aft end, for an installation that is not a
+    /// turbofan pod (a spinner and a long nacelle behind a propeller). Used
+    /// when no valid [`EngineSpec::nacelle_shape`] applies and the last station
+    /// equals [`EngineSpec::nacelle_length_m`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nacelle_stations: Option<Vec<(f64, f64)>>,
     /// Overall pressure ratio. Published for most of these engines.
     pub overall_pressure_ratio: f64,
     /// Condition represented by bypass and overall pressure ratios.
@@ -222,6 +292,16 @@ pub struct EngineSpec {
     /// Cruise thrust-specific fuel consumption, in kilograms of fuel per
     /// kilogram-force of thrust per hour. Estimated; see the module doc.
     pub cruise_tsfc_kg_kgf_hr: f64,
+    /// Source and page of `cruise_tsfc_kg_kgf_hr`. The value is an
+    /// uninstalled manufacturer figure at its stated condition; the mission
+    /// deck adds bleed and power-extraction losses on top.
+    #[serde(default)]
+    pub cruise_tsfc_source: String,
+    /// Evidence class of `cruise_tsfc_kg_kgf_hr`: `published` (a printed
+    /// value for this engine), `family-proxy` (printed for a sibling) or
+    /// `unsourced-estimate` (no public datum; not validated).
+    #[serde(default)]
+    pub cruise_tsfc_evidence: String,
     /// Normalized fuel flow at 7%, 30%, 85%, and 100% rated net thrust.
     /// Values are from, or explicitly proxied to, the ICAO Engine Emissions
     /// Databank's sea-level-static LTO points.
@@ -310,6 +390,7 @@ impl EngineSpec {
             takeoff_fuel_flow_kg_s: self.takeoff_fuel_flow_kg_s,
             part_power_source: self.part_power_source.clone(),
             off_design,
+            flat_rating_temperature_k: self.flat_rating_temperature_k,
         })
     }
 
@@ -319,6 +400,23 @@ impl EngineSpec {
     /// The radius fraction is relative to [`EngineSpec::nacelle_max_radius_m`],
     /// so the pair is what the geometry builder revolves.
     pub fn nacelle_profile(&self) -> Vec<(f64, f64)> {
+        if let Some(shape) = self
+            .nacelle_shape
+            .as_ref()
+            .filter(|shape| shape.is_valid(self.nacelle_length_m))
+        {
+            return shape.profile(self.nacelle_length_m, self.nacelle_max_radius_m);
+        }
+        if let Some(stations) = self.nacelle_stations.as_ref().filter(|stations| {
+            stations.first().is_some_and(|first| first.0 == 0.0)
+                && stations
+                    .last()
+                    .is_some_and(|last| last.0 == self.nacelle_length_m)
+                && stations.windows(2).all(|pair| pair[0].0 < pair[1].0)
+                && stations.iter().all(|&(_, r)| r > 0.0 && r <= 1.0)
+        }) {
+            return stations.clone();
+        }
         NACELLE_STATIONS
             .iter()
             .map(|&(fraction, radius)| (fraction * self.nacelle_length_m, radius))
@@ -400,6 +498,53 @@ mod tests {
         assert!(get("TP400-D6").is_ok());
     }
 
+    /// No per-engine flat-rating temperature or design take-off mass has been
+    /// retrieved, so no catalogue row carries one (the deck then does not
+    /// derate a hot day), and a present value survives the typed payload.
+    #[test]
+    fn flat_rating_and_design_mass_are_optional_and_absent_from_the_catalogue() {
+        for spec in database() {
+            assert_eq!(spec.flat_rating_temperature_k, None, "{}", spec.name);
+            assert_eq!(spec.design_takeoff_mass_kg, None, "{}", spec.name);
+            let value = serde_json::to_value(spec).unwrap();
+            assert!(value.get("flat_rating_temperature_k").is_none());
+        }
+        let mut cfm = get("CFM56-5B4/3").unwrap().clone();
+        cfm.flat_rating_temperature_k = Some(303.15);
+        let typed = cfm.turbofan_spec().unwrap();
+        assert_eq!(typed.flat_rating_temperature_k, Some(303.15));
+        let round_trip: TurbofanEngineSpec =
+            serde_json::from_value(serde_json::to_value(&typed).unwrap()).unwrap();
+        assert_eq!(round_trip, typed);
+    }
+
+    #[test]
+    fn only_published_engine_cruise_points_anchor_the_deck_thrust_scale() {
+        // CFM56-5B4/3 (OpenAP 2CM014 family anchor), CFM56-5C (2CM015),
+        // CFM56-5C3/F (1CM011 -5C3 value, variant assumed), CF6-50 (3GE074
+        // CF6-50C2 value, variant assumed) and CF6-80C2 (2GE045) carry an
+        // engine datum (grade B, M 0.80, 35,000 ft); LEAP-1A carries a
+        // secondary-simulation datum (grade C, maximum-climb, M 0.78); the
+        // other modern engines carry the Svoboda class statistic computed
+        // from the rating.
+        let datum = |name: &str| {
+            get(name)
+                .unwrap()
+                .turbofan_spec()
+                .unwrap()
+                .off_design
+                .is_engine_datum()
+        };
+        assert!(datum("CFM56-5B4/3"));
+        assert!(datum("CFM56-5C"));
+        for name in ["CFM56-5C3/F", "CF6-50", "CF6-80C2", "LEAP-1A"] {
+            assert!(datum(name), "{name}");
+        }
+        for name in ["GE9X", "Trent 900", "GEnx-1B", "PW1500G"] {
+            assert!(!datum(name), "{name}");
+        }
+    }
+
     #[test]
     fn catalogue_anchors_identify_exact_variants_and_conditions() {
         let cfm = get("CFM56-5B4/3").unwrap();
@@ -458,6 +603,31 @@ mod tests {
                     (off_design.cruise_reference_thrust_n - svoboda_n).abs() < 0.5,
                     "{name}"
                 );
+            }
+        }
+    }
+
+    #[test]
+    fn the_leap_1a_anchor_is_a_grade_c_maximum_climb_datum() {
+        // FlyByWire A32NX tables, 23.6 kN at FL350 M 0.78 ISA, cross-checked
+        // by pilot fuel flow over TSFC; not the Svoboda class value, not the
+        // PS or OpenAP-polar required-drag estimates.
+        let engine = get("LEAP-1A").unwrap();
+        let off_design = engine.off_design.as_ref().unwrap();
+        assert_eq!(off_design.cruise_reference_thrust_n, 23_600.0);
+        assert_eq!(off_design.cruise_reference_altitude_m, 10_668.0);
+        assert_eq!(off_design.cruise_reference_mach, 0.78);
+        assert_eq!(off_design.evidence, "secondary-simulation");
+        assert!(off_design.is_maximum_climb_datum());
+        assert!(off_design.is_engine_datum());
+        assert!(off_design.source.contains("FlyByWire"));
+        assert!(off_design.source.contains("Grade C"));
+        assert!(off_design.source.contains("MAXIMUM CLIMB"));
+        for other in available() {
+            if *other != "LEAP-1A" {
+                if let Some(other) = get(other).unwrap().off_design.as_ref() {
+                    assert!(!other.is_maximum_climb_datum(), "{other:?}");
+                }
             }
         }
     }
@@ -563,6 +733,38 @@ mod tests {
         let profile = get("GE9X").unwrap().nacelle_profile();
         assert!(profile.iter().all(|&(_, radius)| radius <= 1.0));
         assert_eq!(profile.iter().filter(|&&(_, r)| r == 1.0).count(), 2);
+    }
+
+    #[test]
+    fn every_drawing_fitted_nacelle_is_a_valid_monotone_outline_of_the_stated_size() {
+        let fitted: Vec<&EngineSpec> = database()
+            .iter()
+            .filter(|e| e.nacelle_shape.is_some() || e.nacelle_stations.is_some())
+            .collect();
+        assert!(fitted.len() >= 10, "{} fitted engines", fitted.len());
+        for engine in fitted {
+            let name = &engine.name;
+            if let Some(shape) = engine.nacelle_shape.as_ref() {
+                assert!(shape.is_valid(engine.nacelle_length_m), "{name}");
+            }
+            let profile = engine.nacelle_profile();
+            assert_eq!(profile.first().unwrap().0, 0.0, "{name}");
+            assert_eq!(profile.last().unwrap().0, engine.nacelle_length_m, "{name}");
+            assert!(profile.windows(2).all(|p| p[0].0 < p[1].0), "{name}");
+            assert!(profile.iter().all(|&(_, r)| r > 0.0 && r <= 1.0), "{name}");
+            assert!(
+                profile.len() > 6,
+                "{name}: more than the generic six stations"
+            );
+            // The lip is nearly the full cowl for the pods behind a fan.
+            if engine.technology == PropulsionTechnology::Turbofan {
+                assert!(profile[0].1 >= 0.9, "{name}: highlight {}", profile[0].1);
+            }
+            assert!(
+                engine.geometry_source.contains("drawing-fitted"),
+                "{name}: source not stated"
+            );
+        }
     }
 
     #[test]

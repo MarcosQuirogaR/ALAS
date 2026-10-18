@@ -3,6 +3,10 @@
 
 //! Headless unit and state integration tests for `alas-gui`.
 
+// A test asserts on values it constructed or loaded from a fixture it
+// controls, so a failed unwrap there is the assertion failing.
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 use alas_gui::layout;
 use alas_gui::nav::{self, PageKind};
 use alas_gui::scene::{
@@ -75,7 +79,8 @@ fn preset_switching_updates_the_json_configuration_and_scene() {
     assert!(config.requirements.mtow_kg < 80_000.0);
     assert_eq!(config.departure_airport, "Riga (EVRA)");
     assert_eq!(config.arrival_airport, "Stockholm Arlanda (ESSA)");
-    assert!(config.mission.profile.cruise_1_air_speed_m_s < 240.0);
+    // M 0.78 (the requirement) at FL250 is 241.6 m/s: still below the generic 253.5.
+    assert!(config.mission.profile.cruise_1_air_speed_m_s < 245.0);
     assert_eq!(config.cabin.passenger.business.share_pct, 0.0);
     assert_eq!(config.cabin.passenger.economy.share_pct, 100.0);
 }

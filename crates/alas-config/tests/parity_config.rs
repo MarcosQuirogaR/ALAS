@@ -482,7 +482,27 @@ fn compare_values(comparison: &mut Comparison, path: &str, actual: &Value, expec
 /// configuration. The reference values remain checked explicitly so a product
 /// optimization cannot silently become a parity drift.
 fn product_default_correction(path: &str) -> Option<(Value, Value)> {
-    if path.ends_with(".freq_sweep_max_hz") {
+    // Fix lane kappa-cal (2026-10-12): the viscous margin is fitted with the
+    // lift-dependent viscous fraction on (Jenkinson 1999 p. 180, midpoint 0.25); the
+    // frozen 1.10 is the lumped margin with the fraction at 0.
+    if path.ends_with(".viscous_margin") || path == "DragModelConfig.viscous_margin" {
+        Some((serde_json::json!(1.10), serde_json::json!(1.00)))
+    }
+    // Landing distance coefficient: the frozen 0.60 m/Pa over-predicted the
+    // certified landing field length by +27.8 % on average; the product value
+    // is calibrated on eight certified jets (see `PerformanceConfig::default`).
+    else if path.ends_with(".k_land") || path == "PerformanceConfig.k_land" {
+        Some((serde_json::json!(0.60), serde_json::json!(0.505)))
+    }
+    // Fix lane A1: take-off flap increment from the handbook component
+    // methods (Roskam I Table 3.6, Roskam VI Sec. 4.6, Raymer 6th ed.
+    // Eq. 12.61-12.62, Torenbeek App. G-4) and the CS 25.125(b)(2)(i) VREF
+    // floor of 1.23 VSR0 replace the frozen 0.025 and 1.30.
+    else if path.ends_with(".oei_climb_delta_cd") {
+        Some((serde_json::json!(0.025), serde_json::json!(0.015)))
+    } else if path.ends_with(".vapp_vstall_land_factor") {
+        Some((serde_json::json!(1.30), serde_json::json!(1.23)))
+    } else if path.ends_with(".freq_sweep_max_hz") {
         Some((serde_json::json!(500.0), serde_json::json!(60.0)))
     } else if path.ends_with(".n_modes") {
         Some((serde_json::json!(30), serde_json::json!(16)))
@@ -533,6 +553,14 @@ fn product_default_correction(path: &str) -> Option<(Value, Value)> {
         || path == "OptimizerConfig.solver.workers"
     {
         Some((serde_json::json!(1), serde_json::json!(0)))
+    }
+    // Audit SIZ-06 (decision D6): the product default is a fixed seed, so
+    // an unconfigured run is reproducible; the frozen default is the clock.
+    else if path.ends_with(".optimizer.solver.seed") || path == "OptimizerConfig.solver.seed" {
+        Some((
+            serde_json::Value::Null,
+            serde_json::json!(alas_config::DEFAULT_SEED),
+        ))
     }
     // The product tolerance is a normalized design-space spread for the
     // stagnation test, not SciPy's relative energy spread.
@@ -852,6 +880,21 @@ fn compare_transport_planform_schema(
 
 fn is_native_config_field(path: &str, key: &str) -> bool {
     performance_fields::is_native_field(path, key)
+        // Lift-dependent viscous drag fraction: a native product addition
+        // (default 0 = the frozen lumped-margin convention).
+        || (key == "compressible_trim"
+            && (path.ends_with("AnalysisConfig") || path.ends_with(".analysis")))
+        || (key == "lift_dependent_viscous_fraction"
+            && (path.ends_with("DragModelConfig") || path.ends_with(".drag_model")))
+        || (matches!(
+            key,
+            "vstab_root_le_x_m"
+                | "hstab_root_le_x_m"
+                | "hstab_root_station_y_m"
+                | "vstab_dorsal_x_start_m"
+                | "vstab_dorsal_height_m"
+                | "vstab_dorsal_in_aero"
+        ) && (path.ends_with("EmpennageConfig") || path.ends_with(".empennage")))
         || (matches!(key, "fuel_policy" | "fuel_tanks" | "downstream")
         && (path.ends_with("AlasConfig") || path.ends_with("ALASConfig") || path.is_empty()))
         // Source-backed landing-gear references and heterogeneous bogie
@@ -895,6 +938,11 @@ fn is_native_config_field(path: &str, key: &str) -> bool {
                 | "oei_asymmetric_trim_cd"
                 | "oei_windmilling_cd"
         ) && (path.ends_with("PerformanceConfig") || path.ends_with(".performance")))
+        // The rudder deflection limit is a native yaw-balance input; the frozen
+        // Python schema predates it (default 30 deg, checked by the
+        // control-surface and yaw-balance tests).
+        || (key == "rudder_max_deflection_deg"
+            && (path.ends_with("ControlSurfacesConfig") || path.ends_with(".control_surfaces")))
         // The mission-sized objective, design-space boundary and
         // correlation validity domain are checked by the optimizer config tests.
         || (matches!(
@@ -914,12 +962,23 @@ fn is_native_config_field(path: &str, key: &str) -> bool {
         // has no such fields (all unset = constant crown, one deck).
         || ((key.starts_with("hump_") || key.starts_with("upper_deck_"))
             && (path.ends_with("FuselageConfig") || path.ends_with(".fuselage")))
+        // Optional shaped aft body (closing section, plan taper, crown drop);
+        // the frozen Python schema has no such fields (all unset = tailcone).
+        || ((key.starts_with("aft_") || key.starts_with("tail_end_") || key == "hold_interior_end_x_m")
+            && (path.ends_with("FuselageConfig") || path.ends_with(".fuselage")))
+        // Optional lofted outer surface (hidden; unset = parametric laws).
+        || (key == "loft"
+            && (path.ends_with("FuselageConfig") || path.ends_with(".fuselage")))
         // The declared section class that fixes the Korn technology factor
         // replaced the frozen global `drag_model.korn_technology_factor`; its
         // mapping and per-preset declarations are checked by the airfoil-class
         // unit test and by `parity_aircraft_presets`.
-        || (key == "airfoil_class"
+        || (matches!(key, "airfoil_class" | "korn_technology_factor_override")
             && (path.ends_with("WingConfig") || path.ends_with(".wing")))
+        // The resolved improved-climb take-off speed: hidden, written by the analysis,
+        // not serialized while unset.
+        || (key == "improved_climb_v2_over_vsr"
+            && (path.ends_with("PerformanceConfig") || path.ends_with(".performance")))
         // Native speed-reference switch for the climb/descent legs. Its
         // serialization skips the `TrueAirspeed` default, so a legacy file
         // and the frozen default tree round-trip unchanged.
@@ -927,7 +986,9 @@ fn is_native_config_field(path: &str, key: &str) -> bool {
             && (path.ends_with("MissionProfileConfig") || path.ends_with(".profile")))
         // Native cruise-level policy; its default skips serialization, and
         // its behaviour is checked by the mission-model tests.
-        || (key == "cruise_altitude_policy"
+        // CAS/Mach schedule, MMO/VMO and the take-off roll allowance: native
+        // additions, each omitted from serialization at its default.
+        || (matches!(key, "cruise_altitude_policy" | "climb_mach" | "descent_mach" | "max_operating_mach" | "max_operating_cas_m_s" | "takeoff_roll_time_s")
             && (path.ends_with("MissionProfileConfig") || path.ends_with(".profile")))
         || (matches!(
             key,
@@ -940,7 +1001,7 @@ fn is_native_config_field(path: &str, key: &str) -> bool {
         // The baggage split policy and declared hold compartments are native
         // product additions; both are omitted from serialization at their
         // defaults, so the frozen default tree is unchanged.
-        || (matches!(key, "baggage_policy" | "hold_compartments")
+        || (matches!(key, "baggage_policy" | "hold_compartments" | "freight_hold")
             && (path.ends_with("CargoDeckConfig") || path.ends_with(".cargo")))
         || (key == "exclude_buried_main_wing_area"
             && (path.ends_with("DragModelConfig") || path.ends_with(".drag_model")))
@@ -949,6 +1010,21 @@ fn is_native_config_field(path: &str, key: &str) -> bool {
         // its behaviour is checked by the wing-shape unit tests.
         || (key == "flight_tip_rise_semispan_fraction"
             && (path.ends_with("WingConfig") || path.ends_with(".wing")))
+        // Spanwise dihedral and thickness stations and the swept-back tip
+        // (geometry round 2): native, omitted when unset.
+        || (matches!(
+            key,
+            "dihedral_stations"
+                | "thickness_stations"
+                | "tip_rake_start_span_fraction"
+                | "tip_rake_tip_chord_m"
+                | "wing_profile_interpolation"
+                | "flight_root_rise_m"
+                | "nacelles_hold_ground_height"
+                | "wingtip_device"
+                | "inboard_le_sweep_deg"
+                | "reference_wing"
+        ) && (path.ends_with("WingConfig") || path.ends_with(".wing")))
         || (matches!(
             key,
             "use_airway_endpoint_coordinates" | "max_airway_stretch"
@@ -1005,7 +1081,7 @@ fn is_native_config_field(path: &str, key: &str) -> bool {
             && (path.ends_with("AnalysisConfig") || path.ends_with(".analysis")))
         || (matches!(key, "nastran_memory_mb" | "max_linear_curvature_relative_error")
             && (path.ends_with("StructuresConfig") || path.ends_with(".structures")))
-        || (key == "random_force_psd_n2_per_hz"
+        || (matches!(key, "random_force_psd_n2_per_hz" | "lower_cover_fatigue_stress_1g_pa")
             && (path.ends_with("StructuresConfig") || path.ends_with(".structures")))
         // The cargo capacity objective is a native product addition; the frozen Python
         // requirements schema predates it. Its default, valid domain,
@@ -1163,6 +1239,17 @@ fn compare_field(
             &format!("{label}.help: frozen floor-share semantics"),
             &expected.get("help").and_then(Value::as_str).unwrap_or(""),
             &"Percentage of usable cabin floor length allocated to this class. Seat count is derived from it using this class's pitch/abreast and the real fuselage geometry. Shares are normalised, so they need not add up to exactly 100. Set the class to 0 to remove it. Only used when Class mix mode is 'percent'.",
+        );
+    } else if label.ends_with(".viscous_margin") {
+        comparison.exact(
+            &format!("{label}.help: source-corrected Rust value"),
+            &field.help,
+            &"Lumped multiplier applied to the total parasite drag, accounting for excrescences, gaps and roughness not captured component-by-component. Default 1.00: refitted with the lift-dependent viscous fraction (0.25) on the A320-200, A340-300 and B787-9 payload-range corners after the sourced engine anchors and the bleed and power-extraction loss (fit 0.98, band 0.94 to 1.02, so 1.00 is the physical lower bound); Jenkinson's secondary-drag allowance of up to 10 % is not supported by that set, so it is a calibrated level; the frozen 1.10 applies with the fraction at 0.",
+        );
+        comparison.exact(
+            &format!("{label}.help: frozen Python value"),
+            &expected.get("help").and_then(Value::as_str).unwrap_or(""),
+            &"Lumped multiplier applied to the total parasite drag, accounting for excrescences, gaps and roughness not captured component-by-component. 1.10 = +10% margin.",
         );
     } else if is_random_response_correction(label) {
         comparison.exact(
@@ -1397,6 +1484,18 @@ fn performance_documentation_correction(
             "Approach-speed multiple retained for translated legacy results. The corrected method uses Vref = 1.23 VS1g, approximating the non-icing 14 CFR 25.125 VSR0 floor.",
             "Approach speed as a multiple of landing stall speed (FAR 25.125).",
         )),
+        "PerformanceConfig.vmc_vstall_factor" | "ALASConfig.performance.vmc_vstall_factor" => Some((
+            "VMC / VS_TO",
+            "VMC / VS_TO",
+            "Declared minimum-control speed as a multiple of the take-off reference stall speed VSR. The speed schedules use the VMC computed from the one-engine-inoperative yaw balance of the built fin and rudder; this value is the fallback when that balance cannot be evaluated and, for a registered (certified) aircraft, the cap on the computed value. CS 25.149(c) puts the certification ceiling at 1.13 VSR. VMC drives V2 >= 1.10 VMC and VR >= 1.05 VMC.",
+            "Minimum-control speed as a multiple of take-off stall speed. FAR 25.149 caps VMC at 1.13*VSR; that ceiling is used as the default.",
+        )),
+        "PerformanceConfig.v2_vstall_factor" | "ALASConfig.performance.v2_vstall_factor" => Some((
+            "V2 / VS_TO",
+            "V2 / VS_TO",
+            "Selected take-off safety speed as a multiple of the take-off reference stall speed VSR. V2 = max(v2_vstall_factor*VSR, V2MIN, VR) with V2MIN = max(v2_min_vsr_factor*VSR, 1.10*VMC) per CS 25.107(b)-(c); the regulatory minimum therefore overrides a lower selected factor.",
+            "Take-off safety speed as a multiple of take-off stall speed (FAR 25.107). V2 = max(v2_vstall_factor*VS_TO, VR).",
+        )),
         "PerformanceConfig.oei_gradient" | "ALASConfig.performance.oei_gradient" => Some((
             "OEI 2nd-segment climb gradient (fallback)",
             "OEI 2nd-segment climb gradient (fallback)",
@@ -1413,7 +1512,7 @@ fn performance_documentation_correction(
         | "ALASConfig.performance.oei_climb_delta_cd" => Some((
             "OEI climb high-lift drag increment (gear up)",
             "OEI climb flap/gear drag increment",
-            "Parasite-drag increment added to clean CD0 for the takeoff flap/slat configuration with landing gear retracted, as required by 14 CFR 25.121(b). Asymmetric trim/control and inoperative-engine or windmilling drag require separate source values; this field does not represent them.",
+            "Take-off flap/slat drag increment on the reference wing area, landing gear retracted (14 CFR 25.121(b) second-segment configuration). Default 0.015: Roskam, Airplane Design Part I, Table 3.6, take-off flaps 0.010-0.020 (first estimate, zero-lift increment); component methods (Roskam VI Sec. 4.6, Raymer 6th ed. Eq. 12.61-12.62, Torenbeek App. G-4) give 0.010-0.013 for a 20 deg Fowler flap including flap-induced drag, plus 0.002-0.007 for slats. Windmilling and asymmetric trim drag are separate terms.",
             "Parasite-drag increment added to the clean CD0 for the flap/gear-down OEI second-segment climb configuration.",
         )),
         _ => None,
@@ -1612,10 +1711,17 @@ fn cabin_preset_help_correction(label: &str) -> Option<(&'static str, &'static s
 }
 
 fn compare_leaf(comparison: &mut Comparison, path: &str, leaf: &LeafField, expected: &Value) {
+    // A set optional is classified as what it holds; the product seed
+    // default is set (audit SIZ-06), the frozen one is unset.
+    let expected_kind = if path.ends_with(".solver.seed") && leaf.value.is_i64() {
+        Value::String("int".to_owned())
+    } else {
+        expected.get("kind").unwrap_or(&Value::Null).clone()
+    };
     comparison.exact(
         &format!("{path}.kind"),
         &serde_json::to_value(leaf.kind).unwrap(),
-        expected.get("kind").unwrap_or(&Value::Null),
+        &expected_kind,
     );
     let expected_value = expected.get("value").unwrap_or(&Value::Null);
     if let Some((upstream, corrected)) = product_default_correction(path) {

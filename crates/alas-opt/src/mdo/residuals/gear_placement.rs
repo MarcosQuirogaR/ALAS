@@ -24,7 +24,9 @@ use crate::envelope::{
 };
 
 use super::super::mission_model::SizingBudget;
+use super::super::sizing::clmax_geometry;
 use super::super::sizing::{run_candidate_cancellable, run_candidate_reusing, SizingOutcome};
+use super::super::speedups;
 use super::super::types::{CandidateFailure, ExternalPolar, SizingControls, SizingWork};
 use super::balance_ledger;
 
@@ -44,8 +46,9 @@ fn places_gear(config: &AlasConfig, x: &[f64]) -> bool {
     let Ok(design) = DesignVector::from_array(x) else {
         return false;
     };
-    alas_config::presets::get(&config.preset)
-        .map_or(true, |registered| registered.design_vector != design)
+    alas_config::presets::get(&config.preset).map_or(true, |registered| {
+        !design.same_geometry(&registered.design_vector)
+    })
 }
 
 /// The placement rule's verdict on one sized candidate.
@@ -57,6 +60,7 @@ pub(in crate::mdo) fn solve(
     outcome: &mut SizingOutcome,
     config: &AlasConfig,
 ) -> Result<MainGearPlacement, String> {
+    let _profile = alas_math::stage_profile::scope(alas_math::stage_profile::Stage::GearPlacement);
     let configured = balance_ledger::loading_basis(outcome, config)?;
     if configured_stations_suffice(
         &outcome.plane,
@@ -138,7 +142,13 @@ pub(in crate::mdo) fn size_with_main_gear_placement(
             cancellation,
             controls,
         )?;
-        return Ok((outcome, None));
+        // The configuration the residuals read carries the candidate's
+        // geometry-scaled CLmax (AERL-01); `None` keeps the declared ones.
+        let scaled = outcome
+            .clmax
+            .as_ref()
+            .map(|set| clmax_geometry::with_clmax(config, set));
+        return Ok((outcome, scaled));
     }
     // The rule places the gear from the published stations: a translation
     // carried in by a replayed configuration is not a base to place from.
@@ -168,7 +178,8 @@ pub(in crate::mdo) fn size_with_main_gear_placement(
     // closure's re-trim rule keeps or replaces (`sizing::TrimReuse`).
     for _ in 0..=MAX_RESOLVES {
         let current = placed.as_ref().unwrap_or(base);
-        let further_m = match solve(&mut outcome, current) {
+        let current_scaled = outcome.config_with_clmax(current);
+        let further_m = match solve(&mut outcome, &current_scaled) {
             Ok(MainGearPlacement::Translated(further_m)) => further_m,
             Ok(MainGearPlacement::Unchanged | MainGearPlacement::Infeasible) => break,
             Err(reason) => {
@@ -180,11 +191,32 @@ pub(in crate::mdo) fn size_with_main_gear_placement(
         next.landing_gear.derived_main_gear = Some(DerivedMainGearStation {
             translation_m: configured_translation_m(current) + further_m,
         });
+        let reuse = outcome.trim_reuse.take();
+        // Lever A13: the re-sizing differs from the closure just solved by
+        // the gear translation only. It starts from that closure's mass and
+        // keeps its trim for a centre-of-gravity shift up to the tolerance
+        // below (the shift stays disclosed in `cg_shift_pct_mac`). A closure
+        // that did not settle has no fixed point to start from: its re-sizing
+        // runs as before.
+        let reuse_closure =
+            speedups::enabled(speedups::Lever::GearReuse) && outcome.sized.sizing_closed;
         let remaining = SizingControls {
             budget: controls.budget.map(|budget| remaining_budget(budget, work)),
+            initial_takeoff_mass_kg: if reuse_closure {
+                Some(outcome.sized.takeoff_mass_kg)
+            } else {
+                controls.initial_takeoff_mass_kg
+            },
             ..controls
         };
-        let reuse = outcome.trim_reuse.take();
+        let reuse = reuse.map(|trim| {
+            if reuse_closure {
+                let configured = base.optimizer.objective.retrim_cg_tolerance_pct_mac;
+                trim.with_cg_tolerance(configured.max(GEAR_REUSE_CG_TOLERANCE_PCT_MAC))
+            } else {
+                trim
+            }
+        });
         outcome = run_candidate_reusing(
             &next,
             x,
@@ -199,8 +231,25 @@ pub(in crate::mdo) fn size_with_main_gear_placement(
     }
     // Every closure is this candidate's work.
     outcome.sized.work = work;
+    let placed = match outcome.clmax.as_ref() {
+        Some(set) => Some(clmax_geometry::with_clmax(
+            placed.as_ref().unwrap_or(base),
+            set,
+        )),
+        None => placed,
+    };
     Ok((outcome, placed))
 }
+
+/// Centre-of-gravity shift, percent MAC, over which the first closure's trim
+/// stands for the re-sized closure (lever A13). Moving the main gear changes
+/// no aerodynamic input; the shift only changes the tail load. Trim drag
+/// moves of the order of 0.04 % of fuel burn per 1 % MAC here: on 24 sampled
+/// ATR72-600 candidates (FixedRequirement, 3 % MAC against the exact re-trim)
+/// the block fuel changed by at most 6.9e-4 at a 1.7 % MAC shift, mass and
+/// field length unchanged (lane report). 1 % MAC stays below the 0.1 %
+/// equivalence tolerance; beyond it the trim is solved afresh.
+const GEAR_REUSE_CG_TOLERANCE_PCT_MAC: f64 = 1.0;
 
 /// Re-solves after the first placement: the re-sized closure is checked at
 /// the solved station and placed again at most this many times.

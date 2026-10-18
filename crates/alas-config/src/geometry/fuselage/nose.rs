@@ -10,7 +10,7 @@
 //! drawn station and a lofted one cannot disagree.
 //!
 //! Frame: x aft of the nose tip, z up, metres; `xi` in `[0, 1]` is the
-//! fraction of the nose length `cabin_start_x_m`. Section centre is
+//! fraction of the nose loft length `nose_loft_length_m()` (`cabin_start_x_m` unless `nose_length_m` is set). Section centre is
 //! `(top + bottom) / 2`, height `top - bottom`, width twice the plan
 //! half-width. With no `nose_*` field set the stations are the legacy law
 //! `z = z_c + (z_n - z_c)(1 - xi)^2`, `r = R sqrt(1 - (1 - xi)^2)`.
@@ -125,6 +125,18 @@ fn resolve(value: Option<f64>, range: (f64, f64), fallback: f64) -> f64 {
 }
 
 impl FuselageConfig {
+    /// Length of the lofted nose, m: `nose_length_m` when it is finite and
+    /// positive, else `cabin_start_x_m`. The cabin start keeps owning the
+    /// cabin, seat and mass stations; this is the geometry-only length of the
+    /// nose loft, so a drawn nose longer than the cabin start can be lofted
+    /// without moving the payload.
+    #[must_use]
+    pub fn nose_loft_length_m(&self) -> f64 {
+        self.nose_length_m
+            .filter(|length| length.is_finite() && *length > 0.0)
+            .unwrap_or(self.cabin_start_x_m)
+    }
+
     /// The shaped nose in effect: `None` (legacy ellipsoid law) when no
     /// `nose_*` field is set, else every field resolved, unset or non-finite
     /// ones from [`NoseShape::NARROWBODY_ESTIMATE`] and the rest clamped to
@@ -182,7 +194,7 @@ impl FuselageConfig {
     pub fn nose_station(&self, xi: f64) -> NoseStation {
         let radius = self.diameter_m / 2.0;
         let height_scale = self.effective_height_m() / self.diameter_m;
-        let x_m = xi * self.cabin_start_x_m;
+        let x_m = xi * self.nose_loft_length_m();
         let Some(nose) = self.nose_shape() else {
             let r_val = radius * (1.0 - (1.0 - xi).powi(2)).sqrt();
             return NoseStation {
@@ -225,7 +237,7 @@ impl FuselageConfig {
 
     /// Upper envelope at `xi`: radome arc, straight windshield, crown blend.
     fn nose_top_z_m(&self, nose: &NoseShape, xi: f64) -> f64 {
-        let length = self.cabin_start_x_m;
+        let length = self.nose_loft_length_m();
         let crown = self.cabin_z_m + self.nose_cabin_half_height_m();
         let tip = self.nose_z_m;
         let x = xi * length;
@@ -471,5 +483,25 @@ mod tests {
             let s = fuselage.nose_station(f64::from(index) / 20.0);
             assert!(s.z_m.is_finite() && s.height_m > 0.0);
         }
+    }
+
+    #[test]
+    fn the_nose_loft_length_moves_the_loft_without_moving_the_cabin_start() {
+        let default = shaped();
+        assert_eq!(default.nose_loft_length_m(), default.cabin_start_x_m);
+        let long = FuselageConfig {
+            nose_length_m: Some(2.0 * default.cabin_start_x_m),
+            ..shaped()
+        };
+        assert_eq!(long.cabin_start_x_m, default.cabin_start_x_m);
+        let end = long.nose_station(1.0);
+        assert_eq!(end.x_m, 2.0 * default.cabin_start_x_m);
+        assert!((end.width_m - long.diameter_m).abs() < 1.0e-9);
+        // An unusable value falls back to the cabin start.
+        let bad = FuselageConfig {
+            nose_length_m: Some(-1.0),
+            ..shaped()
+        };
+        assert_eq!(bad.nose_loft_length_m(), bad.cabin_start_x_m);
     }
 }

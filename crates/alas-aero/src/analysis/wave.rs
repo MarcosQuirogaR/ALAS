@@ -14,6 +14,15 @@ use alas_geom::aircraft::wing::WingXSec;
 /// 1e-12), while a planform crank changes the slope by more than 1e-2.
 const SAME_PANEL_SLOPE_TOLERANCE: f64 = 1e-6;
 
+/// Spanwise share of the lifting semispan below which the outermost straight
+/// run is a tip rake, not the outboard panel. A swept-back tip rake (A220:
+/// 46 deg leading edge over 6.6 % of the semispan; the A380 and A340 tips are
+/// similar) has a quarter-chord sweep far above the wing's, and was read as
+/// the wing's sweep (62 deg, above its own 36 deg leading-edge sweep). The
+/// outboard panels of the registered presets span 40 % to 70 % of the
+/// semispan, the rakes under 10 %.
+const TIP_RAKE_SPAN_FRACTION: f64 = 0.15;
+
 impl AeroAnalysis<'_> {
     /// Quarter-chord sweep of `plane`'s main wing, degrees: the sweep of the
     /// quarter-chord line of the outboard trapezoidal panel, which is the
@@ -41,7 +50,10 @@ impl AeroAnalysis<'_> {
     /// projection, to [`SAME_PANEL_SLOPE_TOLERANCE`]. The sweep is
     /// `atan(dx / dy)` of that line. A single-panel wing returns its own
     /// sweep; a curved planform with no straight outboard run returns the
-    /// outermost panel's.
+    /// outermost panel's. A short outermost run (under
+    /// [`TIP_RAKE_SPAN_FRACTION`] of the lifting semispan) is a swept-back
+    /// tip rake and is skipped in favour of the straight run inboard of it, the
+    /// kink-to-rake-start panel the manufacturers' quarter-chord sweep describes.
     ///
     /// Panels steeper than 45 degrees (`|dz| > |dy|`), such as winglets, are
     /// not part of the lifting planform whose sweep these relations take:
@@ -57,24 +69,45 @@ impl AeroAnalysis<'_> {
         let quarter_chord = |xsec: &WingXSec| [xsec.xyz_le[0] + 0.25 * xsec.chord, xsec.xyz_le[1]];
         // Lifting panels as (inboard quarter chord, outboard quarter chord,
         // slope), tip first.
-        let mut panels = wing.xsecs.windows(2).rev().filter_map(|pair| {
-            let dy = (pair[1].xyz_le[1] - pair[0].xyz_le[1]).abs();
-            let dz = (pair[1].xyz_le[2] - pair[0].xyz_le[2]).abs();
-            let (inboard, outboard) = (quarter_chord(&pair[0]), quarter_chord(&pair[1]));
-            let slope = (outboard[0] - inboard[0]) / dy;
-            (dz <= dy && dy > 0.0 && slope.is_finite()).then_some((inboard, outboard, slope))
-        });
-        let Some((mut inboard, outboard, tip_slope)) = panels.next() else {
+        let panels: Vec<_> = wing
+            .xsecs
+            .windows(2)
+            .rev()
+            .filter_map(|pair| {
+                let dy = (pair[1].xyz_le[1] - pair[0].xyz_le[1]).abs();
+                let dz = (pair[1].xyz_le[2] - pair[0].xyz_le[2]).abs();
+                let (inboard, outboard) = (quarter_chord(&pair[0]), quarter_chord(&pair[1]));
+                let slope = (outboard[0] - inboard[0]) / dy;
+                (dz <= dy && dy > 0.0 && slope.is_finite()).then_some((inboard, outboard, slope))
+            })
+            .collect();
+        let Some(&(first_inboard, first_outboard, first_slope)) = panels.first() else {
             return fallback;
         };
-        for (panel_inboard, _, slope) in panels {
-            if (slope - tip_slope).abs() > SAME_PANEL_SLOPE_TOLERANCE {
-                break;
+        // Straight runs from the tip inward, each as (inboard, outboard).
+        let mut runs = vec![(first_inboard, first_outboard)];
+        let mut run_slope = first_slope;
+        for &(inboard, outboard, slope) in &panels[1..] {
+            if (slope - run_slope).abs() <= SAME_PANEL_SLOPE_TOLERANCE {
+                if let Some(current) = runs.last_mut() {
+                    current.0 = inboard;
+                }
+            } else {
+                runs.push((inboard, outboard));
+                run_slope = slope;
             }
-            inboard = panel_inboard;
         }
-        (outboard[0] - inboard[0])
-            .atan2((outboard[1] - inboard[1]).abs())
+        let lifting_span: f64 = panels.iter().map(|p| (p.1[1] - p.0[1]).abs()).sum();
+        let run_span = |run: &([f64; 2], [f64; 2])| (run.1[1] - run.0[1]).abs();
+        let chosen = match runs.as_slice() {
+            [rake, outboard, ..] if run_span(rake) < TIP_RAKE_SPAN_FRACTION * lifting_span => {
+                outboard
+            }
+            [outermost, ..] => outermost,
+            [] => return fallback,
+        };
+        (chosen.1[0] - chosen.0[0])
+            .atan2((chosen.1[1] - chosen.0[1]).abs())
             .to_degrees()
     }
 
@@ -97,9 +130,10 @@ impl AeroAnalysis<'_> {
     /// The Korn technology factor `kappa_A` of the analysed wing: the one its
     /// declared section class fixes, `geometry.wing.airfoil_class` (0.87
     /// conventional, 0.95 supercritical; Mason, *Configuration
-    /// Aerodynamics*, ch. 7, the Korn equation; Malone and Mason 1995).
+    /// Aerodynamics*, ch. 7, the Korn equation; Malone and Mason 1995), or
+    /// the in-range `geometry.wing.korn_technology_factor_override` when set.
     pub fn korn_technology_factor(&self) -> f64 {
-        self.geometry.wing.airfoil_class.korn_technology_factor()
+        self.geometry.wing.korn_technology_factor()
     }
 
     /// The Korn-equation transonic wave-drag estimate.
@@ -387,5 +421,54 @@ mod tests {
         let before = physics(&config);
         assert_eq!(before.0, 0.95);
         assert_eq!(physics(&reloaded), before);
+    }
+
+    #[test]
+    fn the_a320_korn_point_reproduces_the_audit_closed_form() {
+        // DRG-04 worked point: kappa 0.95, sweep 25 deg, t/c 0.11, CL 0.5.
+        // M_dd = 0.95/cos25 - 0.11/cos^2 25 - 0.5/(10 cos^3 25) = 0.84712,
+        // M_crit = M_dd - (0.1/80)^(1/3) = 0.73940, CDw = 20 (M - M_crit)^4:
+        // 0.54 count at M 0.78, 8.44 counts at M 0.82.
+        let tan_qc = 25.0_f64.to_radians().tan();
+        let plane = plane_with(&[
+            ([0.0, 0.0, 0.0], 6.0),
+            (
+                [
+                    le_for_quarter_chord(0.25 * 6.0 + 16.0 * tan_qc, 2.0),
+                    16.0,
+                    0.0,
+                ],
+                2.0,
+            ),
+        ]);
+        let analysis = AeroAnalysis::new(&plane, 25.0, None, None, None);
+        let (mach_dd, mach_crit) = analysis.korn_mach_numbers(0.5, Some(0.11));
+        assert!((mach_dd - 0.847124).abs() < 1e-5, "{mach_dd}");
+        assert!((mach_crit - 0.739402).abs() < 1e-5, "{mach_crit}");
+        let counts = |mach: f64| 1.0e4 * analysis.wave_drag(mach, 0.5, Some(0.11));
+        assert!((counts(0.78) - 0.543).abs() < 0.01, "{}", counts(0.78));
+        assert!((counts(0.82) - 8.44).abs() < 0.02, "{}", counts(0.82));
+    }
+
+    #[test]
+    fn the_korn_override_replaces_the_class_value_inside_its_range_only() {
+        use alas_config::geometry::GeometryConfig;
+        let plane = plane_with(&[([0.0, 0.0, 0.0], 6.0), ([8.0, 16.0, 0.0], 2.0)]);
+        let with = |value: Option<f64>| {
+            let mut geometry = GeometryConfig::default();
+            geometry.wing.korn_technology_factor_override = value;
+            AeroAnalysis::new(&plane, 25.0, Some(geometry), None, None).korn_technology_factor()
+        };
+        // Supercritical default 0.95; override 0.95 and 0.87 equal the enum.
+        assert_eq!(with(None), 0.95);
+        assert_eq!(with(Some(0.95)), 0.95);
+        assert_eq!(with(Some(0.87)), 0.87);
+        assert_eq!(with(Some(0.91)), 0.91);
+        // Out-of-range and non-finite overrides are never used.
+        assert_eq!(with(Some(1.5)), 0.95);
+        assert_eq!(with(Some(f64::NAN)), 0.95);
+        let mut wing = alas_config::geometry::GeometryConfig::default().wing;
+        wing.korn_technology_factor_override = Some(0.5);
+        assert!(wing.korn_override_error().is_some());
     }
 }

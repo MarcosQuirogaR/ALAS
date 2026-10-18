@@ -17,10 +17,18 @@
 
 mod airfoil_class;
 mod config;
+mod custom_validation;
+mod inboard;
+mod korn;
 mod planform;
+mod profile;
+mod reference;
 mod shape;
+mod smooth;
 #[cfg(test)]
 mod tests;
+mod transport;
+mod wingtip;
 
 pub use airfoil_class::AirfoilClass;
 pub use config::WingConfig;
@@ -28,4 +36,11 @@ pub use planform::{
     InboardAerodynamicStation, MainWingPanel, MainWingStation, MainWingStationKind,
     TransportPlanform, TransportPlanformError, WingSection, WingSectionError,
 };
+pub use profile::{WingDihedralStation, WingProfileError, WingThicknessStation};
+pub use reference::{
+    PublishedReference, ReferenceTrapezoid, ReferenceWingConfig, ReferenceWingMode,
+    RegisteredBasis, PUBLISHED_AREA_TOLERANCE,
+};
 pub use shape::{WingHeights, WingShape, MAX_FLIGHT_TIP_RISE_SEMISPAN_FRACTION};
+pub use smooth::{ProfileSpline, WingProfileInterpolation};
+pub use wingtip::{DeviceStation, WingtipDevice, WingtipDeviceError, WingtipDeviceKind};

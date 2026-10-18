@@ -56,54 +56,29 @@ fn every_mtow_mode_is_mission_sized() {
     }
 }
 
-/// The band closes on the design mission and flies the selected route
-/// off-design: a short route is checked against the closed MTOW, the
-/// derived design structural payload and the tank.
+/// The band is the fixed requirement at the chosen mass: the route is flown
+/// once, with the structure at that mass, and only the fixed `mtow_ceiling`
+/// limits the takeoff mass (the closure beside it is a diagnostic).
 #[test]
-fn the_band_flies_a_short_route_off_design_at_the_closed_mass() {
-    let mut config = clean_sheet(MtowSizing::MtowBand);
-    config.departure_airport = "Paris CDG (LFPG)".to_owned();
-    config.arrival_airport = "Frankfurt (EDDF)".to_owned();
-    let assessment = assess(&config, &DesignVector::default());
+fn the_band_is_the_fixed_requirement_at_the_chosen_mass() {
+    let config = clean_sheet(MtowSizing::MtowBand);
+    let chosen_kg = 0.97 * config.mtow_band_target_kg();
+    let design = DesignVector {
+        mtow_kg: Some(chosen_kg),
+        ..Default::default()
+    };
+    let assessment = assess(&config, &design);
     let sized = &assessment.sized;
-    let flight = sized
-        .mtow
-        .offdesign
-        .as_ref()
-        .expect("the route is flown off-design");
-    assert!(
-        flight.range_m < 0.1 * sized.design_range_m,
-        "{} vs {}",
-        flight.range_m,
-        sized.design_range_m
-    );
-    assert_eq!(flight.mtow_kg, sized.takeoff_mass_kg);
-    assert!(
-        (flight.payload_limit_kg
-            - (sized.mtow.derived_design_mzfw_kg - sized.operating_empty_mass_kg))
-            .abs()
-            < 1e-6
-    );
-    for id in [
-        "offdesign_payload",
-        "offdesign_tow",
-        "offdesign_fuel_capacity",
-    ] {
-        let found = residual(&assessment, id).unwrap_or_else(|| panic!("{id} missing"));
-        assert!(found.raw_residual.is_finite(), "{id}");
+    assert!(sized.mtow.offdesign.is_none());
+    assert_eq!(sized.mtow.structural_basis, "declared_cap");
+    assert_eq!(sized.design_gross_mass_kg, chosen_kg);
+    for id in ["mtow_band_upper", "mtow_band_lower"] {
+        assert!(residual(&assessment, id).is_none(), "{id}");
     }
-    // A short route at the design payload needs far less than the MTOW.
-    // With no planning seats the design payload is the laid-out load case,
-    // so the route payload meets the derived design structural payload.
-    let payload = residual(&assessment, "offdesign_payload").unwrap();
-    assert!(payload.raw_residual.abs() < 1e-6, "{payload:?}");
-    let tow = residual(&assessment, "offdesign_tow").unwrap();
-    assert!(tow.raw_residual < 0.0, "{tow:?}");
-    assert!(residual(&assessment, "mtow_band_upper").is_some());
-    assert!(residual(&assessment, "mtow_band_lower").is_some());
-    assert!(residual(&assessment, "mtow_ceiling").is_none());
-    // The objective is normalised by the band target.
-    assert!(sized.takeoff_mass_kg <= config.mtow_plan().upper_bound_kg.unwrap() + 1e-6);
+    let ceiling = residual(&assessment, "mtow_ceiling").expect("the fixed ceiling");
+    assert_eq!(ceiling.limit, chosen_kg);
+    let closure = residual(&assessment, "mtow_band_closure").expect("the closure diagnostic");
+    assert_eq!(closure.role, alas_opt::mdo::ResidualRole::Diagnostic);
 }
 
 /// The payload-adjusted mode carries fuel-policy reserves and closes the
@@ -131,7 +106,7 @@ fn the_payload_adjusted_closure_carries_reserves_and_closes_the_ledger() {
 /// for a clean sheet and for a registered aircraft in reference adaptation.
 #[test]
 fn the_design_modes_design_the_structure_at_the_converged_mass() {
-    for sizing in [MtowSizing::MtowBand, MtowSizing::PayloadAdjusted] {
+    for sizing in [MtowSizing::PayloadAdjusted] {
         let clean = clean_sheet(sizing);
         let (reference, a320) = a320_reference(sizing);
         for (config, design, what) in [
@@ -192,18 +167,29 @@ fn the_fixed_requirement_keeps_the_declared_cap() {
     );
 }
 
-/// Zero-fuel mass plus every fuel past the destination (contingency,
-/// alternate, final reserve, additional, extra and the taxi-in budget) of
-/// the sizing closure, kg.
+/// The landing mass of the sizing closure's design mission, kg: the reserve
+/// floor. For a settled dispatch it is the plan's own destination landing mass,
+/// which equals the zero-fuel mass plus every fuel past the destination
+/// (contingency, alternate, final reserve, additional, extra and the taxi-in
+/// budget) up to the dispatch's settling tolerance; the limit, the search's
+/// residual and the report's arrival check read this one value.
 fn landing_floor(sized: &alas_opt::SizedCandidate) -> f64 {
     let plan = &sized.dispatch.plan;
-    sized.dispatch.zero_fuel_mass_kg
+    let closed_form_kg = sized.dispatch.zero_fuel_mass_kg
         + plan.contingency.kg
         + plan.alternate.kg
         + plan.final_reserve.kg
         + plan.additional.kg
         + plan.extra.kg
-        + plan.taxi_in_fuel_kg()
+        + plan.taxi_in_fuel_kg();
+    let floor_kg = sized
+        .design_mission_landing_mass_kg()
+        .expect("a finite design-mission landing mass");
+    assert!(
+        (floor_kg - closed_form_kg).abs() < 1.0e-3 * sized.takeoff_mass_kg,
+        "floor {floor_kg} kg vs closed form {closed_form_kg} kg"
+    );
+    floor_kg
 }
 
 /// The payload-adjusted design landing mass covers the zero-fuel mass and
@@ -256,15 +242,27 @@ fn the_clean_sheet_payload_adjusted_landing_mass_is_the_larger_bound() {
     let floor_kg = landing_floor(sized);
     assert!((sized.design_landing_mass_kg - fraction_kg.max(floor_kg)).abs() < 1e-6);
     let landing = residual(&assessment, "landing_mass").expect("landing residual");
-    // The limit is designed at the reserve floor of the last closure pass;
-    // the closure stops once the takeoff mass moves by less than
-    // `sizing_tolerance_kg`, so the planned landing mass can sit above the
-    // limit by at most that fraction of it.
+    // The limit is designed at the reserve floor of the closure, which for a
+    // settled dispatch is the plan's own destination landing mass, so the
+    // residual sits exactly on its limit when the floor binds: the search
+    // accepts no excess that the strict reporting check would reject.
     let closure_relative = config.optimizer.objective.sizing_tolerance_kg / sized.takeoff_mass_kg;
     assert!(
         landing.raw_residual < closure_relative * landing.limit,
         "{landing:?}"
     );
+    if floor_kg >= fraction_kg
+        && matches!(
+            sized.dispatch.status,
+            alas_mass::dispatch::DispatchStatus::Converged
+        )
+    {
+        assert_eq!(landing.raw_residual, 0.0, "{landing:?}");
+        assert_eq!(
+            sized.design_mission_landing_mass_kg(),
+            Some(sized.dispatch.destination_landing_mass_kg)
+        );
+    }
 }
 
 fn a220_reference(sizing: MtowSizing) -> (AlasConfig, DesignVector) {
@@ -275,28 +273,18 @@ fn a220_reference(sizing: MtowSizing) -> (AlasConfig, DesignVector) {
     (config, design)
 }
 
-/// A registered aircraft closes the MTOW band on its charted design point
-/// (ACP Issue 013: 2,150 nmi at the MZFW corner, 18,643 kg payload): the
-/// closure lies inside the band about the declared MTOW, the route landing
-/// mass stays below the design landing mass, and the candidate is feasible.
+/// A registered aircraft in the band mode, evaluated at the target, is the
+/// fixed requirement at the target: same residual values, same masses.
 #[test]
-fn the_a220_band_closes_on_its_charted_point_inside_the_declared_band() {
-    let (config, design) = a220_reference(MtowSizing::MtowBand);
-    let assessment = assess(&config, &design);
-    let sized = &assessment.sized;
-    assert!((sized.design_range_m - 2_150.0 * 1_852.0).abs() < 1e-6);
-    assert!((sized.mtow.design_payload_kg - 18_643.0).abs() < 1e-6);
-    let plan = config.mtow_plan();
-    assert!(sized.takeoff_mass_kg >= plan.lower_bound_kg.unwrap());
-    assert!(sized.takeoff_mass_kg <= plan.upper_bound_kg.unwrap());
-    let flight = sized
-        .mtow
-        .offdesign
-        .as_ref()
-        .expect("route flown off-design");
-    assert!(flight.dispatch.destination_landing_mass_kg <= sized.design_landing_mass_kg);
-    assert!(sized.dispatch.destination_landing_mass_kg <= sized.design_landing_mass_kg + 1e-6);
-    assert!(assessment.hard_feasible, "{:?}", assessment.residuals);
+fn the_a220_band_at_its_target_is_the_fixed_requirement() {
+    let (config, mut design) = a220_reference(MtowSizing::MtowBand);
+    design.mtow_kg = Some(config.mtow_band_target_kg());
+    let band = assess(&config, &design);
+    let (fixed_config, fixed_design) = a220_reference(MtowSizing::FixedRequirement);
+    let fixed = assess(&fixed_config, &fixed_design);
+    assert_eq!(band.sized.takeoff_mass_kg, fixed.sized.takeoff_mass_kg);
+    assert_eq!(band.hard_feasible, fixed.hard_feasible);
+    assert_eq!(band.violated_hard_ids(), fixed.violated_hard_ids());
 }
 
 /// The payload-adjusted mode closes on the same charted range by default,
@@ -310,5 +298,16 @@ fn the_payload_adjusted_mode_closes_on_the_charted_range_by_default() {
     assert!((sized.design_range_m - 2_150.0 * 1_852.0).abs() < 1e-6);
     assert!(sized.takeoff_mass_kg <= config.requirements.mtow_kg);
     assert!(sized.takeoff_mass_kg > 0.85 * config.requirements.mtow_kg);
-    assert!(assessment.hard_feasible, "{:?}", assessment.residuals);
+    // No hard finding. The A220's cruise_thrust, 0.3350 installed against 0.3367 required in
+    // lane a220-atr (the PW1500G has no cruise-thrust datum, so the generic chart deck is used
+    // unscaled), now passes by 0.7 %: 0.3371 installed against 0.3346 required, with the merges
+    // since that lane (the cruise-drag change among them is kappa-cal: clean-polar kappa 0.43 and
+    // viscous margin 0.97). The toc_rate_of_climb miss was a residual speed inconsistency, fixed
+    // in a220-atr. A 0.5 % margin either way is inside the model's thrust uncertainty.
+    assert_eq!(
+        assessment.violated_hard_ids(),
+        Vec::<&str>::new(),
+        "{:?}",
+        assessment.residuals
+    );
 }

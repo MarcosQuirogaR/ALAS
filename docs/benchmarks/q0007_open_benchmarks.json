@@ -431,7 +431,7 @@
     {
       "source": "Open manufacturer aircraft-characteristics planning documents reviewed in the audit",
       "url": null,
-      "reason_not_benchmark": "They provide selected planning dimensions, limits, or payload-range information for particular revisions/variants, but not a complete compatible geometry, engine deck, component mass/CG, and operational rule set. See audit/AUDIT_FINDINGS.md research ledger S-0001-S-0008."
+      "reason_not_benchmark": "They provide selected planning dimensions, limits, or payload-range information for particular revisions/variants, but not a complete compatible geometry, engine deck, component mass/CG, and operational rule set."
     }
   ],
   "owner_authorized_data_required": [

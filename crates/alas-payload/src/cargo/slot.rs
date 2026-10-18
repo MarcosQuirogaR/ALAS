@@ -25,6 +25,9 @@ pub struct CargoSlot {
     pub realized_height_m: f64,
     /// Net cargo loaded, kg, excluding the container's own tare.
     pub payload: f64,
+    /// A structural limit of this position below the container's own, kg net
+    /// (the load-carrying ramp of a freight hold), or `None`.
+    pub net_limit_kg: Option<f64>,
 }
 
 /// Below this a position counts as empty, so an all-but-unloaded container is
@@ -39,7 +42,8 @@ impl CargoSlot {
             // structural hold limit. Retain that density when headroom shrinks.
             self.uld.max_net() * (self.realized_height_m / self.uld.height).clamp(0.0, 1.0)
         } else {
-            self.uld.max_net()
+            self.net_limit_kg
+                .map_or(self.uld.max_net(), |limit| limit.min(self.uld.max_net()))
         }
     }
 

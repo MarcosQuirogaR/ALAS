@@ -14,10 +14,18 @@ rust-version.workspace = true
 alas-atmo = { path = "../alas-atmo" }
 alas-config-derive = { path = "../alas-config-derive" }
 alas-i18n = { path = "../alas-i18n" }
+# The loft data-file validation evaluates its curves with the clamped B-spline
+# `alas-math` owns; `alas-math` depends on nothing in the workspace.
+alas-math = { path = "../alas-math" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
+
+[features]
+# Compiles the hand-made `test_fuselage` loft into the registry so that other
+# crates can exercise the builder path end to end. Never enabled in a product build.
+test-fixtures = []
 
 [dev-dependencies]
 alas-testkit = { path = "../alas-testkit" }

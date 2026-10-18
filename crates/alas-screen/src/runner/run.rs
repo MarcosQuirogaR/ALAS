@@ -3,7 +3,7 @@
 
 //! The staged sweep: 2-D surrogate scoring, 3-D trim re-simulation and MSES verification.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -86,7 +86,7 @@ pub(super) fn run_airfoil_screening_with_mass_model(
     let model_size = ModelSize::from_name(&options.model_size).unwrap_or(ModelSize::Large);
 
     let mut results: Vec<AirfoilCandidateResult> = Vec::new();
-    let mut errors: Vec<HashMap<String, String>> = Vec::new();
+    let mut errors: Vec<BTreeMap<String, String>> = Vec::new();
     let mut cancelled = false;
 
     // Stage 1: 2-D screening. Scoring one candidate touches nothing shared,
@@ -143,7 +143,7 @@ pub(super) fn run_airfoil_screening_with_mass_model(
         if cand.status == "ok" {
             results.push(cand);
         } else {
-            let mut err_map = HashMap::new();
+            let mut err_map = BTreeMap::new();
             err_map.insert("name".to_string(), names[index].clone());
             err_map.insert(
                 "error".to_string(),
@@ -234,19 +234,22 @@ pub(super) fn run_airfoil_screening_with_mass_model(
         }
 
         results.sort_by(|a, b| {
-            let key_a = (
-                a.refined,
-                a.score_3d.unwrap_or(-1.0),
-                a.score.unwrap_or(0.0),
-            );
-            let key_b = (
-                b.refined,
-                b.score_3d.unwrap_or(-1.0),
-                b.score.unwrap_or(0.0),
-            );
+            // Descending on (refined, 3-D score, 2-D score). `+ 0.0` folds
+            // -0.0 into +0.0 so `total_cmp` orders every finite key exactly
+            // as the former tuple `partial_cmp` did, and NaN gets a place.
+            let key = |r: &AirfoilCandidateResult| {
+                (
+                    r.refined,
+                    r.score_3d.unwrap_or(-1.0) + 0.0,
+                    r.score.unwrap_or(0.0) + 0.0,
+                )
+            };
+            let (key_a, key_b) = (key(a), key(b));
             key_b
-                .partial_cmp(&key_a)
-                .unwrap_or(std::cmp::Ordering::Equal)
+                .0
+                .cmp(&key_a.0)
+                .then_with(|| key_b.1.total_cmp(&key_a.1))
+                .then_with(|| key_b.2.total_cmp(&key_a.2))
         });
     }
 

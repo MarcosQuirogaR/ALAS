@@ -16,8 +16,9 @@ use alas_struct::{
     loads::engine_point_loads_n,
     scope::{WingFuelDesignCase, WingMountedRelief},
     sizing::{
-        box_chord_band, box_running_mass_kg_m, size_for_linear_model, size_wingbox_with_scope,
-        size_wingbox_with_wing_carried_mass, sizing_stations, WingFuelRelief, WingboxSizing,
+        box_chord_band, box_running_mass_kg_m, size_for_linear_model, size_wingbox_with_case_set,
+        size_wingbox_with_scope, size_wingbox_with_wing_carried_mass, sizing_stations, CaseSet,
+        WingFuelRelief, WingboxSizing,
     },
     tanks,
 };
@@ -138,7 +139,11 @@ fn transport_presets_conserve_the_declared_box_material_volumes() {
 #[test]
 fn span_increases_mass_and_depth_reduces_mass_in_the_strength_critical_domain() {
     let config = AlasConfig::from_value(&serde_json::json!({"preset":"A320-200"})).unwrap();
-    let design = presets::get("A320-200").unwrap().design_vector;
+    let mut design = presets::get("A320-200").unwrap().design_vector;
+    // Geometry round 2 gave the A320 wing the CRM thickness distribution (15.4 % root, 13.0 %
+    // mean); at that depth the minimum-gauge webs and ribs outweigh the caps, which is the
+    // regime this test excludes. A 0.8 multiplier restores the 10 % class box the premise needs.
+    design.airfoil_thickness_scale = 0.8;
     let baseline = dry_strength_size(&config, &design);
     let mut longer = design;
     longer.span_m *= 1.10;
@@ -287,6 +292,7 @@ fn axial_laminate_cap_reaches_the_declared_strain_limit_in_a_strength_critical_b
         &WingMountedRelief {
             point_masses_kg: Vec::new(),
             omitted: Vec::new(),
+            torque: Default::default(),
         },
     );
     assert!(
@@ -294,44 +300,75 @@ fn axial_laminate_cap_reaches_the_declared_strain_limit_in_a_strength_critical_b
         "{:?}",
         scoped.scope
     );
-    let sizing = scoped.sizing;
-    let response = analyze_structure_with_wing_carried_mass(
-        &geometry,
-        &sizing,
-        cfg,
-        &config.requirements,
-        &config.geometry.engine,
-        &config.mass_model,
-        skin,
-        web,
-        cap,
-        &dry,
-        &[],
-    );
-    let result = assess(&sizing, &response, LinearModelLimits::default());
-    assert!(result.max_strength_utilization <= 1.0 + alas_struct::sizing::MARGIN_NUMERICAL_ZERO);
-    let maximum_cap_strain = response
-        .load_cases
-        .iter()
-        .flat_map(|case| &case.spar_stress)
-        .flat_map(|spar| &spar.stress_pa)
-        .map(|stress| stress / cap.e_pa)
-        .fold(0.0_f64, f64::max);
+    let evaluate = |sizing: &WingboxSizing| {
+        let response = analyze_structure_with_wing_carried_mass(
+            &geometry,
+            sizing,
+            cfg,
+            &config.requirements,
+            &config.geometry.engine,
+            &config.mass_model,
+            skin,
+            web,
+            cap,
+            &dry,
+            &[],
+        );
+        let result = assess(sizing, &response, LinearModelLimits::default());
+        let strain = response
+            .load_cases
+            .iter()
+            .flat_map(|case| &case.spar_stress)
+            .flat_map(|spar| &spar.stress_pa)
+            .map(|stress| stress / cap.e_pa)
+            .fold(0.0_f64, f64::max);
+        (strain, result)
+    };
     // The 60/30/10 axial modulus follows CLT (NASA RP-1351, sec. V-B),
     // with AS4/3501-6 lamina data (NASA TM-104055, table 1). The product
     // damage-tolerant strain proxy is 0.004; clear-web combined strength and
     // buckling must size webs instead of imposing a lower artificial cap limit.
     let allowable_strain = alas_struct::allowables::bending_allowable_pa(cap) / cap.e_pa;
     assert!((allowable_strain - 0.004).abs() < 1.0e-15);
-    // A 1e-8 relative bound permits the 1e-9 relieved-mass fixed-point closure
-    // and section arithmetic, not uncertainty in the declared strain limit.
+
+    // The full envelope (manoeuvre, gust, torque): the torque shear flow
+    // thickens the webs of this box, which then carry part of the bending, so
+    // the caps sit under the strain limit (0.0033 measured) while the webs
+    // govern. No section may exceed the limit.
+    let (full_strain, full_result) = evaluate(&scoped.sizing);
+    assert!(
+        full_result.max_strength_utilization <= 1.0 + alas_struct::sizing::MARGIN_NUMERICAL_ZERO
+    );
+    assert!(
+        full_strain <= allowable_strain * (1.0 + 1.0e-8),
+        "cap strain={full_strain}"
+    );
+
+    // The pull-up case alone: the strength-critical caps reach the declared
+    // strain limit exactly. A 1e-8 relative bound permits the 1e-9
+    // relieved-mass fixed-point closure and section arithmetic, not
+    // uncertainty in the declared strain limit.
+    let sizing = size_wingbox_with_case_set(
+        &geometry,
+        cfg,
+        &config.requirements,
+        skin,
+        web,
+        cap,
+        materials::get(&cfg.rib_material).unwrap(),
+        Some(&dry),
+        &[],
+        CaseSet::MANOEUVRE_ONLY,
+    );
+    let (maximum_cap_strain, result) = evaluate(&sizing);
+    assert!(result.max_strength_utilization <= 1.0 + alas_struct::sizing::MARGIN_NUMERICAL_ZERO);
     assert!(
         (maximum_cap_strain / allowable_strain - 1.0).abs() < 1.0e-8,
         "cap strain={maximum_cap_strain}, root sections={:?}, assessment={result:?}",
         sizing
             .spars
             .iter()
-            .map(|spar| (spar.h[0], spar.a_cap[0], spar.t_cap[0], spar.t_web))
+            .map(|spar| (spar.h[0], spar.a_cap[0], spar.t_cap[0], spar.t_web[0]))
             .collect::<Vec<_>>()
     );
 }

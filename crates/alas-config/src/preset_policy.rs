@@ -137,6 +137,7 @@ pub fn protected_geometry(reference: &GeometryConfig, current: &GeometryConfig) 
     let mut engine = current.engine.clone();
     engine.spanwise_positions_m = reference.engine.spanwise_positions_m.clone();
     engine.z_m = reference.engine.z_m;
+    engine.z_per_engine_m = reference.engine.z_per_engine_m.clone();
     engine.inlet_x_offset_m = reference.engine.inlet_x_offset_m;
     protected.engine = engine;
     protected
@@ -286,6 +287,27 @@ pub fn bounds_violations(
         .optimizer
         .design_space
         .envelope(&preset.design_vector);
+    // The MTOW band mode searches the takeoff mass as one coordinate more; its
+    // pair must lie inside the band, and the sixteen geometric pairs are held
+    // to the envelope as always.
+    let band = config.optimizer.objective.mtow_sizing == crate::MtowSizing::MtowBand;
+    let mut mass_violation = None;
+    let bounds = if band && bounds.len() == envelope.len() + 1 {
+        let (lower, upper) = bounds[envelope.len()];
+        let (band_lower, band_upper) = config.mtow_band_limits_kg();
+        let slack = 1e-9 * band_upper;
+        if lower < band_lower - slack || upper > band_upper + slack || lower > upper {
+            mass_violation = Some(PresetPolicyViolation {
+                path: "mtow_kg".to_owned(),
+                class: PresetFieldClass::OptimizerEnvelope,
+                expected: format!("[{band_lower}, {band_upper}]"),
+                actual: format!("[{lower}, {upper}]"),
+            });
+        }
+        &bounds[..envelope.len()]
+    } else {
+        bounds
+    };
     if bounds.len() != envelope.len() {
         return vec![PresetPolicyViolation {
             path: "bounds".to_owned(),
@@ -294,7 +316,7 @@ pub fn bounds_violations(
             actual: format!("{} bound pairs", bounds.len()),
         }];
     }
-    envelope
+    let mut violations: Vec<PresetPolicyViolation> = envelope
         .iter()
         .zip(bounds)
         .filter(|(variable, &(lower, upper))| {
@@ -307,7 +329,9 @@ pub fn bounds_violations(
             expected: format!("[{}, {}]", variable.lower, variable.upper),
             actual: format!("[{lower}, {upper}]"),
         })
-        .collect()
+        .collect();
+    violations.extend(mass_violation);
+    violations
 }
 
 /// Every violation a dispatch of `config` would carry: none unless preset
@@ -406,6 +430,26 @@ mod tests {
                 assert!(violations.is_empty(), "{name} {mode:?}: {violations:?}");
             }
         }
+    }
+
+    #[test]
+    fn the_band_mode_adds_a_takeoff_mass_pair_that_must_lie_inside_the_band() {
+        let mut config = preset_config("A320-200", DesignMode::ReferenceAdaptation);
+        config.optimizer.objective.mtow_sizing = crate::MtowSizing::MtowBand;
+        let preset = presets::get("A320-200").unwrap();
+        let mut bounds = config.optimizer.design_space.bounds(&preset.design_vector);
+        let (lower_kg, upper_kg) = config.mtow_band_limits_kg();
+        bounds.push((lower_kg, upper_kg));
+        assert!(bounds_violations(&config, preset, &bounds).is_empty());
+        // A pair wider than the band is named.
+        *bounds.last_mut().unwrap() = (0.5 * lower_kg, upper_kg);
+        let violations = bounds_violations(&config, preset, &bounds);
+        assert_eq!(violations.len(), 1);
+        assert_eq!(violations[0].path, "mtow_kg");
+        // Outside the band mode the extra pair is a wrong length.
+        config.optimizer.objective.mtow_sizing = crate::MtowSizing::FixedRequirement;
+        let violations = bounds_violations(&config, preset, &bounds);
+        assert_eq!(violations[0].path, "bounds");
     }
 
     #[test]

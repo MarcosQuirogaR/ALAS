@@ -6,11 +6,11 @@
 use serde::{Deserialize, Serialize};
 
 use super::airfoil_class::AirfoilClass;
-use super::planform::{
-    validate_finite, validate_positive, validate_sweep, InboardAerodynamicStation, MainWingStation,
-    MainWingStationKind, TransportPlanform, TransportPlanformError, WingSection, WingSectionError,
-};
-use crate::{ConfigNode, DesignVector};
+use super::planform::WingSection;
+use super::profile::{WingDihedralStation, WingThicknessStation};
+use super::reference::ReferenceWingConfig;
+use super::smooth::WingProfileInterpolation;
+use crate::ConfigNode;
 
 /// Main-wing scaffold not covered by the design vector.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ConfigNode)]
@@ -57,6 +57,23 @@ pub struct WingConfig {
         help = "How far the wing tip rises from the static ground shape (the heights above, as the ground-clearance tables measure them at maximum ramp weight) to the 1 g flight shape, as a fraction of the semispan. The aerodynamics and the dihedral checks use the flight shape; ground clearance uses the heights above. Leave unset when one shape serves both."
     )]
     pub flight_tip_rise_semispan_fraction: Option<f64>,
+
+    /// Static-to-1 g rise of the centreline root height.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[config(
+        hidden,
+        unit = "m",
+        help = "Optional rise of the wing-root height from the static ground shape to the 1 g flight shape, metres; the flight height polyline then starts at the raised root. Unset keeps the root where the ground shape has it."
+    )]
+    pub flight_root_rise_m: Option<f64>,
+
+    /// Nacelles keep their static height in the flight shape.
+    #[serde(default, skip_serializing_if = "is_false")]
+    #[config(
+        hidden,
+        help = "When set, the nacelles hang from the static ground-shape wing in the flight shape too, as the manufacturer front views and clearance tables draw them, instead of rising with the flight rise of the wing."
+    )]
+    pub nacelles_hold_ground_height: bool,
 
     /// Incidence of the root section.
     #[config(
@@ -130,6 +147,71 @@ pub struct WingConfig {
         help = "Legacy reference-replay override. Product transport wings use the design-vector sweep across both panels so this value cannot create an unintended leading-edge crank."
     )]
     pub outboard_le_sweep_deg: Option<f64>,
+    /// Leading-edge sweep of the inboard panel (centreline to kink) when it differs from the outboard one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[config(
+        hidden,
+        unit = "deg",
+        help = "Optional leading-edge sweep of the inboard panel (centreline to kink), degrees. When unset the design-vector sweep runs straight from the centreline to the tip. Read only with a side-of-body or kink station."
+    )]
+    pub inboard_le_sweep_deg: Option<f64>,
+
+    /// Chord at the extreme tip of a swept-back tip.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[config(
+        hidden,
+        unit = "m",
+        help = "Optional chord at the extreme wing tip of a swept-back tip, metres. The design-vector tip chord is then the chord the straight leading and trailing edges would reach at the tip; from the rake start the leading edge sweeps further aft while the trailing edge stays one straight line, so the tip chord shrinks to this value."
+    )]
+    pub tip_rake_tip_chord_m: Option<f64>,
+
+    /// Where the swept-back tip rake starts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[config(
+        hidden,
+        help = "Optional span fraction where a swept-back tip begins (used with the rake tip chord)."
+    )]
+    pub tip_rake_start_span_fraction: Option<f64>,
+
+    /// Which wing the reference area, span, MAC and MAC leading edge describe.
+    #[serde(default, skip_serializing_if = "ReferenceWingConfig::is_default")]
+    #[config(
+        hidden,
+        help = "Reference-wing convention: Drawn (default) quotes S_ref, b_ref, MAC and the MAC leading edge on the drawn planform; Trapezoid quotes them on the manufacturer reference trapezoid made by extending the outboard panel leading and trailing edges to the centreline. Wetted area and the lattice panels always use the drawn planform. An optional published reference area is checked against the trapezoid (warning above 1 %)."
+    )]
+    pub reference_wing: ReferenceWingConfig,
+
+    /// Optional wingtip device (winglet, sharklet or fence); see [`super::WingtipDevice`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[config(
+        hidden,
+        help = "Optional wingtip device (winglet, sharklet or tip fence) added as an extra lifting surface at the wing tip."
+    )]
+    pub wingtip_device: Option<super::wingtip::WingtipDevice>,
+
+    /// Interior spanwise dihedral stations (ground-shape leading-edge heights).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[config(
+        hidden,
+        help = "Optional interior stations that bend the root-break-tip height polyline: dihedral that varies along the span (see WingDihedralStation)."
+    )]
+    pub dihedral_stations: Vec<WingDihedralStation>,
+
+    /// Spanwise thickness multipliers.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[config(
+        hidden,
+        help = "Optional stations scaling the section thickness along the span so a thick root falls to a thin outer wing (see WingThicknessStation)."
+    )]
+    pub thickness_stations: Vec<WingThicknessStation>,
+
+    /// How the dihedral, twist and thickness stations are interpolated.
+    #[serde(default, skip_serializing_if = "WingProfileInterpolation::is_linear")]
+    #[config(
+        hidden,
+        help = "Interpolation of the spanwise dihedral, twist and thickness profiles: piecewise linear, or a C2 cubic spline through every station."
+    )]
+    pub wing_profile_interpolation: WingProfileInterpolation,
 
     /// The section the root is morphed from.
     #[config(
@@ -162,6 +244,21 @@ pub struct WingConfig {
     )]
     pub airfoil_class: AirfoilClass,
 
+    /// Optional continuous Korn technology factor that replaces the two-valued
+    /// [`AirfoilClass`] mapping (DRG-04). `None` keeps the class value (0.87
+    /// conventional, 0.95 supercritical). Legal range 0.80-1.00: below the
+    /// NACA 6-series value no transport section exists, and 1.00 is above
+    /// every published supercritical section (NASA SC(2): 0.95). A value
+    /// needs a documented source (section data, Mason ch. 7 chart of kappa
+    /// against section family); it is not a free tuning knob. Not a form
+    /// field and not serialized while unset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[config(
+        hidden,
+        help = "Optional Korn technology factor overriding the section class value (0.87 conventional, 0.95 supercritical); valid 0.80-1.00. Needs a documented section-technology source."
+    )]
+    pub korn_technology_factor_override: Option<f64>,
+
     /// Optional user-defined stations lofted between the defining planform
     /// edges. Preset geometry remains locked by the application while this
     /// list is available for a clean-sheet/custom geometry configuration.
@@ -180,6 +277,10 @@ pub struct WingConfig {
     pub n_subdivisions: i64,
 }
 
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
 impl Default for WingConfig {
     fn default() -> Self {
         // A supercritical inboard section washing out into a thinner
@@ -191,6 +292,8 @@ impl Default for WingConfig {
             break_z_m: -0.3,
             tip_z_m: 2.5,
             flight_tip_rise_semispan_fraction: None,
+            flight_root_rise_m: None,
+            nacelles_hold_ground_height: false,
             root_twist_deg: 4.0,
             break_twist_deg: 2.0,
             break_span_fraction: 0.35,
@@ -202,286 +305,20 @@ impl Default for WingConfig {
             kink_span_fraction: Some(0.37),
             outboard_sweep_decrement_deg: 2.0,
             outboard_le_sweep_deg: None,
+            inboard_le_sweep_deg: None,
+            tip_rake_tip_chord_m: None,
+            tip_rake_start_span_fraction: None,
+            reference_wing: ReferenceWingConfig::default(),
+            wingtip_device: None,
+            dihedral_stations: Vec::new(),
+            thickness_stations: Vec::new(),
+            wing_profile_interpolation: WingProfileInterpolation::Linear,
             root_airfoil: "SC2-0714".to_owned(),
             tip_airfoil: "naca2410".to_owned(),
             airfoil_class: AirfoilClass::Supercritical,
+            korn_technology_factor_override: None,
             custom_sections: Vec::new(),
             n_subdivisions: 24,
         }
-    }
-}
-
-impl WingConfig {
-    /// Validate user-defined stations without resolving their airfoils.
-    ///
-    /// The builder performs the planform-dependent taper check after it has a
-    /// design vector. Keeping the structural checks here also lets the GUI
-    /// reject malformed saved values before a build is attempted.
-    pub fn validate_custom_sections(&self) -> Result<(), WingSectionError> {
-        let mut previous = None;
-        for (index, section) in self.custom_sections.iter().enumerate() {
-            for (field, value) in [
-                ("span_fraction", section.span_fraction),
-                ("leading_edge_x_m", section.leading_edge_x_m),
-                ("chord_m", section.chord_m),
-                ("z_m", section.z_m),
-                ("twist_deg", section.twist_deg),
-            ] {
-                if !value.is_finite() {
-                    return Err(WingSectionError::NonFinite {
-                        index,
-                        field,
-                        value,
-                    });
-                }
-            }
-            if !(0.0..1.0).contains(&section.span_fraction) {
-                return Err(WingSectionError::SpanOutOfRange {
-                    index,
-                    value: section.span_fraction,
-                });
-            }
-            if section.chord_m <= 0.0 {
-                return Err(WingSectionError::NonPositiveChord {
-                    index,
-                    value: section.chord_m,
-                });
-            }
-            if section.airfoil.trim().is_empty() {
-                return Err(WingSectionError::EmptyAirfoil(index));
-            }
-            if let Some(previous) = previous {
-                if section.span_fraction <= previous {
-                    return Err(WingSectionError::InvalidOrder {
-                        index,
-                        previous,
-                        current: section.span_fraction,
-                    });
-                }
-            }
-            previous = Some(section.span_fraction);
-        }
-        Ok(())
-    }
-
-    /// Validate custom chords against the defining planform stations.
-    pub fn validate_custom_sections_against_planform(
-        &self,
-        planform: &TransportPlanform,
-    ) -> Result<(), WingSectionError> {
-        self.validate_custom_sections()?;
-        let planform_stations = planform.stations();
-        let mut stations: Vec<(f64, f64)> = planform_stations
-            .iter()
-            .filter(|station| {
-                station.kind != MainWingStationKind::SideOfBody
-                    || self.side_of_body_chord_ratio.is_some()
-            })
-            .map(|station| (station.span_fraction, station.chord_m))
-            .collect();
-        stations.extend(
-            self.custom_sections
-                .iter()
-                .map(|section| (section.span_fraction, section.chord_m)),
-        );
-        stations.sort_by(|left, right| left.0.total_cmp(&right.0));
-        for pair in stations.windows(2) {
-            if (pair[1].0 - pair[0].0).abs() <= 1.0e-9 {
-                if let Some(station) = planform_stations.iter().find(|station| {
-                    (station.span_fraction - pair[1].0).abs() <= 1.0e-9
-                        && station.kind != MainWingStationKind::Root
-                        && station.kind != MainWingStationKind::Tip
-                        && (station.kind != MainWingStationKind::SideOfBody
-                            || self.side_of_body_chord_ratio.is_some())
-                }) {
-                    return Err(WingSectionError::DuplicatePlanformStation {
-                        span_fraction: pair[1].0,
-                        kind: station.kind,
-                    });
-                }
-            }
-            if pair[1].1 > pair[0].1 + 1.0e-9 {
-                return Err(WingSectionError::NonMonotoneChord {
-                    inboard: pair[0].1,
-                    outboard: pair[1].1,
-                });
-            }
-        }
-        Ok(())
-    }
-
-    /// Return custom stations in validated centerline-to-tip order.
-    pub fn custom_sections_sorted(&self) -> Result<Vec<WingSection>, WingSectionError> {
-        self.validate_custom_sections()?;
-        let mut sections = self.custom_sections.clone();
-        sections.sort_by(|left, right| left.span_fraction.total_cmp(&right.span_fraction));
-        Ok(sections)
-    }
-
-    /// Resolve the side-of-body/root/kink/tip planform for `design`.
-    ///
-    /// Existing configurations leave all optional transport fields unset and
-    /// therefore produce the historical root/kink/tip geometry exactly. New
-    /// configurations can make the side-of-body and outboard sweep explicit
-    /// without consumers duplicating sweep or trailing-edge calculations.
-    ///
-    /// Sweep convention: `design.sweep_deg` is a leading-edge angle, positive
-    /// aft. When a side-of-body or kink station is declared (every product
-    /// preset), that one angle runs straight from the centreline to the tip,
-    /// and `outboard_sweep_decrement_deg` and `outboard_le_sweep_deg` are not
-    /// read; they shape only the legacy root/kink/tip replay. A published
-    /// quarter-chord sweep is therefore converted to the leading edge through
-    /// the outboard panel's taper before it is entered, as
-    /// `tan(LE) = tan(c/4) + (c_kink - c_tip) / (4 (y_tip - y_kink))`.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`TransportPlanformError`] when station order, dimensions,
-    /// chords, or sweep angles cannot describe a finite physical wing.
-    pub fn transport_planform(
-        &self,
-        design: &DesignVector,
-    ) -> Result<TransportPlanform, TransportPlanformError> {
-        validate_finite("span", design.span_m)?;
-        validate_positive("span", design.span_m)?;
-        validate_finite("root chord", design.root_chord_m)?;
-        validate_positive("root chord", design.root_chord_m)?;
-        validate_finite("kink chord", design.break_chord_m)?;
-        validate_positive("kink chord", design.break_chord_m)?;
-        validate_finite("tip chord", design.tip_chord_m)?;
-        validate_positive("tip chord", design.tip_chord_m)?;
-        validate_finite("inboard leading-edge sweep", design.sweep_deg)?;
-
-        let semi_span_m = design.span_m / 2.0;
-        let side_of_body_span_fraction = self.side_of_body_span_fraction.unwrap_or(0.0);
-        let kink_span_fraction = self.kink_span_fraction.unwrap_or(self.break_span_fraction);
-        let transport_extension_active =
-            self.side_of_body_span_fraction.is_some() || self.kink_span_fraction.is_some();
-        let outboard_le_sweep_deg = if transport_extension_active {
-            design.sweep_deg
-        } else {
-            self.outboard_le_sweep_deg
-                .unwrap_or(design.sweep_deg - self.outboard_sweep_decrement_deg)
-        };
-
-        validate_finite("side-of-body span fraction", side_of_body_span_fraction)?;
-        validate_finite("kink span fraction", kink_span_fraction)?;
-        if let Some(side_of_body_chord_ratio) = self.side_of_body_chord_ratio {
-            validate_finite("side-of-body chord ratio", side_of_body_chord_ratio)?;
-            validate_positive("side-of-body chord ratio", side_of_body_chord_ratio)?;
-        }
-        validate_finite("outboard leading-edge sweep", outboard_le_sweep_deg)?;
-        validate_sweep("inboard leading-edge sweep", design.sweep_deg)?;
-        validate_sweep("outboard leading-edge sweep", outboard_le_sweep_deg)?;
-        if side_of_body_span_fraction < 0.0
-            || side_of_body_span_fraction >= kink_span_fraction
-            || kink_span_fraction >= 1.0
-        {
-            return Err(TransportPlanformError::InvalidStationOrder {
-                side_of_body: side_of_body_span_fraction,
-                kink: kink_span_fraction,
-            });
-        }
-        let root = MainWingStation {
-            kind: MainWingStationKind::Root,
-            span_fraction: 0.0,
-            y_m: 0.0,
-            leading_edge_x_m: 0.0,
-            chord_m: design.root_chord_m,
-        };
-        let kink_y_m = kink_span_fraction * semi_span_m;
-        let kink = MainWingStation {
-            kind: MainWingStationKind::Kink,
-            span_fraction: kink_span_fraction,
-            y_m: kink_y_m,
-            leading_edge_x_m: kink_y_m * design.sweep_deg.to_radians().tan(),
-            chord_m: design.break_chord_m,
-        };
-        let side_of_body_y_m = side_of_body_span_fraction * semi_span_m;
-        let side_of_body = (side_of_body_span_fraction > 0.0).then(|| {
-            let root_to_kink_fraction = side_of_body_span_fraction / kink_span_fraction;
-            let interpolated_chord_m = design.root_chord_m
-                + root_to_kink_fraction * (design.break_chord_m - design.root_chord_m);
-            let leading_edge_x_m = side_of_body_y_m * design.sweep_deg.to_radians().tan();
-            let kink_trailing_edge_x_m = kink.leading_edge_x_m + kink.chord_m;
-            // The centreline root is a carry-through datum inside the body,
-            // not an exposed aerodynamic chord. Preserve the trailing-edge
-            // clip when it stays inside the root-to-kink chord envelope. If
-            // that clip would make the exposed side-of-body section narrower
-            // than the kink, keep the kink chord instead: an inboard section
-            // must not grow outboard into the kink.
-            let derived_chord_m = interpolated_chord_m
-                .min(kink_trailing_edge_x_m - leading_edge_x_m)
-                .max(kink.chord_m);
-            MainWingStation {
-                kind: MainWingStationKind::SideOfBody,
-                span_fraction: side_of_body_span_fraction,
-                y_m: side_of_body_y_m,
-                leading_edge_x_m,
-                chord_m: self
-                    .side_of_body_chord_ratio
-                    .map_or(derived_chord_m, |ratio| design.root_chord_m * ratio),
-            }
-        });
-        let tip_y_m = semi_span_m;
-        let tip = MainWingStation {
-            kind: MainWingStationKind::Tip,
-            span_fraction: 1.0,
-            y_m: tip_y_m,
-            leading_edge_x_m: kink.leading_edge_x_m
-                + (tip_y_m - kink_y_m) * outboard_le_sweep_deg.to_radians().tan(),
-            chord_m: design.tip_chord_m,
-        };
-
-        let planform = TransportPlanform {
-            root,
-            side_of_body,
-            kink,
-            tip,
-            inboard_le_sweep_deg: design.sweep_deg,
-            outboard_le_sweep_deg,
-        };
-        let stations = planform.stations();
-        for pair in stations.windows(2) {
-            if pair[1].chord_m > pair[0].chord_m + 1.0e-9 {
-                return Err(TransportPlanformError::NonMonotoneChord {
-                    inboard: pair[0].chord_m,
-                    outboard: pair[1].chord_m,
-                });
-            }
-        }
-        if let Some(side_of_body) = planform.side_of_body {
-            validate_positive("side-of-body chord", side_of_body.chord_m)?;
-        }
-        Ok(planform)
-    }
-
-    /// Return the exposed inboard section for a 2-D aerodynamic calculation.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`TransportPlanformError`] when the parent planform is not
-    /// physically constructible.
-    pub fn inboard_aerodynamic_station(
-        &self,
-        design: &DesignVector,
-    ) -> Result<InboardAerodynamicStation, TransportPlanformError> {
-        let planform = self.transport_planform(design)?;
-        if let Some(side_of_body) = planform.side_of_body {
-            let root_to_kink_fraction = side_of_body.y_m / planform.kink.y_m;
-            return Ok(InboardAerodynamicStation {
-                y_m: side_of_body.y_m,
-                leading_edge_x_m: side_of_body.leading_edge_x_m,
-                chord_m: side_of_body.chord_m,
-                twist_deg: self.root_twist_deg
-                    + root_to_kink_fraction * (self.break_twist_deg - self.root_twist_deg),
-            });
-        }
-        Ok(InboardAerodynamicStation {
-            y_m: planform.root.y_m,
-            leading_edge_x_m: planform.root.leading_edge_x_m,
-            chord_m: planform.root.chord_m,
-            twist_deg: self.root_twist_deg,
-        })
     }
 }

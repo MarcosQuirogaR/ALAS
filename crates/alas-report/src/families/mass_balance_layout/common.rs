@@ -32,28 +32,7 @@ pub(super) fn missing_datum_scene(
     });
     scene
 }
-/// Greedily assign a row index to each (already x-sorted) label so any two
-/// labels sharing a row are at least `min_sep` apart: `_assign_label_rows`.
-pub(super) fn assign_label_rows(xs: &[f64], min_sep: f64) -> Vec<usize> {
-    let mut last_x_per_row: Vec<f64> = Vec::new();
-    let mut rows = Vec::with_capacity(xs.len());
-    for &x in xs {
-        let mut placed = false;
-        for (row, last_x) in last_x_per_row.iter_mut().enumerate() {
-            if x - *last_x >= min_sep {
-                *last_x = x;
-                rows.push(row);
-                placed = true;
-                break;
-            }
-        }
-        if !placed {
-            last_x_per_row.push(x);
-            rows.push(last_x_per_row.len() - 1);
-        }
-    }
-    rows
-}
+pub(super) use crate::families::common::assign_label_rows;
 
 pub(super) fn draw_hbar(
     scene: &mut Scene,

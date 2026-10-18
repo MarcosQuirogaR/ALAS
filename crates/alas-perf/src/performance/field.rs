@@ -63,9 +63,13 @@ pub enum FieldPropulsion<'a> {
         /// Supply a callback when the remaining engines use a reserve rating.
         /// None assumes the same rating and scales AEO thrust by (N-1)/N.
         engine_out_thrust_n: Option<&'a dyn Fn(f64) -> Result<f64, String>>,
-        /// Low-speed zero-lift drag coefficient in the takeoff configuration.
-        /// The caller supplies high-lift and gear increments or states their omission.
+        /// Low-speed zero-lift drag coefficient in the takeoff configuration,
+        /// landing gear retracted (the 14 CFR 25.121(b) second-segment
+        /// configuration): clean drag plus the take-off flap/slat increment.
         zero_lift_drag_coefficient: f64,
+        /// Extended-gear drag increment applied to the ground roll only; the
+        /// gear is retracted in the climb at V2 (Roskam VI Sec. 4.7).
+        ground_roll_gear_drag_coefficient: f64,
         /// Low-speed quadratic induced-drag factor.
         induced_drag_factor: f64,
         /// Additional OEI drag for trim, gear and failed-engine/propeller state.
@@ -81,6 +85,11 @@ pub enum FieldPropulsion<'a> {
 /// 14 CFR 25.113(a), 1.15 applies to the all-engine distance, compared against
 /// the engine-out distance; it is not a universal balanced-field multiplier.
 /// The propeller result applies that factor once to its all-engine distance.
+///
+/// The `Jet` branch is that correlation: it supplies the speed schedule, the
+/// landing distance and the replay. The production jet take-off field length
+/// is the CS 25.113 integration of [`super::takeoff_field`], which the
+/// pipeline (`alas_pipeline::field_performance`) lays over this result.
 /// `ldr_m` remains actual distance from the 50 ft screen under 25.125(a),
 /// before the separate operational landing-field factor.
 pub fn compute_field_performance_for_propulsion(
@@ -116,11 +125,13 @@ pub fn compute_field_performance_for_propulsion(
             thrust_n,
             engine_out_thrust_n,
             zero_lift_drag_coefficient,
+            ground_roll_gear_drag_coefficient,
             induced_drag_factor,
             failed_engine_drag_coefficient,
         } => {
             let polar = TakeoffPolar {
                 zero_lift_drag_coefficient,
+                ground_roll_gear_drag_coefficient,
                 induced_drag_factor,
                 failed_engine_drag_coefficient,
             };
@@ -222,6 +233,7 @@ fn positive(name: &str, value: f64) -> Result<(), String> {
 #[derive(Clone, Copy)]
 struct TakeoffPolar {
     zero_lift_drag_coefficient: f64,
+    ground_roll_gear_drag_coefficient: f64,
     induced_drag_factor: f64,
     failed_engine_drag_coefficient: f64,
 }
@@ -257,6 +269,7 @@ fn propeller_takeoff(
     }
     for value in [
         polar.zero_lift_drag_coefficient,
+        polar.ground_roll_gear_drag_coefficient,
         polar.failed_engine_drag_coefficient,
     ] {
         if !value.is_finite() || value < 0.0 {
@@ -272,7 +285,8 @@ fn propeller_takeoff(
     let cl_roll =
         (config.propeller_takeoff_rolling_friction / polar.induced_drag_factor).min(cl_v2);
     let cd0 = polar.zero_lift_drag_coefficient;
-    let cd_roll = cd0 + polar.induced_drag_factor * cl_roll.powi(2);
+    let cd_roll =
+        cd0 + polar.ground_roll_gear_drag_coefficient + polar.induced_drag_factor * cl_roll.powi(2);
     let acceleration_g = |speed_m_s: f64| -> Result<f64, String> {
         let thrust = thrust_n(speed_m_s)?;
         positive("installed takeoff thrust", thrust)?;

@@ -55,10 +55,16 @@ pub fn sized_wingbox_centroid(
     let mut skin = Integral::default();
     let mut ribs = Integral::default();
     for spar in &sizing.spars {
-        if [&spar.h, &spar.a_cap, &spar.t_cap].iter().any(|values| {
-            values.len() != count || values.iter().any(|v| !v.is_finite() || *v < 0.0)
-        }) || !spar.t_web.is_finite()
-            || spar.t_web <= 0.0
+        if [
+            &spar.h,
+            &spar.a_cap,
+            &spar.t_cap,
+            &spar.t_web,
+            &spar.lower_extra_area,
+        ]
+        .iter()
+        .any(|values| values.len() != count || values.iter().any(|v| !v.is_finite() || *v < 0.0))
+            || spar.t_web.iter().any(|v| *v <= 0.0)
         {
             return Err(WingCentroidError::DegenerateMass);
         }
@@ -94,9 +100,13 @@ pub fn sized_wingbox_centroid(
                 caps.add(0.5 * ds * spar.a_cap[j - 1], a);
                 caps.add(0.5 * ds * spar.a_cap[j], b);
             }
+            // The lower-cover fatigue area sits on the lower flange only.
+            let ds = distance(endpoints[0].1, endpoints[1].1);
+            caps.add(0.5 * ds * spar.lower_extra_area[j - 1], endpoints[0].1);
+            caps.add(0.5 * ds * spar.lower_extra_area[j], endpoints[1].1);
             let ds = distance(endpoints[0].2, endpoints[1].2);
-            webs.add(0.5 * ds * spar.t_web * spar.h[j - 1], endpoints[0].2);
-            webs.add(0.5 * ds * spar.t_web * spar.h[j], endpoints[1].2);
+            webs.add(0.5 * ds * spar.t_web[j - 1] * spar.h[j - 1], endpoints[0].2);
+            webs.add(0.5 * ds * spar.t_web[j] * spar.h[j], endpoints[1].2);
         }
     }
     let (front, rear) = alas_struct::sizing::box_chord_band(geometry);
@@ -194,7 +204,7 @@ mod tests {
             spar.a_cap.fill(0.01);
             spar.t_cap.fill(0.01);
             spar.h.fill(0.4);
-            spar.t_web = 0.002;
+            spar.t_web.fill(0.002);
         }
         (geometry, sizing)
     }

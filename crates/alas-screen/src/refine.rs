@@ -92,6 +92,9 @@ pub(crate) fn refine_candidate_3d_with_mass_model(
 ) {
     let mut cfg2 = config.clone();
     cfg2.geometry.wing.root_airfoil = candidate.name.clone();
+    // Screening reads the incompressible lattice's alpha, window and margin
+    // only; the compressible attitude (a second stretched solve) is not used.
+    cfg2.analysis.compressible_trim = false;
     if matches!(geometry, ScreeningGeometry::ReferenceCompatibility) {
         cfg2.geometry.engine.apply_engine_spec();
         // Compatibility screening is an explicit replay boundary.  Pin the

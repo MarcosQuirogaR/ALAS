@@ -259,7 +259,7 @@ pub(super) fn declared_cabin_equipment_method(
 /// 72 installed seats is inside the LTH domain statement's seat clause, so
 /// this class is load-bearing for it and not merely declarative: the
 /// ATR 72-600 takes `m_opp = 32.907 n_pax^1.021`.
-pub(super) fn declared_haul_class(name: &str) -> OperatingHaulClass {
+pub(crate) fn declared_haul_class(name: &str) -> OperatingHaulClass {
     match name {
         "A340-300" | "A380-800" | "B787-9" | "DC-10" | "B747-400" | "AVE" => {
             OperatingHaulClass::LongHaul

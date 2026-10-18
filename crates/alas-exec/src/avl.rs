@@ -293,6 +293,24 @@ pub fn run_avl_with_options_cancellable(
         &paths.output_paths,
         &options.output_channels,
     );
+    // Opt-in result cache (`ALAS_TOOL_CACHE_DIR`): identical deck, session and
+    // executable replay the retained files instead of re-solving.
+    let cache_directory = options
+        .result_namespace
+        .as_deref()
+        .unwrap_or_else(|| parent_directory(geometry_path));
+    let cache = crate::tool_cache::DirCache::begin(
+        "avl",
+        executable,
+        cache_directory,
+        &[geometry_path.to_path_buf()],
+        &[session.as_bytes()],
+    );
+    if cache.as_ref().and_then(|cache| cache.restore()).is_some() {
+        result.status = AvlProcessStatus::Completed;
+        result.error = None;
+        return result;
+    }
     let mut session_file = match create_fresh_file(&session_path) {
         Ok(file) => file,
         Err(error) => {
@@ -420,6 +438,9 @@ pub fn run_avl_with_options_cancellable(
                 .join(", ")
         ));
         return result;
+    }
+    if let Some(cache) = &cache {
+        cache.store(&[]);
     }
     result.status = AvlProcessStatus::Completed;
     result.error = None;

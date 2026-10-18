@@ -11,6 +11,9 @@
 //!
 //! [`view`] provides the interactive [`SceneView`] widget with pan, zoom, and fit-to-view.
 
+// Unit tests assert that their constructed fixture inputs are valid.
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 pub mod raster;
 pub mod render;
 #[cfg(test)]

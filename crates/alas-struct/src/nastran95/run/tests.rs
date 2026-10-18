@@ -206,7 +206,7 @@ fn eigenvector_page_headers_append_to_the_mode_they_name() {
  R E A L   E I G E N V E C T O R   N O .          2
          1      G      0.0  0.0  2.0  0.0  0.0  0.0
 ";
-    let tables = read_eigenvector_tables(print);
+    let tables = read_eigenvector_tables(print).unwrap();
     assert_eq!(tables.len(), 2);
     assert_eq!(tables[0][0].1[2], 1.0);
     assert_eq!(tables[0][1].1[2], 1.5);
@@ -365,4 +365,16 @@ fn nonzero_command_with_a_displacement_table() -> Command {
         "printf 'D I S P L A C E M E N T   V E C T O R\\n1 G 0 0 0 0 0 0\\n'; exit 7",
     ]);
     command
+}
+
+#[test]
+fn corrupted_eigenvector_mode_number_is_an_error_not_an_allocation() {
+    let print = " R E A L   E I G E N V E C T O R   N O .   99999999999\n";
+    let error = read_eigenvector_tables(print).unwrap_err();
+    assert_eq!(error.mode, 99_999_999_999);
+    let at_limit = format!(" R E A L   E I G E N V E C T O R   N O .   {MAX_EIGENVECTOR_MODE}\n");
+    assert_eq!(
+        read_eigenvector_tables(&at_limit).unwrap().len(),
+        MAX_EIGENVECTOR_MODE
+    );
 }

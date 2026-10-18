@@ -28,7 +28,22 @@ use super::{deck_error, SegmentMissionModel};
 /// Grips with Aircraft Performance", Flight Operations Support, 2002,
 /// Sec. "Maximum altitude" (the altitude at which maximum climb thrust still
 /// gives 300 ft/min); Boeing FCOM performance data use the same residual.
-pub(super) const RESIDUAL_CLIMB_M_S: f64 = 300.0 * FOOT / 60.0;
+pub(super) const RESIDUAL_CLIMB_M_S: f64 =
+    alas_perf::performance::cruise_climb::TOC_RESIDUAL_CLIMB_M_S;
+
+/// A top-of-climb state: the residual rate and the maximum-climb thrust,
+/// weight and true airspeed it comes from (`rate = (T - D) V / W`).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct ClimbPoint {
+    /// Residual rate of climb, m/s.
+    pub(crate) rate_m_s: f64,
+    /// Maximum-climb thrust of all engines, N.
+    pub(crate) thrust_n: f64,
+    /// Weight, N.
+    pub(crate) weight_n: f64,
+    /// True airspeed, m/s.
+    pub(crate) tas_m_s: f64,
+}
 
 /// Resolution of the initial-level search before the margin's zero is
 /// interpolated, m. The level is *not* rounded to a flight level: a 1,000 ft
@@ -36,7 +51,7 @@ pub(super) const RESIDUAL_CLIMB_M_S: f64 = 300.0 * FOOT / 60.0;
 /// closure more than one root (measured with mass-dependent step climbs: two
 /// equivalent sizing modes of the B787-9 closed 30 kg apart), so the
 /// ceiling-limited level is kept continuous.
-const LEVEL_RESOLUTION_M: f64 = 1.0;
+pub(super) const LEVEL_RESOLUTION_M: f64 = 1.0;
 
 /// Spacing of the downward scan for the highest qualifying altitude, m: one
 /// flight level, 1,000 ft (ICAO Annex 2, App. 3, table of cruising levels).
@@ -56,7 +71,7 @@ const RVSM_CEILING_M: f64 = 41_000.0 * FOOT;
 /// Conceptual Approach", 6th ed., AIAA 2018, Sec. 6.3, historical mission
 /// segment weight fraction for climb and accelerate. Only the *choice* of
 /// level uses it; the climb itself is integrated.
-pub(super) const CLIMB_MASS_FRACTION: f64 = 0.985;
+pub(super) const CLIMB_MASS_FRACTION: f64 = alas_perf::performance::cruise_climb::TOC_MASS_FRACTION;
 
 /// Cruise distance between step-climb decisions, m (100 nmi). A
 /// discretization of the decision, not a physical constant: a step is taken
@@ -76,6 +91,17 @@ pub(crate) struct StepLevel {
     pub rungs: Vec<(f64, f64)>,
     /// Descent ladder from this level to the arrival field.
     pub descent: Vec<Segment>,
+}
+
+/// The state at the start of one level cruise segment.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CruiseState {
+    /// Pressure altitude, m.
+    pub altitude_m: f64,
+    /// True airspeed, m/s.
+    pub tas_m_s: f64,
+    /// Aircraft mass at the start of the segment, kg.
+    pub mass_kg: f64,
 }
 
 /// What the cruise and descent of one pass produced.
@@ -174,6 +200,108 @@ impl ProfileGeometry<'_> {
 }
 
 impl SegmentMissionModel {
+    /// Residual rate of climb at the initial cruise level of a plan made at
+    /// plan_takeoff_mass_kg for a trip of `range_m` (commanded-rate `scales`
+    /// of the plan), m/s: maximum-climb thrust less drag at the top-of-climb
+    /// mass, at the speeds the plan flies at that level (the first cruise
+    /// rung and the speed the top climb rung arrives at, whichever leaves
+    /// less margin), exactly the quantity the level search holds at or above
+    /// [RESIDUAL_CLIMB_M_S] ([`Self::plan_residual_climb_m_s`]).
+    ///
+    /// The plan's cruise speed below the configured level is not the
+    /// constant-Mach speed: the rung is capped at `VC = VD / 1.25` in
+    /// equivalent airspeed (or holds the equivalent airspeed without a
+    /// declared `VD`), so a short route flown at a low operational level
+    /// cruises far slower than `M a(h)`, and judging the criterion at
+    /// `M a(h)` demanded a climb the plan never flies (A220-300, 251 nmi,
+    /// FL250: 0.66 m/s at 241.6 m/s true airspeed against 3.5 m/s at the
+    /// 209 m/s the plan flies).
+    ///
+    /// # Errors
+    ///
+    /// The plan does not fit the route at `altitude_m`, or the atmosphere,
+    /// deck or drag rejects it, as text.
+    #[cfg(test)]
+    pub(crate) fn top_of_climb_rate_m_s(
+        &self,
+        plan_takeoff_mass_kg: f64,
+        altitude_m: f64,
+        range_m: f64,
+        scales: [f64; 3],
+    ) -> Result<f64, String> {
+        self.top_of_climb_point(plan_takeoff_mass_kg, altitude_m, range_m, scales)
+            .map(|point| point.rate_m_s)
+    }
+
+    /// [`Self::top_of_climb_rate_m_s`] with the thrust, weight and speed of
+    /// the governing point, so the rate deficit can be read as a thrust
+    /// deficit.
+    pub(crate) fn top_of_climb_point(
+        &self,
+        plan_takeoff_mass_kg: f64,
+        altitude_m: f64,
+        range_m: f64,
+        scales: [f64; 3],
+    ) -> Result<ClimbPoint, String> {
+        let profile = super::adapt::climb_rate_revision(&self.profile, scales);
+        let geometry = ProfileGeometry {
+            profile: &profile,
+            ..self.geometry()
+        };
+        self.plan_residual_climb_point(
+            &geometry,
+            LegKind::Trip,
+            plan_takeoff_mass_kg * CLIMB_MASS_FRACTION,
+            range_m,
+            altitude_m,
+        )
+        .ok_or_else(|| {
+            format!(
+                "no top-of-climb state at {altitude_m:.0} m for a {:.0} nmi trip: the plan does                  not fit or the deck or drag rejects it",
+                range_m / 1_852.0
+            )
+        })
+    }
+
+    /// Residual rate of climb at maximum-climb thrust at the top of the plan
+    /// for a cruise at `cruise_m`, m/s: the lower of the value at the first
+    /// cruise rung's true airspeed and at the true airspeed the top climb
+    /// rung arrives at (a calibrated schedule without a Mach crossover flies
+    /// faster than cruise), at `toc_mass_kg`. `None` when the plan does not
+    /// fit or the deck or drag rejects the point.
+    pub(super) fn plan_residual_climb_m_s(
+        &self,
+        geometry: &ProfileGeometry<'_>,
+        leg: LegKind,
+        toc_mass_kg: f64,
+        range_m: f64,
+        cruise_m: f64,
+    ) -> Option<f64> {
+        self.plan_residual_climb_point(geometry, leg, toc_mass_kg, range_m, cruise_m)
+            .map(|point| point.rate_m_s)
+    }
+
+    fn plan_residual_climb_point(
+        &self,
+        geometry: &ProfileGeometry<'_>,
+        leg: LegKind,
+        toc_mass_kg: f64,
+        range_m: f64,
+        cruise_m: f64,
+    ) -> Option<ClimbPoint> {
+        let plan = geometry.plan_at(leg, range_m, cruise_m).ok()?;
+        let top_m = plan.cruise_altitude_m;
+        let cruise = plan.cruise_rungs.first()?.0;
+        let climb = plan.climb.last().map_or(cruise, |segment| segment.tas_m_s);
+        let at_cruise = self.residual_climb_point(toc_mass_kg, top_m, cruise).ok()?;
+        let at_climb = self.residual_climb_point(toc_mass_kg, top_m, climb).ok()?;
+        Some(if at_climb.rate_m_s < at_cruise.rate_m_s {
+            at_climb
+        } else {
+            at_cruise
+        })
+    }
+
     /// Residual rate of climb at maximum-climb thrust in level flight at
     /// `altitude_m` and `tas_m_s` for `mass_kg`, m/s:
     /// `(T_MCL - D) V / (m g)`, at constant true airspeed.
@@ -183,16 +311,37 @@ impl SegmentMissionModel {
         altitude_m: f64,
         tas_m_s: f64,
     ) -> Result<f64, FuelModelError> {
+        self.residual_climb_point(mass_kg, altitude_m, tas_m_s)
+            .map(|point| point.rate_m_s)
+    }
+
+    pub(super) fn residual_climb_point(
+        &self,
+        mass_kg: f64,
+        altitude_m: f64,
+        tas_m_s: f64,
+    ) -> Result<ClimbPoint, FuelModelError> {
         let flight = self
             .propulsion
-            .flight_condition(altitude_m, tas_m_s, self.gravity_m_s2, self.isa_deviation_c)
+            .flight_condition(
+                altitude_m,
+                tas_m_s,
+                self.gravity_at(altitude_m),
+                self.isa_deviation_c,
+            )
             .map_err(deck_error)?;
         let drag_n = self.drag_n(&flight, mass_kg)?;
         let rated = self
             .propulsion
             .rated_point(flight, PropulsionRating::MaximumClimb)
             .map_err(deck_error)?;
-        Ok((rated.thrust_n - drag_n) * tas_m_s / (mass_kg * self.gravity_m_s2))
+        let weight_n = mass_kg * self.gravity_at(altitude_m);
+        Ok(ClimbPoint {
+            rate_m_s: (rated.thrust_n - drag_n) * tas_m_s / weight_n,
+            thrust_n: rated.thrust_n,
+            weight_n,
+            tas_m_s,
+        })
     }
 
     /// Specific air range in level flight, m/kg.
@@ -210,6 +359,9 @@ impl SegmentMissionModel {
     pub(super) fn level_qualifies(&self, mass_kg: f64, altitude_m: f64, tas_m_s: f64) -> bool {
         self.residual_climb_m_s(mass_kg, altitude_m, tas_m_s)
             .is_ok_and(|rate| rate >= RESIDUAL_CLIMB_M_S)
+            && self
+                .cruise_ceiling_assessment(mass_kg, altitude_m, tas_m_s)
+                .is_ok_and(|assessment| assessment.is_none_or(|a| a.flyable()))
     }
 
     /// The initial cruise level for a leg from `mass_kg`: `cap_m` itself if
@@ -243,18 +395,14 @@ impl SegmentMissionModel {
         // schedule without a Mach crossover flies faster than cruise); a
         // rejected plan or deck point counts as no margin at all.
         let margin = |cruise_m: f64| -> f64 {
-            geometry
-                .plan_at(leg, range_m, cruise_m)
-                .ok()
-                .and_then(|plan| {
-                    let top_m = plan.cruise_altitude_m;
-                    let cruise = plan.cruise_rungs.first()?.0;
-                    let climb = plan.climb.last().map_or(cruise, |segment| segment.tas_m_s);
-                    let at_cruise = self.residual_climb_m_s(toc_mass_kg, top_m, cruise).ok()?;
-                    let at_climb = self.residual_climb_m_s(toc_mass_kg, top_m, climb).ok()?;
-                    Some(at_cruise.min(at_climb) - RESIDUAL_CLIMB_M_S)
-                })
-                .unwrap_or(f64::NEG_INFINITY)
+            let climb = self
+                .plan_residual_climb_m_s(geometry, leg, toc_mass_kg, range_m, cruise_m)
+                .map(|rate| rate - RESIDUAL_CLIMB_M_S);
+            let ceiling =
+                self.plan_cruise_ceiling_margin_m_s(geometry, leg, toc_mass_kg, range_m, cruise_m);
+            climb
+                .zip(ceiling)
+                .map_or(f64::NEG_INFINITY, |(climb, ceiling)| climb.min(ceiling))
         };
         let mut high = (cap_m, margin(cap_m));
         if high.1 >= 0.0 {

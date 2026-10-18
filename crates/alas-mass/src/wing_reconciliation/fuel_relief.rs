@@ -432,10 +432,16 @@ mod tests {
     #[test]
     fn the_declared_fuel_replaces_the_geometric_estimate_rather_than_matching_it() {
         // The point of this seam: the two disagree, and the declaration wins.
-        // On the A340-300 the geometric box under-estimates the tanks; on the
-        // DC-10, whose fuel is largely in the centre and auxiliary tanks, it
-        // over-estimates them by half.
-        for (preset, geometric_over_declared) in [("A340-300", false), ("DC-10", true)] {
+        // The geometric box is a generic estimator (fixed span band, generic
+        // usable fraction), within 0.80-2.24 of the declared integral capacity
+        // across the fleet (module documentation). On the DC-10, whose fuel is
+        // largely in the centre and auxiliary tanks, it over-estimates the
+        // tanks by half; on the A340-300 it sits 15 % above the certified
+        // 92 850 L (EASA.A.064 III.9: inner 85 550 + outer 7 300 L) since the
+        // drawn wing carries the real trailing edge (kink chord 7.70 m, was a
+        // fitted 6.56 m): the declared capacity is the primary value and
+        // stays; the generic band is not tuned to one aircraft.
+        for (preset, geometric_over_declared) in [("A340-300", true), ("DC-10", true)] {
             let (resolved, stations) = resolve(preset);
             let (_, _, _, wsg, _) = case(preset);
             let (front, rear) = alas_struct::sizing::box_chord_band(&wsg);
@@ -443,8 +449,14 @@ mod tests {
                 alas_struct::tanks::integral_fuel_running_mass_kg_m(&wsg, &stations, front, rear);
             let declared_kg = trapezoid(&resolved.running_mass_kg_m, &stations);
             let geometric_kg = trapezoid(&geometric, &stations);
+            // Geometry round 2 raised the inboard box volume (NASA CRM thickness
+            // distribution); the geometry freeze of 2026-10-12 fitted the A340 trailing
+            // edge along the whole span (geometric / declared 1.03 -> 1.155). The two
+            // differ and the declaration wins; the ratio stays inside the fleet band.
+            let ratio = geometric_kg / declared_kg;
             assert!(
-                (geometric_kg > declared_kg) == geometric_over_declared,
+                (geometric_kg > declared_kg) == geometric_over_declared
+                    && (0.80..=2.24).contains(&ratio),
                 "{preset}: geometric {geometric_kg} kg, declared {declared_kg} kg"
             );
         }

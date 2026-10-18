@@ -120,3 +120,49 @@ fn navdata_download_action_is_parsed_as_a_non_pipeline_command() {
         .unwrap_or_else(|| panic!("navdata flag does not request help"));
     assert!(parsed.download_navdata);
 }
+
+#[test]
+fn an_option_value_that_is_another_option_is_rejected() {
+    let args = ["--save-config".to_owned(), "--quiet".to_owned()];
+    let error = parse_args(&args)
+        .err()
+        .unwrap_or_else(|| panic!("an option must not be taken as a file name"));
+    assert!(
+        error.contains("missing argument for --save-config"),
+        "{error}"
+    );
+    let args = ["--save-config".to_owned(), "out.yaml".to_owned()];
+    assert!(parse_args(&args).is_ok_and(|cli| cli.is_some()));
+}
+
+#[test]
+fn show_implies_plots_and_the_help_says_it_writes_files() {
+    let args = ["--show".to_owned()];
+    let cli = parse_args(&args)
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| panic!("--show must parse"));
+    assert!(cli.show && cli.plots);
+    let help = super::args::help_text();
+    assert!(!help.contains("interactively"), "{help}");
+    assert!(help.contains("SVG"), "{help}");
+}
+
+#[test]
+fn every_long_flag_the_parser_accepts_appears_in_the_help_text() {
+    let source = include_str!("args.rs");
+    let help = super::args::help_text();
+    let parser = source
+        .split("pub fn parse_args")
+        .nth(1)
+        .and_then(|rest| rest.split("fn print_help").next())
+        .unwrap_or_else(|| panic!("parse_args source not found"));
+    let mut flags = 0;
+    for piece in parser.split('"') {
+        if piece.starts_with("--") && piece.chars().all(|c| c.is_ascii_lowercase() || c == '-') {
+            flags += 1;
+            assert!(help.contains(piece), "{piece} missing from the help text");
+        }
+    }
+    assert!(flags >= 10, "only {flags} flags found; the scan is broken");
+}

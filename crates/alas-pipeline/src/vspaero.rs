@@ -17,10 +17,13 @@ use alas_aero::vspaero::{
 };
 use alas_atmo::Atmosphere;
 use alas_config::AlasConfig;
+use alas_exec::tool_runtime::{FidelityProfile, RuntimeSettings};
 use alas_exec::vspaero::{run_vspaero, VspaeroProcessStatus};
 
 use crate::full_analysis::AnalysisReport;
 use crate::openvsp::OpenVspExportResult;
+use crate::vspaero_domain::validity_schedule;
+use crate::vspaero_wake::assess_vspaero_wake_history;
 
 /// Product-level outcome of a requested VSPAERO analysis.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -114,6 +117,11 @@ pub struct VspaeroAnalysisResult {
     pub comparison: VspaeroComparisonStatus,
     /// Actionable failure or incompatibility detail.
     pub error: Option<String>,
+    /// Geometric angles of attack, deg, from the report's schedule that were
+    /// not requested because the lattice's lift there exceeds the validity
+    /// domain (`vspaero_domain`). They are outside the validity domain and
+    /// are never counted as comparison passes.
+    pub outside_validity_alpha_deg: Vec<f64>,
 }
 
 impl VspaeroAnalysisResult {
@@ -151,6 +159,7 @@ pub fn run_vspaero_analysis(
         polar: None,
         comparison: VspaeroComparisonStatus::NotEvaluated,
         error: None,
+        outside_validity_alpha_deg: Vec::new(),
     };
     let Some(executable) = executable else {
         result.error = Some("native VSPAERO executable is not configured".to_owned());
@@ -164,7 +173,16 @@ pub fn run_vspaero_analysis(
         ));
         return result;
     }
+    // Intersecting lifting surfaces leave polygonal cells VSPAERO mishandles;
+    // name the cause instead of spending a solve on non-physical forces.
+    if let Some(defect) = crate::vspaero_geometry::panel_defect(&result.geometry_path) {
+        result.status = VspaeroAnalysisStatus::GeometryUnavailable;
+        result.error = Some(defect);
+        return result;
+    }
 
+    let (domain_alpha_deg, outside_alpha_deg) = validity_schedule(report);
+    result.outside_validity_alpha_deg = outside_alpha_deg;
     let atmosphere = Atmosphere::new(config.requirements.cruise_altitude_m);
     let speed_m_s = config.requirements.cruise_mach * atmosphere.speed_of_sound();
     let reference = VspaeroReference {
@@ -176,16 +194,21 @@ pub fn run_vspaero_analysis(
     let request = VspaeroSweepRequest {
         reference,
         mach: config.requirements.cruise_mach,
-        alpha_deg: report.polar.geometric_alpha_deg.clone(),
+        alpha_deg: external_alpha_schedule(&domain_alpha_deg, RuntimeSettings::current().fidelity),
         beta_deg: 0.0,
         reynolds: atmosphere.density() * speed_m_s * reference.chord_m
             / atmosphere.dynamic_viscosity(),
         speed_m_s,
         density_kg_m3: atmosphere.density(),
-        // Keep the historical five-iteration request visible in the native
-        // setup, but admit its coefficients only when the retained history
-        // proves that the final wake change is below the gate below.
-        wake_iterations: 5,
+        // Free-wake coefficients settle to a plateau by iteration ~6 with the
+        // 8-node wake (see VSPAERO_WAKE_PLATEAU_TOLERANCE); eight iterations
+        // leave a four-row plateau window after the settling transient (six
+        // or seven iterations still fail the gate on 20 to 90 percent of the
+        // retained cases). The retained history must pass that gate before
+        // coefficients are admitted.
+        wake_iterations: RuntimeSettings::current()
+            .vspaero_wake_iterations
+            .unwrap_or(8),
     };
     let setup = match render_setup(&request) {
         Ok(setup) => setup,
@@ -204,7 +227,10 @@ pub fn run_vspaero_analysis(
         return result;
     }
 
-    let process = run_vspaero(executable, &result.case_path, 4, timeout_seconds);
+    // OpenMP threads: ALAS_VSPAERO_THREADS, else logical cores divided by
+    // ALAS_CONCURRENT_JOBS (the former fixed 4 left a 16-thread host idle).
+    let threads = RuntimeSettings::current().vspaero_thread_count();
+    let process = run_vspaero(executable, &result.case_path, threads, timeout_seconds);
     match process.status {
         VspaeroProcessStatus::InputMissing => {
             result.status = VspaeroAnalysisStatus::GeometryUnavailable;
@@ -290,119 +316,6 @@ pub fn run_vspaero_analysis(
     result
 }
 
-/// Absolute coefficient-change gate for a native VSPAERO wake history.
-///
-/// A successful process and a parseable `.polar` do not establish that the
-/// free wake reached a fixed point. The history contains one iteration table
-/// per alpha case; all three quantities used by the comparison (`CLtot`,
-/// `CDi`, and `CMytot`) must change by no more than this tolerance between the
-/// final two rows of every case.
-const VSPAERO_WAKE_COEFFICIENT_TOLERANCE: f64 = 1.0e-4;
-
-fn assess_vspaero_wake_history(path: &Path) -> Result<(), String> {
-    let text = fs::read_to_string(path).map_err(|error| {
-        format!(
-            "VSPAERO wake convergence history is unavailable at {}: {error}",
-            path.display()
-        )
-    })?;
-    assess_vspaero_wake_history_text(&text)
-}
-
-fn assess_vspaero_wake_history_text(text: &str) -> Result<(), String> {
-    let mut cases: Vec<Vec<[f64; 3]>> = Vec::new();
-    let mut current: Option<Vec<[f64; 3]>> = None;
-    let mut columns: Option<[usize; 3]> = None;
-
-    let finish_case = |current: &mut Option<Vec<[f64; 3]>>, cases: &mut Vec<Vec<[f64; 3]>>| {
-        if let Some(rows) = current.take() {
-            if !rows.is_empty() {
-                cases.push(rows);
-            }
-        }
-    };
-
-    for line in text.lines() {
-        let trimmed = line.trim_start();
-        if trimmed.starts_with("Solver Case:") {
-            finish_case(&mut current, &mut cases);
-            current = Some(Vec::new());
-            columns = None;
-            continue;
-        }
-        if trimmed.starts_with("Iter ") || trimmed == "Iter" {
-            let headers = trimmed.split_whitespace().collect::<Vec<_>>();
-            let required = ["CLtot", "CDi", "CMytot"];
-            let Some(indices) = required
-                .map(|name| headers.iter().position(|header| *header == name))
-                .into_iter()
-                .collect::<Option<Vec<_>>>()
-                .and_then(|indices| indices.try_into().ok())
-            else {
-                return Err("VSPAERO wake history is missing CLtot/CDi/CMytot columns".to_owned());
-            };
-            columns = Some(indices);
-            if current.is_none() {
-                current = Some(Vec::new());
-            }
-            continue;
-        }
-        let Some(indices) = columns else {
-            continue;
-        };
-        let fields = trimmed.split_whitespace().collect::<Vec<_>>();
-        if fields
-            .first()
-            .and_then(|value| value.parse::<usize>().ok())
-            .is_none()
-        {
-            continue;
-        }
-        let mut row = [0.0; 3];
-        for (slot, &index) in indices.iter().enumerate() {
-            let Some(token) = fields.get(index) else {
-                return Err("VSPAERO wake history contains a truncated iteration row".to_owned());
-            };
-            row[slot] = token.parse::<f64>().map_err(|_| {
-                format!("VSPAERO wake history contains a malformed coefficient '{token}'")
-            })?;
-            if !row[slot].is_finite() {
-                return Err("VSPAERO wake history contains a non-finite coefficient".to_owned());
-            }
-        }
-        current.get_or_insert_with(Vec::new).push(row);
-    }
-    finish_case(&mut current, &mut cases);
-    if cases.is_empty() {
-        return Err("VSPAERO wake history contains no iteration cases".to_owned());
-    }
-    for (case_index, rows) in cases.iter().enumerate() {
-        let Some([previous, final_row]) = rows
-            .len()
-            .checked_sub(2)
-            .map(|index| [rows[index], rows[index + 1]])
-        else {
-            return Err(format!(
-                "VSPAERO wake history case {} has fewer than two iterations",
-                case_index + 1
-            ));
-        };
-        let change = previous
-            .iter()
-            .zip(final_row)
-            .map(|(left, right)| (right - left).abs())
-            .fold(0.0, f64::max);
-        if change > VSPAERO_WAKE_COEFFICIENT_TOLERANCE {
-            return Err(format!(
-                "VSPAERO wake case {} is not converged: final coefficient change {change:.6e} exceeds {:.6e}",
-                case_index + 1,
-                VSPAERO_WAKE_COEFFICIENT_TOLERANCE
-            ));
-        }
-    }
-    Ok(())
-}
-
 /// Classify which parsed VSPAERO quantities share the report's references,
 /// geometry scope, frames, and operating-point schedule.
 ///
@@ -441,15 +354,32 @@ pub fn classify_vspaero_comparison(
     if polar.model != VspaeroModel::ALAS_VLM {
         mismatches.push("solver method, geometry scope, or coefficient frames differ".to_owned());
     }
-    let geometric_alpha_deg = report.polar.geometric_alpha_deg.clone();
-    if polar.points.len() != geometric_alpha_deg.len() {
+    // Angles are the reporting (compressibility-corrected) axis: VSPAERO applies its own
+    // Prandtl-Glauert correction at the physical angle, so the ALAS lift is paired with it
+    // there (see avl/reference.rs). The requested schedule is the report's, limited to the validity domain
+    // (`vspaero_domain`) and, in the matrix profile, to its documented subset;
+    // an unrestricted full-fidelity polar of a retained solve is accepted too.
+    let full_alpha_deg = &report.polar.alpha_deg;
+    let (domain_alpha_deg, _) = validity_schedule(report);
+    let candidates = [
+        domain_alpha_deg.clone(),
+        external_alpha_schedule(&domain_alpha_deg, FidelityProfile::Matrix),
+        full_alpha_deg.clone(),
+        external_alpha_schedule(full_alpha_deg, FidelityProfile::Matrix),
+    ];
+    let requested_alpha_deg = candidates
+        .iter()
+        .find(|candidate| candidate.len() == polar.points.len())
+        .unwrap_or(&candidates[0])
+        .clone();
+    if polar.points.len() != requested_alpha_deg.len() {
         mismatches.push(format!(
             "alpha schedule has {} points instead of {}",
             polar.points.len(),
-            geometric_alpha_deg.len()
+            requested_alpha_deg.len()
         ));
     } else {
-        for (index, (point, &alpha)) in polar.points.iter().zip(&geometric_alpha_deg).enumerate() {
+        for (index, (point, &alpha)) in polar.points.iter().zip(&requested_alpha_deg).enumerate() {
             if !close(point.alpha_deg, alpha) {
                 mismatches.push(format!(
                     "alpha[{index}] {:.12} != {alpha:.12}",
@@ -480,6 +410,23 @@ pub fn classify_vspaero_comparison(
     }
 }
 
+/// Number of VSPAERO alpha points in the reduced matrix profile.
+pub const MATRIX_VSPAERO_ALPHA_POINTS: usize = 5;
+
+/// Alpha schedule sent to an external solver. Full fidelity is the report's
+/// own schedule; the matrix profile keeps [`MATRIX_VSPAERO_ALPHA_POINTS`]
+/// points evenly spaced by index, always including both ends of the sweep.
+pub fn external_alpha_schedule(alpha_deg: &[f64], fidelity: FidelityProfile) -> Vec<f64> {
+    let count = alpha_deg.len();
+    if !fidelity.is_reduced() || count <= MATRIX_VSPAERO_ALPHA_POINTS {
+        return alpha_deg.to_vec();
+    }
+    let last = MATRIX_VSPAERO_ALPHA_POINTS - 1;
+    (0..MATRIX_VSPAERO_ALPHA_POINTS)
+        .map(|k| alpha_deg[(k * (count - 1) + last / 2) / last])
+        .collect()
+}
+
 fn close(left: f64, right: f64) -> bool {
     (left - right).abs() <= 1.0e-9 * left.abs().max(right.abs()).max(1.0)
 }
@@ -487,6 +434,21 @@ fn close(left: f64, right: f64) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_matrix_schedule_is_a_five_point_subset_with_both_ends() {
+        let full: Vec<f64> = (0..15).map(|i| f64::from(i) - 4.0).collect();
+        assert_eq!(
+            external_alpha_schedule(&full, FidelityProfile::Matrix),
+            vec![-4.0, 0.0, 3.0, 7.0, 10.0]
+        );
+        assert_eq!(external_alpha_schedule(&full, FidelityProfile::Full), full);
+        let short = [0.0, 1.0, 2.0];
+        assert_eq!(
+            external_alpha_schedule(&short, FidelityProfile::Matrix),
+            short.to_vec()
+        );
+    }
 
     #[test]
     fn status_text_does_not_collapse_runtime_and_comparison_failures() {
@@ -503,43 +465,5 @@ mod tests {
             VspaeroAnalysisStatus::CompletedComparable.as_str(),
             "completed_comparable"
         );
-    }
-
-    fn history(rows: &str) -> String {
-        format!("Solver Case: 1\n  Iter Mach AoA Beta CLo CLi CLtot CDo CDi CDtot CMytot\n{rows}")
-    }
-
-    #[test]
-    fn wake_history_rejects_a_final_change_above_the_coefficient_gate() {
-        let text = history(
-            "  4 0.8 3 0 0 0 0.50 0 0.020 0 0.010\n\
-             5 0.8 3 0 0 0 0.504 0 0.0204 0 0.011\n",
-        );
-        let error = match assess_vspaero_wake_history_text(&text) {
-            Err(error) => error,
-            Ok(_) => panic!("the fifth iteration is still changing"),
-        };
-        assert!(error.contains("case 1 is not converged"), "{error}");
-    }
-
-    #[test]
-    fn wake_history_accepts_all_cases_when_final_coefficients_are_stable() {
-        let text = format!(
-            "{}\nSolver Case: 2\n  Iter Mach AoA Beta CLo CLi CLtot CDo CDi CDtot CMytot\n  1 0.8 3 0 0 0 0.50 0 0.020 0 0.010\n  2 0.8 3 0 0 0 0.50001 0 0.02001 0 0.01001\n",
-            history(
-                "  1 0.8 3 0 0 0 0.50 0 0.020 0 0.010\n\
-                 2 0.8 3 0 0 0 0.50001 0 0.02001 0 0.01001\n",
-            )
-        );
-        assert!(assess_vspaero_wake_history_text(&text).is_ok());
-    }
-
-    #[test]
-    fn wake_history_requires_a_fresh_iteration_table() {
-        let error = match assess_vspaero_wake_history_text("Solver Case: 1\n") {
-            Err(error) => error,
-            Ok(_) => panic!("a headerless history is not convergence evidence"),
-        };
-        assert!(error.contains("no iteration cases"), "{error}");
     }
 }

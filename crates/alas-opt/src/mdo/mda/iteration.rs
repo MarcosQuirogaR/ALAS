@@ -3,6 +3,19 @@
 
 //! Admissible extrapolation of the takeoff-mass fixed point.
 
+use crate::mdo::types::CandidateFailure;
+
+/// Consecutive passes whose dispatch stalled at the evaluable edge, the takeoff mass
+/// moving by at most [`EDGE_STALL_MASS_FRACTION`] of itself, after which the sizing loop
+/// stops (engineering choice: the third pass repeats the first two's status; the cycle of
+/// the AVE and A380 wide-body probes was period 3 and never closed in 30 passes).
+pub(super) const EDGE_STALL_PASSES: u32 = 3;
+
+/// Largest change of the takeoff mass between passes, as a fraction of the pass mass, that
+/// still counts as the same stalled edge (the mass-model feedback moved the edge 0.04 to
+/// 0.16 % per pass in the probes).
+pub(super) const EDGE_STALL_MASS_FRACTION: f64 = 0.01;
+
 /// Aitken delta-squared extrapolation of the fixed-point iterates
 /// `x0 -> x1 -> x2`, or `None` when the denominator vanishes or the
 /// estimate leaves `(0, ceiling]`. Iterates and ceiling are masses, kg.
@@ -13,6 +26,22 @@ pub(super) fn aitken(x0: f64, x1: f64, x2: f64, ceiling: f64) -> Option<f64> {
     }
     let estimate = x2 - (x2 - x1) * (x2 - x1) / denominator;
     (estimate.is_finite() && estimate > 0.0 && estimate <= ceiling).then_some(estimate)
+}
+
+/// A failure with the `mass_coordinates` reason, for the one arm of
+/// [`converge`] that keeps it panic-free.
+///
+/// This is deliberately **not** the seam for a station-placement failure.
+/// Every mass and coordinate result this loop consumes comes from
+/// `build::mass_analysis_with_structural_feedback`, which already classifies
+/// a missing main-gear station as `main_gear_station_not_measured` and
+/// propagates it with `?`; the candidate is rejected there, before the loop
+/// body runs. The arm below is reached only if `max_passes` were zero, which
+/// the caller's own `max(1)` prevents, so it names no physical cause at all.
+pub(super) fn mass_coordinates_failure() -> CandidateFailure {
+    CandidateFailure {
+        reason: "mass_coordinates",
+    }
 }
 
 #[cfg(test)]

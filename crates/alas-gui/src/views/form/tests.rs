@@ -300,7 +300,7 @@ fn tire_and_cabin_preset_lists_include_the_declared_values() {
     let gear_values = values.get("landing_gear").expect("gear values");
     let tire = gear.field("tire_class").expect("tire field");
     assert_eq!(
-        resolved_options(tire, gear_values).expect("tire options"),
+        &*resolved_options(tire, gear_values).expect("tire options"),
         vec!["auto", "light", "narrowbody", "widebody", "heavy"]
     );
 
@@ -311,11 +311,11 @@ fn tire_and_cabin_preset_lists_include_the_declared_values() {
     let requirement_values = values.get("requirements").expect("requirement values");
     let preset = requirements.field("cabin_preset").expect("cabin preset");
     assert_eq!(
-        resolved_options(preset, requirement_values).expect("passenger presets"),
+        &*resolved_options(preset, requirement_values).expect("passenger presets"),
         vec!["Ryanair", "Iberia", "Emirates", "Custom"]
     );
     assert_eq!(
-        resolved_options(preset, &json!({"aircraft_type": "cargo"})).expect("cargo presets"),
+        &*resolved_options(preset, &json!({"aircraft_type": "cargo"})).expect("cargo presets"),
         vec!["Max payload", "Dense payload", "Custom"]
     );
 
@@ -361,7 +361,7 @@ fn cargo_choice_lists_cover_the_loader_inputs() {
     assert!(lower_options.contains(&"BLK".to_owned()));
 
     assert_eq!(
-        resolved_options(strategy, cargo_values).expect("loading strategy options"),
+        &*resolved_options(strategy, cargo_values).expect("loading strategy options"),
         vec!["target_cg", "min_pallets", "door_proximity", "uniform"]
     );
 }
@@ -601,6 +601,21 @@ fn fixed_option_values_are_capitalized_without_changing_their_data_value() {
 }
 
 #[test]
+fn cruise_altitude_policy_options_have_readable_labels() {
+    let field = layout_test_leaf(
+        "cruise_altitude_policy",
+        "Cruise altitude policy",
+        Kind::Str,
+        json!("declared"),
+    );
+    assert_eq!(display_option(&field, "declared"), "Declared cruise level");
+    assert_eq!(display_option(&field, "design"), "Design cruise altitude");
+    assert_eq!(display_option(&field, "optimum_step"), "Optimum step climb");
+    // The words are not rewritten for other fields.
+    assert_eq!(display_option(&plain_option_field(), "design"), "Design");
+}
+
+#[test]
 fn cabin_presets_display_a_descriptive_airline_independent_name() {
     let plain = plain_option_field();
     // The combo box shows a descriptive name, but `resolved_options` above
@@ -729,9 +744,6 @@ fn themed_requirements_remain_compact_across_frames() {
                 height <= rows as f32 * 100.0,
                 "width={width}, frame={frame}: {height} points for {rows} rows"
             );
-            if frame == 11 {
-                eprintln!("requirements width={width}: {height} points for {rows} rows");
-            }
         }
     }
 }

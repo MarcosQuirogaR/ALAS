@@ -39,8 +39,14 @@ pub struct SparSizing {
     pub t_cap: Vec<f64>,
     /// One-flange cap area at each station, m^2.
     pub a_cap: Vec<f64>,
-    /// Uniform web thickness, m.
-    pub t_web: f64,
+    /// Web thickness at each station, m: one gauge per station, common to the
+    /// spars, sized for shear strength and clear-panel shear buckling.
+    pub t_web: Vec<f64>,
+    /// Lower-cover fatigue area added to the lower flange of this spar at each
+    /// station, m^2 (zero where no fatigue limit governs). It is mass and
+    /// strength-neutral for the response model: its stiffness is not credited
+    /// in the analytical section (conservative for deflection).
+    pub lower_extra_area: Vec<f64>,
     /// Bending-moment fraction this spar carries at each station.
     pub frac_moment: Vec<f64>,
     /// Margin of safety at each station: `+inf` where the local demand is
@@ -71,6 +77,9 @@ pub struct ControllingMargin {
 pub struct WingboxSizing {
     /// Spanwise stations, m.
     pub y_stations: Vec<f64>,
+    /// Cosine of the box-axis sweep at each station (see [`super::swept`]); empty means an
+    /// unswept beam, as in the frozen reference law.
+    pub axis_cos: Vec<f64>,
     /// Normalized spanwise stations, `y / semi_span`.
     pub eta_stations: Vec<f64>,
     /// Local chord at each station, m.
@@ -97,6 +106,11 @@ pub struct WingboxSizing {
 }
 
 impl WingboxSizing {
+    /// Cosine of the box-axis sweep at `station`, 1 where none is recorded.
+    pub fn axis_cos_at(&self, station: usize) -> f64 {
+        self.axis_cos.get(station).copied().unwrap_or(1.0)
+    }
+
     /// Installed spanwise pitch between adjacent ribs, including the root and
     /// tip ribs. This is distinct from [`Self::rib_spacing_m`], which is the
     /// maximum pitch permitted by the panel-buckling calculation and may be

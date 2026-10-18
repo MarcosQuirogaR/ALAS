@@ -12,7 +12,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use alas_config::design_variables::{DesignVector, SPECS};
-use alas_config::{AlasConfig, DesignMode};
+use alas_config::AlasConfig;
 use alas_opt::{DesignOptimizer, OptimizationError};
 
 mod support;
@@ -22,17 +22,9 @@ use support::nominal;
 /// but honest search budget so the test measures behaviour rather than
 /// hardware.
 fn reference_config(preset: &str, workers: i64) -> AlasConfig {
-    let mut config = AlasConfig::from_value(&serde_json::json!({ "preset": preset }))
-        .unwrap_or_else(|error| panic!("{preset}: {error}"));
-    config.optimizer.solver.method = alas_config::optimizer::PRODUCT_DE_METHOD.to_owned();
-    config.optimizer.design_space.mode = DesignMode::ReferenceAdaptation;
-    config.optimizer.solver.seed = Some(7);
-    config.optimizer.solver.workers = workers;
     // One screening batch and the 24-member initial population plus about
     // two generations: the smallest budget that runs every stage.
-    config.optimizer.solver.screening.max_evaluations = 64;
-    config.optimizer.solver.refinement.max_evaluations = 72;
-    config
+    support::reference_search_config(preset, workers, 64, 72)
 }
 
 /// The configuration the registered-aircraft envelope tests run: the shared
@@ -154,13 +146,15 @@ fn the_reference_envelope_is_the_ten_percent_window_around_the_loaded_preset() {
     assert!(compounded_span.upper > span.upper);
 }
 
+// The `_nightly` suffix keeps this 136-evaluation, three-worker-count run out
+// of the `full` and fast tiers (nextest profile `nightly`, `cargo xtask gate
+// --nightly`); the integration profile runs it with its binary. The 1-versus-4
+// comparison at the smallest budget runs in `staged_search_determinism`.
 #[test]
-fn the_same_seed_reaches_the_same_winner_at_1_4_and_16_workers() {
-    // Every batch is built from the seed before it is evaluated and every
-    // score is stored at its own index, so the worker count may change the
-    // wall time and nothing else: same winner bits, same history, same
-    // per-stage accounting.
-    let preset = "AVE";
+fn the_same_seed_reaches_the_same_winner_at_1_4_and_16_workers_nightly() {
+    // AVE has no feasible candidate since the clean-polar kappa 0.25 / margin 1.01
+    // change (OEI second segment 0.2786 required vs 0.2655 installed): use A320-200.
+    let preset = "A320-200";
     let start = nominal(preset);
     // Time limits are machine- and load-dependent by design, so the run stops
     // on its evaluation budgets only: the documented reproducible mode.
@@ -175,38 +169,7 @@ fn the_same_seed_reaches_the_same_winner_at_1_4_and_16_workers() {
     let serial = run_with(1);
     for workers in [4, 16] {
         let parallel = run_with(workers);
-        assert_eq!(serial.best_design, parallel.best_design, "{workers}");
-        assert_eq!(serial.best_cost.to_bits(), parallel.best_cost.to_bits());
-        assert_eq!(serial.termination, parallel.termination);
-        assert_eq!(
-            serial.history.design_vectors,
-            parallel.history.design_vectors
-        );
-        let (a, b) = (
-            serial.search_diagnostics.clone().expect("diagnostics"),
-            parallel.search_diagnostics.expect("diagnostics"),
-        );
-        assert_eq!(a.analysis_evaluations, b.analysis_evaluations);
-        assert_eq!(a.poll_iterations, b.poll_iterations);
-        assert_eq!(
-            a.poll_block_size, b.poll_block_size,
-            "N_init follows the budget"
-        );
-        let counts = |d: &alas_opt::SearchDiagnostics| {
-            d.stages
-                .iter()
-                .map(|s| {
-                    (
-                        s.evaluations,
-                        s.elite_size,
-                        s.termination.clone(),
-                        s.sizing_work,
-                    )
-                })
-                .collect::<Vec<_>>()
-        };
-        assert_eq!(counts(&a), counts(&b));
-        assert_eq!(b.workers, workers as usize);
+        support::assert_same_search_outcome(&serial, &parallel, workers);
     }
 }
 
@@ -219,6 +182,7 @@ fn every_stage_respects_its_budget_and_a_time_limited_run_replays_exactly() {
     let preset = "A320-200";
     let start = nominal(preset);
     let mut limited = reference_config(preset, 4);
+    limited.optimizer.solver.stop_on_evaluations_only = false;
     limited.optimizer.solver.screening.time_limit_s = 3.0;
     limited.optimizer.solver.refinement.time_limit_s = 6.0;
     let first = DesignOptimizer::new(limited.clone())
@@ -270,7 +234,7 @@ fn every_stage_respects_its_budget_and_a_time_limited_run_replays_exactly() {
 fn a_run_that_reports_convergence_has_a_feasible_candidate_the_replay_accepts() {
     // Convergence is a claim about the aircraft, not about the loop: it may
     // only be reported for a winner that satisfies every hard residual.
-    let preset = "AVE";
+    let preset = "A320-200";
     let mut config = reference_config(preset, 16);
     config.optimizer.solver.refinement.max_evaluations = 400;
     let start = nominal(preset);

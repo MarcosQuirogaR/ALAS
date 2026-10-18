@@ -188,6 +188,7 @@ fn every_public_mses_status_has_a_stable_diagnostic_string() {
         (MsesStatus::ParseFailure, "parse_failure"),
         (MsesStatus::Ok, "ok"),
         (MsesStatus::PartialConvergence, "partial_convergence"),
+        (MsesStatus::OutsideValidityDomain, "outside_validity_domain"),
         (MsesStatus::Error, "error"),
     ];
     for (status, text) in expected {

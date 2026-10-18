@@ -7,7 +7,16 @@
 //!   and phase integration.
 //! * quick (`--quick [--base <ref>]`): checks, formatting, then clippy and the
 //!   fast test tier for the packages a change affects. Every change.
-//! * slow (`--slow`): only the slow test tier.
+//!   `--part lint` runs only checks, formatting and clippy; `--part tests` only
+//!   the nextest run; CI runs the two parts as parallel jobs.
+//! * integration (`--integration`, alias `--slow`): only the heavy test tier
+//!   (nextest profile `integration`).
+//! * medium (`--medium`): the tests of 5 s or more outside the integration
+//!   tier; nightly (`--nightly`): the `*_nightly` tests the full tier leaves out.
+//!
+//! The test steps run with the shared result store switched on
+//! (`crate::memo`), so tests that need the same expensive nominal computation
+//! share it across processes.
 //!
 //! Tests run under cargo-nextest when it is installed, which is what makes the
 //! tiers possible (profiles live in `.config/nextest.toml`). Without it the
@@ -15,44 +24,103 @@
 //! checks reject runnable doc examples, and rustdoc startup alone cost minutes.
 
 use crate::affected::{self, Affected};
-use crate::{cargo, run_checks};
+use crate::{cargo, cargo_env, memo, run_checks};
 use std::path::Path;
 use std::process::{Command, Stdio};
 
+/// Which steps of the quick gate to run.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Part {
+    All,
+    Lint,
+    Tests,
+}
+
 enum Tier {
     Full,
-    Quick { base: Option<String> },
+    Quick { base: Option<String>, part: Part },
     Slow,
+    Medium,
+    Nightly,
 }
 
 fn parse_args(args: &[String]) -> Result<Tier, String> {
-    let (mut quick, mut slow, mut base) = (false, false, None);
+    let (mut quick, mut slow, mut medium, mut nightly, mut base) =
+        (false, false, false, false, None);
+    let mut part: Option<Part> = None;
     let mut iter = args.iter();
     while let Some(arg) = iter.next() {
         match arg.as_str() {
             "--quick" => quick = true,
-            "--slow" => slow = true,
+            "--slow" | "--integration" => slow = true,
+            "--medium" => medium = true,
+            "--nightly" => nightly = true,
             "--base" => base = Some(iter.next().ok_or("--base needs a git ref")?.clone()),
+            "--part" => {
+                part = Some(match iter.next().map(String::as_str) {
+                    Some("lint") => Part::Lint,
+                    Some("tests") => Part::Tests,
+                    _ => return Err("--part needs `lint` or `tests`".to_owned()),
+                });
+            }
             other => return Err(format!("unknown gate argument: {other}")),
         }
     }
-    match (quick, slow, base) {
-        (true, true, _) => Err("--quick and --slow are mutually exclusive".to_owned()),
-        (false, _, Some(_)) => Err("--base only applies to --quick".to_owned()),
-        (true, false, base) => Ok(Tier::Quick { base }),
-        (false, true, None) => Ok(Tier::Slow),
-        (false, false, None) => Ok(Tier::Full),
+    if part.is_some() && !quick {
+        return Err("--part only applies to --quick".to_owned());
     }
+    let chosen = [quick, slow, medium, nightly]
+        .iter()
+        .filter(|&&on| on)
+        .count();
+    if chosen > 1 {
+        return Err("--quick, --slow, --medium and --nightly are mutually exclusive".to_owned());
+    }
+    match (quick, slow, medium, nightly, base) {
+        (false, _, _, _, Some(_)) => Err("--base only applies to --quick".to_owned()),
+        (true, _, _, _, base) => Ok(Tier::Quick {
+            base,
+            part: part.unwrap_or(Part::All),
+        }),
+        (_, true, _, _, None) => Ok(Tier::Slow),
+        (_, _, true, _, None) => Ok(Tier::Medium),
+        (_, _, _, true, None) => Ok(Tier::Nightly),
+        _ => Ok(Tier::Full),
+    }
+}
+
+/// `cargo xtask test [nextest args]`: `cargo nextest run` with the shared
+/// result store enabled. Without arguments it runs the fast tier.
+pub fn test(root: &Path, args: &[String]) -> Result<(), String> {
+    if !nextest_available(root) {
+        return Err("xtask test needs cargo-nextest: cargo install cargo-nextest --locked".into());
+    }
+    let mut command: Vec<&str> = vec!["nextest", "run", "--no-fail-fast"];
+    command.extend(args.iter().map(String::as_str));
+    cargo_env(root, &command, &memo_env(root))
+}
+
+/// The result-store environment, or nothing (with a notice) when the tree
+/// cannot be hashed: the tests then just compute everything themselves.
+fn memo_env(root: &Path) -> Vec<(String, String)> {
+    memo::memo_env(root).unwrap_or_else(|error| {
+        println!(
+            "
+result store disabled: {error}"
+        );
+        Vec::new()
+    })
 }
 
 /// Runs the gate for the tier named by `args`. Every step runs even if an
 /// earlier one failed, so one failing step can never hide the others.
 pub fn run(root: &Path, args: &[String]) -> Result<(), String> {
     let nextest = nextest_available(root);
+    let env = memo_env(root);
     let results = match parse_args(args)? {
         Tier::Full => {
             let tests = if nextest {
-                cargo(
+                cargo_env(
                     root,
                     &[
                         "nextest",
@@ -62,6 +130,7 @@ pub fn run(root: &Path, args: &[String]) -> Result<(), String> {
                         "full",
                         "--no-fail-fast",
                     ],
+                    &env,
                 )
             } else {
                 cargo(
@@ -96,23 +165,46 @@ pub fn run(root: &Path, args: &[String]) -> Result<(), String> {
         Tier::Slow => {
             if !nextest {
                 return Err(
-                    "gate --slow needs cargo-nextest: cargo install cargo-nextest --locked"
+                    "gate --integration needs cargo-nextest: cargo install cargo-nextest --locked"
                         .to_owned(),
                 );
             }
-            vec![cargo(
+            vec![cargo_env(
                 root,
                 &[
                     "nextest",
                     "run",
                     "--workspace",
                     "--profile",
-                    "slow",
+                    "integration",
                     "--no-fail-fast",
                 ],
+                &env,
             )]
         }
-        Tier::Quick { base } => quick(root, base.as_deref(), nextest)?,
+        tier @ (Tier::Medium | Tier::Nightly) => {
+            if !nextest {
+                return Err("gate --medium and --nightly need cargo-nextest".to_owned());
+            }
+            let profile = if matches!(tier, Tier::Medium) {
+                "medium"
+            } else {
+                "nightly"
+            };
+            vec![cargo_env(
+                root,
+                &[
+                    "nextest",
+                    "run",
+                    "--workspace",
+                    "--profile",
+                    profile,
+                    "--no-fail-fast",
+                ],
+                &env,
+            )]
+        }
+        Tier::Quick { base, part } => quick(root, base.as_deref(), part, nextest, &env)?,
     };
     report_gate_results(results)
 }
@@ -120,10 +212,16 @@ pub fn run(root: &Path, args: &[String]) -> Result<(), String> {
 fn quick(
     root: &Path,
     base: Option<&str>,
+    part: Part,
     nextest: bool,
+    env: &[(String, String)],
 ) -> Result<Vec<Result<(), String>>, String> {
     let (packages, changed) = (workspace_packages(root)?, changed_files(root, base)?);
-    let mut results = vec![run_checks(root), cargo(root, &["fmt", "--all", "--check"])];
+    let mut results = Vec::new();
+    if part != Part::Tests {
+        results.push(run_checks(root));
+        results.push(cargo(root, &["fmt", "--all", "--check"]));
+    }
 
     let selection: Vec<String> = match affected::affected(&packages, &changed) {
         Affected::All(why) => {
@@ -149,12 +247,17 @@ fn quick(
     let with = |head: &[&'static str], tail: &[&'static str]| -> Vec<&str> {
         [head, &selectors, tail].concat()
     };
-    results.push(cargo(
-        root,
-        &with(&["clippy"], &["--all-targets", "--", "-D", "warnings"]),
-    ));
+    if part != Part::Tests {
+        results.push(cargo(
+            root,
+            &with(&["clippy"], &["--all-targets", "--", "-D", "warnings"]),
+        ));
+    }
+    if part == Part::Lint {
+        return Ok(results);
+    }
     results.push(if nextest {
-        cargo(root, &with(&["nextest", "run"], &["--no-fail-fast"]))
+        cargo_env(root, &with(&["nextest", "run"], &["--no-fail-fast"]), env)
     } else {
         println!(
             "\ngate --quick: cargo-nextest is not installed, so the slow-tier split is off and \
@@ -304,8 +407,28 @@ mod tests {
     fn arguments_select_the_tier() {
         assert!(matches!(parse_args(&args(&[])), Ok(Tier::Full)));
         assert!(matches!(parse_args(&args(&["--slow"])), Ok(Tier::Slow)));
+        assert!(matches!(
+            parse_args(&args(&["--integration"])),
+            Ok(Tier::Slow)
+        ));
         let quick = parse_args(&args(&["--quick", "--base", "main"]));
-        assert!(matches!(quick, Ok(Tier::Quick { base: Some(b) }) if b == "main"));
+        assert!(matches!(quick, Ok(Tier::Quick { base: Some(b), part: Part::All }) if b == "main"));
+        let lint = parse_args(&args(&["--quick", "--part", "lint"]));
+        assert!(matches!(
+            lint,
+            Ok(Tier::Quick {
+                base: None,
+                part: Part::Lint
+            })
+        ));
+        let tests = parse_args(&args(&["--quick", "--part", "tests"]));
+        assert!(matches!(
+            tests,
+            Ok(Tier::Quick {
+                base: None,
+                part: Part::Tests
+            })
+        ));
     }
 
     #[test]
@@ -316,6 +439,9 @@ mod tests {
             &["--slow", "--base", "main"],
             &["--quick", "--base"],
             &["--fast"],
+            &["--part", "lint"],
+            &["--quick", "--part"],
+            &["--quick", "--part", "both"],
         ] {
             assert!(parse_args(&args(bad)).is_err(), "{bad:?}");
         }
@@ -334,11 +460,40 @@ mod tests {
     }
 
     #[test]
-    fn the_fast_profile_excludes_exactly_what_the_slow_profile_selects() {
+    fn the_fast_profile_excludes_exactly_what_the_other_tiers_select() {
         let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../.config/nextest.toml");
         let config = std::fs::read_to_string(path).expect("nextest config exists");
-        let slow = default_filter(&config, "slow");
-        assert!(slow.contains("binary("));
-        assert_eq!(default_filter(&config, "default"), format!("not ({slow})"));
+        let slow = default_filter(&config, "integration");
+        let medium = default_filter(&config, "medium");
+        assert!(slow.contains("binary_id("));
+        assert_eq!(default_filter(&config, "slow"), slow, "slow is an alias");
+        assert_eq!(
+            default_filter(&config, "default"),
+            format!("not ({slow} | {medium} | {})", crate::tiers::NIGHTLY)
+        );
+        assert_eq!(default_filter(&config, "nightly"), crate::tiers::NIGHTLY);
+        assert_eq!(
+            default_filter(&config, "full"),
+            format!("not {}", crate::tiers::NIGHTLY)
+        );
+    }
+
+    #[test]
+    fn no_test_is_in_both_the_integration_and_the_medium_tier() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../.config/nextest.toml");
+        let config = std::fs::read_to_string(path).expect("nextest config exists");
+        let slow = default_filter(&config, "integration");
+        let medium = default_filter(&config, "medium");
+        for term in slow.split(" | ") {
+            if let Some(binary) = term
+                .strip_prefix("binary_id(")
+                .and_then(|t| t.strip_suffix(')'))
+            {
+                assert!(
+                    !medium.contains(&format!("binary_id(={binary})")),
+                    "{binary} is in both the medium and the integration tier"
+                );
+            }
+        }
     }
 }

@@ -239,7 +239,7 @@ fn component_stations_internal(
         fuselage: fuselage_station(fuselage, geometry),
         nose_gear: nose_gear_station(fuselage, main_wing, geometry, mass_model, landing_gear),
         main_gear: main_gear_station(fuselage, main_wing, geometry, mass_model, landing_gear)?,
-        propulsion_units: propulsion_stations(plane),
+        propulsion_units: propulsion_stations(plane, geometry.engine.turboprop.is_some()),
         systems: cabin_station(
             fuselage,
             geometry,
@@ -632,7 +632,9 @@ mod tests {
             .expect("the main gear lies under the fuselage")[0];
         let belly_clearance = section.xyz_c[2] - section.height / 2.0 - ground_z;
         assert!(
-            (belly_clearance - 1.79).abs() < 1.0e-9,
+            // Geometry phase 1: the fitted fuselage loft stands the belly 6.5 mm above the 1.79 m
+            // published ground clearance (1.7965 m, +0.36 %).
+            (belly_clearance - 1.796_474_176_864_616_8).abs() < 1.0e-9,
             "belly {belly_clearance} m above the ground under the main gear"
         );
     }
@@ -1042,6 +1044,7 @@ mod tests {
                 airfoil.clone(),
             )],
             symmetric: true,
+            reference: None,
         };
         assert_eq!(
             wing_root_above_fuselage_crown(&wing_at(1.0), &fuselage),
@@ -1059,6 +1062,6 @@ mod tests {
         let plane = AircraftBuilder::new(Some(config.geometry.clone()))
             .build(Some(&DesignVector::default()), false)
             .expect("building without engines succeeds");
-        assert!(propulsion_stations(&plane).is_empty());
+        assert!(propulsion_stations(&plane, false).is_empty());
     }
 }

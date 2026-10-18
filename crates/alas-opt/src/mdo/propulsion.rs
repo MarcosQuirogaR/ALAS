@@ -18,9 +18,12 @@ use std::fmt;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
+pub use super::engine::turboprop_static_thrust_n;
 use alas_atmo::us1976_try_compute_values;
 use alas_config::{ActiveEngineModel, EngineConfig};
-use alas_prop::empirical_turbofan::{EmpiricalTurbofanDeck, EmpiricalTurbofanModel};
+use alas_prop::empirical_turbofan::{
+    EmpiricalTurbofanDeck, EmpiricalTurbofanModel, InstallationLosses,
+};
 use alas_prop::mission_turbofan::{
     freestream_from_atmosphere, size_turbofan_to_static_rating, PartPowerModel, TurbofanInputs,
     VehicleBuilderParams,
@@ -33,7 +36,7 @@ use alas_prop::system::{
 };
 use alas_prop::turboprop::{Atr72TurbopropSystem, Pw127m568fModel};
 
-/// Metres per second to feet per minute, for the empirical climb schedule.
+/// Metres per second to feet per minute (empirical climb schedule).
 const METRES_PER_SECOND_TO_FEET_PER_MINUTE: f64 = 196.850_393_700_787_4;
 
 /// Ratio tolerance on the inverse thrust solve.
@@ -215,16 +218,13 @@ impl PropulsionDeck {
 
     /// The rating a full-command normalized-force demand resolves to.
     ///
-    /// Each deck normalizes its force command against one of its own ratings:
-    /// the turbofan against maximum climb, the turboprop against the
-    /// takeoff-rated force its governor inverse solves for. Stating it here
-    /// lets the inverse thrust solve read that reference from the rating map
+    /// Both decks normalize their force command against maximum climb, so a
+    /// full throttle never draws take-off power in climb or cruise (PROP-13);
+    /// the turboprop's governor inverse solves for that force. Stating it here
+    /// lets the inverse thrust solve read the reference from the rating map
     /// instead of running the normalized-force demand for it.
     fn normalizing_rating(&self) -> PropulsionRating {
-        match self.kind {
-            DeckKind::Turbofan => PropulsionRating::MaximumClimb,
-            DeckKind::Turboprop => PropulsionRating::TakeoffGoAround,
-        }
+        PropulsionRating::MaximumClimb
     }
 
     /// Flight condition at `altitude_m` and true airspeed `tas_m_s` on a day
@@ -649,9 +649,7 @@ pub fn product_orchestrator(
         .map_err(|error| format!("mission engine binding failed: {error}"))?;
     match active_model {
         ActiveEngineModel::Turbofan(payload) => {
-            // The scalar turbofan model has no per-unit moment model. Keep
-            // its equivalent thrust line through the mission reference point;
-            // the typed propulsion boundary is still what mission code sees.
+            // The scalar model has no per-unit moments: keep its equivalent thrust line.
             let scalar_installation = PropulsionInstallation {
                 unit_positions_m: engine
                     .spanwise_positions_m
@@ -712,16 +710,23 @@ pub fn product_orchestrator(
                     part_power_fuel_flow_ratios: payload.part_power_fuel_flow_ratios,
                     max_climb_rate_ft_min,
                     flight_idle_fraction: 0.07,
+                    flat_rating_temperature_k: payload.flat_rating_temperature_k,
+                    cruise_reference_is_engine_datum: payload.off_design.is_engine_datum(),
+                    cruise_reference_is_maximum_climb: payload.off_design.is_maximum_climb_datum(),
+                    // The catalogue TSFC anchors are uninstalled manufacturer data.
+                    installation: InstallationLosses::transport(payload.rated_thrust_kn * 1_000.0),
                 },
                 scalar_model,
                 ModelProvenance {
                     model: ModelIdentity {
                         family: "bartel-young-openap-turbofan".to_owned(),
-                        version: "three-region-v2".to_owned(),
+                        version: "jenkinson-climb-v3".to_owned(),
                     },
                     dataset: Some(engine.engine_name.clone()),
                     sources: vec![
-                        "Battel & Young (2008), Journal of Aircraft 45(4), DOI 10.2514/1.35589"
+                        "Battel & Young (2008), Journal of Aircraft 45(4), DOI 10.2514/1.35589 (take-off thrust)"
+                            .to_owned(),
+                        "Jenkinson, Simpkin & Rhodes, Civil Jet Aircraft Design (1999), Figs. 9.18(b)-9.21(b) and 9.19(c), 9.21(c) (maximum climb, maximum cruise); Torenbeek, Advanced Aircraft Design (2013), Sec. 9.2 (maximum climb over maximum cruise 1.08)"
                             .to_owned(),
                         format!(
                             "{} [{}]",

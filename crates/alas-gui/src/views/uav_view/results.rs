@@ -1,93 +1,19 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! Electrical mission and procurement result panels for the UAV workflow.
+//! Bill of materials and price estimate of the selected competition design.
 
-use alas_uav::optimizer::OptimizedUav;
+use alas_uav::optimizer::SelectedComponents;
 use alas_uav::{estimate_optimized_aircraft_cost, optimized_aircraft_bom, Currency};
-use egui::{Grid, Ui};
+use egui::Ui;
 
-use super::super::{tr, tr_fields};
-use super::presentation::{card, card_column_count};
-use super::uav_fields::result_measure;
+use super::super::tr;
+use super::presentation::card;
 
-pub(super) fn electrical_mission(
-    mission: &alas_uav::propulsion_electric::ElectricMissionResult,
-    ui: &mut Ui,
-) {
-    card(ui, "Electrical mission simulation", None, |ui| {
-        ui.weak(tr_fields(
-            "Source: {evidence}",
-            &[("evidence", mission.evidence.clone())],
-        ));
-        ui.add_space(4.0);
-        Grid::new("uav_electrical_mission_summary")
-            .num_columns(2)
-            .spacing([20.0, 8.0])
-            .show(ui, |ui| {
-                result_measure(ui, "Mission duration", mission.total_duration_s, "s");
-                result_measure(ui, "Mission distance", mission.total_distance_m, "m");
-                result_measure(ui, "Propulsion energy", mission.propulsion_energy_wh, "Wh");
-                result_measure(
-                    ui,
-                    "Maximum battery current",
-                    mission.maximum_battery_current_a,
-                    "A",
-                );
-                result_measure(
-                    ui,
-                    "Maximum battery power",
-                    mission.maximum_battery_power_w,
-                    "W",
-                );
-            });
-        ui.add_space(4.0);
-        ui.weak(tr("Preliminary, source-bounded; not certified"))
-            .on_hover_text(tr("This is a source-bounded preliminary electrical calculation, not a flight-test, airworthiness, or certification result."));
-    });
-    ui.add_space(8.0);
-    let columns = card_column_count(ui.available_width());
-    for row in mission.phases.chunks(columns) {
-        if columns == 1 {
-            electrical_phase_card(&row[0], ui);
-        } else {
-            ui.columns(columns, |column_uis| {
-                for (index, phase) in row.iter().enumerate() {
-                    electrical_phase_card(phase, &mut column_uis[index]);
-                }
-            });
-        }
-        ui.add_space(8.0);
-    }
-}
-
-fn electrical_phase_card(
-    phase: &alas_uav::propulsion_electric::ElectricMissionPhaseResult,
-    ui: &mut Ui,
-) {
-    card(ui, &phase.phase.name, None, |ui| {
-        Grid::new(("uav_electrical_mission_phase", &phase.phase.name))
-            .num_columns(2)
-            .spacing([16.0, 7.0])
-            .show(ui, |ui| {
-                result_measure(ui, "Duration", phase.phase.duration_s, "s");
-                result_measure(ui, "Speed", phase.phase.condition.speed_m_s, "m/s");
-                result_measure(ui, "Low-speed thrust", phase.propulsion.total_thrust_n, "N");
-                result_measure(
-                    ui,
-                    "Battery current",
-                    phase.propulsion.battery_current_a,
-                    "A",
-                );
-                result_measure(ui, "Propulsion energy", phase.propulsion_energy_wh, "Wh");
-            });
-    });
-}
-
-pub(super) fn aircraft_bom(optimized: &OptimizedUav, ui: &mut Ui) {
+pub(super) fn aircraft_bom(components: &SelectedComponents, ui: &mut Ui) {
     card(ui, "Aircraft BOM and price estimate", None, |ui| {
-        let bom = optimized_aircraft_bom(&optimized.components);
-        let estimate = estimate_optimized_aircraft_cost(&optimized.components);
+        let bom = optimized_aircraft_bom(components);
+        let estimate = estimate_optimized_aircraft_cost(components);
         for line in &bom.lines {
             let price = estimate
                 .lines

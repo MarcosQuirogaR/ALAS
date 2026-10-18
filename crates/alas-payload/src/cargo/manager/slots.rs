@@ -54,6 +54,7 @@ impl<'g> CargoLoadManager<'g> {
                     uld.height
                 },
                 payload: 0.0,
+                net_limit_kg: None,
             });
         }
         ys.len()
@@ -138,10 +139,99 @@ impl<'g> CargoLoadManager<'g> {
         }
     }
 
+    /// The deck a freight hold's pallets stand on, or `None` without a
+    /// declared (valid) freight hold.
+    ///
+    /// The floor is not the airliner main-deck floor at the cabin axis: it is
+    /// placed so that the declared clear height closes under the interior
+    /// crown at the middle of the floor.
+    pub fn freight_deck(&self) -> Option<DeckSpec> {
+        let hold = self.config.freight_hold.filter(|hold| hold.is_valid())?;
+        let x_mid = hold.floor_start_x_m + 0.5 * hold.floor_length_m;
+        let half_height = self.geometry.internal_half_height(x_mid);
+        Some(DeckSpec {
+            name: MAIN,
+            floor_frac: (half_height - hold.clear_height_m) / half_height,
+            ceil_frac: 1.0,
+            width_factor: 1.0,
+            is_passenger: false,
+        })
+    }
+
+    /// Lay a freight hold's pallets in a single row down the floor and the
+    /// ramp, returning how many positions fit.
+    ///
+    /// A pallet never straddles the ramp hinge: the floor takes as many as
+    /// fit ahead of it and the ramp as many as fit aft of it, each ramp
+    /// position limited to its share of the declared ramp load. The number
+    /// across follows the declared clear width, not the outer loft.
+    fn build_freight_hold_slots(&mut self) -> usize {
+        let Some(hold) = self.config.freight_hold.filter(|hold| hold.is_valid()) else {
+            return 0;
+        };
+        let Some(deck) = self.freight_deck() else {
+            return 0;
+        };
+        let uld = uld_or(&self.config.main_deck_uld, MAIN_DECK_DEFAULT);
+        let pitch = uld.length + MAIN_ROW_GAP_M;
+        let across = (((hold.clear_width_m + SLOT_GAP_M) / (uld.width + SLOT_GAP_M)).floor()
+            as i64)
+            .clamp(0, MAX_ACROSS);
+        let centers: Vec<f64> = (0..across)
+            .map(|index| (index as f64 - (across - 1) as f64 * 0.5) * (uld.width + SLOT_GAP_M))
+            .collect();
+        let zones = [
+            ("MD", hold.floor_start_x_m, hold.ramp_start_x_m(), false),
+            ("RAMP", hold.ramp_start_x_m(), hold.aft_end_x_m(), true),
+        ];
+        let mut ramp_slots = Vec::new();
+        let mut placed = 0;
+        for (prefix, x_start, x_end, on_ramp) in zones {
+            let mut x = x_start + 0.5 * uld.length;
+            let mut row = 0;
+            while x + 0.5 * uld.length <= x_end + SLOT_FIT_TOLERANCE_M && row < MAX_MAIN_ROWS {
+                row += 1;
+                for (index, &y) in centers.iter().enumerate() {
+                    if !uld_fits(self.geometry, &deck, x, y, uld) {
+                        continue;
+                    }
+                    if on_ramp {
+                        ramp_slots.push(self.slots.len());
+                    }
+                    self.slots.push(CargoSlot {
+                        sid: format!("{prefix}-{row}-{}", index + 1),
+                        deck: MAIN,
+                        x,
+                        y,
+                        uld,
+                        realized_height_m: uld.height,
+                        payload: 0.0,
+                        net_limit_kg: None,
+                    });
+                    placed += 1;
+                }
+                x += pitch;
+            }
+        }
+        if let Some(limit) = hold.ramp_load_limit_kg {
+            let share = limit / ramp_slots.len().max(1) as f64;
+            for index in ramp_slots {
+                self.slots[index].net_limit_kg = Some(share);
+            }
+        }
+        placed
+    }
+
     /// The main deck if this is a freighter, then the lower holds, then the
     /// one loose bulk position every aircraft has.
     fn build_slots(&mut self) {
         let g = self.geometry;
+
+        // A declared freight hold is the whole payload space: no underfloor
+        // hold and no loose bulk position.
+        if self.config.use_main_deck && self.build_freight_hold_slots() > 0 {
+            return;
+        }
 
         if self.config.use_main_deck {
             if let Some(main_deck) = g.passenger_decks.iter().find(|deck| deck.name == MAIN) {
@@ -211,6 +301,7 @@ impl<'g> CargoLoadManager<'g> {
                     BULK.height
                 },
                 payload: 0.0,
+                net_limit_kg: None,
             });
         }
     }

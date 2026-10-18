@@ -35,5 +35,5 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 serde_yaml = { workspace = true }
 
-[dev-dependencies]
-alas-testkit = { path = "../alas-testkit" }
+[lints]
+workspace = true

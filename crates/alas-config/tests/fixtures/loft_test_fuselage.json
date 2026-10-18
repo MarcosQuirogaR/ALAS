@@ -1,0 +1,23 @@
+{
+  "schema": 1,
+  "preset": "test_fuselage",
+  "body": "fuselage",
+  "reference_length_m": 37.5,
+  "degree": 3,
+  "frame": "x aft of nose tip, y right, z up, metres; narrow-body test fixture, D = H = 3.95 m, cabin axis z = 0.2 m (hand-made, not a preset, not a drawing)",
+  "curves": {
+    "A":  {"knots": [0, 0, 0, 0, 0.16, 0.70, 1, 1, 1, 1], "coeffs": [0.0, 3.900625, 3.900625, 3.900625, 3.900625, 0.16]},
+    "E":  {"knots": [0, 0, 0, 0, 0.16, 0.70, 1, 1, 1, 1], "coeffs": [0.0, 3.900625, 3.900625, 3.900625, 3.900625, 0.16]},
+    "zc": {"knots": [0, 0, 0, 0, 0.16, 0.70, 1, 1, 1, 1], "coeffs": [0.2, 0.2, 0.2, 0.2, 0.2, 1.1]},
+    "n":  {"knots": [0, 0, 0, 0, 0.16, 0.70, 1, 1, 1, 1], "coeffs": [2.0, 2.4, 2.4, 2.4, 2.4, 2.4]},
+    "k":  {"knots": [0, 0, 0, 0, 0.16, 0.70, 1, 1, 1, 1], "coeffs": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]}
+  },
+  "front": {"kind": "point", "tip_radius_m": 0.97515625},
+  "rear": {"kind": "base"},
+  "cabin": {"x_start_m": 6.0, "x_end_m": 26.25},
+  "fairness": {"inflections": {"crown": 0, "keel": 0, "plan": 0}, "tv_ratio_max": 3.0},
+  "fit": {"rms_m": 0.0, "max_m": 0.0, "lambda": 0.0, "tool_version": "hand-made"},
+  "provenance": [
+    {"group": "A", "kind": "template", "confidence": "C", "note": "hand-made test body"}
+  ]
+}

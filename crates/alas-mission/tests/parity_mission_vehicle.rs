@@ -134,6 +134,40 @@ fn compare(
                     if path.ends_with(".geometry_config.wing") && key == "airfoil_class" {
                         continue;
                     }
+                    // Geometry round 2 native wing inputs (spanwise dihedral
+                    // and thickness stations, swept-back tip, flight-shape
+                    // rises, nacelle height hold) the frozen request predates;
+                    // the alas-geom wing-profile tests and the alas-config
+                    // preset ledgers pin them.
+                    if path.ends_with(".geometry_config.wing")
+                        && matches!(
+                            key.as_str(),
+                            "dihedral_stations"
+                                | "thickness_stations"
+                                | "tip_rake_start_span_fraction"
+                                | "tip_rake_tip_chord_m"
+                                | "wing_profile_interpolation"
+                                | "flight_root_rise_m"
+                                | "flight_tip_rise_semispan_fraction"
+                                | "nacelles_hold_ground_height"
+                        )
+                    {
+                        continue;
+                    }
+                    // Geometry phase 1 native inputs (fuselage loft, nacelle
+                    // model, drawn reference wing, wingtip device, fin dorsal)
+                    // the frozen request predates; the alas-geom loft and
+                    // builder tests and the alas-config preset ledgers pin
+                    // them.
+                    if (path.ends_with(".geometry_config.fuselage") && key == "loft")
+                        || (path.ends_with(".geometry_config.engine") && key == "nacelle_model")
+                        || (path.ends_with(".geometry_config.wing")
+                            && matches!(key.as_str(), "reference_wing" | "wingtip_device"))
+                        || (path.ends_with(".geometry_config.empennage")
+                            && key.starts_with("vstab_dorsal_"))
+                    {
+                        continue;
+                    }
                     // The optional belly-upsweep, shaped-nose and upper-deck
                     // hump fields are native fuselage inputs the frozen
                     // request predates; the geometry tests and the preset
@@ -142,6 +176,9 @@ fn compare(
                         && (key == "belly_upsweep_length_m"
                             || key.starts_with("hump_")
                             || key.starts_with("upper_deck_")
+                            || key.starts_with("aft_")
+                            || key.starts_with("tail_end_")
+                            || key == "hold_interior_end_x_m"
                             || (key.starts_with("nose_") && key != "nose_z_m"))
                     {
                         continue;
@@ -174,6 +211,13 @@ fn compare(
             }
         }
         (Value::Array(a), Value::Array(e)) => {
+            // A drawing-fitted nacelle outline (A320 and A340 engines, see
+            // `engines::NacelleShape`) replaces the frozen six-station envelope
+            // with a longer, differently proportioned list; its tests are in
+            // alas-config (`engines`).
+            if path.ends_with(".geometry_config.engine.nacelle_profile") && a.len() != e.len() {
+                return;
+            }
             if a.len() != e.len() {
                 strings.exact(
                     &format!("{path}.len"),
@@ -287,17 +331,33 @@ fn request_corrections() -> BTreeMap<&'static str, RequestCorrection> {
         correction(
             "A320-200.geometry_config.empennage.hstab_root_chord_m",
             4.0,
-            3.740,
+            3.8,
         ),
         correction(
             "A320-200.geometry_config.empennage.hstab_tip_chord_m",
             1.2,
-            1.24,
+            1.18,
         ),
         correction(
             "A320-200.geometry_config.empennage.hstab_tip_le_m[0]",
             3.5,
-            3.31,
+            4.01,
+        ),
+        // 2026-10-07 geometry fit (fix/geom): A320 tailplane apex moved forward
+        // 0.56 m with the tip leading edge held at 35.5 m (drawn 32.8 deg LE
+        // sweep, former apex gave 28 deg), and the fin moved 1.2 m forward
+        // (crown LE 29.9 m, TE 35.4 m on Fig 2-2-0-991-004-A01). Before/after:
+        // hstab_offset 5.5 -> 6.06 m, hstab_tip_le_x 3.31 -> 4.02 m,
+        // vstab_offset 6.5 -> 7.7 m.
+        correction(
+            "A320-200.geometry_config.empennage.hstab_offset_from_tail_m",
+            5.5,
+            6.04,
+        ),
+        correction(
+            "A320-200.geometry_config.empennage.vstab_offset_from_tail_m",
+            6.5,
+            7.66,
         ),
         correction(
             "A320-200.geometry_config.empennage.hstab_tip_le_m[1]",
@@ -307,12 +367,12 @@ fn request_corrections() -> BTreeMap<&'static str, RequestCorrection> {
         correction(
             "A320-200.geometry_config.empennage.vstab_root_chord_m",
             5.2,
-            5.444,
+            5.51,
         ),
         correction(
             "A320-200.geometry_config.empennage.vstab_tip_chord_m",
             1.8,
-            1.884,
+            1.75,
         ),
         correction(
             "A320-200.geometry_config.empennage.vstab_tip_le_m[0]",
@@ -342,19 +402,36 @@ fn request_corrections() -> BTreeMap<&'static str, RequestCorrection> {
             0.37,
             0.379_3,
         ),
+        // Nose tip heights of the drawing-fitted noses (geometry round 2): read
+        // from the manufacturer side view; the frozen nose droop was a class
+        // estimate.
+        correction("A320-200.geometry_config.fuselage.nose_z_m", -0.3, -0.57),
+        correction("A340-300.geometry_config.fuselage.nose_z_m", -0.4, 0.25),
         correction("A320-200.geometry_config.wing.root_datum_x_m", 12.9, 11.891),
         // The A320 planar wing and dihedral of the Airbus AC plan view and
         // sharklet ground clearances; pinned by the alas-config preset ledger.
         correction("A320-200.geometry_config.wing.break_z_m", -0.2, -0.62),
-        correction("A320-200.geometry_config.wing.tip_z_m", 1.5, 0.33),
-        correction("A320-200.geometry_config.engine.z_m", -1.71, -1.50),
+        correction("A320-200.geometry_config.wing.tip_z_m", 1.5, 0.3262),
+        // Geometry round 2 (wing lane): tailplane dihedral fitted to the front view.
+        correction(
+            "A320-200.geometry_config.empennage.hstab_tip_le_m[2]",
+            0.5,
+            0.736,
+        ),
+        correction(
+            "A340-300.geometry_config.empennage.hstab_tip_le_m[2]",
+            0.8,
+            1.08,
+        ),
+        correction("A340-300.geometry_config.empennage.hstab_z_m", 1.0, 1.51),
+        correction("A320-200.geometry_config.engine.z_m", -1.71, -1.33),
         correction(
             "A320-200.geometry_config.engine.inlet_x_offset_m",
             2.5,
-            3.646,
+            3.246,
         ),
         // Wing root anchored to the Airbus quarter-MAC point (gear-load statics).
-        correction("A340-300.geometry_config.wing.root_datum_x_m", 22.0, 22.341),
+        correction("A340-300.geometry_config.wing.root_datum_x_m", 22.0, 22.368),
         correction(
             "A340-300.geometry_config.empennage.hstab_tip_le_m[1]",
             9.0,
@@ -367,12 +444,12 @@ fn request_corrections() -> BTreeMap<&'static str, RequestCorrection> {
         correction(
             "A340-300.geometry_config.empennage.hstab_offset_from_tail_m",
             9.0,
-            8.42,
+            8.4,
         ),
         correction(
             "A340-300.geometry_config.empennage.hstab_tip_chord_m",
             1.8,
-            2.02,
+            2.0,
         ),
         correction(
             "A340-300.geometry_config.empennage.hstab_tip_le_m[0]",
@@ -382,33 +459,33 @@ fn request_corrections() -> BTreeMap<&'static str, RequestCorrection> {
         correction(
             "A340-300.geometry_config.empennage.vstab_offset_from_tail_m",
             10.5,
-            11.24,
+            11.19,
         ),
         correction(
             "A340-300.geometry_config.empennage.vstab_root_chord_m",
             8.0,
-            7.78,
+            7.79,
         ),
         correction(
             "A340-300.geometry_config.empennage.vstab_tip_chord_m",
             2.8,
-            2.28,
+            3.08,
         ),
         correction(
             "A340-300.geometry_config.empennage.vstab_tip_le_m[0]",
             7.5,
-            8.14,
+            8.105,
         ),
         correction(
             "A340-300.geometry_config.empennage.vstab_tip_le_m[2]",
             8.5,
-            8.3,
+            8.42,
         ),
         correction("A340-300.geometry_config.empennage.vstab_z_m", 1.8, 3.02),
         correction(
             "A340-300.geometry_config.engine.inlet_x_offset_m",
             3.0,
-            4.227,
+            4.2648,
         ),
         correction(
             "A340-300.geometry_config.engine.spanwise_positions_m[0]",
@@ -430,9 +507,20 @@ fn request_corrections() -> BTreeMap<&'static str, RequestCorrection> {
             -14.0,
             -19.27,
         ),
-        correction("A340-300.geometry_config.engine.z_m", -1.94, -1.436),
-        correction("A340-300.geometry_config.wing.break_z_m", -0.3, -0.922),
-        correction("A340-300.geometry_config.wing.tip_z_m", 2.0, 1.315),
+        correction("A340-300.geometry_config.engine.z_m", -1.94, -1.2742),
+        // Drawing-fitted CFM56-5C nacelle (Airbus A340 AC plan and side view):
+        // 7.3 m inlet face to plug tip, 1.175 m maximum radius.
+        correction("A340-300.engine.nacelle_length_m", 4.0, 7.3),
+        correction("A340-300.engine.nacelle_max_radius_m", 1.1, 1.175),
+        correction("A340-300.geometry_config.engine.radius_scale_m", 1.1, 1.175),
+        correction("A340-300.geometry_config.wing.break_z_m", -0.3, -1.11),
+        // Geometry phase 1: the A340-300 tailplane root chord follows the drawing (5.36 m).
+        correction(
+            "A340-300.geometry_config.empennage.hstab_root_chord_m",
+            6.5,
+            5.36,
+        ),
+        correction("A340-300.geometry_config.wing.tip_z_m", 2.0, 1.2296),
         correction(
             "A320-200.geometry_config.fuselage.height_m",
             Value::Null,
@@ -445,8 +533,8 @@ fn request_corrections() -> BTreeMap<&'static str, RequestCorrection> {
         ),
         correction("A320-200.engine.bypass_ratio", 11.0, 5.5),
         correction("A320-200.engine.fan_pressure_ratio", 1.4, 1.6),
-        correction("A320-200.engine.nacelle_length_m", 3.6, 3.3),
-        correction("A320-200.engine.nacelle_max_radius_m", 1.15, 1.0),
+        correction("A320-200.engine.nacelle_length_m", 3.6, 5.05),
+        correction("A320-200.engine.nacelle_max_radius_m", 1.15, 1.02),
         correction("A320-200.engine.overall_pressure_ratio", 40.0, 32.6),
         // The typed CFM56-5B4/3 binding carries its identity-matched ICAO
         // LTO rating rather than the published design scalar.
@@ -458,10 +546,17 @@ fn request_corrections() -> BTreeMap<&'static str, RequestCorrection> {
             "LEAP-1A",
             "CFM56-5B4/3",
         ),
+        // Cruise TSFC anchors are now the printed values (fuel-chain lane 2026-10-14): the CFM56
+        // family 0.545 (Scholz engine table; see `cruise_tsfc_source` in engines.json).
         correction(
             "A320-200.geometry_config.engine.cruise_tsfc_kg_kgf_hr",
             0.52,
-            0.6,
+            0.545,
+        ),
+        correction(
+            "A340-300.geometry_config.engine.cruise_tsfc_kg_kgf_hr",
+            0.58,
+            0.545,
         ),
         correction(
             "A320-200.geometry_config.engine.fan_diameter_m",
@@ -474,36 +569,11 @@ fn request_corrections() -> BTreeMap<&'static str, RequestCorrection> {
             1.6,
         ),
         correction(
-            "A320-200.geometry_config.engine.nacelle_profile[1][0]",
-            0.288,
-            0.264,
-        ),
-        correction(
-            "A320-200.geometry_config.engine.nacelle_profile[2][0]",
-            0.54,
-            0.495,
-        ),
-        correction(
-            "A320-200.geometry_config.engine.nacelle_profile[3][0]",
-            1.98,
-            1.815,
-        ),
-        correction(
-            "A320-200.geometry_config.engine.nacelle_profile[4][0]",
-            2.7,
-            2.475,
-        ),
-        correction(
-            "A320-200.geometry_config.engine.nacelle_profile[5][0]",
-            3.6,
-            3.3,
-        ),
-        correction(
             "A320-200.geometry_config.engine.overall_pressure_ratio",
             40.0,
             32.6,
         ),
-        correction("A320-200.geometry_config.engine.radius_scale_m", 1.15, 1.0),
+        correction("A320-200.geometry_config.engine.radius_scale_m", 1.15, 1.02),
         correction("A320-200.geometry_config.engine.thrust_kn", 120.64, 120.1),
         correction(
             "A320-200.geometry_config.engine.turbine_inlet_temp_k",

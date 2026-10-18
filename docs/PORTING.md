@@ -7,7 +7,13 @@ orchestration layers such as `alas-pipeline` and `alas-gui` were built
 natively over already-parity-tested physics kernels rather than translated,
 so their rows below correctly read `todo` for "never checked against a
 Python counterpart" while the crates themselves build, run, and are exercised
-end to end. A `todo` row here is not evidence the crate is unbuilt.
+end to end. A `todo` row here is not evidence the crate is unbuilt, and
+conversely some rows still marked `todo` already have parity test files
+(`parity_*.rs` under `crates/alas-aero/tests`, `alas-stab`, `alas-mission`,
+`alas-struct`, `alas-route`, `alas-screen`, `alas-report`, `alas-geom` and
+`alas-pipeline`); the status column was not advanced when those landed, so
+treat the test directories, not this column, as the record of what is
+checked.
 
 Every Python module in the reference implementation appears here exactly once,
 with where it goes, what licence its content carries, and whether it has been
@@ -40,8 +46,12 @@ CONTRIBUTING.md. They are not fixed during translation.
 
 ## Tolerance tiers
 
-Defined in `golden/tolerances.toml`. Summarized here because the table below
-refers to them constantly.
+Defined in `crates/alas-testkit/src/lib.rs` (the `Tier` enum; `golden/` holds
+fixtures and generators only). Summarized here because the table below
+refers to them constantly. `stat` is not a `Tier` variant: it is a ledger
+label (accepted by `xtask evidence-audit`) for distributional agreement, which
+is asserted by dedicated tests in `alas-opt` and `alas-screen` rather than by
+the testkit tiers.
 
 | Tier | Bound | Applies to |
 |---|---|---|
@@ -662,6 +672,7 @@ figure registry survive as library concerns, listed above.
 | `alas-testkit` | n/a | n/a | native |
 | `alas-acceptance` | n/a | n/a | todo |
 | `alas-uav` | n/a | n/a | native |
+| `alas-uav-db` | n/a | n/a | native |
 | `xtask` | n/a | n/a | native |
 
 `alas-math::bicubic` reproduces `scipy.interpolate.RectBivariateSpline` at its

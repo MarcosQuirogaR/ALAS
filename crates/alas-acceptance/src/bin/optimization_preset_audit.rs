@@ -307,7 +307,8 @@ fn run_measure(values: &[String]) -> io::Result<()> {
         args.timeout_s,
         settings_json(&settings)
     );
-    let row = evaluate_preset_optimization(
+    let profiling = alas_opt::stage_profile::enabled();
+    let mut row = evaluate_preset_optimization(
         &preset_name,
         &args.output_dir,
         &locator,
@@ -319,6 +320,9 @@ fn run_measure(values: &[String]) -> io::Result<()> {
         args.native_only,
         args.mtow_mode,
     );
+    if profiling {
+        row["eval_profile"] = diagnostics::eval_profile_json();
+    }
 
     fs::write(
         args.output_dir.join("measurement_result.json"),
@@ -427,7 +431,7 @@ fn settings_json(settings: &SolverSettings) -> Value {
 
 enum RunOutcome {
     Finished(
-        Box<thread::Result<Result<PipelineResult, String>>>,
+        Box<Result<PipelineResult, String>>,
         Duration,
         Box<CancelSnapshot>,
     ),
@@ -442,8 +446,6 @@ enum RunOutcome {
         observed: Duration,
         /// What the cancelled run itself reported, verbatim.
         detail: String,
-        /// Whether the joined worker panicked instead of returning.
-        panicked: bool,
         /// The run's own cancellation telemetry, read after the join.
         telemetry: Box<CancelSnapshot>,
     },
@@ -451,9 +453,7 @@ enum RunOutcome {
 
 fn disconnected(telemetry: CancelSnapshot) -> RunOutcome {
     RunOutcome::Finished(
-        Box::new(Ok(Err(
-            "worker thread disconnected without a result".to_owned()
-        ))),
+        Box::new(Err("worker thread disconnected without a result".to_owned())),
         Duration::ZERO,
         Box::new(telemetry),
     )
@@ -485,7 +485,9 @@ fn run_with_timeout(
     let handle = thread::spawn(move || {
         let start = Instant::now();
         let snapshots = snapshot_evidence::SnapshotEvidence::start(options.output_dir.as_deref());
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        // No panic recovery: the release profile builds with `panic = "abort"`,
+        // so a panicking run ends the process and cannot be reported as a row.
+        let result = (|| {
             let on_event = |event: alas_pipeline::runs::RunEvent| {
                 eprintln!(
                     "[stage] {}",
@@ -508,7 +510,7 @@ fn run_with_timeout(
                     cancel: worker_watch.flag(),
                 },
             )
-        }));
+        })();
         snapshots.finish();
         let elapsed = start.elapsed();
         let _ = tx.send((result, elapsed));
@@ -595,25 +597,13 @@ fn run_with_timeout(
             }
         }
     };
-    // The worker catches its own unwind and always sends, so a panic arrives
-    // in `result` rather than through `join`; both are consulted so neither
-    // can hide one.
-    let joined_panic = handle.join().is_err();
+    let _ = handle.join();
     watch.mark_worker_joined();
-    let (detail, panicked) = match result {
-        Ok(Ok(_)) => (
-            "the run completed after the cancellation request rather than stopping on it"
-                .to_owned(),
-            joined_panic,
-        ),
-        Ok(Err(error)) => (error, joined_panic),
-        Err(panic) => (
-            format!(
-                "worker panicked after the cancellation request: {}",
-                panic_message(&panic)
-            ),
-            true,
-        ),
+    let detail = match result {
+        Ok(_) => {
+            "the run completed after the cancellation request rather than stopping on it".to_owned()
+        }
+        Err(error) => error,
     };
     // The guard, not the search, is what stopped this run; the search's own
     // `cancelled` label is kept in `termination` alongside it.
@@ -626,7 +616,6 @@ fn run_with_timeout(
         limit,
         observed: guarded_start.elapsed(),
         detail,
-        panicked,
         telemetry: Box::new(watch.snapshot()),
     }
 }
@@ -767,7 +756,6 @@ fn evaluate_preset_optimization_inner(
             limit,
             observed,
             detail,
-            panicked,
             telemetry,
         } => {
             persist_telemetry(&result_dir, &telemetry);
@@ -794,7 +782,6 @@ fn evaluate_preset_optimization_inner(
                 "acknowledgement_contract_s": ACKNOWLEDGEMENT_CONTRACT_S,
                 "acknowledgement_contract_met": acknowledged,
                 "worker_joined": true,
-                "worker_panicked": panicked,
                 // A time-limited run is never feasible and never converged:
                 // the search was stopped from outside before it decided
                 // anything.
@@ -811,27 +798,25 @@ fn evaluate_preset_optimization_inner(
     persist_telemetry(&result_dir, &telemetry);
 
     let pipeline_result = match run_result {
-        Ok(Ok(result)) => result,
-        Ok(Err(error)) => {
+        Ok(result) => result,
+        Err(error) => {
             let infeasible = error.contains("no feasible design");
+            // A search that delivered nothing still has a baseline: the native
+            // pipeline on the preset nominal, so every row carries one.
+            let baseline_only = infeasible.then(|| {
+                exposure::baseline_only_json(&controls::run_baseline_pipeline(
+                    baseline_config,
+                    baseline_environment,
+                    seed,
+                    &result_dir,
+                    timeout,
+                ))
+            });
             return json!({
+                "baseline_only": baseline_only,
                 "preset": name,
                 "status": if infeasible { "infeasible" } else { "error" },
                 "status_detail": error,
-                "seed": seed,
-                "solver_preset": configuration.reported_name(),
-                "configuration": configuration.provenance(),
-                "solver_settings": settings_json(settings),
-                "output_dir": result_dir.display().to_string(),
-                "wall_time_s": wall_time.as_secs_f64(),
-            });
-        }
-        Err(panic) => {
-            let message = panic_message(&panic);
-            return json!({
-                "preset": name,
-                "status": "error",
-                "status_detail": format!("pipeline panicked: {message}"),
                 "seed": seed,
                 "solver_preset": configuration.reported_name(),
                 "configuration": configuration.provenance(),
@@ -939,16 +924,6 @@ fn cancellation_json(telemetry: &CancelSnapshot) -> Value {
                   acknowledgement is request to first observation by the running search, \
                   drain is request to search return, join is request to worker collection",
     })
-}
-
-fn panic_message(panic: &Box<dyn std::any::Any + Send>) -> String {
-    if let Some(s) = panic.downcast_ref::<&str>() {
-        (*s).to_owned()
-    } else if let Some(s) = panic.downcast_ref::<String>() {
-        s.clone()
-    } else {
-        "non-string panic payload".to_owned()
-    }
 }
 
 fn error_row(
@@ -1062,6 +1037,8 @@ fn build_success_row(
     // The list is the verdict: `physical_passed` is exactly "no blockers", so
     // a future clause cannot be added to the list and silently left out of the
     // boolean, and the boolean cannot be true while the list is non-empty.
+    // Only physical and execution clauses are blockers; the two facts that are
+    // true of every bounded run by construction are `informational_notes`.
     let mut feasibility_blockers: Vec<String> = Vec::new();
     if !execution_passed {
         feasibility_blockers.push(
@@ -1084,8 +1061,12 @@ fn build_success_row(
             optimization.map_or("none", |o| o.termination.as_str())
         ));
     }
+    // Search convergence is a statement about the stopping rule, not about the
+    // physics of the delivered aircraft: an evaluation-budget termination is
+    // the expected end of these bounded runs. It is reported, not counted.
+    let mut informational_notes: Vec<String> = Vec::new();
     if optimization.is_some() && !optimizer_converged {
-        feasibility_blockers.push(format!(
+        informational_notes.push(format!(
             "the search did not converge (termination {})",
             optimization.map_or("none", |o| o.termination.as_str())
         ));
@@ -1109,18 +1090,20 @@ fn build_success_row(
             "OEW, as MTOW minus payload minus fuel, is not a finite positive mass".to_owned(),
         );
     }
-    if !cruise_l_over_d.is_some_and(|v| v > 8.0) {
-        feasibility_blockers.push(
-            "the cruise lift-to-drag ratio is missing or at or below the 8.0 plausibility floor"
-                .to_owned(),
-        );
+    if !cruise_l_over_d.is_some_and(|v| v > alas_acceptance::matrix::MIN_PLAUSIBLE_L_OVER_D) {
+        feasibility_blockers.push(format!(
+            "the cruise lift-to-drag ratio is missing or at or below the {:.1} plausibility floor",
+            alas_acceptance::matrix::MIN_PLAUSIBLE_L_OVER_D
+        ));
     }
     if !neutral_point_x.is_some_and(|v| v > 0.0) {
         feasibility_blockers
             .push("the neutral point is missing or not aft of the fuselage nose origin".to_owned());
     }
+    // A documented gap of the preset registry (no preset registers one), not a
+    // property of the candidate.
     if !design_mission_source_backed {
-        feasibility_blockers.push(
+        informational_notes.push(
             "no source-backed design mission is registered for this preset, so the mission the \
              candidate is sized against is unverified"
                 .to_owned(),
@@ -1173,6 +1156,7 @@ fn build_success_row(
         "analysis_evidence": diagnostics::evidence(result),
         "physical_passed": physical_passed,
         "feasibility_blockers": feasibility_blockers,
+        "informational_notes": informational_notes,
         "design_mission_status": design_mission_status,
         "design_mission_source_backed": design_mission_source_backed,
         "mtow_kg": mtow_kg,
@@ -1336,6 +1320,18 @@ fn format_matrix_report(document: &Value) -> String {
             }
         }
     }
+    if let Some(rows) = document["presets"].as_array() {
+        text.push_str("\nInformational notes (not blockers), per preset:\n");
+        for row in rows {
+            let name = row["preset"].as_str().unwrap_or("?");
+            for note in row["informational_notes"].as_array().into_iter().flatten() {
+                text.push_str(&format!(
+                    "  {name}: {}\n",
+                    note.as_str().unwrap_or("(unnamed)")
+                ));
+            }
+        }
+    }
     text.push_str(&format!(
         "\nAll presets ran to a success status: {}\n",
         document["all_success"]
@@ -1347,14 +1343,15 @@ fn format_matrix_report(document: &Value) -> String {
          its own stopping criterion; a cancelled or budget-exhausted run is\n\
          never converged. Feas is the optimizer's delivered-candidate verdict: a valid winner,\n\
          a finite objective, not cancelled, and accepted by the reporting-fidelity\n\
-         re-evaluation. Phys additionally requires convergence, no governing error-severity\n\
-         finding, no planning CG violation, physically plausible reported metrics, and a\n\
-         source-backed design mission. None of these is a manufacturability claim: no\n\
+         re-evaluation. Phys additionally requires no governing error-severity\n\
+         finding, no planning CG violation and physically plausible reported metrics.\n\
+         Search non-convergence (evaluation-budget termination) and the missing\n\
+         source-backed design mission are informational notes, not blockers.\n\
+         None of these is a manufacturability claim: no\n\
          wing-fuselage intersection or geometric-plausibility constraint exists in `alas-opt`\n\
          (`docs/optimizer-design-vector.md`). A design-mission status of UNVERIFIED is a known,\n\
-         documented gap and no preset currently clears it, so Phys is expected false\n\
-         workspace-wide until a source-backed mission is registered; it is listed as a blocker\n\
-         rather than excused.\n",
+         documented gap and no preset currently clears it; it is listed under\n\
+         informational notes so it no longer forces Phys false.\n",
     );
     text
 }

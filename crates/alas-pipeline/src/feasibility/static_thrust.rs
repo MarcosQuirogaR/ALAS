@@ -184,7 +184,29 @@ pub(crate) fn cruise_thrust_margin(
     static_tw: f64,
     wing_loading_pa: f64,
     weight_n: f64,
+    mid_cruise_mass_kg: f64,
 ) -> Vec<PhysicalFinding> {
+    // One definition with the optimizer's `cruise_thrust` row: the engine
+    // deck (a turboprop: the unit model's maximum-cruise thrust) over the
+    // levels the mission plan flies. A turboprop's static thrust is the unit
+    // model's own on both sides of the ratio, not the roll-mean figure.
+    if config.performance.cruise_thrust_from_deck {
+        let static_tw = if propeller_cruise_thrust_n(config).is_some() {
+            super::cruise_deck::static_tw_over(config, weight_n)
+        } else {
+            static_tw
+        };
+        if let Some(findings) = super::cruise_deck::jet_findings(
+            config,
+            report,
+            static_tw,
+            wing_loading_pa,
+            weight_n,
+            mid_cruise_mass_kg,
+        ) {
+            return findings;
+        }
+    }
     let cruise_required_tw = match cruise_required_tw(config, report, wing_loading_pa) {
         Ok(required) => required,
         Err(reason) => {

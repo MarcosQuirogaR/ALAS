@@ -135,7 +135,7 @@ mod tests {
     use alas_config::design_variables::DesignVector;
     use alas_geom::aircraft::airplane::Airplane;
     use alas_pipeline::full_analysis::{DesignPoint, PolarFit, PolarFitStatus};
-    use std::collections::HashMap;
+    use std::collections::BTreeMap;
 
     // Test geometry uses a known-valid airfoil name.
     #[allow(clippy::unwrap_used, clippy::expect_used)]
@@ -195,10 +195,10 @@ mod tests {
             },
             static_margin,
             x_neutral_point: 0.0,
-            geometry_summary: HashMap::new(),
-            component_masses: HashMap::new(),
+            geometry_summary: BTreeMap::new(),
+            component_masses: BTreeMap::new(),
             flops_mass_buildup: None,
-            mass_coordinates: HashMap::new(),
+            mass_coordinates: BTreeMap::new(),
             physical_cg: [5.2, 0.0, 0.0],
             payload_layout: None,
             trimmed_design_point: None,

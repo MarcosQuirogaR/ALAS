@@ -249,3 +249,32 @@ fn a_sagging_or_out_of_range_flight_tip_rise_is_rejected() {
         );
     }
 }
+
+#[test]
+fn a_declared_inboard_sweep_cranks_the_leading_edge_at_the_kink_only() {
+    let design = DesignVector::default();
+    let plain = WingConfig::default().transport_planform(&design).unwrap();
+    let wing = WingConfig {
+        inboard_le_sweep_deg: Some(design.sweep_deg + 3.0),
+        ..WingConfig::default()
+    };
+    let cranked = wing.transport_planform(&design).unwrap();
+    assert_eq!(cranked.inboard_le_sweep_deg, design.sweep_deg + 3.0);
+    assert_eq!(cranked.outboard_le_sweep_deg, design.sweep_deg);
+    let tan = |deg: f64| deg.to_radians().tan();
+    assert!(
+        (cranked.kink.leading_edge_x_m - cranked.kink.y_m * tan(design.sweep_deg + 3.0)).abs()
+            < 1e-12
+    );
+    let side = cranked.side_of_body.unwrap();
+    assert!((side.leading_edge_x_m - side.y_m * tan(design.sweep_deg + 3.0)).abs() < 1e-12);
+    // outboard of the kink the leading edge keeps the design sweep
+    let panels = cranked.panels();
+    assert!((panels.last().unwrap().leading_edge_sweep_deg - design.sweep_deg).abs() < 1e-9);
+    // unset: bit-identical to the single-sweep planform
+    let unset = WingConfig {
+        inboard_le_sweep_deg: None,
+        ..WingConfig::default()
+    };
+    assert_eq!(unset.transport_planform(&design).unwrap(), plain);
+}

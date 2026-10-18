@@ -96,7 +96,11 @@ pub struct BreguetFuelModel {
     pub holding_tsfc_factor: f64,
     /// All-engines takeoff fuel flow at sea-level static, kg/s.
     pub takeoff_fuel_flow_kg_s: f64,
-    /// Ground-idle fuel flow as a fraction of the takeoff flow.
+    /// Ground-idle fuel flow as a fraction of the takeoff flow. A caller
+    /// building this model from a catalogue turbofan sets it to the ICAO LTO
+    /// 7 % thrust point, `part_power_fuel_flow_ratios[0]` (0.0893 for the
+    /// CFM56-5B4/3), which is what the production taxi flow uses; the 0.07
+    /// of the test fixtures is a placeholder, not a physical value.
     pub idle_fuel_flow_fraction: f64,
     /// Gravitational acceleration, m/s^2.
     pub gravity_m_s2: f64,

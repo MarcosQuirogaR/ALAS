@@ -151,6 +151,21 @@ impl LandingGearConfig {
             }
         }
 
+        for (field, value) in [
+            ("n_nlg_wheels", self.n_nlg_wheels),
+            ("n_mlg_struts", self.n_mlg_struts),
+            ("wheels_per_mlg_strut", self.wheels_per_mlg_strut),
+        ] {
+            if value < 0 {
+                errors.push((
+                    format!("landing_gear.{field}"),
+                    format!(
+                        "Landing-gear count {value} must be nonnegative (0 selects automatic sizing)."
+                    ),
+                ));
+            }
+        }
+
         let friction = self.rotation_rolling_friction_coefficient;
         if !friction.is_finite() || !(0.0..1.0).contains(&friction) {
             errors.push((

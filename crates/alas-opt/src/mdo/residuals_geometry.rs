@@ -13,9 +13,11 @@ use super::sizing::SizingOutcome;
 use super::types::ConstraintFamily::Geometry;
 use super::types::ConstraintResidual;
 
+mod body_alpha;
 mod measure;
 #[path = "residuals_planform.rs"]
 mod planform;
+use body_alpha::body_alpha_window_residual;
 use measure::{max_washin_rise_deg, tip_washout_deg};
 
 /// The span limit, wing-area cap, wing-loading floor, transport body-attitude
@@ -82,7 +84,7 @@ pub(super) fn geometry_residuals(
     // limit: the pipeline still maps this solved body angle through the
     // section twist and downwash explicitly.  Registered aircraft retain
     // their measured body attitude for parity reporting; applying a
-    // generic 2 to 4 degree design target to them would rewrite the reference
+    // generic body-attitude design target to them would rewrite the reference
     // aircraft rather than test it.
     if config.optimizer.design_space.mode == alas_config::DesignMode::CleanSheet
         && req.aircraft_type == "passenger"
@@ -269,9 +271,11 @@ fn plausibility_residuals(
     // turns to wash-in while the wing as a whole is still washed out, so the
     // worst tip-ward twist increase over any pair of sections is bounded too:
     // the break must not be set above the root, nor the tip above the break.
-    if let (Some(washout_deg), Some(washin_rise_deg)) =
-        (tip_washout_deg(plane), max_washin_rise_deg(plane))
-    {
+    let twist_stations_y_m = twist_stations_y_m(config, &dv);
+    if let (Some(washout_deg), Some(washin_rise_deg)) = (
+        tip_washout_deg(plane),
+        max_washin_rise_deg(plane, twist_stations_y_m.as_deref()),
+    ) {
         residuals.extend(twist_window_residuals(
             washout_deg,
             washin_rise_deg,
@@ -299,6 +303,21 @@ fn plausibility_residuals(
 }
 
 /// Overall fuselage length in metres, from the primary body's sections.
+/// The `y` of the wing's twist stations, m: root, break (kink) and tip of the
+/// planform, plus the custom sections, whose twist is data. `None` when the
+/// planform cannot be resolved.
+fn twist_stations_y_m(config: &AlasConfig, dv: &DesignVector) -> Option<Vec<f64>> {
+    let wing = &config.geometry.wing;
+    let planform = wing.transport_planform(dv).ok()?;
+    let mut ys = vec![0.0, planform.kink.y_m, planform.tip.y_m];
+    ys.extend(
+        wing.custom_sections
+            .iter()
+            .map(|section| section.span_fraction * planform.tip.y_m),
+    );
+    Some(ys)
+}
+
 fn fuselage_length_m(plane: &Airplane) -> Option<f64> {
     let fuselage = plane.fuselages.first()?;
     let first = fuselage.xsecs.first()?;
@@ -507,46 +526,6 @@ const fn window_ids(id_stem: &str) -> (&'static str, &'static str) {
         b"root_thickness_ratio" => ("root_thickness_ratio_max", "root_thickness_ratio_min"),
         _ => ("plausibility_max", "plausibility_min"),
     }
-}
-
-/// A two-sided residual for the configured geometric body-attitude window.
-///
-/// The raw value is positive only outside the interval; inside, the margin
-/// to the nearer bound is reported as a negative value.  The residual uses a
-/// degree unit and the nearest violated bound so the optimizer receives a
-/// useful direction without treating the interval as a local-section solver
-/// validity claim.
-fn body_alpha_window_residual(
-    actual_deg: f64,
-    min_deg: f64,
-    max_deg: f64,
-    role: ResidualRole,
-) -> ConstraintResidual {
-    let (limit_deg, raw_residual) = if actual_deg < min_deg {
-        (min_deg, min_deg - actual_deg)
-    } else if actual_deg > max_deg {
-        (max_deg, actual_deg - max_deg)
-    } else {
-        let slack_to_min = actual_deg - min_deg;
-        let slack_to_max = max_deg - actual_deg;
-        if slack_to_min < slack_to_max {
-            (min_deg, -slack_to_min)
-        } else {
-            (max_deg, -slack_to_max)
-        }
-    };
-    // A degree interval crosses zero, so scaling by the bound's magnitude is
-    // well-defined for the configured positive transport window.  The
-    // generic constructor still protects malformed zero/negative bounds.
-    ConstraintResidual::scaled(
-        "geometric_body_alpha",
-        Geometry,
-        actual_deg,
-        limit_deg,
-        "deg",
-        raw_residual,
-        role,
-    )
 }
 
 #[cfg(test)]
