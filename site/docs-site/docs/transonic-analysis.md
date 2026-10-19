@@ -1,124 +1,113 @@
 # Transonic section analysis
 
-Everything in [Aerodynamic analysis](aerodynamic-analysis.md) treats
-compressibility with empirical correlations: the Korn equation estimates wave-drag
-penalties from section thickness, leading-edge sweep, and lift coefficient. That is
-the appropriate tool for an optimization loop: it carries near-zero computational
-cost and captures primary design trends.
+The [aerodynamic analysis](aerodynamic-analysis.md) treats compressibility with
+correlations: the Korn equation estimates wave drag from thickness, sweep and
+CL. That is right for an optimization loop, but a correlation cannot show where
+the shock sits on the section, how strong it is, or whether the boundary layer
+separates behind it.
 
-What a correlation cannot reveal is *where the shock actually sits on the section*,
-how strong it is, or whether the boundary layer separates behind it.
-
-To investigate those local phenomena, ALAS couples to
-[MSES](https://web.mit.edu/drela/Public/web/mses/) (Mark Drela's coupled
-Euler / boundary-layer solver) to evaluate the viscous, compressible flow field on
-the wing's root or defining sections at the cruise condition.
+For that, ALAS couples to [MSES](https://web.mit.edu/drela/Public/web/mses/)
+(Mark Drela's coupled Euler and boundary-layer solver) on the wing's root
+section. MSES is proprietary and user-supplied (see the
+[External tools guide](external-tools.md#mses)).
 
 ## What it solves, and why that's different
 
-MSES solves a steady Euler flow field on a body-fitted streamline grid coupled to
-a two-equation integral boundary-layer formulation with transition modeling:
-
-- The **Euler formulation** captures compressible effects directly, including
-  embedded supersonic regions and the recompression shock terminating them.
-  (Linearized vortex-lattice methods are incompressible and lack shock-capturing
-  mechanisms.)
-- The **integral boundary layer** captures viscous displacement thickness, skin
-  friction, and shock/boundary-layer interaction to evaluate separation risk.
-
-This provides local field diagnostics that integrated 3D vortex-lattice models
-cannot produce.
+MSES solves a steady Euler flow on a body-fitted streamline grid, coupled to a
+two-equation integral boundary layer with transition modelling. The Euler part
+captures compressibility directly, including supersonic pockets and the shock
+that ends them (linearized vortex-lattice methods cannot). The boundary layer
+gives displacement thickness, skin friction and shock interaction.
 
 ## Surface pressure and Mach
 
+!!! warning "Post-lift-peak points, not cruise"
+    Only 2 of the 7 sweep points converged, at α = 5.06 deg and 6.06 deg. The
+    section lift coefficients are 1.147 and 1.080 (CD 0.0766 and 0.0913): lift
+    is already falling with angle of attack, so these are past the lift peak,
+    heavily shocked and probably separated. They are **not** cruise conditions.
+    The figures show what MSES resolves; they are not a prediction for the
+    cruise section. Non-converged points are excluded from every plot.
+
 <figure markdown>
-  ![Surface Cp and local Mach distributions from MSES](assets/ave-mses-pressure-light.png#only-light)
-  ![Surface Cp and local Mach distributions from MSES](assets/ave-mses-pressure-dark.png#only-dark)
-  <figcaption>Surface pressure coefficient (left) and local Mach number (right) around the root section at the nominal cruise condition.</figcaption>
+  ![Surface Cp and local Mach distributions from MSES](assets/ave-mses-pressure-dark.png)
+  <figcaption>Surface pressure coefficient (left) and local Mach number (right) around the root section at α = 5.06 deg, section Mach 0.695, Re 7.65e7 (MSES 3.12).</figcaption>
 </figure>
 
-Reading the two panels together illustrates the underlying physics:
+1. Flow accelerates round the leading edge and the **upper surface becomes
+   supersonic**, peaking at local Mach 1.565.
+2. The supercritical section's low upper-surface curvature holds the plateau
+   over the forward chord.
+3. Near **35 % chord** the flow recompresses through a shock, with a sharp
+   pressure jump back below Mach 1.
+4. Aft camber then carries rear loading.
 
-1. Rapid flow acceleration occurs around the leading edge; by approximately 6% chord
-   the **upper surface becomes supersonic**, with local Mach peaking near 1.24 at
-   a section freestream Mach of 0.70.
-2. The supersonic plateau is maintained across the forward portion of the chord
-   by the supercritical section's low upper-surface curvature.
-3. Near **32% chord the flow recompresses through a shock**, characterized by a
-   sharp pressure jump and deceleration back below Mach 1.0.
-4. Downstream of the shock, the flow recovers toward the trailing edge, while aft
-   camber provides rear loading to compensate for reduced forward lift.
-
-Engineers inspect these distributions to evaluate shock strength, location, and
-downstream boundary-layer health.
+Cp ranges from -1.95 to 1.11 over the 8,056-point field.
 
 ## The Mach field
 
 <figure markdown>
-  ![Filled Mach contours around the section](assets/ave-mses-mach-light.png#only-light)
-  ![Filled Mach contours around the section](assets/ave-mses-mach-dark.png#only-dark)
+  ![Filled Mach contours around the section](assets/ave-mses-mach-dark.png)
   <figcaption>Mach field around the solved section geometry. The dark region marks the supersonic pocket terminated by the recompression shock.</figcaption>
 </figure>
 
-The contour field illustrates the vertical extent of the supersonic pocket above the
-airfoil surface. The tight contour gradient at the aft boundary marks the shock.
+<figure markdown>
+  ![Cp field around the section](assets/ave-mses-cp-dark.png)
+  <figcaption>MSES pressure-coefficient field around the optimized root section at α = 5.0°.</figcaption>
+</figure>
 
-!!! note "Discretized section coordinates"
-    The section outline plotted above reflects the actual paneled coordinates
-    passed to MSES. Geometric irregularities or meshing anomalies remain visible
-    in the diagnostic plot rather than masked by idealized splines.
+The supersonic pocket sits above the surface, and the tight contour gradient at
+its aft boundary marks the shock. The plotted outline is the actual paneled
+coordinates passed to MSES, so geometry irregularities stay visible.
 
 ## Stage execution & convergence diagnostics
 
-MSES executes as an optional post-analysis diagnostic stage on the final configuration,
-outside the primary optimization loop where solve time and convergence variance
-would be prohibitive. Outputs include:
+MSES runs as an optional post-analysis stage on the final configuration, outside
+the optimization loop where its solve time and convergence variance would be
+prohibitive. It returns a section polar over an angle-of-attack sweep
+(`mses_result`) and surface Cp, local Mach and field contours (`mses_pressure`).
 
-| Result | Contents |
-|---|---|
-| `mses_result` | 2D section polar data across an angle-of-attack sweep |
-| `mses_pressure` | Surface pressure ($C_p$), local Mach number, and field contours |
+### Convergence
 
-### Distinguishing converged vs. partial or non-converged points
+ALAS accepts a point only when MSES reports its own convergence ("Converged on
+tolerance"); a finite contour file alone is not enough. Partial or
+non-converged points keep an explicit status code, are excluded from plots, and
+are never mixed into lift-slope regressions or polar interpolation. A failed
+point does not stop the pipeline.
 
-Transonic viscous-inviscid coupling can be sensitive to strong shock separation or
-severe adverse pressure gradients. In ALAS, **converged points are explicitly
-distinguished from partial or non-converged points**:
+<figure markdown>
+  ![MSES sweep convergence](assets/ave-mses-convergence-dark.png)
+  <figcaption>Converged lift, drag and moment samples and the status of each requested point: 2 of 7 converged with 300 solver iterations.</figcaption>
+</figure>
 
-- **Converged points**: Points where the Newton solver reduces Euler and
-  boundary-layer residuals below the specified convergence tolerance ($10^{-4}$).
-  These points are recorded as valid flow states and included in polar plots.
-- **Partial or non-converged points**: Points where MSES exceeds iteration limits,
-  encounters boundary-layer separation unsteadiness, or fails to converge on a valid
-  streamline grid.
-- **Diagnostic transparency**: Non-converged points are flagged with explicit solver
-  status codes. In diagnostic outputs, they are visually distinguished (or excluded)
-  and never blended into lift-curve slope regressions or polar interpolations.
-
-When an individual point or section solve fails, the stage records diagnostic warning
-flags and the broader analysis pipeline proceeds uninterrupted.
+The solver limits matter. With the default 100 iterations and 60 s limit, none of
+the 7 points converged in this run (0 of 7, no pressure figure). Raising them to
+`max_iterations` 300 and a 300 s timeout (Advanced Settings, MSES Analysis) gave
+the two points above. The seven requested points span 2.06 to 8.06 deg; the
+lower-angle points nearest a cruise-like lift did not converge, so MSES gives no
+confirmed cruise-section result for this design.
 
 ## Multi-model comparison
 
-ALAS can compare polars from AeroSandbox (3D VLM + empirical drag build-up),
-SUAVE (flown mission simulation drag polar), and MSES (2D viscous section) on shared
-axes:
+ALAS can overlay whole-aircraft polars from several models on shared axes: its
+vortex-lattice solver, three lifting-line references (Prandtl, Fourier,
+Helmbold), the polar flown by the mission stage and, when installed and
+comparable, AVL and VSPAERO.
 
 <figure markdown>
-  ![AeroSandbox, SUAVE and MSES polars overlaid](assets/ave-model-comparison-light.png#only-light)
-  ![AeroSandbox, SUAVE and MSES polars overlaid](assets/ave-model-comparison-dark.png#only-dark)
-  <figcaption>Overlay of AeroSandbox, SUAVE, and 2D MSES polars on shared CL–CD and CL–α axes.</figcaption>
+  ![Aerodynamic model polars overlaid](assets/ave-model-comparison-dark.png)
+  <figcaption>Aerodynamic models on shared axes, with the AVL 3.52 cross-check in the lower four panels. VSPAERO is not installed on the machine that produced this run, so it is absent.</figcaption>
 </figure>
 
-This comparison provides an engineering consistency check across preliminary models of differing fidelity:
-
-- **AeroSandbox**: Models the full 3D airframe, accounting for induced drag and
-  empirical drag build-ups.
-- **SUAVE**: Evaluates the airframe along the mission trajectory with independent
+- **ALAS vortex-lattice**: the full 3D airframe with the empirical drag build-up.
+- **Lifting-line references**: closed-form and Fourier solutions for the wing
+  alone, a check on lift slope and induced drag.
+- **Mission polar**: the polar the flown mission uses, with its own
   flight-condition corrections.
-- **MSES**: Evaluates a 2D section without 3D induced drag or finite-span effects.
+- **AVL and VSPAERO**: independent vortex-lattice and panel solvers. AVL lift and
+  pitching moment are overlaid only when they share a reference frame with ALAS;
+  AVL near-field total drag is never plotted against the ALAS drag build-up.
 
-A 2D section polar exhibiting lower drag than a 3D aircraft polar is physically
-expected due to the absence of induced drag. The diagnostic value lies in checking
-that the lift-curve slope and drag-rise onset remain consistent across preliminary
-models.
+A 2D MSES polar has no induced drag, so it is compared with section-level
+quantities and not mixed into the whole-aircraft panels. The check is that lift
+slope and drag-rise onset stay consistent across the models.

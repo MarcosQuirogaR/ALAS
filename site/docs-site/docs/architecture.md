@@ -1,19 +1,16 @@
 # How ALAS works inside
 
-This chapter explains the internal architecture of ALAS. If you are inspecting
-the codebase, debugging a run, or want to understand what happens between
-launching an analysis and generating figures, this is the map.
+The internal structure of ALAS: crate layers, the stages of a run and the main design mechanisms.
 
 ---
 
 ## Shape of the program
 
-ALAS is compiled in Rust as a single native executable (`alas.exe` on Windows,
-`alas` on Linux). There is no interpreter, no loopback HTTP sidecar, and no
-separate server process.
+ALAS is compiled in Rust as a single native executable (`ALAS.exe` on Windows,
+`ALAS` on Linux). There is no interpreter and no server process.
 
 ```
-        alas-app  (alas.exe)
+        alas-app  (ALAS.exe)
              |
         alas-gui  ------------- alas-viz
              |                      |
@@ -43,12 +40,30 @@ The workspace is organized into shallow, acyclic crates:
 | Tier | Crates | Responsibilities |
 |---|---|---|
 | **L0 Foundations** | `alas-units`, `alas-math`, `alas-i18n`, `alas-config-derive` | Physical unit conversions, root finders, splines, localization |
-| **L1 Environment** | `alas-config`, `alas-atmo` | Authoritative configuration schemas (~5,600 lines of typed settings), atmosphere models |
+| **L1 Environment** | `alas-config`, `alas-atmo` | Authoritative configuration schemas (typed settings with per-field metadata), the aircraft preset registry, atmosphere models |
 | **L2 Geometry & Execution** | `alas-geom`, `alas-route`, `alas-exec` | Airfoil coordinates, wing/fuselage generators, structural mesh, airway routing, external process execution |
 | **L3 Disciplinary Analyses** | `alas-aero`, `alas-prop`, `alas-mass`, `alas-stab`, `alas-perf`, `alas-payload` | Vortex-lattice aerodynamics, turbofan thermodynamic cycle, CG envelopes, longitudinal stability |
 | **L4 Composed Stages** | `alas-mission`, `alas-struct`, `alas-opt`, `alas-screen` | Native mission segment solver, wingbox structural sizing, optimization algorithms, airfoil screening |
 | **L5 Orchestration & Output** | `alas-pipeline`, `alas-report` | Multidisciplinary stage sequencing, concurrent execution, figure scene definitions |
-| **L6 Presentation** | `alas-viz`, `alas-gui`, `alas-app` | Hardware-accelerated GUI rendering (egui), desktop window, headless CLI binary |
+| **L6 Presentation** | `alas-viz`, `alas-gui`, `alas-app` | Hardware-accelerated GUI rendering (egui), desktop window (guided workspace and [Sandbox mode](sandbox.md)), headless CLI binary |
+| **Side workflows** | `alas-cfd`, `alas-uav` | OpenFOAM airfoil studies and electric-UAV component selection, launched from the GUI; not stages of the transport-aircraft pipeline |
+
+---
+
+## The stages of a design run
+
+After the configuration and geometry are resolved, `alas-pipeline` runs seven
+numbered stages (the stage names are the identifiers in the run log):
+
+| Stage | What it does |
+|---|---|
+| 1. `baseline` | Fast weight-and-balance and stability estimate of the starting design |
+| 2. `optimization` | Differential-evolution search; each candidate is a closed multidisciplinary analysis (geometry, mass, aerodynamics, propulsion, mission sizing and fuel closure, trim and CG envelope, payload layout, structural feasibility). Can be skipped |
+| 3. `full_analysis` | Fine vortex-lattice polars, trim, neutral point, CG envelope, mass and CG for the baseline and the optimized design |
+| 4. `geometry_export` | CPACS export, design database and airfoil files |
+| 5. `downstream` | Runs concurrently: the flown mission with lateral routing (native, in-process), MSES section analysis, wingbox sizing and finite-element solves, optional VSPAERO, AVL and FLOWUnsteady comparisons |
+| 6. `feasibility` | Physical feasibility assessment over all results, as typed findings rather than one pass or fail |
+| 7. `finalization` | Artifacts and the run manifest |
 
 ---
 
@@ -79,11 +94,9 @@ Every tunable design setting is declared once in `alas-config` with
 
 From this single source of truth, ALAS generates:
 - Graphical settings controls in the desktop GUI.
-- CLI argument parsing and overrides.
+- The `--save-config` output.
 - Serialization and deserialization for YAML and JSON configuration files.
 
-Configuration metadata controls supported inputs, while numerical and model
-assumptions remain documented in code.
 
 ### 3. Figures as vector scenes
 
@@ -105,6 +118,21 @@ processes by `alas-exec`.
   processes when a run ends or is cancelled.
 - Solvers report structured outputs or error logs; if an external solver is not
   installed, ALAS reports the stage unavailable without crashing.
+
+### 5. The sandbox is a second case in the same state
+
+The desktop application keeps one authoritative configuration that every view
+reads. [Sandbox mode](sandbox.md) does not fork the views: entering it moves the
+whole guided case (configuration, design vector, run log, results) aside and
+installs the sandbox aircraft in the same state fields, so the same forms,
+validation and Full Analysis apply. Leaving restores the guided case
+(*discard*) or keeps the drawn aircraft as the guided workspace's custom
+baseline (*promote*). The quick estimates come from an in-process
+`alas-pipeline::quick_analysis` stage that closes the fixed aircraft's mass and
+fuel, then runs the same baseline analysis the Full Analysis runs, so each
+published value can be tagged as the Full Analysis' own or as an estimate.
+Every result carries the configuration revision it was computed for, and a
+late result for older geometry is dropped.
 
 ---
 

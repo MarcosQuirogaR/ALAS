@@ -7,10 +7,10 @@ of it.
 
 ```mermaid
 flowchart TD
-    CFG["Configuration<br/><small>requirements · design space · scaffold</small>"]
+    CFG["Configuration<br/><small>requirements, design space, scaffold</small>"]
 
     CFG --> BASE["Baseline pass<br/><small>nominal design, full fidelity</small>"]
-    BASE --> BCHK{"Balances?<br/><small>mass · CG · stability</small>"}
+    BASE --> BCHK{"Balances?<br/><small>mass, CG, stability</small>"}
     BCHK -- no --> STOP["Fix the inputs<br/><small>reported, not silently ignored</small>"]
     BCHK -- yes --> OPT
 
@@ -20,21 +20,21 @@ flowchart TD
         GEN --> BUILD["Build the<br/>aircraft<br/><small>shape → geometry</small>"]
         BUILD --> FAST["Score it<br/><small>coarse VLM</small>"]
         FAST --> MASS["Close the<br/>mass budget<br/><small>lumped payload</small>"]
-        MASS --> PEN["Check constraints<br/><small>CG · stability<br/>tail · fuel volume</small>"]
+        MASS --> PEN["Check constraints<br/><small>CG, stability<br/>tail, fuel volume</small>"]
         PEN -- "next candidate" --> GEN
     end
 
     OPT --> WIN["Winning design"]
-    WIN --> FINE["Full-fidelity re-analysis<br/><small>fine VLM · α-sweep · polar fit · trim solve</small>"]
+    WIN --> FINE["Full-fidelity re-analysis<br/><small>fine VLM, α-sweep, polar fit, trim solve</small>"]
 
     FINE --> POST
 
     subgraph POST ["Post-analysis, these run concurrently"]
         direction LR
-        MISSION["Mission<br/><small>SUAVE, separate process</small>"]
+        MISSION["Mission<br/><small>native segment solver</small>"]
         MSES["Transonic section<br/><small>MSES, separate process</small>"]
         STRUCT["Wingbox FEM<br/><small>Nastran optional</small>"]
-        EXPORT["Export<br/><small>JSON · .dat · CSV</small>"]
+        EXPORT["Export<br/><small>JSON, .dat, CSV</small>"]
     end
 
     POST --> FIGS["Figures and report"]
@@ -47,6 +47,11 @@ flowchart TD
     class STOP halt;
 ```
 
+**In the sandbox** the same diagram runs with the optimizer loop removed: the
+drawn aircraft is the baseline, [Quick Analysis](sandbox.md#quick-analysis-and-the-estimates-strip)
+evaluates it in-process, and **Full Analysis** runs the post-analysis stages on
+it as drawn.
+
 ## Reading it
 
 **The baseline pass comes first, and that is deliberate.** Before any
@@ -58,10 +63,10 @@ weight target nothing can close against. If the baseline does not balance,
 the answer is in your inputs, and no amount of searching will find it.
 
 **The loop is deliberately cheap.** Every box inside the optimizer runs
-once per candidate, and there are on the order of fifteen hundred
-candidates. That is why the aerodynamics in the loop is a coarse
+once per candidate, and there are hundreds to a few thousand
+candidates, set by the search budget. That is why the aerodynamics in the loop is a coarse
 vortex-lattice solve and the payload is a lumped mass rather than a seat
-map. Anything expensive gets multiplied by fifteen hundred.
+map. Anything expensive gets multiplied by that count.
 
 **Constraints are hard.** A candidate that violates a constraint is
 invalid. It is kept in the evaluation history, with its residuals, so you can
@@ -77,10 +82,10 @@ are two different calculations of the same aircraft, and the second is the
 one to quote.
 
 **The four post-analysis stages are independent, so they run at the same
-time.** Three of them talk to programs outside ALAS: the mission
-simulation runs in an isolated environment, and the transonic and
-finite-element solvers are separate executables. Each reports its own
-status. If one cannot run (no licence, no environment, a solve that will
+time.** The mission simulation is native and always available; the transonic
+and finite-element stages can talk to programs outside ALAS (MSES, MSC
+Nastran or NASTRAN-95), which are separate executables. Each reports its own
+status. If one cannot run (no licence, no installation, a solve that will
 not converge), it says so and the others carry on. A run does not fail
 because an optional stage was unavailable.
 
@@ -89,7 +94,7 @@ because an optional stage was unavailable.
 ```mermaid
 flowchart LR
     DV["DesignVector<br/><small>16 named floats</small>"]
-    AR["AnalysisReport<br/><small>geometry · polar · masses · CG · stability</small>"]
+    AR["AnalysisReport<br/><small>geometry, polar, masses, CG, stability</small>"]
     PR["PipelineResult<br/><small>everything from one run</small>"]
 
     DV --> AR --> PR
@@ -97,9 +102,9 @@ flowchart LR
     SR["StructuralResult"] --> PR
     MS["MSES polar + field"] --> PR
 
-    PR --> J["design_data.json"]
+    PR --> J["design_database.json"]
     PR --> D[".dat section"]
-    PR --> C["flight_data.csv"]
+    PR --> C["payload_layout.json"]
     PR --> P["PDF report"]
 
     classDef obj fill:#1e2228,stroke:#3a4048,color:#eceef2;
