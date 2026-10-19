@@ -32,9 +32,36 @@ fn the_declared_system_reproduces_the_raymer_increment_forms() {
             "{}: S_flapped/S cos(hinge) = {area_cos}",
             system.preset_name
         );
+        // Take-off value: clean + share x landing flap increment + slat, the
+        // share 0.70 unless the reference declares the take-off flap, and the
+        // landing increment the published-speed coefficient less the slats-out,
+        // flaps-up coefficient where the preset has one.
+        let share = match system.takeoff_flap {
+            Some(flap) => {
+                let share = flap.increment_share().unwrap();
+                assert!(
+                    (0.3..0.95).contains(&share),
+                    "{}: {share}",
+                    system.preset_name
+                );
+                share
+            }
+            None => 0.7,
+        };
+        assert_eq!(parts.takeoff_share, share, "{}", system.preset_name);
+        let increment = match parts.landing_anchor {
+            Some(anchor) => anchor - parts.clean - parts.leading_edge,
+            None => parts.flap_landing,
+        };
         assert!(
-            (parts.takeoff() - (parts.clean + 0.7 * parts.flap_landing + parts.leading_edge)).abs()
+            (parts.takeoff() - (parts.clean + share * increment + parts.leading_edge)).abs()
                 < 1e-12
+        );
+        assert_eq!(
+            parts.landing_anchor.is_some(),
+            presets::published_landing_reference(system.preset_name).is_some(),
+            "{}",
+            system.preset_name
         );
     }
 }

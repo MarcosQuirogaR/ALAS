@@ -138,6 +138,7 @@ mod tests {
             spar_upper_nids: vec![vec![1, 2], vec![5, 6]],
             spar_lower_nids: vec![vec![3, 4], vec![7, 8]],
             engine_nids: vec![],
+            semi_span_m: 0.0,
         };
         let y = [0.0, 3.0, 10.0];
         let mass = [10.0, 20.0, 0.0];

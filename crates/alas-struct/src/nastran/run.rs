@@ -55,6 +55,7 @@ use super::text;
 mod cache;
 #[path = "run_diagnostics.rs"]
 mod diagnostics;
+pub use diagnostics::real_eigenvalue_cycles;
 
 /// How many lines of a captured stream a failure report quotes.
 const TAIL_LINES: usize = 15;

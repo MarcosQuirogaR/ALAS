@@ -24,6 +24,7 @@ fn fixture() -> (Deck, MeshNodeIndex, Vec<LoadCase>, Op2) {
         spar_upper_nids: vec![vec![3, 1, 2]],
         spar_lower_nids: vec![],
         engine_nids: vec![],
+        semi_span_m: 0.0,
     };
     let cases = load_cases(&DesignRequirements::default(), 1.0);
     let mut op2 = Op2::default();

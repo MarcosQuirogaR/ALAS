@@ -48,6 +48,7 @@ impl AlasApp {
                 ui.label(tr("Path:"));
                 ui.text_edit_singleline(&mut self.state.config_path);
             });
+            crate::user_files_ui::show_config_file_buttons(&mut self.state, ui);
             if ui.button(tr("Load configuration")).clicked() {
                 self.state.load_config();
                 ui.close_menu();
@@ -76,6 +77,16 @@ impl AlasApp {
                 .clicked()
             {
                 export_report(&mut self.state);
+                ui.close_menu();
+            }
+            if ui
+                .add_enabled(
+                    self.state.pipeline_result.is_some(),
+                    egui::Button::new(tr("Export plot data (CSV + JSON)")),
+                )
+                .clicked()
+            {
+                export_plot_data(&mut self.state);
                 ui.close_menu();
             }
             ui.separator();
@@ -221,6 +232,43 @@ fn export_report(state: &mut AppState) {
         Err(error) => state.log(
             tr_fields(
                 "PDF report failed: {error}",
+                &[("error", error.to_string())],
+            ),
+            LogKind::Error,
+        ),
+    }
+}
+
+/// Write the raw data behind every graph of the run as CSV and JSON files.
+///
+/// The folder dialog opens in the per-user data folder's `exports` directory;
+/// cancelling it writes nothing.
+fn export_plot_data(state: &mut AppState) {
+    let spec = crate::file_dialog::spec(
+        crate::file_dialog::DialogKind::PickFolder,
+        &tr("Export plot data (CSV + JSON)"),
+        "",
+        &state.data_dir().join("exports"),
+        None,
+        Vec::new(),
+    );
+    let Some(folder) = crate::file_dialog::run_blocking(&spec) else {
+        return;
+    };
+    match crate::export::export_all_plot_data(state, &folder) {
+        Ok(receipt) => state.log(
+            tr_fields(
+                "Plot data for {count} graphs written to {path}.",
+                &[
+                    ("count", receipt.figure_count.to_string()),
+                    ("path", receipt.path.display().to_string()),
+                ],
+            ),
+            LogKind::Info,
+        ),
+        Err(error) => state.log(
+            tr_fields(
+                "Plot data export failed: {error}",
                 &[("error", error.to_string())],
             ),
             LogKind::Error,

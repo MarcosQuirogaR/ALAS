@@ -3,7 +3,7 @@ resolver = "2"
 members = ["crates/*", "xtask"]
 
 [workspace.package]
-version = "1.4.0"
+version = "1.4.1-beta.1"
 edition = "2021"
 license = "AGPL-3.0-or-later"
 authors = ["Marcos Quiroga Rodriguez <marcos.quiroga.rodriguez@gmail.com>"]
@@ -47,6 +47,12 @@ tiny-skia = "0.11"
 # exported SVG. Already in the graph at this version through usvg (resvg's SVG
 # parser), so it adds no crate; the alternative was a hand-rolled encoder.
 base64 = "0.22"
+# Native open/save/folder dialogs for every path field in the desktop GUI.
+# MIT. Default features are off: the default `gtk3` backend needs libgtk-3-dev at
+# build time on Linux, while `xdg-portal` is pure Rust (zbus) and talks to the
+# desktop portal at run time, so ubuntu-22.04 CI builds with no extra packages.
+# On Windows the feature selection is inert (the Win32 backend is always used).
+rfd = { version = "0.17", default-features = false, features = ["xdg-portal"] }
 
 # Dense linear-algebra kernel. `alas-math::linalg` began as a scalar Gaussian
 # elimination over row vectors. At the fine vortex-lattice mesh the product
@@ -62,6 +68,13 @@ faer = { version = "0.24", default-features = false, features = ["std", "linalg"
 # vortex-lattice influence-matrix assembly first. Already in the graph through
 # faer; declared here so a crate can use it directly.
 rayon = "1"
+
+# Add-on subsystem (`alas-addons`). `rhai` is the embedded, sandboxed scripting
+# engine for user add-ons (MIT OR Apache-2.0, pure Rust, no file, network or
+# process access unless the host registers it, which this program does not).
+# `toml` parses the `addon.toml` manifest; serde support only.
+rhai = { version = "1", default-features = false, features = ["std", "no_module", "no_time"] }
+toml = { version = "0.9", default-features = false, features = ["parse", "serde", "std"] }
 
 # The three crates every procedural macro is written with. `alas-config-derive`
 # is the only member that depends on them: a derive macro receives its input as

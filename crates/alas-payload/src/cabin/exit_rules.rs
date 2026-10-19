@@ -255,7 +255,14 @@ mod tests {
             }
             // A certified maximum above what the declared exits are rated
             // for would be an arrangement that could not be certified.
-            if let Some(certified) = preset.reference.certified_max_seats {
+            // The declared pairs are the main deck's; an upper-deck hump adds
+            // its own exits, so only a single-deck body is held to the sum.
+            let main_deck_only = preset.geometry.fuselage.upper_deck().is_none();
+            if let Some(certified) = preset
+                .reference
+                .certified_max_seats
+                .filter(|_| main_deck_only)
+            {
                 assert!(
                     layout_rating(&layout) >= certified,
                     "{name}: exits rated {} below the certified {certified}",

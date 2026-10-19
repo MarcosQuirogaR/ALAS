@@ -195,3 +195,33 @@ fn trim_cases_round_trip_the_native_run_layout_and_commands_are_safe() {
     );
     assert!(render_output_command(AvlOutputKind::TotalForces, "bad\nname").is_err());
 }
+
+#[test]
+fn vortex_budget_keeps_the_deck_below_the_solver_bound() {
+    let airplane = sample_airplane();
+    // One symmetric surface, two stations: 2 x chord x max(span, 8).
+    assert_eq!(avl_vortex_count(&airplane, 16, 20), 2 * 16 * 20);
+    assert_eq!(avl_vortex_count(&airplane, 8, 1), 2 * 8 * 8);
+    // A request inside the target is untouched.
+    assert_eq!(fit_vortex_budget(&airplane, 16, 20, 8), (16, 20));
+    // 16 x 200 x 2 = 6400 > target: chordwise is reduced first (11 x 200 x 2
+    // = 4400 fits), spanwise is kept.
+    let (chord, span) = fit_vortex_budget(&airplane, 16, 200, 8);
+    assert_eq!((chord, span), (11, 200));
+    assert!(avl_vortex_count(&airplane, chord, span) <= AVL_VORTEX_TARGET);
+    // A deck above the solver bound is refused before AVL can abort on it.
+    let refused = render_geometry(AvlDeckRequest {
+        airplane: &airplane,
+        mach: 0.2,
+        chordwise_vortices: 16,
+        spanwise_vortices: 200,
+    })
+    .err()
+    .map(|error| error.to_string());
+    assert!(
+        refused
+            .as_deref()
+            .is_some_and(|text| text.contains("NVMAX")),
+        "{refused:?}"
+    );
+}

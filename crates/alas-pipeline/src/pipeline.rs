@@ -89,6 +89,12 @@ use mses_condition::mses_section_condition;
 use mses_condition::mses_span_section_requests;
 use snapshots::SnapshotPublisher;
 
+/// Deadline for the OpenVSP script that writes the .vsp3 and the VSPAERO
+/// thin-surface mesh. The A380-800 script (1.4 MB, 56 sections) takes 65 s on
+/// an idle workstation; the former 120 s deadline killed it under the load of
+/// three concurrent analyses and left VSPAERO with `geometry_unavailable`.
+const OPENVSP_EXPORT_TIMEOUT_S: f64 = 900.0;
+
 fn check_cancelled(cancel: Option<&AtomicBool>) -> Result<(), String> {
     if cancel.is_some_and(|flag| flag.load(Ordering::Relaxed)) {
         Err("Cancelled safely at a pipeline stage boundary".to_owned())
@@ -1004,7 +1010,9 @@ impl DesignPipeline {
             }
             match export_openvsp_script(&optimized_report, &delivered, &openvsp_path) {
                 Ok(export) => Some(match environment.openvsp_exe.as_deref() {
-                    Some(executable) => materialize_openvsp_project(export, executable, 120.0),
+                    Some(executable) => {
+                        materialize_openvsp_project(export, executable, OPENVSP_EXPORT_TIMEOUT_S)
+                    }
                     None => export,
                 }),
                 Err(error) => {

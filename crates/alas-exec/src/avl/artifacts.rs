@@ -118,3 +118,33 @@ pub(super) fn render_output_paths(
         output_paths,
     }
 }
+
+/// The first AVL stdout line that reports a fatal solver error, if any.
+pub(super) fn fatal_solver_line(stdout_path: &Path) -> Option<String> {
+    let text = fs::read_to_string(stdout_path).ok()?;
+    text.lines()
+        .map(str::trim)
+        .find(|line| {
+            let lower = line.to_ascii_lowercase();
+            lower.contains("overflow")
+                || lower.contains("increase nvmax")
+                || lower.contains("increase n") && lower.contains("currently")
+        })
+        .map(str::to_owned)
+}
+
+/// Why a finished AVL process counts as failed, if it does: a non-zero exit,
+/// or a Fortran `STOP` that exits 0 after a fatal solver message such as
+/// "Vortex array overflow" (the message is then the evidence).
+pub(super) fn solver_failure(
+    status: std::process::ExitStatus,
+    stdout_path: &Path,
+) -> Option<String> {
+    if !status.success() {
+        let code = status
+            .code()
+            .map_or_else(|| "unknown code".to_owned(), |code| code.to_string());
+        return Some(format!("AVL exited with {code}"));
+    }
+    fatal_solver_line(stdout_path).map(|line| format!("AVL aborted: {line}"))
+}

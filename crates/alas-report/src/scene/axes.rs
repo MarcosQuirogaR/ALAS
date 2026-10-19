@@ -66,6 +66,7 @@ impl Axes2D {
 
         let px = self.left + u * self.width;
         let py = self.top + (1.0 - v) * self.height;
+        crate::plot_data::note_map_point(self, x, y, [px, py]);
         [px, py]
     }
 
@@ -86,6 +87,10 @@ impl Axes2D {
         vmin: f64,
         vmax: f64,
     ) {
+        scene
+            .data_trace
+            .note_heatmap(self, x_edges, y_edges, values);
+        let _chrome = crate::plot_data::ChromeGuard::begin();
         let nx = x_edges.len().saturating_sub(1);
         let ny = y_edges.len().saturating_sub(1);
         let span = (vmax - vmin).max(1e-12);
@@ -133,6 +138,8 @@ impl Axes2D {
 
     /// Add a 2D continuous line trace to the scene.
     pub fn add_line_series(&self, scene: &mut Scene, pts: &[(f64, f64)], stroke: Stroke) {
+        scene.data_trace.note_line_series(self, pts, &stroke.color);
+        let _chrome = crate::plot_data::ChromeGuard::begin();
         let mut clipped = Vec::new();
         for pair in pts.windows(2) {
             let Some((start, end)) = clip_segment(self, pair[0], pair[1]) else {

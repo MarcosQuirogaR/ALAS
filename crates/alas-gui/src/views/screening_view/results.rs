@@ -191,7 +191,13 @@ pub(super) fn show_result(
                                 // viewer instead of stealing page scrolling.
                                 .wheel_zoom(false)
                                 .desired_size(size);
-                            ui.add(view);
+                            let response = ui.add(view);
+                            crate::views::plot_data_menu::attach_scene(
+                                &response,
+                                &scene,
+                                descriptor.id,
+                                None,
+                            );
                         }
                         None => {
                             ui.add_sized(

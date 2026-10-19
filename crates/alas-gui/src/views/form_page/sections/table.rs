@@ -301,6 +301,7 @@ pub(in crate::views::form_page) fn page_sections(
                 "oei_windmilling_cd",
                 "go_around_spool_thrust_fraction",
                 "wet_landing_runway",
+                "main_gear_truck_wheels",
                 "engine_match_tolerance",
             ],
             default_open: true,

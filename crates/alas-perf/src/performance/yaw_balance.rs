@@ -38,14 +38,17 @@
 //! The roll balance and the aileron (Roskam Eq. 2.11), the side force and
 //! induced drag of the fuselage and nacelles in sideslip, the propeller
 //! slipstream over the fin, the pedal force (hinge moment) and the
-//! transient overshoot are not modelled. The rudder effectiveness is a
-//! Glauert thin-airfoil value reduced by a documented large-deflection
-//! factor, an estimate rather than a measurement. The fin effective aspect
+//! transient overshoot are not modelled. The rudder effectiveness is
+//! interpolated from the published curve points of Sadraey Fig. 12.12 (see
+//! `rudder::RUDDER_TAU_POINTS`), not measured on the fin. The fin effective aspect
 //! ratio is the geometric one unless the caller supplies a larger value.
 
 use std::f64::consts::PI;
 
 use super::failed_engine_drag::YawBalanceGeometry;
+
+mod rudder;
+pub use rudder::rudder_effectiveness;
 
 /// CS 25.149(b): the maximum angle of bank toward the live engine, rad.
 pub const BANK_LIMIT_RAD: f64 = 5.0 * PI / 180.0;
@@ -55,21 +58,30 @@ pub const BANK_LIMIT_RAD: f64 = 5.0 * PI / 180.0;
 pub const SIDESLIP_LIMIT_RAD: f64 = 5.0 * PI / 180.0;
 /// CS 25.149(c): `VMC` may not exceed 1.13 `VSR`.
 pub const VMC_CEILING_OVER_VSR: f64 = 1.13;
-/// Fin dynamic-pressure ratio `eta_v = (V_v / V)^2`, Torenbeek Eq. (9-60). An
-/// assumed value for a fin partly in the fuselage boundary layer; no
-/// handbook value is transcribed.
+/// Fin dynamic-pressure ratio `eta_v = (V_v / V)^2`, Torenbeek Eq. (9-60).
+/// Source: Sadraey, *Aircraft Design: A Systems Engineering Approach* (Wiley,
+/// 2013), book p. 276: the tail efficiency of a conventional tail
+/// is 0.85 to 0.95 (1.0 for a T-tail, out of the wing and fuselage wake), and
+/// the worked fin examples of Chapter 12 use 0.94 to 0.96 (pp. 705, 744-745).
+/// 0.95 is the upper end of the conventional range, kept for a fin partly in
+/// the fuselage boundary layer; a lower value is conservative for VMC.
 pub const FIN_DYNAMIC_PRESSURE_RATIO: f64 = 0.95;
-/// Factor on the thin-airfoil rudder effectiveness for the viscous and
-/// three-dimensional lift loss at large deflections (Torenbeek Sec. 9.6.1:
-/// `tau_v` "accounts for the non-linear C_Y,delta_r at large rudder
-/// angles"). An ESTIMATE of the DATCOM plain-flap lift-effectiveness
-/// correction near 30 deg; not read from the supplied handbooks.
-pub const RUDDER_LARGE_DEFLECTION_FACTOR: f64 = 0.80;
+/// Minimum weathercock stability `Cn_beta` of fuselage plus fin, per rad:
+/// positive (Sadraey p. 282; CS 25.177). The model term omits wing and
+/// nacelle, so it reads 0.02 to 0.08 per rad on the registered transports
+/// (probe: A320 0.053, A340 0.024, ATR72 0.078), below the +0.1 to +0.4 of
+/// complete aircraft, which is therefore not usable as a floor here.
+pub const MINIMUM_DIRECTIONAL_STABILITY_PER_RAD: f64 = 0.0;
+/// Normalising scale of the `Cn_beta` shortfall, per rad: the lower end of the
+/// typical band, so a shortfall of this size counts as one unit of violation.
+pub const DIRECTIONAL_STABILITY_SCALE_PER_RAD: f64 = 0.10;
 /// Floor on the net directional stability `Cn_beta` per rad used by the
 /// crosswind check: the lower end of the 0.10 to 0.25 range of transports
-/// (Torenbeek Sec. 9.6.2). The airframe-without-fin term here is the
-/// fuselage alone (Eq. 9-64) and neglects the wing and interference terms,
-/// so a small or negative net value is an artefact, not a prediction.
+/// (Torenbeek Sec. 9.6.2); Sadraey (book p. 282) puts the typical
+/// value of `Cn_beta` of stable aircraft at +0.1 to +0.4 per rad. The
+/// airframe-without-fin term here is the fuselage alone (Eq. 9-64) and
+/// neglects the wing and interference terms, so a small or negative net value
+/// is an artefact of the missing terms, not a prediction.
 pub const NET_DIRECTIONAL_STABILITY_FLOOR: f64 = 0.10;
 /// Speed bounds of the minimum-control-speed search, m/s.
 const SEARCH_SPEED_RANGE_M_S: (f64, f64) = (5.0, 300.0);
@@ -230,18 +242,6 @@ pub fn fin_lift_curve_slope_per_rad(
         - 4.0 / aspect_ratio * 0.25 * (1.0 - taper_ratio) / (1.0 + taper_ratio);
     let root = 4.0 + aspect_ratio * aspect_ratio * (beta_sq + tan_half * tan_half);
     Some(2.0 * PI * aspect_ratio / (2.0 + root.sqrt()))
-}
-
-/// Rudder effectiveness `tau` (lift per unit rudder deflection over lift per
-/// unit angle of attack): the Glauert thin-airfoil flap effectiveness
-/// `1 - (theta - sin theta) / pi`, `theta = acos(2 E - 1)` for a flap chord
-/// ratio `E`, times [`RUDDER_LARGE_DEFLECTION_FACTOR`]. `None` unless
-/// `0 < E < 1`.
-pub fn rudder_effectiveness(chord_ratio: f64) -> Option<f64> {
-    (chord_ratio.is_finite() && chord_ratio > 0.0 && chord_ratio < 1.0).then(|| {
-        let theta = (2.0 * chord_ratio - 1.0).acos();
-        RUDDER_LARGE_DEFLECTION_FACTOR * (1.0 - (theta - theta.sin()) / PI)
-    })
 }
 
 /// Fin force coefficients at one Mach number.

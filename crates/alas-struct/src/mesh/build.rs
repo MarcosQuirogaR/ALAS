@@ -346,6 +346,7 @@ fn build_with_caps(
         spar_upper_nids: spar_upper,
         spar_lower_nids: spar_lower,
         engine_nids,
+        semi_span_m: wsg.semi_span,
     };
 
     Ok((deck, report, node_index))

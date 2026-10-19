@@ -43,7 +43,22 @@ const LBF_PER_N: f64 = 0.224_808_943_099_710_5;
 
 fn probe(name: &str, show_cg: bool) -> Result<(), Box<dyn Error>> {
     let preset = presets::get(name).map_err(std::io::Error::other)?;
-    let config = AlasConfig::from_value(&json!({"preset": name}))?;
+    // ALAS_PROBE_CABIN=flops_transport_v1 | lth_civil_transport_v1 overrides
+    // the cabin-equipment method for a what-if; unset keeps the preset's own.
+    let mut overlay = json!({"preset": name});
+    if let Ok(method) = std::env::var("ALAS_PROBE_CABIN") {
+        overlay["mass_model"] = json!({"flops_transport": {"cabin_equipment_method": method}});
+    }
+    // ALAS_PROBE_OVERLAY='{"mass_model":{...}}' is merged on top (what-if only).
+    if let Ok(extra) = std::env::var("ALAS_PROBE_OVERLAY") {
+        let extra: serde_json::Value = serde_json::from_str(&extra)?;
+        if let (Some(base), Some(add)) = (overlay.as_object_mut(), extra.as_object()) {
+            for (key, value) in add {
+                base.insert(key.clone(), value.clone());
+            }
+        }
+    }
+    let config = AlasConfig::from_value(&overlay)?;
     let plane = AircraftBuilder::new(Some(config.geometry.clone()))
         .build(Some(&preset.design_vector), true)?;
     let (masses, coords, _, build) = run_product_mass_analysis_with_groups(
@@ -57,6 +72,16 @@ fn probe(name: &str, show_cg: bool) -> Result<(), Box<dyn Error>> {
         MassCoordinateModel::StructuralWingbox(&config.structures),
         &config.landing_gear,
     )?;
+    if std::env::var_os("ALAS_PROBE_XSEC").is_some() {
+        if let Some(f) = plane.fuselages.iter().find(|f| f.name == "Fuselage") {
+            for x in &f.xsecs {
+                println!(
+                    "  xsec x {:.2} w {:.2} h {:.2}",
+                    x.xyz_c[0], x.width, x.height
+                );
+            }
+        }
+    }
     let oew: f64 = OEW_KEYS.iter().filter_map(|key| masses.get(key)).sum();
     let build = build.ok_or("no FLOPS buildup (not the pure FLOPS product)")?;
     let fcomp = build.airframe.structure_inputs.wing.composite_utilization;
@@ -98,6 +123,17 @@ fn probe(name: &str, show_cg: bool) -> Result<(), Box<dyn Error>> {
             prop.pylons_kg / n,
             100.0 * prop.pylons_kg / oew
         );
+    }
+    if std::env::var_os("ALAS_PROBE_GROUPS").is_some() {
+        println!(
+            "  systems/operating items: {:#?}",
+            build.systems_and_operating_items
+        );
+        println!("  structure: {:#?}", build.airframe.structure);
+        println!("  structure_inputs: {:#?}", build.airframe.structure_inputs);
+        println!("  propulsion: {:#?}", build.airframe.propulsion);
+        println!("  turboprop: {:#?}", build.airframe.turboprop_propulsion);
+        println!("  masses: {masses:#?}");
     }
     if show_cg {
         let frame = plane.mac_frame().ok_or("no MAC frame")?;

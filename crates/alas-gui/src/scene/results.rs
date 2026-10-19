@@ -109,6 +109,16 @@ pub fn build_result_figure_with_camera(
     theme: &str,
     camera: Option<Camera3D>,
 ) -> Option<Option<Scene>> {
+    alas_report::capture_plot_data(|| build_result_figure_inner(state, id, config, theme, camera))
+}
+
+fn build_result_figure_inner(
+    state: &AppState,
+    id: &str,
+    config: &AlasConfig,
+    theme: &str,
+    camera: Option<Camera3D>,
+) -> Option<Option<Scene>> {
     let result = state.pipeline_result.as_ref()?;
     // These figures depend only on configuration and remain useful before a
     // full aerodynamic report exists.
@@ -451,6 +461,10 @@ pub fn build_result_figure_with_camera(
 /// page. A missing sweep or a stage with no usable candidates is an ordinary
 /// unavailable slot, as the screening figure registry expects.
 pub fn build_screening_figure(state: &AppState, id: &str, theme: &str) -> Option<Scene> {
+    alas_report::capture_plot_data(|| build_screening_figure_inner(state, id, theme))
+}
+
+fn build_screening_figure_inner(state: &AppState, id: &str, theme: &str) -> Option<Scene> {
     let result = state.screening.result.as_ref()?;
     match id {
         "trade_map" => fig_trade_map(result, Some(theme)),

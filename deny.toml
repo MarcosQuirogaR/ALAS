@@ -13,6 +13,7 @@ ignore = [
   { id = "RUSTSEC-2026-0192", reason = "ttf-parser is transitive through egui/resvg; tracked in docs/dependency-policy.md" },
   { id = "RUSTSEC-2024-0436", reason = "paste is an archived proc-macro used at compile time only, transitive through faer/gemm; tracked in docs/dependency-policy.md" },
   { id = "RUSTSEC-2024-0449", reason = "unsafe-libyaml is an archived libyaml port reached only through serde_yaml, which parses locally authored configuration files; no known vulnerability, tracked in docs/dependency-policy.md" },
+  { id = "RUSTSEC-2026-0249", reason = "smartstring is an archived small-string crate reached only through rhai, the sandboxed add-on script engine; no known vulnerability, tracked in docs/dependency-policy.md" },
 ]
 unused-ignored-advisory = "deny"
 

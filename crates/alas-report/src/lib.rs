@@ -33,6 +33,7 @@ pub mod colormap;
 pub mod document;
 pub mod families;
 pub mod pdf;
+pub mod plot_data;
 pub mod registry;
 mod registry_export;
 pub mod route_geometry;
@@ -46,6 +47,7 @@ pub use chart_kit::{draw_axes, draw_colorbar, draw_legend, LegendMarker};
 pub use colormap::Colormap;
 pub use document::{export_airfoil_dat, export_json, format_summary, DesignDatabase};
 pub use pdf::{render_sectioned_pdf, PdfError, PdfFigure, PdfSection};
+pub use plot_data::{with_capture as capture_plot_data, PlotData, PlotPanel, PlotSeries};
 pub use registry::{
     find_figure, FigureDescriptor, RequiredStage, PREVIEW_FIGURES, RESULT_FIGURES,
     SCREENING_FIGURES,

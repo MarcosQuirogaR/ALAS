@@ -150,6 +150,13 @@ fn every_engine_matches_the_reference() {
             expected.bypass_ratio = 11.37;
             expected.overall_pressure_ratio = 35.11;
         }
+        if expected.name == "PW1500G" {
+            // The frozen 0.50 was an unsourced catalogue figure. The catalogue
+            // carries 0.51, the cruise SFC printed for the sibling PW1400G
+            // (AIN Online 2019-08-19; see `cruise_tsfc_source`), grade C.
+            assert_eq!(expected.cruise_tsfc_kg_kgf_hr, 0.5);
+            expected.cruise_tsfc_kg_kgf_hr = 0.51;
+        }
         if expected.name == "CFM56-5C" {
             // The frozen 0.58 was a recalled value. The catalogue carries the
             // printed 0.545 of Scholz's engine table (see `cruise_tsfc_source`).

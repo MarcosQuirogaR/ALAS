@@ -14,6 +14,7 @@ use crate::sandbox::StartingDesign;
 use crate::state::AppState;
 use crate::views::airport_window;
 use crate::views::form::dynamic_form;
+use crate::views::inputs_selectors::{show_engine_selector, show_preset_selector};
 use crate::views::tour_data::TourTarget;
 use crate::views::{tr, tr_fields};
 
@@ -163,68 +164,14 @@ fn show_aircraft_card(state: &mut AppState, ui: &mut Ui) {
                 show_engine_selector(state, ui);
             });
         }
+        ui.add_space(6.0);
+        crate::user_files_ui::show_my_aircraft_row(state, ui);
     });
     if state.walkthrough_targets(TourTarget::AircraftConfig) {
         response.scroll_to_me(Some(egui::Align::Center));
     }
     if ui.clip_rect().intersects(response.rect) {
         state.record_walkthrough_target(TourTarget::AircraftConfig, response.rect);
-    }
-}
-
-/// The preset selector: `Preset:` and its combo box.
-fn show_preset_selector(state: &mut AppState, ui: &mut Ui) {
-    ui.label(tr("Preset:"));
-    let names = state.preset_names.clone();
-    let current_display = names
-        .iter()
-        .find(|(n, _)| *n == state.active_preset)
-        .map(|(_, d)| d.clone())
-        .unwrap_or_else(|| tr("Choose a preset..."));
-    let mut chosen = None;
-    let preset_mode = state.starting_design() == StartingDesign::PresetAircraft;
-    ui.add_enabled_ui(preset_mode, |ui| {
-        ComboBox::from_id_salt("inputs_preset_combo")
-            .selected_text(current_display)
-            .show_ui(ui, |ui| {
-                for (name, display) in &names {
-                    if ui
-                        .selectable_label(*name == state.active_preset, display)
-                        .clicked()
-                    {
-                        chosen = Some(name.clone());
-                    }
-                }
-            });
-    });
-    if let Some(name) = chosen {
-        state.load_preset(&name);
-    }
-}
-
-/// The engine selector: `Engine:` and its combo box.
-fn show_engine_selector(state: &mut AppState, ui: &mut Ui) {
-    ui.label(tr("Engine:"));
-    let current_engine = state
-        .config_values
-        .get("geometry")
-        .and_then(|g| g.get("engine"))
-        .and_then(|e| e.get("engine_name"))
-        .and_then(Value::as_str)
-        .unwrap_or("")
-        .to_owned();
-    let mut chosen_engine = None;
-    ComboBox::from_id_salt("inputs_engine_combo")
-        .selected_text(&current_engine)
-        .show_ui(ui, |ui| {
-            for name in &state.engine_names {
-                if ui.selectable_label(*name == current_engine, name).clicked() {
-                    chosen_engine = Some(name.clone());
-                }
-            }
-        });
-    if let Some(name) = chosen_engine {
-        state.set_engine(&name);
     }
 }
 
@@ -426,12 +373,29 @@ fn show_route_field(state: &mut AppState, ui: &mut Ui, label: &str, key: &str) {
                 open_custom_editor = true;
             }
             ui.separator();
-            for name in &airports {
-                if ui.selectable_label(*name == current, name).clicked() {
-                    chosen = Some(name.clone());
-                }
-            }
+            let salt = format!("inputs_{key}_combo");
+            let query = crate::selector_search::search_field(ui, &salt);
+            egui::ScrollArea::vertical()
+                .max_height(320.0)
+                .show(ui, |ui| {
+                    for name in &airports {
+                        let icao = alas_config::airports::get(name)
+                            .map(|airport| airport.icao.clone())
+                            .unwrap_or_default();
+                        if !crate::selector_search::matches(&query, &[name, &icao]) {
+                            continue;
+                        }
+                        if ui.selectable_label(*name == current, name).clicked() {
+                            chosen = Some(name.clone());
+                        }
+                    }
+                });
         });
+    crate::selector_search::reset_when_closed(
+        ui,
+        &format!("inputs_{key}_combo"),
+        &combo_response.inner,
+    );
     combo_response
         .response
         .on_hover_text(airport_resolution_tooltip(&current));
@@ -647,10 +611,30 @@ fn show_run_content_options(state: &mut AppState, ui: &mut Ui) {
         ui.label(tr("Output directory")).on_hover_text(tr(
             "Choose a separate writable folder when a previous CPACS export is open in another program.",
         ));
-        let response = ui.text_edit_singleline(&mut output_dir);
+        let response = ui.add(
+            egui::TextEdit::singleline(&mut output_dir)
+                .desired_width((ui.available_width() - 130.0).clamp(60.0, 280.0)),
+        );
         if response.changed() && !output_dir.trim().is_empty() {
             state.pipeline_options.output_dir = Some(output_dir.trim().into());
         }
+        let data = state.data_dir();
+        let current = output_dir.clone();
+        crate::file_dialog::browse_button(
+            state,
+            ui,
+            crate::file_dialog::DialogTarget::OutputDirectory,
+            |_| {
+                crate::file_dialog::spec(
+                    crate::file_dialog::DialogKind::PickFolder,
+                    "Output directory",
+                    &current,
+                    &data,
+                    None,
+                    Vec::new(),
+                )
+            },
+        );
     });
 }
 

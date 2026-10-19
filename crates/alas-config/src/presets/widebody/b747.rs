@@ -16,8 +16,7 @@ use crate::{
 //   "drawing read" = a dimension measured off the ACAP section 2.2.1 plan or
 //   side view (Figure 2.2.1, document page 2-14) at the scale of its printed
 //   dimensions, +-0.3 m.
-// FAA TCDS A20WE was NOT retrieved in this session: nothing below cites it as
-// read, and certified_max_seats is left unset for that reason.
+// FAA TCDS A20WE was not retrieved; certified_max_seats 660: EASA TCDS A.196 items 18/20 (PDF p.18).
 
 /// The main-deck doors: ten passenger doors, five each side (ACAP section
 /// 2.7.1, p. 2-35), door centres 31 ft 2 in (9.50 m), 61 ft 8 in (18.80 m),
@@ -134,6 +133,7 @@ pub fn b747_400() -> AircraftPreset {
             // 24 first + 32 business + 302 economy on the main deck and 42
             // business on the upper deck (ACAP section 2.1.1 typical seating).
             planning_seats: Some(400),
+            certified_max_seats: Some(660),
             planning_cabin: Some(B747_400_PLANNING_CABIN),
             certified_exit_layout: Some(B747_400_EXIT_LAYOUT),
             design_point: Some(crate::PayloadRangeDesignPoint {

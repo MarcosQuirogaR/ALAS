@@ -272,6 +272,7 @@ mod large_single_aisle_2 {
             cabin_equipment_method: alas_config::CabinEquipmentMethod::FlopsTransportV1,
             haul_class: alas_config::OperatingHaulClass::ShortMediumHaul,
             propulsion_sizing: PropulsionSizing::RatedThrust,
+            military_cargo: None,
         };
         let breakdown = estimate_flops_transport(&inputs).expect("complete inputs");
         let systems = breakdown.systems;
@@ -590,6 +591,7 @@ mod large_single_aisle_1 {
             cabin_equipment_method: alas_config::CabinEquipmentMethod::FlopsTransportV1,
             haul_class: alas_config::OperatingHaulClass::ShortMediumHaul,
             propulsion_sizing: PropulsionSizing::RatedThrust,
+            military_cargo: None,
         };
         let breakdown = estimate_flops_transport(&inputs).expect("complete inputs");
         let systems = breakdown.systems;

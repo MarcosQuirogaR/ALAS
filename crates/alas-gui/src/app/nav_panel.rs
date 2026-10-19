@@ -189,6 +189,7 @@ pub(super) fn route_page(state: &mut AppState, ui: &mut Ui) {
             crate::views::screening_window::show_screening_page(state, ui)
         }
         PageKind::Uav => crate::views::show_uav_view(state, ui),
+        PageKind::Addons => crate::addons::show_addons_view(state, ui),
         PageKind::Form => {
             ScrollArea::vertical()
                 .id_salt(format!("advanced_page_scroll::{}", page.id))

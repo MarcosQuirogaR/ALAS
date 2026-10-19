@@ -433,15 +433,14 @@ fn render_engine_selector(state: &mut AppState, ui: &mut Ui) {
     let mut chosen = None;
     ui.horizontal_wrapped(|ui| {
         ui.label(RichText::new(tr("Engine model")).strong());
-        egui::ComboBox::from_id_salt("engine_designer_engine")
-            .selected_text(&current_name)
-            .show_ui(ui, |ui| {
-                for name in &state.engine_names {
-                    if ui.selectable_label(*name == current_name, name).clicked() {
-                        chosen = Some(name.clone());
-                    }
-                }
-            });
+        chosen = crate::selector_search::named_list_combo(
+            ui,
+            "engine_designer_engine",
+            None,
+            &current_name,
+            &state.engine_names,
+            &current_name,
+        );
     });
     if let Some(name) = chosen {
         state.set_engine(&name);

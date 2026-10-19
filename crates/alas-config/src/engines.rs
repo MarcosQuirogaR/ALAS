@@ -653,6 +653,14 @@ mod tests {
             );
         }
 
+        // The geared-turbofan cruise anchors are the grade-C family proxy of
+        // the printed PW1400G / LEAP-1A SFC (0.51), not the legacy 0.50.
+        for name in ["PW1500G", "PW1900G"] {
+            let engine = get(name).unwrap();
+            assert_eq!(engine.cruise_tsfc_kg_kgf_hr, 0.51, "{name}");
+            assert_eq!(engine.cruise_tsfc_evidence, "family-proxy", "{name}");
+            assert!(engine.cruise_tsfc_source.contains("PW1400G"), "{name}");
+        }
         let pw1521g = get("PW1500G").unwrap();
         assert_eq!(pw1521g.thrust_kn, 97.73);
         assert_eq!(pw1521g.lto_rated_thrust_kn, Some(97.72));

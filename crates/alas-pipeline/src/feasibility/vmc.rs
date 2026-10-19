@@ -10,7 +10,9 @@
 //! about the fin model; for a clean-sheet design it is an error.
 
 use alas_opt::mdo::{VmcFailure, VmcOutcome};
-use alas_perf::performance::yaw_balance::VMC_CEILING_OVER_VSR;
+use alas_perf::performance::yaw_balance::{
+    MINIMUM_DIRECTIONAL_STABILITY_PER_RAD, VMC_CEILING_OVER_VSR,
+};
 
 use super::{error, warning, FindingCode, PhysicalFinding};
 
@@ -62,6 +64,20 @@ pub(super) fn append(outcome: &VmcOutcome, findings: &mut Vec<PhysicalFinding>) 
         _ => {}
     }
     if let Some(check) = outcome.crosswind {
+        if check.cn_beta_per_rad.is_finite()
+            && check.cn_beta_per_rad < MINIMUM_DIRECTIONAL_STABILITY_PER_RAD
+        {
+            findings.push(finding(
+                FindingCode::DirectionalStabilityViolation,
+                format!(
+                    "weathercock stability Cn_beta of the fuselage and fin is {:.3} per rad at the approach speed, below the {:.2} per rad minimum: the aircraft is directionally unstable (CS 25.177; Sadraey p. 282; Torenbeek Eq. 9-62)",
+                    check.cn_beta_per_rad, MINIMUM_DIRECTIONAL_STABILITY_PER_RAD,
+                ),
+                Some(check.cn_beta_per_rad),
+                Some(MINIMUM_DIRECTIONAL_STABILITY_PER_RAD),
+                "1/rad",
+            ));
+        }
         if check.rudder_deg > check.rudder_limit_deg {
             findings.push(finding(
                 FindingCode::CrosswindControlViolation,
@@ -168,6 +184,7 @@ mod tests {
             sideslip_deg: 12.0,
             rudder_deg,
             rudder_limit_deg: 30.0,
+            cn_beta_per_rad: 0.3,
         };
         let mut findings = Vec::new();
         append(

@@ -31,6 +31,7 @@ mod layers;
 mod limits;
 mod mass_lines;
 mod panel;
+mod plot_data;
 mod render;
 mod sequences;
 mod weights;

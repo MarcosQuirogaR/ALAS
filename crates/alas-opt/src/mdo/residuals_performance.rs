@@ -10,7 +10,7 @@ use alas_config::airports::Airport;
 use alas_config::{AlasConfig, DesignRequirements, ObjectiveConfig, PerformanceConfig};
 use alas_perf::performance::{
     assess_oei_climb, compute_v_speeds_at_masses, cs25_115_net_path_reduction, density_ratio,
-    far25_oei_gradient, landing_runway_share, oei_cl_at_v2, ws_landing_field_limit, OeiClimbStatus,
+    far25_oei_gradient, landing_runway_share, oei_cl_at_v2, ws_landing_limit_for, OeiClimbStatus,
     JET_DRY_LANDING_SHARE,
 };
 use alas_units::KNOT;
@@ -56,6 +56,9 @@ pub(super) fn performance_residuals(
     let vmc = super::residuals_vmc::evaluate_candidate(outcome, config);
     let resolved = super::residuals_vmc::performance_with_vmc(config, &vmc);
     let config = &*resolved;
+    // Before the improved-climb resolution below: the field row re-resolves it
+    // at its own mass.
+    let base_config = config;
     let req = &config.requirements;
     let objective = &config.optimizer.objective;
     let sized = &outcome.sized;
@@ -357,12 +360,28 @@ pub(super) fn performance_residuals(
     // (`alas_config::MassSizingBasis`): the declared weights of a fixed
     // aircraft, the closure of a coupled design.
     if let Some(departure) = outcome.departure {
+        // The field is certified at the design gross mass, so its speeds are the
+        // schedule at that mass (improved-climb V2 resolved there), not the
+        // dispatch mass the second-segment rows above use.
+        let design_gap = (sized.design_gross_mass_kg - sized.takeoff_mass_kg).abs();
+        let field_speeds = if design_gap > 1e-6 * sized.design_gross_mass_kg {
+            takeoff_field::design_mass_speeds(
+                base_config,
+                outcome,
+                departure,
+                s_ref,
+                req.gravity_m_s2,
+            )
+            .or(departure_speeds)
+        } else {
+            departure_speeds
+        };
         residuals.push(takeoff_field_row(&ResidualInputs {
             perf,
             engine_out: engine_out.as_ref(),
             drag: &sized.fuel_artifacts.drag,
             departure,
-            speeds: departure_speeds,
+            speeds: field_speeds,
             s_ref_m2: s_ref,
             mass_kg: sized.design_gross_mass_kg,
             static_thrust_n: outcome.n_engines as f64 * outcome.static_thrust_kn * 1_000.0,
@@ -413,13 +432,12 @@ fn landing_and_approach_residuals(
     let sized = &outcome.sized;
     let sigma = density_ratio(arrival.elevation_m, arrival.isa_deviation_c);
     // Same definition as the delivery gate and the matching chart: the actual
-    // distance k_land (W/S)/(sigma CLmax) may use 0.6 of the LDA.
-    let ws_land_limit_pa = ws_landing_field_limit(
+    // distance of the landing segment model may use 0.6 of the LDA.
+    let ws_land_limit_pa = ws_landing_limit_for(
+        perf,
         arrival.lda_m,
         landing_runway_share(JET_DRY_LANDING_SHARE, perf.wet_landing_runway),
         sigma,
-        perf.cl_max_land,
-        perf.k_land,
     );
     let landing_ws_pa = sized.design_landing_mass_kg * req.gravity_m_s2 / s_ref;
 

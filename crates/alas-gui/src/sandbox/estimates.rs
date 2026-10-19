@@ -118,9 +118,22 @@ fn show_route(ui: &mut Ui, route: &QuickRouteFuel) {
 }
 
 fn show_payload_range(ui: &mut Ui, corners: &QuickPayloadRange) {
-    let (rect, _) = ui.allocate_exact_size(
+    let (rect, response) = ui.allocate_exact_size(
         vec2(ui.available_width().max(160.0), 120.0),
-        egui::Sense::hover(),
+        egui::Sense::click(),
+    );
+    crate::views::plot_data_menu::attach_xy(
+        &response,
+        "sandbox_payload_range",
+        "Payload-range estimate",
+        "Range [m]",
+        "Payload [kg]",
+        || {
+            vec![(
+                "payload-range corners".to_owned(),
+                corners.points.iter().map(|&(r, p)| [r, p]).collect(),
+            )]
+        },
     );
     let painter = ui.painter_at(rect);
     let inner = rect.shrink2(vec2(34.0, 16.0));

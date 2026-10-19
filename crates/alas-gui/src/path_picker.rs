@@ -1,14 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! Native path selection for optional external tools without persisting files
+//! Native path selection (through `rfd`) for optional external tools without persisting files
 //! beside the executable.
 //!
 //! The actual executable or directory remains an explicit preference. A picker
 //! merely fills an empty path field; it never discovers a location and treats
 //! it as a runnable solver.
 
-use std::process::Command;
 use std::sync::mpsc::{channel, Receiver, TryRecvError};
 use std::thread;
 
@@ -111,172 +110,19 @@ fn spawn_path_picker(directory: bool) -> Receiver<Result<Option<String>, String>
     receiver
 }
 
-#[cfg(target_os = "windows")]
+/// Show the platform dialog through `rfd` (Win32 common dialogs on Windows,
+/// the XDG desktop portal on Linux, Cocoa on macOS). Cancelling is `Ok(None)`.
 fn native_path_picker(directory: bool) -> Result<Option<String>, String> {
-    // The script is constant: user input is never interpolated into a shell
-    // command. `-STA` is required by Windows Forms dialogs and the worker
-    // keeps the modal dialog off eframe's render thread.
-    let script = if directory {
-        r#"
-Add-Type -AssemblyName System.Windows.Forms
-$dialog = New-Object System.Windows.Forms.FolderBrowserDialog
-$dialog.Description = 'Select the external-tool installation directory'
-if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
-    [Console]::Out.Write($dialog.SelectedPath)
-}
-"#
+    let dialog = rfd::FileDialog::new();
+    let selected = if directory {
+        dialog
+            .set_title("Select the external-tool installation directory")
+            .pick_folder()
     } else {
-        r#"
-Add-Type -AssemblyName System.Windows.Forms
-$dialog = New-Object System.Windows.Forms.OpenFileDialog
-$dialog.Filter = 'Executable files (*.exe)|*.exe|All files (*.*)|*.*'
-$dialog.Multiselect = $false
-$dialog.CheckFileExists = $true
-if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
-    [Console]::Out.Write($dialog.FileName)
-}
-"#
+        let dialog = dialog.set_title("Select an external-tool executable");
+        #[cfg(target_os = "windows")]
+        let dialog = dialog.add_filter("Executable files", &["exe"]);
+        dialog.pick_file()
     };
-    let output = Command::new("powershell.exe")
-        .args(["-NoProfile", "-STA", "-Command", script])
-        .output()
-        .map_err(|error| error.to_string())?;
-    if !output.status.success() {
-        return Err(String::from_utf8_lossy(&output.stderr).trim().to_owned());
-    }
-    let selected = String::from_utf8_lossy(&output.stdout).trim().to_owned();
-    Ok((!selected.is_empty()).then_some(selected))
-}
-
-#[cfg(target_os = "macos")]
-fn native_path_picker(directory: bool) -> Result<Option<String>, String> {
-    let script = if directory {
-        "POSIX path of (choose folder with prompt \"Select the external-tool installation directory\")"
-    } else {
-        "POSIX path of (choose file with prompt \"Select an external-tool executable\")"
-    };
-    let output = Command::new("osascript")
-        .args(["-e", script])
-        .output()
-        .map_err(|error| error.to_string())?;
-    if !output.status.success() {
-        return Ok(None);
-    }
-    let selected = String::from_utf8_lossy(&output.stdout).trim().to_owned();
-    Ok((!selected.is_empty()).then_some(selected))
-}
-
-/// Native dialog programs probed on Linux/other Unix desktops, in the fixed
-/// order they are tried. `zenity` ships with GNOME; `kdialog` is the KDE
-/// equivalent. Neither is installed on every minimal or headless distribution.
-#[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
-const UNIX_DIALOG_BACKENDS: [&str; 2] = ["zenity", "kdialog"];
-
-/// The message shown when no supported picker binary is on `PATH`. The text
-/// field a picker fills remains usable without it.
-#[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
-const UNIX_DIALOG_MISSING_MESSAGE: &str =
-    "No native file picker was found (looked for zenity, kdialog). Install one of them, or type the path directly in the field.";
-
-/// The first backend from [`UNIX_DIALOG_BACKENDS`] whose executable exists in
-/// one of `path_var`'s directories, checked without touching process state so
-/// tests can supply a synthetic `PATH` value.
-#[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
-fn resolve_unix_dialog_backend(path_var: &str) -> Option<&'static str> {
-    UNIX_DIALOG_BACKENDS
-        .iter()
-        .copied()
-        .find(|candidate| std::env::split_paths(path_var).any(|dir| dir.join(candidate).is_file()))
-}
-
-#[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
-fn native_path_picker(directory: bool) -> Result<Option<String>, String> {
-    let path_var = std::env::var("PATH").unwrap_or_default();
-    let backend = resolve_unix_dialog_backend(&path_var)
-        .ok_or_else(|| UNIX_DIALOG_MISSING_MESSAGE.to_owned())?;
-    let mut command = Command::new(backend);
-    if backend == "kdialog" {
-        command.arg(if directory {
-            "--getexistingdirectory"
-        } else {
-            "--getopenfilename"
-        });
-        command.arg(".");
-    } else {
-        command.arg("--file-selection");
-        if directory {
-            command.arg("--directory");
-        }
-    }
-    let output = command.output().map_err(|error| error.to_string())?;
-    if !output.status.success() {
-        return Ok(None);
-    }
-    let selected = String::from_utf8_lossy(&output.stdout).trim().to_owned();
-    Ok((!selected.is_empty()).then_some(selected))
-}
-
-#[cfg(all(test, not(target_os = "windows"), not(target_os = "macos")))]
-mod unix_dialog_backend_tests {
-    use super::{resolve_unix_dialog_backend, UNIX_DIALOG_MISSING_MESSAGE};
-    use std::fs;
-
-    /// An isolated directory standing in for one `PATH` entry, holding zero
-    /// or more fake backend "binaries" (empty files; only presence matters).
-    struct FakeBinDir {
-        path: std::path::PathBuf,
-    }
-
-    impl FakeBinDir {
-        fn with_binaries(names: &[&str]) -> Self {
-            // One PATH entry: the name must not contain ':' (the Unix path
-            // separator), which a Debug-formatted Instant does on Linux.
-            static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-            let path = std::env::temp_dir().join(format!(
-                "alas-gui-path-picker-test-{}-{}",
-                std::process::id(),
-                COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-            ));
-            fs::create_dir_all(&path).expect("create fake PATH directory");
-            for name in names {
-                fs::write(path.join(name), b"").expect("create fake backend binary");
-            }
-            Self { path }
-        }
-
-        fn path_var(&self) -> String {
-            self.path.display().to_string()
-        }
-    }
-
-    impl Drop for FakeBinDir {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.path);
-        }
-    }
-
-    #[test]
-    fn reports_the_actionable_error_when_neither_backend_is_on_path() {
-        let bin_dir = FakeBinDir::with_binaries(&[]);
-        assert_eq!(resolve_unix_dialog_backend(&bin_dir.path_var()), None);
-        assert!(UNIX_DIALOG_MISSING_MESSAGE.contains("type the path directly"));
-    }
-
-    #[test]
-    fn finds_kdialog_when_zenity_is_absent() {
-        let bin_dir = FakeBinDir::with_binaries(&["kdialog"]);
-        assert_eq!(
-            resolve_unix_dialog_backend(&bin_dir.path_var()),
-            Some("kdialog")
-        );
-    }
-
-    #[test]
-    fn prefers_zenity_over_kdialog_when_both_are_present() {
-        let bin_dir = FakeBinDir::with_binaries(&["kdialog", "zenity"]);
-        assert_eq!(
-            resolve_unix_dialog_backend(&bin_dir.path_var()),
-            Some("zenity")
-        );
-    }
+    Ok(selected.map(|path| path.display().to_string()))
 }

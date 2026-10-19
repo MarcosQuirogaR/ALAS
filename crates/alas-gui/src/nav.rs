@@ -52,6 +52,8 @@ pub enum PageKind {
     AirfoilScreening,
     /// The fixed-wing UAV component and sizing workflow.
     Uav,
+    /// The Add-ons page.
+    Addons,
 }
 
 /// Which aux-preset registry a form page offers a picker for.
@@ -163,6 +165,7 @@ const SETUP_PAGES: &[Page] = &[
         description: Some("Select source-provenanced hardware, set mission and airframe assumptions, and verify generated UAV geometry with the shared production physics core."),
         ..Page::screen("uav", "Fixed-Wing UAV", PageKind::Uav)
     },
+    Page::screen("addons", "Add-ons", PageKind::Addons),
 ];
 
 const AIRFOIL_SECTIONS: &[ExtraSection] = &[

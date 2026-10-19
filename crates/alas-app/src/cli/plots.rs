@@ -20,6 +20,8 @@ struct PlotExportEntry {
     required_stage: String,
     status: &'static str,
     path: Option<String>,
+    data_csv: Option<String>,
+    data_json: Option<String>,
     reason: Option<String>,
 }
 
@@ -42,6 +44,7 @@ pub(super) fn plots_dir(output_dir: Option<&Path>) -> PathBuf {
 pub(super) fn save_result_plots(
     result: &PipelineResult,
     output_dir: Option<&Path>,
+    write_data: bool,
 ) -> Result<usize, String> {
     let dir = plots_dir(output_dir);
     fs::create_dir_all(&dir)
@@ -57,6 +60,7 @@ pub(super) fn save_result_plots(
     let mut written = 0;
     let mut manifest = Vec::with_capacity(alas_report::RESULT_FIGURES.len());
     for descriptor in alas_report::RESULT_FIGURES {
+        let mut data_files: (Option<String>, Option<String>) = (None, None);
         let (status, path, reason) = match alas_gui::scene::build_result_figure(
             &state,
             descriptor.id,
@@ -69,6 +73,12 @@ pub(super) fn save_result_plots(
                 fs::write(&path, svg)
                     .map_err(|e| format!("failed to write {}: {e}", path.display()))?;
                 written += 1;
+                let (csv, json) = if write_data {
+                    write_figure_data(&dir, &scene, descriptor)?
+                } else {
+                    (None, None)
+                };
+                data_files = (csv, json);
                 ("written", Some(format!("{}.svg", descriptor.id)), None)
             }
             Some(None) => (
@@ -88,6 +98,8 @@ pub(super) fn save_result_plots(
             required_stage: format!("{:?}", descriptor.required_stage),
             status,
             path,
+            data_csv: data_files.0,
+            data_json: data_files.1,
             reason,
         });
     }
@@ -99,4 +111,28 @@ pub(super) fn save_result_plots(
         .map_err(|error| format!("failed to write {}: {error}", manifest_path.display()))?;
 
     Ok(written)
+}
+
+/// Write `<id>.csv` and `<id>.json` with the plotted values next to the SVG.
+///
+/// Returns the two file names, or `None` for both when the figure is a
+/// schematic that carries no plotted series.
+fn write_figure_data(
+    dir: &Path,
+    scene: &alas_report::Scene,
+    descriptor: &alas_report::FigureDescriptor,
+) -> Result<(Option<String>, Option<String>), String> {
+    let Some(mut data) = alas_report::PlotData::from_scene(scene, descriptor.id, None) else {
+        return Ok((None, None));
+    };
+    data.title = descriptor.title.to_owned();
+    let (csv, json) = (
+        format!("{}.csv", descriptor.id),
+        format!("{}.json", descriptor.id),
+    );
+    for (name, text) in [(&csv, data.to_csv()), (&json, data.to_json())] {
+        let path = dir.join(name);
+        fs::write(&path, text).map_err(|e| format!("failed to write {}: {e}", path.display()))?;
+    }
+    Ok((Some(csv), Some(json)))
 }

@@ -303,11 +303,20 @@ fn frozen_plans_replay_their_declared_fuel_and_converge_with_fixed_choices() {
 /// re-freeze contracts the takeoff-mass error about tenfold; once is not
 /// always enough from the unstepped closure (B787-9 with the taxi-in budget
 /// carried: 0.109 % after one, 0.009 % after two).
+///
+/// The B787-9 range is 5,350 nmi (was 5,300; re-pinned by lane field lengths,
+/// 2026-10-17, by probe): with the capped BPR 8 take-off chart the 5,300 nmi
+/// closure sits on the optimum-step policy's switch from three to four step
+/// climbs at about 279 t (plans frozen at 278,476 and 279,092 kg differ by a
+/// step and 229 kg of trip fuel), so the re-freeze iteration cycles between the
+/// two plans (278,477 -> 279,092 -> 278,536 -> 278,481 -> 278,476 -> 279,092 kg)
+/// and has no converged reference. At 5,350 nmi the three re-freezes land within
+/// 0.017 % of fuel of the reference (5,250 nmi 0.067 %, 5,450 nmi 0.020 %).
 #[test]
 fn a_refrozen_plan_prices_dispatch_within_a_tenth_of_a_percent() {
     for (preset, zfw_kg, range_nmi) in [
         ("A320-200", 62_500.0, 2_120.0),
-        ("B787-9", 400_000.0 * LB, 5_300.0),
+        ("B787-9", 400_000.0 * LB, 5_350.0),
         ("ATR72-600", 20_290.0, 758.0),
     ] {
         let (model, config) = preset_model(preset);

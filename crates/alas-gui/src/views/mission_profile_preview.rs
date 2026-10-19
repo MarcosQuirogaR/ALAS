@@ -73,6 +73,14 @@ fn show_mission_profile_preview_inner(
         let (rect, response) =
             ui.allocate_exact_size(vec2(ui.available_width().max(1.0), 300.0), Sense::click());
         paint_profile(ui, rect, config, &segments);
+        crate::views::plot_data_menu::attach_xy(
+            &response,
+            "mission_profile_preview",
+            "Live mission profile (schematic)",
+            "Mission progress (schematic fraction) [-]",
+            "Altitude [m]",
+            || vec![("profile".to_owned(), profile_points(config))],
+        );
         let response = response.on_hover_text(tr(
             "Click a phase in the profile to edit its actual mission parameters in a detached window.",
         ));
@@ -84,6 +92,24 @@ fn show_mission_profile_preview_inner(
             }
         }
     });
+}
+
+/// Phase-end points `[progress fraction, altitude m]` of the schematic, starting
+/// at the departure elevation. Progress is the schematic phase weight, not distance.
+pub(crate) fn profile_points(config: &AlasConfig) -> Vec<[f64; 2]> {
+    let segments = preview_segments(config);
+    let total = segments
+        .iter()
+        .map(|s| s.weight)
+        .sum::<f64>()
+        .max(ACTIVE_FRACTION);
+    let mut progress = 0.0;
+    let mut points = vec![[0.0, airport_elevation_m(&config.departure_airport)]];
+    for segment in &segments {
+        progress += segment.weight / total;
+        points.push([progress, segment.altitude_m]);
+    }
+    points
 }
 
 fn preview_segments(config: &AlasConfig) -> Vec<PreviewSegment> {

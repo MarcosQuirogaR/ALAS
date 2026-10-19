@@ -111,6 +111,7 @@ fn modal_shape_slots_stay_parallel_when_an_op2_vector_is_missing() {
         spar_upper_nids: vec![vec![1, 2]],
         spar_lower_nids: Vec::new(),
         engine_nids: Vec::new(),
+        semi_span_m: 0.0,
     };
     let mut op2 = Op2::default();
     op2.eigenvectors.insert(

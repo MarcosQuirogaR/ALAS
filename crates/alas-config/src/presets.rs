@@ -60,9 +60,12 @@ mod atr72_600_schedule_fix;
 mod cabin_sources;
 mod cg_envelope;
 mod evidence;
+mod flap_effectiveness;
 mod gear_load;
 mod high_lift_system;
 mod landing_reference;
+mod lower_holds;
+pub use lower_holds::declared_lower_holds;
 mod military;
 mod mission_evidence;
 mod narrowbody;
@@ -74,6 +77,7 @@ mod takeoff_reference;
 #[cfg(test)]
 mod tests;
 mod widebody;
+mod widebody_exits;
 
 pub use aircraft::{
     AircraftPreset, AircraftReferenceData, AircraftVariantIdentity, CertifiedExitLayout,
@@ -97,7 +101,7 @@ pub use evidence::{
 pub use gear_load::{AftCgNoseLoadPoint, PublishedAftCgNoseLoad};
 pub use high_lift_system::{
     declared_system, declared_systems, preset_breakdown, DeclaredHighLift, HighLiftBreakdown,
-    HighLiftGeometry, TrailingEdgeDevice,
+    HighLiftGeometry, TakeoffFlap, TrailingEdgeDevice,
 };
 pub use landing_reference::{
     published_landing_reference, published_landing_references, PublishedLandingReference,
@@ -112,3 +116,4 @@ pub use speed_schedules::atr72_600_takeoff_speed_m_s;
 pub use takeoff_reference::{
     published_takeoff_reference, published_takeoff_references, PublishedTakeoffReference,
 };
+pub use widebody_exits::{A340_300_EXIT_LAYOUT, DC_10_30_EXIT_LAYOUT};

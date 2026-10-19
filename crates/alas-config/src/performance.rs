@@ -243,6 +243,14 @@ pub struct PerformanceConfig {
     )]
     pub v2_min_vsr_factor: f64,
 
+    /// Wheels on each main-gear truck (bogie); zero when undeclared.
+    #[serde(default)]
+    #[config(
+        label = "Main-gear wheels per truck (0 = undeclared)",
+        help = "Declared wheels on each main-gear truck, which selects the mean braked-run deceleration of the jet landing-distance model: Torenbeek, Advanced Aircraft Design (2013), p. 274 (ESDU 84040 statistics for jets with automatic ground spoilers, anti-skid, no reverse thrust): 0.40 g for two-wheel trucks, 0.32 g for four-wheel trucks. Presets copy their landing-gear declaration (first strut of the bogie list, else wheels per strut). 0 is treated as the four-wheel class, the longer distance."
+    )]
+    pub main_gear_truck_wheels: i64,
+
     /// Whether the landing field-length check assumes a wet runway.
     #[serde(default)]
     #[config(
@@ -406,18 +414,11 @@ impl Default for PerformanceConfig {
             cl_min_clean: -1.00,
             thrust_lapse: 0.235,
             oei_gradient: 0.024,
-            // Unfactored 25.125 landing distance from 50 ft, m per Pa of
-            // (W/S)/(sigma CLmax_land) at MLW. One value for every class and
-            // aircraft (the earlier 0.58 / 0.60 / 0.63 variants had no source
-            // and over-predicted the certified LFL by +27.8 % on average).
-            // Calibrated 2026-10-07 as the mean of K_i = 0.6 LFL_i /
-            // (0.5 rho0 (Vref_i/1.23)^2) over eight certified jets (A220-300,
-            // A320, A340-300, A380, B747-400, B787-9, DC-10, C919; spread
-            // 0.43-0.57, s.d. 0.045, in-sample mean |LFL error| about 8 %; refit-without-one is only
-            // that residual inflated by n/(n-1), not out-of-sample evidence).
-            // Cross-checks: Loftin NASA RP-1060 Fig. 3.4 via Scholz, Aircraft
-            // Design ch. 5, gives 0.572; Raymer eq. 5.11 gives 0.51 m/Pa
-            // before the air-distance term. Calibration, not validation.
+            // Legacy replay only (`legacy_field_correlations`): the production
+            // landing distance is the Torenbeek segment model (alas-perf
+            // `landing.rs`). 0.505 m/Pa was the mean of 0.6 LFL / (0.5 rho0
+            // (Vref/1.23)^2) over eight certified jets (calibration, retained
+            // for the frozen replay; Loftin NASA RP-1060 Fig. 3.4: 0.572).
             k_land: 0.505,
             oei_climb_cl: 1.2,
             oei_climb_delta_cd: 0.015,
@@ -426,6 +427,7 @@ impl Default for PerformanceConfig {
             landing_gear_delta_cd: default_landing_gear_delta_cd(),
             go_around_spool_thrust_fraction: default_go_around_spool_thrust_fraction(),
             v2_min_vsr_factor: default_v2_min_vsr_factor(),
+            main_gear_truck_wheels: 0,
             wet_landing_runway: false,
             engine_match_tolerance: default_engine_match_tolerance(),
             oei_condition_to_sls_thrust_ratio: None,

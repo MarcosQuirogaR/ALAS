@@ -331,6 +331,9 @@ impl AircraftPreset {
         if self.name == "E195-E2" {
             cabin.cargo.hold_compartments = super::narrowbody::e195_e2_hold_compartments();
         }
+        if let Some(holds) = super::lower_holds::declared_lower_holds(self.name) {
+            cabin.cargo.hold_compartments = holds;
+        }
         if self.name == "ATR72-600" {
             cabin.cargo.hold_compartments = super::atr72_600_baggage_holds();
         }
@@ -404,10 +407,10 @@ impl AircraftPreset {
                 "Representative European airlift sector; operational example only, not an A400M design-mission claim (the design point is the 20 t / 6300 km brochure entry)",
             ),
             "DC-10" => (
-                "Osaka Kansai (RJBB)",
-                "Honolulu (PHNL)",
-                37_000.0 * 0.3048,
-                "Northwest Airlines 1996-10-27 timetable explicitly assigns DC-10 equipment to Osaka-Honolulu; historical because scheduled passenger DC-10 service has ended",
+                "Madrid Barajas (LEMD)",
+                "Boston Logan (KBOS)",
+                35_000.0 * 0.3048,
+                "Iberia Flight 933, a scheduled Madrid Barajas to Boston Logan service flown with a McDonnell Douglas DC-10-30 (EC-CBN, 1973-12-17): Wikipedia 'Iberia Flight 933' infobox, read 2026-10-19, which cites Aviation Safety Network; evidence grade C. Historical because scheduled passenger DC-10 service has ended. Replaces Osaka-Honolulu, whose airway-planned distance (4,253 nmi) exceeded the 4,120 nmi charted design point",
             ),
             // ESTIMATE: representative historical long-haul 747-400 route
             // declared for this study; not checked against a timetable.

@@ -258,6 +258,7 @@ fn line_series(scene: &mut Scene, axes: &Axes2D, x: &[f64], y: &[f64], stroke: S
 /// axis height): the closest approximation [`crate::scene`]'s primitives
 /// offer to matplotlib's `hatch="///"`, since there is no dedicated hatch fill.
 fn draw_hatch(scene: &mut Scene, axes: &Axes2D, v_s_kt: f64) {
+    let _chrome = crate::plot_data::ChromeGuard::begin();
     let top_left = axes.map_point(0.0, axes.y_max);
     let bottom_right = axes.map_point(v_s_kt, axes.y_min);
     let (x0, y0) = (top_left[0], top_left[1]);
