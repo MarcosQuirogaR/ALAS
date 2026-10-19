@@ -115,6 +115,7 @@ rather than taking a dependency on a crate that cannot land yet.
 | `alas/i18n.py` | 90 | `alas-i18n` | n/a | n/a | green |
 | `alas/__init__.py` | 36 | n/a | n/a | n/a | dropped: lazy-export shim, no native equivalent needed |
 | n/a | n/a | `alas-fonts` | n/a | n/a | native: the bundled text face the desktop build draws with, which the Python implementation took from the host system |
+| n/a | n/a | `alas-addons` | n/a | n/a | native: user add-ons (sandboxed Rhai scripts and JSON-protocol external processes) with traceable application of their outputs; no Python counterpart, see `docs/ADDONS.md` |
 
 ## Configuration
 

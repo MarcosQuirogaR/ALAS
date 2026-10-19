@@ -874,6 +874,7 @@ fn compare_values(
                     if let Some(new) = product_corrections::engine_copy(&child)
                         .or_else(|| product_corrections::added_planform(&child))
                         .or_else(|| product_corrections::declared_airfoil_class(&child))
+                        .or_else(|| product_corrections::declared_lower_holds(&child))
                     {
                         source_corrections.remove(&child);
                         compare_recorded_value(comparison, &child, &actual[key], &new);

@@ -42,6 +42,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 mod osmap;
 use osmap::*;
 mod case;
+mod geometry;
+use geometry::repair_inverted_trailing_edge;
 mod ramp;
 use ramp::RampOutcome;
 mod session;

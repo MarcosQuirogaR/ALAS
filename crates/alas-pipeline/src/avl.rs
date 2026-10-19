@@ -12,7 +12,9 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 
 use alas_aero::analysis::PolarSweep;
-use alas_aero::avl::{parse_total_forces, render_geometry, AvlDeckRequest, AvlModel, AvlPolar};
+use alas_aero::avl::{
+    fit_vortex_budget, parse_total_forces, render_geometry, AvlDeckRequest, AvlModel, AvlPolar,
+};
 use alas_config::AlasConfig;
 use alas_exec::avl::{run_avl_with_options_cancellable, AvlProcessStatus, AvlRunOptions};
 
@@ -203,6 +205,11 @@ fn run_avl_analysis_with_reference(
     let spanwise_vortices = positive_usize(config.analysis.fine_spanwise_resolution)
         .saturating_mul(10)
         .max(20);
+    // AVL stops with "Vortex array overflow" above NVMAX = 5000 vortices
+    // (symmetric surfaces count twice). Fit the lattice to that bound, keeping
+    // the 8-chord audit mesh as the chordwise floor.
+    let (chordwise_vortices, spanwise_vortices) =
+        fit_vortex_budget(&report.airplane, chordwise_vortices, spanwise_vortices, 8);
     let deck = match render_geometry(AvlDeckRequest {
         airplane: &report.airplane,
         mach: reference.mach,

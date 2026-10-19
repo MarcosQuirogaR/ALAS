@@ -371,6 +371,9 @@ fn draw_masked_heatmap(
     vmin: f64,
     vmax: f64,
 ) {
+    let flat: Vec<f64> = values.iter().flatten().copied().collect();
+    scene.data_trace.note_heatmap(axes, x_edges, y_edges, &flat);
+    let _chrome = crate::plot_data::ChromeGuard::begin();
     let span = (vmax - vmin).max(1e-12);
     for (iy, row) in values.iter().enumerate() {
         for (ix, &v) in row.iter().enumerate() {

@@ -373,11 +373,14 @@ fn a_propeller_aircraft_gets_its_cruise_thrust_margin_from_the_propeller_model()
 }
 
 /// The take-off band (owner decision 2026-10-14): the AVE's second segment
-/// needs 0.2528 against 0.2655 installed, so it passes. Raising the failed
-/// engine's windmilling drag coefficient by configuration (the derived value
-/// is 0.0039) lifts the requirement: 0.0200 gives 0.2824 (6.0 % short, inside
-/// the 8.2 % take-off band: a Warning finding), 0.0320 gives 0.3045 (12.8 %
-/// short, beyond it: the hard ThrustMarginViolation error).
+/// needs 0.2655 against 0.2655 installed at the improved-climb speed, so it
+/// passes (re-pinned by lane field lengths, 2026-10-17, by probe: it needed
+/// 0.2528 at the schedule speed before the BPR 8 take-off chart was capped).
+/// Raising the failed engine's windmilling drag coefficient by configuration
+/// (the derived value is 0.0039) lifts the requirement: 0.0100 gives 0.2791
+/// (4.9 % short, inside the 8.2 % take-off band: a Warning finding), 0.0240
+/// gives 0.3064 (13.3 % short, beyond it: the hard ThrustMarginViolation
+/// error).
 #[test]
 fn a_second_segment_shortfall_inside_the_take_off_band_is_a_warning_beyond_it_an_error() {
     let preset = presets::get("AVE").expect("registered AVE preset");
@@ -399,7 +402,7 @@ fn a_second_segment_shortfall_inside_the_take_off_band_is_a_warning_beyond_it_an
             .collect::<Vec<_>>()
     };
     assert!(findings_for(None).is_empty());
-    let inside = findings_for(Some(0.020));
+    let inside = findings_for(Some(0.010));
     assert_eq!(inside.len(), 1, "{inside:?}");
     assert_eq!(inside[0].code, FindingCode::ThrustWithinChartScatter);
     assert_eq!(inside[0].severity, FindingSeverity::Warning);
@@ -412,7 +415,7 @@ fn a_second_segment_shortfall_inside_the_take_off_band_is_a_warning_beyond_it_an
         (0.918..1.0).contains(&(available / required)),
         "{available} {required}"
     );
-    let beyond = findings_for(Some(0.032));
+    let beyond = findings_for(Some(0.024));
     assert_eq!(beyond.len(), 1, "{beyond:?}");
     assert_eq!(beyond[0].code, FindingCode::ThrustMarginViolation);
     assert_eq!(beyond[0].severity, FindingSeverity::Error);

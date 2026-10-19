@@ -154,9 +154,22 @@ The search minimises a mission quantity through `optimizer.objective` and ranks
 candidates feasibility first: a candidate that violates a hard requirement family
 costs more than any feasible one and infeasible candidates order by their
 normalised violation; soft families rank behind feasibility and ahead of the
-objective; diagnostic families are reported only. Tail-volume windows are
-plausibility bands (tier S of the research note) and rank soft even under a
-hard geometry family, and a violation below ten parts per million of its
+objective; diagnostic families are reported only. No tail-volume window is
+enforced anywhere in the search or the report: in a reference adaptation the
+tail areas are solved to the registered aircraft's own V_H and V_V
+(`mdo/tail_sizing.rs`), in clean-sheet mode `tail_scale` and `tail_x_shift_m`
+are free design variables, and the tails are sized by the physical checks of
+the candidate: the static-margin floor at the aft and the rotation and
+landing-trim limits at the forward end of each loading state (`Balance`
+family, CS 25.107(e) rotation), `VMCA <= 1.13 VSR` (CS 25.149(c), 5 deg bank,
+critical engine out, take-off thrust, design maximum take-off weight), the
+rudder deflection that holds a 30 kt crosswind at the approach speed and the
+weathercock stability `Cn_beta` of the fuselage and fin (`directional_stability`,
+positive, CS 25.177 and Sadraey p. 282). The optimizer and the report call the
+same yaw-balance function (`mdo/residuals_vmc.rs`). Raymer's Table 6.4
+volume coefficients (jet transport 1.00 and 0.09) are not used as a sizing law
+or as a bound; the coefficients of the result are reported for comparison. A
+violation below ten parts per million of its
 limit is numerical noise (the builder's own rounding of the reference area)
 and is not counted. The objective is a
 mission quantity closed by an inner takeoff-mass fixed point, which the

@@ -149,6 +149,17 @@ fn show_implies_plots_and_the_help_says_it_writes_files() {
 }
 
 #[test]
+fn plot_data_implies_plots_and_is_documented() {
+    let args = ["--plot-data".to_owned()];
+    let cli = parse_args(&args)
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| panic!("--plot-data must parse"));
+    assert!(cli.plot_data && cli.plots);
+    assert!(super::args::help_text().contains("--plot-data"));
+}
+
+#[test]
 fn every_long_flag_the_parser_accepts_appears_in_the_help_text() {
     let source = include_str!("args.rs");
     let help = super::args::help_text();

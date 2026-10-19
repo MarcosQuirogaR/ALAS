@@ -75,7 +75,7 @@ fn push_flops_systems(
     let systems_station = stations.systems.position_m;
     let wing_station = stations.wing.position_m;
 
-    let items: [(&str, f64, [f64; 3]); 10] = [
+    let items: [(&str, f64, [f64; 3]); 11] = [
         ("systems-apu", systems.apu_kg, apu_station),
         (
             "systems-instruments",
@@ -84,6 +84,11 @@ fn push_flops_systems(
         ),
         ("systems-avionics", systems.avionics_kg, forward_bay_station),
         ("systems-anti_ice", systems.anti_ice_kg, wing_station),
+        (
+            "systems-military_cargo_equipment",
+            systems.military_cargo_equipment_kg,
+            systems_station,
+        ),
         ("systems-hydraulics", systems.hydraulics_kg, systems_station),
         ("systems-electrical", systems.electrical_kg, systems_station),
         (
@@ -109,6 +114,10 @@ fn push_flops_systems(
     ];
     let mut placed_kg = 0.0;
     for (id, mass_kg, position_m) in items {
+        // A passenger transport has no military cargo row: its ledger is unchanged.
+        if id == "systems-military_cargo_equipment" && mass_kg == 0.0 {
+            continue;
+        }
         push_flops_item(
             ledger,
             id,

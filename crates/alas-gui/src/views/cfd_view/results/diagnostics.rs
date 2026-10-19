@@ -74,8 +74,22 @@ fn show_residual_card(ui: &mut Ui, series: &[PlotSeries]) {
             "One record per equation and outer SIMPLE iteration. Solid strokes are the initial residual, which is the status criterion; dashed strokes are the final residual of the same equation.",
         );
         let width = ui.available_width().max(200.0);
-        let (rect, _) = ui.allocate_exact_size(egui::vec2(width, plot_height(width)), Sense::hover());
+        let (rect, response) =
+            ui.allocate_exact_size(egui::vec2(width, plot_height(width)), Sense::click());
         paint_multi_line_plot(ui, rect, series);
+        crate::views::plot_data_menu::attach_xy(
+            &response,
+            "cfd_residual_histories",
+            "Residual histories (log10)",
+            "iteration",
+            "log10 residual [-]",
+            || {
+                series
+                    .iter()
+                    .map(|s| (s.name.clone(), crate::views::plot_data_menu::pairs(&s.points)))
+                    .collect()
+            },
+        );
         plot_legend(ui, series);
         let samples = series.iter().map(|entry| entry.points.len()).sum::<usize>();
         plot_footer(

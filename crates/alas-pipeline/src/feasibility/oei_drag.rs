@@ -573,16 +573,19 @@ mod tests {
             report.polar_fit.cd0 = f64::NAN;
             report.polar_fit.c1 = f64::NAN;
             report.polar_fit.k = f64::NAN;
-            // The feasibility entry point resolves the computed VMC into the
-            // configuration before any speed schedule; do the same here.
-            let vmc = crate::report_config::evaluate_report_vmc(
+            // The feasibility entry point resolves the computed VMC and then
+            // the improved-climb V2 into the configuration before any speed
+            // schedule (the registered A320 flies the CS 25.107 schedule, which
+            // the hot-high departure's second segment lifts), as the optimizer
+            // does; do the same here.
+            let resolution = crate::report_config::resolve_report(
                 &config,
                 &report,
                 sized.takeoff_mass_kg,
                 sized.design_landing_mass_kg,
                 report.airplane.s_ref,
             );
-            let resolved = alas_opt::mdo::performance_with_vmc(&config, &vmc);
+            let resolved = resolution.config;
             let report_assessment = assess(
                 &resolved,
                 &report,
@@ -614,7 +617,28 @@ mod tests {
                 "{departure_icao}: report {report_demand}, optimizer {}",
                 optimizer_residual.limit
             );
-            report_demands.push(report_demand);
+            // The improved-climb V2 pins the demand to the installed thrust, so
+            // the departure-temperature check reads the demand at the schedule
+            // speed (computed VMC only).
+            let vmc = crate::report_config::evaluate_report_vmc(
+                &config,
+                &report,
+                sized.takeoff_mass_kg,
+                sized.design_landing_mass_kg,
+                report.airplane.s_ref,
+            );
+            let scheduled = alas_opt::mdo::performance_with_vmc(&config, &vmc);
+            let schedule_demand = assess(
+                &scheduled,
+                &report,
+                sized.takeoff_mass_kg,
+                report.airplane.s_ref,
+                2.0 * config.geometry.engine.thrust_kn() * 1_000.0,
+            )
+            .unwrap_or_else(|error| panic!("{departure_icao} schedule OEI: {error}"))
+            .required_sls_tw
+            .unwrap_or_else(|| panic!("schedule SLS demand"));
+            report_demands.push(schedule_demand);
         }
         assert!(
             (report_demands[0] - report_demands[1]).abs() > 1.0e-6,

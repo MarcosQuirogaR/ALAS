@@ -256,3 +256,40 @@ fn separation_only_gaps_are_outside_the_validity_domain_never_ok() {
     assert_eq!(classified_completion_status(7, 7, 0), MsesStatus::Ok);
     assert_eq!(classified_completion_status(7, 0, 0), MsesStatus::Error);
 }
+
+#[test]
+fn an_inverted_trailing_edge_is_closed_and_a_normal_one_is_untouched() {
+    // dsma523a family: the lower end point sits above the upper one.
+    let inverted = Airfoil::from_coordinates(
+        "morphed",
+        vec![
+            (1.0, 0.000286),
+            (0.5, 0.05),
+            (0.0, 0.0),
+            (0.5, -0.04),
+            (1.0, 0.000520),
+        ],
+    );
+    let (repaired, note) = geometry::repair_inverted_trailing_edge(inverted);
+    let mean = 0.5 * (0.000286 + 0.000520);
+    assert_eq!(repaired.coordinates[0], (1.0, mean));
+    assert_eq!(repaired.coordinates[4], (1.0, mean));
+    assert_eq!(repaired.coordinates[1], (0.5, 0.05), "interior points stay");
+    assert!(note.is_some_and(|text| text.contains("inverted trailing edge")));
+
+    for gap in [0.0, 0.0013] {
+        let normal = Airfoil::from_coordinates(
+            "open",
+            vec![
+                (1.0, gap),
+                (0.5, 0.05),
+                (0.0, 0.0),
+                (0.5, -0.04),
+                (1.0, 0.0),
+            ],
+        );
+        let (kept, note) = geometry::repair_inverted_trailing_edge(normal.clone());
+        assert_eq!(kept, normal);
+        assert!(note.is_none());
+    }
+}

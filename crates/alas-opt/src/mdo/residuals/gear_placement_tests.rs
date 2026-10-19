@@ -323,7 +323,10 @@ fn a_three_leg_group_translates_past_its_centre_leg_behind_the_wing_root() {
         // that the miss needs a slightly smaller forward shift. Scan: -3.277 m no miss (met),
         // -3.20, -3.15, -3.10 miss and the centre leg stays behind the root, -3.05 m the centre
         // leg is no longer behind the wing trailing edge.
-        wing_x_shift_m: -3.15,
+        // Payload/DC-10 merges 2026-10-19 (by probe): the miss now needs a slightly larger
+        // backward shift. Scan: -3.30 m no miss, -3.25 and -3.20 m miss, centre leg behind the
+        // root and a positive translation; -3.15 to -3.05 m the placement cannot clear it.
+        wing_x_shift_m: -3.20,
         tail_scale: 1.011_511_624_181_909_5,
         airfoil_thickness_scale: 0.971_979_582_161_175_3,
         airfoil_camber_scale: 0.989_585_468_423_623_5,

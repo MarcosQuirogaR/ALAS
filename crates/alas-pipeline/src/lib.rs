@@ -57,6 +57,7 @@ pub mod run_manifest;
 pub mod runs;
 pub mod solver_mode;
 pub mod structural;
+pub mod tool_failures;
 pub mod tool_profile;
 pub mod vspaero;
 mod vspaero_domain;

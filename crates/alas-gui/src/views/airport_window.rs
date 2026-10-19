@@ -175,8 +175,54 @@ fn show_custom_airport_editor(state: &mut AppState, ui: &mut Ui) {
             egui::TextEdit::singleline(&mut state.custom_airport_file_path),
         );
         ui.horizontal_wrapped(|ui| {
+            let data = state.data_dir();
+            let current = state.custom_airport_file_path.clone();
+            let filters = vec![(
+                "Airport files".to_owned(),
+                vec!["json".to_owned(), "dat".to_owned()],
+            )];
+            let import_filters = filters.clone();
+            let import_current = current.clone();
+            let import_data = data.clone();
+            crate::file_dialog::browse_button(
+                state,
+                ui,
+                crate::file_dialog::DialogTarget::AirportImport,
+                |_| {
+                    crate::file_dialog::spec(
+                        crate::file_dialog::DialogKind::OpenFile,
+                        "Import airports",
+                        &import_current,
+                        &import_data,
+                        None,
+                        import_filters,
+                    )
+                },
+            )
+            .on_hover_text(tr("Choose an airport file and import it immediately."));
             if ui.button(tr("Import airports")).clicked() {
                 state.import_custom_airports();
+            }
+            let name = std::path::Path::new(&current)
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_else(|| "alas-airports.json".to_owned());
+            if ui
+                .add_enabled(
+                    !state.file_dialog_pending(&crate::file_dialog::DialogTarget::AirportExport),
+                    egui::Button::new(tr("Export to...")),
+                )
+                .clicked()
+            {
+                let dialog = crate::file_dialog::spec(
+                    crate::file_dialog::DialogKind::SaveFile,
+                    "Export airports",
+                    &current,
+                    &data,
+                    Some(&name),
+                    filters,
+                );
+                state.begin_file_dialog(crate::file_dialog::DialogTarget::AirportExport, dialog);
             }
             if ui.button(tr("Export airports")).clicked() {
                 state.export_custom_airports();
@@ -185,6 +231,9 @@ fn show_custom_airport_editor(state: &mut AppState, ui: &mut Ui) {
     });
     if let Some(status) = &state.custom_airport_status {
         ui.label(RichText::new(status).weak().small());
+    }
+    if let Some(note) = &state.files.airport_import_note {
+        ui.label(RichText::new(note).strong().small());
     }
 
     let custom = alas_config::airport_io::registered_custom_airports();
@@ -198,12 +247,28 @@ fn show_custom_airport_editor(state: &mut AppState, ui: &mut Ui) {
                 .copied()
                 .filter(|length| length.is_finite() && *length > 0.0)
                 .fold(0.0, f64::max);
-            ui.label(format!(
-                "{} - {} ({runway_length:.0} m) [{}]",
-                airport.icao,
-                airport.name,
-                tr(airport_provenance_label(airport.provenance.kind))
-            ));
+            ui.horizontal_wrapped(|ui| {
+                ui.label(format!(
+                    "{} - {} ({runway_length:.0} m, {:.0} m elev., ISA {:+.1} C) [{}]",
+                    airport.icao,
+                    airport.name,
+                    airport.altitude_m,
+                    airport.isa_delta_c,
+                    tr(airport_provenance_label(airport.provenance.kind))
+                ));
+                if ui
+                    .small_button(tr("Show values"))
+                    .on_hover_text(tr("Load this airport into the entry fields above."))
+                    .clicked()
+                {
+                    state.custom_airport_draft =
+                        crate::airport_editor::CustomAirportDraft::from_airport(&airport);
+                    state.files.airport_import_note =
+                        airport.provenance.source.as_ref().map(|source| {
+                            format!("{} {source}", tr("Values of the record imported from"))
+                        });
+                }
+            });
         }
     }
 }
@@ -336,6 +401,7 @@ mod tests {
             isa_delta_c: "0.0".to_owned(),
             altitude_m: "610.0".to_owned(),
             runway_lengths_m: "3500, 4100".to_owned(),
+            origin: None,
         };
     }
 

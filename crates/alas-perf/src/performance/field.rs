@@ -7,8 +7,8 @@
 //! pp. 167-170, and Appendix K underpin the propeller model. The BFL equation
 //! uses an energy-equivalent mean acceleration from the integrated 0-to-V2
 //! ground roll in place of the source's 0-to-V1 mean. Rotation and the critical
-//! V1 solution remain preliminary approximations. The point OEI gradient at
-//! V2 replaces the source's equivalent gradient over takeoff phases 1..2.
+//! V1 solution remain preliminary approximations. The mean OEI gradient over
+//! take-off phases 1..2 follows Torenbeek Eq. 5-90 (0.06 + gamma_2 - gamma_2,min).
 //! These are conceptual
 //! estimates on a level dry hard runway, without wind, clearway or reverse thrust.
 //! They do not establish certified V1, VMCG, brake-energy limits or field distances.
@@ -16,6 +16,7 @@
 use alas_config::airports::Airport;
 use alas_config::PerformanceConfig;
 
+use super::landing::LandingSegmentModel;
 use super::{
     compute_field_performance_at_masses, compute_v_speeds_at_masses, density_ratio,
     FieldPerformance, VSpeeds, G, RHO_SL,
@@ -115,6 +116,10 @@ pub fn compute_field_performance_for_propulsion(
     field.v_speeds = reference_speeds(inputs)?;
     match propulsion {
         FieldPropulsion::Jet => {
+            // CS 25.125 landing distance as air, flare and braked-run segments
+            // (Torenbeek 2013, Eqs. 9.21-9.24); replaces the k_land correlation.
+            field.ldr_m = LandingSegmentModel::jet(inputs.config.main_gear_truck_wheels)
+                .distance_m(field.v_speeds.v_app_ms);
             field.bfl_m = field.todr_m;
             // TOP does not independently resolve accelerate-stop: this remains
             // the same conceptual field proxy and must be labelled by callers.
@@ -328,10 +333,19 @@ fn propeller_takeoff(
     // Torenbeek Eq. 5-89, p. 169, before the jet-specific Eq. 5-91
     // simplification. Replacing the source's 0-to-V1 mean by the integrated
     // 0-to-V2 energy mean retains thrust lapse but is a preliminary extension.
-    // The point V2 OEI gradient also approximates the source's equivalent
-    // gradient over phases 1..2; no phase-resolved OEI trajectory is solved.
+    // The phase 1-2 mean OEI gradient follows Eq. 5-90 (see below); no
+    // phase-resolved OEI trajectory is solved.
+    // Mean engine-out gradient over phases 1-2 of Eq. 5-86, Torenbeek Eq. 5-90,
+    // p. 169: 0.06 + (gamma_2 - gamma_2,min) with the CS 25.121(b) minimum of
+    // the engine count. It exceeds the point gradient at V2 because phases 1-2
+    // include the accelerating ground run and the transition. Engine counts
+    // without a CS 25.121(b) value keep the point gradient at V2.
+    let phase_mean_gradient = match super::far25_oei_gradient(engine_count as i64) {
+        Some(minimum) => 0.06 + (engine_out_gradient - minimum),
+        None => engine_out_gradient,
+    };
     let balanced_distance_m = (speeds.v2_ms.powi(2) / (2.0 * G) + screen_height_m)
-        / (1.0 + engine_out_gradient / stop_g)
+        / (1.0 + phase_mean_gradient / stop_g)
         * (1.0 / equivalent_acceleration_g + 1.0 / stop_g)
         + inertia_m;
     // The energy balance with VLOF = V2 supplies the all-engine screen
@@ -371,14 +385,14 @@ fn propeller_landing(inputs: FieldInputs<'_>, speeds: VSpeeds) -> Result<f64, St
         "landing mean deceleration",
         config.propeller_landing_deceleration_g,
     )?;
-    // Torenbeek Eqs. 5-93/5-94, p. 170. The published mean stopping
-    // deceleration includes inertia; adding a separate brake delay doubles it.
-    let air_distance_m = (50.0 * 0.3048
-        + (speeds.v_app_ms.powi(2) - speeds.v_td_ms.powi(2)) / (2.0 * G))
-        / config.propeller_landing_mean_drag_to_weight;
-    let roll_distance_m =
-        speeds.v_td_ms.powi(2) / (2.0 * G * config.propeller_landing_deceleration_g);
-    Ok(air_distance_m + roll_distance_m)
+    // The same segment equations as the jet model (Torenbeek 2013, Eqs.
+    // 9.21-9.24) with this method's own sourced glide parameter
+    // W/(D-T) = 1 / 0.10 (Torenbeek 1982, Eq. 5-93) and mean deceleration.
+    let model = LandingSegmentModel {
+        glide_ratio: 1.0 / config.propeller_landing_mean_drag_to_weight,
+        deceleration_g: config.propeller_landing_deceleration_g,
+    };
+    Ok(model.distance_m(speeds.v_app_ms))
 }
 
 #[cfg(test)]

@@ -315,6 +315,12 @@ fn figure_tile(
                                 .cache_revision(revision)
                                 .desired_size(vec2(canvas_width, canvas_height)),
                         );
+                        super::plot_data_menu::attach_scene(
+                            &response,
+                            scene,
+                            id,
+                            Some(crate::export::run_label(state)),
+                        );
                         if response.double_clicked() {
                             open_fullscreen_result(
                                 state,

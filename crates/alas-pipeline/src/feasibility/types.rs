@@ -64,6 +64,8 @@ pub enum FindingCode {
     MinimumControlSpeedUnavailable,
     /// The rudder deflection that holds the design crosswind exceeds its limit.
     CrosswindControlViolation,
+    /// The weathercock stability of the fuselage and fin is below its floor.
+    DirectionalStabilityViolation,
     /// The built wing reference area exceeds its configured maximum.
     WingAreaLimit,
     /// The mandatory structural response could not be evaluated.
@@ -182,6 +184,7 @@ impl FindingCode {
             Self::MinimumControlSpeedViolation => "minimum_control_speed_violation",
             Self::MinimumControlSpeedUnavailable => "minimum_control_speed_unavailable",
             Self::CrosswindControlViolation => "crosswind_control_violation",
+            Self::DirectionalStabilityViolation => "directional_stability_violation",
             Self::FieldPerformanceUnavailable => "field_performance_unavailable",
             Self::FieldTakeoffDistanceViolation => "field_takeoff_distance_violation",
             Self::FieldLandingDistanceViolation => "field_landing_distance_violation",

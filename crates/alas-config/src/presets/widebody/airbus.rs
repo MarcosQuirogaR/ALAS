@@ -48,6 +48,7 @@ pub fn a340_300() -> AircraftPreset {
                 source: "Airbus A340-200/-300 Aircraft Characteristics Rev 33 (2025-12) section 3-2-1 Figure 3-2-1-991-013-A01 (payload/range ISA, CFM56-5C3, A340-300): maximum-payload corner read as 5,000 nmi at 112,000 lb (50.8 t); read uncertainty +-100 nmi, +-1,000 lb; chart MTOW not printed; reserves not stated",
             }),
             certified_max_seats: Some(375),
+            certified_exit_layout: Some(crate::presets::A340_300_EXIT_LAYOUT),
             partial_design_mission_evidence: vec![PartialDesignMissionEvidence {
                 kind: PartialMissionEvidenceKind::PayloadRangeChart,
                 range: None,

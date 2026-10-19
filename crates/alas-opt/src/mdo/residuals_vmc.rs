@@ -29,14 +29,18 @@
 //! hard residual.
 //!
 //! # Residuals
-//!
 //! - `vmc_over_vsr`: `VMC / VSR` against the 1.13 ceiling (hard for clean
 //!   sheet, diagnostic for a registered aircraft). Evaluated at sea level
 //!   ISA, where the thrust is greatest, as CS 25.149 prescribes.
 //! - `crosswind_rudder`: rudder deflection that holds the sideslip of a
 //!   30 kt crosswind at the approach speed against the rudder stop
-//!   (Torenbeek Eq. 9-68; CS 25.237 demonstrates at least 0.2 `VSO`, to 25 kt,
-//!   so 30 kt is a design margin).
+//!   (Torenbeek Eq. 9-68). CS 25.237(a) demonstrates 20 kt or 0.2 `VSO` (at
+//!   most 25 kt); 30 kt is the Class II to IV requirement of Sadraey Table
+//!   12.13 (p. 651), a margin over it.
+//! - `directional_stability`: `Cn_beta` of fuselage plus fin at the approach
+//!   Mach number, at least zero (CS 25.177; Sadraey p. 282). Wing and nacelle
+//!   terms are not modelled, so the 0.1 to 0.4 per rad of complete aircraft is
+//!   not the floor. Hard for clean sheet, diagnostic for a registered aircraft.
 //! - `vmcg_estimate_over_vsr` and `fin_area_ratio_for_vmc_ceiling`:
 //!   diagnostics (the latter is the fin area, at constant aspect ratio and
 //!   arm, that would bring `VMC` to the ceiling over the actual area).
@@ -48,7 +52,8 @@ use alas_config::airports::Airport;
 use alas_config::{AlasConfig, DesignMode};
 use alas_geom::aircraft::airplane::Airplane;
 use alas_perf::performance::yaw_balance::{
-    ControlLimit, YawControlGeometry, YawTrimMode, VMC_CEILING_OVER_VSR,
+    ControlLimit, YawControlGeometry, YawTrimMode, DIRECTIONAL_STABILITY_SCALE_PER_RAD,
+    MINIMUM_DIRECTIONAL_STABILITY_PER_RAD, VMC_CEILING_OVER_VSR,
 };
 
 use super::residuals_performance::oei_deck::{
@@ -113,6 +118,9 @@ pub struct CrosswindAssessment {
     pub rudder_deg: f64,
     /// The rudder limit, deg.
     pub rudder_limit_deg: f64,
+    /// `Cn_beta` per rad of fuselage plus fin at approach (Torenbeek Eq. 9-62);
+    /// `NaN` when unavailable.
+    pub cn_beta_per_rad: f64,
 }
 
 /// Everything the optimizer residual and the feasibility finding need.
@@ -287,6 +295,9 @@ fn crosswind(control: YawControlGeometry, inputs: &VmcInputs<'_>) -> Option<Cros
         sideslip_deg: sideslip.to_degrees(),
         rudder_deg: rudder.to_degrees(),
         rudder_limit_deg: control.rudder_max_deflection_rad.to_degrees(),
+        cn_beta_per_rad: control
+            .cn_beta_total_per_rad(approach / sea_level.speed_of_sound_m_s)
+            .unwrap_or(f64::NAN),
     })
 }
 
@@ -452,6 +463,19 @@ pub(crate) fn vmc_residuals(outcome: &VmcOutcome, role: ResidualRole) -> Vec<Con
             check.rudder_deg - check.rudder_limit_deg,
             role,
         ));
+        if check.cn_beta_per_rad.is_finite() {
+            let shortfall = MINIMUM_DIRECTIONAL_STABILITY_PER_RAD - check.cn_beta_per_rad;
+            residuals.push(ConstraintResidual::direct(
+                "directional_stability",
+                Performance,
+                check.cn_beta_per_rad,
+                MINIMUM_DIRECTIONAL_STABILITY_PER_RAD,
+                "1/rad",
+                shortfall,
+                (shortfall / DIRECTIONAL_STABILITY_SCALE_PER_RAD).max(0.0),
+                role,
+            ));
+        }
     }
     residuals
 }

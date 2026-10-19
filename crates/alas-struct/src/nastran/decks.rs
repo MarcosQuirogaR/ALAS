@@ -70,7 +70,13 @@ fn build_sol101(
         .spar_upper_nids
         .first()
         .map_or(&[], |nids| nids.as_slice());
-    let semi_span = deck.node_y(node_index.tip_nid);
+    // The frozen reference deck takes the ellipse over the tip grid; the
+    // product deck over the wing semi-span (the tip rib can lie inboard of it).
+    let semi_span = if trapezoid {
+        node_index.semi_span_m.max(deck.node_y(node_index.tip_nid))
+    } else {
+        deck.node_y(node_index.tip_nid)
+    };
     let nid_y: Vec<(i64, f64)> = front_upper
         .iter()
         .map(|&nid| (nid, deck.node_y(nid)))
@@ -446,6 +452,7 @@ mod tests {
             spar_upper_nids: Vec::new(),
             spar_lower_nids: Vec::new(),
             engine_nids: vec![194],
+            semi_span_m: 0.0,
         }
     }
 

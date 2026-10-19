@@ -11,6 +11,7 @@ mod regional_cabin;
 use self::lth_cabin::{lth_furnishings_kg, lth_operating_items_kg};
 use super::propulsion::{scaled_engine_count, scaled_nacelle_diameter_m};
 
+use super::military_cargo::military_cargo_equipment;
 use super::units::kg;
 use super::{
     FlopsOperatingItemsBreakdown, FlopsSystemsBreakdown, FlopsTransportBreakdown,
@@ -420,6 +421,18 @@ pub fn estimate_flops_transport(
         ),
     };
 
+    // Military freight hold: handling system, tie-downs and ramp, else zero.
+    let military_cargo_equipment = inputs.military_cargo.map_or(0.0, |hold| {
+        let basic_fuselage_kg = super::structure::fuselage_kg(
+            inputs.fuselage_length_m,
+            inputs.fuselage_width_m,
+            inputs.fuselage_depth_m,
+            scaled_fuselage_engines,
+            0.0,
+            inputs.fuselage_count,
+        );
+        military_cargo_equipment(&hold, inputs.design_gross_mass_kg, basic_fuselage_kg).total_kg()
+    });
     let systems = FlopsSystemsBreakdown {
         surface_controls_kg: surface_controls,
         apu_kg: apu,
@@ -430,6 +443,7 @@ pub fn estimate_flops_transport(
         furnishings_kg: furnishings,
         air_conditioning_kg: air_conditioning,
         anti_ice_kg: anti_ice,
+        military_cargo_equipment_kg: military_cargo_equipment,
         total_kg: surface_controls
             + apu
             + instruments
@@ -438,7 +452,8 @@ pub fn estimate_flops_transport(
             + avionics
             + furnishings
             + air_conditioning
-            + anti_ice,
+            + anti_ice
+            + military_cargo_equipment,
     };
 
     // Equations 119-126. Counts are declared inputs rather than equation
@@ -574,6 +589,7 @@ mod tests {
             cabin_equipment_method: alas_config::CabinEquipmentMethod::FlopsTransportV1,
             haul_class: alas_config::OperatingHaulClass::ShortMediumHaul,
             propulsion_sizing: PropulsionSizing::RatedThrust,
+            military_cargo: None,
         }
     }
 

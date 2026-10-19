@@ -387,6 +387,7 @@ mod tests {
             spar_upper_nids: vec![vec![4, 46, 110]],
             spar_lower_nids: vec![vec![1004, 1046, 1110]],
             engine_nids: vec![46],
+            semi_span_m: 0.0,
         }
     }
 

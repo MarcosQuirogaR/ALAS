@@ -13,12 +13,15 @@
 //! inputs all call [`jet_takeoff_field`].
 
 use alas_config::airports::Airport;
-use alas_config::PerformanceConfig;
+use alas_config::{AlasConfig, PerformanceConfig};
 use alas_perf::performance::{
-    density_ratio, takeoff_field, tw_takeoff_constraint, TakeoffField, TakeoffFieldInputs, VSpeeds,
+    compute_v_speeds_at_masses, density_ratio, takeoff_field, tw_takeoff_constraint, TakeoffField,
+    TakeoffFieldInputs, VSpeeds,
 };
 
-use super::oei_deck::{EngineOutCondition, EngineOutModel, EngineOutRating};
+use super::improved_climb::{resolve_improved_climb, ImprovedClimbInputs};
+use super::oei_deck::{EngineOutCondition, EngineOutModel, EngineOutRating, YawAirframe};
+use crate::mdo::sizing::SizingOutcome;
 use crate::mdo::types::{CandidateDrag, ConstraintFamily, ConstraintResidual};
 use crate::mdo::ResidualRole;
 
@@ -53,6 +56,54 @@ pub fn field_polar(
         );
     }
     Ok((cd0, k))
+}
+
+/// The speed schedule of the field-length row at the design gross mass, with
+/// the improved-climb `V2` resolved at that mass (`base` is the configuration
+/// with the computed `VMC` and no improved-climb override). `None` when the
+/// engine-out evidence cannot be bound.
+pub(super) fn design_mass_speeds(
+    base: &AlasConfig,
+    outcome: &SizingOutcome,
+    departure: &Airport,
+    s_ref_m2: f64,
+    gravity_m_s2: f64,
+) -> Option<VSpeeds> {
+    let sized = &outcome.sized;
+    let mass_kg = sized.design_gross_mass_kg;
+    let static_thrust_n = outcome.n_engines as f64 * outcome.static_thrust_kn * 1_000.0;
+    let model = EngineOutModel::new(
+        base,
+        Some(YawAirframe {
+            plane: &outcome.plane,
+            cg_x_m: outcome.cg_x,
+        }),
+        s_ref_m2,
+        Some(outcome.static_thrust_kn * 1_000.0),
+    )
+    .ok()?
+    .with_weight_kg(mass_kg);
+    let (config, _) = resolve_improved_climb(
+        base,
+        &ImprovedClimbInputs {
+            model: &model,
+            departure,
+            mass_kg,
+            s_ref_m2,
+            drag: &sized.fuel_artifacts.drag,
+            installed_tw_sls: static_thrust_n / (mass_kg * gravity_m_s2),
+        },
+    );
+    let perf = &config.performance;
+    Some(compute_v_speeds_at_masses(
+        mass_kg,
+        sized.design_landing_mass_kg,
+        s_ref_m2,
+        departure,
+        perf.cl_max_to,
+        perf.cl_max_land,
+        perf,
+    ))
 }
 
 /// Inputs of [`jet_takeoff_field`].

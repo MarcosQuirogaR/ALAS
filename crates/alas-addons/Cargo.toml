@@ -1,0 +1,19 @@
+[package]
+name = "alas-addons"
+description = "User add-ons: manifest, sandboxed Rhai scripts, external-process add-ons, and traceable application of their outputs."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+alas-exec = { path = "../alas-exec" }
+rhai = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+toml = { workspace = true }
+
+[lints]
+workspace = true

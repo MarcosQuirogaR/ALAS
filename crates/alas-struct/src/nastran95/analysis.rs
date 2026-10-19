@@ -476,6 +476,7 @@ mod tests {
             spar_upper_nids: vec![vec![1, 2]],
             spar_lower_nids: vec![],
             engine_nids: vec![],
+            semi_span_m: 0.0,
         };
         // The solver path is never reached, so a placeholder installation is
         // enough; its executable does not exist.
@@ -523,6 +524,7 @@ mod tests {
             spar_upper_nids: vec![vec![1, 2]],
             spar_lower_nids: vec![],
             engine_nids: vec![],
+            semi_span_m: 0.0,
         };
         let config = StructuresConfig {
             num_ribs_override: Some(2),
@@ -557,6 +559,7 @@ mod tests {
             spar_upper_nids: vec![vec![1, 2]],
             spar_lower_nids: vec![],
             engine_nids: vec![],
+            semi_span_m: 0.0,
         };
         let print = "\
  R E A L   E I G E N V A L U E S
@@ -591,6 +594,7 @@ mod tests {
             spar_upper_nids: vec![vec![1, 2]],
             spar_lower_nids: vec![],
             engine_nids: vec![],
+            semi_span_m: 0.0,
         };
         let print = "\
  R E A L   E I G E N V A L U E S

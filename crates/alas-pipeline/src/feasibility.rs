@@ -402,7 +402,7 @@ pub fn assess_physical_feasibility_with_load_case(
             .unwrap_or(landing_mass_limit_kg(config, report).min(takeoff_mass_kg)),
         wing_area_m2,
     );
-    vmc::append(&resolution.vmc, &mut findings);
+    vmc::append(&resolution.vmc_at_mtow, &mut findings);
     findings.extend(improved_climb::finding(resolution.improved_climb));
     let config = &*resolution.config;
     // The installed sea-level reference thrust, taken from whichever physical

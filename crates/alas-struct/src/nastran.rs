@@ -48,8 +48,8 @@ pub use results::{
     VibrationResult,
 };
 pub use run::{
-    fatal_lines, msc_solver_arguments, run_nastran, run_nastran_with_solver, solver_arguments,
-    tail, NastranRunOutcome,
+    fatal_lines, msc_solver_arguments, real_eigenvalue_cycles, run_nastran,
+    run_nastran_with_solver, solver_arguments, tail, NastranRunOutcome,
 };
 pub use static_spanwise::{
     read_static_product, StaticCaseIdentity, StaticSpanwiseCase, StaticSpanwiseResponse,
@@ -121,6 +121,7 @@ mod tests {
             spar_upper_nids: Vec::new(),
             spar_lower_nids: Vec::new(),
             engine_nids: engines,
+            semi_span_m: 0.0,
         }
     }
 

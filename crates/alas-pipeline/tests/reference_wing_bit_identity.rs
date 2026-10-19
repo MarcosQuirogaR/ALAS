@@ -90,10 +90,37 @@ fn unset_options_leave_the_physics_output_bit_identical() {
     // temporary env switch, removed) the tree gives A320 13006190495559274761
     // and B747-400 8092820004634198083: the pin above was already stale at the
     // integration base 65d3d3a1 (other merged work), so this re-pin also absorbs
-    // that drift. New: A320 7204725775780450666, B747-400 15835521684524083561.
+    // that drift. A320 7204725775780450666, B747-400 15835521684524083561.
+    // Re-pinned by lane field lengths (2026-10-17, by probe, value from the same
+    // eprintln): registered jets fly the CS 25.107 V2 schedule (1.13 VSR) with
+    // the flap share and landing anchor of the declared high-lift system, the
+    // BPR 8 take-off thrust chart is capped (Jenkinson Fig. 9.20(a)), and the
+    // optimizer field row reads its speeds at the design gross mass (A320
+    // 7204725775780450666 -> 16439056093985561747, B747-400
+    // 15835521684524083561 -> 4797963330003502369; the first three changes alone
+    // gave A320 5454666173859552581, the same B747-400 value, which has equal
+    // design and dispatch masses). Fix lane field 2026-10-18: the landing_field limit is the
+    // Torenbeek segment-model wing loading, not k_land (A320 16439056093985561747 -> 277880278787852317,
+    // B747-400 4797963330003502369 -> 10869569037091291768; values from this test's eprintln).
+    // Re-pinned by lane tools-fe (2026-10-17, by probe, value from the same
+    // eprintln): the swept box's stiff root triangle (`W tan L`, nothing bends
+    // inboard of it) shortens the analytical tip deflection and slope the
+    // flexibility rows read (A320 16439056093985561747 -> 13339502906525582016,
+    // B747-400 4797963330003502369 -> 7852487941241913377). With only that
+    // length forced to zero in place (a temporary switch, removed) the tree
+    // reproduces the previous hashes exactly: the change is that term alone.
+    // Integration 2026-10-19: both changes together, re-pinned by probe (eprintln).
+    // Re-pinned by lane payload layout (2026-10-19, by probe from the same
+    // eprintln): the lower holds now start at the centre wing box's front spar
+    // instead of the root leading edge (`lower_hold_gap_x_range`), which moves
+    // the baggage hold rows and compartments. With only that change disabled
+    // in place (a temporary edit, reverted) the previous hashes reproduce
+    // exactly (A320 277880278787852317, B747-400 10869569037091291768); the
+    // exit-layout and certified-maximum declarations do not touch them.
+    // Integration 2026-10-19 (payload holds merged): combined change, re-pinned by probe.
     let expected: [(&str, u64); 2] = [
-        ("A320-200", 7_204_725_775_780_450_666),
-        ("B747-400", 15_835_521_684_524_083_561),
+        ("A320-200", 9_266_314_913_585_128_108),
+        ("B747-400", 5_235_203_677_043_748_222),
     ];
     let got = expected.map(|(name, _)| (name, fnv1a(&physics_text(name, false))));
     eprintln!("{got:?}");

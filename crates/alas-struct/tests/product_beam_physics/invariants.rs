@@ -370,9 +370,32 @@ fn swept_axis_follows_the_normal_section_theory() {
     let covers = 2.0 * 1.8 * skin_thickness * (0.5 * depth).powi(2);
     let ei_straight = material.e_pa * (caps + webs + covers);
     let ei_swept = material.e_pa * (caps + webs + covers * c) * c.powi(3);
+    // The stiff root triangle (root box width times tan L, here 1.8 m x 0.577,
+    // under the 0.2 semi-span cap) does not bend: only the cells outboard of
+    // it enter the tip integral, which the straight beam integrates in full.
+    let root_zone = (1.8 * sweep.tan()).min(0.2 * length);
+    let cell = length / 40.0;
+    let flexible_integral = |case: usize| {
+        let m = &swept.load_cases[case].moment_nm;
+        let y = &sizing.y_stations;
+        let terms: Vec<f64> = (0..count)
+            .map(|j| {
+                let flexible = ((y[j] + 0.5 * cell - root_zone) / cell).clamp(0.0, 1.0);
+                flexible * m[j] * (length - y[j])
+            })
+            .collect();
+        let full: Vec<f64> = (0..count).map(|j| m[j] * (length - y[j])).collect();
+        let trapezoid = |v: &[f64]| {
+            (1..count)
+                .map(|j| 0.5 * (v[j] + v[j - 1]) * cell)
+                .sum::<f64>()
+        };
+        trapezoid(&terms) / trapezoid(&full)
+    };
     for case in 0..3 {
-        let ratio =
-            swept.load_cases[case].tip_deflection_m / straight.load_cases[case].tip_deflection_m;
+        let ratio = swept.load_cases[case].tip_deflection_m
+            / straight.load_cases[case].tip_deflection_m
+            / flexible_integral(case);
         assert!(
             (ratio - ei_straight / ei_swept).abs() < 1.0e-9 * ratio,
             "{ratio}"
@@ -387,8 +410,14 @@ fn swept_axis_follows_the_normal_section_theory() {
         }
     }
     // Between the all-cover bound 1/cos^4 and the all-cap bound 1/cos^3.
-    let ratio = swept.load_cases[0].tip_deflection_m / straight.load_cases[0].tip_deflection_m;
+    let ratio = swept.load_cases[0].tip_deflection_m
+        / straight.load_cases[0].tip_deflection_m
+        / flexible_integral(0);
     assert!(ratio > 1.0 / c.powi(3) - 1.0e-9 && ratio < 1.0 / c.powi(4) + 1.0e-9);
+    assert!(
+        flexible_integral(0) < 0.97,
+        "the root triangle must matter here"
+    );
     // Cap stress follows kappa_n = (M_x / cos L) / EI_n with
     // EI_n = covers cos L + webs + caps, against M_x / EI_s unswept.
     let ei_normal = material.e_pa * (caps + webs + covers * c);

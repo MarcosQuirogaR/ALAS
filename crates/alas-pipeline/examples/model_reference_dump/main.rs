@@ -22,17 +22,30 @@ use alas_payload::{build_payload_layout, ItemMeta};
 use alas_perf::landing_gear::size_landing_gear_with_group_stations;
 use alas_pipeline::full_analysis::FullAnalysis;
 use alas_pipeline::gear_stations::resolved_gear_stations;
-use alas_pipeline::{DesignPipeline, PipelineOptions, RunEnvironment};
 use serde_json::{json, Value};
 
 mod gear_reference;
+mod mission;
 mod performance;
 mod studies;
+mod validation_exports;
 
 use gear_reference::source_gear_reference;
 use studies::{lin, mesh_study, payload_range};
 
 fn main() {
+    // The full analysis recurses deeply in a debug build and overflows the
+    // 1 MiB main-thread stack, so the dump runs on a thread with a larger one.
+    let worker = std::thread::Builder::new()
+        .stack_size(256 * 1024 * 1024)
+        .spawn(run_dump)
+        .expect("spawn dump thread");
+    if worker.join().is_err() {
+        std::process::exit(1);
+    }
+}
+
+fn run_dump() {
     let out = PathBuf::from(
         std::env::args()
             .nth(1)
@@ -337,6 +350,8 @@ fn dump(name: &str) -> Result<Value, String> {
             "geometry_exit_limit": summary.geometric_capacity,
             "effective_limit": summary.max_certifiable_capacity,
             "source_certified_cap": summary.source_capacity_cap,
+            // exit-derived limit bounded by the registry type-certificate maximum
+            "certified_max_seats": preset.reference.certified_max_seats.map_or(summary.geometric_capacity, |cap| summary.geometric_capacity.min(cap)),
             "source_exit_layout": summary.source_exit_layout,
             "binding": summary.capacity_binding,
         }),
@@ -388,6 +403,15 @@ fn dump(name: &str) -> Result<Value, String> {
         },
     );
     let capacity = cargo_manager.capacity_summary();
+    let hold_volume_m3: f64 = alas_payload::cargo::derive_hold_compartments(
+        &cabin_geometry,
+        &cargo_manager.slots,
+        None,
+        &config.cabin.cargo.hold_compartments,
+    )
+    .iter()
+    .map(|compartment| compartment.volume_m3)
+    .sum();
     let cabin_payload = json!({
         "seats_modelled": seats,
         "seats_requested": config.requirements.num_passengers,
@@ -397,10 +421,14 @@ fn dump(name: &str) -> Result<Value, String> {
         "available_bulk_positions": capacity.bulk_positions,
         "available_container_internal_volume_m3": capacity.container_internal_volume_m3,
         "available_bulk_nominal_volume_m3": capacity.bulk_nominal_volume_m3,
-        "cargo_hold_volume_m3": null,
-        "cargo_hold_volume_status": "unsupported: slot internal volume is not total usable hold volume; main-deck baggage compartments are not modelled",
-        "container_positions_fwd": fwd.len(),
-        "container_positions_aft": aft.len(),
+        "cargo_hold_volume_m3": hold_volume_m3,
+        "cargo_hold_volume_status": "sum of derived or declared hold compartments (rectangular width x height integral)",
+        "container_positions_fwd": cargo_manager.installed_positions("FWD-", false),
+        "container_positions_aft": cargo_manager.installed_positions("AFT-", false),
+        "bulk_positions_fwd": cargo_manager.installed_positions("FWD-", true),
+        "bulk_positions_aft": cargo_manager.installed_positions("AFT-", true),
+        "loaded_containers_fwd": fwd.len(),
+        "loaded_containers_aft": aft.len(),
         "fwd_rows": distinct(&fwd, |c| c.0),
         "fwd_abreast": distinct(&fwd, |c| c.1),
         "aft_rows": distinct(&aft, |c| c.0),
@@ -550,83 +578,7 @@ fn dump(name: &str) -> Result<Value, String> {
     });
 
     // ---- mission ---------------------------------------------------------
-    let options = PipelineOptions {
-        optimize: false,
-        compare_baseline: false,
-        parallel: true,
-        output_dir: None,
-        save_plots: false,
-        seed: Some(42),
-        quiet: true,
-        ..Default::default()
-    };
-    let mission = match DesignPipeline::new(config.clone())
-        .run(&options, &RunEnvironment::default())
-    {
-        Err(error) => json!({"status": "pipeline_failed", "error": error.to_string()}),
-        Ok(result) => {
-            let mut summary = json!({"status": "route_unavailable"});
-            if let Some(route) = result.route.as_ref() {
-                summary = json!({
-                    "status": "route_planned",
-                    "departure": route.origin_airport.as_ref().map(|a| &a.icao)
-                        .or_else(|| alas_config::airports::get(&config.departure_airport).ok().map(|a| &a.icao)),
-                    "arrival": route.dest_airport.as_ref().map(|a| &a.icao)
-                        .or_else(|| alas_config::airports::get(&config.arrival_airport).ok().map(|a| &a.icao)),
-                    "route_source": route.source.as_str(),
-                    "planned_route_km": route.total_distance_m() / 1000.0,
-                    "route_waypoints": route.waypoints.len(),
-                    "mission_status": "unavailable",
-                });
-            }
-            if let Some(m) = result.mission_result.as_ref() {
-                let mut cruise = None;
-                for seg in &m.segments {
-                    if format!("{:?}", seg.spec.kind)
-                        .to_lowercase()
-                        .contains("cruise")
-                    {
-                        let c = &seg.conditions;
-                        let mid = c.altitude_m.len() / 2;
-                        if !c.altitude_m.is_empty() {
-                            cruise = Some(json!({
-                                "altitude_m": c.altitude_m[mid],
-                                "flight_level": c.altitude_m[mid] / 30.48,
-                                "mach": c.mach[mid],
-                                "tas_m_s": c.velocity_m_s[mid],
-                                "mass_kg": c.total_mass_kg[mid],
-                                "cl": c.lift_coefficient[mid],
-                                "cd": c.drag_coefficient[mid],
-                                "l_over_d": c.lift_coefficient[mid] / c.drag_coefficient[mid],
-                                "thrust_n": c.thrust[mid].thrust_n,
-                                "fuel_flow_kg_h": c.vehicle_mass_rate_kg_s[mid] * 3600.0,
-                                "throttle": c.throttle[mid],
-                            }));
-                        }
-                    }
-                }
-                let last = m.segments.last();
-                let telemetry = json!({
-                    "mission_status": if m.segments.len() == m.scheduled_segment_count {"completed"} else {"partial"},
-                    "segments_flown": m.segments.len(),
-                    "segments_scheduled": m.scheduled_segment_count,
-                    "distance_flown_km": last.and_then(|s| s.conditions.aircraft_range_m.last()).map(|v| v / 1000.0),
-                    "block_time_min": last.and_then(|s| s.conditions.time_s.last()).map(|v| v / 60.0),
-                    "trip_fuel_kg": m.segments.first().and_then(|s| s.conditions.total_mass_kg.first().copied())
-                        .zip(last.and_then(|s| s.conditions.total_mass_kg.last().copied()))
-                        .map(|(a, b)| a - b),
-                    "final_cruise": cruise,
-                    "cruise_drag_breakdown": performance::cruise_drag_breakdown(m, &report.airplane),
-                });
-                if let (Some(target), Some(fields)) =
-                    (summary.as_object_mut(), telemetry.as_object())
-                {
-                    target.extend(fields.clone());
-                }
-            }
-            summary
-        }
-    };
+    let (mission, cg_envelope_limits) = mission::section(&config, &report);
 
     let mut doc = json!({
         "identity": {
@@ -651,5 +603,8 @@ fn dump(name: &str) -> Result<Value, String> {
         },
     });
     performance::attach(&mut doc, &config, preset, &report);
+    if let Some(cg) = doc.get_mut("cg").and_then(Value::as_object_mut) {
+        cg.insert("envelope_limits".to_owned(), cg_envelope_limits);
+    }
     Ok(doc)
 }

@@ -89,6 +89,25 @@ Every `figure_*` function behind this guide's charts lives in
 static PNG (`--plots`) or drawn live in the desktop app, in either light
 or dark mode.
 
+### Plot data (CSV and JSON)
+
+Every graph can hand over the numbers it plots, so you can re-plot or reformat
+it in your own tools. In the desktop app, right-click a graph and choose
+**Export data...**, or use **File > Export plot data (CSV + JSON)** for every graph
+of the run at once (a folder with an index, plus a ZIP of the same files). From the
+command line, `--plot-data` (which implies `--plots`) writes `<figure>.csv` and
+`<figure>.json` next to each SVG and lists them in `plot_manifest.json`.
+
+- **CSV**: tidy long format, one row per data point (`panel, series_index, series, kind,
+  index, x, y, z, x2, y2, x_unit, y_unit, x_si, y_si`) under `#` header lines that carry
+  the plot id, title, run id, axis labels, axis scales and ranges.
+- **JSON**: the same values with full metadata (units, SI conversion factors, series colours,
+  heatmap cell edges). Non-finite numbers are written as the strings `NaN`, `inf`, `-inf`.
+- Values are exactly the numbers the figure plots, in the unit its axis label states
+  (`x_unit`, `y_unit`). When that is a known display unit (nm, ft, kt, deg, ...), `x_si` and
+  `y_si` repeat the value in SI. Bars are recovered from the drawn rectangles and are flagged
+  as not exact in the file notes.
+
 ## Reusing outputs across runs
 
 Because `design_data.json` is a complete, self-contained description of

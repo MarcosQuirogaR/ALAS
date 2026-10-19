@@ -18,6 +18,7 @@
 //! UID 08P28CM150 (LEAP-1C28), the CAAC-certified LEAP-1C family sharing the
 //! EASA.E.110 LEAP-1A/-1C type design with a 78 in fan.
 
+use super::exit_layouts::C919_CERTIFIED_EXIT_LAYOUT;
 use crate::{
     AircraftPreset, AircraftReferenceData, AircraftVariantIdentity, CgEnvelopeEvidence,
     DesignRequirements, DesignVector, EmpennageConfig, EngineConfig, FuselageConfig,
@@ -95,9 +96,9 @@ pub fn c919() -> AircraftPreset {
                 payload_kg: None,
                 source: "Wikipedia, Comac C919, Specifications (Chinese edition: full-payload range 2,200 nmi STD / 3,000 nmi ER; English edition: 4,075 km basic range, 4,139 km at standard payload); secondary; no cabin, reserve or profile stated, so this is an advertised-range proxy, not a payload/range chart point",
             }),
-            // CAAC type-certificate seating is not public.
-            certified_max_seats: None,
-            certified_exit_layout: None,
+            // COMAC C919-SVV19-50009-00 ACAP 02-01 Table 1: maximum seating capacity 174 (certificated or anticipated for certification).
+            certified_max_seats: Some(174),
+            certified_exit_layout: Some(C919_CERTIFIED_EXIT_LAYOUT),
             planning_cabin: Some(C919_PLANNING_CABIN),
             partial_design_mission_evidence: vec![PartialDesignMissionEvidence {
                 kind: PartialMissionEvidenceKind::AdvertisedRange,

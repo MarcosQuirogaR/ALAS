@@ -392,11 +392,22 @@ impl Mses {
         mset_alpha: f64,
         cancel: Option<&AtomicBool>,
     ) -> Result<(), MsesFailure> {
+        self.run_mset_with_points(dir, mset_alpha, self.mset_n, cancel)
+    }
+
+    /// [`Self::run_mset`] with an explicit surface-point count.
+    pub(super) fn run_mset_with_points(
+        &self,
+        dir: &Path,
+        mset_alpha: f64,
+        points: i64,
+        cancel: Option<&AtomicBool>,
+    ) -> Result<(), MsesFailure> {
         let run = exec::run_tool_with_cancel(
             &self.mset_exe,
             &["case"],
             dir,
-            &deck::mset_keystrokes(self.mset_n, self.mset_e, mset_alpha),
+            &deck::mset_keystrokes(points, self.mset_e, mset_alpha),
             self.timeout_mset_s,
             cancel,
         )

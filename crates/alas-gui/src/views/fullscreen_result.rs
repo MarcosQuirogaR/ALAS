@@ -152,6 +152,16 @@ pub(super) fn show_fullscreen_result(
                             .cache_revision(revision)
                             .desired_size(available),
                         );
+                        if let Some(figure_id) =
+                            crate::views::plot_data_menu::figure_id_from_view_key(view_key)
+                        {
+                            crate::views::plot_data_menu::attach_scene(
+                                &response,
+                                active_scene,
+                                figure_id,
+                                Some(crate::export::run_label(state)),
+                            );
+                        }
                         restore |= response.double_clicked();
                     }
                     if openvsp {

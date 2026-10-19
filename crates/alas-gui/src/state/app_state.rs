@@ -31,8 +31,7 @@ use serde_json::Value;
 
 /// Master interactive state for the ALAS desktop application.
 pub struct AppState {
-    /// The edited configuration, as a tree of values (the single source of
-    /// truth for editing; see the module doc).
+    /// The edited configuration as a value tree: the single source of truth (module doc).
     pub config_values: Value,
     /// Memo behind [`Self::typed_config`]: the content fingerprint
     /// `config_values` had when `AlasConfig` was last decoded from it, paired
@@ -47,11 +46,8 @@ pub struct AppState {
     /// Memo behind [`crate::config_edit_design_space::AppState::enforce_design_space_fixed_variables`]:
     /// the `(config_fingerprint, design_values_fingerprint)` pair the design
     /// space was already an enforced fixed point for. The function is
-    /// idempotent, so a repeat call with an unchanged pair is a guaranteed
-    /// no-op; this lets the Design Space page's per-frame call (and every
-    /// other call site) skip its `alas_opt::canonicalize_design` work
-    /// (a config clone, payload case load, fuselage sizing) except when the
-    /// configuration or the design point actually changed.
+    /// idempotent, so a repeat call with an unchanged pair is a no-op and the
+    /// per-frame call skips its `alas_opt::canonicalize_design` work.
     pub(crate) design_space_enforcement_memo: Option<(u64, u64)>,
     /// Fingerprint of the clean-sheet brief the design space was last derived from.
     pub(crate) clean_sheet_brief_fingerprint: Option<(u64, u64)>,
@@ -243,6 +239,8 @@ pub struct AppState {
     pub result_figure_revision_counter: u64,
     /// The path the config Load/Save actions read and write.
     pub config_path: String,
+    /// Dialog, "My aircraft" and import-note state of the file features.
+    pub files: crate::user_files::UserFilesState,
     /// Shared external-tool locator used by the GUI worker and setup page.
     pub tool_locator: ToolLocator,
     /// User-level tool locations retained across GUI restarts.
@@ -286,10 +284,11 @@ pub struct AppState {
     pub cfd: crate::cfd::AirfoilCfdState,
     /// Independent fixed-wing UAV inputs, selections, and latest outcome.
     pub uav: crate::uav::UavWorkflowState,
+    /// The Add-ons page: discovered add-ons, settings and the last run.
+    pub addons: crate::addons::AddonsPanel,
     /// The clean-sheet sandbox session and workspace mode.
     pub sandbox: crate::sandbox::SandboxSession,
-    /// Frames remaining for the boot splash. Nothing is awaited, so this is a
-    /// short, fixed-length branded flash rather than a state machine.
+    /// Frames remaining for the fixed-length boot splash (nothing is awaited).
     pub boot_frames_remaining: u32,
 }
 
@@ -312,6 +311,7 @@ impl Default for AppState {
     fn default() -> Self {
         let tool_locator = ToolLocator::for_current_process();
         let tool_preferences = tool_locator.load_preferences();
+        let data_dir = tool_locator.user_data_root().to_path_buf();
         let mut config = AlasConfig::default();
         crate::config_edit::apply_interactive_solver(&mut config);
         apply_tool_preferences(&mut config, &tool_preferences);
@@ -363,7 +363,7 @@ impl Default for AppState {
             airport_names,
             custom_airport_draft: crate::airport_editor::CustomAirportDraft::default(),
             custom_airport_window: crate::views::airport_window::CustomAirportWindow::default(),
-            custom_airport_file_path: "alas-airports.json".to_owned(),
+            custom_airport_file_path: data_dir.join("alas-airports.json").display().to_string(),
             custom_airport_status: None,
             custom_airfoil_file_path: "custom-airfoil.dat".to_owned(),
             custom_airfoil_status: None,
@@ -437,7 +437,8 @@ impl Default for AppState {
             patran_textures: BTreeMap::new(),
             result_figure_cache: BTreeMap::new(),
             result_figure_revision_counter: 0,
-            config_path: "alas-config.json".to_owned(),
+            config_path: data_dir.join("alas-config.json").display().to_string(),
+            files: crate::user_files::UserFilesState::default(),
             tool_locator,
             tool_preferences,
             show_about: false,
@@ -457,6 +458,7 @@ impl Default for AppState {
             screening: crate::screening::ScreeningState::default(),
             cfd,
             uav: crate::uav::UavWorkflowState::default(),
+            addons: crate::addons::AddonsPanel::default(),
             sandbox: crate::sandbox::SandboxSession::default(),
             boot_frames_remaining: 40,
         };

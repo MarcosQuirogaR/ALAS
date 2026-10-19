@@ -1,0 +1,67 @@
+name = "Raymer wing weight (script)"
+version = "1.0.0"
+author = "ALAS"
+description = """Wing structural mass for a cargo/transport aircraft from Raymer, Aircraft Design: A Conceptual Approach, 6th edition, Eq. 15.25 (section 15.3.2, printed page 574; symbols on pp. 577-579):
+W_wing = 0.0051 (Wdg Nz)^0.557 Sw^0.649 A^0.5 (t/c)root^-0.4 (1+lambda)^0.1 (cos Lambda)^-1.0 Scsw^0.1, in pounds and square feet. Nz is the ultimate load factor, 1.5 x the limit load factor. Lambda is the sweep at 25% MAC. Scsw is the wing-mounted control surface area including flaps.
+The Rhai script converts from SI and returns kilograms. The default inputs are illustrative narrow-body numbers, not a preset: replace them with your design.
+ALAS has no wing-mass override field in its configuration, so this result is display-only: it is shown, never written to the design. To compare it with the model, read the wing mass in the Results mass breakdown."""
+kind = "script"
+entry = "main.rhai"
+
+[[inputs]]
+name = "mtow_kg"
+unit = "kg"
+default = 73500.0
+description = "Flight design gross weight Wdg"
+
+[[inputs]]
+name = "limit_load_factor"
+unit = "g"
+default = 2.5
+description = "Limit load factor; Nz = 1.5 x this"
+
+[[inputs]]
+name = "wing_area_m2"
+unit = "m^2"
+default = 122.4
+description = "Trapezoidal wing area Sw"
+
+[[inputs]]
+name = "aspect_ratio"
+unit = "-"
+default = 9.5
+description = "Wing aspect ratio A"
+
+[[inputs]]
+name = "thickness_ratio_root"
+unit = "-"
+default = 0.12
+description = "Thickness-to-chord ratio at the wing root (t/c)root"
+
+[[inputs]]
+name = "taper_ratio"
+unit = "-"
+default = 0.24
+description = "Wing taper ratio lambda"
+
+[[inputs]]
+name = "sweep_quarter_chord_deg"
+unit = "deg"
+default = 25.0
+description = "Wing sweep at 25% MAC, Lambda"
+
+[[inputs]]
+name = "control_surface_area_m2"
+unit = "m^2"
+default = 30.0
+description = "Wing-mounted control surface area including flaps, Scsw"
+
+[[outputs]]
+name = "wing_mass_kg"
+unit = "kg"
+description = "Raymer Eq. 15.25 wing mass (display only: no override field exists)"
+
+[[outputs]]
+name = "wing_mass_lb"
+unit = "lb"
+description = "The same result in pounds as the equation returns it"

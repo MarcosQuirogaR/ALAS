@@ -9,14 +9,14 @@
 //! legal conversions in `alas-units`.
 //!
 //! [`evaluate_product_at_design_gross_mass`] resolves outer geometry from the built airplane and
-//! reads every architecture datum from [`alas_config::FlopsTransportConfig`]. It returns
-//! [`FlopsTransportEvaluation::Unverified`] when any required datum is absent or inconsistent.
-//! The reference-compatible MTOW fractions remain a different, explicit method and are never a
-//! fallback from this module.
+//! reads every architecture datum from [`alas_config::FlopsTransportConfig`]; it returns
+//! [`FlopsTransportEvaluation::Unverified`] when a datum is absent or inconsistent. The MTOW
+//! fractions are a different, explicit method and never a fallback from this module.
 
 mod airframe;
 mod airframe_geometry;
 mod equations;
+pub mod military_cargo;
 mod movable_area;
 pub(crate) mod product;
 pub mod propulsion;
@@ -100,23 +100,16 @@ pub struct FlopsTransportInputs {
     /// Checked passenger baggage that rides in the containers, kilograms,
     /// FLOPS `WPBAG`.
     ///
-    /// NASA/TM-2017-219627 Vol. I equation 126 names only `WCARGO`, but FLOPS
-    /// as it is actually run charges the checked baggage to the containers
-    /// too: NASA Aviary's `LargeSingleAisle1FLOPS` deck (pinned commit
-    /// `c7affbbe`) declares `MISC_CARGO = WING_CARGO = 0` with
-    /// `BAGGAGE_MASS = 7,436 lb` and publishes `CARGO_CONTAINER_MASS =
-    /// 1,400 lb`, which is exactly `175 x ceil(7436 / 950)`. The
-    /// `LargeSingleAisle2FLOPS` deck closes the same way on cargo *plus*
-    /// baggage. Both decks' operating-items totals close to under a pound
-    /// only with the baggage included, so this is the containerized mass the
-    /// equation is fed, not an added allowance.
+    /// Equation 126 names only `WCARGO`, but FLOPS as run charges checked
+    /// baggage to the containers too: NASA Aviary's `LargeSingleAisle1FLOPS`
+    /// deck (commit `c7affbbe`) has `BAGGAGE_MASS = 7,436 lb` and
+    /// `CARGO_CONTAINER_MASS = 1,400 lb = 175 x ceil(7436 / 950)`, and
+    /// `LargeSingleAisle2FLOPS` closes the same way; both operating-item
+    /// totals close only with the baggage included.
     ///
-    /// **This is the containerised part only.** The container tare is real
-    /// hardware, so it exists only where the aircraft has a container to put
-    /// the bags in; a bulk-loaded hold carries none, and the product adapter
-    /// resolves this field from the declared
-    /// [`alas_config::CargoHoldLoading`] rather than charging every aircraft
-    /// the same equation.
+    /// **Containerised part only.** The tare is real hardware, so a
+    /// bulk-loaded hold carries none; the adapter resolves this field from
+    /// the declared [`alas_config::CargoHoldLoading`].
     pub containerized_baggage_kg: f64,
     /// The declared hold-loading architecture this evaluation used, retained
     /// so an audit can see which rule produced the container tare.
@@ -129,6 +122,8 @@ pub struct FlopsTransportInputs {
     pub haul_class: alas_config::OperatingHaulClass,
     /// Which rating sizes the two operating items that read an engine size.
     pub propulsion_sizing: PropulsionSizing,
+    /// Declared main-deck freight hold (military or freighter), else `None`.
+    pub military_cargo: Option<military_cargo::MilitaryCargoHold>,
 }
 
 /// The engine rating the thrust-dependent operating items are sized on.
@@ -195,6 +190,8 @@ pub struct FlopsSystemsBreakdown {
     pub air_conditioning_kg: f64,
     /// Anti-icing, FLOPS `WAI`.
     pub anti_ice_kg: f64,
+    /// Military cargo handling, tie-down and ramp items, zero without a freight hold.
+    pub military_cargo_equipment_kg: f64,
     /// Sum of the nine transport systems-and-equipment components.
     pub total_kg: f64,
 }

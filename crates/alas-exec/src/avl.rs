@@ -23,7 +23,8 @@ use crate::process::{
 
 mod artifacts;
 use artifacts::{
-    create_fresh_file, is_fresh_output, output_filename, remove_stale_artifact, render_output_paths,
+    create_fresh_file, is_fresh_output, output_filename, remove_stale_artifact,
+    render_output_paths, solver_failure,
 };
 
 /// Process-level outcome before aerodynamic parsing.
@@ -413,14 +414,9 @@ pub fn run_avl_with_options_cancellable(
             }
         }
     };
-    if !process_status.success() {
+    if let Some(error) = solver_failure(process_status, &stdout_path) {
         result.status = AvlProcessStatus::SolverFailed;
-        result.error = Some(format!(
-            "AVL exited with {}",
-            process_status
-                .code()
-                .map_or_else(|| "unknown code".to_owned(), |code| code.to_string())
-        ));
+        result.error = Some(error);
         return result;
     }
     let missing = paths
@@ -510,6 +506,7 @@ mod avl_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
+
     #[test]
     fn session_has_one_execute_and_force_export_per_alpha() {
         let paths = [PathBuf::from("case.000.ft"), PathBuf::from("case.001.ft")];

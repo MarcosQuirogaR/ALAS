@@ -35,8 +35,22 @@ pub(crate) fn line_chart(
     series: &[Series<'_>],
     x_label: &str,
     y_label: &str,
+    plot_id: &str,
 ) -> Rect {
-    let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
+    let (rect, response) = ui.allocate_exact_size(size, Sense::click());
+    crate::views::plot_data_menu::attach_xy(
+        &response,
+        plot_id,
+        &format!("{y_label} vs {x_label}"),
+        x_label,
+        y_label,
+        || {
+            series
+                .iter()
+                .map(|entry| (entry.label.clone(), entry.points.to_vec()))
+                .collect()
+        },
+    );
     let painter = ui.painter_at(rect);
     let visuals = ui.visuals();
     painter.rect_filled(rect, 4.0, visuals.extreme_bg_color);

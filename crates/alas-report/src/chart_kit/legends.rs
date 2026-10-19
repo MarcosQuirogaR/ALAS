@@ -15,6 +15,7 @@ pub fn draw_colorbar(
     label: &str,
     pal: &Palette,
 ) {
+    let _chrome = crate::plot_data::ChromeGuard::begin();
     let (x, y, w, h) = rect;
     let steps = 64;
     for i in 0..steps {
@@ -122,6 +123,8 @@ pub fn draw_legend(
     pal: &Palette,
     font_size: f64,
 ) {
+    note_legend_rows(scene, entries);
+    let _chrome = crate::plot_data::ChromeGuard::begin();
     let line_h = font_size + 6.0;
     for (i, (label, marker)) in entries.iter().enumerate() {
         let y = pos[1] + (i as f64) * line_h;
@@ -217,6 +220,8 @@ fn draw_horizontal_legend_impl(
     if entries.is_empty() {
         return;
     }
+    note_legend_rows(scene, entries);
+    let _chrome = crate::plot_data::ChromeGuard::begin();
     let available_width = (scene.width - pos[0] - 4.0).max(1.0);
     let column_width = available_width / entries.len() as f64;
     let wrap_label = |label: &str, max_width: f64| {
@@ -294,5 +299,16 @@ fn draw_horizontal_legend_impl(
                 .unwrap_or_default();
             x += 42.0 + longest_line as f64 * font_size * 0.90;
         }
+    }
+}
+
+/// Remember legend labels and swatch colours so exported series can be named.
+fn note_legend_rows(scene: &mut Scene, entries: &[(String, LegendMarker)]) {
+    for (label, marker) in entries {
+        let color = match marker {
+            LegendMarker::Line(stroke) => stroke.color,
+            LegendMarker::Patch(color) | LegendMarker::Circle(color) => *color,
+        };
+        scene.data_trace.note_legend(label, &color);
     }
 }

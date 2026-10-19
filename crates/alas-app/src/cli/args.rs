@@ -29,6 +29,9 @@ pub struct CliArgs {
     pub no_parallel: bool,
     /// Generate and save comparison plots.
     pub plots: bool,
+    /// Also write the raw data behind each figure as CSV and JSON next to the
+    /// SVG files (implies plots).
+    pub plot_data: bool,
     /// Write the figures as SVG files to the output directory (implies plots).
     /// There is no interactive viewer; open the files in a browser or editor.
     pub show: bool,
@@ -59,6 +62,7 @@ impl Default for CliArgs {
             no_mission: false,
             no_parallel: false,
             plots: false,
+            plot_data: false,
             show: false,
             gui: false,
             seed: None,
@@ -112,6 +116,10 @@ pub fn parse_args(args: &[String]) -> Result<Option<CliArgs>, String> {
             "--no-mission" => cli.no_mission = true,
             "--no-parallel" => cli.no_parallel = true,
             "--plots" => cli.plots = true,
+            "--plot-data" => {
+                cli.plot_data = true;
+                cli.plots = true;
+            }
             "--show" => {
                 cli.show = true;
                 cli.plots = true;
@@ -170,6 +178,7 @@ pub(super) fn help_text() -> String {
     line("      --no-mission          Disable native mission analysis");
     line("      --no-parallel         Run stages sequentially");
     line("      --plots               Generate and save figures (SVG files)");
+    line("      --plot-data           Also write each figure's raw data as CSV and JSON (implies --plots)");
     line("      --show                Same as --plots: writes SVG files to the output directory");
     line("      --seed <INT>          Random seed for optimization (default 20260922)");
     line("      --aero-solver <MODE>  Result model: vlm, avl, or both");

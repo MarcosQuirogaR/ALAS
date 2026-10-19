@@ -110,6 +110,13 @@ default font data and declares OFL-1.1 and Ubuntu Font License entries in
 binaries. See `docs/dependency-policy.md` for the current dependency-level
 audit.
 
+### Native file dialogs: rfd (MIT)
+
+The desktop application links `rfd` (https://github.com/PolyMeilex/rfd, MIT
+license) for its "Browse..." file and folder dialogs, with its small
+transitive additions `pollster` (Apache-2.0 OR MIT) and `block2` (MIT). See
+`docs/dependency-policy.md` for the feature selection.
+
 ### Airport and engine reference data
 
 Compiled by the author from published sources, each cited next to its entry.

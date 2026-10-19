@@ -104,6 +104,14 @@ pub fn build_page_preview_with_camera(
     id: &str,
     camera_override: Option<Camera3D>,
 ) -> Option<Scene> {
+    alas_report::capture_plot_data(|| build_page_preview_inner(state, id, camera_override))
+}
+
+fn build_page_preview_inner(
+    state: &AppState,
+    id: &str,
+    camera_override: Option<Camera3D>,
+) -> Option<Scene> {
     let mut config = state.typed_config()?;
     let design = preview_design(state);
     // A named cabin preset is normally materialized by the pipeline. The live
