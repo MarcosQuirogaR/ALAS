@@ -12,18 +12,9 @@ theme:
   favicon: assets/icon.png
   logo: assets/icon.png
   palette:
-    - scheme: slate
-      primary: custom
-      accent: custom
-      toggle:
-        icon: material/brightness-4
-        name: Switch to light mode
-    - scheme: default
-      primary: custom
-      accent: custom
-      toggle:
-        icon: material/brightness-7
-        name: Switch to dark mode
+    scheme: slate
+    primary: custom
+    accent: custom
   font: false
   features:
     - navigation.instant
@@ -38,7 +29,7 @@ theme:
     - content.code.copy
     - content.tabs.link
 
-copyright: "© 2026 ALAS. AGPL-3.0-or-later."
+copyright: "© 2026 Marcos Quiroga Rodríguez. ALAS is free software under AGPL-3.0-or-later."
 
 extra:
   social:
@@ -76,14 +67,16 @@ markdown_extensions:
 
 extra_javascript:
   - javascripts/mathjax.js
-  - https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js
+  - javascripts/mathjax/tex-mml-chtml.js
 
 nav:
   - Home: index.md
   - Get started:
       - Installation: installation.md
       - User guide: user-guide.md
+      - Sandbox mode: sandbox.md
       - External tools guide: external-tools.md
+      - Add-ons: addons.md
       - Gallery: gallery.md
       - Meet AVE: meet-ave.md
   - The AVE walkthrough:
@@ -106,6 +99,8 @@ nav:
       - How ALAS works inside: architecture.md
       - Configuration reference: reference/configuration.md
       - Formulas & theory: reference/formulas.md
+      - Validation: validation.md
   - Help:
       - Troubleshooting: troubleshooting.md
       - Glossary: glossary.md
+      - Licensing: licensing.md

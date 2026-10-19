@@ -1,0 +1,115 @@
+{
+ "summary": {
+  "presets": 12,
+  "presets_with_published_oew": 11,
+  "oew_mean_abs_error_pct": 4.1,
+  "oew_median_abs_error_pct": 0.9,
+  "oew_within_5_pct": 8,
+  "oew_within_10_pct": 8,
+  "oew_max_abs_error_pct": 13.8,
+  "range_mean_abs_error_pct": 6.4,
+  "range_comparisons": 20,
+  "range_positive": 14,
+  "tofl_mean_abs_error_pct": 11.3,
+  "lfl_mean_abs_error_pct": 27.6,
+  "cruise_ld_mean_abs_error_pct": 5.1,
+  "per_quantity": {
+   "oew": {
+    "n": 11,
+    "mean_abs_pct": 4.1,
+    "max_abs_pct": 13.8,
+    "mean_signed_pct": -1.3,
+    "positive": 4
+   },
+   "range_max_payload": {
+    "n": 8,
+    "mean_abs_pct": 7.0,
+    "max_abs_pct": 21.5,
+    "mean_signed_pct": 6.2,
+    "positive": 7
+   },
+   "range_mtow_max_fuel": {
+    "n": 7,
+    "mean_abs_pct": 4.6,
+    "max_abs_pct": 9.0,
+    "mean_signed_pct": 2.6,
+    "positive": 4
+   },
+   "ferry_range": {
+    "n": 5,
+    "mean_abs_pct": 8.1,
+    "max_abs_pct": 15.2,
+    "mean_signed_pct": -1.0,
+    "positive": 3
+   },
+   "range_advertised_payload": {
+    "n": 4,
+    "mean_abs_pct": 18.4,
+    "max_abs_pct": 61.8,
+    "mean_signed_pct": 15.7,
+    "positive": 3
+   },
+   "tofl": {
+    "n": 10,
+    "mean_abs_pct": 11.3,
+    "max_abs_pct": 24.1,
+    "mean_signed_pct": 3.2,
+    "positive": 5
+   },
+   "lfl": {
+    "n": 9,
+    "mean_abs_pct": 27.6,
+    "max_abs_pct": 51.9,
+    "mean_signed_pct": 27.6,
+    "positive": 9
+   },
+   "cruise_ld": {
+    "n": 5,
+    "mean_abs_pct": 5.1,
+    "max_abs_pct": 9.6,
+    "mean_signed_pct": -4.8,
+    "positive": 1
+   }
+  },
+  "matrix_cells_total": 88,
+  "matrix_cells_with_reference": 62,
+  "scored_comparisons": 105,
+  "scored_registered_inputs": 68,
+  "scored_model_outputs": 37,
+  "scored_model_outputs_within_tolerance": 33,
+  "error_convention": "(model - published) / published",
+  "version": "ALAS 1.3.2 (pre-release working tree, 2026-10-06)"
+ },
+ "figures": [
+  {
+   "file": "validation-oew.png",
+   "title": "Operating empty mass vs published",
+   "caption": "Across 11 aircraft the mean absolute OEW error is 4.1 % (median 0.9 %); 8 of 11 are within 5 %. The B747-400 (+13.8 %) is a known over-prediction; C919 and A400M references are secondary or unspecified.",
+   "alt": "Parity plot and signed-error bars of modelled versus published operating empty mass for 11 aircraft."
+  },
+  {
+   "file": "validation-summary.png",
+   "title": "Error by quantity and aircraft",
+   "caption": "Signed errors for OEW, range (three payload-range corners and an advertised-payload point), take-off and landing field length and cruise L/D on the 11 real aircraft. Green is within 5 %, red beyond 10 %. n/a means no reference was found.",
+   "alt": "Heat table of signed percentage errors by aircraft and quantity."
+  },
+  {
+   "file": "validation-payload-range.png",
+   "title": "Range vs published values",
+   "caption": "Range corners differ from published values by 7.0 % (max payload), 4.6 % (MTOW, max fuel) and 8.1 % (ferry) on average, mean absolute. Most errors are positive. The C919 advertised range is a weak reference.",
+   "alt": "Grouped bars of range error at maximum payload, at MTOW, at ferry condition and at an advertised payload."
+  },
+  {
+   "file": "validation-field.png",
+   "title": "Field lengths vs published values",
+   "caption": "Take-off field length is 11.3 % and landing field length 27.6 % from published values on average. Landing is over-predicted on every aircraft and is the weakest result.",
+   "alt": "Grouped bars of take-off and landing field length error for nine aircraft."
+  },
+  {
+   "file": "validation-scope.png",
+   "title": "What the comparisons actually test",
+   "caption": "Of 105 scored contract rows, 68 compare a registered input (data entry) and only 37 are independent model outputs, 33 of them within tolerance.",
+   "alt": "Stacked bars of contract rows by status per aircraft, separating registered inputs from model outputs."
+  }
+ ]
+}

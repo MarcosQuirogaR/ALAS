@@ -23,16 +23,6 @@
   --md-hue: 220;
 }
 
-[data-md-color-scheme="default"] {
-  --md-default-bg-color: #faf9f6;
-  --md-default-fg-color: #16181c;
-  --md-default-fg-color--light: #6d737d;
-  --md-default-fg-color--lightest: #d9d6cd;
-  --md-typeset-color: #3d424b;
-  --md-typeset-a-color: #14417c;
-  --md-code-bg-color: #f3f1ec;
-}
-
 /* Keep the documentation typography aligned with the landing page. */
 body,
 input,
@@ -65,8 +55,7 @@ input,
   max-width: 100%;
 }
 
-/* Figures ship in both themes and already carry the right ground, so they
-   need a frame and nothing else: no white mat behind a dark plot. */
+/* Figures are dark-theme renders and need a frame and nothing else. */
 .md-typeset figure img {
   border: 1px solid var(--md-default-fg-color--lightest);
   display: block;

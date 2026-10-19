@@ -1,114 +1,85 @@
 # Airfoil screening
 
-Picking a wing section is usually an act of inheritance: you use the one
-the last aircraft used, or the one the textbook example used. ALAS
-ships a catalogue of roughly **1,665 sections** and can score every one of
-them against *your* aircraft at *your* cruise condition, then hand back a
-ranked shortlist.
+ALAS carries a catalogue of 1,665 airfoil sections (the UIUC coordinate
+database) and can score every one against your aircraft at your cruise
+condition, then return a ranked shortlist.
 
-This is an explicitly optional tool. Nothing in a normal run touches it,
-and it never mutates the configuration you give it: every candidate is
-scored against an isolated copy.
+Open it from **Analysis, Open Airfoil Screening**. It runs in its own window,
+is not available while the sandbox is open, and is optional: a normal run never
+touches it, and every candidate is scored against an isolated copy of your
+configuration.
 
-## Why it is a screen and not an answer
+## Why it is staged
 
-Re-running the full three-dimensional pipeline 1,665 times would take tens
-of minutes at best. A screening tool that takes half an hour is not a
-screening tool. So the search is staged: something very cheap looks at
-everything, and progressively more expensive physics looks at
-progressively fewer candidates.
+Running the full three-dimensional pipeline 1,665 times would take tens of
+minutes at best. So something very cheap looks at everything, and progressively
+more expensive physics looks at progressively fewer candidates.
 
-### Stage 1: the fast two-dimensional pass
+### Stage 1: fast two-dimensional pass
 
-Every section in the library is evaluated with
+Every section is evaluated with
 [NeuralFoil](https://github.com/peterdsharpe/NeuralFoil), a neural-network
-surrogate for panel-method airfoil analysis. A network forward pass is
-microseconds, so the whole catalogue is swept in seconds. Each candidate is
-scored at the lift coefficient your aircraft actually needs in cruise,
-inside a tolerance band, and survivors are ranked on a weighted
-combination of:
+surrogate for panel-method airfoil analysis (model size `large`), over an
+angle-of-attack sweep (default -4 to 14 deg in 0.5 deg steps). Each candidate is
+scored at the lift coefficient your aircraft needs in cruise (or an explicit
+target) and ranked on a weighted blend:
 
 | Term | Default weight | Meaning |
 |---|---|---|
 | `ld_weight` | 0.7 | Section lift-to-drag at the target lift coefficient |
 | `fuel_weight` | 0.3 | Fuel volume the section's thickness distribution allows in the wingbox |
-| `robustness_weight` | 0.0 | Penalty for candidates whose performance is sharply peaked in angle of attack |
+| `robustness_weight` | 0.0 | Drag-bucket retention within `cl_band` (default 0.05) of the target lift coefficient |
 
-Both scored terms are min–max normalised across the surviving set before
-they are combined, because lift-to-drag and cubic metres of tank volume do
-not share a scale.
+The terms are min-max normalised across the surviving set before combining. An
+**objective** selector (Balanced, Efficiency, Fuel capacity, Robustness) puts all
+the weight on one term, or keeps the blend. The fuel term keeps the shortlist
+from filling with thin sections that cannot carry the mission fuel (see
+[Weight, balance & stability](weight-balance-and-stability.md#payload-range-and-fuel-volume)).
 
-The fuel term is not decoration. A section that wins on drag by being thin
-is quietly shrinking the tank, and
-[Weight, balance & stability](weight-balance-and-stability.md#payload-range-and-fuel-volume)
-is where that bill arrives. Scoring both together at the screening stage
-stops the shortlist filling with sections that cannot carry the mission's
-fuel.
+### Stage 2: re-rank on your wing
 
-### Stage 2: re-rank on your actual wing
+Stage 1 flatters low-Reynolds sections that would not win on a large transport
+wing. The top 20 survivors by default are rebuilt into your actual wing and
+re-evaluated with vortex-lattice induced drag, the Raymer parasite build-up,
+Korn wave drag and a trim solve at the live take-off weight, span and root
+chord. A candidate whose trim cannot sustain the required lift is demoted
+outright.
 
-Stage 1 has a systematic bias: it flatters low-Reynolds sections that win
-an isolated two-dimensional polar but would never win on a large transport
-wing. So the top survivors (20 by default) are **rebuilt into your real
-wing geometry** and re-evaluated properly: vortex-lattice induced drag,
-Raymer parasite build-up, Korn wave drag, and a genuine trim solve using
-the live take-off weight, span and root chord.
+### Stage 3: MSES check
 
-A candidate whose trim solve cannot actually sustain the required lift is
-*demoted outright*, not merely ranked lower. This is the stage that turns
-"good airfoil" into "good airfoil **for this aircraft**".
+The top 5 Stage-2 survivors by default get an [MSES](transonic-analysis.md)
+coupled viscous/inviscid solve at the sweep-corrected section Mach number. It
+needs a user-supplied MSES installation.
 
-### Stage 3: verify the finalists with real viscous physics
-
-The top few Stage-2 survivors (5 by default) get a full
-[MSES](transonic-analysis.md) coupled viscous/inviscid solve at the
-sweep-corrected section Mach number: real shock capture, real wave drag.
-This is the same solver the transonic chapter describes, applied here as a
-final sanity check on a handful of candidates rather than a survey.
-
-## Filters you control
-
-Ranking is only useful after the obviously unsuitable candidates are gone:
+## Filters
 
 | Filter | Purpose |
 |---|---|
-| `min_tc` / `max_tc` | Thickness-to-chord bounds: excludes sections too thin to build or too thick to fly fast |
-| `min_static_margin` | Rejects candidates that would push the aircraft outside its stability floor |
-| `name_filter` | Glob pattern over section names, for narrowing to a family |
-| `cl_band` | How far from the target lift coefficient a candidate may be scored |
-| `alpha_min/max/step` | The angle-of-attack sweep each candidate is evaluated over |
+| `min_tc` / `max_tc` | Thickness-to-chord bounds (defaults 0.005 and 0.25) |
+| `min_static_margin` | Rejects candidates that push the aircraft below a static-margin floor (Stage 2) |
+| `name_filter` | Glob or comma-separated substrings over section names |
+| `cl_band` | Lift-coefficient window used for the robustness score |
+| `alpha_min/max/step` | Angle-of-attack sweep |
+| `top_n` | Number of ranked candidates returned (default 50) |
 
-## The transonic caveat, stated plainly
+## Transonic caveat
 
-At cruise Mach numbers at or above **0.75**, neither the Stage-1 surrogate
-nor the Stage-2 vortex-lattice model represents wave drag. That has a
-specific and predictable failure mode: a real supercritical section's whole
-advantage is a delayed and softer drag rise near its design Mach, and
-neither model can see it. Both will cheerfully rank a thin conventional
-section above a supercritical one that would in reality perform far better.
-
-There is no dependable way to detect "is this section supercritical" from
-coordinates alone without risking a confidently wrong heuristic, so
-ALAS does not try. Instead the result carries an explicit warning
-whenever the design's cruise Mach crosses that threshold, and the interface
-surfaces it prominently rather than presenting the top-ranked candidate as
-a finished answer. Stage 3 exists precisely so the finalists get judged by
-a solver that *does* model shocks.
-
-Alongside the algorithmic candidates, a set of real wind-tunnel-validated
-transonic sections (the NASA SC(2) supercritical family among them) is
-carried as reference points, so a transonic design always has known-good
-anchors in view rather than only proxy-scored entries.
+At section Mach numbers of 0.75 or above, neither the Stage-1 surrogate nor the
+Stage-2 vortex-lattice model represents wave drag. A supercritical section's
+advantage is a delayed, softer drag rise, which neither model sees, so both can
+rank a thin conventional section above a supercritical one that would perform
+better. ALAS does not try to detect supercritical shapes from coordinates. The
+result carries an explicit warning when the Mach threshold is crossed, and
+Stage 3 judges the finalists with a solver that models shocks. Real
+wind-tunnel-validated transonic sections (the NASA SC(2) family among them) are
+carried as reference points.
 
 ## Using the result
 
-The output is a ranked table, not a decision. The intended workflow is:
+The output is a ranked table, not a decision:
 
-1. Screen, and read the shortlist.
-2. Swap a promising candidate into the wing.
-3. Run the real thing: a full [analysis](aerodynamic-analysis.md), and for
-   a transonic design a [MSES check](transonic-analysis.md).
-4. Compare against the section you started with.
-
-A screening pass tells you which twenty sections out of one thousand six
-hundred deserve that attention. It does not tell you which one to build.
+1. Screen and read the shortlist.
+2. Put a promising candidate into the wing.
+3. Run a full [analysis](aerodynamic-analysis.md) and, for a transonic design, an
+   [MSES check](transonic-analysis.md).
+4. Compare against the starting section.
