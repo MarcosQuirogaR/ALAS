@@ -78,6 +78,7 @@ fn show_menu_bar(state: &mut AppState, ctx: &Context, ui: &mut Ui) {
                 ui.label(tr("Path:"));
                 ui.text_edit_singleline(&mut state.config_path);
             });
+            crate::user_files_ui::show_config_file_buttons(state, ui);
             if ui.button(tr("Load configuration")).clicked() {
                 state.load_config();
                 ui.close_menu();

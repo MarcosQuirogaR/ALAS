@@ -273,6 +273,10 @@ pub struct RunManifest {
     /// MSES and AVL sweeps are not full fidelity.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool_profile: Option<crate::tool_profile::ToolProfileStatus>,
+    /// External tools that ran (or were requested) and failed; empty when
+    /// every tool either delivered or was not configured.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tool_failures: Vec<String>,
 }
 
 impl RunManifest {
@@ -362,6 +366,7 @@ impl RunManifest {
             stage_totals_ms,
             search,
             tool_profile: Some(result.execution.tool_profile.clone()),
+            tool_failures: crate::tool_failures::tool_failures(result),
         }
     }
 

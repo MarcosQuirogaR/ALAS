@@ -170,14 +170,60 @@ impl AppState {
     /// Import custom airports atomically from the path in the editor.
     pub fn import_custom_airports(&mut self) {
         let path = self.custom_airport_file_path.clone();
-        match alas_config::airport_io::import_file(&path)
-            .and_then(alas_config::airport_io::replace_custom_airports)
-        {
+        let resolved = self.user_load_path(&path);
+        let imported = alas_config::airport_io::import_file(&resolved);
+        let mut replaced: Vec<String> = Vec::new();
+        let first_imported = imported
+            .as_ref()
+            .ok()
+            .and_then(|airports| airports.first().cloned());
+        // Merge into the registry: an imported record replaces only the record
+        // with the same ICAO or name; every other custom airport survives.
+        let merged = imported.map(|incoming| {
+            let mut airports = alas_config::airport_io::registered_custom_airports();
+            for airport in incoming {
+                airports.retain(|existing| {
+                    let same = existing.icao.eq_ignore_ascii_case(&airport.icao)
+                        || existing.name.eq_ignore_ascii_case(&airport.name);
+                    if same {
+                        replaced.push(existing.icao.clone());
+                    }
+                    !same
+                });
+                airports.push(airport);
+            }
+            airports
+        });
+        match merged.and_then(alas_config::airport_io::replace_custom_airports) {
             Ok(()) => {
                 let status = format!(
                     "Imported {} custom airport(s) from {path}.",
                     alas_config::airport_io::registered_custom_airports().len()
                 );
+                // The value-entry fields must show what was just imported so
+                // it can be checked; before this they kept the previous draft.
+                if let Some(airport) = first_imported {
+                    self.custom_airport_draft =
+                        crate::airport_editor::CustomAirportDraft::from_airport(&airport);
+                }
+                self.files.airport_import_note = Some(tr_fields(
+                    "Imported from {path} at {time}",
+                    &[
+                        ("path", path.clone()),
+                        (
+                            "time",
+                            crate::user_files::format_utc(crate::user_files::now_unix()),
+                        ),
+                    ],
+                ));
+                let status = if replaced.is_empty() {
+                    status
+                } else {
+                    format!(
+                        "{status} Replaced existing record(s): {}.",
+                        replaced.join(", ")
+                    )
+                };
                 self.custom_airport_status = Some(status.clone());
                 self.refresh_airport_names();
                 self.persist_custom_airports();
@@ -198,7 +244,11 @@ impl AppState {
     pub fn export_custom_airports(&mut self) {
         let path = self.custom_airport_file_path.clone();
         let airports = alas_config::airport_io::registered_custom_airports();
-        match alas_config::airport_io::export_file(&path, &airports) {
+        let target = self.user_save_path(&path);
+        if let Some(parent) = target.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        match alas_config::airport_io::export_file(&target, &airports) {
             Ok(()) => {
                 let status = format!("Exported {} custom airport(s) to {path}.", airports.len());
                 self.custom_airport_status = Some(status.clone());
@@ -219,12 +269,13 @@ impl AppState {
     /// lookup without changing the current preset selection.
     pub fn import_custom_airfoil(&mut self) {
         let path = self.custom_airfoil_file_path.clone();
-        let result = alas_geom::airfoil_io::import_dat(&path).and_then(|imported| {
-            let mut records = alas_geom::airfoil_io::records();
-            records.retain(|record| !record.name.eq_ignore_ascii_case(&imported.airfoil.name));
-            records.push(alas_geom::airfoil_io::AirfoilRecord::from(&imported));
-            alas_geom::airfoil_io::replace_records(records)
-        });
+        let result =
+            alas_geom::airfoil_io::import_dat(self.user_load_path(&path)).and_then(|imported| {
+                let mut records = alas_geom::airfoil_io::records();
+                records.retain(|record| !record.name.eq_ignore_ascii_case(&imported.airfoil.name));
+                records.push(alas_geom::airfoil_io::AirfoilRecord::from(&imported));
+                alas_geom::airfoil_io::replace_records(records)
+            });
         match result {
             Ok(()) => {
                 let status = format!("Imported custom airfoil from {path}.");
@@ -324,7 +375,11 @@ impl AppState {
             }
         };
         let path = self.config_path.clone();
-        match crate::fs_atomic::write_atomic(Path::new(&path), text) {
+        let target = self.user_save_path(&path);
+        if let Some(parent) = target.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        match crate::fs_atomic::write_atomic(&target, text) {
             Ok(()) => self.log(
                 tr_fields("Saved configuration to {path}.", &[("path", path)]),
                 LogKind::Info,
@@ -369,6 +424,63 @@ mod custom_airport_store_tests {
                 note: None,
             },
         }
+    }
+
+    #[test]
+    fn importing_an_airport_fills_the_entry_fields_and_records_the_source() {
+        let path = temporary_store("imported.json");
+        let mut airport = entered_airport();
+        airport.icao = "LEIM".to_owned();
+        airport.name = "Import Field".to_owned();
+        airport.altitude_m = 1234.0;
+        airport.isa_delta_c = 12.5;
+        airport.runway_lengths_m = vec![2800.0, 3100.0];
+        write_custom_airports(&path, &[airport]).expect("the file is writable");
+
+        // A custom airport entered earlier must survive importing another.
+        alas_config::airport_io::replace_custom_airports(vec![entered_airport()])
+            .expect("the earlier airport registers");
+        let mut state = AppState {
+            custom_airport_file_path: path.display().to_string(),
+            ..AppState::default()
+        };
+        state.import_custom_airports();
+        let registered = alas_config::airport_io::registered_custom_airports();
+        // Leave the process-wide registry as found for other tests.
+        let _ = alas_config::airport_io::replace_custom_airports(Vec::new());
+        let _ = fs::remove_dir_all(path.parent().expect("the store has a directory"));
+
+        assert_eq!(
+            registered.len(),
+            2,
+            "the earlier airport is kept: {registered:?}"
+        );
+        assert!(registered.iter().any(|a| a.icao == "LEXX"));
+        assert!(registered.iter().any(|a| a.icao == "LEIM"));
+        let draft = &state.custom_airport_draft;
+        assert_eq!(draft.icao, "LEIM");
+        assert_eq!(draft.altitude_m, "1234");
+        assert_eq!(draft.isa_delta_c, "12.5");
+        assert_eq!(draft.runway_lengths_m, "2800, 3100");
+        let note = state
+            .files
+            .airport_import_note
+            .as_deref()
+            .expect("the import is acknowledged");
+        assert!(
+            note.contains("imported.json") && note.contains("UTC"),
+            "{note}"
+        );
+    }
+
+    #[test]
+    fn a_failed_import_keeps_the_previous_entry_fields() {
+        let mut state = AppState::default();
+        state.custom_airport_draft.icao = "KEEP".to_owned();
+        state.custom_airport_file_path = "no-such-airports.json".to_owned();
+        state.import_custom_airports();
+        assert_eq!(state.custom_airport_draft.icao, "KEEP");
+        assert!(state.files.airport_import_note.is_none());
     }
 
     #[test]

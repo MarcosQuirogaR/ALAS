@@ -8,8 +8,9 @@
 use alas_config::AlasConfig;
 use alas_opt::mdo::{second_segment_evidence, EngineOutModel, YawAirframe};
 use alas_perf::performance::{
-    assess_oei_climb, build_matching_chart, compute_v_speeds, far25_oei_gradient,
-    landing_runway_share, oei_cl_at_v2, MatchingChartData,
+    assess_oei_climb, build_matching_chart, compute_v_speeds, density_ratio, far25_oei_gradient,
+    landing_runway_share, oei_cl_at_v2, ws_landing_limit_for, MatchingChartData,
+    JET_DRY_LANDING_SHARE,
 };
 use alas_pipeline::feasibility::landing_mass_limit_kg;
 use alas_pipeline::field_reference::candidate_field_polar;
@@ -178,6 +179,14 @@ pub fn figure_matching_chart(
         .collect();
 
     let landing_mass_kg = landing_mass_limit_kg(config, report);
+    if !performance.legacy_field_correlations {
+        // The chart builder knows only the k_land correlation; the production
+        // limit is the landing segment model shared with the gate and residual.
+        for ((_, limit), airport) in data.ws_land_limits.iter_mut().zip([&departure, &arrival]) {
+            let sigma = density_ratio(airport.elevation_m, airport.isa_deviation_c);
+            *limit = ws_landing_limit_for(performance, airport.lda_m, JET_DRY_LANDING_SHARE, sigma);
+        }
+    }
     for (_, limit) in &mut data.ws_land_limits {
         *limit = landing_limit_on_takeoff_axis(
             *limit,

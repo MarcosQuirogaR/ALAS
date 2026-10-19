@@ -3,6 +3,7 @@
 
 //! Behavioral contracts for the native AVL executor.
 
+use super::artifacts::fatal_solver_line;
 use super::*;
 use std::time::Duration;
 
@@ -377,4 +378,28 @@ fn an_unusable_timeout_is_an_invalid_timeout_and_nothing_is_launched() {
         assert!(!root.join("case.avl.000.ft").exists(), "{timeout_seconds}");
     }
     fs::remove_dir_all(&root).unwrap_or_else(|error| panic!("remove {}: {error}", root.display()));
+}
+
+#[test]
+fn a_vortex_overflow_abort_is_a_solver_failure_even_with_exit_zero() {
+    let path = std::env::temp_dir().join(format!("alas-avl-fatal-{}.txt", std::process::id()));
+    let overflow = " Building surface: Main Wing
+ SDUPL: Vortex array overflow. Increase NVMAX currently 5000
+";
+    assert!(fs::write(&path, overflow).is_ok());
+    let line = fatal_solver_line(&path);
+    assert!(
+        line.as_deref()
+            .is_some_and(|text| text.starts_with("SDUPL: Vortex array overflow")),
+        "{line:?}"
+    );
+    assert!(fs::write(
+        &path,
+        " Building surface: Main Wing
+ Operation done
+"
+    )
+    .is_ok());
+    assert_eq!(fatal_solver_line(&path), None);
+    let _ = fs::remove_file(path);
 }

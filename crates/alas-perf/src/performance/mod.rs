@@ -56,7 +56,8 @@ pub use field::{
 };
 pub use improved_climb::{select_improved_v2, ImprovedClimbSelection, MAX_IMPROVED_V2_OVER_VSR};
 pub use landing::{
-    landing_runway_share, ws_landing_field_limit, ws_landing_limit, JET_DRY_LANDING_SHARE,
+    jet_landing_deceleration_g, landing_runway_share, ws_landing_field_limit, ws_landing_limit,
+    ws_landing_limit_for, ws_landing_segment_limit, LandingSegmentModel, JET_DRY_LANDING_SHARE,
     WET_RUNWAY_LANDING_FACTOR,
 };
 pub use second_segment::{

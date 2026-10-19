@@ -90,6 +90,9 @@ impl App for AlasApp {
             self.layout_debug.handle_shortcuts(ctx);
             self.layout_debug.begin_frame(ctx);
         }
+        if self.state.poll_file_dialog() {
+            ctx.request_repaint_after(std::time::Duration::from_millis(100));
+        }
         self.state.poll_navdata_download();
         self.state.poll_openvsp_runtime_setup();
         self.state.poll_worker();
@@ -106,6 +109,7 @@ impl App for AlasApp {
             );
         }
         self.state.uav.poll();
+        self.state.poll_addons();
         if self.state.zoom_auto {
             let automatic_zoom = auto_zoom_factor(ctx);
             if (self.state.zoom - automatic_zoom).abs() > f32::EPSILON {
@@ -165,6 +169,7 @@ impl App for AlasApp {
             crate::views::screening_window::show_custom_airfoil_import_window(&mut self.state, ctx);
             crate::views::wing_analysis_view::show_wing_analysis_window(&mut self.state, ctx);
             crate::views::airport_window::show_custom_airport_window(&mut self.state, ctx);
+            crate::user_files_ui::show_windows(&mut self.state, ctx);
             crate::views::mission_profile_inputs::show_mission_profile_window(&mut self.state, ctx);
             crate::views::tool_intro::show_tool_intro(&mut self.state, ctx);
             return self.show_detached_view_panel(ctx);
@@ -348,6 +353,7 @@ impl App for AlasApp {
         crate::views::screening_window::show_screening_window(&mut self.state, ctx);
         crate::views::screening_window::show_custom_airfoil_import_window(&mut self.state, ctx);
         crate::views::airport_window::show_custom_airport_window(&mut self.state, ctx);
+        crate::user_files_ui::show_windows(&mut self.state, ctx);
         crate::views::mission_profile_inputs::show_mission_profile_window(&mut self.state, ctx);
         self.show_detached_view_panel(ctx);
         #[cfg(debug_assertions)]

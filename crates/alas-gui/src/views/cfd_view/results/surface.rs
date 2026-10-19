@@ -205,9 +205,35 @@ fn show_surface_plot_pair(
             },
         ];
         let width = ui.available_width();
-        let (rect, _) =
-            ui.allocate_exact_size(egui::vec2(width, plot_height(width)), egui::Sense::hover());
+        let (rect, response) =
+            ui.allocate_exact_size(egui::vec2(width, plot_height(width)), egui::Sense::click());
         paint_multi_line_plot_with(ui, rect, &series, invert_y);
+        crate::views::plot_data_menu::attach_xy(
+            &response,
+            if invert_y {
+                "cfd_cp_distribution"
+            } else {
+                "cfd_cf_distribution"
+            },
+            if invert_y {
+                "Pressure coefficient"
+            } else {
+                "Skin-friction coefficient"
+            },
+            "x/c [-]",
+            y_label,
+            || {
+                series
+                    .iter()
+                    .map(|s| {
+                        (
+                            s.name.clone(),
+                            crate::views::plot_data_menu::pairs(&s.points),
+                        )
+                    })
+                    .collect()
+            },
+        );
         plot_legend(ui, &series);
         super::plot_footer(ui, "x/c [-]", y_label, upper.len() + lower.len());
     });

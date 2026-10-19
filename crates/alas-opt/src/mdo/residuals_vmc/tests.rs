@@ -319,7 +319,8 @@ fn dc10_computed_vmc_is_below_the_certification_ceiling_known_failure() {
     let (config, outcome) = candidate("DC-10");
     let vmc = evaluate_candidate(&outcome, &config);
     let assessment = vmc
-        .at_airport
+        // CS 25.149(c) holds at sea level, whatever the departure aerodrome.
+        .at_sea_level
         .clone()
         .unwrap_or_else(|error| panic!("DC-10: {error:?}"));
     assert!(
@@ -327,4 +328,39 @@ fn dc10_computed_vmc_is_below_the_certification_ceiling_known_failure() {
         "DC-10: VMC/VSR {}",
         assessment.vmc_over_vsr
     );
+}
+
+#[test]
+fn the_weathercock_stability_is_positive_on_a_transport_and_negative_stability_is_a_violation() {
+    let (config, outcome) = candidate("A320-200");
+    let mut clean_sheet = config.clone();
+    clean_sheet.optimizer.design_space.mode = DesignMode::CleanSheet;
+    let vmc = evaluate_candidate(&outcome, &clean_sheet);
+    let crosswind = vmc.crosswind.unwrap();
+    // Fuselage plus fin only: 0.053 per rad on the A320 (probe 2026-10-19).
+    assert!(
+        (0.02..0.10).contains(&crosswind.cn_beta_per_rad),
+        "{}",
+        crosswind.cn_beta_per_rad
+    );
+    let rows = vmc_residuals(&vmc, ResidualRole::Constraint);
+    let row = rows
+        .iter()
+        .find(|r| r.id == "directional_stability")
+        .unwrap();
+    assert_eq!(row.role, ResidualRole::Constraint);
+    assert!(!row.violated());
+    let unstable = VmcOutcome {
+        crosswind: Some(CrosswindAssessment {
+            cn_beta_per_rad: -0.02,
+            ..crosswind
+        }),
+        ..vmc
+    };
+    let rows = vmc_residuals(&unstable, ResidualRole::Constraint);
+    let row = rows
+        .iter()
+        .find(|r| r.id == "directional_stability")
+        .unwrap();
+    assert!(row.violated());
 }

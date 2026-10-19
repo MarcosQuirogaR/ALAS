@@ -395,4 +395,30 @@ impl CabinGeometry {
     pub fn wing_box_x_range(&self) -> (f64, f64) {
         (self.x_wing_le, self.x_wing_le + self.wing_root_chord)
     }
+
+    /// The longitudinal stretch of the lower fuselage the lower holds cannot
+    /// use because the centre wing box and the main-gear bay occupy it.
+    ///
+    /// The box begins at the front spar, not at the root leading edge: ahead
+    /// of the front spar the belly is free hold floor, the leading-edge
+    /// structure sits above the keel. The front spar is the first entry of
+    /// the model's own spar list ([`alas_config::StructuresConfig`], 25 % of
+    /// the local chord by default). The bay behind the rear spar runs to about
+    /// the root trailing edge, so the stretch ends there. The frozen Python
+    /// parity frame keeps the whole root chord, as it always has.
+    pub fn lower_hold_gap_x_range(&self) -> (f64, f64) {
+        let (start, end) = self.wing_box_x_range();
+        if !self.strict_envelope {
+            return (start, end);
+        }
+        let front_spar = alas_config::StructuresConfig::default()
+            .spar_chord_fractions
+            .iter()
+            .copied()
+            .fold(f64::INFINITY, f64::min);
+        if !front_spar.is_finite() || !(0.0..1.0).contains(&front_spar) {
+            return (start, end);
+        }
+        (start + front_spar * self.wing_root_chord, end)
+    }
 }

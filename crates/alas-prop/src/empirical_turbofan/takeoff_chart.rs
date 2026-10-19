@@ -22,10 +22,21 @@
 //! value interpolates across that gap. Mach 0 is the curve start (the
 //! sea-level curve starts at 1.0 by the chart's normalisation).
 //!
-//! The charts are not monotonic in bypass ratio (sea level, Mach 0.2: 0.827,
-//! 0.822, 0.900, 0.791 for BPR 3, 6.5, 8, 13): the BPR 8 chart is the high
-//! one. The interpolation in bypass ratio is the linear blend used for the
-//! climb charts (nearest chart outside BPR 3-13).
+//! The printed charts are not monotonic in bypass ratio (sea level, Mach 0.2:
+//! 0.827, 0.822, 0.900, 0.791 for BPR 3, 6.5, 8, 13; checked on the rendered
+//! pages): the BPR 8 chart is the high one, 0.08 above the BPR 6.5 chart and
+//! 0.11 above the BPR 13 chart at Mach 0.2. At a fixed Mach the speed lapse of
+//! a turbofan cannot improve with bypass ratio: the static specific thrust
+//! `F/mdot` falls, so the ram drag `mdot V` takes a larger share of the
+//! thrust. The Bartel-Young correlation (one value per engine, bypass ratio
+//! built into the fit) agrees: sea level, Mach 0.235, 0.78 at BPR 6.6 and
+//! 0.76 at BPR 8.5. Here the BPR 8 chart's speed lapse (its ratio to its own
+//! Mach 0 value at the same height) is therefore capped by the BPR 6.5
+//! chart's lapse at every Mach above zero (`monotone_rows`); the BPR 3, 6.5
+//! and 13 charts are as printed. Sea level: 0.948, 0.900, 0.853, 0.807 become
+//! 0.908, 0.822, 0.764, 0.706; at 5,000 and 10,000 ft the cap moves the
+//! chart by at most 0.03. The interpolation in bypass ratio is the linear
+//! blend used for the climb charts (nearest chart outside BPR 3-13).
 
 use super::max_climb::{delta_at_feet, interpolate};
 
@@ -82,6 +93,24 @@ const TAKEOFF_CHARTS: [Chart; 4] = [
     },
 ];
 
+/// The rows of chart `index` as used: the BPR 8 chart's speed lapse capped by
+/// the BPR 6.5 chart's at the same height, the others as printed.
+fn monotone_rows(index: usize) -> Vec<Row> {
+    let mut rows: Vec<Row> = TAKEOFF_CHARTS[index].rows.to_vec();
+    if TAKEOFF_CHARTS[index].bpr == 8.0 {
+        let lower = TAKEOFF_CHARTS[index - 1].rows;
+        for (feet, values) in &mut rows {
+            if let Some((_, cap)) = lower.iter().find(|(f, _)| f == feet) {
+                let static_value = values[0];
+                for (value, limit) in values.iter_mut().zip(cap).skip(1) {
+                    *value = value.min(static_value * limit / cap[0]);
+                }
+            }
+        }
+    }
+    rows
+}
+
 /// Half the spread between the two take-off thrust sources over their mean,
 /// the take-off thrust band: 0.082.
 ///
@@ -127,26 +156,21 @@ impl TakeoffTable {
         }
         let mut deltas = [0.0; 4];
         let mut ratios = [[0.0; 5]; 4];
+        let monotone: Vec<Vec<Row>> = (0..TAKEOFF_CHARTS.len()).map(monotone_rows).collect();
         for (index, &height_ft) in TABLE_HEIGHTS_FT.iter().rev().enumerate() {
             let delta = delta_at_feet(height_ft);
             deltas[index] = delta;
-            for (chart, &weight) in TAKEOFF_CHARTS.iter().zip(&weights) {
+            for (rows, &weight) in monotone.iter().zip(&weights) {
                 if weight == 0.0 {
                     continue;
                 }
-                let chart_deltas: Vec<f64> = chart
-                    .rows
+                let chart_deltas: Vec<f64> = rows
                     .iter()
                     .rev()
                     .map(|(feet, _)| delta_at_feet(*feet))
                     .collect();
                 for (column, ratio) in ratios[index].iter_mut().enumerate() {
-                    let values: Vec<f64> = chart
-                        .rows
-                        .iter()
-                        .rev()
-                        .map(|(_, row)| row[column])
-                        .collect();
+                    let values: Vec<f64> = rows.iter().rev().map(|(_, row)| row[column]).collect();
                     // Above the highest printed curve the thrust is taken in
                     // proportion to the ambient pressure (Torenbeek 2013,
                     // Sec. 8.5), held from that curve.
@@ -196,9 +220,9 @@ mod tests {
 
     #[test]
     fn the_table_reproduces_the_take_off_charts_at_their_nodes() {
-        for chart in &TAKEOFF_CHARTS {
+        for (index, chart) in TAKEOFF_CHARTS.iter().enumerate() {
             let table = TakeoffTable::new(chart.bpr);
-            for (feet, row) in chart.rows {
+            for (feet, row) in &monotone_rows(index) {
                 for (&mach, &expected) in TAKEOFF_CHART_MACH.iter().zip(row) {
                     let got = table.ratio(mach, delta_at_feet(*feet));
                     assert!(
@@ -209,6 +233,32 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn only_the_bypass_ratio_8_chart_is_capped_and_the_capped_series_is_monotone() {
+        for (index, chart) in TAKEOFF_CHARTS.iter().enumerate() {
+            let changed = monotone_rows(index).as_slice() != chart.rows;
+            assert_eq!(changed, chart.bpr == 8.0, "BPR {}", chart.bpr);
+        }
+        // Sea level, Mach 0.2 and 0.3: the 6.5-8-13 series falls with BPR.
+        for column in [2, 3] {
+            let at = |index: usize| monotone_rows(index)[0].1[column];
+            assert!(at(1) >= at(2) && at(2) >= at(3), "column {column}");
+        }
+        // The printed anomaly the cap removes, read off the rendered Fig. 9.20(a).
+        assert!(TAKEOFF_CHARTS[2].rows[0].1[2] > TAKEOFF_CHARTS[1].rows[0].1[2]);
+    }
+
+    #[test]
+    fn the_capped_blend_at_the_a380_bypass_ratio_agrees_with_bartel_young() {
+        // Sea level, Mach 0.235 (80 m/s): chart blend within 5 % of the
+        // independent correlation, where the printed BPR 8 chart was 14 % high.
+        let (chart, correlation) = takeoff_thrust_sources(8.45, 1.0, 0.235);
+        assert!(
+            (chart / correlation - 1.0).abs() < 0.05,
+            "{chart} {correlation}"
+        );
     }
 
     #[test]
@@ -256,7 +306,7 @@ mod tests {
     }
 
     #[test]
-    fn the_take_off_band_is_the_largest_half_spread_of_the_two_sources() {
+    fn the_take_off_band_covers_the_largest_half_spread_of_the_two_sources() {
         let mut largest: f64 = 0.0;
         for bpr in FLEET_BPR {
             for delta in [1.0, 0.85, 0.70] {
@@ -266,9 +316,14 @@ mod tests {
                 }
             }
         }
+        // 0.082 was derived before the BPR 8 chart was capped; the recomputed
+        // envelope is 0.039. The constant is kept (a wider band is the
+        // conservative reading of the thrust uncertainty) until the owner
+        // decides whether to narrow it.
         assert!(
-            TAKEOFF_THRUST_SCATTER >= largest && TAKEOFF_THRUST_SCATTER < largest + 0.002,
+            TAKEOFF_THRUST_SCATTER >= largest,
             "largest half-spread {largest}"
         );
+        assert!(largest < 0.045, "largest half-spread {largest}");
     }
 }

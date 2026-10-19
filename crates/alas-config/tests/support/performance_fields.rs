@@ -8,7 +8,7 @@
 
 use serde_json::{json, Value};
 
-pub const NATIVE_FIELDS: [&str; 19] = [
+pub const NATIVE_FIELDS: [&str; 20] = [
     "improved_climb_v2",
     "geometry_scaled_clmax",
     "cruise_thrust_from_deck",
@@ -20,6 +20,7 @@ pub const NATIVE_FIELDS: [&str; 19] = [
     "takeoff_gear_delta_cd",
     "v2_min_vsr_factor",
     "wet_landing_runway",
+    "main_gear_truck_wheels",
     "cl_max_to_source",
     "legacy_field_correlations",
     "propeller_dry_landing_distance_share",
@@ -73,6 +74,13 @@ pub fn published_landing_change(path: &str) -> Option<(Value, Value)> {
         let preset = alas_config::presets::get(name).ok()?;
         let parts = alas_config::presets::preset_breakdown(preset)?;
         return Some((json!(2.10), json!(parts.takeoff())));
+    }
+    // Take-off safety speed at the CS 25.107(b) minimum (1.13 VSR; climb and VMC
+    // raise it where they govern) instead of the frozen 1.20 class factor, for
+    // every jet with a declared high-lift system (fix lane field lengths,
+    // 2026-10-17).
+    if key == "v2_vstall_factor" && alas_config::presets::declared_system(name).is_some() {
+        return Some((json!(1.20), json!(1.13)));
     }
     let source = alas_config::presets::published_landing_reference(name)?;
     match key {

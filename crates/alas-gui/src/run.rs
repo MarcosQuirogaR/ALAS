@@ -153,6 +153,8 @@ impl AppState {
             LogKind::Info,
         );
 
+        self.record_addon_provenance(options.output_dir.as_deref());
+
         let (tx, rx): (Sender<WorkerMessage>, Receiver<WorkerMessage>) = channel();
         self.worker_rx = Some(rx);
         let cancel = self.cancel_flag.clone();

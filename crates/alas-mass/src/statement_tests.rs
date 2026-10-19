@@ -148,6 +148,7 @@ fn the_flops_split_preserves_systems_and_furnishings_totals() {
         furnishings_kg: 1_800.0,
         air_conditioning_kg: 550.0,
         anti_ice_kg: 150.0,
+        military_cargo_equipment_kg: 0.0,
         total_kg: 900.0 + 400.0 + 250.0 + 500.0 + 700.0 + 600.0 + 1_800.0 + 550.0 + 150.0,
     };
     let operating_items = FlopsOperatingItemsBreakdown {
@@ -321,6 +322,7 @@ fn sample_flops() -> FlopsTransportBreakdown {
         furnishings_kg: 1_800.0,
         air_conditioning_kg: 550.0,
         anti_ice_kg: 150.0,
+        military_cargo_equipment_kg: 0.0,
         total_kg: 900.0 + 400.0 + 250.0 + 500.0 + 700.0 + 600.0 + 1_800.0 + 550.0 + 150.0,
     };
     let operating_items = FlopsOperatingItemsBreakdown {

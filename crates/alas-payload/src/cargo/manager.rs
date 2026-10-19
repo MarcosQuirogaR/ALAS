@@ -118,7 +118,9 @@ pub struct CargoLoadManager<'g> {
 }
 
 mod correction;
+mod declared;
 mod slots;
+mod solve;
 
 #[cfg(test)]
 // Failed expectations and unwraps here are failed test assertions.

@@ -127,6 +127,7 @@ fn build() -> Vec<AircraftPreset> {
         preset.geometry.engine.apply_engine_spec_if_uninitialized();
         register_published_reference(preset);
         landing_reference::apply(preset);
+        declare_main_gear_truck(preset);
         takeoff_reference::apply(preset);
         high_lift_system::apply(preset);
         // Converted presets build their fuselage from the embedded fitted loft.
@@ -137,4 +138,21 @@ fn build() -> Vec<AircraftPreset> {
     presets
 }
 
-// A test asserts on values it constructed here directly, so a failed unwrap
+/// Copy the declared main-gear truck size (first strut of the bogie list, else
+/// the uniform wheels per strut) into the performance block, where it selects
+/// the braked-run deceleration of the landing-distance model.
+fn declare_main_gear_truck(preset: &mut AircraftPreset) {
+    let gear = &preset.landing_gear;
+    let wheels = gear
+        .mlg_strut_bogie_wheels
+        .as_ref()
+        .and_then(|counts| counts.first().copied())
+        .filter(|&count| count > 0)
+        .unwrap_or(gear.wheels_per_mlg_strut);
+    if wheels > 0 {
+        preset
+            .performance
+            .get_or_insert_with(Default::default)
+            .main_gear_truck_wheels = wheels;
+    }
+}

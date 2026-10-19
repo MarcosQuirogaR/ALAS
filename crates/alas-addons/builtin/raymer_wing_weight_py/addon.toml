@@ -1,0 +1,67 @@
+name = "Raymer wing weight (Python process)"
+version = "1.0.0"
+author = "ALAS"
+description = """The same calculation as the Raymer wing weight script add-on (Aircraft Design: A Conceptual Approach, 6th edition, Eq. 15.25, printed page 574), written as an external Python program to show the process protocol: one JSON request on stdin, one JSON reply on stdout.
+A process add-on runs arbitrary code with your user rights. ALAS keeps it disabled until you enable it for this add-on and version, and it uses the Python interpreter configured in the Add-ons panel (or python on PATH).
+No wing-mass override field exists in the ALAS configuration, so the result is display-only."""
+kind = "process"
+entry = "main.py"
+timeout_s = 20.0
+
+[[inputs]]
+name = "mtow_kg"
+unit = "kg"
+default = 73500.0
+description = "Flight design gross weight Wdg"
+
+[[inputs]]
+name = "limit_load_factor"
+unit = "g"
+default = 2.5
+description = "Limit load factor; Nz = 1.5 x this"
+
+[[inputs]]
+name = "wing_area_m2"
+unit = "m^2"
+default = 122.4
+description = "Trapezoidal wing area Sw"
+
+[[inputs]]
+name = "aspect_ratio"
+unit = "-"
+default = 9.5
+description = "Wing aspect ratio A"
+
+[[inputs]]
+name = "thickness_ratio_root"
+unit = "-"
+default = 0.12
+description = "Thickness-to-chord ratio at the wing root (t/c)root"
+
+[[inputs]]
+name = "taper_ratio"
+unit = "-"
+default = 0.24
+description = "Wing taper ratio lambda"
+
+[[inputs]]
+name = "sweep_quarter_chord_deg"
+unit = "deg"
+default = 25.0
+description = "Wing sweep at 25% MAC, Lambda"
+
+[[inputs]]
+name = "control_surface_area_m2"
+unit = "m^2"
+default = 30.0
+description = "Wing-mounted control surface area including flaps, Scsw"
+
+[[outputs]]
+name = "wing_mass_kg"
+unit = "kg"
+description = "Raymer Eq. 15.25 wing mass (display only: no override field exists)"
+
+[[outputs]]
+name = "wing_mass_lb"
+unit = "lb"
+description = "The same result in pounds as the equation returns it"

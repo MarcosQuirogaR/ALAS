@@ -93,9 +93,8 @@ impl AppState {
     /// Start a complete canonical aircraft case. Only machine locations and
     /// an explicitly selected baseline workflow survive aircraft selection.
     pub fn load_preset(&mut self, key: &str) {
-        let preset = match presets::get(key) {
-            Ok(p) => p,
-            Err(_) => return,
+        let Ok(preset) = presets::get(key) else {
+            return;
         };
 
         let previous = self.typed_config();
@@ -121,6 +120,7 @@ impl AppState {
 
         self.config_values = full_config_values(&config);
         self.active_preset = preset.name.to_owned();
+        self.files.active_aircraft = None;
         self.selected_aux_preset.clear();
         // Preset operational profiles are automatic route-linked inputs.
         // Initialize their cruise-leg count from the route-aware mission
@@ -386,7 +386,7 @@ impl AppState {
     /// Load a configuration from [`AppState::config_path`] (JSON or YAML).
     pub fn load_config(&mut self) {
         let path = self.config_path.clone();
-        let text = match std::fs::read_to_string(&path) {
+        let text = match std::fs::read_to_string(self.user_load_path(&path)) {
             Ok(t) => t,
             Err(e) => {
                 self.log(
@@ -447,7 +447,7 @@ impl AppState {
 /// Preserve installed tools, local data and machine memory budgets. Do not
 /// retain solver switches, physics settings or the dispatch account: the
 /// latter can override the new aircraft's route with an unrelated flight.
-fn preserve_machine_locations(config: &mut AlasConfig, previous: &AlasConfig) {
+pub(crate) fn preserve_machine_locations(config: &mut AlasConfig, previous: &AlasConfig) {
     config.mses.mses_dir.clone_from(&previous.mses.mses_dir);
     config.mses.osmap_path.clone_from(&previous.mses.osmap_path);
     let mission = &mut config.mission;

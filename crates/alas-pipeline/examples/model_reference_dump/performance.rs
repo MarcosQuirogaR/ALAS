@@ -9,6 +9,7 @@
 //! Certification limits that the model does not compute (MMO, maximum
 //! operating altitude) are deliberately not exported.
 
+use super::validation_exports;
 use super::*;
 use alas_config::presets::AircraftPreset;
 use alas_geom::aircraft::airplane::Airplane;
@@ -167,6 +168,8 @@ pub(super) fn attach(
     }
     extend("aerodynamics", aerodynamics);
     doc["performance"] = field_performance(config, report, mlw_kg);
+    doc["performance"]["service_ceiling"] = validation_exports::service_ceiling(config, report);
+    doc["route"]["reference_block_fuel"] = validation_exports::reference_block_fuel(config, report);
     doc["tail_volume_coefficients"] = tail_volumes(&report.airplane);
 }
 
@@ -200,6 +203,10 @@ fn field_performance(config: &AlasConfig, report: &AnalysisReport, mlw_kg: f64) 
             "vref_mlw_m_s": f.vref_m_s,
             "vref_basis": "1.23 x V_S1g at MLW, 14 CFR 25.125(b)(2)(i) with V_SR taken as V_S1g (V_SR >= V_S1g, so slightly low); not the app approach-speed factor",
             "takeoff_mass_kg": f.takeoff_mass_kg,
+            "v2_m_s": f.v2_m_s,
+            "vsr_takeoff_m_s": f.v_stall_takeoff_m_s,
+            "v2_over_vsr": f.oei.v2_over_vsr,
+            "v2_basis": "improved-climb V2 of the report speed model at the take-off mass, ISA sea level (computed VMC, geometry-scaled CLmax_TO); a model speed, not an AFM value",
             "landing_mass_kg": f.landing_mass_kg,
             "static_thrust_n": f.static_thrust_n,
             "static_thrust_basis": f.static_thrust_basis,

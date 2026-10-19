@@ -6,7 +6,7 @@
 use alas_config::{ActiveEngineModel, AlasConfig};
 use alas_opt::mdo::YawAirframe;
 use alas_perf::performance::{
-    compute_v_speeds_at_masses, density_ratio, tw_takeoff_constraint, ws_landing_field_limit,
+    compute_v_speeds_at_masses, density_ratio, tw_takeoff_constraint, ws_landing_limit_for,
 };
 
 use super::{error, static_thrust, FindingCode, PhysicalFinding};
@@ -174,13 +174,7 @@ pub(super) fn assess_airports(
             }
         } else if !propeller {
             let landing_ws = landing_mass_kg * gravity_m_s2 / wing_area_m2;
-            let limit = ws_landing_field_limit(
-                airport.lda_m,
-                share,
-                sigma,
-                config.performance.cl_max_land,
-                config.performance.k_land,
-            );
+            let limit = ws_landing_limit_for(&config.performance, airport.lda_m, share, sigma);
             if landing_ws.is_finite() && limit.is_finite() && landing_ws > limit {
                 landing_constraint_violation = true;
                 findings.push(error(FindingCode::FieldLandingDistanceViolation,
@@ -205,11 +199,11 @@ mod tests {
 
     #[test]
     fn arrival_gate_compares_factored_dispatch_length_with_lda() {
-        let mut config = AlasConfig::from_value(&serde_json::json!({"preset": "A320-200"}))
+        let mut config = AlasConfig::from_value(&serde_json::json!({"preset": "C919"}))
             .unwrap_or_else(|reason| panic!("preset: {reason}"));
         config.arrival_airport = "LXGB".to_owned();
-        let preset = alas_config::presets::get("A320-200")
-            .unwrap_or_else(|reason| panic!("preset: {reason}"));
+        let preset =
+            alas_config::presets::get("C919").unwrap_or_else(|reason| panic!("preset: {reason}"));
         let report = crate::full_analysis::FullAnalysis::new(config.clone())
             .run(&preset.design_vector, true)
             .unwrap_or_else(|reason| panic!("analysis: {reason}"));

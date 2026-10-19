@@ -978,6 +978,7 @@ mod tests {
             furnishings_kg: 20_000.0,
             air_conditioning_kg: 1_500.0,
             anti_ice_kg: 200.0,
+            military_cargo_equipment_kg: 0.0,
             total_kg: 28_900.0,
         };
         let FlopsAirframeEvaluation::Verified(breakdown) =

@@ -63,13 +63,17 @@ fn the_fin_slope_matches_the_unswept_helmbold_closed_form_and_falls_with_sweep()
 }
 
 #[test]
-fn the_rudder_effectiveness_follows_the_glauert_flap_value() {
-    // Glauert, 30 percent chord: 1 - (theta - sin theta) / pi = 0.661.
+fn the_rudder_effectiveness_follows_the_published_curve_points() {
+    // Sadraey Fig. 12.12 points printed in his worked examples.
+    for (ratio, expected) in [(0.2, 0.41), (0.3, 0.52), (0.4, 0.60), (0.49, 0.664)] {
+        let tau = rudder_effectiveness(ratio).unwrap();
+        assert!((tau - expected).abs() < 1e-12, "{ratio}: {tau}");
+    }
     let tau = rudder_effectiveness(0.30).unwrap();
-    assert!(
-        (tau / RUDDER_LARGE_DEFLECTION_FACTOR - 0.661).abs() < 2e-3,
-        "{tau}"
-    );
+    assert!((rudder_effectiveness(0.35).unwrap() - 0.56).abs() < 1e-12);
+    // Beyond the points the Glauert shape continues monotonically.
+    assert!(rudder_effectiveness(0.15).unwrap() < 0.41);
+    assert!(rudder_effectiveness(0.6).unwrap() > 0.664);
     assert!(rudder_effectiveness(0.4).unwrap() > tau);
     assert!(rudder_effectiveness(0.0).is_none());
     assert!(rudder_effectiveness(1.0).is_none());

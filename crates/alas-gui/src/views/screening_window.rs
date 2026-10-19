@@ -44,7 +44,26 @@ pub fn show_custom_airfoil_import_window(state: &mut AppState, ctx: &egui::Conte
                 .spacing([12.0, 8.0])
                 .show(ui, |ui| {
                     ui.label(tr("Selig .dat path"));
-                    ui.text_edit_singleline(&mut state.custom_airfoil_file_path);
+                    ui.horizontal(|ui| {
+                        ui.text_edit_singleline(&mut state.custom_airfoil_file_path);
+                        let data = state.data_dir();
+                        let current = state.custom_airfoil_file_path.clone();
+                        crate::file_dialog::browse_button(
+                            state,
+                            ui,
+                            crate::file_dialog::DialogTarget::AirfoilImport,
+                            |_| {
+                                crate::file_dialog::spec(
+                                    crate::file_dialog::DialogKind::OpenFile,
+                                    "Import custom airfoil",
+                                    &current,
+                                    &data,
+                                    None,
+                                    vec![("Selig .dat".to_owned(), vec!["dat".to_owned()])],
+                                )
+                            },
+                        );
+                    });
                     ui.end_row();
                     ui.label("");
                     if ui.button(tr("Import airfoil .dat")).clicked() {

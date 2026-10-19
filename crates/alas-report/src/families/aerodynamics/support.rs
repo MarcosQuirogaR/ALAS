@@ -57,6 +57,10 @@ pub(super) fn add_heatmap_grid_nan_aware(
     vmin: f64,
     vmax: f64,
 ) {
+    scene
+        .data_trace
+        .note_heatmap(axes, x_edges, y_edges, values);
+    let _chrome = crate::plot_data::ChromeGuard::begin();
     let nx = x_edges.len().saturating_sub(1);
     let ny = y_edges.len().saturating_sub(1);
     let span = (vmax - vmin).max(1e-12);

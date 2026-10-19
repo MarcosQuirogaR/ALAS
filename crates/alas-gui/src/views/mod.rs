@@ -16,11 +16,14 @@ pub(crate) mod inputs_custom;
 pub(crate) mod inputs_mtow;
 #[cfg(test)]
 mod inputs_mtow_tests;
+pub(crate) mod inputs_selectors;
 pub mod inputs_view;
 pub(crate) mod mission_profile_inputs;
 pub(crate) mod mission_profile_preview;
 pub mod notices;
 pub mod overlays;
+pub(crate) mod plot_data_menu;
+pub(crate) mod plot_data_sources;
 pub mod preview_dock;
 pub(crate) mod result_3d;
 pub mod results_view;

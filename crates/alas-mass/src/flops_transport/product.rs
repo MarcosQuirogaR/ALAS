@@ -17,6 +17,7 @@ use alas_geom::aircraft::fuselage::Fuselage;
 use alas_geom::aircraft::wing::Wing;
 
 use super::airframe_geometry::nacelle_dimensions;
+use super::military_cargo::MilitaryCargoHold;
 use super::movable_area::movable_surface_area;
 use super::{
     estimate_flops_transport, FlopsTransportEvaluation, FlopsTransportInputs,
@@ -381,6 +382,13 @@ pub fn evaluate_product_at_design_gross_mass(
     if !fuselage_length.is_finite() || fuselage_length <= 0.0 || width <= 0.0 || depth <= 0.0 {
         reasons.push(FlopsTransportUnverifiedReason::FuselageGeometry);
     }
+    // A declared main-deck freight hold is the military-freighter attribute:
+    // its loadable floor (floor plus load-bearing ramp, at the clear width)
+    // sizes the cargo-handling system, and a ramp makes it rear-loading.
+    let military_cargo = cabin.cargo.freight_hold.map(|hold| MilitaryCargoHold {
+        floor_area_m2: (hold.floor_length_m + hold.ramp_length_m) * hold.clear_width_m,
+        rear_ramp: hold.ramp_length_m > 0.0,
+    });
     let inputs = FlopsTransportInputs {
         maximum_mach,
         design_range_nmi,
@@ -416,6 +424,7 @@ pub fn evaluate_product_at_design_gross_mass(
         cabin_equipment_method: flops.cabin_equipment_method,
         haul_class: flops.haul_class.unwrap_or_default(),
         propulsion_sizing,
+        military_cargo,
     };
     if !inputs.wing_area_m2.is_finite() || inputs.wing_area_m2 <= 0.0 {
         reasons.push(FlopsTransportUnverifiedReason::MainWingGeometry);

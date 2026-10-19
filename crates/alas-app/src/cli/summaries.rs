@@ -135,3 +135,22 @@ pub(super) fn print_structural_summary(result: &PipelineResult, quiet: bool) {
         }
     }
 }
+
+/// External tools that failed. Printed even in quiet mode (to stderr), so an
+/// aborted solver can never pass as a silent success.
+pub(super) fn print_tool_failures(result: &PipelineResult, quiet: bool) {
+    let failures = alas_pipeline::tool_failures::tool_failures(result);
+    if failures.is_empty() {
+        return;
+    }
+    if quiet {
+        for failure in &failures {
+            eprintln!("TOOL FAILURE: {failure}");
+        }
+        return;
+    }
+    println!("\n--- External tool failures ---");
+    for failure in &failures {
+        println!("  TOOL FAILURE: {failure}");
+    }
+}
