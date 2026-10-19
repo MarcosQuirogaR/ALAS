@@ -1,151 +1,138 @@
 # Mission & route analysis
 
-Every other chapter in this guide analyzes AVE sitting still: one flight
-condition, one design point. This chapter is the one place the aircraft
-actually *flies*: a full climb/cruise/descent simulation over a real route,
-executed natively by `alas-mission` and output as detailed trajectory figures
-and tabular performance data.
+This is the chapter where AVE flies: a full climb, cruise and descent simulation
+over a real route, run natively by `alas-mission` and reported as trajectory
+figures and tables. It is native Rust, adapted in part from SUAVE (LGPL-2.1)
+segment methods, and runs as an ordinary concurrent pipeline stage with no
+external interpreter or setup step.
 
-## Mission simulation architecture
-
-The mission segment solver translates aircraft geometry, engine deck models,
-and operational profiles into numerical flight segments (take-off, climb,
-stepped cruise, descent, reserves). The simulation is built natively into ALAS,
-incorporating segment methods and aerodynamic drag integrations translated
-from SUAVE (LGPL-2.1).
-
-Because mission analysis runs natively within `alas-pipeline`, it executes
-as a standard concurrent stage without requiring external Python interpreters
-or virtual environment management.
+The segment solver turns the aircraft geometry, engine deck and operating profile
+into take-off, climb, stepped-cruise, descent and reserve segments.
 
 ## The route
 
-ALAS's default route is **London Heathrow (EGLL) → Dubai (OMDB)**:
-`departure_airport`/`arrival_airport` in the top-level app settings. This
-run used the great-circle routing tier (2,968 nm / 5,497 km) rather than
-the airway-graph tier, since that requires the optional navdata download
-described in [Installation](installation.md#navigation-route-data).
+The default city pair is **London Heathrow (EGLL) to Dubai (OMDB)**
+(`departure_airport`, `arrival_airport`). Routing is tried in order of fidelity:
+a SimBrief or KML dispatch plan, then the airway graph (needs the optional
+navdata download, see [Installation](installation.md#navigation-route-data)),
+then a great-circle track.
+
+This run used a **SimBrief plan, EGLLOMDB, AIRAC cycle 2610**, fetched through
+the SimBrief API: 89 waypoints, 6,362 km (3,435 nmi). The great-circle distance
+is 5,497 km (2,968 nmi), so the plan is 15.7 % longer.
 
 <figure markdown>
-  ![Mission route, colored by mass](assets/ave-mission-route-light.png#only-light)
-  ![Mission route, colored by mass](assets/ave-mission-route-dark.png#only-dark)
-  <figcaption>EGLL → OMDB, colored by total aircraft mass along the route. The annotation marks the cruise midpoint.</figcaption>
+  ![Mission route, colored by mass](assets/ave-mission-route-dark.png)
+  <figcaption>The SimBrief EGLL to OMDB plan (89 waypoints, 6,362 km) coloured by aircraft mass, 265.9 t at departure to 221.3 t at arrival.</figcaption>
 </figure>
 
-The color gradient is the fuel-burn story made visual: orange near
-departure (heavy, full fuel load), fading through green toward blue as the
-aircraft burns down toward its arrival mass. This is the same 2D
-equirectangular map that replaced an earlier 3D textured-globe view, a
-deliberate simplification that keeps the figure legible without needing an
-offscreen 3D render for every run.
+<figure markdown>
+  ![Mission route on a 3D globe](assets/ave-mission-route-3d-dark.png)
+  <figcaption>The same route on the 3D globe.</figcaption>
+</figure>
 
 ## Fuel burn and block time
 
 <div class="ave-stat-grid" markdown>
-<div class="ave-stat"><div class="label">Initial mass</div><div class="value">358.67 t</div></div>
-<div class="ave-stat"><div class="label">Final mass</div><div class="value">285.26 t</div></div>
-<div class="ave-stat"><div class="label">Fuel burned</div><div class="value">73.41 t</div></div>
-<div class="ave-stat"><div class="label">Block time</div><div class="value">7.34 h</div></div>
-<div class="ave-stat"><div class="label">Segments</div><div class="value">12</div></div>
+<div class="ave-stat"><div class="label">Initial mass</div><div class="value">265.9 t</div></div>
+<div class="ave-stat"><div class="label">Final mass</div><div class="value">221.3 t</div></div>
+<div class="ave-stat"><div class="label">Fuel burned (native mission)</div><div class="value">44.5 t</div></div>
+<div class="ave-stat"><div class="label">Block time</div><div class="value">7.49 h</div></div>
+<div class="ave-stat"><div class="label">Route length</div><div class="value">6,362 km</div></div>
 </div>
 
-73.4 t burned against a 135.3 t max fuel load (from
-[Weight, balance & stability](weight-balance-and-stability.md)) means this
-particular EGLL–OMDB mission uses about 54% of AVE's fuel capacity: well
-inside the payload-range diagram's max-payload plateau, consistent with
-Dubai being nowhere near AVE's ~8,177 nm harmonic range.
+Several fuel quantities appear, and they are different things:
+
+| Quantity | Value | Meaning |
+|---|---|---|
+| Native mission burn | 44,541 kg, 7.49 h | The flown trajectory in the figures below |
+| Dispatch-plan trip fuel | 44,803 kg, 7.42 h | The plan flies the same route as a trip and sets takeoff and landing mass (0.6 % apart from the native flight) |
+| Plan block fuel | 45,319 kg | `plan.block_fuel_kg` of the dispatch plan |
+| Plan takeoff fuel | 52,164 kg | Also carries 5 % contingency (2,240 kg), 370 km alternate (3,353 kg) and 30 min final reserve (1,578 kg) |
+| Design mission, great circle (5,497 km) | trip 38,770 kg at 259.5 t takeoff mass | The mission the optimizer closes the design on |
+
+!!! note "Why the optimizer's 39.3 t differs from the 44.5 t flown here"
+    The optimizer scores block fuel on its design mission, a great-circle track of
+    5,497 km (2,968 nmi). Its trip fuel for the final design is 38.8 t, the same
+    order as the optimizer's 39.3 t objective. The final analysis instead flies the
+    6,362 km SimBrief plan, 15.7 % longer, and burns 14.9 % more fuel. So the two
+    numbers are for different routes, not an inconsistency. Run-to-run optimizer
+    variation and the exact objective definition (for example reserve and taxi
+    treatment) were not separated out.
+
+The 44.5 t burn is 28 % of the 159.0 t geometry-estimated usable fuel capacity
+([Weight, balance & stability](weight-balance-and-stability.md)), well inside the
+maximum-payload range of the payload-range diagram (6,524 nmi at 65 t).
+
+!!! note "The mission is flown at the sized mass, not at MTOW"
+    The flight starts at 265.9 t, the takeoff mass the dispatch closes at (payload
+    plus the fuel this route needs), not at the 358.67 t MTOW. MTOW is a ceiling
+    and the mass at which the payload-range corners are computed.
 
 ## The full profile
 
 <figure markdown>
-  ![Mission profile: altitude, mass, airspeed, SFC](assets/ave-mission-profile-light.png#only-light)
-  ![Mission profile: altitude, mass, airspeed, SFC](assets/ave-mission-profile-dark.png#only-dark)
-  <figcaption>Twelve segments, top to bottom: altitude, total mass, true airspeed, and specific fuel consumption, all against elapsed time.</figcaption>
+  ![Mission profile: altitude, mass, airspeed, SFC](assets/ave-mission-profile-dark.png)
+  <figcaption>Altitude (FL370, then FL390), mass, true airspeed and specific fuel consumption against elapsed time over the 7.49 h block.</figcaption>
 </figure>
 
-This is the climb schedule described in
-[Installation](installation.md) and
-[Design space & optimizer](design-space-and-optimizer.md)'s sibling
-chapter made concrete: takeoff, an initial climb to roughly 31,000 ft,
-a two-step climb ladder up to final cruise altitude (visible as the two
-distinct steps in the altitude trace around minute 115 and minute 250),
-a long cruise, then a four-step descent ladder back down. The **mass**
-trace is almost perfectly linear through cruise (steady fuel flow at a
-steady cruise thrust setting), and the **SFC** trace tells the same story
-from the engine's side: it climbs during the low-airspeed initial segments
-(the engine working relatively harder per unit thrust at low speed). Every
-segment boundary here is a `MissionProfileConfig` field
-([Installation](installation.md)), editable, not hardcoded, if you want a
-different climb schedule for a different aircraft.
+The profile is take-off, an initial climb to FL370, a step climb to FL390, a long
+cruise and a descent. Mass falls almost linearly through cruise (steady fuel flow
+at steady thrust). SFC rises in the low-speed initial segments, where the engine
+works harder per unit thrust. Segment boundaries are `MissionProfileConfig`
+fields (Advanced Settings, Mission Analysis), not hardcoded.
 
 ## Aerodynamics and drag, in flight
 
 <figure markdown>
-  ![Aerodynamic coefficients through the mission](assets/ave-mission-aero-coefficients-light.png#only-light)
-  ![Aerodynamic coefficients through the mission](assets/ave-mission-aero-coefficients-dark.png#only-dark)
+  ![Aerodynamic coefficients through the mission](assets/ave-mission-aero-coefficients-dark.png)
   <figcaption>CL, CD, and L/D as they actually vary segment to segment, not the single design-point values from Aerodynamic analysis.</figcaption>
 </figure>
 
 <figure markdown>
-  ![Drag component breakdown through the mission](assets/ave-mission-drag-components-light.png#only-light)
-  ![Drag component breakdown through the mission](assets/ave-mission-drag-components-dark.png#only-dark)
+  ![Drag component breakdown through the mission](assets/ave-mission-drag-components-dark.png)
   <figcaption>Induced, parasite, and wave drag, tracked across the same mission.</figcaption>
 </figure>
 
-[Aerodynamic analysis](aerodynamic-analysis.md) gives you AVE's
-performance at *one* condition: the cruise design point. These two charts
-are the same aerodynamic model evaluated continuously across an actual
-flight, which is a meaningfully different (and more honest) picture: CL
-drifts upward through cruise as the aircraft gets lighter and needs less
-lift at the same speed and altitude, and the drag-component split shifts
-accordingly. If you only ever look at the single design-point numbers,
-it's easy to forget that "cruise CL" is really "cruise CL at this one
-instant." This chapter is the reminder.
+The [aerodynamic analysis](aerodynamic-analysis.md) is one condition. These charts
+evaluate the same model continuously along the flight: CL falls within each cruise
+segment as fuel burns and jumps up at the step climb, where the dynamic pressure
+is lower, and the drag-component split shifts with it. "Cruise CL" is a value at
+one instant.
 
 ## Speeds, range and the forces behind them
 
-Three more views come out of the same solve, each answering a question the
-profile above leaves open.
+Three more views come from the same solve.
 
 <figure markdown>
-  ![True and equivalent airspeed, and Mach, against time](assets/ave-mission-velocities-light.png#only-light)
-  ![True and equivalent airspeed, and Mach, against time](assets/ave-mission-velocities-dark.png#only-dark)
+  ![True and equivalent airspeed, and Mach, against time](assets/ave-mission-velocities-dark.png)
   <figcaption>TAS and EAS overlaid, with Mach below. The gap between the two speeds is the compressibility signature a single TAS trace hides.</figcaption>
 </figure>
 
-True airspeed and *equivalent* airspeed diverge as the aircraft climbs:
-EAS is the speed the airframe structurally "feels" (it carries the dynamic
-pressure), while TAS is the speed it actually covers ground at. In cruise
-the aircraft is doing roughly 480 kt TAS but only around 250 kt EAS, which
-is precisely why the V-n envelope in
-[Structural analysis](structural-analysis.md#the-v-n-diagram) is plotted
-against equivalent airspeed and not true.
+Equivalent airspeed (EAS) is the speed the airframe feels through dynamic
+pressure; true airspeed (TAS) is the speed over the ground. In cruise the aircraft
+flies roughly 480 kt TAS at about 250 kt EAS, which is why the V-n envelope in
+[Structural analysis](structural-analysis.md#the-v-n-diagram) uses EAS.
 
 <figure markdown>
-  ![Cumulative range and pitch angle against time](assets/ave-mission-flight-path-light.png#only-light)
-  ![Cumulative range and pitch angle against time](assets/ave-mission-flight-path-dark.png#only-dark)
+  ![Cumulative range and pitch angle against time](assets/ave-mission-flight-path-dark.png)
   <figcaption>Ground covered and body pitch attitude through the flight.</figcaption>
 </figure>
 
 <figure markdown>
-  ![Throttle, lift, thrust and drag against time](assets/ave-mission-aero-forces-light.png#only-light)
-  ![Throttle, lift, thrust and drag against time](assets/ave-mission-aero-forces-dark.png#only-dark)
+  ![Throttle, lift, thrust and drag against time](assets/ave-mission-aero-forces-dark.png)
   <figcaption>The force balance being solved at every timestep: throttle setting, lift, thrust and drag.</figcaption>
 </figure>
 
-The force panel is the most direct evidence that this is a simulation and
-not a Breguet-range shortcut. Lift tracks weight downward as fuel burns;
-thrust and drag stay matched through cruise because the segment is solved
-to equilibrium, not assumed; and throttle drifts as the engine is asked for
-progressively less thrust to hold the same speed at a falling weight.
+The force panel shows this is a simulation and not a Breguet shortcut: lift tracks
+weight down as fuel burns, thrust and drag stay matched through cruise because
+each segment is solved to equilibrium, and throttle drifts down to hold speed at a
+falling weight.
 
-## What this run needs that others don't
+## Data this stage needs
 
-Every other analysis chapter in this guide runs from a bare
-`--no-optimize` pass. This one additionally needs the isolated SUAVE environment
-(`scripts/setup_suave_env.ps1`, one-time, ~2 minutes) and, for a route more
-detailed than a great-circle line, the optional navdata download. Skip
-either and `DesignPipeline.run()` degrades gracefully: the mission stage
-reports itself unavailable and every other stage runs normally, which is
-why this is the one chapter in this guide with its own explicit
-prerequisite rather than assuming a bare install gets you here.
+Mission analysis needs no installation. A route better than a great-circle line
+needs either a SimBrief username (External Tools) or the optional airway
+navigation data (External Tools window, with consent, or `ALAS --download-navdata`).
+Without them the stage flies the great-circle track and every other stage is
+unaffected.

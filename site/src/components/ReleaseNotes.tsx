@@ -1,49 +1,13 @@
-import { formatDate, useReleases } from '../lib/useRelease'
-
-const RELEASES_URL = 'https://github.com/MarcosQuirogaR/ALAS/releases'
-
-// Keep the landing page's release copy local and deliberate. GitHub release
-// bodies can contain historical branding or editorial notes that do not belong
-// in the current product site.
-const RELEASE_SUMMARIES: Record<string, string[]> = {
-  'v1.4.0': [
-    'Consistency and validation release: geometry, drag, thrust, mass and payload bookkeeping corrected across the registered presets; results move, so v1.4 designs are not comparable with v1.3.2 designs.',
-    'New take-off thrust table and wing structure sized from spanwise load cases; the native 36-cell matrix runs in about 41 minutes instead of 87.',
-    'Known limitations are listed in the release notes, including infeasible MTOW-band cells and the experimental UAV module, which is not validated.',
-  ],
-  'v1.3.2': [
-    'Boeing 747-400 upper-deck hump and partial upper deck, with business class upstairs and first class in the nose; the model OEW is +13.8 % over the published 178,755 kg, which exposes a FLOPS over-prediction.',
-  ],
-  'v1.3.1': [
-    'Four new presets: Embraer E195-E2 (model OEW within 0.3 % of the 35,700 kg reference), COMAC C919 (-3.1 %, airframe data from a secondary source), Boeing 747-400 (+9.3 %, smoothed upper-deck hump) and Airbus A400M (cargo transport, no passenger cabin).',
-    'Parametric nose geometry, opt-in through six nose fields; an unset nose keeps the legacy shape.',
-    'Test robustness on CI hosts without navigation data or a writable shared temporary directory.',
-  ],
-  'v1.3.0': [
-    'Hard MTOW as the default for presets, with takeoff fuel capped at usable tank capacity, and hard constraints throughout.',
-    'Clean-sheet design from a preset-less brief, a load and trim CG sheet, and an all-evaluation optimization history.',
-    'Rotation forward-CG model with a geometry-derived tail authority, and an MSC Nastran wing-box validation.',
-  ],
-  'v1.2.0': [
-    'One optimiser: L-SHADE differential evolution under the epsilon-constrained method, deterministic for a given seed.',
-    'Wing and fuselage layout constraints, revised mass, fuel and mission models, and a first-start download of the optional OpenVSP preview runtime.',
-    'Windows and Linux packages built and checked by the release workflow from the tagged commit.',
-  ],
-  'v1.1.0': [
-    'Native Rust desktop packages for Windows and Linux.',
-    'Portable archives include a release manifest and a sibling SHA-256 file.',
-  ],
-}
+import { useState } from 'react'
+import { formatDate, PUBLISHED, RELEASES_URL, releaseUrl } from '../lib/releases'
 
 export default function ReleaseNotes() {
-  const releases = useReleases(3)
+  const [open, setOpen] = useState<string | null>(PUBLISHED[0]?.tag ?? null)
 
   return (
     <section id="releases" className="border-b border-rule bg-raised/40">
       <div className="mx-auto max-w-[68rem] px-6 py-20">
-        <p className="section-mark">Release notes</p>
-
-        <div className="mt-6 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
           <h2 className="text-[1.65rem] font-bold leading-[1.25] tracking-[-0.015em] text-fg-strong">
             Release history
           </h2>
@@ -52,49 +16,52 @@ export default function ReleaseNotes() {
           </a>
         </div>
 
-        {releases === null ? (
-          <p className="mt-10 text-[0.92rem] text-fg-dim">
-            Release notes are published on{' '}
-            <a href={RELEASES_URL} className="prose-link">
-              GitHub
-            </a>
-            .
-          </p>
-        ) : (
-          <ol className="mt-10 border-t border-rule">
-            {releases.map((r) => {
-              const lines = RELEASE_SUMMARIES[r.tag] ?? []
-              return (
-                <li
-                  key={r.tag}
-                  className="grid gap-x-10 gap-y-3 border-b border-rule py-7 sm:grid-cols-[10rem_1fr]"
-                >
-                  <div>
-                    <div className="font-mono text-[0.9rem] text-accent">{r.tag}</div>
-                    <div className="mt-1 font-mono text-[0.72rem] text-fg-dim">
-                      {formatDate(r.published)}
-                    </div>
+        <ol className="mt-10 border-t border-rule">
+          {PUBLISHED.map((r) => {
+            const isOpen = open === r.tag
+            return (
+              <li
+                key={r.tag}
+                className="grid gap-x-10 gap-y-3 border-b border-rule py-6 sm:grid-cols-[10rem_1fr]"
+              >
+                <div>
+                  <div className="font-mono text-[0.9rem] text-accent">
+                    {r.tag}
+                    {r.prerelease ? ' (pre-release)' : ''}
                   </div>
-                  <div>
-                    <h3 className="text-[1rem] font-semibold text-fg-strong">{r.name}</h3>
-                    {lines.length > 0 && (
-                      <ul className="mt-2.5 space-y-1.5">
-                        {lines.map((l, i) => (
-                          <li
-                            key={i}
-                            className="text-[0.9rem] leading-[1.6] text-fg-dim"
-                          >
-                            {l}
-                          </li>
-                        ))}
-                      </ul>
-                    )}
+                  <div className="mt-1 font-mono text-[0.72rem] text-fg-dim">
+                    {formatDate(r.published)}
                   </div>
-                </li>
-              )
-            })}
-          </ol>
-        )}
+                </div>
+                <div>
+                  <h3 className="text-[1rem] font-semibold text-fg-strong">{r.headline}</h3>
+                  {isOpen && (
+                    <ul className="mt-2 list-disc space-y-1 pl-5 marker:text-accent">
+                      {r.details.map((l, i) => (
+                        <li key={i} className="text-[0.9rem] leading-[1.5] text-fg-dim">
+                          {l}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-[0.82rem]">
+                    <button
+                      type="button"
+                      aria-expanded={isOpen}
+                      onClick={() => setOpen(isOpen ? null : r.tag)}
+                      className="prose-link cursor-pointer"
+                    >
+                      {isOpen ? 'Hide details' : 'Show details'}
+                    </button>
+                    <a href={releaseUrl(r.tag)} className="prose-link">
+                      Full notes on GitHub →
+                    </a>
+                  </div>
+                </div>
+              </li>
+            )
+          })}
+        </ol>
       </div>
     </section>
   )

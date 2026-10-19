@@ -1,69 +1,51 @@
 # Low-speed and field performance
 
-Cruise is where an airliner spends its time, but it is not what decides
-whether the aircraft can operate. That is settled at low speed, at the two
-ends of the flight: whether it can get off the runway it departs from, and
-whether it can stop on the runway it arrives at.
-
-This chapter covers the two results that answer those questions: the
-matching chart, which sizes the aircraft, and the take-off and landing
-analysis, which checks it against real airports.
+Whether an airliner can operate is settled at low speed: can it leave the runway
+it departs from, and stop on the one it arrives at. This chapter covers the
+matching chart, which sizes the aircraft, and the take-off and landing analysis,
+which checks it against real airports.
 
 ## The matching chart
 
-Before any geometry exists, classical aircraft design reduces the problem
-to two numbers: **wing loading** (weight per unit wing area) and
-**thrust-to-weight ratio**. Nearly every performance requirement can be
-expressed as a constraint on that plane, and the region satisfying all of
-them at once is the design space you are allowed to choose from.
+Classical design reduces the problem to two numbers: **wing loading** and
+**thrust-to-weight ratio**. Most performance requirements are constraints on that
+plane, and the region satisfying all of them is the design space.
 
 <figure markdown>
-  ![Matching chart](assets/ave-matching-chart-light.png#only-light)
-  ![Matching chart](assets/ave-matching-chart-dark.png#only-dark)
+  ![Matching chart](assets/ave-matching-chart-dark.png)
   <figcaption>Every sizing constraint drawn on the wing-loading / thrust-to-weight plane, with the feasible region shaded and the design point marked.</figcaption>
 </figure>
 
 Each line is a different requirement refusing to be violated:
 
-- **Cruise thrust floor**: the thrust needed to balance drag at the cruise
-  design point. It falls with wing loading, then turns back up: a small
-  wing means high lift coefficients and high induced drag, a large one
-  means excess wetted area and parasite drag. The minimum between those is
-  the aerodynamically natural wing size.
-- **Engine-out climb gradient**: with one engine failed the aircraft must
-  still climb at a certified minimum gradient. Here that fixes a floor of
-  T/W ≥ 0.211, independent of wing loading, and it is often the binding
-  constraint on thrust for a twin.
-- **Take-off distance**, per departure airport: rising with wing loading,
-  because a more heavily loaded wing needs more speed before it will fly,
-  and more runway to reach it.
-- **Landing distance**, per arrival airport: a vertical limit on wing
-  loading. Approach speed follows from wing loading and maximum lift
-  coefficient, and landing distance follows from approach speed.
+- **Cruise thrust floor**: the thrust that balances drag at the cruise design
+  point. It falls with wing loading, then rises again: a small wing means high CL
+  and induced drag, a large one means excess wetted area.
+- **Engine-out climb gradient**: a certified minimum gradient with one engine
+  failed puts a floor under T/W for a twin. It is a performance constant
+  (`oei_gradient`) and not a line on this chart, where the cruise floor is the
+  binding thrust constraint.
+- **Take-off distance**, per departure airport: rises with wing loading, since a
+  more heavily loaded wing needs more speed and runway.
+- **Landing distance**, per arrival airport: a vertical limit on wing loading,
+  because approach speed follows from wing loading and maximum lift coefficient.
 
-The **feasible design space** is everything above the climb and cruise
-lines and left of the landing limit. AVE's design point sits at 682 kg/m²
-and T/W = 0.265, inside the region with margin on every side rather than
-pressed against a boundary, which is what you want at a preliminary stage,
-because every one of those constraints will move as the design matures.
-
-Both airports appear separately on the chart. If you fly between two
-airports with very different runway lengths or elevations, the more
-demanding one silently governs the design, and this is where you see which.
+The feasible region lies above the cruise floor and the take-off lines and left of
+the landing limit. AVE's design point, at about 675 kg/m² and T/W = 0.265, sits
+inside it with margin on every side, which suits a preliminary stage because every
+constraint will move as the design matures. Both airports appear on the chart; the
+more demanding one governs the design.
 
 ## Take-off and landing, per airport
 
-The matching chart works in normalised ratios. The next step checks actual
-metres of runway at the specific airports on the route.
+The next step checks actual metres of runway at the airports on the route.
 
 <figure markdown>
-  ![Take-off and landing at the departure airport](assets/ave-lto-departure-light.png#only-light)
-  ![Take-off and landing at the departure airport](assets/ave-lto-departure-dark.png#only-dark)
+  ![Take-off and landing at the departure airport](assets/ave-lto-departure-dark.png)
   <figcaption>Departure field analysis: the runway drawn to scale with decision speeds marked, and required distances against what is available.</figcaption>
 </figure>
 
-The upper panel draws the runway itself, with the certification distances
-laid over it and the decision speeds marked where they occur:
+The upper panel draws the runway with the certification distances and decision speeds:
 
 | Quantity | Meaning |
 |---|---|
@@ -75,37 +57,33 @@ laid over it and the decision speeds marked where they occur:
 | **BFL** | Balanced field length: where TODR and ASD are equal |
 | **LDR** | Landing distance required |
 
-At London Heathrow, with 3,902 m available, AVE needs 2,889 m all-engines
-and a 3,409 m balanced field. The **balanced field length is the number
-that matters**: it is the runway required for the take-off to remain safe
-whichever side of V₁ an engine fails on. Its 493 m of margin here is real
-but not generous, and this is at sea level, in standard conditions.
+At London Heathrow, with 3,902 m available, AVE needs 2,857 m all-engines (V₁ 158 kt,
+V_R 166 kt, V₂ 168 kt). The accelerate-stop and balanced-field proxies land at the
+same 2,857 m, and the landing field length is 1,456 m. The **balanced field length
+is the number that matters**: the runway needed for the take-off to stay safe
+whichever side of V₁ an engine fails on. The margin is 1,045 m, at 25 m elevation
+and ISA+0.
 
 <figure markdown>
-  ![Take-off and landing at the arrival airport](assets/ave-lto-arrival-light.png#only-light)
-  ![Take-off and landing at the arrival airport](assets/ave-lto-arrival-dark.png#only-dark)
-  <figcaption>The same analysis at the arrival airport, where landing distance is the operative figure.</figcaption>
+  ![Take-off and landing at the arrival airport](assets/ave-lto-arrival-dark.png)
+  <figcaption>The same analysis at the arrival airport, where landing distance is the operative figure. Dubai (OMDB, 19 m elevation, ISA+15): 4,000 m available, landing field length 1,531 m. The take-off bars of this panel show 3,004 m.</figcaption>
 </figure>
 
-Landing is much less demanding than take-off for this aircraft: unsurprising,
-since it arrives having burned most of its fuel, and a lighter aircraft
-approaches more slowly and stops sooner.
+Landing is much less demanding than take-off here, because the aircraft arrives
+with most of its fuel burned and approaches slower.
 
-!!! note "Airport conditions are inputs, not constants"
-    Field length is computed at each airport's own elevation and
-    temperature, because both matter and both are unforgiving. Thinner air
-    at altitude reduces engine thrust and increases true airspeed for the
-    same lift, and a hot day does the same thing. An aircraft comfortable
-    at sea level on a standard day can be runway-limited at a
-    high-elevation airport in summer, and the only way to find out is to
-    compute it there.
+!!! note "Airport conditions are inputs"
+    Field length is computed at each airport's own elevation and temperature.
+    Thin air and heat both cut thrust and raise true airspeed for the same lift,
+    so an aircraft comfortable at sea level can be runway-limited at a
+    high-elevation airport in summer.
 
 ## Where these numbers come from
 
 The high-lift coefficients, thrust lapse, engine-out climb gradient and
-landing constant behind all of the above are on the **Performance** page in
+landing constant behind all of the above are on the **Performance** tab of
 Advanced Settings, with matched presets for different aircraft classes.
-See the [user guide](user-guide.md#performance). The formulas are in
+See the [user guide](user-guide.md#advanced-settings). The formulas are in
 [Formulas & theory](reference/formulas.md#the-v-n-diagram), alongside the
 V-speed definitions shared with the
 [V-n diagram](structural-analysis.md#the-v-n-diagram).

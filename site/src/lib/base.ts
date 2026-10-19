@@ -4,7 +4,13 @@
  */
 export function withBase(path = ''): string {
   const rawBase = import.meta.env.BASE_URL || '/'
-  const base = rawBase.endsWith('/') ? rawBase : `${rawBase}/`
+  let base = rawBase.endsWith('/') ? rawBase : `${rawBase}/`
+  // A relative build (VITE_BASE=./) serves pages from different depths; a page
+  // below the root names its way back with <meta name="site-root" content="../">.
+  if (base === './' && typeof document !== 'undefined') {
+    const root = document.querySelector('meta[name="site-root"]')?.getAttribute('content')
+    if (root) base = root.endsWith('/') ? root : `${root}/`
+  }
 
   if (!path) return base
   if (path.startsWith('#')) return `${base}${path}`
