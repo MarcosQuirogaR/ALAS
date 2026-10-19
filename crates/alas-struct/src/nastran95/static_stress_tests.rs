@@ -116,6 +116,7 @@ fn product_stress_request_changes_only_case_control_output() {
         spar_upper_nids: vec![vec![1, 4]],
         spar_lower_nids: vec![],
         engine_nids: vec![],
+        semi_span_m: 0.0,
     };
     let req = DesignRequirements::default();
     let cfg = StructuresConfig::default();

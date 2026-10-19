@@ -154,7 +154,7 @@ pub(super) fn static_loads(
         .spar_upper_nids
         .first()
         .map_or(&[], |nids| nids.as_slice());
-    let semi_span = deck.node_y(node_index.tip_nid);
+    let semi_span = node_index.semi_span_m.max(deck.node_y(node_index.tip_nid));
     let nid_y: Vec<(i64, f64)> = front_upper
         .iter()
         .map(|&nid| (nid, deck.node_y(nid)))

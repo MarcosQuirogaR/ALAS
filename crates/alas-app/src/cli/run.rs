@@ -10,6 +10,7 @@ use super::args::{apply_cli_tool_preferences, load_config, parse_args, CliArgs};
 use super::plots::{plots_dir, save_result_plots};
 use super::summaries::{
     print_cpacs_summary, print_mses_summary, print_optimization_summary, print_structural_summary,
+    print_tool_failures,
 };
 use alas_exec::download::{download_files, DownloadSpec};
 use alas_exec::ToolLocator;
@@ -185,7 +186,7 @@ fn run_headless(cli: CliArgs) -> i32 {
     }
 
     if options.save_plots {
-        match save_result_plots(&result, options.output_dir.as_deref()) {
+        match save_result_plots(&result, options.output_dir.as_deref(), cli.plot_data) {
             Ok(count) if !cli.quiet => {
                 println!(
                     "Saved {count} SVG plot(s) to {}.",
@@ -214,6 +215,7 @@ fn run_headless(cli: CliArgs) -> i32 {
     print_mses_summary(&result, cli.quiet);
     print_structural_summary(&result, cli.quiet);
     print_cpacs_summary(&result, cli.quiet);
+    print_tool_failures(&result, cli.quiet);
 
     0
 }

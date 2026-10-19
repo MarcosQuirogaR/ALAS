@@ -41,6 +41,12 @@ impl ToolLocator {
         &self.app_root
     }
 
+    /// The per-user writable data folder: the one default location for saved
+    /// configurations, user aircraft, custom airports, and exports.
+    pub fn user_data_root(&self) -> &Path {
+        &self.user_data_root
+    }
+
     /// Location of the user-level preferences file.
     pub fn preferences_path(&self) -> PathBuf {
         self.user_data_root.join("tool-preferences.json")

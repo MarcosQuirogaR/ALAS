@@ -191,6 +191,7 @@ fn show_span_load_card(outcome: &WingAnalysisOutcome, ui: &mut Ui) {
             ],
             &tr("Spanwise station y / (b/2), positive to starboard"),
             &tr("N/m"),
+            "wing_analysis_span_load",
         );
         let peak = outcome
             .span_load
@@ -255,6 +256,7 @@ fn show_sweep_card(outcome: &WingAnalysisOutcome, ui: &mut Ui) {
             ],
             &tr("Angle of attack (deg)"),
             &tr("CL and Cm"),
+            "wing_analysis_cl_cm_vs_alpha",
         );
         ui.add_space(6.0);
         line_chart(
@@ -267,6 +269,7 @@ fn show_sweep_card(outcome: &WingAnalysisOutcome, ui: &mut Ui) {
             }],
             &tr("Induced drag coefficient CDi"),
             &tr("CL"),
+            "wing_analysis_induced_drag_polar",
         );
     });
 }

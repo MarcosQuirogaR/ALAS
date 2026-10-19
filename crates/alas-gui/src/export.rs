@@ -430,6 +430,12 @@ fn crc32(bytes: &[u8]) -> u32 {
     !crc
 }
 
+mod plot_data;
+pub use plot_data::{
+    collect_plot_data, default_plot_export_dir, export_all_plot_data, export_plot_data, line_plot,
+    run_label, write_plot_bundle, PLOT_DATA_ARCHIVE_NAME, PLOT_DATA_DIR_NAME,
+};
+
 #[cfg(test)]
 #[path = "export/tests.rs"]
 mod tests;

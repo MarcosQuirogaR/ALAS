@@ -49,6 +49,7 @@ pub fn dc_10() -> AircraftPreset {
                 source: "Boeing DC-10 Airplane Characteristics for Airport Planning section 3.2.1 p.54 (payload/range M0.82 step cruise, Series 30, 572,000 lb MTOGW curve): maximum-payload corner read as 4,120 nmi at 101,396 lb (45,993 kg); read uncertainty +-100 nmi; reserves per FAR 121.645 at a 200 nmi alternate",
             }),
             certified_max_seats: Some(399),
+            certified_exit_layout: Some(crate::presets::DC_10_30_EXIT_LAYOUT),
             cg_evidence: CgEnvelopeEvidence::AfmRequired,
             // The ACAP publishes the Series 30 ground envelope at the
             // 583,000 lb maximum ramp weight; the 572,000 lb option lies

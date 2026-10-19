@@ -631,19 +631,16 @@ mod product_tests {
                 "{name} preset reported a passenger shortfall"
             );
             if name == "DC-10" {
-                // The DC-10 source record publishes a planning seat count
-                // without a revision-locked exit-pair arrangement and LOPA
-                // that this generic cabin can reproduce.  Keep the corrected
-                // complete-pair proxy visible as a source/layout gap instead
-                // of silently doubling a pair rating or treating a planning
-                // count as a hard floor-fill target.  The common assertions
-                // above still require a physically consistent row pack: no
-                // passenger is reported seated without a mass-bearing row.
-                assert_eq!(summary.source_exit_layout, None);
-                // Its planning-seat ceiling is below the geometric exit sum,
-                // which the summary reports as the cap even though this shell
-                // cannot seat that many.
-                assert_eq!(summary.capacity_binding, "planning_seat_cap");
+                // The DC-10 ACAP prints its four door pairs (B-A-A-A, 405,
+                // under the 399-seat maximum) but no LOPA that this generic
+                // cabin can reproduce.  Keep the planning-count shortfall
+                // visible as a source/layout gap instead of treating the
+                // planning count as a hard floor-fill target.  The common
+                // assertions above still require a physically consistent row
+                // pack: no passenger is reported seated without a
+                // mass-bearing row.
+                assert_eq!(summary.source_exit_layout, Some("B-A-A-A"));
+                assert_eq!(summary.geometric_capacity, 405);
                 assert!(
                     summary.total_pax < preset.requirements.num_passengers,
                     "{name} source/layout gap was hidden by a planning-count pin"

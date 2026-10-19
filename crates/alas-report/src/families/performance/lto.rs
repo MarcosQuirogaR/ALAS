@@ -19,6 +19,7 @@ use crate::scene::{Color, Fill, Scene, SceneElement, Stroke, TextAlign, TextBase
 use crate::theme::get_palette;
 
 mod inputs;
+mod plot_data;
 
 const MS_TO_KT: f64 = 1.94384;
 const GRASS: &str = "#2d5a27";
@@ -358,6 +359,7 @@ fn draw_bars(
         performance.lda_m(),
     ];
     let colours = ["#3498db", "#e67e22", "#e74c3c", "#2ecc71"];
+    plot_data::record_distances(scene, labels, [values, available]);
     let max_value = available
         .iter()
         .chain(values.iter())

@@ -71,6 +71,7 @@ impl NodeIndex {
             spar_upper_nids: self.spar_upper_nids.clone(),
             spar_lower_nids: self.spar_lower_nids.clone(),
             engine_nids: self.engine_nids.clone(),
+            semi_span_m: 0.0,
         }
     }
 }

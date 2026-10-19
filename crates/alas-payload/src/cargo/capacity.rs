@@ -50,3 +50,15 @@ impl CargoLoadManager<'_> {
         result
     }
 }
+
+impl CargoLoadManager<'_> {
+    /// Installed positions whose identifier starts with `prefix` (`"FWD-"`
+    /// for the forward hold, `"AFT-"` for the aft hold). `bulk` selects the
+    /// loose-bulk positions instead of the rigid containers.
+    pub fn installed_positions(&self, prefix: &str, bulk: bool) -> usize {
+        self.slots
+            .iter()
+            .filter(|slot| slot.sid.starts_with(prefix) && (slot.uld.code == BULK.code) == bulk)
+            .count()
+    }
+}

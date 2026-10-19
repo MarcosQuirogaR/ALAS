@@ -378,6 +378,16 @@ fn validate_deck_request(request: AvlDeckRequest<'_>) -> Result<(), AvlError> {
             "at least one lifting surface is required".to_owned(),
         ));
     }
+    let vortices = avl_vortex_count(
+        airplane,
+        request.chordwise_vortices,
+        request.spanwise_vortices,
+    );
+    if vortices > AVL_VORTEX_LIMIT {
+        return Err(AvlError::InvalidInput(format!(
+            "deck needs {vortices} horseshoe vortices, above AVL's compiled limit of {AVL_VORTEX_LIMIT} (NVMAX)"
+        )));
+    }
     for wing in &airplane.wings {
         if wing.xsecs.len() < 2 {
             return Err(AvlError::InvalidInput(format!(

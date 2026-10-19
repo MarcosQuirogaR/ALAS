@@ -22,13 +22,24 @@ use super::*;
 pub(super) const RAMP_START_MACH: f64 = 0.3;
 /// Largest Mach increment between ramp stages.
 const RAMP_MAX_STEP: f64 = 0.1;
-/// Smallest Mach increment tried before the ramp declares a stall: three
-/// halvings of [`RAMP_MAX_STEP`]. A section that cannot be advanced by 0.0125
-/// in Mach is at its steady-solution boundary (shock-induced separation), and
-/// every further halving costs a full diverging solve.
-const RAMP_MIN_STEP: f64 = RAMP_MAX_STEP / 8.0;
+/// Smallest Mach increment tried before the ramp declares a stall: five
+/// halvings of [`RAMP_MAX_STEP`] (0.003125). Three halvings (0.0125) stalled
+/// the A340-300 root at M 0.639-0.655 (Re 5.7e7) although a steady solution
+/// exists up to its design M 0.714: restarted from the last converged Mach with
+/// steps down to 0.003 the walk reaches the target in about 30 runs. Every
+/// halving costs one diverging solve of a few seconds.
+const RAMP_MIN_STEP: f64 = RAMP_MAX_STEP / 32.0;
 /// Resource bound on the number of solver runs one ramp may take.
-const RAMP_MAX_RUNS: usize = 16;
+const RAMP_MAX_RUNS: usize = 48;
+/// Grid-point offsets (added to the configured `mset_n`) tried, in order, when
+/// a section's Mach walk stalls on the configured mesh. A stalled walk with a
+/// small, constant residual (1e-5 on the DC-10 root at M 0.3, Re 7.6e7) or a
+/// stall at low Mach (A400M root, M 0.39) is a transition-node limit cycle
+/// tied to where the nodes fall, not a flow limit: a different node count
+/// converges the same section (DC-10 root 161, DC-10 kink 171, A400M root
+/// 161 points). The mesh density is a numerical setting, not a physical
+/// assumption; every retry is recorded in the solver attempts.
+const MESH_RETRY_OFFSETS: [i64; 5] = [20, -20, 30, 10, -10];
 /// Angle offset of the lower-lift anchor used when a cold point's Mach walk
 /// stalls at its own angle. Two bounded continuation steps
 /// ([`MAX_CONTINUATION_STEP_DEG`] each) below the requested angle.
@@ -39,6 +50,9 @@ const CL_ANCHOR_OFFSET_DEG: f64 = 2.0 * MAX_CONTINUATION_STEP_DEG;
 /// the final stage use the configured budget: the first can converge slowly
 /// on a thick aft-loaded section (residual 3e-5 at 60 iterations).
 const RAMP_STAGE_ITERATIONS: i64 = 60;
+
+/// Fewest surface points a grid retry may use.
+const MIN_RETRY_MESH_POINTS: i64 = 81;
 
 /// Pure step controller for the Mach walk.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -122,11 +136,56 @@ impl Mses {
             return Ok(Some(RampOutcome::Cancelled));
         }
         match self.mach_ramp_cold_start(dir, alpha, reynolds, mach, cancel, attempts)? {
-            RampOutcome::Stalled => self
-                .cl_anchored_cold_start(dir, alpha, reynolds, mach, cancel, attempts)
-                .map(Some),
+            RampOutcome::Stalled => {
+                match self.cl_anchored_cold_start(dir, alpha, reynolds, mach, cancel, attempts)? {
+                    RampOutcome::Stalled => self
+                        .mesh_retry_cold_start(dir, alpha, reynolds, mach, cancel, attempts)
+                        .map(Some),
+                    outcome => Ok(Some(outcome)),
+                }
+            }
             outcome => Ok(Some(outcome)),
         }
+    }
+
+    /// Repeat the Mach walk on meshes with a different number of surface
+    /// points ([`MESH_RETRY_OFFSETS`]) after the configured mesh stalled. The
+    /// first mesh whose walk reaches the target wins; if none does, the last
+    /// state is unusable and the caller sees `Stalled`.
+    pub(super) fn mesh_retry_cold_start(
+        &self,
+        dir: &Path,
+        alpha: f64,
+        reynolds: f64,
+        mach: f64,
+        cancel: Option<&AtomicBool>,
+        attempts: &mut Vec<MsesSolverAttempt>,
+    ) -> Result<RampOutcome, MsesFailure> {
+        for offset in MESH_RETRY_OFFSETS {
+            let points = self.mset_n + offset;
+            if points < MIN_RETRY_MESH_POINTS {
+                continue;
+            }
+            match self.run_mset_with_points(dir, alpha, points, cancel) {
+                Ok(()) => {}
+                Err(failure) if cancelled(&failure) => return Ok(RampOutcome::Cancelled),
+                Err(failure) => return Err(failure),
+            }
+            attempts.push(MsesSolverAttempt {
+                alpha_deg: alpha,
+                purpose: format!(
+                    "grid retry: MSET re-run with n={points} surface points (configured {}) after the Mach walk stalled",
+                    self.mset_n
+                ),
+                status: MsesPolarPointStatus::NotConverged,
+                solver_output: String::new(),
+            });
+            match self.mach_ramp_cold_start(dir, alpha, reynolds, mach, cancel, attempts)? {
+                RampOutcome::Stalled => {}
+                outcome => return Ok(outcome),
+            }
+        }
+        Ok(RampOutcome::Stalled)
     }
 
     /// Lower-lift start for a cold point whose Mach walk stalled at its own
@@ -302,11 +361,12 @@ mod tests {
         let mut ramp = MachRamp::new(0.7).expect("transonic target");
         assert!(ramp.failed());
         assert!((ramp.next_mach() - 0.35).abs() < 1e-12);
-        assert!(ramp.failed());
-        assert!(ramp.failed());
+        for _ in 0..4 {
+            assert!(ramp.failed());
+        }
         assert!(
             !ramp.failed(),
-            "three halvings of 0.1 reach the 0.0125 floor"
+            "the sixth halving of 0.1 goes below the 0.003125 floor"
         );
     }
 }

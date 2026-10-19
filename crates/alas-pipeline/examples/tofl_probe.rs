@@ -56,14 +56,14 @@ fn line(name: &str) -> Result<String, String> {
     let r = report_isa_sea_level_field_reference(&config, &report, airplane.s_ref, mtow, mlw)?;
     let Some(f) = r.takeoff_field else {
         return Ok(format!(
-            "{name}: TOFL {:.0} m (propeller/replay method)",
-            r.takeoff_field_length_m
+            "{name}: TOFL {:.0} m (propeller/replay method) | BFL {:.0} | Vref {:.1} | LDR {:.0} LFL {:.0}",
+            r.takeoff_field_length_m, r.model_balanced_field_length_m, r.vref_m_s, r.landing_distance_m, r.landing_field_length_m
         ));
     };
     Ok(format!(
-        "{name}: mtow {mtow:.0} T/W {:.4} VSR {:.1} V2 {:.1} ({:.3} VSR) Vref {:.1} | VR {:.1} V1 {:.1} VEF {:.1} | AEO {:.0} x1.15 {:.0} | ASD {:.0} GO {:.0} BFL {:.0} | TOFL {:.0}",
+        "{name}: mtow {mtow:.0} T/W {:.4} VSR {:.1} V2 {:.1} ({:.3} VSR) Vref {:.1} | VR {:.1} V1 {:.1} VEF {:.1} | AEO {:.0} x1.15 {:.0} | ASD {:.0} GO {:.0} BFL {:.0} | TOFL {:.0} CLTO {:.3} | LDR {:.0} LFL {:.0} VS1gL {:.1}",
         r.static_tw, r.v_stall_takeoff_m_s, r.v2_m_s, r.v2_m_s / r.v_stall_takeoff_m_s, r.vref_m_s,
         f.vr_m_s, f.v1_m_s, f.vef_m_s, f.all_engine_m, 1.15 * f.all_engine_m,
-        f.accelerate_stop_m, f.continued_m, f.balanced_m, f.tofl_m,
+        f.accelerate_stop_m, f.continued_m, f.balanced_m, f.tofl_m, config.performance.cl_max_to, r.landing_distance_m, r.landing_field_length_m, r.vs1g_landing_m_s,
     ))
 }

@@ -10,7 +10,7 @@
 //! model-change bookkeeping. Every editor shows the unit and the valid range
 //! and offers a reset to the AVE reference value.
 
-use egui::{ComboBox, DragValue, RichText, Ui};
+use egui::{DragValue, RichText, Ui};
 use serde_json::Value;
 
 use crate::state::AppState;
@@ -290,17 +290,14 @@ fn airfoil_editor(state: &mut AppState, ui: &mut Ui, field: &SandboxField, curre
 fn engine_editor(state: &mut AppState, ui: &mut Ui, field: &SandboxField, current: &Value) {
     let current = current.as_str().unwrap_or_default().to_owned();
     let names = state.engine_names.clone();
-    let mut chosen = None;
-    ComboBox::from_id_salt(("sandbox_engine", &field.id))
-        .width(ui.available_width())
-        .selected_text(&current)
-        .show_ui(ui, |ui| {
-            for name in &names {
-                if ui.selectable_label(*name == current, name).clicked() {
-                    chosen = Some(name.clone());
-                }
-            }
-        });
+    let chosen = crate::selector_search::named_list_combo(
+        ui,
+        &format!("sandbox_engine::{}", field.id),
+        Some(ui.available_width()),
+        &current,
+        &names,
+        &current,
+    );
     if let Some(name) = chosen {
         let before = state.edit_snapshot();
         state.sandbox.undo.record(before);

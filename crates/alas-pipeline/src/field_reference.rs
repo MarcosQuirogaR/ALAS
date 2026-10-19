@@ -133,18 +133,14 @@ pub struct IsaSeaLevelFieldReference {
     /// Take-off-configuration reference stall speed `VSR` at the take-off
     /// mass, m/s, from which `V2 / VSR` is formed.
     pub v_stall_takeoff_m_s: f64,
-    /// Unfactored landing distance from 50 ft, m. Propellers use Torenbeek's
-    /// air-phase energy and touchdown braking balance. Jets retain the
-    /// correlation `K (W/S)/(sigma CL_max,land)` at the landing mass.
-    ///
-    /// `K` (`performance.k_land`, one value, 0.505 m/Pa) is an actual-distance
-    /// coefficient, not a field-length one: it is calibrated as the mean of
-    /// 0.6 LFL / (0.5 rho0 (Vref/1.23)^2) over eight certified jets (see
-    /// `PerformanceConfig::default`). Loftin (NASA RP-1060, Fig. 3.4) gives
-    /// 0.572 and Raymer eq. 5.11 (80 ft/psf = 0.51 m/Pa plus an air-distance
-    /// term) is of the same order. The field length above is this divided by
-    /// the 0.6 dry share (`JET_DRY_LANDING_SHARE`), the same share the
-    /// optimizer residual, matching chart and delivery gate apply to the LDA.
+    /// Unfactored landing distance from 50 ft, m: the Torenbeek (2013) Eqs.
+    /// 9.21-9.24 air, flare and braked-run segments at Vref = 1.23 VS1g, with
+    /// the mean deceleration of the declared main-gear truck (jets, p. 274) or
+    /// the propeller method's sourced values; no reverse thrust. The
+    /// `k_land` correlation remains only in `legacy_field_correlations` replay.
+    /// The field length above is this divided by the dry share
+    /// (`JET_DRY_LANDING_SHARE`), the share the optimizer residual, matching
+    /// chart and delivery gate apply to the LDA.
     pub landing_distance_m: f64,
     /// 1 g landing-configuration stall speed at the landing mass, m/s.
     pub vs1g_landing_m_s: f64,

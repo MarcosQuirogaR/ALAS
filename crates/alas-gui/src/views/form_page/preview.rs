@@ -77,7 +77,8 @@ pub(super) fn render_preview(
             // Centred, and only as wide as the drawing, so the figure is not
             // letterboxed inside the container.
             ui.vertical_centered(|ui| {
-                ui.add(view);
+                let response = ui.add(view);
+                super::super::plot_data_menu::attach_scene(&response, &scene, preview_id, None);
             });
         }
         None => {

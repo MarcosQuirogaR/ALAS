@@ -451,9 +451,11 @@ fn toc_probe() {
 }
 
 /// Improved climb on the B787-9 candidate with an installed T/W that the best-climb
-/// speed can reach (0.246, between the 0.2408 required at the best speed and the 0.2515 at
-/// the schedule): the lowest meeting speed is resolved into the configuration,
-/// raises V2 and charges the jet field length by the square of the speed ratio.
+/// speed can reach (0.265, between the 0.2583 required at the best speed and the 0.2721 at
+/// the 1.13 VSR schedule; re-pinned by lane field lengths, 2026-10-17, by probe: the
+/// CS 25.107 schedule and the capped BPR 8 take-off chart move both): the lowest
+/// meeting speed is resolved into the configuration, raises V2 and charges the jet
+/// field length by the square of the speed ratio.
 #[test]
 fn an_attainable_gradient_resolves_the_lowest_speed_and_charges_the_field() {
     use super::improved_climb::{resolve_improved_climb, ImprovedClimbInputs};
@@ -483,18 +485,20 @@ fn an_attainable_gradient_resolves_the_lowest_speed_and_charges_the_field() {
         drag: &outcome.sized.fuel_artifacts.drag,
         installed_tw_sls,
     };
-    // 0.2460 is reachable only above the schedule speed.
-    let (improved, selection) = resolve_improved_climb(&resolved, &inputs(0.2460));
+    // 0.2650 is reachable only above the schedule speed.
+    let (improved, selection) = resolve_improved_climb(&resolved, &inputs(0.2650));
     let selection = selection.unwrap();
     assert!(selection.improved && selection.meets, "{selection:?}");
-    assert!(selection.required <= 0.2460 && selection.required > 0.2459);
+    assert!(selection.required <= 0.2650 && selection.required > 0.2649);
     let x = selection.v2_over_vsr;
-    assert!(x > 1.20 && x < 1.42, "{x}");
+    let schedule = selection.schedule_v2_over_vsr;
+    assert!((schedule - 1.13).abs() < 1e-12, "{schedule}");
+    assert!(x > schedule && x < 1.42, "{x}");
     let perf = &improved.performance;
     assert_eq!(perf.improved_climb_v2_over_vsr, Some(x));
     assert!((perf.takeoff_speed_ratios().v2 - x).abs() < 1e-12);
-    assert!((perf.schedule_takeoff_speed_ratios().v2 - 1.20).abs() < 1e-12);
-    assert!((perf.improved_climb_field_factor() - (x / 1.20).powi(2)).abs() < 1e-12);
+    assert!((perf.schedule_takeoff_speed_ratios().v2 - schedule).abs() < 1e-12);
+    assert!((perf.improved_climb_field_factor() - (x / schedule).powi(2)).abs() < 1e-12);
     // The jet field length is the schedule length times that factor.
     let sea_level = Airport::custom("ISA sea level", 0.0, 10_000.0, 10_000.0, 0.0, 0.0, 0.0);
     let todr = |c: &AlasConfig| {
@@ -513,14 +517,14 @@ fn an_attainable_gradient_resolves_the_lowest_speed_and_charges_the_field() {
         )
         .todr_m
     };
-    assert!((todr(&improved) / todr(&resolved) - (x / 1.20).powi(2)).abs() < 1e-9);
+    assert!((todr(&improved) / todr(&resolved) - (x / schedule).powi(2)).abs() < 1e-9);
     // The schedule that already meets, the switch and the best-climb miss.
     let (kept, selection) = resolve_improved_climb(&resolved, &inputs(0.40));
     assert!(!selection.unwrap().improved);
     assert!(kept.performance.improved_climb_v2_over_vsr.is_none());
     let mut off = resolved.clone().into_owned();
     off.performance.improved_climb_v2 = false;
-    let (same, selection) = resolve_improved_climb(&off, &inputs(0.2460));
+    let (same, selection) = resolve_improved_climb(&off, &inputs(0.2650));
     assert!(selection.is_none() && same.performance.improved_climb_v2_over_vsr.is_none());
     let (missed, selection) = resolve_improved_climb(&resolved, &inputs(0.2350));
     let selection = selection.unwrap();

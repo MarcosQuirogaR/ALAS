@@ -114,9 +114,12 @@ The `optimizer/plausibility.rs` limits are already in the appropriate broad
 group. They are validity-domain windows for aspect ratio, fuselage fineness,
 tail-arm fraction, chord ratios, thickness ratio, washout and planform order.
 They protect the correlations and geometry builder; they are not
-certification requirements. Tail-volume windows and clean-sheet body-angle
+certification requirements. Clean-sheet body-angle
 windows in `mdo/residuals_geometry.rs` are preferences/study bounds and should
-remain labelled as such.
+remain labelled as such. There is no tail-volume window in the code: a clean-sheet
+tail is sized by the physical checks of the candidate (balance limits per loading
+state, `vmc_over_vsr`, `crosswind_rudder`, `directional_stability`; see
+`docs/methods.md`), and a reference adaptation holds the registered V_H and V_V.
 
 ## Residual consumer map
 

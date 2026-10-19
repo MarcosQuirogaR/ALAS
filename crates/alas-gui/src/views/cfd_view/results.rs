@@ -93,6 +93,23 @@ fn show_result_import(state: &mut AppState, ui: &mut Ui) {
                     .hint_text(tr("Path to results.json"))
                     .desired_width((ui.available_width() - 120.0).clamp(160.0, 560.0)),
             );
+            let data = state.data_dir();
+            let current = state.cfd.result_json_path.clone();
+            crate::file_dialog::browse_button(
+                state,
+                ui,
+                crate::file_dialog::DialogTarget::CfdResultJson,
+                |_| {
+                    crate::file_dialog::spec(
+                        crate::file_dialog::DialogKind::OpenFile,
+                        "Load persisted OpenFOAM result",
+                        &current,
+                        &data,
+                        None,
+                        vec![("results.json".to_owned(), vec!["json".to_owned()])],
+                    )
+                },
+            );
             if ui.small_button(tr("Load result")).clicked() {
                 let path = std::path::PathBuf::from(state.cfd.result_json_path.trim());
                 match state.cfd.load_result_json(&path) {
@@ -234,8 +251,25 @@ pub(super) fn show_line_plot_with(
         ui.set_min_width(ui.available_width());
         ui.label(RichText::new(tr(title)).strong());
         let width = ui.available_width().max(200.0);
-        let (rect, _) = ui.allocate_exact_size(vec2(width, plot_height(width)), Sense::hover());
+        let (rect, response) =
+            ui.allocate_exact_size(vec2(width, plot_height(width)), Sense::click());
         paint_line_plot_with(ui, rect, points, invert_y);
+        crate::views::plot_data_menu::attach_xy(
+            &response,
+            &format!(
+                "cfd_{}",
+                alas_report::plot_data::safe_file_stem(&title.to_lowercase())
+            ),
+            title,
+            x_label,
+            y_label,
+            || {
+                vec![(
+                    title.to_owned(),
+                    crate::views::plot_data_menu::pairs(points),
+                )]
+            },
+        );
         plot_footer(ui, x_label, y_label, points.len());
     });
 }

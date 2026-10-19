@@ -594,6 +594,18 @@ pub fn operational(path: &str) -> Option<Value> {
     })
 }
 
+/// Lower holds a preset declares by station (`presets::declared_lower_holds`):
+/// the frozen configuration carries no declared hold compartments.
+pub fn declared_lower_holds(path: &str) -> Option<Value> {
+    let case = path.strip_suffix(".cabin.cargo.hold_compartments")?;
+    let name = match case {
+        "preset_only" => "A220-300",
+        "preset_then_field" => "B787-9",
+        name => name,
+    };
+    serde_json::to_value(alas_config::presets::declared_lower_holds(name)?).ok()
+}
+
 /// Source-constrained side-of-body corrections have no Python counterpart.
 pub fn added_planform(path: &str) -> Option<Value> {
     match path {

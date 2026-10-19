@@ -5,6 +5,9 @@
 
 use alas_config::{Entry, Field, Kind, OptionalValueKind};
 use egui::{ComboBox, DragValue, RichText, Slider, TextEdit, Ui};
+
+/// Option lists longer than this get a search box in their drop-down.
+const LONG_LIST_SEARCH_THRESHOLD: usize = 12;
 use serde_json::Value;
 
 use super::display_unit;
@@ -316,7 +319,20 @@ pub(super) fn edit_str(
                     {
                         changed = true;
                     }
+                    // A long list (more than a screenful) gets a search box.
+                    let search_salt = format!("{id_prefix}::{}", field.name);
+                    let query = if opts.len() > LONG_LIST_SEARCH_THRESHOLD {
+                        crate::selector_search::search_field(ui, &search_salt)
+                    } else {
+                        String::new()
+                    };
                     for opt in opts {
+                        if !crate::selector_search::matches(
+                            &query,
+                            &[opt.as_str(), display_option(field, opt).as_str()],
+                        ) {
+                            continue;
+                        }
                         let response =
                             ui.selectable_label(current == *opt, display_option(field, opt));
                         let response = if let Some(kind) =
@@ -334,6 +350,13 @@ pub(super) fn edit_str(
                         }
                     }
                 });
+            if opts.len() > LONG_LIST_SEARCH_THRESHOLD {
+                crate::selector_search::reset_when_closed(
+                    ui,
+                    &format!("{id_prefix}::{}", field.name),
+                    &response.inner,
+                );
+            }
             let hover = match super::options::objective_kind(field, &current) {
                 Some(kind) => format!(
                     "{selected}\n\n{}",

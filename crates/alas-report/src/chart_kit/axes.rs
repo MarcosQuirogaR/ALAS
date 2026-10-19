@@ -5,6 +5,7 @@ use super::*;
 
 /// Add a chart title using the palette's title color and shared typography.
 pub fn draw_title(scene: &mut Scene, title: &str, pal: &Palette) {
+    let _chrome = crate::plot_data::ChromeGuard::begin();
     if title.trim().is_empty() {
         return;
     }
@@ -59,6 +60,7 @@ pub fn wrap_text(text: &str, max_chars_per_line: usize) -> String {
 
 /// Draw labels for a categorical x axis without pretending categories are numeric.
 pub fn draw_categorical_x_axis(axes: &Axes2D, scene: &mut Scene, labels: &[&str], pal: &Palette) {
+    let _chrome = crate::plot_data::ChromeGuard::begin();
     if labels.is_empty() {
         return;
     }
@@ -149,6 +151,8 @@ fn draw_axes_configured(
     y_label: Option<&str>,
     show_x_tick_labels: bool,
 ) {
+    scene.data_trace.note_labels(axes, x_label, y_label);
+    let _chrome = crate::plot_data::ChromeGuard::begin();
     let spine = Color::from_hex(pal.spine);
     let grid = Color::rgba(spine.r, spine.g, spine.b, 105);
     let tick_color = Color::from_hex(pal.tick);

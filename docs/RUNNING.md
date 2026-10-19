@@ -340,6 +340,35 @@ description of what the module guarantees.
 
 ---
 
+## Files in the desktop GUI
+
+Every path field has a text box (paste a path) and a **Browse...** button that
+opens the system file or folder dialog (Windows common dialogs; the XDG desktop
+portal, or `zenity`/`kdialog`, on Linux).
+
+All saves default to one per-user data folder, the same one that holds
+`tool-preferences.json` and `custom-airports.json`:
+
+| System | Folder |
+| --- | --- |
+| Windows | `%LOCALAPPDATA%\ALAS` |
+| macOS | `~/Library/Application Support/ALAS` |
+| Linux | `$XDG_DATA_HOME/ALAS`, else `~/.local/share/ALAS` |
+
+The File menu shows the folder with an **Open folder** button. Relative paths
+typed in a save field resolve there; any absolute path or dialog choice is
+accepted instead.
+
+**My aircraft.** *Save as my aircraft...* (Inputs page, under the aircraft
+selector) stores the current aircraft and mission configuration in
+`my-aircraft/` of the data folder under a name you choose. Saving under another
+name keeps another variant of the same airframe (for example one per mission).
+Saved aircraft appear in the aircraft list under *My aircraft*; *Manage my
+aircraft...* renames, deletes, imports and exports them to any path. Loading one
+keeps this machine's tool locations. The aircraft, engine and airport lists have
+a search box (case-insensitive substring over name and ICAO code) that is
+focused when the list opens.
+
 ## Backing up
 
 The repository has no remote, by design. To write a full copy into OneDrive:

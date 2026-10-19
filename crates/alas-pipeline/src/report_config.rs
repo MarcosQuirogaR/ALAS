@@ -83,8 +83,14 @@ pub fn evaluate_report_vmc(
 pub struct ReportResolution<'a> {
     /// The configuration the V speeds are built from.
     pub config: Cow<'a, AlasConfig>,
-    /// The computed minimum control speed outcome.
+    /// The computed minimum control speed outcome at the analysed take-off
+    /// mass: the basis of the speed schedule (`VMC / VSR` of the load case
+    /// that is flown).
     pub vmc: VmcOutcome,
+    /// The minimum control speed outcome at the maximum take-off weight of
+    /// the design, the condition CS 25.149(c)(4) states for the
+    /// `VMC <= 1.13 VSR` ceiling (the findings read this one).
+    pub vmc_at_mtow: VmcOutcome,
     /// The improved-climb selection (jets), `None` when it was not evaluated.
     pub improved_climb: Option<ImprovedClimbSelection>,
 }
@@ -108,6 +114,18 @@ pub fn resolve_report<'a>(
         landing_mass_kg,
         wing_area_m2,
     );
+    // CS 25.149(c)(4): the ceiling holds at the maximum sea-level take-off
+    // weight. The analysed mass is the flown load case, lighter than that
+    // for a short route, and `VSR` falls with it while `VMC` (a thrust and
+    // fin balance) barely does, so the ratio at the flown mass overstates
+    // the ceiling ratio. The sized mass is the design's own maximum take-off
+    // weight (the declared one when the report is unsized).
+    let mtow_kg = report.analysis_takeoff_mass_kg(config.requirements.mtow_kg);
+    let vmc_at_mtow = if (mtow_kg - takeoff_mass_kg).abs() <= 1.0e-9 * mtow_kg.abs() {
+        vmc.clone()
+    } else {
+        evaluate_report_vmc(&scaled, report, mtow_kg, landing_mass_kg, wing_area_m2)
+    };
     let with_vmc = match performance_with_vmc(&scaled, &vmc) {
         Cow::Owned(resolved) => Cow::Owned(resolved),
         Cow::Borrowed(_) => scaled,
@@ -116,6 +134,7 @@ pub fn resolve_report<'a>(
     ReportResolution {
         config,
         vmc,
+        vmc_at_mtow,
         improved_climb,
     }
 }
@@ -266,28 +285,73 @@ mod tests {
             );
             speeds.v2_ms / speeds.v_stall_to_ms
         };
-        // Declared estimate: V2 = 1.10 x 1.13 = 1.243 VSR; computed: the
-        // configured 1.20 VSR governs.
+        // Declared estimate: V2 = 1.10 x 1.13 = 1.243 VSR. Computed: the
+        // registered A320 flies the CS 25.107 rule, V2 = max(1.13 VSR, 1.10
+        // VMC, VR) with the computed VMC far below 1.13 / 1.10 VSR, raised to
+        // the improved-climb speed the second segment needs at MTOW.
         assert!(
             (v2_ratio(&config) - 1.243).abs() < 1e-9,
             "{}",
             v2_ratio(&config)
         );
+        let expected = resolved
+            .performance
+            .improved_climb_v2_over_vsr
+            .unwrap_or(1.13)
+            .max(1.13);
         assert!(
-            (v2_ratio(&resolved) - 1.20).abs() < 1e-9,
-            "{}",
+            (v2_ratio(&resolved) - expected).abs() < 1e-9 && v2_ratio(&resolved) < 1.243,
+            "{} against {expected}",
             v2_ratio(&resolved)
         );
     }
 
     #[test]
+    fn the_vmc_ceiling_ratio_is_taken_at_the_maximum_takeoff_weight_not_the_flown_mass() {
+        // CS 25.149(c)(4): the 1.13 VSR ceiling is shown at the maximum
+        // sea-level take-off weight. A light flown mass lowers VSR (about
+        // the square root of the mass) and leaves VMC nearly unchanged, so
+        // the ratio at the flown mass is higher than the certified one.
+        let config = AlasConfig::from_value(&serde_json::json!({"preset": "A320-200"})).unwrap();
+        let design = config.configured_nominal_design();
+        let analysis = report(&config, &design);
+        let mtow = config.requirements.mtow_kg;
+        let light = 0.6 * mtow;
+        let resolution = resolve_report(
+            &config,
+            &analysis,
+            light,
+            config.landing_mass_limit_kg(light),
+            analysis.airplane.s_ref,
+        );
+        let ratio = |outcome: &VmcOutcome| {
+            outcome
+                .at_sea_level
+                .as_ref()
+                .map(|assessment| assessment.vmc_over_vsr)
+                .unwrap()
+        };
+        let at_mtow = evaluate_report_vmc(
+            &config_with_geometry_clmax(&config, &analysis),
+            &analysis,
+            mtow,
+            config.landing_mass_limit_kg(light),
+            analysis.airplane.s_ref,
+        );
+        assert!((ratio(&resolution.vmc_at_mtow) - ratio(&at_mtow)).abs() < 1.0e-12);
+        assert!(
+            ratio(&resolution.vmc) > 1.1 * ratio(&resolution.vmc_at_mtow),
+            "flown {} against MTOW {}",
+            ratio(&resolution.vmc),
+            ratio(&resolution.vmc_at_mtow)
+        );
+    }
+
+    #[test]
     fn a_second_segment_that_no_speed_meets_keeps_the_schedule_speed_and_is_flagged() {
-        // The B787-9 at 1.2 MTOW (with the Jenkinson take-off charts it meets
-        // the gradient at the schedule speed up to about 1.09 MTOW and at the
-        // best-climb speed up to about 1.14 MTOW) misses the gradient at the
-        // schedule speed and at the best-climb speed too: the schedule stands
-        // (no field charge) and the selection records that improved climb
-        // cannot meet it.
+        // The B787-9 at 1.2 MTOW misses the gradient at the schedule speed and
+        // at the best-climb speed too: the schedule stands (no field charge)
+        // and the selection records that improved climb cannot meet it.
         let config = AlasConfig::from_value(&serde_json::json!({"preset": "B787-9"})).unwrap();
         let design = config.configured_nominal_design();
         let analysis = report(&config, &design);
@@ -311,7 +375,10 @@ mod tests {
             resolution.config.performance.improved_climb_field_factor(),
             1.0
         );
-        // The A320 meets at the schedule: nothing to report.
+        // The A320 flies the CS 25.107 schedule (1.13 VSR; the yaw-balance VMC
+        // lifts it to about 1.16): at MTOW it needs a speed above the schedule
+        // to meet the CS 25.121(b) gradient and a speed below the best-climb
+        // limit meets it.
         let a320 = AlasConfig::from_value(&serde_json::json!({"preset": "A320-200"})).unwrap();
         let design = a320.configured_nominal_design();
         let analysis = report(&a320, &design);
@@ -323,6 +390,11 @@ mod tests {
             a320.landing_mass_limit_kg(mass),
             analysis.airplane.s_ref,
         );
-        assert!(!resolution.improved_climb.expect("selection").improved);
+        let selection = resolution.improved_climb.expect("selection");
+        assert!(selection.improved && selection.meets, "{selection:?}");
+        assert!(
+            selection.v2_over_vsr > selection.schedule_v2_over_vsr && selection.v2_over_vsr < 1.30,
+            "{selection:?}"
+        );
     }
 }

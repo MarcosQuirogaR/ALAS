@@ -377,6 +377,14 @@ fn analyze_structure_with_rib_mass(
     } else {
         ei_curve(sizing, cap_mat, skin_mat)
     };
+    // Product static response: the stiff root triangle of the swept box does not
+    // bend (sizing::swept::root_zone_length_m). The reference law keeps its beam.
+    // The Rayleigh modes below keep the full-length beam: the stiff root was
+    // checked against the shell decks for static tip deflection only, and
+    // clamping the trial shape at its end moved the first frequency 6-15 percent
+    // further from the shell decks' (A380-800 0.99 Hz shell, 1.13 Hz clamped,
+    // 0.99 Hz unclamped).
+    let ei_response = crate::sizing::swept::response_ei(sizing, y, &ei, credit_cover_skin);
     let mut m_y = structural_running_mass_kg_m.map_or_else(
         || {
             mass_per_length(
@@ -427,9 +435,11 @@ fn analyze_structure_with_rib_mass(
             loads::apply_point_mass_shear_relief(y, &mut v, n_factor, g, &engine_loads);
         }
 
-        let tip_terms: Vec<f64> = (0..n).map(|j| m[j] * m_bar_tip[j] / ei[j]).collect();
+        let tip_terms: Vec<f64> = (0..n)
+            .map(|j| m[j] * m_bar_tip[j] / ei_response[j])
+            .collect();
         let tip_deflection_m = trapezoid(&tip_terms, y) * sign;
-        let defl_curve = deflection_curve(y, &m, &ei);
+        let defl_curve = deflection_curve(y, &m, &ei_response);
         let deflection_m: Vec<f64> = defl_curve.iter().map(|&d| d * sign).collect();
         let m_signed: Vec<f64> = m.iter().map(|&mj| mj * sign).collect();
 

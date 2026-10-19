@@ -449,5 +449,6 @@ pub fn figure_load_trim_sheet(data: &LoadTrimSheetData, pal: &Palette) -> Scene 
     );
 
     draw_panel(&mut scene, data, &ink, &layout);
+    super::plot_data::record_sheet(&mut scene, data);
     scene
 }

@@ -59,7 +59,7 @@ fn mission_sized_registered_jet_designs_pass_their_buffet_margin() {
             continue;
         };
         checked += 1;
-        if matches!(preset, "DC-10" | "B747-400") {
+        if preset == "B747-400" {
             // B747-400 (new preset) takes the same documented exception: a
             // 1960s conventional section held at the 0.87 Korn lower bound,
             // cruising at Mach 0.85 with a model buffet floor of 0.76 g.
@@ -74,7 +74,7 @@ fn mission_sized_registered_jet_designs_pass_their_buffet_margin() {
             assert!(n >= floor - 1e-9, "{preset}: {n:.3} against {floor:.3}");
             assert!(
                 floor < 0.9,
-                "DC-10 buffet floor {floor:.3} g now meets the 0.9 g bound: remove this exception"
+                "{preset} buffet floor {floor:.3} g now meets the 0.9 g bound: remove this exception"
             );
             continue;
         }

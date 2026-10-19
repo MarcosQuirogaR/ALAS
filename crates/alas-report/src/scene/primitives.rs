@@ -344,6 +344,11 @@ pub struct Scene {
     pub render_title: bool,
     /// Flat list of scene elements.
     pub elements: Vec<SceneElement>,
+    /// Data behind the plotted series; empty unless built under
+    /// [`crate::plot_data::with_capture`]. Not serialized: it is a build-time
+    /// record, and plotted values may be non-finite.
+    #[serde(skip)]
+    pub data_trace: Box<crate::plot_data::DataTrace>,
 }
 
 impl Scene {
@@ -357,11 +362,13 @@ impl Scene {
             title: None,
             render_title: true,
             elements: Vec::new(),
+            data_trace: Box::default(),
         }
     }
 
     /// Add a scene element to the scene.
     pub fn add(&mut self, elem: SceneElement) {
+        crate::plot_data::observe(&mut self.data_trace, &elem);
         self.elements.push(elem);
     }
 
@@ -392,43 +399,6 @@ const fn default_paint_background() -> bool {
     true
 }
 
-/// Return the visible heading associated with a scene's document title.
-///
-/// `Scene::title` began as export metadata, which meant that otherwise titled
-/// figures had no heading in either the SVG or the raster viewport. Keeping
-/// the heading derived at render time preserves the scene contract while
-/// making the same title visible in every backend.
-///
-/// The contrast decision reads [`Scene::background`] directly, independent of
-/// whether that color is actually painted (see [`Scene::paint_background`]).
-/// A caller that needs a transparent canvas layer must use
-/// [`Scene::hide_background_paint`] rather than clearing `background`, or
-/// this heading silently falls back to its light-background color on every
-/// theme.
-pub fn visual_title(scene: &Scene) -> Option<SceneElement> {
-    if !scene.render_title {
-        return None;
-    }
-    let title = scene.title.as_ref()?.trim();
-    if title.is_empty() {
-        return None;
-    }
-    let color = match scene.background {
-        Some(background) if background.relative_luminance() < 0.5 => Color::from_hex("#ffffff"),
-        _ => Color::from_hex("#202124"),
-    };
-    Some(SceneElement::Text {
-        text: title.to_owned(),
-        pos: [scene.width * 0.5, 18.0],
-        font_size: 15.0,
-        color,
-        align: TextAlign::Center,
-        baseline: TextBaseline::Middle,
-        angle_deg: 0.0,
-        bold: true,
-    })
-}
-
 /// Axis coordinate scaling mode.
 ///
 /// `SymLog` follows matplotlib's convention: linear within `[-linthresh,
@@ -449,7 +419,7 @@ pub enum Scale {
 }
 
 impl Scale {
-    pub(super) fn transform(self, v: f64) -> f64 {
+    pub(crate) fn transform(self, v: f64) -> f64 {
         match self {
             Scale::Linear => v,
             Scale::Log10 => v.max(1e-300).log10(),

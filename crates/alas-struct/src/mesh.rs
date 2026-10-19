@@ -80,7 +80,7 @@ const SEC_RIB_THICKNESS_FACTOR: f64 = 0.5;
 /// Returned from the same pass that built the mesh rather than recovered later
 /// by re-reading a written deck, which is what the reference scripts this
 /// module generalizes had to do.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct MeshNodeIndex {
     /// Front-spar upper grid at the root.
     pub root_nid: i64,
@@ -95,6 +95,10 @@ pub struct MeshNodeIndex {
     pub spar_lower_nids: Vec<Vec<i64>>,
     /// The grid each wing-mounted engine's mass hangs from.
     pub engine_nids: Vec<i64>,
+    /// Semi-span of the wing the box belongs to, m: the span the elliptic lift
+    /// is defined over. The mesh ends at its tip rib, which can lie inboard of
+    /// this; 0 when not recorded (the tip grid's `y` is then used).
+    pub semi_span_m: f64,
 }
 
 /// What the five geometric health checks found.

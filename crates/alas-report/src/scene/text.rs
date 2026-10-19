@@ -99,3 +99,40 @@ pub fn text_block_height(text: &str, font_size_pt: f64, width_px: f64) -> f64 {
         .max(1);
     lines as f64 * font_size_pt * CSS_PIXELS_PER_POINT * TEXT_LINE_HEIGHT_EM
 }
+
+/// Return the visible heading associated with a scene's document title.
+///
+/// `Scene::title` began as export metadata, which meant that otherwise titled
+/// figures had no heading in either the SVG or the raster viewport. Keeping
+/// the heading derived at render time preserves the scene contract while
+/// making the same title visible in every backend.
+///
+/// The contrast decision reads [`Scene::background`] directly, independent of
+/// whether that color is actually painted (see [`Scene::paint_background`]).
+/// A caller that needs a transparent canvas layer must use
+/// [`Scene::hide_background_paint`] rather than clearing `background`, or
+/// this heading silently falls back to its light-background color on every
+/// theme.
+pub fn visual_title(scene: &Scene) -> Option<SceneElement> {
+    if !scene.render_title {
+        return None;
+    }
+    let title = scene.title.as_ref()?.trim();
+    if title.is_empty() {
+        return None;
+    }
+    let color = match scene.background {
+        Some(background) if background.relative_luminance() < 0.5 => Color::from_hex("#ffffff"),
+        _ => Color::from_hex("#202124"),
+    };
+    Some(SceneElement::Text {
+        text: title.to_owned(),
+        pos: [scene.width * 0.5, 18.0],
+        font_size: 15.0,
+        color,
+        align: TextAlign::Center,
+        baseline: TextBaseline::Middle,
+        angle_deg: 0.0,
+        bold: true,
+    })
+}

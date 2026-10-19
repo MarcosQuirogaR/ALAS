@@ -93,23 +93,33 @@ fn field_residuals_use_design_masses(mode: alas_config::MtowSizing) {
     assert_eq!(field.unit, "m");
     let departure = outcome.departure.unwrap();
     assert_eq!(field.actual, departure.toda_m);
-    assert!(field.limit > 0.3 * departure.toda_m && field.limit < 3.0 * departure.toda_m);
+    assert!(
+        field.limit > 0.3 * departure.toda_m && field.limit < 3.0 * departure.toda_m,
+        "{field:?} toda {}",
+        departure.toda_m
+    );
     assert!(tw_mtow > 0.0);
     let ws_mlw = sized.design_landing_mass_kg * config.requirements.gravity_m_s2 / s_ref;
     assert!((find("landing_field").actual / ws_mlw - 1.0).abs() < 1e-12);
 
     // The optimizer limit is the factored definition shared with the delivery
-    // gate: at the limiting wing loading the unfactored distance
-    // K (W/S)/(sigma CLmax) divided by the 0.6 dry share equals the LDA.
+    // gate: at the limiting wing loading the unfactored segment-model distance
+    // at Vref = 1.23 VS1g divided by the 0.6 dry share equals the LDA.
     if let Some(arrival) = outcome.arrival {
         let perf = &config.performance;
         let sigma = density_ratio(arrival.elevation_m, arrival.isa_deviation_c);
         let limit = find("landing_field").limit;
-        let lfl_at_limit = perf.k_land * limit
-            / (sigma * perf.cl_max_land)
+        let lfl_at_limit = landing_distance_at_limit(perf, limit, sigma)
             / alas_perf::performance::JET_DRY_LANDING_SHARE;
-        assert!((lfl_at_limit / arrival.lda_m - 1.0).abs() < 1e-12);
+        assert!((lfl_at_limit / arrival.lda_m - 1.0).abs() < 1e-9);
     }
+}
+
+/// Segment-model landing distance at a limiting wing loading [Pa].
+fn landing_distance_at_limit(perf: &PerformanceConfig, ws_pa: f64, sigma: f64) -> f64 {
+    let v_app = alas_perf::performance::VREF_OVER_VS1G
+        * (2.0 * ws_pa / (1.225 * sigma * perf.cl_max_land)).sqrt();
+    alas_perf::performance::LandingSegmentModel::jet(perf.main_gear_truck_wheels).distance_m(v_app)
 }
 
 /// The engine-out departure polar.
@@ -351,7 +361,13 @@ fn a_wet_landing_runway_cuts_the_landing_wing_loading_limit_by_the_cat_pol_a_235
     let dry = limit(&config);
     config.performance.wet_landing_runway = true;
     let wet = limit(&config);
-    assert!((dry / wet - 1.15).abs() < 1e-12);
+    // The limit is the wing loading whose segment-model distance fills the
+    // usable runway share, which the wet factor divides by 1.15.
+    let arrival = outcome.arrival.as_ref().unwrap();
+    let sigma = density_ratio(arrival.elevation_m, arrival.isa_deviation_c);
+    let distance_dry = landing_distance_at_limit(&config.performance, dry, sigma);
+    let distance_wet = landing_distance_at_limit(&config.performance, wet, sigma);
+    assert!((distance_dry / distance_wet - 1.15).abs() < 1e-9);
     config.performance.wet_landing_runway = false;
     assert_eq!(limit(&config).to_bits(), dry.to_bits());
 }

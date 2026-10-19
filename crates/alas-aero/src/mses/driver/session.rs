@@ -32,6 +32,8 @@ pub struct Mses {
     osmap_status: MsesOsmapStatus,
     pub(super) osmap_path: Option<PathBuf>,
     osmap_diagnostic: Option<String>,
+    /// What `repair_inverted_trailing_edge` changed, if anything.
+    geometry_note: Option<String>,
 }
 
 impl Mses {
@@ -55,6 +57,7 @@ impl Mses {
             airfoil.name.clone()
         };
         let osmap = resolve_osmap(config, mses_dir);
+        let (airfoil, geometry_note) = repair_inverted_trailing_edge(airfoil);
         Self {
             airfoil,
             airfoil_name,
@@ -76,6 +79,7 @@ impl Mses {
             osmap_status: osmap.status,
             osmap_path: osmap.path,
             osmap_diagnostic: osmap.diagnostic,
+            geometry_note,
         }
     }
 
@@ -138,6 +142,16 @@ impl Mses {
         };
         result.point_diagnostics = outcome.point_diagnostics;
         result.solver_attempts = outcome.solver_attempts;
+        if let (Some(note), Some(first)) = (&self.geometry_note, result.solver_attempts.first_mut())
+        {
+            first.solver_output.insert_str(
+                0,
+                &format!(
+                    "{note}
+"
+                ),
+            );
+        }
         result.checkpoints = outcome.checkpoints;
 
         let converged = outcome.accumulated.get("alpha").map_or(0, Vec::len);
