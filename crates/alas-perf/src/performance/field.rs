@@ -327,7 +327,7 @@ fn propeller_takeoff(
             speeds.v2_ms, polar.induced_drag_factor, polar.failed_engine_drag_coefficient
         ));
     }
-    let screen_height_m = 35.0 * 0.3048;
+    let screen_height_m = 35.0 * alas_units::FOOT;
     let stop_g = config.propeller_takeoff_stop_deceleration_g;
     let inertia_m = config.propeller_takeoff_inertia_distance_m / sigma.sqrt();
     // Torenbeek Eq. 5-89, p. 169, before the jet-specific Eq. 5-91

@@ -53,7 +53,7 @@ pub const STOP_ALLOWANCE_S: f64 = 2.0;
 /// Factor on the all-engine distance: CS 25.113(a)(2).
 pub const ALL_ENGINE_FACTOR: f64 = 1.15;
 /// Screen height, m: CS 25.113 (35 ft).
-pub const SCREEN_HEIGHT_M: f64 = 35.0 * 0.3048;
+pub const SCREEN_HEIGHT_M: f64 = 35.0 * alas_units::FOOT;
 /// Load factor of the transition arc: Raymer Eqs. 17.105-17.107, p. 674.
 pub const TRANSITION_LOAD_FACTOR: f64 = 1.2;
 /// Ground lift coefficient: "typically less than 0.1" (Raymer p. 672).
@@ -495,7 +495,7 @@ mod tests {
             thrust_oei: Table::sample(100.0, &flat)?,
         };
         let roll = model.roll(80.0, false)?;
-        let exact = 80.0_f64.powi(2) / (2.0 * 9.81 * 0.25);
+        let exact = 80.0_f64.powi(2) / (2.0 * crate::performance::G * 0.25);
         assert!((roll.distance(80.0) / exact - 1.0).abs() < 1e-9);
         Ok(())
     }

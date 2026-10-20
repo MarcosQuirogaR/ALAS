@@ -95,6 +95,8 @@ pub const DEGREE_RANKINE: f64 = 5.0 / 9.0;
 pub const PASCAL: f64 = 1.0;
 /// Pascals in a pound-force per square inch.
 pub const PSI: f64 = POUND_FORCE / (INCH * INCH);
+/// Pascals in a pound-force per square foot.
+pub const PSF: f64 = POUND_FORCE / (FOOT * FOOT);
 
 // Volume
 

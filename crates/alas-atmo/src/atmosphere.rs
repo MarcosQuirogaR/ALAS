@@ -40,13 +40,13 @@ use crate::isa::{
     pressure_isa, temperature_isa, GAS_CONSTANT_AIR, GAS_CONSTANT_UNIVERSAL, MOLECULAR_MASS_AIR,
 };
 
-/// Standard gravity, in m/s^2, used only by the approximate density-altitude
-/// formula.
+/// Standard gravity `g0`, in m/s^2 (3rd CGPM, 1901; ISO 80000-3; ICAO Doc 7488).
 ///
-/// Written as a literal `9.80665` in `atmosphere.py`'s `density_altitude`
-/// rather than importing [`crate::BAROMETRIC_GRAVITY`]; see the module
-/// documentation.
-pub const STANDARD_GRAVITY: f64 = 9.80665;
+/// The program's single source of truth is [`alas_units::STANDARD_GRAVITY`];
+/// this is the same value, re-exported here for the crates that depend on
+/// the atmosphere but not on the unit table. It is distinct from
+/// [`crate::BAROMETRIC_GRAVITY`], the ISA model's rounded 9.81.
+pub const STANDARD_GRAVITY: f64 = alas_units::STANDARD_GRAVITY;
 
 /// Sutherland's law constant, in kg/(m*s*sqrt(K)).
 ///

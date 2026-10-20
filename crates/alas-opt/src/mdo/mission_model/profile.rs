@@ -15,7 +15,7 @@
 //! [`FuelModelError::RouteTooShort`].
 
 use alas_atmo::{us1976_try_compute_values, Us1976Values};
-use alas_config::mission::{MissionProfileConfig, SpeedReference};
+use alas_config::mission::{MissionProfileConfig, SpeedReference, MIN_CRUISE_ROUTE_FRACTION};
 use alas_mass::fuel_plan::FuelModelError;
 use alas_units::FOOT;
 
@@ -31,7 +31,7 @@ const MINIMUM_SEGMENT_ALTITUDE_M: f64 = 1.0e-6;
 /// definition of that airspeed, not a property of today's air, so it is the
 /// standard value rather than one read from the atmosphere model - the same
 /// convention `alas_config::validation` uses for the same comparison.
-const SEA_LEVEL_DENSITY_KG_M3: f64 = 1.225;
+const SEA_LEVEL_DENSITY_KG_M3: f64 = alas_atmo::SEA_LEVEL_DENSITY_ICAO_KG_M3;
 /// Minimum ratio of design dive to design cruise speed, CS 25.335(b)(1).
 const VD_OVER_VC: f64 = 1.25;
 
@@ -725,8 +725,13 @@ impl ProfileGeometry<'_> {
             });
         }
         let configured = self.configured_cruise_m_for(leg);
+        // The ladders must leave a meaningful cruise (the native schedule's
+        // `MIN_CRUISE_ROUTE_FRACTION`), not merely a non-negative one.
+        let leaves_cruise =
+            |plan: &ProfilePlan| plan.cruise_distance_m() >= MIN_CRUISE_ROUTE_FRACTION * range_m;
         match self.plan_at(leg, range_m, configured) {
             Err(FuelModelError::RouteTooShort { .. }) => {}
+            Ok(plan) if !leaves_cruise(&plan) => {}
             other => return other,
         }
         let floor = self.floor_cruise_m(leg).min(configured);
@@ -739,11 +744,11 @@ impl ProfileGeometry<'_> {
             }
             let middle = 0.5 * (low + high);
             match self.plan_at(leg, range_m, middle) {
-                Ok(plan) => {
+                Ok(plan) if leaves_cruise(&plan) => {
                     feasible = plan;
                     low = middle;
                 }
-                Err(FuelModelError::RouteTooShort { .. }) => high = middle,
+                Ok(_) | Err(FuelModelError::RouteTooShort { .. }) => high = middle,
                 Err(error) => return Err(error),
             }
         }

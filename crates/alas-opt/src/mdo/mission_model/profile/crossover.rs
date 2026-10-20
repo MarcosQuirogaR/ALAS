@@ -145,7 +145,7 @@ mod tests {
     use super::*;
     use alas_config::mission::{MissionProfileConfig, CAS_SPEED_SUBDIVISIONS};
 
-    const KNOT_M_S: f64 = 1852.0 / 3600.0;
+    const KNOT_M_S: f64 = alas_units::KNOT;
     /// The airspeed module and the US1976 table carry gas constants that
     /// differ in the seventh digit (287.05287 against 287.0528742 J/(kg K)).
     const MACH_TOLERANCE: f64 = 1.0e-6;

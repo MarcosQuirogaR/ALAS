@@ -77,16 +77,15 @@ pub use takeoff_field::{takeoff_field, TakeoffField, TakeoffFieldInputs};
 
 use alas_atmo::Atmosphere;
 
-/// Standard gravity as a two-decimal figure rather than the CODATA
-/// `9.80665`; kept so the matching-chart numbers stay reproducible.
-pub(crate) const G: f64 = 9.81;
-/// Pascals to pounds-force per square foot.
-pub(crate) const PA_TO_PSF: f64 = 0.020885;
-/// Metres to feet.
-pub(crate) const M_TO_FT: f64 = 3.28084;
+/// Standard gravity, m/s^2 (the program-wide `g0`, 9.80665).
+pub(crate) const G: f64 = alas_atmo::STANDARD_GRAVITY;
+/// Pascals to pounds-force per square foot (exact: 1 / [`alas_units::PSF`]).
+pub(crate) const PA_TO_PSF: f64 = 1.0 / alas_units::PSF;
+/// Metres to feet (exact: 1 / [`alas_units::FOOT`]).
+pub(crate) const M_TO_FT: f64 = 1.0 / alas_units::FOOT;
 /// Sea-level ISA density, kg/m^3, the matching chart references wing loading
 /// against.
-pub(crate) const RHO_SL: f64 = 1.225;
+pub(crate) const RHO_SL: f64 = alas_atmo::SEA_LEVEL_DENSITY_ICAO_KG_M3;
 
 /// Whether an engine count is in the transport-category schedule implemented
 /// by this module.
@@ -121,14 +120,14 @@ pub fn far25_oei_gradient(n_engines: i64) -> Option<f64> {
 /// `density_ratio`.
 ///
 /// The ISA offset is added to the model temperature and the density is
-/// recovered from the ideal-gas law at a hardcoded `287.05` J/(kg*K), *not*
-/// through [`Atmosphere::density`]: the constant is written out at two
-/// decimals and the offset applied by hand, so the matching-chart numbers
+/// recovered from the ideal-gas law at [`alas_atmo::GAS_CONSTANT_AIR`], *not*
+/// through [`Atmosphere::density`]: the offset is applied by hand to the
+/// model temperature, so the matching-chart numbers
 /// stay reproducible.
 pub fn density_ratio(elevation_m: f64, delta_isa_c: f64) -> f64 {
     let atmo = Atmosphere::new(elevation_m);
     let temp_k = atmo.temperature() + delta_isa_c;
-    let rho = atmo.pressure() / (287.05 * temp_k);
+    let rho = atmo.pressure() / (alas_atmo::GAS_CONSTANT_AIR * temp_k);
     rho / RHO_SL
 }
 

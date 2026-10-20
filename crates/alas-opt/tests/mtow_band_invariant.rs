@@ -34,6 +34,17 @@ const PRESETS: [&str; 5] = ["ATR72-600", "A220-300", "A320-200", "E195-E2", "A34
 /// two interior points (default band fraction 10 %).
 const FRACTIONS: [f64; 5] = [0.90, 0.95, 1.00, 1.05, 1.10];
 
+/// The payload-range floor only the band carries (`band_range_corner_b`): the
+/// relaxation statement is about every other residual.
+const BAND_RANGE_ID: &str = "band_range_corner_b";
+
+fn range_violated(assessment: &CandidateAssessment) -> bool {
+    assessment
+        .residuals
+        .iter()
+        .any(|residual| residual.id == BAND_RANGE_ID && residual.normalized_violation > 0.0)
+}
+
 fn preset_config(preset: &str, sizing: MtowSizing) -> (AlasConfig, DesignVector) {
     let mut config = AlasConfig::from_value(&serde_json::json!({ "preset": preset })).unwrap();
     config.optimizer.design_space.mode = DesignMode::ReferenceAdaptation;
@@ -53,7 +64,9 @@ fn ranking_residuals(
     assessment
         .residuals
         .iter()
-        .filter(|residual| residual.role != ResidualRole::Diagnostic)
+        .filter(|residual| {
+            residual.role != ResidualRole::Diagnostic && residual.id != BAND_RANGE_ID
+        })
         .map(|residual| {
             (
                 residual.id,
@@ -71,6 +84,7 @@ fn ranking_residuals(
 fn a_fixed_requirement_point_inside_the_band_has_the_same_values_in_band_mode() {
     let mut feasible_points = 0;
     let mut checked = 0;
+    let mut lost_range_points = 0;
     for preset in PRESETS {
         let (band, nominal) = preset_config(preset, MtowSizing::MtowBand);
         let target_kg = band.mtow_band_target_kg();
@@ -101,15 +115,35 @@ fn a_fixed_requirement_point_inside_the_band_has_the_same_values_in_band_mode() 
             let band_assessment = assess_product_candidate(&band, &carried)
                 .unwrap_or_else(|reason| panic!("{preset} {fraction}: {reason}"));
 
-            assert_eq!(
-                band_assessment.hard_feasible, fixed_assessment.hard_feasible,
-                "{preset} at {fraction} T: feasibility"
+            // The band adds the corner B range floor to the fixed problem: it
+            // is feasible exactly when the fixed point is and the floor holds.
+            let range_lost = range_violated(&band_assessment);
+            assert!(
+                band_assessment
+                    .residuals
+                    .iter()
+                    .any(|residual| residual.id == BAND_RANGE_ID),
+                "{preset} at {fraction} T: the band carries the range floor"
             );
             assert_eq!(
-                band_assessment.violated_hard_ids(),
+                band_assessment.hard_feasible,
+                fixed_assessment.hard_feasible && !range_lost,
+                "{preset} at {fraction} T: feasibility"
+            );
+            let without_range = |ids: Vec<&'static str>| -> Vec<&'static str> {
+                ids.into_iter().filter(|id| *id != BAND_RANGE_ID).collect()
+            };
+            assert_eq!(
+                without_range(band_assessment.violated_hard_ids()),
                 fixed_assessment.violated_hard_ids(),
                 "{preset} at {fraction} T"
             );
+            if fraction == 1.0 {
+                assert!(
+                    !range_lost,
+                    "{preset}: the registered aircraft at its own mass keeps its corner B range"
+                );
+            }
             assert_eq!(
                 ranking_residuals(&band_assessment),
                 ranking_residuals(&fixed_assessment),
@@ -134,13 +168,19 @@ fn a_fixed_requirement_point_inside_the_band_has_the_same_values_in_band_mode() 
                 .any(|residual| residual.id == "mtow_band_closure"
                     && residual.role == ResidualRole::Diagnostic));
             checked += 1;
-            feasible_points += usize::from(fixed_assessment.hard_feasible);
+            feasible_points += usize::from(band_assessment.hard_feasible);
+            lost_range_points += usize::from(range_lost);
         }
     }
     assert!(checked >= 20, "only {checked} points were evaluable");
     // The statement is vacuous if no point is feasible; the registered
     // aircraft at their own mass (fraction 1.0) are expected to be among
     // them, and the lighter points are allowed to be infeasible.
+    // The floor is not vacuous: giving mass away loses range somewhere.
+    assert!(
+        lost_range_points >= 1,
+        "no band point lost corner B range; the floor was never exercised"
+    );
     assert!(
         feasible_points >= 1,
         "no feasible fixed-requirement point was exercised"

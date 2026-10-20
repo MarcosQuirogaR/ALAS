@@ -15,6 +15,7 @@ alas-config = { path = "../alas-config" }
 # `Atmosphere::new`, the fitted "differentiable" model, the same edge
 # `alas-prop` carries for the same reason.
 alas-atmo = { path = "../alas-atmo" }
+alas-units = { path = "../alas-units" }
 
 [dev-dependencies]
 alas-testkit = { path = "../alas-testkit" }

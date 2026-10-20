@@ -14,7 +14,7 @@ const FT_MIN_M_S: f64 = 0.3048 / 60.0;
 /// takeoff-speed derivation below (a sea-level, standard-day reference
 /// stall speed, at which CAS, EAS and TAS coincide).
 const ISA_SEA_LEVEL_DENSITY_KG_M3: f64 = 1.225;
-const STANDARD_GRAVITY_M_S2: f64 = 9.806_65;
+const STANDARD_GRAVITY_M_S2: f64 = alas_atmo::STANDARD_GRAVITY;
 /// CS-25.107(b) / FAR 25.107(b): V2 may not be less than 1.13 V_SR for a
 /// two-engine turbopropeller aeroplane. The regulatory minimum ratio, used
 /// here as the scheduled ratio (an assumption: an operator's actual V2 is

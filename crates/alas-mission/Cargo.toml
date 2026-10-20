@@ -13,6 +13,7 @@ rust-version.workspace = true
 alas-aero = { path = "../alas-aero" }
 # `update_atmosphere` is mission analysis model's own `US_Standard_1976`, not native aerodynamic model's ISA.
 alas-atmo = { path = "../alas-atmo" }
+alas-units = { path = "../alas-units" }
 # `mission_mission.py` reads the cruise targets, airports and mission profile
 # straight off `ALASConfig`, and every field name already matches what the
 # mission analysis model runner expects.

@@ -76,7 +76,10 @@ fn main() -> Result<(), Box<dyn Error>> {
             parallel: true,
             aerodynamic_solver: Default::default(),
             optimization_solver: Default::default(),
-            output_dir: None,
+            // `OUTPUT_DIR=dir` keeps the run's artifacts under `dir/<preset>`,
+            // for a file-by-file comparison of two builds.
+            output_dir: std::env::var_os("OUTPUT_DIR")
+                .map(|dir| std::path::PathBuf::from(dir).join(&name)),
             save_plots: false,
             seed: Some(42),
             quiet: true,
@@ -98,6 +101,32 @@ fn main() -> Result<(), Box<dyn Error>> {
         );
         let wall_s = started.elapsed().as_secs_f64();
         println!("== {name}: wall {wall_s:.2} s, ok = {}", result.is_ok());
+        // `DIGEST=1`: FNV-1a of the result's exact `Debug` text (shortest
+        // round-trip floats), to compare two builds bit for bit.
+        if std::env::var_os("DIGEST").is_some() {
+            // A report's lazily built fuel artifacts print only once built:
+            // build them on the delivered report so the text does not depend
+            // on which clone happened to be asked first.
+            if let Ok(done) = &result {
+                if let Some(report) = &done.optimized_report {
+                    let _ = report.fuel.artifacts(&done.config, &report.design);
+                }
+            }
+            let text = format!("{result:?}");
+            if let Ok(dir) = std::env::var("DIGEST_TEXT_DIR") {
+                std::fs::write(
+                    std::path::Path::new(&dir).join(format!("{name}.txt")),
+                    &text,
+                )?;
+            }
+            let digest = text.bytes().fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| {
+                (hash ^ u64::from(byte)).wrapping_mul(0x0000_0100_0000_01b3)
+            });
+            println!(
+                "  result_digest {digest:016x} ({} bytes of Debug text)",
+                text.len()
+            );
+        }
         for (stage, ms) in durations.lock().map(|l| l.clone()).unwrap_or_default() {
             if ms >= 50 {
                 println!("  stage {stage:<28} {:>8.3} s", ms as f64 / 1.0e3);

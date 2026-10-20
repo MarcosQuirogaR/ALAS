@@ -97,6 +97,22 @@ mod tests {
     }
 
     #[test]
+    fn every_operating_empty_weight_key_resolves_in_both_the_mass_and_the_coordinate_table() {
+        // `oew_and_cg` reads both tables by name and treats an unknown name as
+        // a zero mass; this fails if a renamed key would be dropped silently.
+        let masses = masses(1.0, 1.0);
+        let coords = coords(1.0, 1.0);
+        let positions = coords.as_pairs();
+        for key in OEW_KEYS {
+            assert!(masses.get(key).is_some(), "mass table lacks {key}");
+            assert!(
+                positions.iter().any(|&(name, _)| name == key),
+                "coordinate table lacks {key}"
+            );
+        }
+    }
+
+    #[test]
     fn payload_and_fuel_are_not_part_of_the_operating_empty_weight() {
         // The whole point of the OEW component list is that it excludes the
         // two things a load plan is free to change; including them would make

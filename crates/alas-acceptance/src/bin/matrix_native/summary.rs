@@ -179,6 +179,12 @@ fn first_present(primary: &Value, fallback: &Value) -> Value {
     }
 }
 
+/// One corner value of the model-mass payload-range chart of a reported
+/// design (`validation.payload_range.model_masses.corners`), or null.
+fn corner(side: &Value, name: &str, field: &str) -> Value {
+    side["validation"]["payload_range"]["model_masses"]["corners"][name][field].clone()
+}
+
 fn cell_row(root: &Path, cell: &Cell, table: &BudgetTable) -> Value {
     let dir = cell_dir(root, cell);
     let runner = read_json(&dir.join("runner_cell.json")).unwrap_or(Value::Null);
@@ -205,6 +211,9 @@ fn cell_row(root: &Path, cell: &Cell, table: &BudgetTable) -> Value {
         row["status"].as_str().unwrap_or("?").to_owned()
     };
     let baseline = &row["baseline_vs_optimized"];
+    let like = &row["like_for_like"];
+    let like_perf = &like["geometry_and_performance"];
+    let only_perf = &row["baseline_only"]["geometry_and_performance"];
     let digests = (!row.is_null()).then(|| determinism_digests(&row));
     json!({
         "preset": cell.preset,
@@ -223,8 +232,35 @@ fn cell_row(root: &Path, cell: &Cell, table: &BudgetTable) -> Value {
         "termination": row["optimizer"]["termination"],
         "best_cost": row["optimizer"]["best_cost"],
         "delivered_feasible": row["optimizer"]["delivered_feasible"],
-        "baseline_fuel_kg": first_present(&baseline["baseline"]["fuel_kg"], &row["baseline_only"]["fuel_kg"]),
-        "optimized_fuel_kg": baseline["optimized"]["fuel_kg"],
+        // Mission fuel, never the weight-closure residual. `*_fuel_kg` is the
+        // block fuel of the same sized mission on one mass basis (both designs
+        // evaluated at the delivered design's takeoff mass by the same
+        // model); `*_trip_fuel_kg` is the native segment mission's trip fuel at
+        // each side's own mass.
+        "baseline_fuel_kg": like["same_model_baseline"]["baseline"]["block_fuel_kg"],
+        "optimized_fuel_kg": like["same_model_baseline"]["winner"]["block_fuel_kg"],
+        "baseline_trip_fuel_kg": first_present(&like["native_mission"]["baseline"]["trip_fuel_kg"], &row["baseline_only"]["native_mission"]["trip_fuel_kg"]),
+        "optimized_trip_fuel_kg": like["native_mission"]["winner"]["trip_fuel_kg"],
+        // The closure residual MTOW - (OEW + payload) at each side's own
+        // design gross mass: it moves with the MTOW the search chose, so it
+        // is a mass-closure quantity and not a fuel comparison.
+        "baseline_closure_residual_kg": first_present(&baseline["baseline"]["fuel_kg"], &row["baseline_only"]["fuel_kg"]),
+        "optimized_closure_residual_kg": baseline["optimized"]["fuel_kg"],
+        "baseline_design_gross_mass_kg": baseline["baseline"]["design_gross_mass_kg"],
+        "optimized_design_gross_mass_kg": baseline["optimized"]["design_gross_mass_kg"],
+        // Payload-range capability, reported next to the baseline's (no
+        // requirement is imposed): corners B (max payload at MTOW) and C (max
+        // fuel at MTOW) of the model-mass chart, nmi and kg.
+        "baseline_range_b_nmi": first_present(&corner(&like_perf["baseline"], "B", "range_nmi"), &corner(only_perf, "B", "range_nmi")),
+        "optimized_range_b_nmi": corner(&like_perf["winner"], "B", "range_nmi"),
+        "baseline_range_c_nmi": first_present(&corner(&like_perf["baseline"], "C", "range_nmi"), &corner(only_perf, "C", "range_nmi")),
+        "optimized_range_c_nmi": corner(&like_perf["winner"], "C", "range_nmi"),
+        "baseline_payload_c_kg": first_present(&corner(&like_perf["baseline"], "C", "payload_kg"), &corner(only_perf, "C", "payload_kg")),
+        "optimized_payload_c_kg": corner(&like_perf["winner"], "C", "payload_kg"),
+        "baseline_mlw_kg": first_present(&like_perf["baseline"]["mlw_kg"], &only_perf["mlw_kg"]),
+        "optimized_mlw_kg": like_perf["winner"]["mlw_kg"],
+        "baseline_mtow_kg": first_present(&like_perf["baseline"]["mtow_kg"], &only_perf["mtow_kg"]),
+        "optimized_mtow_kg": like_perf["winner"]["mtow_kg"],
         "baseline_l_over_d": first_present(&baseline["baseline"]["cruise_l_over_d"], &row["baseline_only"]["cruise_l_over_d"]),
         "optimized_l_over_d": baseline["optimized"]["cruise_l_over_d"],
         "physical_passed": row["physical_passed"],
@@ -255,7 +291,7 @@ fn csv_field(value: &Value) -> String {
 }
 
 fn csv(rows: &[Value]) -> String {
-    const COLUMNS: [(&str, &str); 31] = [
+    const COLUMNS: [(&str, &str); 47] = [
         ("preset", "/preset"),
         ("mode", "/mode"),
         ("status", "/status"),
@@ -286,6 +322,34 @@ fn csv(rows: &[Value]) -> String {
         ("delivered_feasible", "/delivered_feasible"),
         ("baseline_fuel_kg", "/baseline_fuel_kg"),
         ("optimized_fuel_kg", "/optimized_fuel_kg"),
+        ("baseline_trip_fuel_kg", "/baseline_trip_fuel_kg"),
+        ("optimized_trip_fuel_kg", "/optimized_trip_fuel_kg"),
+        (
+            "baseline_closure_residual_kg",
+            "/baseline_closure_residual_kg",
+        ),
+        (
+            "optimized_closure_residual_kg",
+            "/optimized_closure_residual_kg",
+        ),
+        (
+            "baseline_design_gross_mass_kg",
+            "/baseline_design_gross_mass_kg",
+        ),
+        (
+            "optimized_design_gross_mass_kg",
+            "/optimized_design_gross_mass_kg",
+        ),
+        ("baseline_mtow_kg", "/baseline_mtow_kg"),
+        ("optimized_mtow_kg", "/optimized_mtow_kg"),
+        ("baseline_mlw_kg", "/baseline_mlw_kg"),
+        ("optimized_mlw_kg", "/optimized_mlw_kg"),
+        ("baseline_range_b_nmi", "/baseline_range_b_nmi"),
+        ("optimized_range_b_nmi", "/optimized_range_b_nmi"),
+        ("baseline_range_c_nmi", "/baseline_range_c_nmi"),
+        ("optimized_range_c_nmi", "/optimized_range_c_nmi"),
+        ("baseline_payload_c_kg", "/baseline_payload_c_kg"),
+        ("optimized_payload_c_kg", "/optimized_payload_c_kg"),
         ("baseline_l_over_d", "/baseline_l_over_d"),
         ("optimized_l_over_d", "/optimized_l_over_d"),
         ("physical_passed", "/physical_passed"),
@@ -414,6 +478,8 @@ pub fn compare(a: &str, b: &str) -> io::Result<()> {
     Ok(())
 }
 
+// Tests assert on fixtures they built, so a failed unwrap is the assertion failing.
+#[allow(clippy::unwrap_used)]
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -439,6 +505,56 @@ mod tests {
         assert_eq!(determinism_digests(&base), determinism_digests(&other));
         other["oew_kg"] = json!(40880.4);
         assert_ne!(determinism_digests(&base).1, determinism_digests(&other).1);
+    }
+
+    #[test]
+    fn fuel_columns_are_mission_fuel_and_the_closure_residual_is_named_apart() {
+        let corners = |b: f64, c: f64, pc: f64| {
+            json!({"validation": {"payload_range": {"model_masses": {"corners": {
+                "B": {"range_nmi": b}, "C": {"range_nmi": c, "payload_kg": pc}}}}}})
+        };
+        let mut baseline_side = corners(2249.0, 3533.0, 13186.0);
+        baseline_side["mlw_kg"] = json!(67800.0);
+        let mut winner_side = corners(996.0, 3990.0, 6452.0);
+        winner_side["mlw_kg"] = json!(67770.0);
+        let row = json!({
+            "status": "success",
+            "baseline_vs_optimized": {
+                "baseline": {"fuel_kg": 16568.0, "design_gross_mass_kg": 75100.0},
+                "optimized": {"fuel_kg": 9885.0, "design_gross_mass_kg": 67770.0}},
+            "like_for_like": {
+                "same_model_baseline": {
+                    "baseline": {"block_fuel_kg": 3987.0},
+                    "winner": {"block_fuel_kg": 3920.0}},
+                "native_mission": {
+                    "baseline": {"trip_fuel_kg": 3945.0},
+                    "winner": {"trip_fuel_kg": 3842.0}},
+                "geometry_and_performance": {"baseline": baseline_side, "winner": winner_side}}
+        });
+        let root = std::env::temp_dir().join("matrix_native_summary_test");
+        let cell = Cell {
+            preset: "X".to_owned(),
+            mode: "mtow_band".to_owned(),
+            screening: 1,
+            refinement: 1,
+            weight: 1.0,
+        };
+        let dir = cell_dir(&root, &cell);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("measurement_result.json"), row.to_string()).unwrap();
+        let table = BudgetTable::load("matrix").unwrap();
+        let out = cell_row(&root, &cell, &table);
+        let _ = fs::remove_dir_all(&root);
+        assert_eq!(out["baseline_fuel_kg"], json!(3987.0));
+        assert_eq!(out["optimized_fuel_kg"], json!(3920.0));
+        assert_eq!(out["baseline_trip_fuel_kg"], json!(3945.0));
+        assert_eq!(out["optimized_trip_fuel_kg"], json!(3842.0));
+        assert_eq!(out["baseline_closure_residual_kg"], json!(16568.0));
+        assert_eq!(out["optimized_closure_residual_kg"], json!(9885.0));
+        assert_eq!(out["baseline_range_b_nmi"], json!(2249.0));
+        assert_eq!(out["optimized_range_b_nmi"], json!(996.0));
+        assert_eq!(out["optimized_payload_c_kg"], json!(6452.0));
+        assert_eq!(out["optimized_mlw_kg"], json!(67770.0));
     }
 
     #[test]

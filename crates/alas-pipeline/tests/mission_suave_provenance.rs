@@ -286,9 +286,18 @@ fn public_native_mission_matches_pinned_provenance_checkpoints() {
         // third cruise step of the heavy long-range mission starts at the thrust-limited level
         // 11,745.15 m (FL385, 142 m under the SUAVE FL390 reference of 11,887.2 m); the reference
         // itself stays pinned. The first descent starts from the same level.
+        // Re-pinned by lane release 1.4.1 (2026-10-20, by probe, value from this
+        // assertion's message): 11,745.15 -> 11,784.41 m (FL387, +39 m, toward
+        // the reference). The sourced default descent rates (Jenkinson Table
+        // 10.22: 1,850 / 1,700 / 1,600 / 1,450 ft/min instead of 900-1,000)
+        // shorten the descent footprint, and the minimum-cruise route share
+        // (20 %) changes how the footprint-limited altitude fit reads the
+        // thrust-limited climb revisions on this 6,500 km mission. With both
+        // disabled in place (a temporary switch, removed) the previous level
+        // reproduces exactly.
         let expected_start_m = if *tag == "cruise_step_3" || *tag == "descent_1" {
             assert!((reference_start_m - 11_887.2).abs() < 1.0e-6);
-            11_745.151_314_645_087
+            11_784.412_605_665_737
         } else {
             reference_start_m
         };

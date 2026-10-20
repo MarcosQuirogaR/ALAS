@@ -19,7 +19,7 @@ use alas_prop::turboprop::{Pw127mRating, TurbopropCommand, TurbopropCondition, T
 use super::propulsion::turboprop_unit_model;
 
 /// ISA sea-level density, kg/m^3.
-const SEA_LEVEL_DENSITY_KG_M3: f64 = 1.225;
+const SEA_LEVEL_DENSITY_KG_M3: f64 = alas_atmo::SEA_LEVEL_DENSITY_ICAO_KG_M3;
 /// ISA sea-level temperature, K.
 const SEA_LEVEL_TEMPERATURE_K: f64 = 288.15;
 

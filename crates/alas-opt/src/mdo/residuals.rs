@@ -21,6 +21,7 @@ use super::types::ConstraintFamily::{Balance, Mass};
 use super::types::ConstraintResidual;
 
 mod balance_ledger;
+mod band_range;
 #[cfg(test)]
 mod critical_tests;
 mod declared_fuel;
@@ -234,6 +235,8 @@ fn mass_residuals(outcome: &SizingOutcome, config: &AlasConfig) -> Vec<Constrain
         outcome.mtow_ceiling,
         role,
     ));
+    // MTOW band only: keep the registered aircraft's corner B range.
+    residuals.extend(band_range::residuals(outcome, config, role));
 
     // The landing-mass limit is the sizing basis's own `design_landing_mass_kg`
     // (`alas_config::MassSizingBasis`, computed once in `mdo::sizing` and

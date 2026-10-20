@@ -5,7 +5,7 @@
 
 use super::{ALTITUDE_TOLERANCE_M, DISTANCE_TOLERANCE_M, PROFILE_SCALE_ITERATIONS};
 use alas_atmo::us1976_try_compute_values;
-use alas_config::mission::{SpeedCaps, SpeedReference};
+use alas_config::mission::{SpeedCaps, SpeedReference, MIN_CRUISE_ROUTE_FRACTION};
 use alas_mission::segments::{SegmentKind, SegmentSpec};
 use alas_mission::{MissionRequest, Numerics};
 
@@ -108,7 +108,8 @@ pub(crate) fn close_schedule_distance(
 }
 
 /// Return the highest-altitude version of `nominal` whose non-cruise legs fit
-/// the route. Intermediate climb altitudes scale from the departure elevation;
+/// the route and leave [`MIN_CRUISE_ROUTE_FRACTION`] of it for cruise.
+/// Intermediate climb altitudes scale from the departure elevation;
 /// descent altitudes scale from the arrival elevation. Thus a scale of zero is
 /// the irreducible direct elevation transition and a scale of one is the
 /// configured profile.
@@ -118,11 +119,12 @@ pub(crate) fn fit_altitude_profile(
     arrival_elevation_m: f64,
     route_distance_m: f64,
 ) -> Result<Vec<SegmentSpec>, String> {
+    let limit_m = route_distance_m * (1.0 - MIN_CRUISE_ROUTE_FRACTION);
     let full_profile =
         scaled_altitude_profile(nominal, departure_elevation_m, arrival_elevation_m, 1.0);
     let full_distance_m =
         profile_horizontal_distance_of_schedule(&full_profile, departure_elevation_m);
-    if full_distance_m.is_finite() && full_distance_m <= route_distance_m {
+    if full_distance_m.is_finite() && full_distance_m <= limit_m {
         return Ok(full_profile);
     }
 
@@ -135,7 +137,7 @@ pub(crate) fn fit_altitude_profile(
             "mission profile produces a non-finite climb/descent horizontal distance".to_owned(),
         );
     }
-    if minimum_distance_m > route_distance_m + DISTANCE_TOLERANCE_M {
+    if minimum_distance_m > limit_m + DISTANCE_TOLERANCE_M {
         return Ok(minimum_profile);
     }
 
@@ -152,7 +154,7 @@ pub(crate) fn fit_altitude_profile(
         );
         let candidate_distance_m =
             profile_horizontal_distance_of_schedule(&candidate, departure_elevation_m);
-        if candidate_distance_m.is_finite() && candidate_distance_m <= route_distance_m {
+        if candidate_distance_m.is_finite() && candidate_distance_m <= limit_m {
             lower_scale = candidate_scale;
             best_profile = candidate;
         } else {

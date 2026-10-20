@@ -139,12 +139,52 @@ impl AircraftBuilder {
     ///
     /// [`BuildError::UnresolvedAirfoil`] when the tail airfoil is unknown.
     pub fn build_empennage(&self, dv: &DesignVector) -> Result<(Wing, Wing), BuildError> {
+        let context = self.empennage_context(dv)?;
+        self.build_empennage_in(dv, &context)
+    }
+
+    /// The parts of the unmeshed tail build that do not depend on the tail
+    /// scale or the fin scale ratio: the resolved tail airfoil and the fin
+    /// seat on the fuselage (and centreline nacelles) of `dv`.
+    ///
+    /// A solve that varies only `tail_scale` or `vstab_scale_ratio` builds
+    /// this once and calls [`Self::build_empennage_in`] per trial, which
+    /// returns exactly what [`Self::build_empennage`] returns (the body does
+    /// not read either scale).
+    ///
+    /// # Errors
+    ///
+    /// [`BuildError::UnresolvedAirfoil`] when the tail airfoil is unknown, or
+    /// the fuselage or nacelle build error.
+    pub fn empennage_context(&self, dv: &DesignVector) -> Result<EmpennageContext, BuildError> {
         let tail_airfoil = Self::resolve(&self.geometry.empennage.tail_airfoil)?;
         let fuselage = self.build_fuselage_reported(dv, &mut super::BuildReport::default())?;
         let seat = self.fin_seat(dv, &fuselage)?;
+        Ok(EmpennageContext { tail_airfoil, seat })
+    }
+
+    /// [`Self::build_empennage`] with the scale-independent parts supplied by
+    /// [`Self::empennage_context`], built for the same body design.
+    ///
+    /// # Errors
+    ///
+    /// The tail planform build errors.
+    pub fn build_empennage_in(
+        &self,
+        dv: &DesignVector,
+        context: &EmpennageContext,
+    ) -> Result<(Wing, Wing), BuildError> {
         Ok((
-            self.build_hstab(dv, &tail_airfoil, false)?,
-            self.build_vstab(dv, &tail_airfoil, false, &seat)?,
+            self.build_hstab(dv, &context.tail_airfoil, false)?,
+            self.build_vstab(dv, &context.tail_airfoil, false, &context.seat)?,
         ))
     }
+}
+
+/// The tail-scale-independent inputs of the unmeshed tail build; see
+/// [`AircraftBuilder::empennage_context`].
+#[derive(Debug, Clone)]
+pub struct EmpennageContext {
+    tail_airfoil: Airfoil,
+    seat: FinSeat,
 }

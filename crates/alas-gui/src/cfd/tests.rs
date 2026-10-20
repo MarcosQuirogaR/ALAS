@@ -112,6 +112,35 @@ fn sweep_values_include_endpoints_and_support_descending_ranges() {
 }
 
 #[test]
+fn a_tiny_or_subnormal_sweep_step_is_an_error_and_never_overflows() {
+    for step in [f64::MIN_POSITIVE, 5e-324, 1e-300, 1e-12, 0.01] {
+        let settings = CfdSweepSettings {
+            step,
+            ..CfdSweepSettings::default()
+        };
+        let error = settings.values().unwrap_err();
+        assert!(error.contains("limited to 51"), "{error}");
+        assert!(error.contains("at least"), "{error}");
+    }
+}
+
+#[test]
+fn a_sweep_of_exactly_the_case_limit_is_accepted() {
+    let settings = CfdSweepSettings {
+        start: 0.0,
+        end: 25.0,
+        step: 0.5,
+        ..CfdSweepSettings::default()
+    };
+    assert_eq!(settings.values().unwrap().len(), MAX_SWEEP_CASES);
+    let too_many = CfdSweepSettings {
+        step: 0.49,
+        ..settings
+    };
+    assert!(too_many.values().is_err());
+}
+
+#[test]
 fn sweep_reynolds_point_uses_the_declared_independent_input() {
     let settings = CfdSweepSettings {
         variable: CfdSweepVariable::Reynolds,

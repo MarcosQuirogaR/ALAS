@@ -37,7 +37,7 @@ const RADIANS_PER_DEGREE: f64 = std::f64::consts::PI / 180.0;
 pub const EARTH_MEAN_RADIUS_M: f64 = 6.371e6;
 
 /// Standard sea-level gravity, m/s^2. `Attributes.Planets.Earth.sea_level_gravity`.
-pub const SEA_LEVEL_GRAVITY_M_S2: f64 = 9.806_65;
+pub const SEA_LEVEL_GRAVITY_M_S2: f64 = alas_atmo::STANDARD_GRAVITY;
 
 /// `Earth.compute_gravity`: `g0 * (Re / (Re + H))^2`.
 pub fn compute_gravity(altitude_m: f64) -> f64 {

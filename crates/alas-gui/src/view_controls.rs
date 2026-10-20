@@ -123,19 +123,39 @@ pub(crate) fn zoom_after_command(current: f32, command: ZoomCommand) -> f32 {
 /// the same coordinate system.
 pub(crate) fn auto_zoom_factor(ctx: &Context) -> f32 {
     let physical_size = ctx.screen_rect().size() * ctx.pixels_per_point();
-    auto_zoom_for_physical_size(physical_size)
+    auto_zoom_for_physical_size(physical_size, ctx.native_pixels_per_point().unwrap_or(1.0))
 }
 
-pub(crate) fn auto_zoom_for_physical_size(physical_size: egui::Vec2) -> f32 {
-    let requested = (physical_size.x / 1_240.0).min(physical_size.y / 760.0);
-    if requested <= 0.90 {
-        return 0.90;
+/// Smallest and largest automatic zoom. The floor lets a layout whose
+/// minimum content size is 1240 x 760 points still fit a window scaled by the
+/// operating system (150 % at 1920 x 1200 leaves 1280 x 800 points).
+const AUTO_ZOOM_MIN: f32 = 0.60;
+const AUTO_ZOOM_MAX: f32 = 1.35;
+
+/// Zoom factor that makes the layout's minimum content size (1240 x 760
+/// points) fit a client area of `physical_size` pixels at the operating
+/// system's `native_pixels_per_point` (egui's scale is `zoom * native`).
+pub(crate) fn auto_zoom_for_physical_size(
+    physical_size: egui::Vec2,
+    native_pixels_per_point: f32,
+) -> f32 {
+    let native = if native_pixels_per_point.is_finite() && native_pixels_per_point > 0.0 {
+        native_pixels_per_point
+    } else {
+        1.0
+    };
+    let requested = (physical_size.x / (1_240.0 * native)).min(physical_size.y / (760.0 * native));
+    if requested <= AUTO_ZOOM_MIN {
+        return AUTO_ZOOM_MIN;
     }
-    if requested >= 1.35 {
-        return 1.35;
+    if requested >= AUTO_ZOOM_MAX {
+        return AUTO_ZOOM_MAX;
     }
     const AUTO_ZOOM_STEP: f32 = 0.025;
-    ((requested.clamp(0.90, 1.35) / AUTO_ZOOM_STEP).round() * AUTO_ZOOM_STEP).clamp(0.90, 1.35)
+    // Round down so the stepped zoom never makes the content larger than
+    // the window can hold.
+    ((requested / AUTO_ZOOM_STEP + 1e-4).floor() * AUTO_ZOOM_STEP)
+        .clamp(AUTO_ZOOM_MIN, AUTO_ZOOM_MAX)
 }
 
 /// Apply desktop-standard zoom shortcuts before page widgets consume input.
