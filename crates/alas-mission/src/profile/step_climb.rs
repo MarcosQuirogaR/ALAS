@@ -14,7 +14,8 @@ use alas_config::mission::{MissionProfileConfig, SpeedCaps};
 /// 287.05 J/(kg K), times 216.65 K, over standard gravity, 9.80665 m/s^2.
 /// `alas-mission` keeps its own copy rather than reaching into `alas-atmo`'s
 /// internal breakpoint table for it.
-const STRATOSPHERE_PRESSURE_SCALE_HEIGHT_M: f64 = 287.05 * 216.65 / 9.80665;
+const STRATOSPHERE_PRESSURE_SCALE_HEIGHT_M: f64 =
+    alas_atmo::GAS_CONSTANT_AIR * 216.65 / alas_atmo::STANDARD_GRAVITY;
 
 /// Representative fractional mass burn per hour used when the editor has no
 /// solved fuel-flow/mass history yet. This is a planning prior, not an
@@ -25,7 +26,7 @@ const TYPICAL_CRUISE_FUEL_BURN_FRACTION_PER_HOUR: f64 = 0.0325;
 
 /// Nominal cruise-level interval used by the route recommendation, 2,000 ft
 /// expressed in SI units.
-pub(super) const CRUISE_LEVEL_INTERVAL_M: f64 = 2000.0 * 0.3048;
+pub(super) const CRUISE_LEVEL_INTERVAL_M: f64 = 2000.0 * alas_units::FOOT;
 
 /// Cruise time after a step needed to drift one level interval, in seconds.
 /// This allows the aircraft to use the higher level and continue losing mass
@@ -309,7 +310,7 @@ pub(super) fn estimate_non_cruise_distance(
             profile.descent_4_rate_m_s,
         ),
     ] {
-        let target_m = altitude_ft * 0.3048;
+        let target_m = altitude_ft * alas_units::FOOT;
         if target_m > arrival_elevation_m && target_m < current_m {
             let descent_midpoint_m = 0.5 * (current_m + target_m);
             leg(

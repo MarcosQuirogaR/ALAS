@@ -73,7 +73,8 @@ pub fn motor_from_spec(spec: &MotorSpec, id: &str) -> Result<MotorModel, PowerEr
 }
 
 /// Battery model from a database pack.  Needs capacity, series count and the
-/// pack DC resistance; uses `voc_vs_soc` and `r_dc_vs_soc_t` when present.
+/// pack DC resistance and the pack mass; uses `voc_vs_soc` and `r_dc_vs_soc_t`
+/// when present.
 ///
 /// # Errors
 ///
@@ -100,7 +101,8 @@ pub fn battery_from_spec(spec: &BatterySpec, id: &str) -> Result<BatteryModel, P
     if let Some(v) = val(&spec.v_min_v) {
         battery.v_cutoff_v = v;
     }
-    battery.mass_kg = val(&spec.mass_kg).unwrap_or(0.0);
+    // A pack of unknown mass must not enter the mass budget as 0 kg.
+    battery.mass_kg = need(&spec.mass_kg, id, "mass_kg")?;
     battery.i_cont_a = val(&spec.i_cont_a);
     Ok(battery)
 }

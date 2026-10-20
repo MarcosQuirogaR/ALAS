@@ -138,9 +138,16 @@ struct Bars {
     y_max_m: f64,
 }
 
+/// The frozen reference uses R = 287.05 in the field density ratio and g = 9.81;
+/// the product uses the program-wide constants (R = 287.0531, g0 = 9.80665), which
+/// moves sigma by 1.1e-5, field lengths by up to 3.4e-4 and their margins (differences)
+/// by up to 2.3e-3 relative, so
+/// this file compares at a declared bound instead of `Tier::Closed`.
+const UNIFIED_CONSTANTS: Tier = Tier::Iter { relative: 5.0e-3 };
+
 fn close(label: &str, actual: f64, expected: f64) {
     assert!(
-        agrees(actual, expected, Tier::Closed),
+        agrees(actual, expected, UNIFIED_CONSTANTS),
         "{label}: got {actual:.17e}, reference {expected:.17e}"
     );
 }

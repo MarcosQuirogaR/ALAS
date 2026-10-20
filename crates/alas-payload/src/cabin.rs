@@ -353,15 +353,33 @@ pub fn abreast_and_aisles(
     // narrower (747-400: 10 economy abreast below, 6 above; ACAP D6-58326-1
     // Rev F section 2.5.3), so there it is packed to its own floor width.
     let declared_fits_deck = g.upper_deck.is_none() || deck.name != crate::layout::UPPER;
+    let usable = g.usable_width(deck, x);
     if class.abreast > 0 && declared_fits_deck {
         let aisles = if class.abreast <= MAX_ABREAST_SINGLE_AISLE {
             1
         } else {
             2
         };
-        return (class.abreast, aisles);
+        // A declared count is a seat-geometry input, not a licence to seat
+        // passengers outside the shell: it is held to the seats that fit the
+        // widest interior (outer diameter less both walls) beside its aisles.
+        // That bound is deliberately the physical upper limit, not the
+        // sloped-sidewall floor width, so a source-backed count that the
+        // simplified section estimate under-counts (747-400: 10 abreast of
+        // 0.503 m with two aisles in a 6.2 m interior) is never cut.
+        let interior_m = g.diameter_m - 2.0 * g.wall;
+        let fitting = floor_div(interior_m - f64::from(aisles as i32) * aisle_w, seat_w) as i64;
+        if class.abreast <= fitting.max(1) {
+            return (class.abreast, aisles);
+        }
+        let held = fitting.max(1);
+        let held_aisles = if held <= MAX_ABREAST_SINGLE_AISLE {
+            1
+        } else {
+            2
+        };
+        return (held, held_aisles);
     }
-    let usable = g.usable_width(deck, x);
     let n_single = (floor_div(usable - aisle_w, seat_w) as i64).min(MAX_ABREAST_SINGLE_AISLE);
     let n_twin = (floor_div(usable - 2.0 * aisle_w, seat_w) as i64).min(MAX_ABREAST_TWIN_AISLE);
     if n_twin > n_single {
@@ -556,7 +574,6 @@ mod tests {
     #[test]
     fn a_declared_abreast_count_chooses_its_own_aisle_count() {
         // Six abreast is the most one aisle may serve, so seven needs two.
-        let g_unused_x = 0.0;
         let deck = DeckSpec {
             name: crate::layout::MAIN,
             floor_frac: -0.18,
@@ -565,16 +582,46 @@ mod tests {
             is_passenger: true,
         };
         let geometry = probe_geometry();
+        let mid_x = 0.5 * (geometry.cabin_start_x + geometry.cabin_end_x);
         for (declared, expected_aisles) in [(4, 1), (6, 1), (7, 2), (10, 2)] {
             let class = SeatClassConfig {
                 abreast: declared,
+                width_m: MIN_SEAT_WIDTH,
                 ..Default::default()
             };
             assert_eq!(
-                abreast_and_aisles(&class, &deck, &geometry, 0.51, g_unused_x),
+                abreast_and_aisles(&class, &deck, &geometry, 0.51, mid_x),
                 (declared, expected_aisles)
             );
         }
+    }
+
+    #[test]
+    fn a_declared_abreast_count_wider_than_the_floor_is_held_to_what_fits() {
+        let deck = DeckSpec {
+            name: crate::layout::MAIN,
+            floor_frac: -0.18,
+            ceil_frac: 0.95,
+            width_factor: 0.97,
+            is_passenger: true,
+        };
+        let geometry = probe_geometry();
+        let class = SeatClassConfig {
+            abreast: 6,
+            width_m: 1.2,
+            ..Default::default()
+        };
+        let (seats, _) = abreast_and_aisles(
+            &class,
+            &deck,
+            &geometry,
+            0.51,
+            0.5 * (geometry.cabin_start_x + geometry.cabin_end_x),
+        );
+        let interior_m = geometry.diameter_m - 2.0 * geometry.wall;
+        assert!(seats < 6, "six 1.2 m seats cannot sit in {interior_m} m");
+        assert!(seats >= 1);
+        assert!(seats as f64 * 1.2 + 0.51 <= interior_m || seats == 1);
     }
 
     #[test]

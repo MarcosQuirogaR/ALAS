@@ -22,6 +22,14 @@ use alas_perf::performance::{
     tw_takeoff_constraint, ws_landing_limit, JET_DRY_LANDING_SHARE,
 };
 use alas_testkit::{Comparison, Tier};
+
+/// The frozen reference uses g = 9.81, R = 287.05, 0.020885 psf/Pa and 3.28084 ft/m;
+/// the product uses the single program-wide constants (g0 = 9.80665, R = 287.0531,
+/// exact ft/psf). That moves closed-form results by 1e-5 .. 3.5e-4 relative and
+/// differences of such results (field-length margins) by up to 1.5e-3, so the
+/// affected comparisons carry this declared bound instead of `Tier::Closed`.
+const UNIFIED_CONSTANTS: Tier = Tier::Iter { relative: 2.0e-3 };
+
 use perf_support::{compare_arrays, section, AirportInput};
 use serde::Deserialize;
 use std::collections::BTreeMap;
@@ -34,7 +42,7 @@ fn density_ratio_matches_the_fixture() {
         delta_isa_c: f64,
         sigma: f64,
     }
-    let mut c = Comparison::new("alas-perf::performance::density_ratio", Tier::Closed);
+    let mut c = Comparison::new("alas-perf::performance::density_ratio", UNIFIED_CONSTANTS);
     for case in section::<Case>("density_ratio") {
         c.scalar(
             &format!("sigma({}, {})", case.elevation_m, case.delta_isa_c),
@@ -117,7 +125,7 @@ fn tw_takeoff_constraint_matches_the_fixture() {
     }
     let mut c = Comparison::new(
         "alas-perf::performance::tw_takeoff_constraint",
-        Tier::Closed,
+        UNIFIED_CONSTANTS,
     );
     for (i, case) in section::<Case>("tw_takeoff").iter().enumerate() {
         let got = tw_takeoff_constraint(&case.ws_pa, case.toda_m, case.sigma, case.cl_max_to);
@@ -183,7 +191,10 @@ fn build_matching_chart_matches_the_fixture() {
         ws_max_pa: Option<f64>,
         expected: Expected,
     }
-    let mut c = Comparison::new("alas-perf::performance::build_matching_chart", Tier::Closed);
+    let mut c = Comparison::new(
+        "alas-perf::performance::build_matching_chart",
+        UNIFIED_CONSTANTS,
+    );
     for case in section::<Case>("matching_chart") {
         let airports: Vec<Airport> = case.airports.iter().map(AirportInput::build).collect();
         let got = build_matching_chart(

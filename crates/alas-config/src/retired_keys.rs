@@ -69,7 +69,21 @@ pub const RETIRED_WEIGHT_KEYS: &[&str] = &[
     "fineness_ratio_max",
     "fineness_ratio_penalty_scale",
     "instability_failure_cost",
+    // Removed 2026-10-19: the transport planform limits are constraint
+    // residuals now; these six scales multiplied no penalty term.
+    "geometric_body_alpha_penalty_scale",
+    "wingbox_packaging_penalty_scale",
+    "flap_area_penalty_scale",
+    "bending_slenderness_penalty_scale",
+    "taper_realism_penalty_scale",
+    "te_root_angle_penalty_scale",
 ];
+
+/// `propulsion_cycle` keys that nothing reads any more: `fan_face_mach` was
+/// offered as a mass-flow sanity check against the rated static thrust, but
+/// no fan-face area (hub-to-tip ratio) is configured to check it against, so
+/// no code ever read it.
+pub const RETIRED_PROPULSION_CYCLE_KEYS: &[&str] = &["fan_face_mach"];
 
 /// `optimizer.solver` keys that stated the search budget in generations.
 /// Unlike the keys above they are converted, not dropped: see
@@ -160,6 +174,16 @@ fn carries(data: &serde_json::Value, group: &str, keys: &[&str]) -> bool {
         .is_some_and(|map| keys.iter().any(|key| map.contains_key(*key)))
 }
 
+fn carries_propulsion_cycle(data: &serde_json::Value) -> bool {
+    data.get("propulsion_cycle")
+        .and_then(serde_json::Value::as_object)
+        .is_some_and(|map| {
+            RETIRED_PROPULSION_CYCLE_KEYS
+                .iter()
+                .any(|key| map.contains_key(*key))
+        })
+}
+
 fn carries_drag_model(data: &serde_json::Value) -> bool {
     data.get("drag_model")
         .and_then(serde_json::Value::as_object)
@@ -187,6 +211,8 @@ pub struct RetiredKeysDropped {
     /// `drag_model.korn_technology_factor`, replaced by the declared airfoil
     /// class.
     pub korn_technology_factor: bool,
+    /// `propulsion_cycle.fan_face_mach`, which no code read.
+    pub fan_face_mach: bool,
     /// A stage budget saved when pre-gate rejections counted against
     /// `max_evaluations`; the same number now counts analysed candidates.
     pub requested_count_budget: bool,
@@ -205,6 +231,7 @@ impl RetiredKeysDropped {
                 || carries(data, "objective", &RETIRED_OBJECTIVE_KEYS[1..5]),
             preference_weight: carries(data, "objective", &["soft_penalty_weight"]),
             korn_technology_factor: carries_drag_model(data),
+            fan_face_mach: carries_propulsion_cycle(data),
             requested_count_budget: requested_count_stages(data).next().is_some(),
             requested_count_replay: requested_count_stages(data)
                 .any(|stage| stage.contains_key(REPLAY_KEY)),
@@ -220,6 +247,7 @@ impl RetiredKeysDropped {
             (self.constraint_allowances, "The saved constraint policies and violation allowances were dropped; every constraint is hard."),
             (self.preference_weight, "The saved soft-penalty weight was migrated to the study-preference weight; hard constraints do not use it."),
             (self.korn_technology_factor, "The saved Korn technology factor 'drag_model.korn_technology_factor' was dropped; it now follows the wing's declared airfoil class (0.87 conventional, 0.95 supercritical)."),
+            (self.fan_face_mach, "The saved fan-face Mach number 'propulsion_cycle.fan_face_mach' was dropped; the engine mass flow follows the rated static thrust and no code read this value (deprecated)."),
             (self.requested_count_budget, "The saved stage evaluation budgets counted design-vector pre-gate rejections; the same numbers now count analysed candidates only, and rejections have their own cap (20 times the budget unless set)."),
             (self.requested_count_replay, "The saved replay evaluation counts were recorded when pre-gate rejections counted as evaluations and were dropped; they would not reproduce that run."),
         ]
@@ -238,6 +266,7 @@ pub(crate) fn without_retired_optimizer_keys(
     if !stale_replay
         && data.pointer("/optimizer/relaxation").is_none()
         && !carries_drag_model(data)
+        && !carries_propulsion_cycle(data)
         && !GROUPS
             .iter()
             .any(|(group, keys)| carries(data, group, keys))
@@ -274,6 +303,14 @@ pub(crate) fn without_retired_optimizer_keys(
         .and_then(serde_json::Value::as_object_mut)
     {
         for key in RETIRED_DRAG_MODEL_KEYS {
+            map.remove(*key);
+        }
+    }
+    if let Some(map) = cleaned
+        .get_mut("propulsion_cycle")
+        .and_then(serde_json::Value::as_object_mut)
+    {
+        for key in RETIRED_PROPULSION_CYCLE_KEYS {
             map.remove(*key);
         }
     }
@@ -318,6 +355,23 @@ fn requested_count_stages(
 #[cfg(test)]
 mod tests {
     use crate::AlasConfig;
+
+    #[test]
+    fn older_files_with_removed_penalty_scales_and_fan_face_mach_still_load() {
+        let mut document = serde_json::to_value(AlasConfig::default()).unwrap();
+        document["propulsion_cycle"]["fan_face_mach"] = serde_json::json!(0.55);
+        document["optimizer"]["weights"]["flap_area_penalty_scale"] = serde_json::json!(250.0);
+        document["optimizer"]["weights"]["te_root_angle_penalty_scale"] = serde_json::json!(100.0);
+        let (loaded, notes) = AlasConfig::from_value_with_notes(&document).unwrap();
+        assert_eq!(loaded, AlasConfig::default());
+        assert!(notes.retired_keys.fan_face_mach);
+        assert!(notes.retired_keys.weights);
+        assert!(notes
+            .retired_keys
+            .messages()
+            .iter()
+            .any(|m| m.contains("fan_face_mach") && m.contains("deprecated")));
+    }
 
     #[test]
     fn explicit_preference_weight_takes_precedence_over_legacy_key() {

@@ -173,7 +173,8 @@ pub use pylon_mass::PylonMassMethod;
 pub use requirements::{DesignRequirements, RequirementsError};
 pub use retired_keys::{
     LegacySolverBudget, RetiredKeysDropped, RETIRED_BUDGET_KEYS, RETIRED_DRAG_MODEL_KEYS,
-    RETIRED_OBJECTIVE_KEYS, RETIRED_SOLVER_KEYS, RETIRED_WEIGHT_KEYS,
+    RETIRED_OBJECTIVE_KEYS, RETIRED_PROPULSION_CYCLE_KEYS, RETIRED_SOLVER_KEYS,
+    RETIRED_WEIGHT_KEYS,
 };
 pub use settings::{legacy_mission_disabled, AlasConfig, ConfigLoadNotes, WORKSPACE_ENVELOPE_KEY};
 pub use solver_presets::{SolverPreset, UnknownSolverPreset};

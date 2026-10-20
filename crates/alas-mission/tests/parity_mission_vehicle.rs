@@ -272,7 +272,9 @@ fn vehicle_request_matches_the_reference() {
     let fixture: Fixture =
         serde_json::from_value(load_json("mission", "vehicle")).expect("fixture shape");
 
-    let mut numbers = Comparison::new("vehicle request numbers", Tier::Closed);
+    // Cruise thrust uses the program-wide g0 = 9.80665 (the reference wrote 9.81):
+    // 3.4e-4 relative on `cruise_thrust_kn`, so a declared bound replaces Closed.
+    let mut numbers = Comparison::new("vehicle request numbers", Tier::Iter { relative: 5.0e-4 });
     let mut strings = Comparison::new("vehicle request strings", Tier::Exact);
     let mut corrections = request_corrections();
 

@@ -71,6 +71,9 @@ impl CfdSweepVariable {
     }
 }
 
+/// Most sequential CFD cases one sweep may expand to.
+pub const MAX_SWEEP_CASES: usize = 51;
+
 /// Persistent one-dimensional AoA/Reynolds sweep definition.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
@@ -120,13 +123,20 @@ impl CfdSweepSettings {
         }
         let direction = if self.end > self.start { 1.0 } else { -1.0 };
         let span = (self.end - self.start).abs();
-        let estimated = (span / self.step).ceil() as usize + 1;
-        if estimated > 51 {
-            return Err("A sweep is limited to 51 sequential CFD cases.".to_owned());
+        // Count in f64 and compare before any cast: a tiny step makes the
+        // quotient huge or infinite, and `as usize` saturates, so adding one
+        // afterwards would panic in debug and wrap past the limit in release.
+        let intervals = (span / self.step).ceil();
+        if !intervals.is_finite() || intervals + 1.0 > MAX_SWEEP_CASES as f64 {
+            return Err(format!(
+                "A sweep is limited to {MAX_SWEEP_CASES} sequential CFD cases;                  use a step of at least {:.3e} for this range.",
+                span / (MAX_SWEEP_CASES - 1) as f64
+            ));
         }
+        let estimated = intervals as usize + 1;
         let mut values = Vec::with_capacity(estimated);
         let mut value = self.start;
-        for _ in 0..51 {
+        for _ in 0..MAX_SWEEP_CASES {
             values.push(value);
             let next = value + direction * self.step;
             if (self.end - value) * direction <= self.step {
@@ -137,8 +147,10 @@ impl CfdSweepSettings {
             }
             value = next;
         }
-        if values.len() > 51 {
-            return Err("A sweep is limited to 51 sequential CFD cases.".to_owned());
+        if values.len() > MAX_SWEEP_CASES {
+            return Err(format!(
+                "A sweep is limited to {MAX_SWEEP_CASES} sequential CFD cases."
+            ));
         }
         Ok(values)
     }

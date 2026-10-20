@@ -100,6 +100,10 @@ pub enum FindingCode {
     FieldLandingDistanceViolation,
     /// The analyzed arrival mass exceeds the configured maximum landing mass.
     LandingMassLimitViolation,
+    /// The weight hierarchy `MZFW <= MLW <= MTOW` is broken: the maximum
+    /// landing mass exceeds the takeoff mass of the design, or the zero-fuel
+    /// mass exceeds the maximum landing mass.
+    MassLimitHierarchyViolation,
     /// Static thrust-to-weight is below the selected departure-field requirement.
     ThrustMarginViolation,
     /// A cruise or top-of-climb thrust shortfall inside the documented
@@ -189,6 +193,7 @@ impl FindingCode {
             Self::FieldTakeoffDistanceViolation => "field_takeoff_distance_violation",
             Self::FieldLandingDistanceViolation => "field_landing_distance_violation",
             Self::LandingMassLimitViolation => "landing_mass_limit_violation",
+            Self::MassLimitHierarchyViolation => "mass_limit_hierarchy_violation",
             Self::ThrustMarginViolation => "thrust_margin_violation",
             Self::ThrustWithinChartScatter => "thrust_within_chart_scatter",
             Self::MissionThrottleLimitViolation => "mission_throttle_limit_violation",

@@ -42,7 +42,7 @@ use crate::full_analysis::AnalysisReport;
 
 /// ISA sea-level density, kg/m^3: the reference the matching chart's
 /// sea-level quantities and every equivalent airspeed are defined against.
-const SEA_LEVEL_DENSITY_KG_M3: f64 = 1.225;
+const SEA_LEVEL_DENSITY_KG_M3: f64 = alas_atmo::SEA_LEVEL_DENSITY_ICAO_KG_M3;
 
 /// Where a sea-level reference thrust came from.
 #[derive(Debug, Clone, PartialEq)]

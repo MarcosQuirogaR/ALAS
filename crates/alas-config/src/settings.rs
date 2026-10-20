@@ -475,9 +475,12 @@ impl AlasConfig {
         let fraction_limit_kg = candidate_mtow_kg * self.mass_model.mlw_fraction_mtow;
         match self.optimizer.design_space.mode {
             DesignMode::CleanSheet => fraction_limit_kg,
-            DesignMode::BaselineSandbox | DesignMode::ReferenceAdaptation => self
-                .declared_reference_mlw_kg()
-                .unwrap_or(fraction_limit_kg),
+            DesignMode::BaselineSandbox | DesignMode::ReferenceAdaptation => {
+                let declared_kg = self
+                    .declared_reference_mlw_kg()
+                    .unwrap_or(fraction_limit_kg);
+                crate::landing_mass_ratio::clip_to_takeoff_mass(declared_kg, candidate_mtow_kg)
+            }
         }
     }
 
@@ -556,6 +559,35 @@ mod tests {
     use serde_json::json;
 
     #[test]
+    fn a_chosen_mtow_below_the_declared_mlw_clips_the_landing_limit_for_every_preset() {
+        // MTOW as a design variable (MTOW band): the certified MLW stays a
+        // structural limit until the chosen MTOW falls below it, then MLW =
+        // MTOW, never above (MZFW <= MLW <= MTOW).
+        for preset in crate::presets::registry() {
+            let Some(declared_kg) = preset.reference.mlw_kg else {
+                continue;
+            };
+            let mut config = AlasConfig::from_value(&json!({"preset": preset.name})).unwrap();
+            config.optimizer.design_space.mode = crate::optimizer::DesignMode::ReferenceAdaptation;
+            for factor in [0.9, 1.0, 1.1, 2.0] {
+                let mtow_kg = factor * declared_kg;
+                let limit_kg = config.landing_mass_limit_kg(mtow_kg);
+                assert!(
+                    limit_kg <= mtow_kg,
+                    "{}: MLW {limit_kg} > MTOW {mtow_kg}",
+                    preset.name
+                );
+                assert!(limit_kg <= declared_kg, "{}", preset.name);
+            }
+            assert_eq!(
+                config.landing_mass_limit_kg(0.9 * declared_kg),
+                0.9 * declared_kg
+            );
+            assert_eq!(config.landing_mass_limit_kg(1.1 * declared_kg), declared_kg);
+        }
+    }
+
+    #[test]
     fn baseline_sandbox_uses_the_declared_reference_mlw_not_the_fraction() {
         let mut config = AlasConfig::from_value(&json!({"preset": "ATR72-600"})).unwrap();
         config.optimizer.design_space.mode = crate::optimizer::DesignMode::BaselineSandbox;
@@ -617,7 +649,9 @@ mod tests {
         config.optimizer.design_space.mode = crate::optimizer::DesignMode::BaselineSandbox;
         // A search candidate's MTOW must not scale a real airframe's
         // certified landing-mass limit the way the fraction fallback would.
-        assert_eq!(config.landing_mass_limit_kg(20_000.0), 22_350.0);
+        // Above the certified MLW it does not move; below it the limit is the
+        // candidate MTOW itself (MLW <= MTOW, `crate::landing_mass_ratio::clip_to_takeoff_mass`).
+        assert_eq!(config.landing_mass_limit_kg(20_000.0), 20_000.0);
         assert_eq!(config.landing_mass_limit_kg(23_000.0), 22_350.0);
         assert_eq!(config.landing_mass_limit_kg(30_000.0), 22_350.0);
     }
@@ -665,11 +699,14 @@ mod tests {
                 let model = config.analysis_mass_model(candidate_mtow_kg);
                 assert_eq!(
                     model.mlw_fraction_mtow,
-                    22_350.0 / candidate_mtow_kg,
+                    22_350.0_f64.min(candidate_mtow_kg) / candidate_mtow_kg,
                     "{mode:?} at {candidate_mtow_kg}"
                 );
                 assert!(
-                    (candidate_mtow_kg * model.mlw_fraction_mtow - 22_350.0).abs() < 1e-9,
+                    (candidate_mtow_kg * model.mlw_fraction_mtow
+                        - 22_350.0_f64.min(candidate_mtow_kg))
+                    .abs()
+                        < 1e-9,
                     "{mode:?} at {candidate_mtow_kg}"
                 );
             }

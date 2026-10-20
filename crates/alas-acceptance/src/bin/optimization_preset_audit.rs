@@ -827,17 +827,37 @@ fn evaluate_preset_optimization_inner(
         }
     };
 
-    let baseline_run = controls::run_baseline_pipeline(
-        baseline_config,
-        baseline_environment,
-        seed,
-        &result_dir,
-        timeout,
-    );
+    // The native baseline pipeline and the two like-for-like product
+    // assessments share no input but the configuration, so they run side by
+    // side; each value is exactly what the serial order produced.
+    let (baseline_run, baseline_assessment, winner_assessment) = thread::scope(|scope| {
+        let baseline_pipeline = scope.spawn(|| {
+            controls::run_baseline_pipeline(
+                baseline_config,
+                baseline_environment,
+                seed,
+                &result_dir,
+                timeout,
+            )
+        });
+        let preset_assessment = scope.spawn(|| {
+            exposure::assessment_json(&pipeline_result.config, Some(&preset.design_vector))
+        });
+        let winner_assessment = exposure::assessment_json(
+            &pipeline_result.config,
+            pipeline_result.optimized_design.as_ref(),
+        );
+        (
+            join_scoped(baseline_pipeline),
+            join_scoped(preset_assessment),
+            winner_assessment,
+        )
+    });
     let exposure = exposure::Exposure {
-        preset_design: &preset.design_vector,
         baseline_run: baseline_run.as_ref().ok(),
         baseline_run_error: baseline_run.as_ref().err().map(String::as_str),
+        baseline_assessment,
+        winner_assessment,
     };
     build_success_row(
         name,
@@ -850,6 +870,13 @@ fn evaluate_preset_optimization_inner(
         &telemetry,
         &exposure,
     )
+}
+
+/// The value of a scoped worker; a worker panic continues on this thread.
+fn join_scoped<T>(handle: thread::ScopedJoinHandle<'_, T>) -> T {
+    handle
+        .join()
+        .unwrap_or_else(|error| std::panic::resume_unwind(error))
 }
 
 /// Write the run's cancellation telemetry next to its other evidence.

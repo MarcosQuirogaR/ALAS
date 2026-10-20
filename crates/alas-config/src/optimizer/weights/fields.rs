@@ -45,14 +45,6 @@ pub struct ObjectiveWeights {
     )]
     pub geometric_body_alpha_max_deg: f64,
 
-    /// Cost of leaving the physical body-incidence window.
-    #[serde(default)]
-    #[config(
-        label = "Geometric body-AoA penalty weight",
-        help = "Quadratic penalty on trimmed geometric body angle of attack outside the transport body-AoA window. Kept high enough that L/D cannot buy an implausible cruise attitude, while preserving a gradient back toward compliance."
-    )]
-    pub geometric_body_alpha_penalty_scale: f64,
-
     /// Minimum usable depth at the inboard root wingbox.
     #[serde(default)]
     #[config(
@@ -80,14 +72,6 @@ pub struct ObjectiveWeights {
     )]
     pub min_break_wingbox_width_m: f64,
 
-    /// Cost of violating any inboard wingbox dimensional reserve.
-    #[serde(default)]
-    #[config(
-        label = "Wingbox packaging penalty weight",
-        help = "Quadratic penalty for insufficient root/kink wingbox depth or kink spar-box width. The three deficits are normalized by their configured minimums before being summed."
-    )]
-    pub wingbox_packaging_penalty_scale: f64,
-
     /// Minimum physical flap area relative to the reference wing area.
     #[serde(default)]
     #[config(
@@ -96,14 +80,6 @@ pub struct ObjectiveWeights {
     )]
     pub min_flap_area_fraction: f64,
 
-    /// Cost of falling below the flap-area reserve.
-    #[serde(default)]
-    #[config(
-        label = "High-lift area penalty weight",
-        help = "Quadratic penalty for a configured flap footprint smaller than the transport high-lift reserve."
-    )]
-    pub flap_area_penalty_scale: f64,
-
     /// Maximum geometric bending slenderness of the root spar box.
     #[serde(default)]
     #[config(
@@ -111,14 +87,6 @@ pub struct ObjectiveWeights {
         help = "Upper bound on projected-span squared divided by root wingbox width times depth. This is a dimensionless preliminary bending-capacity proxy: it prevents span growth and root-box collapse from appearing structurally free, but does not replace the wingbox structural sizing analysis."
     )]
     pub max_root_bending_box_slenderness: f64,
-
-    /// Cost of exceeding the root bending slenderness guard.
-    #[serde(default)]
-    #[config(
-        label = "Root bending-slenderness penalty weight",
-        help = "Quadratic penalty for exceeding the root bending-box slenderness guard."
-    )]
-    pub bending_slenderness_penalty_scale: f64,
 
     /// Inboard edge of the tankable semispan interval.
     #[serde(default)]
@@ -160,20 +128,6 @@ pub struct ObjectiveWeights {
         help = "Lower bound on tip_chord_m / root_chord_m. It prevents a mathematically efficient but impractically pinched tip, retaining volume for tip structure, ailerons and a manufacturable trailing edge."
     )]
     pub min_tip_root_chord_ratio: f64,
-
-    /// Cost of a wing that tapers too little.
-    #[config(
-        label = "Break-chord taper-realism penalty weight",
-        help = "Penalty weight applied when break_chord_m / root_chord_m exceeds max_break_root_chord_ratio."
-    )]
-    pub taper_realism_penalty_scale: f64,
-
-    /// Cost of a reflex corner at the wing root trailing edge.
-    #[config(
-        label = "Wing-root trailing-edge angle penalty weight",
-        help = "Penalizes the wing's root-to-break trailing edge (seen in planform) making an angle greater than 90 deg with the fuselage centerline: i.e. the break station's trailing edge sitting forward of the root's. That creates a reflex (concave) corner at the wing-fuselage junction: a severe stress concentration no real transport-category wing root has, caused by a short root chord combined with a comparatively long break chord and/or too little sweep. Quadratic on the angle exceedance beyond 90 deg."
-    )]
-    pub te_root_angle_penalty_scale: f64,
 
     /// Most forward-swept admissible inboard trailing edge.
     #[serde(default)]

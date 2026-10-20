@@ -80,19 +80,21 @@ pub(super) fn icao_code_for_span(span_m: f64) -> Option<(char, Option<f64>)> {
 
 /// What the harness knows about the two designs beyond the optimization run.
 pub(super) struct Exposure<'a> {
-    /// The registered preset's own design vector, the search's nominal.
-    pub preset_design: &'a DesignVector,
     /// The pipeline run on the nominal with `optimize = false`.
     pub baseline_run: Option<&'a PipelineResult>,
     /// Why there is no baseline run, when there is none.
     pub baseline_run_error: Option<&'a str>,
+    /// `alas_opt::assess_product_candidate` of the preset nominal.
+    pub baseline_assessment: Value,
+    /// `alas_opt::assess_product_candidate` of the delivered design.
+    pub winner_assessment: Value,
 }
 
 pub(super) fn exposure_json(result: &PipelineResult, exposure: &Exposure<'_>) -> Value {
     let config = &result.config;
-    let winner_design = result.optimized_design.as_ref();
-    let baseline = assessment_json(config, Some(exposure.preset_design));
-    let winner = assessment_json(config, winner_design);
+    // Assessed before (and beside) the baseline pipeline run: both depend only
+    // on the effective configuration and the two designs.
+    let (baseline, winner) = (&exposure.baseline_assessment, &exposure.winner_assessment);
     json!({
         "same_model_baseline": {
             "model": "alas_opt::assess_product_candidate at the run's effective configuration, applied to the preset nominal and to the delivered design alike; each design is its own design-space nominal there, so the preset window is not re-checked and the ranking cost (normalized by a nominal) is omitted",
@@ -100,7 +102,7 @@ pub(super) fn exposure_json(result: &PipelineResult, exposure: &Exposure<'_>) ->
             "mtow_mode": config.optimizer.objective.mtow_sizing.as_str(),
             "baseline": baseline,
             "winner": winner,
-            "delta_winner_minus_baseline": assessment_delta(&baseline, &winner),
+            "delta_winner_minus_baseline": assessment_delta(baseline, winner),
         },
         "native_mission": {
             "note": "trip fuel of the pipeline's native mission, kg; the baseline comes from a separate pipeline run on the preset nominal with optimize=false",
@@ -160,7 +162,7 @@ fn residual_json(residual: &ConstraintResidual) -> Value {
     })
 }
 
-fn assessment_json(config: &AlasConfig, design: Option<&DesignVector>) -> Value {
+pub(super) fn assessment_json(config: &AlasConfig, design: Option<&DesignVector>) -> Value {
     let Some(design) = design else {
         return json!({"error": "no design delivered"});
     };

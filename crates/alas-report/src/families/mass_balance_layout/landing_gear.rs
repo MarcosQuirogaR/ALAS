@@ -275,6 +275,28 @@ pub fn figure_landing_gear_planform(
             ),
             51.0,
         ),
+        (
+            // Tip-back is the fixed-floor check only (the tail-scrape angle
+            // needs fuselage contour geometry this layout does not hold); the
+            // tire margin is rated capacity over per-wheel design load.
+            format!(
+                "Tip-back: {:.1} deg ({})  |  Tire margin nose/main: {:.2} / {:.2} ({})",
+                gear.tip_back_angle_deg,
+                if gear.tip_back_ok {
+                    "OK"
+                } else {
+                    "BELOW LIMIT"
+                },
+                gear.nlg_tire_margin,
+                gear.mlg_tire_margin,
+                if gear.tire_overloaded {
+                    "OVERLOADED"
+                } else {
+                    "OK"
+                }
+            ),
+            63.0,
+        ),
     ] {
         scene.add(SceneElement::Text {
             text,
@@ -289,7 +311,7 @@ pub fn figure_landing_gear_planform(
     }
     scene.add(SceneElement::Text {
         text: crate::families::mass_balance::mass_method_note(config).to_owned(),
-        pos: [canvas_w / 2.0, 63.0],
+        pos: [canvas_w / 2.0, 74.0],
         font_size: 7.6,
         color: Color::from_hex(pal.tick),
         align: TextAlign::Center,

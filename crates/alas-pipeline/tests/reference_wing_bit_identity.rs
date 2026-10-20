@@ -118,9 +118,19 @@ fn unset_options_leave_the_physics_output_bit_identical() {
     // exactly (A320 277880278787852317, B747-400 10869569037091291768); the
     // exit-layout and certified-maximum declarations do not touch them.
     // Integration 2026-10-19 (payload holds merged): combined change, re-pinned by probe.
+    // Code-quality lane 2026-10-19 (Q-03), re-pinned by probe from the same
+    // eprintln: one program-wide set of constants (g0 = 9.80665 instead of
+    // 9.81 in the performance matching chart, R = 287.0531 instead of 287.05
+    // in the field density ratio, exact ft and psf factors). Magnitude 1e-5 to
+    // 3.4e-4 relative on the performance rows; no other source changed.
+    // Release 1.4.1 (2026-10-20), re-pinned by probe from the same eprintln:
+    // the minimum-cruise route share (20 %) lowers the short registered A320-200
+    // sector's flown altitude (FL280 -> FL269, trip fuel +0.9 %, block time
+    // -0.4 %). With that share set to zero in place (a temporary switch,
+    // removed) A320 reproduces 2858569692261565263; B747-400 is unchanged.
     let expected: [(&str, u64); 2] = [
-        ("A320-200", 9_266_314_913_585_128_108),
-        ("B747-400", 5_235_203_677_043_748_222),
+        ("A320-200", 16_213_798_872_209_247_873),
+        ("B747-400", 4_294_417_171_097_909_022),
     ];
     let got = expected.map(|(name, _)| (name, fnv1a(&physics_text(name, false))));
     eprintln!("{got:?}");

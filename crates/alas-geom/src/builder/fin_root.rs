@@ -73,6 +73,7 @@ fn lofted_top(loft: &crate::loft::Loft, body: &Fuselage) -> Vec<[f64; 2]> {
 }
 
 /// The tops of the bodies on the plane of symmetry a fin can stand on.
+#[derive(Debug, Clone)]
 pub(super) struct FinSeat {
     /// One `(x, z_top)` polyline per body, nose to tail.
     tops: Vec<Vec<[f64; 2]>>,

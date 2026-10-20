@@ -392,7 +392,6 @@ fn propulsion_cycle_fields(fields: &[Field], turboprop: bool) -> Vec<Field> {
         "fan_polytropic_efficiency",
         "fan_nozzle_pressure_ratio",
         "fan_nozzle_efficiency",
-        "fan_face_mach",
     ];
     fields
         .iter()
@@ -520,7 +519,6 @@ mod tests {
             "fan_polytropic_efficiency",
             "fan_nozzle_pressure_ratio",
             "fan_nozzle_efficiency",
-            "fan_face_mach",
         ] {
             assert!(turbofan.iter().any(|field| field.name == name));
             assert!(!turboprop.iter().any(|field| field.name == name));

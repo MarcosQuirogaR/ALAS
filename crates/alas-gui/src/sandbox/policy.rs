@@ -37,9 +37,15 @@ pub fn protected_geometry(reference: &GeometryConfig, current: &GeometryConfig) 
 }
 
 impl AppState {
-    /// Whether manual geometry edits are locked for the active case.
+    /// Whether manual geometry edits are locked for the active case: a
+    /// registered preset analysed as the reference. A clean-sheet case that
+    /// names a preset (a loaded file, say) keeps its own geometry.
     pub fn manual_geometry_locked(&self) -> bool {
-        !self.sandbox.active() && !self.active_preset.is_empty()
+        if self.sandbox.active() || self.active_preset.is_empty() {
+            return false;
+        }
+        self.typed_config_arc()
+            .is_some_and(|config| alas_config::preset_policy::preset_mode_active(&config))
     }
 
     /// Restore protected preset geometry and design values after a
@@ -121,6 +127,38 @@ mod tests {
         assert_eq!(
             config.geometry.engine.spanwise_positions_m,
             reference.engine.spanwise_positions_m
+        );
+    }
+
+    #[test]
+    fn a_loaded_clean_sheet_file_naming_a_preset_keeps_its_geometry() {
+        let mut state = AppState::default();
+        let document = serde_json::json!({
+            "preset": "AVE",
+            "optimizer": {"design_space": {"mode": "clean_sheet"}},
+            "geometry": {"wing": {"root_z_m": 3.5}},
+        });
+        state.apply_workspace_document(&document).expect("load");
+        assert_eq!(state.active_preset, "AVE");
+        assert!(!state.manual_geometry_locked());
+        assert_eq!(
+            state.config_values["geometry"]["wing"]["root_z_m"],
+            Value::from(3.5)
+        );
+    }
+
+    #[test]
+    fn a_loaded_reference_mode_file_is_still_locked_to_the_preset() {
+        let mut state = AppState::default();
+        let document = serde_json::json!({
+            "preset": "AVE",
+            "geometry": {"wing": {"root_z_m": 3.5}},
+        });
+        state.apply_workspace_document(&document).expect("load");
+        assert!(state.manual_geometry_locked());
+        assert_ne!(
+            state.config_values["geometry"]["wing"]["root_z_m"],
+            Value::from(3.5)
         );
     }
 
