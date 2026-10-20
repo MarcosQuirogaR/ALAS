@@ -519,6 +519,30 @@ fn product_default_correction(path: &str) -> Option<(Value, Value)> {
     } else if path.ends_with(".descent_4_altitude_ft") {
         Some((serde_json::json!(6500.0), serde_json::json!(3000.0)))
     }
+    // Descent rates: the frozen 4.5-5 m/s (900-1,000 ft/min) is about half the
+    // energy-corrected flight-idle rates of Jenkinson (Civil Jet Aircraft
+    // Design, Table 10.22, p. 259): 1,850 / 1,700 / 1,600 / 1,450 ft/min.
+    else if path.ends_with(".descent_1_rate_m_s") {
+        Some((
+            serde_json::json!(4.5),
+            serde_json::json!(1_850.0 * (0.3048 / 60.0)),
+        ))
+    } else if path.ends_with(".descent_2_rate_m_s") {
+        Some((
+            serde_json::json!(5.0),
+            serde_json::json!(1_700.0 * (0.3048 / 60.0)),
+        ))
+    } else if path.ends_with(".descent_3_rate_m_s") {
+        Some((
+            serde_json::json!(5.0),
+            serde_json::json!(1_600.0 * (0.3048 / 60.0)),
+        ))
+    } else if path.ends_with(".descent_4_rate_m_s") {
+        Some((
+            serde_json::json!(5.0),
+            serde_json::json!(1_450.0 * (0.3048 / 60.0)),
+        ))
+    }
     // The vortex-lattice mesh. Upstream evaluates the optimizer loop at one
     // chordwise panel, which samples the mean camber line only at the leading
     // and trailing edges (where it is zero) so every section is a flat
@@ -629,6 +653,7 @@ fn compare_node(
         .filter(|field| {
             !is_native_config_field(node.type_name, field.name)
                 && !is_transport_planform_field_name(node.type_name, field.name)
+                && !product_exposed_cabin_field(node.type_name, field.name)
                 && (node.type_name != "MassModelConfig"
                     || !matches!(
                         field.name,
@@ -691,6 +716,8 @@ fn is_retired_reference_field(path: &str, key: &str) -> bool {
             && alas_config::RETIRED_WEIGHT_KEYS.contains(&key)
         || (path.ends_with("DragModelConfig") || path.ends_with(".drag_model"))
             && alas_config::RETIRED_DRAG_MODEL_KEYS.contains(&key)
+        || (path.ends_with("PropulsionCycleConfig") || path.ends_with(".propulsion_cycle"))
+            && alas_config::RETIRED_PROPULSION_CYCLE_KEYS.contains(&key)
 }
 
 fn transport_planform_field(path: &str, key: &str) -> Option<&'static TransportPlanformField> {
@@ -734,6 +761,17 @@ fn product_hidden_cabin_field(type_name: &str, name: &str) -> bool {
             name,
             "count" | "abreast" | "pitch_m" | "width_m" | "mass_per_pax_kg"
         ),
+        _ => false,
+    }
+}
+
+/// Cabin inputs the product form now shows although the frozen reference hid
+/// them: a Custom cabin's seat geometry and the checked-bag allowance. Their
+/// values, bounds and defaults are pinned by the cabin and validation tests.
+fn product_exposed_cabin_field(type_name: &str, name: &str) -> bool {
+    match type_name {
+        "PassengerCabinConfig" => name == "checked_bag_mass_kg",
+        "SeatClassConfig" => matches!(name, "abreast" | "pitch_m" | "width_m"),
         _ => false,
     }
 }
@@ -1095,15 +1133,11 @@ fn is_native_config_field(path: &str, key: &str) -> bool {
                 | "transport_shape_priors_enabled"
                 | "geometric_body_alpha_min_deg"
                 | "geometric_body_alpha_max_deg"
-                | "geometric_body_alpha_penalty_scale"
                 | "min_root_wingbox_depth_m"
                 | "min_break_wingbox_depth_m"
                 | "min_break_wingbox_width_m"
-                | "wingbox_packaging_penalty_scale"
                 | "min_flap_area_fraction"
-                | "flap_area_penalty_scale"
                 | "max_root_bending_box_slenderness"
-                | "bending_slenderness_penalty_scale"
                 | "tankable_span_start_fraction"
                 | "tankable_span_end_fraction"
                 | "min_break_root_chord_ratio"
@@ -1206,14 +1240,32 @@ fn compare_field(
         expected,
         "unit",
     );
-    comparison.exact(
-        &format!("{label}.advanced"),
-        &field.advanced,
-        &expected
-            .get("advanced")
-            .and_then(Value::as_bool)
-            .unwrap_or(false),
-    );
+    if label.ends_with(".passenger_mass_kg") {
+        // The combined passenger mass is a load-case input shown on the
+        // Requirements page; the frozen reference kept it advanced.
+        comparison.exact(
+            &format!("{label}.advanced: product value"),
+            &field.advanced,
+            &false,
+        );
+        comparison.exact(
+            &format!("{label}.advanced: frozen Python value"),
+            &expected
+                .get("advanced")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            &true,
+        );
+    } else {
+        comparison.exact(
+            &format!("{label}.advanced"),
+            &field.advanced,
+            &expected
+                .get("advanced")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+        );
+    }
 
     // Where upstream declared no explanation it emits an empty string, and
     // this port supplies one. Comparing those would fail on prose the port is
@@ -1739,15 +1791,42 @@ fn compare_leaf(comparison: &mut Comparison, path: &str, leaf: &LeafField, expec
         comparison.exact(&format!("{path}.value"), &leaf.value, expected_value);
     }
 
-    compare_optional(comparison, path, "min", to_value(leaf.min), expected);
-    compare_optional(comparison, path, "max", to_value(leaf.max), expected);
-    compare_optional(
-        comparison,
-        path,
-        "decimals",
-        to_value(leaf.decimals),
-        expected,
-    );
+    if path.ends_with(".passenger_mass_kg") {
+        // Validation bounds the product adds (body plus baggage, kg); the
+        // frozen reference declares none.
+        comparison.exact(
+            &format!("{path}.min: product"),
+            &to_value(leaf.min),
+            &Some(serde_json::json!(50.0)),
+        );
+        comparison.exact(
+            &format!("{path}.max: product"),
+            &to_value(leaf.max),
+            &Some(serde_json::json!(200.0)),
+        );
+        comparison.exact(
+            &format!("{path}.decimals: product"),
+            &to_value(leaf.decimals),
+            &Some(serde_json::json!(1)),
+        );
+        for key in ["min", "max", "decimals"] {
+            comparison.exact(
+                &format!("{path}.{key}: frozen Python value"),
+                &expected.get(key).cloned().unwrap_or(Value::Null),
+                &Value::Null,
+            );
+        }
+    } else {
+        compare_optional(comparison, path, "min", to_value(leaf.min), expected);
+        compare_optional(comparison, path, "max", to_value(leaf.max), expected);
+        compare_optional(
+            comparison,
+            path,
+            "decimals",
+            to_value(leaf.decimals),
+            expected,
+        );
+    }
     compare_optional(
         comparison,
         path,

@@ -192,3 +192,32 @@ fn fin_scale_ratio_scales_only_the_fin_and_keeps_the_t_tail_attached() {
         }
     }
 }
+
+#[test]
+fn a_shared_empennage_context_builds_the_same_tails_at_every_scale() {
+    // Tail sizing builds the airfoil and fin seat once and reuses them for
+    // every trial scale: the result must equal a full per-trial build bit
+    // for bit (compared through the exact `Debug` text of every float).
+    for preset in presets::registry() {
+        let mut builder = AircraftBuilder::new(Some(preset.geometry.clone()));
+        let dv = preset.design_vector;
+        let context = builder.empennage_context(&dv).expect("context");
+        for (scale, ratio) in [(0.8, 1.0), (1.0, 1.0), (1.3, 0.9)] {
+            let trial = alas_config::DesignVector {
+                tail_scale: scale,
+                ..dv
+            };
+            builder.geometry.empennage.vstab_scale_ratio = ratio;
+            let (h0, v0) = builder.build_empennage(&trial).expect("full");
+            let (h1, v1) = builder
+                .build_empennage_in(&trial, &context)
+                .expect("shared");
+            assert_eq!(
+                format!("{h0:?}{v0:?}"),
+                format!("{h1:?}{v1:?}"),
+                "{}",
+                preset.name
+            );
+        }
+    }
+}

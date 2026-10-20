@@ -77,6 +77,7 @@ use events::{
 mod helpers;
 mod mission_payload_override;
 mod mses_condition;
+mod mses_polars;
 mod sized_finalist;
 mod snapshots;
 use helpers::{
@@ -889,6 +890,12 @@ impl DesignPipeline {
             Some(report) => report,
             None => match this.aircraft_override.as_ref() {
                 Some(airplane) => full.run_on_airplane(&optimized_design, airplane.clone())?,
+                // A baseline report prices its fuel on artifacts that depend
+                // only on the configuration and design: build them beside the
+                // analysis instead of after it.
+                None if !options.optimize => {
+                    crate::fuel_model::run_with_baseline_artifacts(&full, &optimized_design)?
+                }
                 None => full.run(&optimized_design, true)?,
             },
         };
@@ -1534,82 +1541,96 @@ impl DesignPipeline {
                 }
                 None => None,
             };
-        let design_database = options.output_dir.as_ref().and_then(|out_dir| {
-            let path = out_dir.join("design_database.json");
-            let cpacs = cpacs_export.as_ref().map(|export| CpacsReference {
-                path: export
-                    .path
-                    .strip_prefix(out_dir)
-                    .unwrap_or(&export.path)
-                    .display()
-                    .to_string(),
-                version: export.cpacs_version.clone(),
-                aircraft_model_uid: export.aircraft_model_uid.clone(),
-                engine_uid: export.engine_uid.clone(),
+        // The cabin-scene export (a few seconds on a large cabin) reads only the
+        // delivered configuration and report, like the two exports beside it, so
+        // it runs on its own thread; its warning is raised below in the original
+        // order. Every file is written exactly as before.
+        let (design_database, payload_layout_artifact, cabin_scene_export) =
+            std::thread::scope(|scope| {
+                let cabin_scene_export = options.output_dir.as_ref().map(|out_dir| {
+                    let path = out_dir.join("cabin_scene_v2.json");
+                    let (delivered, report) = (&delivered, &optimized_report);
+                    scope.spawn(move || export_cabin_scene(delivered, report, &path).map(|_| path))
+                });
+                let design_database = options.output_dir.as_ref().and_then(|out_dir| {
+                    let path = out_dir.join("design_database.json");
+                    let cpacs = cpacs_export.as_ref().map(|export| CpacsReference {
+                        path: export
+                            .path
+                            .strip_prefix(out_dir)
+                            .unwrap_or(&export.path)
+                            .display()
+                            .to_string(),
+                        version: export.cpacs_version.clone(),
+                        aircraft_model_uid: export.aircraft_model_uid.clone(),
+                        engine_uid: export.engine_uid.clone(),
+                    });
+                    match cpacs.map_or_else(
+                        || {
+                            crate::export::export_json_with_feasibility(
+                                &optimized_report,
+                                &delivered,
+                                &feasibility,
+                                &path,
+                            )
+                        },
+                        |cpacs| {
+                            export_json_with_feasibility_and_cpacs(
+                                &optimized_report,
+                                &delivered,
+                                &feasibility,
+                                cpacs,
+                                &path,
+                            )
+                        },
+                    ) {
+                        Ok(database) => Some(database),
+                        Err(error) => {
+                            warn_artifact_failure(
+                                events,
+                                run_clock,
+                                "finalization",
+                                "Design database",
+                                &error,
+                            );
+                            None
+                        }
+                    }
+                });
+                let payload_layout_artifact = options.output_dir.as_ref().and_then(|out_dir| {
+                    let layout = optimized_report.payload_layout.as_ref()?;
+                    let path = out_dir.join("payload_layout.json");
+                    match export_payload_layout_artifact(
+                        &delivered,
+                        optimized_design,
+                        layout,
+                        &path,
+                    ) {
+                        Ok(_) => Some(path),
+                        Err(error) => {
+                            warn_artifact_failure(
+                                events,
+                                run_clock,
+                                "finalization",
+                                "Payload-layout render artifact",
+                                &error,
+                            );
+                            None
+                        }
+                    }
+                });
+                let cabin_scene_export = cabin_scene_export.map(|handle| {
+                    handle
+                        .join()
+                        .unwrap_or_else(|error| std::panic::resume_unwind(error))
+                });
+                (design_database, payload_layout_artifact, cabin_scene_export)
             });
-            match cpacs.map_or_else(
-                || {
-                    crate::export::export_json_with_feasibility(
-                        &optimized_report,
-                        &delivered,
-                        &feasibility,
-                        &path,
-                    )
-                },
-                |cpacs| {
-                    export_json_with_feasibility_and_cpacs(
-                        &optimized_report,
-                        &delivered,
-                        &feasibility,
-                        cpacs,
-                        &path,
-                    )
-                },
-            ) {
-                Ok(database) => Some(database),
-                Err(error) => {
-                    warn_artifact_failure(
-                        events,
-                        run_clock,
-                        "finalization",
-                        "Design database",
-                        &error,
-                    );
-                    None
-                }
-            }
-        });
-        let payload_layout_artifact = options.output_dir.as_ref().and_then(|out_dir| {
-            let layout = optimized_report.payload_layout.as_ref()?;
-            let path = out_dir.join("payload_layout.json");
-            match export_payload_layout_artifact(&delivered, optimized_design, layout, &path) {
-                Ok(_) => Some(path),
-                Err(error) => {
-                    warn_artifact_failure(
-                        events,
-                        run_clock,
-                        "finalization",
-                        "Payload-layout render artifact",
-                        &error,
-                    );
-                    None
-                }
-            }
-        });
-        let cabin_scene_artifact = options.output_dir.as_ref().and_then(|out_dir| {
-            let path = out_dir.join("cabin_scene_v2.json");
-            match export_cabin_scene(&delivered, &optimized_report, &path) {
-                Ok(_) => Some(path),
-                Err(error) => {
-                    warn_artifact_failure(
-                        events,
-                        run_clock,
-                        "finalization",
-                        "Cabin scene v2",
-                        &error,
-                    );
-                    None
-                }
+        let cabin_scene_artifact = cabin_scene_export.and_then(|exported| match exported {
+            Ok(path) => Some(path),
+            Err(error) => {
+                warn_artifact_failure(events, run_clock, "finalization", "Cabin scene v2", &error);
+                None
             }
         });
 
@@ -2086,29 +2107,44 @@ impl DesignPipeline {
             &self.config.mses,
             alas_exec::tool_runtime::RuntimeSettings::current().fidelity,
         );
-        let mut polar = run_mses_polar_with_cancel(
-            root_airfoil,
-            condition.mach,
-            condition.reynolds,
-            condition.alpha_deg,
-            &mses_config,
-            dir,
-            cancel,
-        );
-        // Kink and tip sections at their own chord, twist and Reynolds number.
-        for request in mses_span_section_requests(&self.config, report) {
-            if cancel.is_some_and(|flag| flag.load(std::sync::atomic::Ordering::Relaxed)) {
-                break;
-            }
-            let section_polar = run_mses_polar_with_cancel(
-                request.airfoil,
-                request.condition.mach,
-                request.condition.reynolds,
-                request.condition.alpha_deg,
+        // Root, kink and tip polars are independent solves (see `mses_polars`).
+        let requests = mses_span_section_requests(&self.config, report);
+        let tasks = requests.len() + 1;
+        let solve = |index: usize| {
+            let (airfoil, condition) = match index.checked_sub(1) {
+                None => (root_airfoil, &condition),
+                Some(section) => (requests[section].airfoil, &requests[section].condition),
+            };
+            run_mses_polar_with_cancel(
+                airfoil,
+                condition.mach,
+                condition.reynolds,
+                condition.alpha_deg,
                 &mses_config,
                 dir,
                 cancel,
+            )
+        };
+        let cancelled =
+            || cancel.is_some_and(|flag| flag.load(std::sync::atomic::Ordering::Relaxed));
+        let parallelism = mses_polars::polar_parallelism(
+            &alas_exec::tool_runtime::RuntimeSettings::current(),
+            tasks,
+        );
+        let mut solved =
+            mses_polars::run_polars(tasks, parallelism, &solve, &cancelled).into_iter();
+        // The root polar always runs.
+        let Some(Some(mut polar)) = solved.next() else {
+            return unavailable(
+                alas_aero::mses::MsesStatus::NotRun,
+                "the root MSES polar did not run",
             );
+        };
+        // Kink and tip sections at their own chord, twist and Reynolds number.
+        for (request, section_polar) in requests.iter().zip(solved) {
+            let Some(section_polar) = section_polar else {
+                break;
+            };
             polar.span_sections.push(alas_aero::mses::MsesSpanSection {
                 label: request.label.to_owned(),
                 y_m: request.y_m,

@@ -77,10 +77,25 @@ fn zoom_commands_stay_inside_the_readable_interface_range() {
 
 #[test]
 fn automatic_zoom_scales_from_the_client_area_with_recoverable_bounds() {
-    assert_eq!(auto_zoom_for_physical_size(vec2(1_240.0, 760.0)), 1.0);
-    assert_eq!(auto_zoom_for_physical_size(vec2(620.0, 380.0)), 0.90);
-    assert_eq!(auto_zoom_for_physical_size(vec2(3_840.0, 2_160.0)), 1.35);
-    assert_eq!(auto_zoom_for_physical_size(vec2(1_400.0, 850.0)), 1.125);
+    assert_eq!(auto_zoom_for_physical_size(vec2(1_240.0, 760.0), 1.0), 1.0);
+    assert_eq!(auto_zoom_for_physical_size(vec2(300.0, 190.0), 1.0), 0.60);
+    assert_eq!(
+        auto_zoom_for_physical_size(vec2(3_840.0, 2_160.0), 1.0),
+        1.35
+    );
+    assert_eq!(auto_zoom_for_physical_size(vec2(1_400.0, 850.0), 1.0), 1.1);
+}
+
+#[test]
+fn automatic_zoom_fits_the_minimum_layout_under_operating_system_scaling() {
+    // 1920 x 1200 pixels at 150 % is 1280 x 800 points: the 1240 x 760 point
+    // layout fits only up to a zoom of about 1.03, never at the old 1.35.
+    let zoom = auto_zoom_for_physical_size(vec2(1_920.0, 1_200.0), 1.5);
+    assert!(zoom <= 1.03, "zoom {zoom}");
+    assert!(1_920.0 / (1.5 * zoom) >= 1_240.0 && 1_200.0 / (1.5 * zoom) >= 760.0);
+    // A 200 % display of a 1366 x 768 panel leaves 683 x 384 points.
+    let tight = auto_zoom_for_physical_size(vec2(1_366.0, 768.0), 2.0);
+    assert_eq!(tight, 0.60);
 }
 
 #[test]

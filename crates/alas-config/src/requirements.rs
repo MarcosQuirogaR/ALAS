@@ -236,7 +236,9 @@ pub struct DesignRequirements {
 
     /// Average mass of an occupant and their baggage.
     #[config(
-        advanced,
+        min = 50.0,
+        max = 200.0,
+        decimals = 1,
         label = "Mass per passenger",
         unit = "kg",
         help = "Combined average mass per occupant (body + baggage). The shipped 100 kg is a transparent project load-case default; FAA AC 120-27F is operator weight-and-balance guidance and does not establish a universal passenger mass. Record the operator, population, baggage method and date before using another value operationally. This remains the single load-case authority for report, GUI preview, pipeline, export and optimizer paths: cabin.passenger.checked_bag_mass_kg supplies the baggage share and the occupant slot the remainder."
@@ -284,7 +286,7 @@ impl Default for DesignRequirements {
             // 9.81. `alas-config` has no dependency on `alas-units`
             // so the value is repeated here as a literal rather than
             // importing the constant across a new crate edge.
-            gravity_m_s2: 9.806_65,
+            gravity_m_s2: alas_atmo::STANDARD_GRAVITY,
         }
     }
 }

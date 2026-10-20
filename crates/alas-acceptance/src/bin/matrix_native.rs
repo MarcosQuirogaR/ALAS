@@ -226,6 +226,13 @@ fn run_cell(exe: &Path, args: &RunArgs, table: &BudgetTable, cell: &Cell) -> Val
         .arg("--native-only")
         .stdout(Stdio::from(stdout))
         .stderr(Stdio::from(stderr));
+    // Cells run side by side, so an external tool a cell starts shares the
+    // machine: VSPAERO takes cores / cells threads rather than all of them,
+    // and concurrent MSES polars stay inside the same share. Native cells do
+    // not read it. An explicit setting of the operator wins.
+    if env::var_os("ALAS_CONCURRENT_JOBS").is_none() {
+        command.env("ALAS_CONCURRENT_JOBS", args.cells_parallel.to_string());
+    }
     let mut child = match command.spawn() {
         Ok(child) => child,
         Err(error) => return json!({"runner_status": "spawn_error", "detail": error.to_string()}),

@@ -64,6 +64,25 @@ pub fn working_default_mlw_fraction_mtow() -> f64 {
     )
 }
 
+/// A landing mass limited to the takeoff mass it belongs to, kg.
+///
+/// Weight hierarchy `MZFW <= MLW <= MTOW`. Landing after a normal flight
+/// happens at `W_L = W_TO - W_misf = W_ZF + W_resf` (Torenbeek, *Advanced
+/// Aircraft Design*, Wiley 2013, Sec. 2.2, Eq. 2.6), so no landing mass can
+/// exceed the takeoff mass of the same flight. 14 CFR / CS 25.25(a) lets the
+/// applicant select each maximum weight (not above the structurally proven
+/// one), so a lower MTOW chosen for the same structure keeps the certified
+/// MLW as a structural limit until the MTOW itself falls below it; from
+/// there MLW equals MTOW. A non-finite or non-positive `takeoff_mass_kg`
+/// leaves `landing_kg` unchanged (no hierarchy can be formed from it).
+pub fn clip_to_takeoff_mass(landing_kg: f64, takeoff_mass_kg: f64) -> f64 {
+    if takeoff_mass_kg.is_finite() && takeoff_mass_kg > 0.0 {
+        landing_kg.min(takeoff_mass_kg)
+    } else {
+        landing_kg
+    }
+}
+
 /// Re-derive the default ratio from the loaded haul class.
 ///
 /// Applies only when the loaded document states no `mlw_fraction_mtow` of

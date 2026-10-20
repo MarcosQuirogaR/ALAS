@@ -193,8 +193,8 @@ fn render_class(
         // The condition names a root sibling (requirements.cabin_preset).
         // The class editor receives only the nested class JSON value, so the
         // page resolves this condition before handing the field to the form.
-        if let Some(share) = fields.iter_mut().find(|field| field.name == "share_pct") {
-            if let Entry::Leaf(leaf) = &mut share.entry {
+        for editable in &mut fields {
+            if let Entry::Leaf(leaf) = &mut editable.entry {
                 leaf.readonly_unless = None;
             }
         }

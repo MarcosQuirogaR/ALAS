@@ -17,7 +17,7 @@ use crate::mdo::propulsion::{max_climb_rate_ft_min, PropulsionDeck};
 
 /// ISA sea-level density, kg/m^3 (ICAO Doc 7488, *Manual of the ICAO
 /// Standard Atmosphere*, 3rd ed., 1993).
-const SEA_LEVEL_DENSITY_KG_M3: f64 = 1.225;
+const SEA_LEVEL_DENSITY_KG_M3: f64 = alas_atmo::SEA_LEVEL_DENSITY_ICAO_KG_M3;
 
 /// `V_R / V_S` for the rotation (nose-wheel liftoff) criterion: the stall
 /// branch of the rotation-speed floor, `vr_vstall_factor` (1.10 by

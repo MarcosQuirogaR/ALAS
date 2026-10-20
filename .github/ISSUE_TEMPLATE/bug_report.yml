@@ -6,7 +6,7 @@ body:
     id: version
     attributes:
       label: ALAS version
-      description: Help > About, or the release you downloaded (for example 1.4.1-beta.1).
+      description: Help > About, or the release you downloaded (for example 1.4.1).
     validations:
       required: true
   - type: dropdown

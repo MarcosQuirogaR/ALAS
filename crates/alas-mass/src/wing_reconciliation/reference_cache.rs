@@ -3,9 +3,11 @@
 
 //! Exact reuse of prepared primary-wing-box solves.
 //!
-//! Candidate boxes retain only their latest exact case per evaluation thread;
-//! the frozen reference uses a separate process-wide cache and cannot evict
-//! that candidate entry. The reference key
+//! Candidate boxes retain their [`CANDIDATE_ENTRIES`] most recently used exact
+//! cases per evaluation thread (the gear ledger, structural feasibility and
+//! balance ledger of one evaluation ask for a handful of distinct inputs in
+//! turn, and a later pass repeats them); the frozen reference uses a separate
+//! process-wide cache and cannot evict those candidate entries. The reference key
 //! retains the complete prepared geometry (including private airfoil and spar
 //! arrays), structures, design-load requirements, engines, mass model,
 //! materials, declared/geometric fuel state, mounted masses and root X datum.
@@ -30,10 +32,15 @@ use super::{DesignWingBox, WingReconciliationError};
 type SizingResult = Result<(SizedWingboxMass, WingboxSizing), WingReconciliationError>;
 type Cell<T> = Arc<OnceLock<Arc<T>>>;
 type ReferenceCells<T> = OnceLock<Mutex<HashMap<String, Cell<T>>>>;
-type CandidateEntry = Option<(String, Arc<SizingResult>)>;
+/// Most recently used exact candidate cases kept per thread. Hits need the
+/// whole key to match, so the count changes only how often a solve repeats.
+const CANDIDATE_ENTRIES: usize = 8;
+
+/// Most recently used first.
+type CandidateEntries = Vec<(String, Arc<SizingResult>)>;
 
 thread_local! {
-    static CANDIDATE: RefCell<CandidateEntry> = const { RefCell::new(None) };
+    static CANDIDATE: RefCell<CandidateEntries> = const { RefCell::new(Vec::new()) };
 }
 
 #[derive(Debug)]
@@ -179,18 +186,24 @@ fn candidate_result(prepared: &PreparedSizing<'_>) -> Arc<SizingResult> {
     let Some(key) = prepared.cache_key() else {
         return Arc::new(prepared.solve());
     };
-    let cached = CANDIDATE.with(|entry| {
-        entry
-            .borrow()
-            .as_ref()
-            .filter(|(cached_key, _)| *cached_key == key)
-            .map(|(_, result)| Arc::clone(result))
+    let cached = CANDIDATE.with(|entries| {
+        let mut entries = entries.borrow_mut();
+        let position = entries
+            .iter()
+            .position(|(cached_key, _)| *cached_key == key)?;
+        // Move the hit to the front so the least recently used entry leaves.
+        entries[..=position].rotate_right(1);
+        Some(Arc::clone(&entries[0].1))
     });
     if let Some(result) = cached {
         return result;
     }
     let result = Arc::new(prepared.solve());
-    CANDIDATE.with(|entry| *entry.borrow_mut() = Some((key, Arc::clone(&result))));
+    CANDIDATE.with(|entries| {
+        let mut entries = entries.borrow_mut();
+        entries.insert(0, (key, Arc::clone(&result)));
+        entries.truncate(CANDIDATE_ENTRIES);
+    });
     result
 }
 
@@ -295,7 +308,7 @@ mod tests {
     }
 
     #[test]
-    fn candidate_cache_is_thread_local_and_replaces_its_single_entry() {
+    fn candidate_cache_is_thread_local_and_keeps_several_recent_entries() {
         let preset = presets::get("A320-200").expect("registered preset resolves");
         let config = AlasConfig::from_value(&serde_json::json!({ "preset": "A320-200" }))
             .expect("registered configuration resolves");
@@ -337,9 +350,23 @@ mod tests {
         assert!(!Arc::ptr_eq(&original, &shifted));
         assert_eq!(shifted.as_ref(), &prepared.solve());
         prepared.root_x_m = original_x;
+        // The earlier case is still held: restoring the input reuses it.
         let restored = candidate_result(&prepared);
-        assert!(!Arc::ptr_eq(&original, &restored));
-        assert_eq!(original.as_ref(), restored.as_ref());
+        assert!(Arc::ptr_eq(&original, &restored));
+        // The cache is bounded: more distinct cases than it holds evict the
+        // least recently used one, and a re-solve is bit-identical.
+        for step in 1..=CANDIDATE_ENTRIES {
+            prepared.root_x_m = original_x + step as f64;
+            let _ = candidate_result(&prepared);
+        }
+        prepared.root_x_m = original_x;
+        let evicted = candidate_result(&prepared);
+        assert!(!Arc::ptr_eq(&original, &evicted));
+        assert_eq!(original.as_ref(), evicted.as_ref());
+        assert_eq!(
+            sizing_bits(original.as_ref().as_ref().expect("sized")),
+            sizing_bits(evicted.as_ref().as_ref().expect("sized"))
+        );
     }
 
     fn sizing_bits((primary, sizing): &(SizedWingboxMass, WingboxSizing)) -> Vec<u64> {

@@ -18,17 +18,19 @@
 
 mod allocation;
 mod cargo;
+mod flops_annotation;
 mod seat_class;
 
 use allocation::proportional_integer_allocation;
 pub use cargo::{
     BaggagePolicy, CargoDeckConfig, FreightHoldConfig, HoldCompartmentConfig, HoldDeck,
 };
+pub use flops_annotation::annotate_flops_cabin_resolution;
 pub use seat_class::SeatClassConfig;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{ConfigNode, DesignRequirements, FlopsInputEvidence, MassModelConfig};
+use crate::{ConfigNode, DesignRequirements};
 
 /// The three product class slots, forward to aft. Naming them once keeps the layout
 /// order and the share mix from disagreeing about which cabin comes first.
@@ -63,86 +65,6 @@ impl ResolvedPassengerCounts {
     /// Whether at least one seat was resolved.
     pub fn is_nonempty(self) -> bool {
         self.total() > 0
-    }
-}
-
-/// Mark a FLOPS transport clone when its class-count mirror has been resolved
-/// from the canonical cabin rather than copied from the serialized seed.
-///
-/// The transport node retains the source document and revision for the seed,
-/// but a changed numeric split must not continue to look source-backed in an
-/// evaluated report. There is no fourth Derived evidence enum in the saved
-/// schema, so the existing auditable UserDeclared category is used together
-/// with an explicit applicability/uncertainty note. The comparison is made
-/// before the caller writes the new counts; calling this helper twice is
-/// idempotent.
-pub fn annotate_flops_cabin_resolution(
-    mass_model: &mut MassModelConfig,
-    counts: ResolvedPassengerCounts,
-) {
-    let current = [
-        mass_model
-            .flops_transport
-            .first_class_passenger_count
-            .and_then(|value| i64::try_from(value).ok()),
-        mass_model
-            .flops_transport
-            .business_class_passenger_count
-            .and_then(|value| i64::try_from(value).ok()),
-        mass_model
-            .flops_transport
-            .tourist_class_passenger_count
-            .and_then(|value| i64::try_from(value).ok()),
-    ];
-    let resolved = [
-        Some(counts.first),
-        Some(counts.business),
-        Some(counts.tourist),
-    ];
-    if current == resolved {
-        return;
-    }
-
-    let note = format!(
-        "canonical cabin resolution for this evaluation uses FLOPS class counts First={}, Business={}, Tourist={}",
-        counts.first, counts.business, counts.tourist
-    );
-    let provenance = &mut mass_model.flops_transport.provenance.cabin;
-    provenance.applicability = replace_provenance_note(
-        &provenance.applicability,
-        "canonical cabin resolution for this evaluation uses FLOPS class counts",
-        &note,
-    );
-    if !provenance
-        .uncertainty
-        .contains("serialized FLOPS class-count seed was superseded")
-    {
-        provenance.uncertainty = append_provenance_note(
-            &provenance.uncertainty,
-            "the serialized FLOPS class-count seed was superseded by the canonical cabin for this load case",
-        );
-    }
-    provenance.evidence = FlopsInputEvidence::UserDeclared;
-}
-
-fn replace_provenance_note(existing: &str, marker: &str, note: &str) -> String {
-    let existing = existing.trim().trim_end_matches('.');
-    if let Some(index) = existing.find(marker) {
-        let prefix = existing[..index].trim().trim_end_matches(';').trim();
-        if prefix.is_empty() {
-            return note.to_owned();
-        }
-        return format!("{prefix}; {note}");
-    }
-    append_provenance_note(existing, note)
-}
-
-fn append_provenance_note(existing: &str, note: &str) -> String {
-    let existing = existing.trim().trim_end_matches('.');
-    if existing.is_empty() {
-        note.to_owned()
-    } else {
-        format!("{existing}; {note}")
     }
 }
 
@@ -189,7 +111,14 @@ pub struct PassengerCabinConfig {
     pub lavatory_count: i64,
 
     /// Checked baggage per passenger.
-    #[config(skip)]
+    #[config(
+        min = 0.0,
+        max = 60.0,
+        decimals = 1,
+        label = "Checked baggage per passenger",
+        unit = "kg",
+        help = "Checked-bag mass carried in the holds for each seated passenger. It is part of the combined mass per passenger (Requirements > Mass per passenger): the occupant is that combined mass minus this bag, so changing it moves mass between the cabin and the hold, not the total. Default 16 kg, a typical short- and medium-haul allowance."
+    )]
     pub checked_bag_mass_kg: f64,
 
     /// Revenue freight in whatever hold capacity the bags leave.
@@ -497,6 +426,7 @@ pub struct CabinConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{FlopsInputEvidence, MassModelConfig};
 
     #[test]
     fn the_default_cabin_is_two_classes_sharing_the_whole_length() {

@@ -35,7 +35,7 @@
 /// usable cruise altitude, m/s: 300 ft/min (ICAO-style service-ceiling
 /// convention; Airbus "Getting to Grips with Aircraft Performance", 2002,
 /// "Maximum altitude"; Boeing FCOM performance data use the same residual).
-pub const TOC_RESIDUAL_CLIMB_M_S: f64 = 300.0 * 0.3048 / 60.0;
+pub const TOC_RESIDUAL_CLIMB_M_S: f64 = 300.0 * alas_units::FOOT / 60.0;
 
 /// Top-of-climb mass over brake-release mass: Raymer, "Aircraft Design: A
 /// Conceptual Approach", 6th ed., Sec. 6.3, climb and accelerate fraction.

@@ -20,7 +20,7 @@ mod speed_caps;
 
 pub use profile::{
     resolve_true_airspeed_m_s, CruiseAltitudePolicy, MissionProfileConfig, SpeedReference,
-    CAS_SPEED_SUBDIVISIONS,
+    CAS_SPEED_SUBDIVISIONS, MIN_CRUISE_ROUTE_FRACTION,
 };
 pub use speed_caps::{crossover_altitude_m, SpeedCaps};
 

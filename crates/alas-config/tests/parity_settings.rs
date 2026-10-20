@@ -427,6 +427,26 @@ fn mission_profile_default_correction(path: &str) -> Option<(Value, Value)> {
         ))
     } else if path.ends_with(".mission.profile.descent_4_altitude_ft") {
         Some((serde_json::json!(6500.0), serde_json::json!(3000.0)))
+    } else if path.ends_with(".mission.profile.descent_1_rate_m_s") {
+        Some((
+            serde_json::json!(4.5),
+            serde_json::json!(1_850.0 * (0.3048 / 60.0)),
+        ))
+    } else if path.ends_with(".mission.profile.descent_2_rate_m_s") {
+        Some((
+            serde_json::json!(5.0),
+            serde_json::json!(1_700.0 * (0.3048 / 60.0)),
+        ))
+    } else if path.ends_with(".mission.profile.descent_3_rate_m_s") {
+        Some((
+            serde_json::json!(5.0),
+            serde_json::json!(1_600.0 * (0.3048 / 60.0)),
+        ))
+    } else if path.ends_with(".mission.profile.descent_4_rate_m_s") {
+        Some((
+            serde_json::json!(5.0),
+            serde_json::json!(1_450.0 * (0.3048 / 60.0)),
+        ))
     } else {
         None
     }
@@ -1211,15 +1231,11 @@ fn add_transport_objective_weight_corrections(
         ("transport_shape_priors_enabled", Value::Bool(false)),
         ("geometric_body_alpha_min_deg", Value::from(0.0)),
         ("geometric_body_alpha_max_deg", Value::from(4.0)),
-        ("geometric_body_alpha_penalty_scale", Value::from(200.0)),
         ("min_root_wingbox_depth_m", Value::from(1.20)),
         ("min_break_wingbox_depth_m", Value::from(0.65)),
         ("min_break_wingbox_width_m", Value::from(2.50)),
-        ("wingbox_packaging_penalty_scale", Value::from(250.0)),
         ("min_flap_area_fraction", Value::from(0.11)),
-        ("flap_area_penalty_scale", Value::from(250.0)),
         ("max_root_bending_box_slenderness", Value::from(700.0)),
-        ("bending_slenderness_penalty_scale", Value::from(150.0)),
         ("tankable_span_start_fraction", Value::from(0.10)),
         ("tankable_span_end_fraction", Value::from(0.75)),
         ("min_break_root_chord_ratio", Value::from(0.40)),

@@ -199,14 +199,6 @@ pub struct PropulsionCycleConfig {
         help = "Ratio of specific heats for the combustion-gas stations. Lower than the cold-section value because the burned gas is hotter and its molecules have more ways to store energy."
     )]
     pub gamma_hot: f64,
-
-    /// Fan-face Mach number the mass-flow check assumes.
-    #[config(
-        label = "Assumed fan-face Mach number (static anchor)",
-        unit = "-",
-        help = "Used only to sanity-check the design mass flow implied by anchoring the cycle to the engine's rated static thrust: a conceptual-design-level assumption, not a real corrected-flow schedule."
-    )]
-    pub fan_face_mach: f64,
 }
 
 impl Default for PropulsionCycleConfig {
@@ -233,7 +225,6 @@ impl Default for PropulsionCycleConfig {
             gamma_cold: 1.4,
             cp_hot_j_kgk: 1156.9,
             gamma_hot: 1.33,
-            fan_face_mach: 0.55,
         }
     }
 }

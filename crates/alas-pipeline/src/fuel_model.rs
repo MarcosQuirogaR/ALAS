@@ -120,13 +120,60 @@ impl ReportFuel {
             return Ok(sized.artifacts.clone());
         }
         self.artifacts
-            .get_or_init(|| {
-                alas_opt::mdo::baseline_fuel_artifacts(config, design)
-                    .map(Arc::new)
-                    .map_err(|error| format!("fuel model artifacts unavailable: {error}"))
-            })
+            .get_or_init(|| baseline_artifacts(config, design))
             .clone()
     }
+
+    /// Store `artifacts`, built by [`baseline_artifacts`] for the same
+    /// configuration and design the first [`Self::artifacts`] caller would
+    /// pass, unless the report already carries or has built its own.
+    fn prime(&self, artifacts: Result<Arc<CandidateFuelArtifacts>, String>) {
+        if self.sized.is_none() {
+            let _ = self.artifacts.set(artifacts);
+        }
+    }
+}
+
+/// The artifacts of the baseline aircraft `design` under `config`: the sizing
+/// closure of the declared aircraft over its route.
+fn baseline_artifacts(
+    config: &AlasConfig,
+    design: &DesignVector,
+) -> Result<Arc<CandidateFuelArtifacts>, String> {
+    alas_opt::mdo::baseline_fuel_artifacts(config, design)
+        .map(Arc::new)
+        .map_err(|error| format!("fuel model artifacts unavailable: {error}"))
+}
+
+/// `full.run(design, true)` with the baseline fuel artifacts built beside it.
+///
+/// A baseline report builds its artifacts on the first use, which is the
+/// mission stage right after the analysis. They depend only on the
+/// configuration and the design, not on the finished report, so they are
+/// built on a second thread while the analysis runs and handed to the report
+/// when it is for exactly that design. Either way the report holds what
+/// [`ReportFuel::artifacts`] would have built from `full.config` and `design`.
+///
+/// # Errors
+///
+/// The analysis failure, as [`crate::full_analysis::FullAnalysis::run`].
+pub(crate) fn run_with_baseline_artifacts(
+    full: &crate::full_analysis::FullAnalysis,
+    design: &DesignVector,
+) -> Result<AnalysisReport, String> {
+    let (report, artifacts) = std::thread::scope(|scope| {
+        let artifacts = scope.spawn(|| baseline_artifacts(&full.config, design));
+        let report = full.run(design, true);
+        let artifacts = artifacts
+            .join()
+            .unwrap_or_else(|error| std::panic::resume_unwind(error));
+        (report, artifacts)
+    });
+    let report = report?;
+    if report.design == *design {
+        report.fuel.prime(artifacts);
+    }
+    Ok(report)
 }
 
 /// The mission model of `report`'s aircraft under `config`

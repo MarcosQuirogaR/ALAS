@@ -417,6 +417,18 @@ fn battery_and_esc_build_from_database_rows() {
     assert!((b.v_cutoff_v - 12.8).abs() < 1.0e-12 && b.i_cont_a == Some(125.0));
     assert!((b.voc(1.0) - 16.8).abs() < 1.0e-12);
     assert!(battery_from_spec(&BatterySpec::default(), "pack").is_err());
+    // A pack of unknown mass is missing data, never a 0 kg pack.
+    let massless = BatterySpec {
+        mass_kg: None,
+        ..spec.clone()
+    };
+    assert!(matches!(
+        battery_from_spec(&massless, "pack"),
+        Err(alas_uav::power::PowerError::Missing {
+            field: "mass_kg",
+            ..
+        })
+    ));
     let esc = esc_from_spec(
         &EscSpec {
             i_cont_a: Some(text(60.0, "A")),

@@ -290,7 +290,14 @@ impl AlasConfig {
                     && floor_kg > 0.0
                     && self.landing_reserve_floor_applies() =>
             {
-                scaled_kg.max(floor_kg)
+                // Never above the closure: MLW <= MTOW (see
+                // `crate::landing_mass_ratio::clip_to_takeoff_mass`). A floor above the
+                // closure means ZFW + reserves does not fit under the takeoff
+                // mass, which the reserve-fuel finding reports.
+                crate::landing_mass_ratio::clip_to_takeoff_mass(
+                    scaled_kg.max(floor_kg),
+                    closure_mass_kg,
+                )
             }
             _ => scaled_kg,
         }
@@ -576,6 +583,27 @@ mod tests {
         assert!(
             (config.design_landing_mass_at_closure(70_000.0) - 70_000.0 * fraction).abs() < 1e-9
         );
+    }
+
+    #[test]
+    fn a_band_mass_below_the_certified_mlw_never_leaves_mlw_above_mtow() {
+        // C919 certified MLW 67,800 kg; the run6 band winner chose 67,770 kg.
+        let mut config = AlasConfig::from_value(&json!({"preset": "C919"})).unwrap();
+        config.optimizer.design_space.mode = DesignMode::ReferenceAdaptation;
+        config.optimizer.objective.mtow_sizing = crate::MtowSizing::MtowBand;
+        for mass_kg in [67_000.0, 67_770.0, 67_800.0, 75_100.0] {
+            let band = config.at_band_mass(Some(mass_kg));
+            let MassSizingBasis::FixedAircraft {
+                design_gross_mass_kg,
+                design_landing_mass_kg,
+            } = band.mass_sizing_basis()
+            else {
+                panic!("a registered aircraft in a reference mode is a fixed aircraft");
+            };
+            assert_eq!(design_gross_mass_kg, mass_kg);
+            assert!(design_landing_mass_kg <= mass_kg, "{mass_kg}");
+            assert_eq!(design_landing_mass_kg, mass_kg.min(67_800.0));
+        }
     }
 
     #[test]

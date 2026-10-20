@@ -12,7 +12,7 @@
 
 use super::AircraftPreset;
 
-const STANDARD_GRAVITY_M_S2: f64 = 9.806_65;
+const STANDARD_GRAVITY_M_S2: f64 = alas_atmo::STANDARD_GRAVITY;
 const ISA_SEA_LEVEL_DENSITY_KG_M3: f64 = 1.225;
 const KNOT_M_S: f64 = 1852.0 / 3600.0;
 const POUND_KG: f64 = 0.453_592_37;

@@ -393,6 +393,8 @@ pub fn retired_reference_key(path: &str, key: &str) -> bool {
     path.ends_with(".drag_model") && alas_config::RETIRED_DRAG_MODEL_KEYS.contains(&key)
         || path.ends_with(".solver") && alas_config::RETIRED_SOLVER_KEYS.contains(&key)
         || path.ends_with(".weights") && alas_config::RETIRED_WEIGHT_KEYS.contains(&key)
+        || path.ends_with(".propulsion_cycle")
+            && alas_config::RETIRED_PROPULSION_CYCLE_KEYS.contains(&key)
 }
 
 /// Additive propulsion fields are validated by the active-binding unit tests.
