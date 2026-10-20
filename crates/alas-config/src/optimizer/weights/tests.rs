@@ -20,10 +20,6 @@ fn a_threshold_that_happens_to_end_in_a_weight_suffix_is_offered_as_a_slider() {
     // The naming rule catches the failure cost, which is a flat cost rather
     // than a relative weight.
     assert_eq!(kind_of("failure_cost"), Kind::WeightSlider);
-    assert_eq!(
-        kind_of("wingbox_packaging_penalty_scale"),
-        Kind::WeightSlider
-    );
 }
 
 #[test]

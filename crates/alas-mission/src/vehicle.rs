@@ -138,9 +138,9 @@ fn cruise_thrust_kn_per_engine(report: &ReportView, config: &AlasConfig) -> Opti
         return None;
     }
     let n_engines = config.geometry.engine.spanwise_positions_m.len();
-    // 9.81 is hardcoded upstream rather than read from `requirements.gravity_m_s2`
-    // (which holds the same value by default); reproduced as written.
-    let thrust_required_n = config.requirements.mtow_kg * 9.81 / l_over_d;
+    // Weight uses the program-wide standard gravity, as the performance and
+    // mass models do (the upstream two-decimal 9.81 is retired).
+    let thrust_required_n = config.requirements.mtow_kg * alas_atmo::STANDARD_GRAVITY / l_over_d;
     Some(thrust_required_n / n_engines as f64 / 1000.0)
 }
 

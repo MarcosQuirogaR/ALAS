@@ -459,6 +459,12 @@ pub fn assess_physical_feasibility_with_load_case(
         mlw_limit_kg,
         &mut findings,
     );
+    design_mass::mass_limit_hierarchy_findings(
+        mlw_limit_kg,
+        report.analysis_takeoff_mass_kg(config.requirements.mtow_kg),
+        fuel_loading.zero_fuel_mass_kg,
+        &mut findings,
+    );
     let wing_loading_pa = takeoff_mass_kg * gravity_m_s2 / wing_area_m2;
     let matching_inputs_are_finite = wing_loading_pa.is_finite()
         && wing_loading_pa > 0.0

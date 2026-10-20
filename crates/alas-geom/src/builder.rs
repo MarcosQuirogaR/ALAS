@@ -63,11 +63,11 @@ mod tests;
 mod wingtip;
 
 use crate::aircraft::spacing::linspace;
-pub use error::BuildError;
 pub use loft_build::POLYLINE_TOLERANCE_M;
 pub use nacelle::{centre_pod_nacelle_loft, engine_nacelle_loft};
 pub use report::{BuildReport, BuildWarning, LoftBuildInfo};
 use spacing::{n_subdivisions_usize, sinspace};
+pub use {empennage::EmpennageContext, error::BuildError};
 
 pub use smooth_profiles::tip_cap_scale;
 

@@ -126,6 +126,49 @@ pub(super) fn landing_mass_findings(
     }
 }
 
+/// The weight hierarchy `MZFW <= MLW <= MTOW` of a design, as hard findings.
+///
+/// `landing_limit_kg` is the maximum landing mass the report is checked
+/// against, `takeoff_mass_kg` the takeoff mass of the design (the chosen
+/// MTOW under the MTOW band mode) and `zero_fuel_mass_kg` the modelled zero-fuel
+/// mass. Landing follows takeoff on the same flight, so `W_L = W_TO - W_misf
+/// = W_ZF + W_resf` (Torenbeek, *Advanced Aircraft Design*, Wiley 2013,
+/// Sec. 2.2, Eq. 2.6), and Jenkinson, *Civil Jet Aircraft Design*, 1999,
+/// Ch. 12 requires operating weight + payload + reserve fuel <= MLW. A mass
+/// within 1 g of its limit passes; a non-finite value is skipped.
+pub(super) fn mass_limit_hierarchy_findings(
+    landing_limit_kg: f64,
+    takeoff_mass_kg: f64,
+    zero_fuel_mass_kg: f64,
+    findings: &mut Vec<super::PhysicalFinding>,
+) {
+    const TOLERANCE_KG: f64 = 1.0e-3;
+    if landing_limit_kg.is_finite()
+        && takeoff_mass_kg.is_finite()
+        && landing_limit_kg > takeoff_mass_kg + TOLERANCE_KG
+    {
+        findings.push(super::error(
+            super::FindingCode::MassLimitHierarchyViolation,
+            "the maximum landing mass exceeds the takeoff mass of the design (MLW > MTOW)",
+            Some(landing_limit_kg),
+            Some(takeoff_mass_kg),
+            "kg",
+        ));
+    }
+    if landing_limit_kg.is_finite()
+        && zero_fuel_mass_kg.is_finite()
+        && zero_fuel_mass_kg > landing_limit_kg + TOLERANCE_KG
+    {
+        findings.push(super::error(
+            super::FindingCode::MassLimitHierarchyViolation,
+            "the zero-fuel mass exceeds the maximum landing mass (MZFW > MLW)",
+            Some(zero_fuel_mass_kg),
+            Some(landing_limit_kg),
+            "kg",
+        ));
+    }
+}
+
 /// The V-n diagram of the analysed aircraft: the built reference area at the
 /// structural design mass of [`design_vn_mass_kg`], the mass the wing-box loads
 /// are sized for.
@@ -167,6 +210,21 @@ mod tests {
             .into_iter()
             .map(|finding| (finding.severity, finding.actual))
             .collect()
+    }
+
+    #[test]
+    fn the_weight_hierarchy_flags_mlw_above_mtow_and_zfw_above_mlw() {
+        let count = |mlw: f64, mtow: f64, zfw: f64| {
+            let mut findings = Vec::new();
+            mass_limit_hierarchy_findings(mlw, mtow, zfw, &mut findings);
+            findings.len()
+        };
+        assert_eq!(count(67_800.0, 75_100.0, 57_885.0), 0);
+        assert_eq!(count(67_770.0, 67_770.0, 57_885.0), 0);
+        assert_eq!(count(67_800.0, 67_770.0, 57_885.0), 1);
+        assert_eq!(count(67_770.0, 67_770.0, 68_000.0), 1);
+        assert_eq!(count(70_000.0, 67_770.0, 71_000.0), 2);
+        assert_eq!(count(f64::NAN, 67_770.0, 71_000.0), 0);
     }
 
     #[test]

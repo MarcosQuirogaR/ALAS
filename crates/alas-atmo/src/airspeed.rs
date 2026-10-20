@@ -87,7 +87,16 @@
 /// than requiring a caller to construct an [`crate::Atmosphere`] just to
 /// read it, since every conversion here needs only an ambient pressure
 /// and/or temperature value, not a full altitude model.
-const AIR_GAMMA: f64 = 1.4;
+const AIR_GAMMA: f64 = GAMMA_AIR;
+
+/// Ratio of specific heats of dry air (calorically perfect, ISA), the single
+/// program-wide value.
+pub const GAMMA_AIR: f64 = 1.4;
+
+/// ISA sea-level density as published, 1.225 kg/m^3 (ICAO Doc 7488, 3rd ed.,
+/// 1993): the reference value that equivalent airspeed and the sigma-based
+/// correlations are defined against. Use this instead of writing 1.225.
+pub const SEA_LEVEL_DENSITY_ICAO_KG_M3: f64 = 1.225;
 
 /// Standard sea-level static pressure, in pascals (ICAO/ISA).
 pub const SEA_LEVEL_PRESSURE_PA: f64 = 101_325.0;
@@ -106,7 +115,7 @@ pub const SEA_LEVEL_TEMPERATURE_K: f64 = 288.15;
 /// state itself (a spurious ~1e-5 relative error at exactly `p0`, `T0`), so
 /// the two are kept deliberately separate rather than one standing in for
 /// the other.
-pub const SEA_LEVEL_DENSITY_DISPLAY_KG_M3: f64 = 1.225;
+pub const SEA_LEVEL_DENSITY_DISPLAY_KG_M3: f64 = SEA_LEVEL_DENSITY_ICAO_KG_M3;
 
 /// Standard sea-level density, in kg/m^3: `p0 / (R * T0)`, from this
 /// module's own [`SEA_LEVEL_PRESSURE_PA`], [`SEA_LEVEL_TEMPERATURE_K`] and

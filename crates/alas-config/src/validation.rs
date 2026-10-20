@@ -37,6 +37,7 @@
 
 use serde::{Deserialize, Serialize};
 
+mod cabin_inputs;
 mod fuel_scheme;
 mod input_bounds;
 mod mass_model;
@@ -91,6 +92,8 @@ pub fn validate(config: &AlasConfig) -> Vec<ValidationIssue> {
     let mut issues = cruise_point_inside_the_flight_envelope(config);
     issues.extend(atmosphere_domain_is_physical(config));
     issues.extend(wave_drag::rise_is_physical(config));
+    issues.extend(cabin_inputs::passenger_and_bag_masses_are_physical(config));
+    issues.extend(cabin_inputs::declared_abreast_fits_the_fuselage(config));
     issues.extend(fuel_properties_are_physical(config));
     issues.extend(landing_gear_inputs_are_physical(config));
     issues.extend(empennage_tapers_toward_its_tips(config));
@@ -1003,7 +1006,7 @@ mod tests {
     }
 
     #[test]
-    fn resolved_reference_landing_mass_cannot_exceed_a_reduced_fixed_mtow() {
+    fn resolved_reference_landing_mass_is_clipped_to_a_reduced_fixed_mtow() {
         let mut config = AlasConfig::from_value(&serde_json::json!({
             "preset": "A320-200"
         }))
@@ -1011,11 +1014,19 @@ mod tests {
         config.optimizer.design_space.mode = crate::optimizer::DesignMode::BaselineSandbox;
         config.requirements.mtow_kg = 60_000.0;
 
+        // The certified MLW (66,000 kg) is clipped to the reduced MTOW, so the
+        // hierarchy MLW <= MTOW holds by construction instead of failing.
+        assert_eq!(
+            config.mass_sizing_basis(),
+            crate::MassSizingBasis::FixedAircraft {
+                design_gross_mass_kg: 60_000.0,
+                design_landing_mass_kg: 60_000.0,
+            }
+        );
         let issues = validate(&config);
-        assert!(issues.iter().any(|issue| {
+        assert!(!issues.iter().any(|issue| {
             issue.field_path == "mass_model.flops_structure.design_landing_mass_kg"
                 && issue.severity == Severity::Error
-                && issue.message.contains("cannot exceed DG")
         }));
     }
 

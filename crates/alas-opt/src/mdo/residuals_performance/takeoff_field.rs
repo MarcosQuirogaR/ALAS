@@ -25,8 +25,8 @@ use crate::mdo::sizing::SizingOutcome;
 use crate::mdo::types::{CandidateDrag, ConstraintFamily, ConstraintResidual};
 use crate::mdo::ResidualRole;
 
-/// Standard gravity used for the weight, m/s^2 (the performance module's).
-const G: f64 = 9.81;
+/// Standard gravity used for the weight, m/s^2 (the program-wide `g0`).
+const G: f64 = alas_atmo::STANDARD_GRAVITY;
 
 /// Low-speed quadratic field polar `(CD0, k)` of a candidate's drag model.
 ///

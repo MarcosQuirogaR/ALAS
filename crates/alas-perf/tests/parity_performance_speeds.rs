@@ -15,6 +15,14 @@ mod perf_support;
 
 use alas_perf::performance::{build_vn_diagram, compute_field_performance, compute_v_speeds};
 use alas_testkit::{Comparison, Tier};
+
+/// The frozen reference uses g = 9.81, R = 287.05, 0.020885 psf/Pa and 3.28084 ft/m;
+/// the product uses the single program-wide constants (g0 = 9.80665, R = 287.0531,
+/// exact ft/psf). That moves closed-form results by 1e-5 .. 3.5e-4 relative and
+/// differences of such results (field-length margins) by up to 1.5e-3, so the
+/// affected comparisons carry this declared bound instead of `Tier::Closed`.
+const UNIFIED_CONSTANTS: Tier = Tier::Iter { relative: 2.0e-3 };
+
 use perf_support::{
     compare_arrays, compare_v_speeds, perf_config_for, requirements_for, section, AirportInput,
     VSpeedsExpected,
@@ -35,7 +43,10 @@ fn compute_v_speeds_matches_the_fixture() {
         config: Map<String, Value>,
         expected: VSpeedsExpected,
     }
-    let mut c = Comparison::new("alas-perf::performance::compute_v_speeds", Tier::Closed);
+    let mut c = Comparison::new(
+        "alas-perf::performance::compute_v_speeds",
+        UNIFIED_CONSTANTS,
+    );
     for case in section::<Case>("v_speeds") {
         let pc = perf_config_for(&case.config);
         let got = compute_v_speeds(
@@ -81,7 +92,7 @@ fn compute_field_performance_matches_the_fixture() {
     }
     let mut c = Comparison::new(
         "alas-perf::performance::compute_field_performance",
-        Tier::Closed,
+        UNIFIED_CONSTANTS,
     );
     for case in section::<Case>("field_performance") {
         let pc = perf_config_for(&case.config);
@@ -157,7 +168,10 @@ fn build_vn_diagram_matches_the_fixture() {
         cruise_alt_m: f64,
         expected: Expected,
     }
-    let mut c = Comparison::new("alas-perf::performance::build_vn_diagram", Tier::Closed);
+    let mut c = Comparison::new(
+        "alas-perf::performance::build_vn_diagram",
+        UNIFIED_CONSTANTS,
+    );
     for case in section::<Case>("vn_diagram") {
         let req = requirements_for(&case.req);
         let pc = perf_config_for(&case.perf);

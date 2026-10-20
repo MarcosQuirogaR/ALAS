@@ -43,7 +43,7 @@ use std::sync::OnceLock;
 use alas_config::design_variables::DesignVector;
 use alas_config::{AlasConfig, DesignMode, EmpennageConfig, TailSizing};
 use alas_geom::aircraft::airplane::Airplane;
-use alas_geom::builder::AircraftBuilder;
+use alas_geom::builder::{AircraftBuilder, EmpennageContext};
 use alas_stab::trim::tail_volume_coefficients;
 
 use super::types::CandidateFailure;
@@ -97,12 +97,14 @@ fn targets(config: &AlasConfig) -> Option<TailVolumes> {
 struct Frame {
     builder: AircraftBuilder,
     plane: Airplane,
+    /// The airfoil and fin seat, which no trial scale changes: built once.
+    context: EmpennageContext,
 }
 
 impl Frame {
     fn volumes(&mut self, dv: &DesignVector, ratio: f64) -> Option<(f64, f64)> {
         self.builder.geometry.empennage.vstab_scale_ratio = ratio;
-        let (hstab, vstab) = self.builder.build_empennage(dv).ok()?;
+        let (hstab, vstab) = self.builder.build_empennage_in(dv, &self.context).ok()?;
         self.plane.wings[1] = hstab;
         self.plane.wings[2] = vstab;
         match tail_volume_coefficients(&self.plane) {
@@ -154,9 +156,14 @@ fn solve(
     let mut reference = builder.build(Some(dv), false).ok()?;
     let main_wing = reference.wings.first()?.clone();
     reference.wings = vec![main_wing; 3];
+    // The tail scales only move the tail planforms, so the airfoil and the
+    // fin seat on the fuselage are built once for the whole solve. The first
+    // trial would have failed on the same error, so `?` keeps the outcome.
+    let context = builder.empennage_context(dv).ok()?;
     let mut frame = Frame {
         builder,
         plane: reference,
+        context,
     };
     let start = if dv.tail_scale.is_finite() && dv.tail_scale > 0.0 {
         dv.tail_scale

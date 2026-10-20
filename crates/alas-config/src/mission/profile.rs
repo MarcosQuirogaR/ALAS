@@ -110,6 +110,14 @@ fn is_default_cruise_policy(policy: &CruiseAltitudePolicy) -> bool {
 /// the refinement test next to this constant's two consumers for how much.
 pub const CAS_SPEED_SUBDIVISIONS: usize = 8;
 
+/// Share of a route that must stay available to cruise. A short sector is
+/// flown at the highest altitude whose climb and descent leave at least this
+/// fraction of the route for cruise; climbing straight to the full profile
+/// altitude and descending at once, with no level segment, is not a flown
+/// mission. The native schedule and the optimizer's mission model both fit
+/// the altitude against it so they plan the same footprint.
+pub const MIN_CRUISE_ROUTE_FRACTION: f64 = 0.20;
+
 /// True airspeed to fly for a configured takeoff/climb/descent/landing speed
 /// `configured_speed_m_s`, under `reference`, at the given ambient state.
 ///
@@ -144,6 +152,9 @@ pub fn resolve_true_airspeed_m_s(
 /// ICAO LTO reference cycle take-off mode time, s (0.7 min; ICAO Annex 16
 /// Vol II, Doc 9889).
 const ICAO_LTO_TAKEOFF_TIME_S: f64 = 42.0;
+
+/// One foot per minute in metres per second.
+const FT_MIN_M_S: f64 = 0.3048 / 60.0;
 
 /// Whether the take-off roll time is the default, for
 /// `#[serde(skip_serializing_if)]`.
@@ -409,15 +420,20 @@ impl Default for MissionProfileConfig {
             cruise_2_distance_fraction: 0.33803,
             cruise_3_air_speed_m_s: 247.8,
             cruise_3_distance_fraction: 0.38028,
+            // Descent rates: energy-corrected flight-idle rates of a 380,000 lb
+            // transport (Jenkinson, Civil Jet Aircraft Design, Table 10.22,
+            // p. 259): about 1,850 ft/min at 30,000 ft, 1,700 at 20,000-15,000,
+            // 1,600 near 10,000 and 1,450 at 5,000 ft to sea level. The former
+            // 4.5-5 m/s (900-1,000 ft/min) was roughly half of these.
             descent_1_altitude_ft: 30000.0,
             descent_1_air_speed_m_s: 220.0,
-            descent_1_rate_m_s: 4.5,
+            descent_1_rate_m_s: 1_850.0 * FT_MIN_M_S,
             descent_2_altitude_ft: 17000.0,
             descent_2_air_speed_m_s: 195.0,
-            descent_2_rate_m_s: 5.0,
+            descent_2_rate_m_s: 1_700.0 * FT_MIN_M_S,
             descent_3_altitude_ft: 10000.0,
             descent_3_air_speed_m_s: 170.0,
-            descent_3_rate_m_s: 5.0,
+            descent_3_rate_m_s: 1_600.0 * FT_MIN_M_S,
             // Landing configuration from glide-path interception at 3,000 ft
             // (a mean-sea-level rung, so above a sea-level field; about 10 NM on a 3 degree ILS; ICAO Doc 8168
             // PANS-OPS Vol II final approach segment), which is also the
@@ -425,7 +441,7 @@ impl Default for MissionProfileConfig {
             // below 3,000 ft).
             descent_4_altitude_ft: 3_000.0,
             descent_4_air_speed_m_s: 150.0,
-            descent_4_rate_m_s: 5.0,
+            descent_4_rate_m_s: 1_450.0 * FT_MIN_M_S,
             landing_air_speed_m_s: 83.6,
             landing_descent_rate_m_s: 3.0,
         }

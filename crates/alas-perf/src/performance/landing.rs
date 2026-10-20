@@ -269,7 +269,7 @@ mod tests {
         let model = LandingSegmentModel::jet(4);
         let (sigma, cl, k_app) = (0.9, 2.5, 1.23);
         let ws = ws_landing_segment_limit(&model, 2_500.0, JET_DRY_LANDING_SHARE, sigma, cl, k_app);
-        let v_app = k_app * (2.0 * ws / (1.225 * sigma * cl)).sqrt();
+        let v_app = k_app * (2.0 * ws / (crate::performance::RHO_SL * sigma * cl)).sqrt();
         assert!((model.distance_m(v_app) - 2_500.0 * JET_DRY_LANDING_SHARE).abs() < 1e-6);
         // A distance shorter than the screen term leaves no wing loading.
         assert_eq!(
