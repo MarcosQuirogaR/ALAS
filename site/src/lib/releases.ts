@@ -43,6 +43,30 @@ export type ReleaseEntry = {
 /** Newest first. */
 export const RELEASES: ReleaseEntry[] = [
   {
+    tag: 'v1.4.1',
+    published: '2026-10-21',
+    headline: 'Stable: add-ons, plot data export, My aircraft, cabin inputs',
+    details: [
+      'Everything in the v1.4.1 beta: native Browse dialogs, My aircraft, add-ons, plot data export, airport import.',
+      'A loaded file that names a preset no longer overwrites its geometry; seat pitch, width, abreast, checked bags and mass per passenger are editable (bounded, validated).',
+      'Automatic zoom fits the window under operating-system scaling.',
+      'Short sectors keep a cruise segment (at least 20 % of the route, an unsourced assumption stated in the release notes); descent rates follow Jenkinson Table 10.22.',
+      'Real-aircraft comparison: 172 scored cells within 10 %, 16 outside; limitations listed in the release notes and on the validation page.',
+    ],
+    assets: {
+      windows: {
+        file: 'alas-v1.4.1-windows-x86_64.zip',
+        bytes: 47_717_098,
+        sha256: '2d1395784019dea6d230fdaa32ff8f86664b368f33b333e153a0080d1a69757a',
+      },
+      linux: {
+        file: 'alas-v1.4.1-linux-x86_64.tar.gz',
+        bytes: 46_544_586,
+        sha256: '5c864642e7303465313189b9b6d64ba37546aed598b0ed3decb02a988e5712e9',
+      },
+    },
+  },
+  {
     tag: 'v1.4.1-beta.1',
     published: '2026-10-19',
     prerelease: true,

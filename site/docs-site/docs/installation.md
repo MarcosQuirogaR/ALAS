@@ -5,28 +5,20 @@ manager or background service.
 
 ## Download
 
-The latest published release is **v1.4.0**. The same two packages
+The latest published release is **v1.4.1**. The same two packages
 are on [alas.uvigo.es](https://alas.uvigo.es/) (`/downloads/<file>`) and on the
-[GitHub release](https://github.com/MarcosQuirogaR/ALAS/releases/tag/v1.4.0),
+[GitHub release](https://github.com/MarcosQuirogaR/ALAS/releases/tag/v1.4.1),
 which is the canonical copy.
 
 | Platform | File | Notes |
 |---|---|---|
-| Windows 10 or later, x86-64 | `alas-v1.4.0-windows-x86_64.zip` | Includes AVL 3.52 |
-| Linux x86-64 | `alas-v1.4.0-linux-x86_64.tar.gz` | glibc 2.35 or newer |
+| Windows 10 or later, x86-64 | `alas-v1.4.1-windows-x86_64.zip` | Includes AVL 3.52 |
+| Linux x86-64 | `alas-v1.4.1-linux-x86_64.tar.gz` | glibc 2.35 or newer |
 
 Each archive has a sibling `.sha256` file (for example
-`alas-v1.4.0-windows-x86_64.zip.sha256`) and contains `RELEASE-MANIFEST.json`
+`alas-v1.4.1-windows-x86_64.zip.sha256`) and contains `RELEASE-MANIFEST.json`
 and `SOURCE-MANIFEST.json`, which record the source commit and every packaged
 file. Verify the checksum before extracting.
-
-!!! note "Pre-release v1.4.1-beta.1"
-    A beta with newer features is available as `alas-v1.4.1-beta.1-windows-x86_64.zip`
-    and `alas-v1.4.1-beta.1-linux-x86_64.tar.gz` on the
-    [GitHub release](https://github.com/MarcosQuirogaR/ALAS/releases/tag/v1.4.1-beta.1)
-    and under `/downloads/` on alas.uvigo.es. Designs and numbers change against
-    v1.4.0 and seeded searches are not bit-identical to it. Verify the checksum the
-    same way.
 
 ### Windows
 
@@ -35,7 +27,7 @@ file. Verify the checksum before extracting.
    file:
 
    ```powershell
-   Get-FileHash .\alas-v1.4.0-windows-x86_64.zip -Algorithm SHA256
+   Get-FileHash .\alas-v1.4.1-windows-x86_64.zip -Algorithm SHA256
    ```
 
 3. Extract the archive, keep the folder intact, and run `ALAS.exe`.
@@ -46,9 +38,9 @@ Compare the checksum before running it.
 ### Linux
 
 ```bash
-sha256sum -c alas-v1.4.0-linux-x86_64.tar.gz.sha256
-tar xzf alas-v1.4.0-linux-x86_64.tar.gz
-cd alas-v1.4.0-linux-x86_64
+sha256sum -c alas-v1.4.1-linux-x86_64.tar.gz.sha256
+tar xzf alas-v1.4.1-linux-x86_64.tar.gz
+cd alas-v1.4.1-linux-x86_64
 ./ALAS
 ```
 
@@ -78,11 +70,8 @@ E195-E2, C919, B747-400 and A400M. Press **Analyze reference** in the control
 bar for a quick baseline analysis, then see the [User guide](user-guide.md). To
 draw an aircraft that is not in the list, use [Sandbox mode](sandbox.md).
 
-!!! note "Pre-release features"
-    The latest stable package is v1.4.0. Features that exist only in the
-    pre-release v1.4.1-beta.1 (add-ons, plot data export, My aircraft, native
-    Browse dialogs, the per-user data folder) are marked in the pages that
-    describe them.
+!!! note "Version"
+    This guide describes ALAS v1.4.1, the latest stable package.
 
 ---
 
