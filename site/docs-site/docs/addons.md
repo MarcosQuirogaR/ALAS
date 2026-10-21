@@ -1,7 +1,7 @@
 # Add-ons
 
-!!! note "Available from v1.4.1-beta.1"
-    Add-ons are in the pre-release v1.4.1-beta.1, not in the stable v1.4.0.
+!!! note "Available from v1.4.1"
+    Add-ons are in v1.4.1 and later, not in v1.4.0.
     The same text ships in the package as `docs/ADDONS.md`.
 
 An add-on is a small calculator you can add or edit without rebuilding ALAS:
